@@ -172,25 +172,30 @@ The columns you read first are at the **front**:
 |---|---|
 | `Registered_Count` | What the **forms** say — how many asked for lunch |
 | `Served_Confirmed` | What **actually happened** — how many `Lunch_Served` boxes you ticked on the Registrants tab |
+| `Lunches_Assigned_To_Registrants` | Not editable. Counts registrants whose `Lunch_Assignment` (see the Registrants tab) was explicitly set to this date+location — for reconciling meals eaten on a different day/location than originally registered |
 | `Total_to_Order` | Live formula: `Registered_Count + Standard_Buffer + Tester_Buffer` |
 
-`Served_Confirmed` stays **blank** until you've ticked something — a real `0`
-("nobody came") and "not counted yet" mean very different things, so it won't
-claim the first. It counts every tick, including walk-ins who never registered.
+`Served_Confirmed` and `Lunches_Assigned_To_Registrants` both stay **blank**
+until something has actually been ticked/assigned — a real `0` ("nobody came")
+and "not counted yet" mean very different things, so neither claims the first.
+`Served_Confirmed` counts every tick, including walk-ins who never registered.
 
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
-system never overwrites them. They now sit at the **end** of the row, because
-they're reconciliation detail and were pushing the numbers you actually order
-against off the screen:
+system never overwrites them. The buffer amounts sit at the very **end** of
+the row, because they're set once from Config and rarely touched again, and
+having them up near the counts you read every day pushed those numbers off
+the screen:
 
-`Standard_Buffer` · `Tester_Buffer` · `Actual_Ordered` · `Day_1_In-Person` ·
-`Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` · `Total_Consumed` ·
-`Thrown_Away` · `Discrepancy`
+`Actual_Ordered` · `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` ·
+`Subs_Takeaway` · `Total_Consumed` · `Thrown_Away` · `Discrepancy` ·
+`Standard_Buffer` · `Tester_Buffer`
 
-Because there's one row per date **per location**, each row is **shaded by
-location** — Narberth light orange, Ashbridge light green, Zoom lavender — so a
-week with several sites reads as blocks of color. The `Event_Date` cell keeps
-its month tint and the ✍️ columns keep their yellow.
+The `Location` cell itself is **color-coded** — Narberth light orange,
+Ashbridge light green, Zoom lavender — the same convention as every other tab,
+so you can scan down the column and tell locations apart at a glance without a
+whole row of tint competing with the manual-override purple, the grey
+"Not Serving" cell, and the ✍️ yellow hand-entry columns. The `Event_Date` cell
+keeps its own month tint.
 
 ### 3. Lunch_and_Event_Registrants
 One row **per person, per session** — guests get their own rows, not a note on
@@ -203,18 +208,24 @@ without hunting for their row:
 
 1. **Location** — pick from the dropdown.
 2. **Program** — the list narrows to programs at that location.
-3. **Name** — narrows again to people registered for it.
-4. Tick **✓ Attended** or **✓ Lunch**.
+3. **Date** — optional. Narrows to the exact session, when you need it.
+4. **Name** — narrows again to people registered for it (on that date, if one
+   was picked).
+5. Tick **✓ Attended** or **✓ Lunch**.
 
 That's it. The system finds that person's row wherever it is, ticks it, tells
 you what it did on the line underneath, and clears itself for the next person.
-The **Clear** box resets it if you pick wrong.
+The **Clear** box resets it if you pick wrong. Guests brought by another
+registrant show up in the Program/Date/Name dropdowns exactly like anyone
+else — there's no separate step for them.
 
 - **Ticking Lunch also ticks Attended** — you can't be fed without being there.
-- If someone's registered for **several dates** of the same program, it marks
-  the nearest one (today first, then the next upcoming) and says so, e.g.
-  *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
-  the nearest)."* If that's the wrong one, tick the right row directly.
+- **Date is optional.** Leave it blank and, if someone's registered for
+  **several dates** of the same program, it marks the nearest one (today
+  first, then the next upcoming) and says so, e.g. *"Marked attendance for
+  Marion Webb — Tue, Aug 5 (2 sessions matched — marked the nearest)."* Pick a
+  Date instead to mark that **exact** session with no guessing — useful when
+  the nearest one isn't the one actually being served.
 - If nothing matches, it says so and **changes nothing** — no silent guesses.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
@@ -232,6 +243,8 @@ scrolling.
 | `Location` / `Event` | Which program and location this row belongs to |
 | ✍️ `Attended` | **Yours to tick.** They turned up |
 | ✍️ `Lunch_Served` | **Yours to tick.** They were actually fed — this is what `Served_Confirmed` on the lunch dashboard counts |
+| ✍️ `Serving_Method` | **Yours to set.** How the meal was served — Day 1 In-Person, Day 1 Takeaway, Subs In-Person, Subs Takeaway |
+| ✍️ `Lunch_Assignment` | **Yours to set.** A dropdown of every scheduled lunch (from Lunch_Schedule) — set it when this person's meal should count against a *different* date/location than the one they registered for. Rolls up into `Lunches_Assigned_To_Registrants` on Master_Lunch_Dashboard |
 | `Person_Type` | `Attendee` (registered themselves) or `Guest` |
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
@@ -299,11 +312,13 @@ itself. Each is split down the middle:
 
 | Recomputed | Yours |
 |---|---|
-| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
+| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
 
 This is where "Marion always brings her sister" or "cold lunch only, no dairy"
 lives. People stay on the roll even after their sessions age out, so the notes
-don't evaporate.
+don't evaporate. `Confirmed_Member` is a plain checkbox — tick it once you've
+personally verified someone as a real member, independent of how many times
+the recomputed history shows them attending.
 
 **Program_Options** — one row per program per location:
 
@@ -573,8 +588,9 @@ let the next sync do it.
 
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
-**Lunch_and_Event_Registrants** — location, program, name, then tick Attended or
-Lunch. See [that tab's section](#3-lunch_and_event_registrants).
+**Lunch_and_Event_Registrants** — location, program, optionally a date, then
+name, then tick Attended or Lunch. See
+[that tab's section](#3-lunch_and_event_registrants).
 
 **Check how many lunches actually went out**
 Compare `Registered_Count` (what the forms said) with `Served_Confirmed` (what
