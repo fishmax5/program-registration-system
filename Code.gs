@@ -2174,12 +2174,22 @@ function handleLunchScheduleEdit(e, sheet) {
   // Re-sorting the tab is harmless and always safe to do.
   renderLunchScheduleSheet();
 
+  offerToPushLunchScheduleChanges(dateLocationPairs);
+}
+
+/**
+ * Shared by handleLunchScheduleEdit() and the Add Lunch Schedule Entry/Batch
+ * menu actions: offers to push a set of changed {date, location} pairs out
+ * to their forms right now.
+ *
+ * Pushing is NOT harmless: it rewrites the visible date labels on live
+ * registration forms, and can add or remove the lunch question entirely
+ * (see syncLunchQuestionsOnForm). Someone mid-way through typing a menu
+ * doesn't necessarily want that yet, so this always asks first.
+ */
+function offerToPushLunchScheduleChanges(dateLocationPairs) {
   if (dateLocationPairs.length === 0) return;
 
-  // Pushing the menu out to forms is NOT harmless: it rewrites the visible
-  // date labels on live registration forms, and can add or remove the lunch
-  // question entirely (see syncLunchQuestionsOnForm). Someone mid-way through
-  // typing a menu doesn't necessarily want that yet.
   const dateList = dateLocationPairs
     .map(p => `${formatDateLabel(p.date)}${p.location ? ` (${p.location})` : ''}`)
     .slice(0, 5)
@@ -2256,6 +2266,270 @@ function refreshFormsForChangedLunchDate(changedDate, location) {
 
 
 // ============================================================================
+// 1d. ADD TO LUNCH SCHEDULE  (menu-driven, single row or a whole batch)
+// ============================================================================
+//
+// Hand-typing a row is fine for one date, but finding the right spot in a
+// tab that's sorted and split into Upcoming/Past sections — or typing out
+// twenty rows for a recurring menu — is exactly the kind of thing worth a
+// couple of prompts instead. Both menu items below UPSERT: a date+location
+// that already has a row gets its Type/Meal_Description/Meal_Shorthand
+// overwritten (same as hand-editing that row directly) rather than adding a
+// duplicate.
+//
+// Neither of these requires an authorized admin account: adding a menu row
+// is exactly what hand-editing Lunch_Schedule already lets anyone do (see
+// handleLunchScheduleEdit()) — this is just a faster way to do the same
+// thing, not a new capability.
+// ============================================================================
+
+/**
+ * Adds or updates one row per {date, location, type, description, shorthand}
+ * entry on Lunch_Schedule, then re-renders the tab. Returns the {date,
+ * location} pairs touched, so a caller can offer to push the change out to
+ * registration forms the same way a manual edit does (see
+ * offerToPushLunchScheduleChanges()).
+ */
+function applyLunchScheduleEntries(entries) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(sheet, headers, 'Event_Date');
+
+  const byKey = {};
+  rows.forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return;
+    byKey[`${formatDateKey(d)}|${row[map['Location']]}`] = row;
+  });
+
+  const touched = [];
+  let added = 0;
+  let updated = 0;
+  entries.forEach(entry => {
+    const key = `${formatDateKey(entry.date)}|${entry.location}`;
+    let row = byKey[key];
+    if (row) {
+      updated++;
+    } else {
+      row = new Array(headers.length).fill('');
+      row[map['Event_Date']] = entry.date;
+      row[map['Location']] = entry.location;
+      rows.push(row);
+      byKey[key] = row;
+      added++;
+    }
+    row[map['Type']] = entry.type;
+    row[map['Meal_Description']] = entry.description || '';
+    row[map['Meal_Shorthand']] = entry.shorthand || '';
+    touched.push({ date: entry.date, location: entry.location });
+  });
+
+  renderLunchScheduleSheet(false, rows);
+  return { touched, added, updated };
+}
+
+/** How many of `dates` already have a Lunch_Schedule row for `location` — used to warn before a batch add overwrites them. */
+function countExistingLunchScheduleRows(dates, location) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  if (!sheet) return 0;
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const existingKeys = new Set();
+  readAllSectionedRows(sheet, headers, 'Event_Date').forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (d) existingKeys.add(`${formatDateKey(d)}|${row[map['Location']]}`);
+  });
+  return dates.filter(d => existingKeys.has(`${formatDateKey(d)}|${location}`)).length;
+}
+
+/** Prompts for a Location, validated against CALENDAR_MAP's location names (case-insensitive). Returns null on cancel or an invalid entry. */
+function promptForLocation(ui) {
+  const options = Object.values(CALENDAR_MAP);
+  const result = ui.prompt('Location', `Which location? (${options.join(' / ')})`, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const match = options.filter(o => o.toLowerCase() === typed.toLowerCase())[0];
+  if (!match) {
+    ui.alert(`"${typed}" isn't one of: ${options.join(', ')}. Nothing was added — try again.`);
+    return null;
+  }
+  return match;
+}
+
+/** Prompts for a single date (anything coerceDate() can parse, e.g. "8/5/2026"). Returns null on cancel or an invalid entry. */
+function promptForDate(ui, label) {
+  const result = ui.prompt(label, 'Enter a date, e.g. 8/5/2026', ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const d = coerceDate(typed);
+  if (!d) {
+    ui.alert(`"${typed}" doesn't look like a date. Nothing was added — try again.`);
+    return null;
+  }
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Prompts for a Type, validated against LUNCH_TYPE_OPTIONS. Returns null on cancel or an invalid entry. */
+function promptForLunchType(ui) {
+  const result = ui.prompt('Type', `${LUNCH_TYPE_OPTIONS.join(' / ')}?`, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const match = LUNCH_TYPE_OPTIONS.filter(o => o.toLowerCase() === typed.toLowerCase())[0];
+  if (!match) {
+    ui.alert(`"${typed}" isn't one of: ${LUNCH_TYPE_OPTIONS.join(', ')}. Nothing was added — try again.`);
+    return null;
+  }
+  return match;
+}
+
+/** Prompts for free text. Returns '' for a blank OK, or null on Cancel (so callers can tell "left blank" apart from "abandon everything"). */
+function promptForOptionalText(ui, title, message) {
+  const result = ui.prompt(title, message, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  return result.getResponseText().trim();
+}
+
+/** Weekday abbreviations accepted by promptForWeekdays(), matching Date.getDay() (0=Sun..6=Sat). */
+const WEEKDAY_ABBREVIATIONS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+/**
+ * Prompts for a comma-separated weekday filter for the batch add (e.g.
+ * "Mon,Wed,Fri"). A blank answer means every day in the range. Returns a Set
+ * of Date.getDay() values (empty = no filter), or null on cancel/an
+ * unrecognized day name.
+ */
+function promptForWeekdays(ui) {
+  const result = ui.prompt('Which days of the week?',
+    'Comma-separated, e.g. "Mon,Wed,Fri" — leave blank for every day in the range.', ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  if (!typed) return new Set(); // no filter
+
+  const set = new Set();
+  const unrecognized = [];
+  typed.split(',').forEach(part => {
+    const trimmed = part.trim();
+    if (!trimmed) return;
+    const key = trimmed.slice(0, 3).toLowerCase();
+    if (WEEKDAY_ABBREVIATIONS[key] !== undefined) set.add(WEEKDAY_ABBREVIATIONS[key]);
+    else unrecognized.push(trimmed);
+  });
+  if (unrecognized.length > 0) {
+    ui.alert(`Didn't recognize: ${unrecognized.join(', ')}. Use Sun/Mon/Tue/Wed/Thu/Fri/Sat. Nothing was added — try again.`);
+    return null;
+  }
+  return set;
+}
+
+/**
+ * Menu item: "Add Lunch Schedule Entry". Adds (or updates) ONE Lunch_Schedule
+ * row via a short series of prompts, so a single date+location doesn't
+ * require finding the right row in a tab that's sorted and split into
+ * Upcoming/Past sections. Cancelling any prompt aborts with nothing changed.
+ */
+function addLunchScheduleEntryUi() {
+  const ui = SpreadsheetApp.getUi();
+
+  const location = promptForLocation(ui);
+  if (!location) return;
+
+  const date = promptForDate(ui, 'What date?');
+  if (!date) return;
+
+  const type = promptForLunchType(ui);
+  if (!type) return;
+
+  const description = promptForOptionalText(ui, 'Meal description',
+    'e.g. "Turkey sandwich, chips, apple" — leave blank if none.');
+  if (description === null) return;
+
+  const shorthand = promptForOptionalText(ui, 'Meal shorthand',
+    'A short label registrants see on the form, e.g. "Turkey Sub". Leave blank if none.');
+  if (shorthand === null) return;
+
+  const result = applyLunchScheduleEntries([{ date, location, type, description, shorthand }]);
+  const verb = result.updated > 0 ? 'Updated existing' : 'Added';
+  toastIfPossible(`${verb} row for ${formatDateLabel(date)} (${location}) on Lunch_Schedule ✅`);
+  offerToPushLunchScheduleChanges(result.touched);
+}
+
+/**
+ * Menu item: "Add Lunch Schedule Entries (Batch)". Generates a whole run of
+ * Lunch_Schedule rows at once — one location, one date range, an optional
+ * weekday filter, and ONE Type/description/shorthand applied to every date
+ * produced. For different menus on different dates in the same run, use
+ * "Add Lunch Schedule Entry" (individual) instead, or edit the generated
+ * rows afterward — this is deliberately a bulk tool, not a per-row editor.
+ */
+function addLunchScheduleBatchUi() {
+  const ui = SpreadsheetApp.getUi();
+
+  const location = promptForLocation(ui);
+  if (!location) return;
+
+  const startDate = promptForDate(ui, 'Start date (inclusive)?');
+  if (!startDate) return;
+
+  const endDate = promptForDate(ui, 'End date (inclusive)?');
+  if (!endDate) return;
+  if (endDate < startDate) {
+    ui.alert('End date is before the start date — nothing was added.');
+    return;
+  }
+
+  const weekdays = promptForWeekdays(ui);
+  if (weekdays === null) return;
+
+  const type = promptForLunchType(ui);
+  if (!type) return;
+
+  const description = promptForOptionalText(ui, 'Meal description (applies to every date)',
+    'e.g. "Turkey sandwich, chips, apple" — leave blank if none.');
+  if (description === null) return;
+
+  const shorthand = promptForOptionalText(ui, 'Meal shorthand (applies to every date)',
+    'A short label registrants see on the form, e.g. "Turkey Sub". Leave blank if none.');
+  if (shorthand === null) return;
+
+  const dates = [];
+  for (const d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    if (weekdays.size === 0 || weekdays.has(d.getDay())) dates.push(new Date(d));
+  }
+
+  if (dates.length === 0) {
+    ui.alert('No dates matched that range/weekday combination — nothing was added.');
+    return;
+  }
+
+  const overwriting = countExistingLunchScheduleRows(dates, location);
+  const weekdayNote = weekdays.size > 0
+    ? ` (${Array.from(weekdays).sort().map(n => {
+        const abbr = Object.keys(WEEKDAY_ABBREVIATIONS).find(k => WEEKDAY_ABBREVIATIONS[k] === n);
+        return abbr.charAt(0).toUpperCase() + abbr.slice(1);
+      }).join(', ')} only)`
+    : '';
+  const detail = `This adds ${dates.length} Lunch_Schedule row(s) for ${location}, ` +
+    `${formatDateLabel(startDate)} through ${formatDateLabel(endDate)}${weekdayNote}, ` +
+    `all as "${type}"${shorthand ? ` — ${shorthand}` : ''}.` +
+    (overwriting > 0 ? `\n\n${overwriting} of those date(s) already have a menu row — they will be overwritten.` : '');
+
+  if (!confirmConsequentialAction(`Add ${dates.length} Lunch_Schedule row(s)?`, detail, false)) {
+    toastIfPossible('Cancelled — nothing was added.');
+    return;
+  }
+
+  const result = applyLunchScheduleEntries(
+    dates.map(date => ({ date, location, type, description, shorthand })));
+  toastIfPossible(`Lunch_Schedule updated: ${result.added} row(s) added, ${result.updated} updated ✅`);
+  offerToPushLunchScheduleChanges(result.touched);
+}
+
+
+// ============================================================================
 // 2. SHEET SETUP UTILITY  (initSheet)
 // ============================================================================
 
@@ -2314,6 +2588,23 @@ function initLunchScheduleSheet(ss) {
       `The new tab tracks one row per date PER LOCATION (with a "Not Serving" Type option) — please migrate anything you still need.`);
   }
   renderLunchScheduleSheet(true);
+}
+
+/**
+ * TEMPORARY — run directly from the Apps Script editor (select this
+ * function in the dropdown, then Run). (Re)builds ONLY the Lunch_Schedule
+ * tab — creates it if missing, renames an old Month-based layout out of the
+ * way if found — without touching Config, the template form, Registrants,
+ * Triage, either dashboard, or triggers the way the full initSheet() does.
+ *
+ * Safe to run more than once. Delete this function once you no longer
+ * need it — it's scaffolding, not part of the normal workflow.
+ */
+function tempInitLunchScheduleOnly() {
+  if (!requireAuthorizedAdmin('Initialize Lunch_Schedule only')) return;
+  initLunchScheduleSheet(SpreadsheetApp.getActiveSpreadsheet());
+  toastIfPossible('Lunch_Schedule initialized ✅');
+  log('tempInitLunchScheduleOnly complete — delete this function when you no longer need it.');
 }
 
 /** Puts tabs in a logical, at-a-glance order. */
@@ -3014,6 +3305,9 @@ function onOpen() {
     .addItem('Sync Cal', 'syncCalendars')
     .addItem('Sync Registrations', 'syncRegistrations')
     .addItem('Check Triggers', 'writeTriggers')
+    .addSeparator()
+    .addItem('Add Lunch Schedule Entry', 'addLunchScheduleEntryUi')
+    .addItem('Add Lunch Schedule Entries (Batch)', 'addLunchScheduleBatchUi')
     .addSeparator()
     .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
     .addSeparator()

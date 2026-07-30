@@ -298,6 +298,32 @@ say **no** to just save it here and let the next Sync Cal apply it. Useful when
 you're part-way through typing a week's menu and don't want each keystroke
 rewriting live forms.
 
+#### Adding rows the easy way
+
+Typing rows by hand works, but the tab is sorted and split into Upcoming/Past
+sections, so finding — or creating — the right row gets tedious. Two menu
+items do it for you instead:
+
+**Add Lunch Schedule Entry** — one row, a few prompts: Location, date, Type,
+description, shorthand. Cancel any prompt and nothing is changed.
+
+**Add Lunch Schedule Entries (Batch)** — a whole run at once: Location, a
+start and end date, an optional day-of-week filter (e.g. "Mon,Wed,Fri" — leave
+blank for every day in the range), then ONE Type/description/shorthand applied
+to every date produced. It shows you a summary — including how many existing
+rows it's about to overwrite — before it writes anything. Use this for
+something like "Cold lunch, every Tuesday and Thursday, for the next two
+months." For a run where different dates need different menus, either run it
+more than once (once per menu) or edit the generated rows afterward.
+
+Both **upsert**: a date+location that already has a row gets its
+Type/Meal_Description/Meal_Shorthand overwritten — same as hand-editing that
+row — rather than creating a duplicate. Both also ask **whether to push the
+change out to the forms**, exactly like hand-editing a row does.
+
+Neither needs an authorized admin account — adding a menu row this way is the
+same capability as hand-editing the tab, just faster.
+
 ### 5. Member_Roll and Program_Options — your own notes
 
 These two tabs are the only ones holding knowledge the system can't work out for
@@ -467,6 +493,8 @@ Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet:
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
 | **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
+| **Add Lunch Schedule Entry** | Adds/updates one Lunch_Schedule row via a few prompts — see [Adding rows the easy way](#adding-rows-the-easy-way) |
+| **Add Lunch Schedule Entries (Batch)** | Generates a whole run of Lunch_Schedule rows at once |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
 | **Find Leftover Tabs (preview)** | Read-only: reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
 | **Merge + Delete Leftover Tabs** | Folds those tabs into the current ones, then removes them |
@@ -572,9 +600,10 @@ Merge + Delete Leftover Tabs, `initSheet()`, `cancelBootstrapCalendars()`,
 `confirmLargeTriage()`, `restoreTriagedRegistrants()`,
 `recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`.
 
-**Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, and
-everyone's ability to register, edit rows, and view every dashboard. Ordinary
-day-to-day use needs no special account.
+**Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, Add
+Lunch Schedule Entry (individual and batch), and everyone's ability to
+register, edit rows, and view every dashboard. Ordinary day-to-day use needs
+no special account.
 
 If someone outside that list runs a gated action, nothing happens — no tabs
 rebuilt, no triggers touched, no data changed — and they see a toast (and the
