@@ -473,10 +473,11 @@ function confirmCellEditOrRevert(e, title, detail) {
 
 /** Calendar ID -> human-readable location name. */
 const CALENDAR_MAP = {
-  'c_a1a2cd2f999f1bed82d1f21c59a1cb381485a28297a3ff1b8d394e2ad5fdc282@group.calendar.google.com': 'Narberth',
-  'c_e75805d7180c15888ed58e5625878088059c001053181bbaffceac8f6a64e1dd@group.calendar.google.com': 'Ashbridge',
-  'c_562b3332ef81d94b74100a3075f00d0f68061a01edcf46ea1378872c60d91c07@group.calendar.google.com': 'Zoom'
+  'c7706e8a3c057e02a4adca78268262aeb7116b9717b9325926bf746728566faa@group.calendar.google.com': 'Narberth',
+  '1073e5cc279f84bff722d0b03695b38011d845e6230e2f704adab49d31c3d652@group.calendar.google.com': 'Ashbridge',
+  'ac990016bc9f04e0d7ef9da8b463367cd34b2aa5a137535d876af9ae4db2f675@group.calendar.google.com': 'Zoom'
 };
+
 
 /**
  * Hardcoded soft colors per "Month Year" label — used to tint the Event_Date
