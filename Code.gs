@@ -813,9 +813,14 @@ const CONFIG_LAYOUT = {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
     headers: ['Location', 'Catering_Policy']
+  },
+  REGISTRATION_LINK: {
+    title: '🔗 Registration Link on Calendar',
+    startCol: 13,
+    headers: ['Registration_Link_Visibility']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 const CONFIG_HEADER_ROW = 2;
@@ -828,6 +833,27 @@ const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
 /** Lunch_and_Event_Registrants' Serving_Method domain — how THIS person's meal was actually served, day-of. */
 const SERVING_METHOD_OPTIONS = ['Day 1 In-Person', 'Day 1 Takeaway', 'Subs In-Person', 'Subs Takeaway'];
+
+/**
+ * Config's "🔗 Registration Link on Calendar" toggle.
+ *
+ *   SHOW  the description gets the clickable "📝 Register for X" link, same
+ *         as always.
+ *   HIDE  the description gets a plain, non-clickable placeholder line
+ *         instead — for a calendar that's embedded/shared publicly, where a
+ *         raw registration link isn't something you want a stranger clicking
+ *         straight into. The [Cap:]/[Grouped] settings brackets are NOT
+ *         affected either way — this only ever touches the registration
+ *         line, never the settings this script reads back from the
+ *         description (see resolveEventSettings()).
+ *
+ * The placeholder still carries the form ID in a small `[Form: ...]` tag —
+ * visible, same as the [Cap:]/[Grouped] brackets already are, but not a link
+ * — so findExistingFormIdFromEvents() can still recover a lost form registry
+ * from the calendar even with the link hidden.
+ */
+const REGISTRATION_LINK_VISIBILITY_OPTIONS = ['Show', 'Hide'];
+const DEFAULT_REGISTRATION_LINK_VISIBILITY = 'Show';
 
 /**
  * A location's STANDING catering posture. Until this existed the only way
@@ -1612,6 +1638,7 @@ let __cateringPolicyIndexCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 let __lunchAssignmentIndexCache = null;
+let __registrationLinkVisibilityCache = null;
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -1707,6 +1734,7 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __cateringPolicyIndexCache = null;
+  __registrationLinkVisibilityCache = null;
 }
 
 /**
@@ -2629,10 +2657,14 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, policySection.startCol, Object.values(CALENDAR_MAP), CONFIG_DATA_START_ROW, policyRows);
   applyValueListValidationBounded(sheet, policySection.startCol + 1, CATERING_POLICY_OPTIONS, CONFIG_DATA_START_ROW, policyRows);
 
+  const linkSection = CONFIG_LAYOUT.REGISTRATION_LINK;
+  applyValueListValidationBounded(sheet, linkSection.startCol, REGISTRATION_LINK_VISIBILITY_OPTIONS, CONFIG_DATA_START_ROW, 1);
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
   seedCateringPolicyRows(sheet);
+  seedRegistrationLinkVisibilityRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -2728,6 +2760,20 @@ function seedAdminNotificationRow(sheet) {
   if (String(cell.getValue() || '').trim() === '') {
     cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
       + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
+  }
+}
+
+/** Defaults to Show — never silently hides a link nobody asked to hide. */
+function seedRegistrationLinkVisibilityRow(sheet) {
+  const section = CONFIG_LAYOUT.REGISTRATION_LINK;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_REGISTRATION_LINK_VISIBILITY);
+    cell.setNote('Show = the calendar event description carries a clickable "Register for..." link, as always.\n'
+      + 'Hide = the description gets a plain, non-clickable line instead — for a calendar embedded/shared '
+      + 'publicly, where you don\'t want a stranger clicking straight into a registration form. This never '
+      + 'affects the [Cap:]/[Grouped] settings brackets, only the registration line. Takes effect on the next sync.');
+    log(`Seeded default Registration Link visibility (${DEFAULT_REGISTRATION_LINK_VISIBILITY}) on "${SHEET_NAMES.CONFIG}".`);
   }
 }
 
@@ -2859,6 +2905,26 @@ function getAdminNotificationEmail() {
   }
   __adminNotificationEmailCache = email;
   return email;
+}
+
+/** Config's "🔗 Registration Link on Calendar" setting — 'Show' or 'Hide'. See REGISTRATION_LINK_VISIBILITY_OPTIONS. */
+function getRegistrationLinkVisibility() {
+  if (__registrationLinkVisibilityCache !== null) return __registrationLinkVisibilityCache;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  let visibility = DEFAULT_REGISTRATION_LINK_VISIBILITY;
+  if (sheet) {
+    const section = CONFIG_LAYOUT.REGISTRATION_LINK;
+    const val = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
+    if (REGISTRATION_LINK_VISIBILITY_OPTIONS.indexOf(val) !== -1) visibility = val;
+  }
+  __registrationLinkVisibilityCache = visibility;
+  return visibility;
+}
+
+/** True when Config's Registration Link setting is 'Hide'. */
+function isRegistrationLinkHidden() {
+  return getRegistrationLinkVisibility() === 'Hide';
 }
 
 /**
@@ -3274,17 +3340,30 @@ function setGroupingBracketInDescription(description, newTag) {
 function handleConfigEdit(e, sheet) {
   if (typeof e.value === 'undefined') return; // multi-cell paste
   const editedCol = e.range.getColumn();
+  const editedRow = e.range.getRow();
   const policySection = CONFIG_LAYOUT.CATERING_POLICY;
-  const isPolicyEdit = editedCol === policySection.startCol + 1 &&
-    e.range.getRow() >= CONFIG_DATA_START_ROW;
+  const isPolicyEdit = editedCol === policySection.startCol + 1 && editedRow >= CONFIG_DATA_START_ROW;
 
   if (isPolicyEdit) {
-    const location = String(sheet.getRange(e.range.getRow(), policySection.startCol).getValue() || 'this location');
+    const location = String(sheet.getRange(editedRow, policySection.startCol).getValue() || 'this location');
     const detail = `Lunch service for "${location}" becomes "${e.value}".\n\n` +
       `This changes whether its registration forms ask about lunch at all, and whether its dates ` +
       `appear on the lunch dashboard. Existing forms are updated on the next sync.`;
     if (!confirmCellEditOrRevert(e, `Change lunch service for ${location}?`, detail)) return;
     toastIfPossible(`Lunch service for ${location} set to "${e.value}" — forms update on the next sync.`);
+  }
+
+  const linkSection = CONFIG_LAYOUT.REGISTRATION_LINK;
+  const isLinkVisibilityEdit = editedCol === linkSection.startCol && editedRow === CONFIG_DATA_START_ROW;
+
+  if (isLinkVisibilityEdit) {
+    const detail = e.value === 'Hide'
+      ? `Every calendar event's registration link becomes a plain, non-clickable line instead of a link.\n\n` +
+        `The [Cap:]/[Grouped] settings brackets are unaffected. This applies to every event on the next sync.`
+      : `Every calendar event's registration line goes back to being a clickable "Register for..." link.\n\n` +
+        `This applies to every event on the next sync.`;
+    if (!confirmCellEditOrRevert(e, `${e.value === 'Hide' ? 'Hide' : 'Show'} the registration link on the calendar?`, detail)) return;
+    toastIfPossible(`Registration Link set to "${e.value}" — every event updates on the next sync.`);
   }
 
   // Any Config edit can invalidate a cached read of it, confirmed or not.
@@ -4528,10 +4607,14 @@ function toastIfPossible(message) {
  * it keeps the ID machine-recoverable, which is what lets
  * findExistingFormIdFromEvents() rebuild a lost form registry instead of
  * spawning duplicate forms.
+ *
+ * Config's "🔗 Registration Link on Calendar" toggle (isRegistrationLinkHidden())
+ * swaps this for a plain, non-clickable line instead — see buildHiddenRegistrationLine().
  */
 const REGISTRATION_LINK_FRAGMENT_KEY = 'form';
 
 function buildRegistrationLinkLine(group, formInfo) {
+  if (isRegistrationLinkHidden()) return buildHiddenRegistrationLine(group, formInfo);
   const label = group.isFixed
     ? `📝 Register for ${group.cleanTitle}`
     : `📝 Register for ${group.cleanTitle} — ${group.monthLabel}`;
@@ -4539,18 +4622,39 @@ function buildRegistrationLinkLine(group, formInfo) {
   return `<a href="${href}">${label}</a>`;
 }
 
+/**
+ * Config's Hide mode: no href, no clickable anchor at all — just plain text
+ * telling a public viewer where to actually register, plus the SAME `[Form:
+ * ...]` recovery tag the rest of this workbook already leaves visible for
+ * [Cap:]/[Grouped] (see EVENT_TYPES) — a small bracketed tag was already the
+ * accepted trade-off for those, so reusing it here costs nothing new and
+ * keeps findExistingFormIdFromEvents() working without a clickable link.
+ */
+function buildHiddenRegistrationLine(group, formInfo) {
+  return `📝 Registration for ${group.cleanTitle} is available on our dashboard/website. [Form: ${formInfo.formId}]`;
+}
+
 /** Matches our anchor, capturing (1) the URL without fragment and (2) the form ID. */
 const REGISTRATION_ANCHOR_REGEX =
   new RegExp(`<a href="([^"#]*)#${REGISTRATION_LINK_FRAGMENT_KEY}=([a-zA-Z0-9_-]+)"[^>]*>.*?</a>`, 'i');
+/** Matches buildHiddenRegistrationLine()'s placeholder, capturing the form ID from its `[Form: ...]` tag. */
+const HIDDEN_REGISTRATION_LINE_REGEX = /📝 Registration for .*? is available on our dashboard\/website\.\s*\[Form:\s*([a-zA-Z0-9_-]+)\]/;
 /** Pre-anchor format, still read so events stamped by older versions keep working. */
 const LEGACY_REGISTRATION_LINE_REGEX = /^.*Registration Link:\s*(\S+)\s*\[Form ID:\s*([a-zA-Z0-9_-]+)\]\s*$/m;
 
-/** Finds our registration line in a description in either format. Returns { url, formId, matchText } or null. */
+/**
+ * Finds our registration line in a description, in whichever of the three
+ * formats it's currently in. Returns { url, formId, matchText, isLegacy,
+ * isHidden } or null. `url` is null for the Hide-mode placeholder, which
+ * carries no link at all.
+ */
 function findRegistrationLineInDescription(description) {
   const anchor = REGISTRATION_ANCHOR_REGEX.exec(description);
-  if (anchor) return { url: anchor[1], formId: anchor[2], matchText: anchor[0], isLegacy: false };
+  if (anchor) return { url: anchor[1], formId: anchor[2], matchText: anchor[0], isLegacy: false, isHidden: false };
+  const hidden = HIDDEN_REGISTRATION_LINE_REGEX.exec(description);
+  if (hidden) return { url: null, formId: hidden[1], matchText: hidden[0], isLegacy: false, isHidden: true };
   const legacy = LEGACY_REGISTRATION_LINE_REGEX.exec(description);
-  if (legacy) return { url: legacy[1], formId: legacy[2], matchText: legacy[0], isLegacy: true };
+  if (legacy) return { url: legacy[1], formId: legacy[2], matchText: legacy[0], isLegacy: true, isHidden: false };
   return null;
 }
 
@@ -4821,15 +4925,23 @@ function restoreTriagedRegistrants() {
 
 function backInjectCalendarDescriptions(group, formInfo) {
   const linkLine = buildRegistrationLinkLine(group, formInfo);
+  const hidden = isRegistrationLinkHidden();
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
     const found = findRegistrationLineInDescription(existing);
 
     if (found) {
-      // Already current, in the current format — leave the event alone
-      // rather than burning a write (and a notification) on every sync.
-      if (!found.isLegacy && found.url === formInfo.publishedUrl && found.formId === formInfo.formId) return;
+      // Already current, in the current format AND the current Show/Hide
+      // mode — leave the event alone rather than burning a write (and a
+      // notification) on every sync. A Config toggle flip always forces a
+      // rewrite even when the form ID hasn't changed, since that's the
+      // whole point of flipping it — a stale anchor left behind after
+      // switching to Hide would defeat the setting entirely. Hide mode has
+      // no URL to compare, so the form ID alone is what "current" means.
+      const alreadyCurrent = found.isHidden === hidden && found.formId === formInfo.formId &&
+        (hidden || (!found.isLegacy && found.url === formInfo.publishedUrl));
+      if (alreadyCurrent) return;
       const corrected = existing.replace(found.matchText, linkLine);
       if (corrected !== existing) ev.setDescription(corrected);
       return;

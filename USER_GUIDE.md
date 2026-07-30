@@ -329,7 +329,7 @@ the recomputed history shows them attending.
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
 ### 6. Config
-Four small settings blocks:
+Five small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold, used to
   pre-fill new lunch rows
@@ -337,6 +337,7 @@ Four small settings blocks:
   inside that window get flagged.
 - **📧 Admin Notifications** — one email address (optional)
 - **🍽️ Lunch Service by Location** — see below
+- **🔗 Registration Link on Calendar** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -359,6 +360,29 @@ If you set the email, you get **at most one message per sync**, and only when
 something needs a person: waitlisted registrants, forms that couldn't be opened,
 and events sent to triage. A quiet sync sends nothing. **Leave it blank to turn
 notifications off.**
+
+**Registration Link on Calendar** controls what a calendar event's
+registration line looks like — useful if that calendar is embedded or shared
+publicly somewhere, where you may not want a stranger able to click straight
+into a registration form from the description.
+
+| Setting | Effect |
+|---|---|
+| **Show** (default) | The description carries a clickable **"📝 Register for …"** link, as always |
+| **Hide** | The description carries a plain, **non-clickable** line instead — something like *"📝 Registration for Yoga Basics is available on our dashboard/website."* |
+
+This **only** ever touches the registration line. The `[Cap: 12]` /
+`[Grouped]`/`[Monthly]` settings brackets are completely unaffected either
+way — the system still reads those from the description exactly as before,
+so switching to **Hide** never resets a program's capacity or grouping.
+
+The **Hide** placeholder still carries a small `[Form: …]` tag — visible,
+the same way `[Cap: 12]` already is, but not a link — so the system can still
+recognize which form an event belongs to if it ever needs to recover that
+without creating a duplicate.
+
+Changing this **asks you to confirm**, and applies to **every** calendar
+event on the **next sync** — nothing to do per-event.
 
 ### 7. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
@@ -482,6 +506,7 @@ say no:
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
 | Edit a **Lunch_Schedule** menu row | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
+| Change **Registration Link on Calendar** in Config | It rewrites the registration line on every calendar event on the next sync |
 | **Merge + Delete Leftover Tabs** | It deletes tabs (after moving their rows to safety) |
 
 For a cell edit, saying **no puts the old value straight back** — the cell
