@@ -331,11 +331,50 @@ from all counts automatically.
 | `Meal_Description` | Full description |
 | `Meal_Shorthand` | Short label — **this is what registrants see on the form** |
 
-Setting a date to **Not Serving** removes it from the lunch question on that
-form and labels it "No Lunch Served," so nobody is asked to pick a meal that
-doesn't exist. If that leaves the form with **no** catered dates at all, the
-lunch questions come off the form entirely and its description says lunch isn't
-provided — and they come back on their own if you later add a catered date.
+#### "Not Serving" — closing the kitchen for a day
+
+Setting a date to **Not Serving** is treated as a **decision**, not a gap, and
+it wins over everything:
+
+- It **removes that date+location from Master_Lunch_Dashboard** — no row, no
+  ordering number. If a row was already there, it's taken off.
+- It **removes the date from the lunch question** on that form and labels it
+  "No Lunch Served," so nobody is asked to pick a meal that doesn't exist. If
+  that leaves the form with **no** catered dates at all, the lunch questions
+  come off the form entirely and its description says lunch isn't provided —
+  and they come back on their own if you later add a catered date.
+- **People already signed up for that lunch stop being counted** — and you are
+  told about it, by name, straight away:
+
+  > ⚠️ 3 person(s) had signed up for lunch on a date now marked "Not Serving" —
+  > Mon, Sep 14 at Narberth: Marion Webb, Ada Cole, Ruth Bell. They will drop
+  > off the lunch dashboard; they still need telling.
+
+  The same thing goes to the **admin email** on the next sync, so it isn't lost
+  if you clicked past the message. **Their registrations are not changed** —
+  they're still coming to the program, they're just not being catered for.
+  Ringing them is yours to do; the system won't quietly cancel a meal and say
+  nothing.
+
+To put the lunch back, change that date's `Type` to `Hot` or `Cold`. Everything
+above reverses on the next sync.
+
+> **A date with no menu row at all is different.** That's a *gap* — nobody's
+> got to it yet — and demand wins there: if someone is signed up for lunch on
+> a date with no menu, the date stays on the dashboard and you get a "lunch
+> needed with no menu set" notice. Only an explicit `Not Serving` cancels.
+
+Three things are deliberately **not** removed:
+
+- **Past dates.** Their rows hold what was actually ordered, consumed and
+  thrown away. Marking an old date Not Serving is a correction to the plan; it
+  doesn't erase the receipt.
+- **Hand-edited dashboard rows** (`Manually Added` / `Manually Edited`). Your
+  own rows are never deleted out from under you — you get a note instead, and
+  can delete it yourself.
+- **Days somebody was actually fed.** If `Lunch_Served` is ticked for anyone
+  that day, the row stays: `Served_Confirmed` records what happened, not what
+  was planned.
 
 #### Adding menu items — paste CSV
 
@@ -888,9 +927,17 @@ Only `Active` + `Needed` rows count. Check for rows sitting at `Waitlisted`,
 `Cancelled`, or `Superseded`.
 
 **A date I expected isn't on the lunch dashboard**
-Check that location's **Lunch Service by Location** setting in Config. If it's
-*By exception*, the date only appears once you add a Hot/Cold row for it on
-**Lunch_Schedule**. If it's *Never*, it won't appear at all.
+First check whether it's marked **Not Serving** on **Lunch_Schedule** — that
+removes it deliberately, and wins even if people signed up. Otherwise check
+that location's **Lunch Service by Location** setting in Config: if it's *By
+exception*, the date only appears once you add a Hot/Cold row for it on
+**Lunch_Schedule**; if it's *Never*, it won't appear at all.
+
+**A date is still on the lunch dashboard after I marked it Not Serving**
+Three reasons it's kept on purpose: it's in the **past** (that row is the
+record of what was ordered), its `Manual_Override` says **Manually
+Added/Edited** (delete it yourself), or somebody's **`Lunch_Served` is ticked**
+for that day (people really were fed). Otherwise it clears on the next sync.
 
 **A form isn't asking about lunch**
 Either that location is set to *Never* in Config, or none of the dates on that

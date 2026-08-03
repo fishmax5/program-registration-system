@@ -92,7 +92,35 @@ collect. The cheap mitigation is to start collecting one (a phone number or
 birth year on the form, folded into the key). Worth doing **before** it
 happens, because untangling merged history afterwards is manual.
 
-### 5. Triggers are private to the account that made them
+### 5. Changing `CALENDAR_MAP` re-keys every session
+
+The calendar IDs in `CALENDAR_MAP` were repointed in this branch. Worth knowing
+what that does, because none of it is loud:
+
+`computeEventId()` hashes **`calendarId | title | date`**. The calendar ID is
+part of the key, so the *same program on the same day* under a new calendar ID
+is a **different session** as far as this system is concerned.
+
+| | What happens |
+|---|---|
+| Old session rows | Kept. `triageDeletedSessions()` only considers rows whose `Calendar_Source` is a calendar it could read, and the old IDs aren't in `CALENDAR_MAP` any more — so they're skipped, not deleted. **Nothing is lost.** |
+| New sync | Imports the new calendars' events as **new** rows with new `Event_ID`s |
+| If both calendars hold the same programs | You get **two rows per session** — one stale, one live — and **two forms** |
+| Existing registrants | Still joined to the **old** `Event_ID`s, so they attach to the stale rows, not the new ones |
+| Sync tokens | The old `CALENDAR_SYNC_TOKEN_*` script properties are orphaned. Harmless. |
+| Calendar-edit triggers | Still watching the old calendars until **Check Triggers** is run |
+| Config | Unaffected — buffers and catering policy are keyed on the location *name*, which didn't change |
+
+**If these are brand-new, empty calendars:** nothing to do beyond **Check
+Triggers**, then a sync.
+
+**If they're the same programs under new IDs** (a recreated or migrated
+calendar), decide before syncing. The clean options are to start the workbook's
+session history fresh, or to rewrite `Calendar_Source` and `Event_ID` on the
+existing rows to match the new IDs. Do **not** just sync and sort it out
+afterwards — once duplicate forms exist, registrations start arriving on both.
+
+### 6. Triggers are private to the account that made them
 
 Already documented in the code and guide, and the admin-email restriction is
 the right fix at the cause. Restating because it is the failure mode most
@@ -107,7 +135,7 @@ visible.
 
 ## Medium term — the next few months
 
-### 6. The hourly sync has no time budget
+### 7. The hourly sync has no time budget
 
 `bootstrapCalendars()` is carefully sliced against the 6-minute execution
 limit. `syncRegistrations()` is not, and it does an unbounded amount of work:
@@ -127,7 +155,7 @@ looks like a dead sync.**
 — check elapsed time between forms, stop cleanly, and advance the sync time
 only to the last response actually processed.
 
-### 7. Renders rewrite everything, every time
+### 8. Renders rewrite everything, every time
 
 Every render is `sheet.clear()` then a full rewrite of every row. It is what
 makes the layout code simple and the tabs self-healing, and it was the right
@@ -140,7 +168,7 @@ Hiding old months (added here) fixes the human problem, not this one. See
 watch is total cells across the history tabs; ~150,000 is where a full render
 starts eating a meaningful share of the execution budget.
 
-### 8. Quick Mark now reads three tabs per keystroke
+### 9. Quick Mark now reads three tabs per keystroke
 
 Widening the dropdowns to all programs and all members means
 `refreshQuickMarkDropdowns()` reads `Master_Program_Dashboard`,
@@ -151,7 +179,7 @@ That latency lands at a sign-in desk with a queue in front of it, and it grows
 with history. If it becomes noticeable: cache the derived lists on a hidden
 tab and rebuild them at the end of each sync, rather than deriving them live.
 
-### 9. `FORMS_FOLDER_ID` is empty
+### 10. `FORMS_FOLDER_ID` is empty
 
 `getOrCreateFormsFolder()` falls back to find-or-create **by name**. If a
 second folder called "Program Registration Forms" ever exists in the Drive —
@@ -161,7 +189,7 @@ whichever one Drive returns first, and they scatter across both.
 One-line fix: create the folder once, paste its ID into `FORMS_FOLDER_ID`.
 Worth doing now; it costs nothing and removes the ambiguity permanently.
 
-### 10. Renders from an edit aren't locked
+### 11. Renders from an edit aren't locked
 
 `harvestPastedMenuRows()` and the Quick Mark walk-in both re-render a whole
 tab from `onEdit`, which can collide with a scheduled sync rendering the same
@@ -172,7 +200,7 @@ same class of bug as #2 and will be worth a lock if either path grows.
 
 ## Long term — architectural, worth knowing before deciding anything big
 
-### 11. The spreadsheet is the database
+### 12. The spreadsheet is the database
 
 Every row on every tab is both storage and UI. That is genuinely the right
 choice here — the staff live in the sheet, and nothing else would have been
@@ -188,10 +216,10 @@ adopted. The costs to keep in view:
 - **The 10-million-cell limit is per file**, shared by every tab including any
   in-workbook archive.
 
-None of this argues for a database. It argues for the archive decision in #7
+None of this argues for a database. It argues for the archive decision in #8
 being made deliberately rather than discovered.
 
-### 12. The calendar is the source of truth, and it's editable by anyone
+### 13. The calendar is the source of truth, and it's editable by anyone
 
 Program identity is the event title; capacity and grouping are bracket tags in
 the description. Anyone with calendar access can rename an event and, from the
@@ -201,7 +229,7 @@ sweep more than 15 sessions or 25% of the table is what stands between a bulk
 calendar rename and a wiped dashboard, and it is doing more work than its size
 suggests. Leave those limits alone.
 
-### 13. Admin gating is convenience, not access control
+### 14. Admin gating is convenience, not access control
 
 `AUTHORIZED_ADMIN_EMAILS` is a constant in a file that anyone with edit access
 to the spreadsheet can open and change. The new two-tier menu hides
@@ -210,7 +238,7 @@ they are started. Both are real improvements to the chance of an accident.
 Neither is a boundary against someone who means it — that comes only from who
 the spreadsheet is shared with.
 
-### 14. Single-file, 8,000 lines
+### 15. Single-file, 8,000 lines
 
 `Code.gs` is well-organized and unusually well-commented; the comments explain
 *why*, which is what makes this maintainable at all. But it is one file with
@@ -247,3 +275,10 @@ order of what would change your plans:
    new name, tick Attended, confirm the row appears flagged `Manually Added`.
 6. **Check the Past sections** show the hidden-row note, and that
    **🕓 Show All Past Rows** brings them back.
+7. **Mark an upcoming date "Not Serving"** on `Lunch_Schedule` where somebody
+   is signed up for lunch. You should get the named warning immediately, the
+   row should leave Master_Lunch_Dashboard on the next sync, and the admin
+   address should get an email about it.
+8. **Before the first sync on the new calendar IDs**, read #5 above and decide
+   which case you're in. That one is easier to get right beforehand than to
+   unpick afterwards.

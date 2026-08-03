@@ -474,9 +474,9 @@ function confirmCellEditOrRevert(e, title, detail) {
 
 /** Calendar ID -> human-readable location name. */
 const CALENDAR_MAP = {
-  'c_a1a2cd2f999f1bed82d1f21c59a1cb381485a28297a3ff1b8d394e2ad5fdc282@group.calendar.google.com': 'Narberth',
-  'c_e75805d7180c15888ed58e5625878088059c001053181bbaffceac8f6a64e1dd@group.calendar.google.com': 'Ashbridge',
-  'c_562b3332ef81d94b74100a3075f00d0f68061a01edcf46ea1378872c60d91c07@group.calendar.google.com': 'Zoom'
+  'c7706e8a3c057e02a4adca78268262aeb7116b9717b9325926bf746728566faa@group.calendar.google.com': 'Narberth',
+  '1073e5cc279f84bff722d0b03695b38011d845e6230e2f704adab49d31c3d652@group.calendar.google.com': 'Ashbridge',
+  'ac990016bc9f04e0d7ef9da8b463367cd34b2aa5a137535d876af9ae4db2f675@group.calendar.google.com': 'Zoom'
 };
 
 /**
@@ -2236,6 +2236,7 @@ function normalizeLunchScheduleCells(e, sheet) {
   let changed = false;
   let touchedUpcoming = false;
   const todayKey = formatDateKey(new Date());
+  const nowNotServing = [];
 
   values.forEach(row => {
     const date = coerceDate(row[map['Event_Date']]);
@@ -2247,12 +2248,23 @@ function normalizeLunchScheduleCells(e, sheet) {
     if (loc && loc !== row[map['Location']]) { row[map['Location']] = loc; changed = true; }
     const type = canonicalizeLunchType(row[map['Type']]);
     if (type && type !== row[map['Type']]) { row[map['Type']] = type; changed = true; }
+    const finalType = String(row[map['Type']] || '').trim();
+    if (date && finalType === 'Not Serving') {
+      nowNotServing.push({ date, location: String(row[map['Location']] || '').trim() });
+    }
   });
 
   if (changed) range.setValues(values);
+  // Before the sign-up check below: it asks getMealInfoForDate() what the
+  // schedule says, and the answer has to be what was just typed.
   invalidateMealInfoIndex();
 
-  if (touchedUpcoming) {
+  // Say it now, while the person who closed the kitchen is still looking at
+  // the screen. The durable version goes out by email on the next sync — see
+  // buildDashboardRollup().
+  const warned = warnAboutNotServingSignups(nowNotServing);
+
+  if (touchedUpcoming && warned === 0) {
     toastIfPossible('Menu updated. Live forms still show the old text — use ' +
       '"🍱 Push Menu Changes to Forms", or wait for the next Sync Cal.');
   }
@@ -2309,11 +2321,31 @@ function harvestPastedMenuRows(sheet, add) {
     sheet.getRange(after.firstRow, 1, back.length, LUNCH_ADD_HEADERS.length).setValues(back);
   }
 
+  // A pasted month routinely contains "Not Serving" rows, and one of them can
+  // land on a date people have already signed up to eat on. Same warning as
+  // typing it by hand — see warnAboutNotServingSignups().
+  const warned = warnAboutNotServingSignups(collectNotServingPairs(parsed.rows));
+
   const parts = [`✅ ${merged.added} added`];
   if (merged.updated > 0) parts.push(`${merged.updated} updated`);
   if (parsed.rejects.length > 0) parts.push(`⚠️ ${parsed.rejects.length} left in the add area (${parsed.rejects[0].reason})`);
-  toastIfPossible(`${parts.join(', ')}. Use "🍱 Push Menu Changes to Forms" when you want the forms to show it.`);
+  if (warned === 0) {
+    toastIfPossible(`${parts.join(', ')}. Use "🍱 Push Menu Changes to Forms" when you want the forms to show it.`);
+  }
   log(`Lunch menu add: ${merged.added} new, ${merged.updated} updated, ${parsed.rejects.length} rejected.`);
+}
+
+/** The {date, location} pairs among canonical menu rows whose Type is "Not Serving". */
+function collectNotServingPairs(menuRows) {
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+  const pairs = [];
+  (menuRows || []).forEach(row => {
+    if (String(row[map['Type']] || '').trim() !== 'Not Serving') return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    pairs.push({ date, location: String(row[map['Location']] || '').trim() });
+  });
+  return pairs;
 }
 
 /**
@@ -2644,7 +2676,17 @@ function importLunchMenuCsv(text) {
   const parts = [`${merged.added} added`];
   if (merged.updated > 0) parts.push(`${merged.updated} updated`);
   if (parsed.rejects.length > 0) parts.push(`${parsed.rejects.length} skipped — ${parsed.rejects[0].reason}`);
-  return `✅ ${parts.join(', ')}. Use "Push Menu Changes to Forms" when you want the forms to show it.`;
+
+  // Reported in the dialog rather than as a toast — a modal is in the way of
+  // the toast, and this is the one line in the result somebody must not miss.
+  const clash = checkNotServingSignups(collectNotServingPairs(parsed.rows));
+  const warning = clash.total > 0
+    ? ` ⚠️ ${clash.total} person(s) had signed up for lunch on a date you marked "Not Serving" ` +
+      `(${formatDateLabel(clash.affected[0].date)} at ${clash.affected[0].location}: ` +
+      `${describePeopleList(clash.affected[0].people)}) — they need telling.`
+    : '';
+
+  return `✅ ${parts.join(', ')}. Use "Push Menu Changes to Forms" when you want the forms to show it.${warning}`;
 }
 
 /**
@@ -3490,6 +3532,134 @@ function isLunchOfferedOn(date, locationName) {
     return !!meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1;
   }
   return true; // ALWAYS
+}
+
+/**
+ * Is there a Lunch_Schedule row for this date+location that explicitly says
+ * "Not Serving"?
+ *
+ * THE DISTINCTION THIS EXISTS TO DRAW, and it is the whole point of the
+ * Not-Serving handling: a date with NO menu row is a GAP — somebody hasn't
+ * got to it yet — and a gap must never suppress a lunch a real person is
+ * signed up for. A date whose row READS "Not Serving" is a DECISION. It has
+ * an author, and the answer to "but three people signed up" is not to quietly
+ * cater it anyway; it is to tell somebody those three people need telling.
+ *
+ * Everywhere the catering pipeline says "demand always wins", it means over a
+ * gap. This is what it does not win over.
+ *
+ * Location-specific on purpose: getMealInfoForDate() with a location matches
+ * only that location's row, so Narberth closing its kitchen says nothing
+ * about Ashbridge on the same day.
+ */
+function isExplicitlyNotServing(date, locationName) {
+  if (!date || !locationName) return false;
+  const meal = getMealInfoForDate(date, locationName);
+  return !!meal && String(meal.type || '').trim() === 'Not Serving';
+}
+
+/**
+ * Everyone still expecting to eat at `location` on `dateKey` — Active
+ * registrations with Lunch_Status "Needed". Returns [{name, event}].
+ *
+ * Reads the registrant rows' own Event_Date/Location rather than joining
+ * through Event_ID and the session table, so it works from a plain
+ * spreadsheet read and is safe to call from an onEdit (see onEdit()).
+ */
+function findRegistrantsExpectingLunch(dateKey, location, registrantRows) {
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const map = getIndexMap(headers);
+
+  let rows = registrantRows;
+  if (!rows) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS) : null;
+    if (!sheet) return [];
+    try {
+      rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+    } catch (err) {
+      log(`ℹ️ Could not read the registrants tab to check for lunch sign-ups (${err}).`);
+      return [];
+    }
+  }
+
+  const wantedLocation = String(location || '').trim();
+  const found = [];
+  rows.forEach(row => {
+    if (String(row[map['Program_Status']] || '').trim() !== 'Active') return;
+    if (String(row[map['Lunch_Status']] || '').trim() !== 'Needed') return;
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d || formatDateKey(d) !== dateKey) return;
+    if (wantedLocation && String(row[map['Location']] || '').trim() !== wantedLocation) return;
+    found.push({
+      name: String(row[map['Name']] || '').trim() || '(unnamed)',
+      event: String(row[map['Event']] || '').trim()
+    });
+  });
+  return found;
+}
+
+/** "Marion Webb, Ada Cole and 3 more" — a name list short enough for a toast. */
+function describePeopleList(people, max) {
+  const limit = max || 4;
+  const names = people.map(p => p.name);
+  if (names.length <= limit) return names.join(', ');
+  return `${names.slice(0, limit).join(', ')} and ${names.length - limit} more`;
+}
+
+/**
+ * Called the moment a date+location is marked "Not Serving" by hand or by
+ * paste. Says, right there, whether anyone was counting on that meal.
+ *
+ * TOAST ONLY — no email. This runs on the onEdit path, where MailApp is
+ * unavailable (see onEdit()); the same finding is raised as a real admin
+ * notification by buildDashboardRollup() on the next sync, which is where the
+ * durable record belongs. The toast is for the person who just typed it, who
+ * is the one who can still ring those people.
+ *
+ * Past dates are skipped: there is nothing left to act on.
+ */
+function warnAboutNotServingSignups(pairs, registrantRows) {
+  const result = checkNotServingSignups(pairs, registrantRows);
+  if (result.total === 0) return 0;
+
+  const first = result.affected[0];
+  const more = result.affected.length > 1 ? ` (+${result.affected.length - 1} other date(s))` : '';
+  toastIfPossible(
+    `⚠️ ${result.total} person(s) had signed up for lunch on a date now marked "Not Serving" — ` +
+    `${formatDateLabel(first.date)} at ${first.location}: ${describePeopleList(first.people)}${more}. ` +
+    `They will drop off the lunch dashboard; they still need telling.`);
+  return result.total;
+}
+
+/**
+ * The query behind the warning, with no side effects beyond a log line, so
+ * callers that report through something other than a toast (the CSV dialog)
+ * can use the same answer.
+ *
+ * Returns { total, affected: [{date, location, people}] }. Past dates are
+ * excluded — there is nothing left to act on.
+ */
+function checkNotServingSignups(pairs, registrantRows) {
+  const todayKey = formatDateKey(new Date());
+  const affected = [];
+  let total = 0;
+
+  (pairs || []).forEach(p => {
+    if (!p.date || !p.location) return;
+    const dateKey = formatDateKey(p.date);
+    if (dateKey < todayKey) return;
+    if (!isExplicitlyNotServing(p.date, p.location)) return;
+    const people = findRegistrantsExpectingLunch(dateKey, p.location, registrantRows);
+    if (people.length === 0) return;
+    affected.push({ date: p.date, location: p.location, people });
+    total += people.length;
+  });
+
+  if (total > 0) {
+    log(`Not Serving: ${total} lunch sign-up(s) affected across ${affected.length} date(s).`);
+  }
+  return { total, affected };
 }
 
 function getOrderAheadDays() {
@@ -9067,6 +9237,8 @@ function buildDashboardRollup(registrantRows) {
   });
 
   const rollup = {};
+  /** date|location -> people who wanted lunch on a day now marked Not Serving. */
+  const notServingWithSignups = {};
 
   // Seed upcoming date+location pairs at 0 so the schedule shows what's
   // coming rather than only what's already been registered for — but only
@@ -9127,6 +9299,24 @@ function buildDashboardRollup(registrantRows) {
         return;
       }
 
+      // ...EXCEPT over an explicit "Not Serving". A missing menu row is a gap
+      // and demand rightly overrides it (below); a row that READS "Not
+      // Serving" is somebody's decision that the kitchen is closed that day,
+      // and quietly catering it anyway because three people ticked a box on a
+      // form weeks ago is not a safety net, it's an unordered meal.
+      //
+      // So the date leaves the dashboard, and the people who signed up are
+      // collected here and reported by name below. Suppressing them silently
+      // would be the actually dangerous version of this.
+      if (isExplicitlyNotServing(parseDateKey(meta.dateKey), meta.location)) {
+        const nsKey = `${meta.dateKey}|${meta.location}`;
+        if (!notServingWithSignups[nsKey]) {
+          notServingWithSignups[nsKey] = { dateKey: meta.dateKey, location: meta.location, people: [] };
+        }
+        notServingWithSignups[nsKey].people.push(String(row[lrMap['Name']] || '').trim() || '(unnamed)');
+        return;
+      }
+
       // DEMAND ALWAYS WINS (for ALWAYS/BY_EXCEPTION). Policy decides what
       // gets SEEDED; it never suppresses a date somebody is actually signed
       // up to eat on. This is the safety net for "By exception" — forgetting
@@ -9154,6 +9344,23 @@ function buildDashboardRollup(registrantRows) {
     noteForAdmin('Lunch needed with no menu set',
       `${r.registeredCount} person(s) need lunch at ${r.location} on ${formatDateLabel(parseDateKey(r.dateKey))}, ` +
       `but Lunch_Schedule has no Hot/Cold row for it.`);
+  });
+
+  // THE ONE THAT MATTERS MOST IN THIS FILE'S DIGEST. Everything else it
+  // reports is a number that looks wrong somewhere; this is real people who
+  // asked for a meal, are going to turn up expecting it, and are about to
+  // stop appearing on every screen anyone looks at. The dashboard row going
+  // away is correct — the kitchen is closed — but it must not be the last
+  // anyone hears of it, so the names go out by email rather than only to a
+  // log nobody reads.
+  Object.keys(notServingWithSignups).forEach(key => {
+    const entry = notServingWithSignups[key];
+    if (entry.dateKey < todayKey) return; // already happened; nothing to act on
+    noteForAdmin('⚠️ Lunch cancelled with people signed up',
+      `${entry.people.length} person(s) asked for lunch at ${entry.location} on ` +
+      `${formatDateLabel(parseDateKey(entry.dateKey))}, which Lunch_Schedule now marks "Not Serving": ` +
+      `${entry.people.join(', ')}. They have been removed from the catering count and need telling. ` +
+      `To keep the meal, change that date's Type back to Hot or Cold on Lunch_Schedule.`);
   });
 
   return Object.values(rollup).map(r => {
@@ -9212,7 +9419,69 @@ function updateMasterLunchDashboard(registrantRows) {
     row[map['Served_Confirmed']] = r.servedConfirmed > 0 ? r.servedConfirmed : '';
   });
 
-  writeMasterLunchDashboardSheet(sheet, plan, headers, existingTable, rollup);
+  writeMasterLunchDashboardSheet(sheet, plan, headers,
+    dropNotServingRows(existingTable, map, rollup), rollup);
+}
+
+/**
+ * Removes the schedule rows for upcoming dates that Lunch_Schedule now marks
+ * "Not Serving".
+ *
+ * WHY THIS IS NEEDED AT ALL: the Full Schedule table is UPSERTED, not rebuilt.
+ * That's deliberate — it's what makes hand-entered buffers and actuals survive
+ * every sync — but it also means a row, once written, never leaves on its own.
+ * So closing the kitchen on a date the dashboard had already picked up left
+ * the row sitting there with its old count, indefinitely, and the ordering
+ * number stayed on the screen the kitchen orders from.
+ *
+ * Three things are deliberately NOT dropped:
+ *
+ *   PAST DATES. Those rows hold Actual_Ordered / Total_Consumed / Thrown_Away —
+ *   a record of what really happened. Marking an old date "Not Serving" is
+ *   almost always a correction to the plan, and it must not erase the receipt.
+ *
+ *   HAND-EDITED ROWS (Manually Added / Manually Edited). Everything else in
+ *   this workbook treats those as untouchable; an exception here would be the
+ *   one place a person's own row disappears under them. Reported instead.
+ *
+ *   ROWS STILL IN THE ROLLUP. A "Not Serving" day where somebody's
+ *   Lunch_Served box is ticked stays, because food demonstrably happened —
+ *   Served_Confirmed records reality, not the plan.
+ */
+function dropNotServingRows(tableRows, map, rollup) {
+  const inRollup = {};
+  (rollup || []).forEach(r => { inRollup[`${r.dateKey}|${r.location}`] = true; });
+
+  const todayKey = formatDateKey(new Date());
+  const kept = [];
+  let dropped = 0;
+
+  tableRows.forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    const location = String(row[map['Location']] || '').trim();
+    if (!d || !location) { kept.push(row); return; }
+
+    const dateKey = formatDateKey(d);
+    if (inRollup[`${dateKey}|${location}`]) { kept.push(row); return; }
+    if (dateKey < todayKey) { kept.push(row); return; }
+    if (!isExplicitlyNotServing(d, location)) { kept.push(row); return; }
+
+    const override = String(row[map['Manual_Override']] || '').trim();
+    if (override === 'Manually Added' || override === 'Manually Edited') {
+      noteForAdmin('Not-Serving date still on the lunch dashboard',
+        `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row was ` +
+        `hand-edited (${override}) so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
+      kept.push(row);
+      return;
+    }
+
+    dropped++;
+  });
+
+  if (dropped > 0) {
+    log(`Master_Lunch_Dashboard: removed ${dropped} upcoming row(s) for date+location(s) now marked "Not Serving".`);
+  }
+  return kept;
 }
 
 function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rollup) {
