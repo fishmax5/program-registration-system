@@ -563,6 +563,11 @@ const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
  * handleProgramDashboardEdit() makes it stick by writing it back to the
  * calendar). Location is a dropdown for readability but is equally
  * calendar-derived, so it is NOT advertised as editable.
+ *
+ * NOT given the yellow manual-entry treatment the other tabs' editable
+ * columns get — see writeProgramDashboardSheet(). Kept as the single named
+ * list of "what a human may change here", which is what
+ * protectDerivedColumns() is defined against.
  */
 const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag'];
 
@@ -1305,6 +1310,18 @@ function applyValueListValidationBounded(sheet, colIndex, options, startRow, num
   sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
 }
 
+/**
+ * Same, but SUGGESTING rather than restricting: the list drops down, and a
+ * value that isn't on it is still accepted. For cells where the list is a
+ * convenience and the vocabulary is genuinely open — a walk-in's name, a
+ * pasted location — rejecting the input is worse than not knowing it.
+ */
+function applyOpenValueListValidationBounded(sheet, colIndex, options, startRow, numRows) {
+  if (!colIndex || colIndex < 1 || numRows < 1 || !options || options.length === 0) return;
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(options, true).setAllowInvalid(true).build();
+  sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
+}
+
 /** Same as above, from startRow to the end of the sheet. */
 function applyValueListValidationRange(sheet, colIndex, options, startRow) {
   if (!colIndex || colIndex < 1) return;
@@ -1637,7 +1654,7 @@ function getMealInfoIndex() {
   if (sheet) {
     const headers = HEADERS.Lunch_Schedule;
     const map = getIndexMap(headers);
-    readAllSectionedRows(sheet, headers, 'Event_Date').forEach(row => {
+    readLunchScheduleRows(sheet).forEach(row => {
       const rowDate = coerceDate(row[map['Event_Date']]);
       if (!rowDate) return;
       const dateKey = formatDateKey(rowDate);
@@ -1714,8 +1731,17 @@ function getCalendarEventsForWindow(start, end) {
   }
   const byCalendar = {};
   Object.keys(CALENDAR_MAP).forEach(calendarId => {
-    const calendar = CalendarApp.getCalendarById(calendarId);
-    byCalendar[calendarId] = calendar ? calendar.getEvents(start, end) : null;
+    // getCalendarById() returns null for "not found", but THROWS when the
+    // running context has no calendar authorization at all — which is the
+    // normal state inside a simple onEdit trigger (see onEdit()). Both mean
+    // the same thing to every caller: this calendar could not be read.
+    try {
+      const calendar = CalendarApp.getCalendarById(calendarId);
+      byCalendar[calendarId] = calendar ? calendar.getEvents(start, end) : null;
+    } catch (err) {
+      log(`⚠️ Calendar ${calendarId} could not be read (${err}).`);
+      byCalendar[calendarId] = null;
+    }
   });
   __calendarEventsCache = { windowKey, byCalendar };
   return byCalendar;
@@ -2081,109 +2107,675 @@ function syncLunchQuestionsOnForm(form, locationName, hasLunchDates) {
 }
 
 
+// ============================================================================
+// 1e. ADDING MENU ITEMS  (Lunch_Schedule: paste CSV, in the sheet or a dialog)
+// ============================================================================
+//
+// WHAT THIS REPLACED, and why. Adding a menu item used to mean typing into
+// the Upcoming table, at which point every single committed cell:
+//   1. re-rendered and RE-SORTED the whole tab — so the half-finished row you
+//      were typing jumped somewhere else mid-entry; and
+//   2. threw up a modal asking whether to rewrite every live registration
+//      form covering that date.
+// Neither is survivable while entering a month of menus, and there was no
+// blank row to type into in the first place: the Upcoming table ends exactly
+// where its last dated row does, so adding one meant inserting a row by hand
+// first. That whole arrangement is gone.
+//
+// WHAT IT IS NOW. The tab ends with an ADD block — a banner, a header, and
+// open space to the bottom of the sheet. Put CSV there, however much of it:
+//
+//     2026-09-14, Narberth, Hot, Chicken Parmesan, Chx Parm
+//     2026-09-15, Ashbridge, Cold, Turkey Wrap, Turkey
+//     2026-09-16, Narberth, Not Serving
+//
+// as a normal multi-column paste (from Excel/Sheets), as raw comma-separated
+// text (one cell per line, or one cell holding every line), or typed a row at
+// a time. All of it lands in the same parser, so ONE row and TWO HUNDRED rows
+// behave identically — the only difference is how long the toast takes.
+// Complete rows are folded into the schedule and the block is emptied ready
+// for the next batch; anything unparseable stays put with a reason, so a bad
+// date in row 40 never silently swallows a good row 41.
+//
+// Pushing the menu out to live forms is now an EXPLICIT act — the
+// "🍱 Push Menu Changes to Forms" menu item — rather than a modal that
+// interrupts typing. The daily Sync Cal picks it up regardless.
+// ============================================================================
+
+/** Column A marker that locates the ADD block. Must not collide with a real header. */
+const LUNCH_ADD_MARKER = '➕ ADD MENU ITEMS';
 /**
- * Fired via onEdit() when Lunch_Schedule is hand-edited. Reorganizes the
- * tab into fresh Upcoming/Past sections reflecting whatever was just
- * typed, then pushes updated date labels out to any form covering the
- * edited date(s)+location(s) — since those labels carry a " — <hint>"
- * suffix that would otherwise sit stale.
+ * The ADD block's own header labels. Deliberately NOT the canonical
+ * HEADERS.Lunch_Schedule names: getSectionZones()/readAllSectionedRows() find
+ * this tab's real tables by scanning for the literal header 'Event_Date', and
+ * a third row carrying that word would be read as a third data table.
+ */
+const LUNCH_ADD_HEADERS = ['Date', 'Location', 'Type', 'Meal Description', 'Shorthand'];
+/** Blank rows left under the ADD header. A bigger paste simply extends past it. */
+const LUNCH_ADD_BLANK_ROWS = 15;
+
+/**
+ * The last row of Lunch_Schedule that is genuinely SCHEDULE — everything
+ * above the ADD block's banner.
+ *
+ * This is the one thing the bottom-mounted ADD block costs, and it has to be
+ * respected by every reader of the tab: rows waiting (or rejected) in the add
+ * area carry real dates, so an unbounded read would quietly absorb them into
+ * the Past table and a rejected row would "disappear into" the schedule
+ * instead of staying put to be corrected.
+ */
+function getLunchScheduleEndRow(sheet) {
+  const add = findLunchAddBlock(sheet);
+  return add ? add.bannerRow - 1 : sheet.getLastRow();
+}
+
+/** Every real schedule row on the tab, ADD block excluded. */
+function readLunchScheduleRows(sheet) {
+  return readAllSectionedRows(sheet, HEADERS.Lunch_Schedule, 'Event_Date', getLunchScheduleEndRow(sheet));
+}
+
+/** The tab's Upcoming/Past data zones, ADD block excluded. */
+function getLunchScheduleZones(sheet) {
+  return getSectionZones(sheet, 'Event_Date', getLunchScheduleEndRow(sheet));
+}
+
+/**
+ * Locates the ADD block by its banner marker. Returns null when the tab
+ * hasn't been rendered with one yet (an older workbook), which every caller
+ * treats as "no add area" rather than an error.
+ */
+function findLunchAddBlock(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 1) return null;
+  const colA = sheet.getRange(1, 1, lastRow, 1).getValues();
+  for (let i = 0; i < colA.length; i++) {
+    if (String(colA[i][0] || '').indexOf(LUNCH_ADD_MARKER) === 0) {
+      const bannerRow = i + 1;
+      return { bannerRow, headerRow: bannerRow + 1, firstRow: bannerRow + 2 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Fired via onEdit() when Lunch_Schedule is hand-edited.
+ *
+ * Two zones, two behaviours:
+ *   ADD block  -> harvest whatever is complete into the schedule (see above).
+ *   The tables -> tidy the edited cells in place. NO re-render: correcting a
+ *                 typo must not move the row you are looking at.
  */
 function handleLunchScheduleEdit(e, sheet) {
-  const zones = getSectionZones(sheet, 'Event_Date');
+  const add = findLunchAddBlock(sheet);
+  const editedRow = e.range.getRow();
+  const editedLastRow = editedRow + e.range.getNumRows() - 1;
+
+  if (add && editedLastRow >= add.firstRow) {
+    harvestPastedMenuRows(sheet, add);
+    return;
+  }
+  normalizeLunchScheduleCells(e, sheet);
+}
+
+/**
+ * Tidies the rows just edited INSIDE one of the real tables: text dates become
+ * real dates, and Location/Type are snapped to their canonical spelling. The
+ * row stays exactly where it is.
+ */
+function normalizeLunchScheduleCells(e, sheet) {
+  const zones = getLunchScheduleZones(sheet);
   const editedRow = e.range.getRow();
   if (!isRowInAnyDataZone(zones, editedRow)) return;
 
   const headers = HEADERS.Lunch_Schedule;
   const map = getIndexMap(headers);
-  const startRow = editedRow;
   const numRows = e.range.getNumRows();
-  const touched = sheet.getRange(startRow, 1, numRows, headers.length).getValues();
+  const range = sheet.getRange(editedRow, 1, numRows, headers.length);
+  const values = range.getValues();
 
-  const dateLocationPairs = touched
-    .map(r => ({ date: coerceDate(r[map['Event_Date']]), location: r[map['Location']] }))
-    .filter(p => p.date);
+  let changed = false;
+  let touchedUpcoming = false;
+  const todayKey = formatDateKey(new Date());
 
-  // Re-sorting the tab is harmless and always safe to do.
-  renderLunchScheduleSheet();
+  values.forEach(row => {
+    const date = coerceDate(row[map['Event_Date']]);
+    if (date) {
+      if (!(row[map['Event_Date']] instanceof Date)) { row[map['Event_Date']] = date; changed = true; }
+      if (formatDateKey(date) >= todayKey) touchedUpcoming = true;
+    }
+    const loc = canonicalizeLocation(row[map['Location']]);
+    if (loc && loc !== row[map['Location']]) { row[map['Location']] = loc; changed = true; }
+    const type = canonicalizeLunchType(row[map['Type']]);
+    if (type && type !== row[map['Type']]) { row[map['Type']] = type; changed = true; }
+  });
 
-  if (dateLocationPairs.length === 0) return;
+  if (changed) range.setValues(values);
+  invalidateMealInfoIndex();
 
-  // Pushing the menu out to forms is NOT harmless: it rewrites the visible
-  // date labels on live registration forms, and can add or remove the lunch
-  // question entirely (see syncLunchQuestionsOnForm). Someone mid-way through
-  // typing a menu doesn't necessarily want that yet.
-  const dateList = dateLocationPairs
-    .map(p => `${formatDateLabel(p.date)}${p.location ? ` (${p.location})` : ''}`)
-    .slice(0, 5)
-    .join('\n• ');
-  const more = dateLocationPairs.length > 5 ? `\n• …and ${dateLocationPairs.length - 5} more` : '';
-  const proceed = confirmConsequentialAction('Update the registration forms?',
-    `The menu changed for:\n• ${dateList}${more}\n\n` +
-    'Every registration form covering these dates will have its date labels rewritten, and the lunch ' +
-    'question added or removed to match.\n\nSay No to save the menu here without touching the forms — ' +
-    'the next Sync Cal will pick it up.', false);
-
-  if (!proceed) {
-    toastIfPossible('Menu saved. Forms were NOT changed — the next Sync Cal will apply it.');
-    return;
+  if (touchedUpcoming) {
+    toastIfPossible('Menu updated. Live forms still show the old text — use ' +
+      '"🍱 Push Menu Changes to Forms", or wait for the next Sync Cal.');
   }
-
-  dateLocationPairs.forEach(p => refreshFormsForChangedLunchDate(p.date, p.location));
-  toastIfPossible(`Menu saved and pushed to the forms for ${dateLocationPairs.length} date(s).`);
 }
 
 /**
- * Finds every form with at least one session on `changedDate` AT
- * `location` and rewrites that form's date-dependent items with fresh
- * labels — every date the form covers, not just changedDate — so a single
- * Lunch_Schedule edit self-heals any stale label on that form.
+ * Reads everything sitting in the ADD block, folds the complete rows into the
+ * schedule, and leaves the rest behind with a reason.
+ *
+ * A row is COMPLETE when it has a parseable date, a known location and a
+ * known type. That threshold is what makes typing one row by hand work at
+ * all: onEdit fires on every committed cell, so a row still being typed
+ * (date entered, location not yet) must be left alone rather than harvested
+ * half-built and rejected. A pasted row arrives complete in a single event
+ * and is taken immediately.
  */
-function refreshFormsForChangedLunchDate(changedDate, location) {
+function harvestPastedMenuRows(sheet, add) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < add.firstRow) return;
+
+  const width = Math.max(sheet.getLastColumn(), LUNCH_ADD_HEADERS.length);
+  const raw = sheet.getRange(add.firstRow, 1, lastRow - add.firstRow + 1, width).getValues();
+  const parsed = parseLunchMenuGrid(raw);
+  if (parsed.rows.length === 0 && parsed.rejects.length === 0) return; // block is empty
+
+  if (parsed.rows.length === 0) {
+    // Nothing usable yet. Silent while a row is merely unfinished; explicit
+    // once something is actually wrong with it.
+    const hard = parsed.rejects.filter(r => !r.incomplete);
+    if (hard.length > 0) {
+      toastIfPossible(`⚠️ Not added — ${hard[0].reason}. Fix it in the add area and it will go in.`);
+    }
+    return;
+  }
+
+  // Re-renders the tab, which clears and rebuilds the ADD block along with
+  // everything else — so the accepted rows are now in the table above and the
+  // block is empty.
+  const merged = upsertLunchScheduleRows(parsed.rows);
+
+  // Put the rejects back into the fresh block so they can be corrected in
+  // place rather than silently lost. Its row numbers moved with the render,
+  // so it has to be located again.
+  const after = findLunchAddBlock(sheet);
+  if (after && parsed.rejects.length > 0) {
+    const back = parsed.rejects.map(r => {
+      const padded = r.raw.slice(0, LUNCH_ADD_HEADERS.length)
+        .map(v => (v instanceof Date ? v : String(v === null || v === undefined ? '' : v)));
+      while (padded.length < LUNCH_ADD_HEADERS.length) padded.push('');
+      return padded;
+    });
+    const needed = after.firstRow + back.length - 1;
+    if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+    sheet.getRange(after.firstRow, 1, back.length, LUNCH_ADD_HEADERS.length).setValues(back);
+  }
+
+  const parts = [`✅ ${merged.added} added`];
+  if (merged.updated > 0) parts.push(`${merged.updated} updated`);
+  if (parsed.rejects.length > 0) parts.push(`⚠️ ${parsed.rejects.length} left in the add area (${parsed.rejects[0].reason})`);
+  toastIfPossible(`${parts.join(', ')}. Use "🍱 Push Menu Changes to Forms" when you want the forms to show it.`);
+  log(`Lunch menu add: ${merged.added} new, ${merged.updated} updated, ${parsed.rejects.length} rejected.`);
+}
+
+/**
+ * Turns a raw grid of pasted/typed cells into canonical Lunch_Schedule rows.
+ *
+ * Accepts, in one pass and without being told which it is getting:
+ *   • a proper multi-column paste           -> ['2026-09-14','Narberth','Hot',…]
+ *   • one CSV line per cell                 -> ['2026-09-14, Narberth, Hot, …']
+ *   • the entire CSV in a single cell       -> a blob with newlines in it
+ *   • a header line ("Date,Location,Type…") -> recognized and skipped
+ * That is the whole point: "batch and single work similarly" means there is
+ * exactly one code path, and the shape of what you pasted is not your problem.
+ *
+ * Returns { rows: [canonical row arrays], rejects: [{raw, reason, incomplete}] }.
+ * `incomplete` marks a row that is merely unfinished (still being typed)
+ * rather than wrong — the caller stays quiet about those.
+ */
+function parseLunchMenuGrid(grid) {
+  const rows = [];
+  const rejects = [];
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+
+  // Flatten to a list of field-arrays first, expanding any cell that is
+  // itself CSV/multi-line text.
+  const records = [];
+  (grid || []).forEach(cells => {
+    const nonEmpty = cells.filter(c => String(c === null || c === undefined ? '' : c).trim() !== '');
+    if (nonEmpty.length === 0) return;
+
+    const first = cells[0];
+    const firstText = first instanceof Date ? '' : String(first === null || first === undefined ? '' : first);
+    const onlyFirstColumn = nonEmpty.length === 1 && firstText.trim() !== '';
+    if (onlyFirstColumn && (firstText.indexOf('\n') !== -1 || firstText.indexOf(',') !== -1 || firstText.indexOf('\t') !== -1)) {
+      parseCsvText(firstText).forEach(fields => records.push({ fields, raw: [firstText] }));
+      return;
+    }
+    records.push({ fields: cells, raw: cells });
+  });
+
+  records.forEach(rec => {
+    const f = rec.fields;
+    const get = i => {
+      const v = f[i];
+      if (v instanceof Date) return v;
+      return String(v === null || v === undefined ? '' : v).trim();
+    };
+
+    // A header line pasted along with the data — skip it silently.
+    const firstText = String(get(0) || '').toLowerCase();
+    if (firstText === 'date' || firstText === 'event_date') return;
+
+    const date = coerceMenuDate(get(0));
+    const location = canonicalizeLocation(get(1));
+    const type = canonicalizeLunchType(get(2));
+    const description = String(get(3) || '');
+    const shorthand = String(get(4) || '');
+
+    const missing = [];
+    if (!date) missing.push('a date');
+    if (!location) missing.push('a location');
+    if (!type) missing.push('a type');
+    if (missing.length > 0) {
+      // "Wrong" vs "not finished yet": a row where something was TYPED into a
+      // field but did not resolve is an error worth reporting; a row where the
+      // field is simply still blank is someone mid-entry.
+      const typedButUnresolved =
+        (!date && String(get(0) || '') !== '') ||
+        (!location && String(get(1) || '') !== '') ||
+        (!type && String(get(2) || '') !== '');
+      rejects.push({
+        raw: rec.raw.map(v => (v instanceof Date ? formatDateKey(v) : v)),
+        reason: typedButUnresolved
+          ? `couldn't read ${missing.join(', ')} in "${[get(0), get(1), get(2)].filter(Boolean).join(', ')}"`
+          : `needs ${missing.join(' and ')}`,
+        incomplete: !typedButUnresolved
+      });
+      return;
+    }
+
+    const row = new Array(HEADERS.Lunch_Schedule.length).fill('');
+    row[map['Event_Date']] = date;
+    row[map['Location']] = location;
+    row[map['Type']] = type;
+    // "Not Serving" is a statement about the DAY, not a meal — a description
+    // or shorthand on it would show up as a menu hint on the form's date
+    // label for a day nobody is being fed.
+    row[map['Meal_Description']] = type === 'Not Serving' ? '' : description;
+    row[map['Meal_Shorthand']] = type === 'Not Serving' ? '' : shorthand;
+    rows.push(row);
+  });
+
+  return { rows, rejects };
+}
+
+/**
+ * Merges canonical rows into Lunch_Schedule, keyed on date + location — the
+ * same identity mergeLegacyTabs() uses. A second row for a date that already
+ * has one REPLACES it (re-pasting a corrected month is the common case, and
+ * ending up with two contradictory menus for one day is never wanted).
+ *
+ * Does not render; callers do that once at the end.
+ */
+function upsertLunchScheduleRows(newRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const existing = readLunchScheduleRows(sheet);
+
+  const keyOf = row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return '';
+    return `${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`;
+  };
+
+  const byKey = {};
+  const order = [];
+  existing.forEach(row => {
+    const key = keyOf(row);
+    if (!key) return;
+    if (byKey[key] === undefined) order.push(key);
+    byKey[key] = row;
+  });
+
+  let added = 0, updated = 0;
+  newRows.forEach(row => {
+    const key = keyOf(row);
+    if (!key) return;
+    if (byKey[key] === undefined) { order.push(key); added++; } else { updated++; }
+    byKey[key] = row;
+  });
+
+  const out = order.map(k => byKey[k]);
+  renderLunchScheduleSheet(false, out);
+  return { added, updated, total: out.length };
+}
+
+/**
+ * A minimal RFC4180 CSV reader: quoted fields, "" escapes, embedded commas
+ * and newlines, and tab-separated input (what a spreadsheet actually puts on
+ * the clipboard) all included. Returns an array of field-arrays.
+ *
+ * Written out rather than split(',') because a meal description with a comma
+ * in it — "Chicken, rice and beans" — is the normal case here, not an edge one.
+ */
+function parseCsvText(text) {
+  const src = String(text || '').replace(/\r\n?/g, '\n');
+  if (src.trim() === '') return [];
+
+  // Tab wins if present: a paste out of Excel/Sheets is tab-separated, and its
+  // fields routinely contain unquoted commas.
+  const delimiter = src.indexOf('\t') !== -1 ? '\t' : ',';
+
+  const records = [];
+  let field = '';
+  let record = [];
+  let inQuotes = false;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"' && field.trim() === '') { inQuotes = true; field = ''; continue; }
+    if (ch === delimiter) { record.push(field.trim()); field = ''; continue; }
+    if (ch === '\n') {
+      record.push(field.trim());
+      if (record.some(v => v !== '')) records.push(record);
+      record = []; field = '';
+      continue;
+    }
+    field += ch;
+  }
+  record.push(field.trim());
+  if (record.some(v => v !== '')) records.push(record);
+  return records;
+}
+
+/**
+ * Parses whatever a person put in a date cell. Real Dates pass through;
+ * yyyy-MM-dd and the US m/d/yyyy are read explicitly (rather than left to
+ * `new Date(string)`, which reads "9/14/2026" and "2026-09-14" in two
+ * different timezones and lands the second one a day early); anything else
+ * falls back to coerceDate().
+ */
+function coerceMenuDate(value) {
+  if (value instanceof Date) return coerceDate(value);
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  if (!text) return null;
+
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+
+  const us = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
+  if (us) {
+    let year = Number(us[3]);
+    if (year < 100) year += 2000;
+    return new Date(year, Number(us[1]) - 1, Number(us[2]));
+  }
+
+  return coerceDate(text);
+}
+
+/** Snaps free text onto a CALENDAR_MAP location name, or '' if it matches none. */
+function canonicalizeLocation(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  if (!text) return '';
+  const names = Object.values(CALENDAR_MAP);
+  const exact = names.filter(n => n.toLowerCase() === text)[0];
+  if (exact) return exact;
+  // A prefix match covers "narb" and "Narberth Center" alike, but only when
+  // exactly one location can be meant — an ambiguous abbreviation is a reject,
+  // not a coin toss.
+  const partial = names.filter(n => n.toLowerCase().indexOf(text) === 0 || text.indexOf(n.toLowerCase()) === 0);
+  return partial.length === 1 ? partial[0] : '';
+}
+
+/** Snaps free text onto a LUNCH_TYPE_OPTIONS value, or '' if it matches none. */
+function canonicalizeLunchType(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  if (!text) return '';
+  if (text === 'hot') return 'Hot';
+  if (text === 'cold') return 'Cold';
+  if (['not serving', 'not-serving', 'none', 'no lunch', 'no', 'n/a', 'closed', 'off'].indexOf(text) !== -1) {
+    return 'Not Serving';
+  }
+  return '';
+}
+
+/**
+ * The paste-or-upload dialog: the same parser as the in-sheet ADD block, for
+ * when the CSV is in a file or is too big to want to see land on the tab.
+ * Open to everyone — adding a menu changes no structure and deletes nothing.
+ */
+function showLunchMenuImportDialog() {
+  const html = HtmlService.createHtmlOutput(buildLunchMenuImportHtml())
+    .setWidth(560)
+    .setHeight(520);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Add Menu Items');
+}
+
+/** The dialog's markup. Inline so this project stays a single .gs file. */
+function buildLunchMenuImportHtml() {
+  const locations = Object.values(CALENDAR_MAP).join(' · ');
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  code { background: #f1f3f4; padding: 1px 4px; border-radius: 3px; }
+  textarea { width: 100%; height: 210px; font-family: Consolas, Menlo, monospace; font-size: 12px;
+             box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; padding: 8px; }
+  .row { margin: 10px 0; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
+           font-size: 13px; cursor: pointer; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 10px; min-height: 18px; font-weight: bold; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+</style>
+<h3>Paste CSV, or choose a .csv file</h3>
+<p class="hint">
+  One line per date and location:<br>
+  <code>Date, Location, Type, Meal Description, Shorthand</code><br>
+  Locations: ${locations}. Type: <code>Hot</code>, <code>Cold</code> or <code>Not Serving</code>.
+  A header line is fine — it's ignored. A date that already has a menu is replaced.
+</p>
+<div class="row"><input type="file" id="file" accept=".csv,.txt,text/csv"></div>
+<textarea id="csv" placeholder="2026-09-14, Narberth, Hot, Chicken Parmesan, Chx Parm
+2026-09-15, Ashbridge, Cold, Turkey Wrap, Turkey
+2026-09-16, Narberth, Not Serving"></textarea>
+<div class="row"><button id="go" onclick="submit()">Add to Lunch_Schedule</button></div>
+<div id="status"></div>
+<script>
+  document.getElementById('file').addEventListener('change', function (ev) {
+    var f = ev.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () { document.getElementById('csv').value = reader.result; };
+    reader.readAsText(f);
+  });
+  function submit() {
+    var text = document.getElementById('csv').value;
+    if (!text.trim()) { say('Nothing to add — paste some rows first.', 'err'); return; }
+    document.getElementById('go').disabled = true;
+    say('Working…', '');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        document.getElementById('go').disabled = false;
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('go').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      })
+      .importLunchMenuCsv(text);
+  }
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+</script>`;
+}
+
+/**
+ * Called from the dialog. Same parser, same upsert, same rules as the in-sheet
+ * ADD block — this is a second doorway onto one implementation, not a second
+ * implementation. Returns a human-readable summary for the dialog to show.
+ */
+function importLunchMenuCsv(text) {
+  const records = parseCsvText(text);
+  if (records.length === 0) return '⚠️ Nothing to add — no rows found in that text.';
+
+  const parsed = parseLunchMenuGrid(records);
+  if (parsed.rows.length === 0) {
+    const why = parsed.rejects.length > 0 ? ` (${parsed.rejects[0].reason})` : '';
+    return `⚠️ No usable rows${why}. Expected: Date, Location, Type, Description, Shorthand.`;
+  }
+
+  const merged = upsertLunchScheduleRows(parsed.rows);
+  log(`importLunchMenuCsv: ${merged.added} added, ${merged.updated} updated, ${parsed.rejects.length} skipped.`);
+
+  const parts = [`${merged.added} added`];
+  if (merged.updated > 0) parts.push(`${merged.updated} updated`);
+  if (parsed.rejects.length > 0) parts.push(`${parsed.rejects.length} skipped — ${parsed.rejects[0].reason}`);
+  return `✅ ${parts.join(', ')}. Use "Push Menu Changes to Forms" when you want the forms to show it.`;
+}
+
+/**
+ * Rewrites the date labels (and the lunch question) on every live form whose
+ * sessions fall on an UPCOMING Lunch_Schedule date — the deliberate,
+ * once-you-mean-it counterpart to the modal that used to fire mid-typing.
+ *
+ * Past dates are skipped: their forms are closed business, and rewriting them
+ * is pure quota spend.
+ */
+function pushLunchMenuToForms() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  if (!sheet) { toastIfPossible('No Lunch_Schedule tab yet — nothing to push.'); return 0; }
+
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+
+  const pairs = [];
+  const seen = {};
+  readLunchScheduleRows(sheet).forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d || formatDateKey(d) < todayKey) return;
+    const location = String(row[map['Location']] || '').trim();
+    const key = `${formatDateKey(d)}|${location}`;
+    if (seen[key]) return;
+    seen[key] = true;
+    pairs.push({ date: d, location });
+  });
+
+  if (pairs.length === 0) {
+    toastIfPossible('No upcoming menu dates — nothing to push.');
+    return 0;
+  }
+
+  if (!confirmConsequentialAction('Push the menu to the registration forms?',
+    `${pairs.length} upcoming date(s) will be pushed.\n\n` +
+    'Every registration form covering them will have its date labels rewritten, and the lunch ' +
+    'question added or removed to match what the schedule now says.\n\n' +
+    'Registrants and their existing answers are never changed.', false)) {
+    return 0;
+  }
+
+  const affected = refreshFormsForLunchDates(pairs);
+  toastIfPossible(`Menu pushed to ${affected} form(s) across ${pairs.length} date(s) ✅`);
+  return affected;
+}
+
+/**
+ * Batched form refresh for a list of {date, location} pairs.
+ *
+ * Reads the session table ONCE and touches each affected form ONCE, however
+ * many dates it covers. The per-date refreshFormsForChangedLunchDate() below
+ * re-reads the whole dashboard on every call, which was fine for the single
+ * date an onEdit produced and quadratic for a pasted month.
+ */
+function refreshFormsForLunchDates(pairs) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!registrySheet) return;
+  if (!registrySheet) return 0;
+
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
-  if (rows.length === 0) return;
+  if (rows.length === 0) return 0;
   const map = getIndexMap(headers);
-  const changedKey = formatDateKey(changedDate);
 
-  const affectedFormIds = new Set();
+  const wanted = {};
+  pairs.forEach(p => {
+    if (!p.date) return;
+    wanted[`${formatDateKey(p.date)}|${p.location || ''}`] = true;
+  });
+
+  const affectedFormIds = {};
   rows.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
-    if (d && formatDateKey(d) === changedKey && (!location || row[map['Location']] === location)) {
-      const formId = row[map['Form_ID']];
-      if (formId) affectedFormIds.add(formId);
-    }
+    if (!d) return;
+    const key = formatDateKey(d);
+    const location = String(row[map['Location']] || '').trim();
+    // A pair with no location means "this date, wherever it is".
+    if (!wanted[`${key}|${location}`] && !wanted[`${key}|`]) return;
+    const formId = row[map['Form_ID']];
+    if (formId) affectedFormIds[formId] = true;
   });
-  if (affectedFormIds.size === 0) return;
 
-  affectedFormIds.forEach(formId => {
-    const formRows = rows.filter(row => row[map['Form_ID']] === formId);
-    const formLocation = formRows.length > 0 ? formRows[0][map['Location']] : location;
-    const datesForForm = formRows.map(row => coerceDate(row[map['Event_Date']])).filter(Boolean).sort((a, b) => a - b);
-    if (datesForForm.length === 0) return;
-
-    const capacityHints = buildCapacityHintsFromRegistryRows(formRows, map);
-    const { allDateLabels, lunchDateLabels } = buildDateLabelSets(datesForForm, formLocation, capacityHints);
-
-    // A menu edit is exactly how a form gains or loses its last lunch date,
-    // so the question set is re-checked here, not just the row labels.
-    let form = null;
-    let questionsChanged = 0;
-    try {
-      form = FormApp.openById(formId);
-      questionsChanged = syncLunchQuestionsOnForm(form, formLocation, lunchDateLabels.length > 0);
-    } catch (err) {
-      log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a Lunch_Schedule edit (${err}).`);
-    }
-
-    if (applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
-      { form, force: questionsChanged > 0, context: 'Lunch_Schedule edit' })) {
-      log(`Refreshed form ${formId}'s date labels after a Lunch_Schedule edit affecting ${changedKey} (${formLocation}).`);
-    }
-  });
+  const formIds = Object.keys(affectedFormIds);
+  formIds.forEach(formId => refreshOneFormDateLabels(formId, rows, map, 'menu push'));
   flushPersistentRegistries();
+  log(`refreshFormsForLunchDates: refreshed ${formIds.length} form(s) for ${pairs.length} date(s).`);
+  return formIds.length;
+}
+
+/**
+ * Rebuilds one form's date-dependent items from the session rows already in
+ * memory — every date that form covers, not just the changed one, so a single
+ * menu edit self-heals any stale label on it.
+ */
+function refreshOneFormDateLabels(formId, sessionRows, map, context) {
+  const formRows = sessionRows.filter(row => row[map['Form_ID']] === formId);
+  if (formRows.length === 0) return false;
+
+  const formLocation = formRows[0][map['Location']];
+  const dates = formRows.map(row => coerceDate(row[map['Event_Date']])).filter(Boolean).sort((a, b) => a - b);
+  if (dates.length === 0) return false;
+
+  const capacityHints = buildCapacityHintsFromRegistryRows(formRows, map);
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, formLocation, capacityHints);
+
+  // A menu edit is exactly how a form gains or loses its last lunch date, so
+  // the question set is re-checked here, not just the row labels.
+  let form = null;
+  let questionsChanged = 0;
+  try {
+    form = FormApp.openById(formId);
+    questionsChanged = syncLunchQuestionsOnForm(form, formLocation, lunchDateLabels.length > 0);
+  } catch (err) {
+    log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);
+    return false;
+  }
+
+  return applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
+    { form, force: questionsChanged > 0, context });
+}
+
+/**
+ * Single-date convenience wrapper over refreshFormsForLunchDates(), kept for
+ * running by hand from the Apps Script editor ("this one date's labels look
+ * wrong"). Pass no location to mean "this date, wherever it is".
+ */
+function refreshFormsForChangedLunchDate(changedDate, location) {
+  return refreshFormsForLunchDates([{ date: changedDate, location: location || '' }]);
 }
 
 
@@ -2873,31 +3465,90 @@ function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {
 // ============================================================================
 
 /**
- * Deliberately small: the three things anyone needs day to day, plus
- * Resize All Sheets, which is safe to click at any time (it only touches
- * column widths — no data, no formatting, no forms), plus the first-run
- * import. The setup entry points — initSheet() (rebuild every tab +
- * formatting) and initializeAndSyncAll() — are still here and still work;
- * they're just run from the Apps Script editor now rather than sitting in a
- * menu where a mis-click reformats the whole workbook.
+ * TWO MENUS, NOT ONE.
  *
- * "Import Everything (First Run)" is in the menu because it's the one thing
- * a new workbook genuinely needs and the one thing Sync Cal cannot do in a
- * single execution on a busy calendar — see section 4b.
+ * Everyone gets the day-to-day items: the two syncs, the lunch-menu tools,
+ * and Resize All Sheets (safe to click at any time — it only touches column
+ * widths). Nothing on that list can restructure the workbook or delete
+ * anything.
+ *
+ * Accounts in AUTHORIZED_ADMIN_EMAILS additionally get an "🔧 Admin"
+ * submenu holding the structural entries: trigger repair, the first-run
+ * import, and the READ-ONLY leftover-tab report.
+ *
+ * DELIBERATELY NOT IN ANY MENU:
+ *   • mergeLegacyTabs()      — it deletes tabs after folding them in. There
+ *                              is no undo, and no reason for it to be one
+ *                              mis-click away on a menu that sits open all
+ *                              day next to "Sync Cal".
+ *   • initSheet()            — rebuilds every tab and all formatting.
+ *   • initializeAndSyncAll()
+ *   • cancelBootstrapCalendars(), restoreTriagedRegistrants(),
+ *     confirmLargeTriage(), recheckAllRegistrationForms(),
+ *     cleanupNeverPolicyForms()
+ * All of them still exist, still work, and are still admin-gated; they're
+ * run from the Apps Script editor by someone who went looking for them.
+ *
+ * A HIDDEN MENU IS NOT A PERMISSION. Anyone with edit access to the
+ * spreadsheet can open the script editor and run any function in this file
+ * by name. The menu split is ergonomics — it keeps destructive things out of
+ * reach of a normal day. requireAuthorizedAdmin() inside each of those
+ * functions is the actual gate, and it is what must be kept correct.
  */
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('🗓️ Calendar & Form Manager')
+  buildAppMenu(SpreadsheetApp.getUi(), isAuthorizedAdmin());
+}
+
+/**
+ * Builds (or rebuilds) the workbook menu. `includeAdmin` decides whether the
+ * structural submenu is attached.
+ *
+ * Split out from onOpen() so showAdminMenu() can re-run it — see below.
+ */
+function buildAppMenu(ui, includeAdmin) {
+  const menu = ui.createMenu(APP_MENU_NAME)
     .addItem('Sync Cal', 'syncCalendars')
     .addItem('Sync Registrations', 'syncRegistrations')
-    .addItem('Check Triggers', 'writeTriggers')
     .addSeparator()
-    .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
+    .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
+    .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
+    .addItem('🔁 Apply Type Changes to Calendar', 'applyTypeTagChangesToCalendar')
     .addSeparator()
-    .addItem('Find Leftover Tabs (preview)', 'previewLegacyTabMerge')
-    .addItem('Merge + Delete Leftover Tabs', 'mergeLegacyTabs')
-    .addItem('Resize All Sheets', 'resizeAllSheets')
-    .addToUi();
+    .addItem('🕓 Show All Past Rows', 'showAllPastRows')
+    .addItem('Resize All Sheets', 'resizeAllSheets');
+
+  if (includeAdmin) {
+    menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
+      .addItem('Check Triggers', 'writeTriggers')
+      .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
+      .addSeparator()
+      .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+      .addItem('Archive Old Months (report)', 'reportArchivableMonths'));
+  } else {
+    // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
+    // execution contexts cannot resolve the signed-in account at all — and
+    // getCurrentUserEmail() deliberately fails closed, so a genuine admin
+    // can open the workbook and find no Admin submenu. Clicking a menu ITEM
+    // always runs fully authorized, so this re-checks and rebuilds. A
+    // non-admin who clicks it just gets told no.
+    menu.addSeparator().addItem('🔧 Admin Tools (sign-in check)…', 'showAdminMenu');
+  }
+
+  menu.addToUi();
+}
+
+const APP_MENU_NAME = '🗓️ Calendar & Form Manager';
+
+/**
+ * Re-checks the current account with full authorization and, if it's an
+ * admin, rebuilds the menu WITH the Admin submenu. Google replaces a menu of
+ * the same name, so this swaps the menu in place rather than adding a second.
+ * The rebuild lasts until the next reload.
+ */
+function showAdminMenu() {
+  if (!requireAuthorizedAdmin('Admin Tools')) return;
+  buildAppMenu(SpreadsheetApp.getUi(), true);
+  toastIfPossible(`Admin tools added to the "${APP_MENU_NAME}" menu ✅`);
 }
 
 /**
@@ -3060,6 +3711,28 @@ function removeCalendarChangeTriggers() {
  * column at all (see HEADERS.Master_Program_Dashboard), so there's nothing
  * to auto-flip there anymore.
  */
+/**
+ * A SIMPLE trigger, on purpose, and that choice has consequences worth
+ * stating because they shape everything reachable from here.
+ *
+ * Simple onEdit CAN show alerts and prompts (which is why the "are you sure?"
+ * dialogs work at all) but runs WITHOUT authorization, so it cannot touch
+ * CalendarApp, FormApp, PropertiesService, or the protection API. An
+ * INSTALLABLE onEdit is the mirror image: full authorization, no UI at all,
+ * so every confirmation would silently answer itself.
+ *
+ * We keep the dialogs. Everything an edit does that needs authorization is
+ * therefore either (a) written to survive being refused — see
+ * getCalendarEventsForWindow() and protectDerivedColumns(), both of which
+ * degrade instead of throwing — or (b) moved off this path entirely and onto
+ * a menu item the user clicks, which runs fully authorized. Pushing a menu
+ * change out to live forms is the main example: it used to be attempted from
+ * here, where FormApp is unavailable and the failure was swallowed by the
+ * catch below, and is now "🍱 Push Menu Changes to Forms".
+ *
+ * BEFORE ADDING ANYTHING HERE: if it needs a Google service other than
+ * SpreadsheetApp, it does not belong on this path.
+ */
 function onEdit(e) {
   try {
     const sheet = e.range.getSheet();
@@ -3076,7 +3749,11 @@ function onEdit(e) {
       handleConfigEdit(e, sheet);
     }
   } catch (err) {
+    // Say something. A silent catch here is how "I typed it and nothing
+    // happened" becomes unreportable: the edit stays on the sheet looking
+    // accepted while the work behind it never ran.
     log(`onEdit error: ${err}`);
+    toastIfPossible(`⚠️ That edit didn't fully process (${err}). The cell is saved; check the log or run the matching menu item.`);
   }
 }
 
@@ -3102,29 +3779,140 @@ function handleProgramDashboardEdit(e, sheet) {
 
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
   const typeCol = headerMap['Type_Tag'];
-  if (typeCol === undefined || e.range.getColumn() !== typeCol + 1) return;
-  if (typeof e.value === 'undefined') return; // multi-cell paste — nothing single to reason about
+  if (typeCol === undefined) return;
 
-  const newTag = normalizeTypeTag(e.value);
-  const oldTag = normalizeTypeTag(e.oldValue);
-  if (newTag === oldTag) return;
+  // The edited RANGE, not just its top-left cell: a fill-down or a paste over
+  // a block of Type_Tag cells is exactly as consequential as typing one, and
+  // used to slip through unasked and unstamped (the calendar never learned
+  // about it, so the next render silently put the old tags back — the "my
+  // change didn't save" bug, in its quietest form).
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (typeCol + 1 < firstCol || typeCol + 1 > lastCol) return;
 
-  const title = String(sheet.getRange(editedRow, (headerMap['Clean_Title'] || 0) + 1).getValue() || 'this program');
-  const detail = newTag === EVENT_TYPES.GROUPED
+  const numRows = e.range.getNumRows();
+  const isSingleCell = numRows === 1 && e.range.getNumColumns() === 1;
+
+  if (isSingleCell) {
+    const newTag = normalizeTypeTag(e.value);
+    const oldTag = normalizeTypeTag(e.oldValue);
+    if (newTag === oldTag) return;
+    const title = String(sheet.getRange(editedRow, (headerMap['Clean_Title'] || 0) + 1).getValue() || 'this program');
+    if (!confirmCellEditOrRevert(e, `Change ${title} to "${newTag}"?`, describeTypeTagChange(title, newTag))) return;
+    applyTypeTagToCalendar(sheet, editedRow, headerMap, newTag, title);
+    return;
+  }
+
+  // Multi-row edit. Collect the distinct (row, tag) pairs that actually landed
+  // inside a data zone, ask ONCE, and stamp each affected program.
+  const targets = [];
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (!isRowInAnyDataZone(zones, row)) continue;
+    const tag = normalizeTypeTag(sheet.getRange(row, typeCol + 1).getValue());
+    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) continue;
+    const title = String(sheet.getRange(row, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
+    if (!title) continue;
+    if (targets.some(t => t.title === title && t.tag === tag)) continue; // one stamp per program
+    targets.push({ row, title, tag });
+  }
+  if (targets.length === 0) return;
+
+  const list = targets.slice(0, 8).map(t => `• ${t.title} → ${t.tag}`).join('\n');
+  const more = targets.length > 8 ? `\n…and ${targets.length - 8} more` : '';
+  // NOT confirmCellEditOrRevert(): a multi-cell edit carries no oldValue, so
+  // there is nothing truthful to put back on a "no". Instead the change stays
+  // on the sheet but is NOT pushed to the calendar, and the toast says so —
+  // the next render then restores the calendar's own tags, which is the
+  // honest undo.
+  if (!confirmConsequentialAction('Change how these programs are grouped?',
+    `${targets.length} program(s) would be re-grouped:\n${list}${more}\n\n` +
+    'Each one\'s registration forms will be rebuilt on the next sync, and the registration link ' +
+    'in its calendar events updated.', false)) {
+    toastIfPossible('Not applied. The cells will go back to the calendar\'s own tags on the next sync.');
+    return;
+  }
+
+  let stampedPrograms = 0;
+  targets.forEach(t => {
+    if (writeTypeTagToCalendarEvents(sheet, t.row, headerMap, t.tag) > 0) stampedPrograms++;
+  });
+  toastIfPossible(`Re-grouped ${stampedPrograms}/${targets.length} program(s) — run Sync Cal to rebuild their forms.`);
+}
+
+/** The plain-language consequence of flipping one program's Type_Tag. */
+function describeTypeTagChange(title, newTag) {
+  return newTag === EVENT_TYPES.GROUPED
     ? `"${title}" will switch to ONE shared registration form for its whole series, ` +
       `instead of a separate form each month.\n\nThe next sync will build that form and update the ` +
       `registration link on every one of its calendar events.`
     : `"${title}" will switch to a SEPARATE registration form per calendar month, ` +
       `instead of one form for the whole series.\n\nThe next sync will build those forms and update the ` +
       `registration link on every one of its calendar events.`;
+}
 
-  if (!confirmCellEditOrRevert(e, `Change ${title} to "${newTag}"?`, detail)) return;
-
+/** Stamps one program's new Type_Tag onto its calendar events and reports what happened. */
+function applyTypeTagToCalendar(sheet, editedRow, headerMap, newTag, title) {
   const stamped = writeTypeTagToCalendarEvents(sheet, editedRow, headerMap, newTag);
   toastIfPossible(stamped > 0
     ? `Set "${title}" to ${newTag} on ${stamped} calendar event(s) — run Sync Cal to rebuild its form(s).`
-    : `⚠️ Set "${title}" to ${newTag} on the sheet, but no calendar event could be updated — ` +
-      `the next render may revert it. Set [${newTag}] in the event description by hand.`);
+    : `⚠️ "${title}" reads ${newTag} on the sheet, but the calendar could not be updated from a cell edit. ` +
+      `Click "Apply Type Changes to Calendar" on the menu to make it stick.`);
+  return stamped;
+}
+
+/**
+ * Menu action: reconcile every program's Type_Tag on the dashboard with what
+ * its calendar events actually say, and stamp the differences.
+ *
+ * THE RECOVERY PATH for the one thing a cell edit genuinely cannot finish.
+ * Writing to a calendar needs authorization that a simple onEdit trigger does
+ * not have (see onEdit()), so a Grouped/Monthly change typed into the sheet
+ * can be confirmed but not delivered — and the next render, which recomputes
+ * Type_Tag from the calendar, would quietly put the old value back. Running
+ * this from the menu runs it fully authorized.
+ *
+ * Safe to click at any time: it only ever writes a tag the sheet already
+ * shows, and only where the calendar disagrees.
+ */
+function applyTypeTagChangesToCalendar() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const byProgram = {};
+  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    const title = String(row[map['Clean_Title']] || '').trim();
+    const calendarId = String(row[map['Calendar_Source']] || '').trim();
+    const tag = normalizeTypeTag(row[map['Type_Tag']]);
+    if (!title || !calendarId) return;
+    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) return;
+    // Last row wins per program — they should all agree, and if they don't,
+    // the most recently written one is the intent.
+    byProgram[`${title}|${calendarId}`] = { title, calendarId, tag };
+  });
+
+  const programs = Object.keys(byProgram).map(k => byProgram[k]);
+  if (programs.length === 0) {
+    toastIfPossible('No programs with a grouping tag to apply.');
+    return 0;
+  }
+
+  let stampedEvents = 0;
+  let changedPrograms = 0;
+  programs.forEach(p => {
+    const n = stampTypeTagOnCalendar(p.title, p.calendarId, p.tag);
+    if (n > 0) { stampedEvents += n; changedPrograms++; }
+  });
+
+  const message = changedPrograms > 0
+    ? `Applied ${changedPrograms} grouping change(s) to ${stampedEvents} calendar event(s) — run Sync Cal to rebuild their forms.`
+    : `Every program's grouping already matches its calendar ✅ — nothing to change.`;
+  toastIfPossible(message);
+  log(`applyTypeTagChangesToCalendar: ${message}`);
+  return changedPrograms;
 }
 
 /**
@@ -3145,6 +3933,15 @@ function handleProgramDashboardEdit(e, sheet) {
 function writeTypeTagToCalendarEvents(sheet, editedRow, headerMap, newTag) {
   const title = String(sheet.getRange(editedRow, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
   const calendarId = String(sheet.getRange(editedRow, (headerMap['Calendar_Source'] || 0) + 1).getValue() || '').trim();
+  return stampTypeTagOnCalendar(title, calendarId, newTag);
+}
+
+/**
+ * The stamping itself, addressed by program rather than by sheet row, so both
+ * the cell-edit path above and the menu-driven reconcile
+ * (applyTypeTagChangesToCalendar) share one implementation.
+ */
+function stampTypeTagOnCalendar(title, calendarId, newTag) {
   if (!title || !calendarId) return 0;
 
   const { start, end } = computeSyncDateRange();
@@ -3320,15 +4117,18 @@ function handleQuickMarkEdit(e, sheet, editedCol) {
     sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL, 1, 2).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.programList.length} program(s) at this location — pick one, or go straight to a name.`);
+      `${lists.programList.length} program(s) at this location, soonest first — pick one, or go straight to a name.`);
     return;
   }
 
   if (editedCol === QUICK_MARK.EVENT_COL) {
     sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
+    const others = lists.nameList.length - lists.registeredCount;
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.nameList.length} registrant(s) — pick a name, then tick Attended or Lunch.`);
+      `${lists.registeredCount} registered` +
+      (others > 0 ? `, plus ${others} other known member(s)` : '') +
+      ` — pick a name (or type a new one), then tick Attended or Lunch.`);
     return;
   }
 
@@ -4790,6 +5590,31 @@ function syncRegistrations() {
     log(`syncRegistrations: a large-setup import (${BOOTSTRAP_ENTRY_NAME}()) is writing to the session table — skipping this run.`);
     return;
   }
+
+  // THE SAME LOCK syncCalendars() takes, and for a sharper reason. This
+  // function reads every registrant row, adds to them in memory, and writes
+  // the whole tab back. Two overlapping runs — the hourly trigger and someone
+  // pressing the menu item, which is exactly what people do when they are
+  // waiting for a registration to appear — both read the same "before"
+  // picture, and whichever finishes last overwrites the other's new rows with
+  // its own. The registrations are not re-read afterwards either: getResponses()
+  // is bounded by LAST_FORM_SYNC_TIME, which the losing run has already
+  // advanced. So the rows are simply gone until someone notices a name is
+  // missing.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    log('syncRegistrations: another sync is already running — skipping this run.');
+    toastIfPossible('Another sync is already running — try again in a moment.');
+    return;
+  }
+  try {
+    syncRegistrationsInternal();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function syncRegistrationsInternal() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
@@ -5738,14 +6563,23 @@ function getZoneDataRange(sheet, headerRow, nextHeaderRow, dateCol1Based) {
   return { start: firstRow, count: lastRow - firstRow + 1 };
 }
 
-/** Returns [{headerRow, dataStart, dataEnd}, ...] for every header row found via `markerHeaderName` on `sheet`. */
-function getSectionZones(sheet, markerHeaderName) {
+/**
+ * Returns [{headerRow, dataStart, dataEnd}, ...] for every header row found
+ * via `markerHeaderName` on `sheet`.
+ *
+ * `endRow` bounds the LAST zone. Without it the final table runs to the
+ * bottom of the sheet, which is right everywhere except Lunch_Schedule, whose
+ * ADD block sits below the tables and holds dated rows that are explicitly
+ * NOT part of the schedule yet — see getLunchScheduleEndRow().
+ */
+function getSectionZones(sheet, markerHeaderName, endRow) {
   const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
   if (headerRows.length === 0) return [];
   const map = getHeaderMapAt(sheet, headerRows[0]);
   const dateCol = map['Event_Date'];
+  const limit = endRow || null;
   return headerRows.map((hRow, i) => {
-    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : (limit ? limit + 1 : null);
     const zone = getZoneDataRange(sheet, hRow, nextHeader, dateCol);
     return zone
       ? { headerRow: hRow, dataStart: zone.start, dataEnd: zone.start + zone.count - 1 }
@@ -5774,10 +6608,10 @@ function findZoneForRow(zones, row) {
  * data already sitting on the tab: the next render reads by header NAME and
  * writes back out in the new order.
  */
-function readAllSectionedRows(sheet, headers, markerHeaderName) {
+function readAllSectionedRows(sheet, headers, markerHeaderName, endRow) {
   const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
   if (headerRows.length === 0) return [];
-  const lastRow = sheet.getLastRow();
+  const lastRow = endRow ? Math.min(endRow, sheet.getLastRow()) : sheet.getLastRow();
   const sheetLastCol = Math.max(sheet.getLastColumn(), headers.length);
   const dateColIdx = headers.indexOf('Event_Date');
   let combined = [];
@@ -5842,6 +6676,199 @@ function partitionByDate(rows, dateColIdx, todayKey) {
   return { upcoming, past };
 }
 
+// ============================================================================
+// OLD MONTHS
+// ============================================================================
+//
+// Every date-sorted tab in this workbook grows in one direction forever. A
+// year in, the Past section of Lunch_and_Event_Registrants is thousands of
+// rows that nobody scrolls through and every render rewrites.
+//
+// THE CHEAP HALF OF THE PROBLEM — that it is in the way — is solved here, by
+// HIDING past rows older than PAST_MONTHS_SHOWN months. Hiding, specifically:
+//
+//   • Nothing is moved and nothing is deleted, so no sync, count, dashboard
+//     rollup or Member_Roll recompute sees any difference. That matters more
+//     than it sounds: the rows on these tabs ARE the database, and a scheme
+//     that relocates them has to be right about every reader of every tab.
+//   • Ctrl+F still finds a hidden row. Someone asking "was Marion here last
+//     March?" gets an answer, without the tab opening onto last March.
+//   • It is one API call to undo (showAllPastRows(), on the menu).
+//
+// THE EXPENSIVE HALF — that the rows still cost render time and cells — is
+// NOT solved here, deliberately. See reportArchivableMonths(), which measures
+// it and says what the options are, and the "Old months" section of
+// USER_GUIDE.md, which lays out the archive designs and why none of them is
+// worth doing before the numbers say so.
+// ============================================================================
+
+/**
+ * How many months of past rows stay visible, counting the current month.
+ * 2 = this month and last month; anything older is hidden.
+ */
+const PAST_MONTHS_SHOWN = 2;
+
+/** 'yyyy-MM' for a date — the key old-month collapsing compares on. */
+function formatMonthKey(date) {
+  return Utilities.formatDate(date, TIMEZONE, 'yyyy-MM');
+}
+
+/** The oldest month that stays visible, as a 'yyyy-MM' key. */
+function getVisibleMonthCutoffKey() {
+  const now = new Date();
+  return formatMonthKey(new Date(now.getFullYear(), now.getMonth() - (PAST_MONTHS_SHOWN - 1), 1));
+}
+
+/**
+ * Hides the tail of a Past block — the rows whose month is older than the
+ * cutoff. Returns how many rows were hidden.
+ *
+ * ONE CONTIGUOUS BLOCK, always: partitionByDate() sorts past rows
+ * most-recent-first, so "older than X" is by construction a suffix. That is
+ * what keeps this to a single hideRows() call however many years accumulate,
+ * and it is why this function is a suffix scan rather than a filter.
+ *
+ * Undated rows (there shouldn't be any in a Past block, but a hand-typed row
+ * can produce one) count as visible and stop the scan — hiding a row nobody
+ * can find again by date is exactly the outcome to avoid.
+ */
+function collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx) {
+  if (!pastRows || pastRows.length === 0 || dateColIdx < 0) return 0;
+  const cutoff = getVisibleMonthCutoffKey();
+
+  let firstOldIndex = -1;
+  for (let i = pastRows.length - 1; i >= 0; i--) {
+    const d = coerceDate(pastRows[i][dateColIdx]);
+    if (!d || formatMonthKey(d) >= cutoff) break;
+    firstOldIndex = i;
+  }
+  if (firstOldIndex === -1) return 0;
+
+  const count = pastRows.length - firstOldIndex;
+  try {
+    sheet.hideRows(pastDataStart + firstOldIndex, count);
+  } catch (err) {
+    log(`ℹ️ Could not hide ${count} old row(s) on "${sheet.getName()}" (${err}) — they stay visible.`);
+    return 0;
+  }
+  return count;
+}
+
+/**
+ * Un-hides every row on a rendered tab. Called at the START of each full
+ * render: sheet.clear() does NOT reset row visibility, so yesterday's hidden
+ * range would otherwise still be hidden today, over completely different rows.
+ */
+function showAllRows(sheet) {
+  try {
+    sheet.showRows(1, sheet.getMaxRows());
+  } catch (err) {
+    log(`ℹ️ Could not un-hide rows on "${sheet.getName()}" (${err}).`);
+  }
+}
+
+/**
+ * Menu action: show everything on every date-sorted tab, until the next
+ * render puts the old months away again. The counterpart to the automatic
+ * collapse — someone doing a year-end count needs the whole thing on screen,
+ * and should not have to go hunting through Format ▸ Hide to get it.
+ */
+function showAllPastRows() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const names = [
+    SHEET_NAMES.LUNCH_EVENT_REGISTRANTS,
+    SHEET_NAMES.PROGRAM_DASHBOARD,
+    SHEET_NAMES.LUNCH_SCHEDULE,
+    SHEET_NAMES.LUNCH_DASHBOARD,
+    SHEET_NAMES.TRIAGE
+  ];
+  let done = 0;
+  names.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    showAllRows(sheet);
+    done++;
+  });
+  toastIfPossible(`All past rows shown on ${done} tab(s). They collapse again on the next sync.`);
+  log(`showAllPastRows: un-hid rows on ${done} tab(s).`);
+}
+
+/**
+ * READ-ONLY. Counts how much history each tab is carrying, by month, and says
+ * what it costs — the measurement that has to come before any decision to
+ * archive. Changes nothing.
+ */
+function reportArchivableMonths() {
+  if (!requireAuthorizedAdmin('Archive Old Months (report)')) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cutoff = getVisibleMonthCutoffKey();
+  const tabs = [
+    { name: SHEET_NAMES.LUNCH_EVENT_REGISTRANTS, headers: HEADERS.Lunch_and_Event_Registrants, marker: 'Event_ID' },
+    { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.Master_Program_Dashboard, marker: 'Event_ID' },
+    { name: SHEET_NAMES.TRIAGE, headers: HEADERS.Deleted_Event_Triage, marker: 'Event_ID' },
+    { name: SHEET_NAMES.LUNCH_SCHEDULE, headers: HEADERS.Lunch_Schedule, marker: 'Event_Date' }
+  ];
+
+  const lines = [];
+  let grandTotal = 0;
+  let grandOld = 0;
+  let grandCells = 0;
+
+  tabs.forEach(tab => {
+    const sheet = ss.getSheetByName(tab.name);
+    if (!sheet) return;
+    const rows = tab.name === SHEET_NAMES.LUNCH_SCHEDULE
+      ? readLunchScheduleRows(sheet)
+      : readAllSectionedRows(sheet, tab.headers, tab.marker);
+    const dateIdx = tab.headers.indexOf('Event_Date');
+
+    const months = {};
+    let old = 0;
+    rows.forEach(row => {
+      const d = coerceDate(row[dateIdx]);
+      if (!d) return;
+      const key = formatMonthKey(d);
+      months[key] = (months[key] || 0) + 1;
+      if (key < cutoff) old++;
+    });
+
+    const monthKeys = Object.keys(months).sort();
+    const cells = rows.length * tab.headers.length;
+    grandTotal += rows.length;
+    grandOld += old;
+    grandCells += cells;
+
+    lines.push(`  • ${tab.name}: ${rows.length} row(s) across ${monthKeys.length} month(s)` +
+      (monthKeys.length > 0 ? ` (${monthKeys[0]} → ${monthKeys[monthKeys.length - 1]})` : '') +
+      `; ${old} older than ${cutoff}; ~${cells} cells.`);
+  });
+
+  const verdict = grandCells > ARCHIVE_ADVISORY_CELLS
+    ? `⚠️ Over the ${ARCHIVE_ADVISORY_CELLS}-cell advisory line — worth archiving a year out. ` +
+      `See "Old months" in USER_GUIDE.md.`
+    : `✅ Comfortably inside normal size. Hiding old months is enough for now; nothing needs archiving.`;
+
+  const report = `Old-month report (visible from ${cutoff} onward):\n${lines.join('\n')}\n` +
+    `  TOTAL: ${grandTotal} row(s), ${grandOld} in collapsed months, ~${grandCells} cells.\n${verdict}`;
+
+  log(report);
+  try {
+    SpreadsheetApp.getUi().alert('Old Months', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    toastIfPossible(`${grandTotal} history row(s), ${grandOld} in collapsed months — see the log.`);
+  }
+  return { totalRows: grandTotal, oldRows: grandOld, cells: grandCells };
+}
+
+/**
+ * The point at which the history on these tabs is worth doing something about.
+ * Nowhere near a Sheets hard limit — it's the point where a full re-render
+ * starts eating a meaningful share of the 6-minute execution budget, which is
+ * what actually breaks first.
+ */
+const ARCHIVE_ADVISORY_CELLS = 150000;
+
 /**
  * Writes two stacked sub-tables ("Upcoming" then "Past") starting at
  * `startRow`, each with its own banner, header row, and zebra-striped/
@@ -5866,6 +6893,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   row += upcomingRows.length;
   row++; // spacer
 
+  const pastBannerRow = row;
   writeSectionBanner(sheet, row, numCols, options.pastLabel || '🕓 Past');
   row++;
   writeSectionHeader(sheet, row, numCols, headers);
@@ -5877,10 +6905,23 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length);
   row += pastRows.length;
 
+  // Old months go away LAST, once the rows are written and formatted — hiding
+  // them first would only mean formatting a hidden range, and the banner has
+  // to be able to say how many went.
+  const hidden = options.collapseOldMonths === false
+    ? 0
+    : collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx);
+  if (hidden > 0) {
+    sheet.getRange(pastBannerRow, 1).setValue(
+      `${options.pastLabel || '🕓 Past'}  —  ${hidden} row(s) before ${getVisibleMonthCutoffKey()} are hidden ` +
+      `(they're still here and still searchable; "Show All Past Rows" on the menu brings them back)`);
+  }
+
   return {
     nextRow: row + 1,
     upcomingHeaderRow, upcomingDataStart, upcomingCount: upcomingRows.length,
-    pastHeaderRow, pastDataStart, pastCount: pastRows.length
+    pastBannerRow, pastHeaderRow, pastDataStart, pastCount: pastRows.length,
+    hiddenPastRows: hidden
   };
 }
 
@@ -5893,6 +6934,10 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
   sheet.clear();
   sheet.clearFormats();
+  // Row visibility is a sheet-level property that survives clear(), exactly
+  // like column visibility below — so last render's hidden old-month range
+  // has to be released before this render decides its own.
+  showAllRows(sheet);
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   // Column visibility is a sheet-level property that survives clear(), so a
@@ -6034,13 +7079,130 @@ function setQuickMarkStatus(sheet, numCols, message) {
 }
 
 /**
+ * Every program the workbook knows about at `location` (or everywhere, if
+ * `location` is blank), NEAREST TO TODAY FIRST.
+ *
+ * WHAT THIS FIXES. The Program dropdown used to be built purely from the
+ * registrant rows, which means a program only appeared once somebody had
+ * already registered for it — precisely backwards for a panel whose job is
+ * adding people. A brand-new program, or one whose sign-ups all live on
+ * paper, was unreachable: it was not in the list, so nobody could be marked
+ * onto it, so it stayed not in the list.
+ *
+ * Three sources, unioned:
+ *   Master_Program_Dashboard — every session the calendar has ever produced,
+ *                              past AND future. The authoritative list.
+ *   Program_Options          — the memory tab, so a program whose sessions
+ *                              have aged off the dashboard is still offered.
+ *   the registrant rows      — belt and braces for anything hand-added.
+ *
+ * ORDERED BY DISTANCE FROM TODAY, not alphabetically. Someone standing at a
+ * sign-in desk wants today's program first and last month's twentieth; an
+ * A-Z list of two years of programs puts "Armchair Yoga" above the thing
+ * happening in the next room. Ties break toward the future.
+ */
+function collectKnownPrograms(location, registrantRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const todayKey = formatDateKey(new Date());
+  const todayMidnight = parseDateKey(todayKey);
+  const byName = {};
+
+  const note = (title, loc, date) => {
+    const name = String(title || '').trim();
+    if (!name) return;
+    if (location && String(loc || '').trim() !== location) return;
+    if (!byName[name]) byName[name] = { name, best: null, future: false };
+    const d = coerceDate(date);
+    if (!d) return;
+    const distance = Math.abs(d - todayMidnight);
+    const entry = byName[name];
+    if (entry.best === null || distance < entry.best) {
+      entry.best = distance;
+      entry.future = formatDateKey(d) >= todayKey;
+    }
+  };
+
+  try {
+    const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (dash) {
+      const headers = HEADERS.Master_Program_Dashboard;
+      const map = getIndexMap(headers);
+      readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+        note(row[map['Clean_Title']], row[map['Location']], row[map['Event_Date']]);
+      });
+    }
+  } catch (err) {
+    log(`ℹ️ Quick Mark could not read the program dashboard for its program list (${err}).`);
+  }
+
+  try {
+    const options = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
+    if (options) {
+      const headers = HEADERS.Program_Options;
+      const map = getIndexMap(headers);
+      readSimpleTable(options, headers).forEach(row => {
+        // Next_Date if there is one, else Last_Date — either way it is that
+        // program's nearest known session.
+        note(row[map['Event']], row[map['Location']], row[map['Next_Date']] || row[map['Last_Date']]);
+      });
+    }
+  } catch (err) {
+    log(`ℹ️ Quick Mark could not read Program_Options for its program list (${err}).`);
+  }
+
+  const lrMap = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
+  (registrantRows || []).forEach(row => {
+    note(row[lrMap['Event']], row[lrMap['Location']], row[lrMap['Event_Date']]);
+  });
+
+  return Object.keys(byName)
+    .map(k => byName[k])
+    .sort((a, b) => {
+      const da = a.best === null ? Infinity : a.best;
+      const db = b.best === null ? Infinity : b.best;
+      if (da !== db) return da - db;
+      if (a.future !== b.future) return a.future ? -1 : 1; // a tie goes to the upcoming one
+      return a.name.localeCompare(b.name);
+    })
+    .map(p => p.name);
+}
+
+/** Every name on Member_Roll — the standing directory, registered or not. */
+function collectKnownMembers() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    const sheet = ss.getSheetByName(SHEET_NAMES.MEMBER_ROLL);
+    if (!sheet) return [];
+    const headers = HEADERS.Member_Roll;
+    const map = getIndexMap(headers);
+    return readSimpleTable(sheet, headers)
+      .map(row => String(row[map['Name']] || '').trim())
+      .filter(Boolean);
+  } catch (err) {
+    log(`ℹ️ Quick Mark could not read Member_Roll for its name list (${err}).`);
+    return [];
+  }
+}
+
+/**
+ * A Sheets dropdown built from a list this long stops being a dropdown. Cap
+ * it — the ordering above guarantees the cut falls on the least relevant end.
+ */
+const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
+
+/**
  * Rebuilds the Program and Name dropdowns from whatever Location/Program is
  * currently selected, narrowing each list to what's actually possible.
  *
- * Sourced from the CURRENT registrant rows, not the Member_Roll tab: the point
- * is to mark someone who is registered for a specific session, and offering a
- * name nobody has registered under would just produce a "no match" a moment
- * later. Member_Roll is the standing directory; this is today's actual list.
+ * PROGRAMS: every past and present program, nearest first — see
+ * collectKnownPrograms().
+ *
+ * NAMES: the people already registered for the chosen program first (the
+ * common case — you are ticking someone off a list), then everyone else on
+ * Member_Roll. The SAME BUG the program list had applied here: sourcing names
+ * from registrant rows alone meant a known member who had not registered for
+ * this particular session could not be selected, which is exactly the walk-in
+ * this panel is for. applyQuickMark() adds a row for them.
  */
 function refreshQuickMarkDropdowns(sheet, rows) {
   const headers = HEADERS.Lunch_and_Event_Registrants;
@@ -6050,26 +7212,43 @@ function refreshQuickMarkDropdowns(sheet, rows) {
   const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
   const program = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
 
-  const programs = {};
-  const names = {};
+  const programList = collectKnownPrograms(location, registrantRows)
+    .slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
+
+  // Registered-for-this-selection names, in the order the rows themselves are
+  // in (the tab is date-sorted, so that is nearest-session-first already).
+  const registered = [];
+  const registeredSeen = {};
   registrantRows.forEach(row => {
     const rowLocation = String(row[map['Location']] || '').trim();
     const rowEvent = String(row[map['Event']] || '').trim();
     const rowName = String(row[map['Name']] || '').trim();
+    if (!rowName) return;
     if (location && rowLocation !== location) return;
-    if (rowEvent) programs[rowEvent] = true;
     if (program && rowEvent !== program) return;
-    if (rowName) names[rowName] = true;
+    const key = normalizeNameKey(rowName);
+    if (registeredSeen[key]) return;
+    registeredSeen[key] = true;
+    registered.push(rowName);
   });
 
-  const programList = Object.keys(programs).sort();
-  const nameList = Object.keys(names).sort();
+  const others = [];
+  collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
+    const key = normalizeNameKey(name);
+    if (registeredSeen[key]) return;
+    registeredSeen[key] = true;
+    others.push(name);
+  });
+
+  const nameList = registered.concat(others).slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
 
   applyValueListValidationBounded(sheet, QUICK_MARK.EVENT_COL, programList.length ? programList : ['(no programs yet)'],
     QUICK_MARK.inputRow, 1);
-  applyValueListValidationBounded(sheet, QUICK_MARK.NAME_COL, nameList.length ? nameList : ['(no registrants yet)'],
-    QUICK_MARK.inputRow, 1);
-  return { programList, nameList };
+  // allowInvalid on the NAME cell: a first-time walk-in has no row and is on
+  // no roll, so their name has to be typeable rather than only selectable.
+  applyOpenValueListValidationBounded(sheet, QUICK_MARK.NAME_COL,
+    nameList.length ? nameList : ['(type a name)'], QUICK_MARK.inputRow, 1);
+  return { programList, nameList, registeredCount: registered.length };
 }
 
 /** Blanks the panel's inputs, ready for the next person. */
@@ -6121,9 +7300,12 @@ function applyQuickMark(sheet, column) {
   });
 
   if (candidates.length === 0) {
-    setQuickMarkStatus(sheet, numCols,
-      `⚠️ No registrant row found for "${name}"${program ? ` on ${program}` : ''}${location ? ` at ${location}` : ''}. Nothing was marked.`);
+    // Nobody registered under that name for that program. Now that the
+    // dropdowns offer every program and every known member, this is no longer
+    // a dead end — it is the walk-in case, and it is the reason the lists were
+    // widened in the first place.
     sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
+    addQuickMarkWalkIn(sheet, { name, program, location, column, numCols });
     return;
   }
 
@@ -6164,6 +7346,135 @@ function applyQuickMark(sheet, column) {
 
   clearQuickMarkInputs(sheet);
   refreshQuickMarkDropdowns(sheet, null);
+}
+
+/**
+ * The walk-in path: someone is standing there, they are not on the list for
+ * this program, and marking them has to be possible without a form
+ * submission.
+ *
+ * Creates a "Manually Added" registrant row against the NEAREST session of
+ * the chosen program (today first, then the next upcoming, then the most
+ * recent past — the same rule applyQuickMark() uses to pick among existing
+ * rows), then marks it. Manually Added is a protected state: see
+ * getProtectedRegistrantKeys(), which is what stops the next registration
+ * sync from overwriting or removing the row.
+ *
+ * Asks first. It writes a person into the record and, if the row is for a
+ * lunch-serving date, into the catering count — small, but not something to
+ * do because a checkbox was clicked by accident.
+ */
+function addQuickMarkWalkIn(sheet, args) {
+  const { name, program, location, column, numCols } = args;
+
+  if (!program) {
+    setQuickMarkStatus(sheet, numCols,
+      `⚠️ "${name}" has no registration yet. Pick a program in box 2 and tick again to add them as a walk-in.`);
+    return;
+  }
+
+  const session = findNearestSessionForProgram(program, location);
+  if (!session) {
+    setQuickMarkStatus(sheet, numCols,
+      `⚠️ Couldn't find any session of "${program}"${location ? ` at ${location}` : ''} to add "${name}" to. ` +
+      `Run Sync Cal if the program is new.`);
+    return;
+  }
+
+  const isLunch = column === QUICK_MARK.LUNCH_COL;
+  const lunchOffered = isLunchOfferedOn(session.date, session.location);
+  const dateLabel = formatDateLabel(session.date);
+
+  if (!confirmConsequentialAction(`Add ${name} as a walk-in?`,
+    `"${name}" has no registration for ${program}.\n\n` +
+    `A new row will be added for ${program} — ${dateLabel} (${session.location}), marked ` +
+    `${isLunch ? 'attended + lunch served' : 'attended'} and flagged "Manually Added".` +
+    (isLunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : ''),
+    false)) {
+    setQuickMarkStatus(sheet, numCols, `Nothing added. "${name}" is still not registered for ${program}.`);
+    return;
+  }
+
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const map = getIndexMap(headers);
+  const row = new Array(headers.length).fill('');
+  row[map['Event_Date']] = session.date;
+  row[map['Location']] = session.location;
+  row[map['Event']] = session.title;
+  row[map['Name']] = name;
+  row[map['Attended']] = true;
+  row[map['Lunch_Served']] = isLunch;
+  row[map['Person_Type']] = 'Attendee';
+  row[map['Lunch_Type']] = isLunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
+  row[map['Lunch_Status']] = isLunch && lunchOffered ? 'Needed' : 'No Lunch';
+  row[map['Program_Status']] = 'Active';
+  row[map['Primary_Registrant']] = 'Self';
+  row[map['Party_Size']] = 1;
+  row[map['Admin_Notes']] = `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
+  row[map['Manual_Override']] = 'Manually Added';
+  row[map['Form_Source']] = 'Walk-in (no form)';
+  row[map['Event_ID']] = session.eventId;
+
+  const existing = readAllSectionedRows(sheet, headers, 'Event_ID');
+  existing.push(row);
+  renderRegistrantsSheet(false, existing);
+
+  const what = isLunch ? 'attendance + lunch' : 'attendance';
+  toastIfPossible(`✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what} marked.`);
+  setQuickMarkStatus(sheet, numCols,
+    `✅ Added ${name} to ${program} — ${dateLabel} (walk-in), ${what} marked.`);
+  clearQuickMarkInputs(sheet);
+  refreshQuickMarkDropdowns(sheet, null);
+}
+
+/**
+ * The session of `program` nearest to today: today, else the soonest
+ * upcoming, else the most recent past. Read from the session table, which is
+ * the only place an Event_ID (the key every registrant row is joined on)
+ * can come from.
+ */
+function findNearestSessionForProgram(program, location) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!dash) return null;
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const wanted = normalizeNameKey(program);
+
+  const matches = [];
+  readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+    if (normalizeNameKey(row[map['Clean_Title']]) !== wanted) return;
+    const rowLocation = String(row[map['Location']] || '').trim();
+    if (location && rowLocation !== location) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    matches.push({
+      date,
+      dateKey: formatDateKey(date),
+      location: rowLocation,
+      title: String(row[map['Clean_Title']] || '').trim(),
+      eventId: String(row[map['Event_ID']] || '').trim(),
+      lunchType: ''
+    });
+  });
+  if (matches.length === 0) return null;
+
+  matches.sort((a, b) => {
+    const rank = c => (c.dateKey === todayKey ? 0 : (c.dateKey > todayKey ? 1 : 2));
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    if (rank(a) === 2) return b.date - a.date; // past: newest first
+    return a.date - b.date;                    // future: soonest first
+  });
+  return matches[0];
+}
+
+/** Hot/Cold for a walk-in's meal, taken from that day's menu; 'Hot' if the menu says nothing. */
+function resolveWalkInLunchType(session) {
+  const info = getMealInfoForDate(session.date, session.location);
+  const type = info ? String(info.type || '').trim() : '';
+  return (type === 'Hot' || type === 'Cold') ? type : 'Hot';
 }
 
 function renderTriageSheet(force, allRows) {
@@ -6333,11 +7644,22 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
   // Cleared ONCE, for the whole sheet, before anything is re-created —
   // clearing per zone would have each zone wipe the previous one's work.
   // Only this script's own protections are touched; anyone else's are left be.
-  sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
-    .filter(p => String(p.getDescription() || '').indexOf(PROTECTION_TAG) === 0)
-    .forEach(p => {
-      try { p.remove(); } catch (err) { /* someone else's, or already gone */ }
-    });
+  //
+  // The whole call is guarded, not just the per-protection remove(): the
+  // protection API needs authorization the script does not have inside a
+  // simple onEdit trigger, and a render IS reachable from there (a Quick Mark
+  // walk-in rebuilds this tab). Warning labels are a nicety; aborting a
+  // render that has already cleared the sheet is not survivable.
+  try {
+    sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+      .filter(p => String(p.getDescription() || '').indexOf(PROTECTION_TAG) === 0)
+      .forEach(p => {
+        try { p.remove(); } catch (err) { /* someone else's, or already gone */ }
+      });
+  } catch (err) {
+    log(`ℹ️ Could not read protections on "${sheet.getName()}" (${err}) — leaving them as they are.`);
+    return;
+  }
 
   (zones || []).forEach(z => {
     if (z.count < 1) return;
@@ -6374,7 +7696,7 @@ function renderLunchScheduleSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
   const headers = HEADERS.Lunch_Schedule;
-  const rows = allRows || readAllSectionedRows(sheet, headers, 'Event_Date');
+  const rows = allRows || readLunchScheduleRows(sheet);
   const result = renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Menu',
     pastLabel: '🕓 Past Menu',
@@ -6408,6 +7730,57 @@ function applyLunchScheduleFormatting(sheet, headers, result) {
   if (notServingRule) rules.push(notServingRule);
 
   sheet.setConditionalFormatRules(rules);
+
+  // The ADD block goes last, below everything, so a paste of any size just
+  // extends the sheet downward instead of colliding with the tables.
+  writeLunchAddBlock(sheet, result.nextRow + 1);
+}
+
+/**
+ * Writes the "paste your CSV here" block at the bottom of Lunch_Schedule.
+ *
+ * BELOW the tables on purpose. A paste area at the TOP has to be a fixed
+ * height, and a 40-row paste into a 12-row box overflows into whatever is
+ * beneath it — which on this tab is the live schedule. At the bottom there is
+ * nothing to overflow into: the paste simply makes the sheet taller, and
+ * harvestPastedMenuRows() sweeps everything from the header row down.
+ */
+function writeLunchAddBlock(sheet, startRow) {
+  const numCols = LUNCH_ADD_HEADERS.length;
+  // Make room BEFORE writing anything: getRange() throws on a row that isn't
+  // there, and on a freshly-cleared tab the schedule can easily run past the
+  // sheet's default height.
+  const needed = startRow + 1 + LUNCH_ADD_BLANK_ROWS;
+  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+
+  writeSectionBanner(sheet, startRow, numCols,
+    `${LUNCH_ADD_MARKER} — paste CSV here (Date, Location, Type, Description, Shorthand). ` +
+    `One row or a hundred; they move into the schedule above automatically.`);
+
+  const headerRow = startRow + 1;
+  sheet.getRange(headerRow, 1, 1, numCols)
+    .setValues([LUNCH_ADD_HEADERS])
+    .setFontWeight('bold')
+    .setFontSize(TYPO.COLUMN_HEADER.size)
+    .setFontColor(TYPO.COLUMN_HEADER.color)
+    .setBackground(TYPO.COLUMN_HEADER.background);
+
+  const firstRow = headerRow + 1;
+  const blankRows = LUNCH_ADD_BLANK_ROWS;
+  const entry = sheet.getRange(firstRow, 1, blankRows, numCols);
+  entry.setBackground(MANUAL_ENTRY_CELL_TINT)
+    .setBorder(true, true, true, true, true, true, '#D9D9D9', SpreadsheetApp.BorderStyle.SOLID);
+
+  // Dropdowns on the two columns with a fixed vocabulary. requireValueInList's
+  // second argument false = show the list but DON'T reject anything else:
+  // a paste must never be blocked by validation, and canonicalizeLocation() /
+  // canonicalizeLunchType() already snap free text onto these values.
+  const locationRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(Object.values(CALENDAR_MAP), true).setAllowInvalid(true).build();
+  const typeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(LUNCH_TYPE_OPTIONS, true).setAllowInvalid(true).build();
+  sheet.getRange(firstRow, 2, blankRows, 1).setDataValidation(locationRule);
+  sheet.getRange(firstRow, 3, blankRows, 1).setDataValidation(typeRule);
 }
 
 
@@ -6751,6 +8124,9 @@ function getMergeTargets() {
         if (!d) return '';
         return `${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`;
       },
+      // Not the generic read: this tab's ADD block sits below its tables and
+      // holds dated rows that are NOT schedule yet — see getLunchScheduleEndRow().
+      readCurrent: sheet => readLunchScheduleRows(sheet),
       render: rows => renderLunchScheduleSheet(true, rows)
     }
   ];
@@ -6922,7 +8298,10 @@ function mergeLegacyTabs() {
 
     let current;
     try {
-      current = readAllSectionedRows(getOrCreateSheet(ss, sheetName), target.headers, target.marker);
+      const targetSheet = getOrCreateSheet(ss, sheetName);
+      current = target.readCurrent
+        ? target.readCurrent(targetSheet)
+        : readAllSectionedRows(targetSheet, target.headers, target.marker);
     } catch (err) {
       log(`⚠️ mergeLegacyTabs: could not read "${sheetName}" (${err}) — skipping its sources, tabs left in place.`);
       return;
@@ -7369,6 +8748,7 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
   sheet.clear();
   sheet.clearFormats();
+  showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
@@ -7457,15 +8837,14 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
-  // Type_Tag is the ONE cell on this table a human is meant to change (see
-  // handleProgramDashboardEdit) — mark it yellow like every other editable
-  // cell in the workbook, and warn on the derived columns around it.
-  labelManualEntryColumns(sheet, result.upcomingHeaderRow, headers, PROGRAM_DASHBOARD_EDITABLE_COLUMNS);
-  labelManualEntryColumns(sheet, result.pastHeaderRow, headers, PROGRAM_DASHBOARD_EDITABLE_COLUMNS);
-  zones.forEach(z => {
-    if (z.count < 1) return;
-    tintManualEntryColumns(sheet, z.start, z.count, headers, PROGRAM_DASHBOARD_EDITABLE_COLUMNS);
-  });
+  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag is the one cell
+  // a human changes on this table, but it is not a blank waiting to be filled
+  // in — it always already holds a real, calendar-derived value, and washing
+  // a full column of correct values in "please type here" yellow read as a
+  // column of problems on the tab people scan first. Grouped/Monthly is a
+  // dropdown with a confirmation dialog behind it (see
+  // handleProgramDashboardEdit) — the prompt is the affordance, not the color.
+  // Everything else keeps its warning protection.
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source'],
@@ -7701,6 +9080,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
 
   sheet.clear();
   sheet.clearFormats();
+  showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 

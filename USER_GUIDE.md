@@ -34,7 +34,9 @@ part-way — and a timed-out sync leaves things half-done: triggers switched off
 some programs imported, and forms it had just created forgotten (so a second
 attempt makes duplicates).
 
-**Import Everything (First Run)** exists for exactly this:
+**🔧 Admin ▸ Import Everything (First Run)** exists for exactly this (the
+🔧 Admin submenu only shows for admin accounts — see
+[Admin-only actions](#admin-only-actions)):
 
 - It **pauses all automation** first — the scheduled syncs and the
   calendar-watch triggers — and keeps them paused for the whole import, not
@@ -202,8 +204,11 @@ The panel at the **top of this tab** is how you tick people in on the day,
 without hunting for their row:
 
 1. **Location** — pick from the dropdown.
-2. **Program** — the list narrows to programs at that location.
-3. **Name** — narrows again to people registered for it.
+2. **Program** — **every** program at that location, past and present,
+   **soonest first**. Not just the ones somebody has already registered for.
+3. **Name** — the people registered for that program first, then **everyone
+   else on Member_Roll**. You can also just **type a name** that isn't on
+   either list.
 4. Tick **✓ Attended** or **✓ Lunch**.
 
 That's it. The system finds that person's row wherever it is, ticks it, tells
@@ -215,7 +220,18 @@ The **Clear** box resets it if you pick wrong.
   the nearest one (today first, then the next upcoming) and says so, e.g.
   *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
   the nearest)."* If that's the wrong one, tick the right row directly.
-- If nothing matches, it says so and **changes nothing** — no silent guesses.
+
+**Walk-ins.** If the person you picked has **no registration** for that
+program, ticking a box offers to add them:
+
+> *Add Marion Webb as a walk-in?*
+> A new row will be added for Chair Yoga — Tue, Aug 5 (Narberth), marked
+> attended + lunch served and flagged "Manually Added".
+
+Say yes and the row appears, already marked. It's flagged **Manually Added**,
+which means no future sync will touch or remove it. Say no and nothing
+happens. You need a **program** picked in box 2 for this — the system won't
+guess which one they walked into.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
 the panel is just faster when you're standing at a sign-in desk.
@@ -279,11 +295,54 @@ doesn't exist. If that leaves the form with **no** catered dates at all, the
 lunch questions come off the form entirely and its description says lunch isn't
 provided — and they come back on their own if you later add a catered date.
 
-**When you edit a menu row, you'll be asked whether to update the forms.** Say
-**yes** to push the new label out to every registration form covering that date;
-say **no** to just save it here and let the next Sync Cal apply it. Useful when
-you're part-way through typing a week's menu and don't want each keystroke
-rewriting live forms.
+#### Adding menu items — paste CSV
+
+Scroll to the bottom of the tab. Under **➕ ADD MENU ITEMS** there is open
+space. Put your menu there in this order:
+
+```
+Date, Location, Type, Meal Description, Shorthand
+2026-09-14, Narberth,  Hot,  Chicken Parmesan, Chx Parm
+2026-09-15, Ashbridge, Cold, Turkey Wrap,      Turkey
+2026-09-16, Narberth,  Not Serving
+```
+
+**One row or two hundred, it's the same thing.** Paste from Excel or Sheets,
+paste raw comma-separated text, drop the whole month in one cell, or type a
+single row by hand — it all goes through the same reader. Complete rows move
+up into the schedule and the box empties itself, ready for the next batch.
+
+- A **header line** is fine — it's ignored.
+- A date that **already has a menu** for that location is replaced.
+- **Dates** can be `2026-09-14` or `9/14/2026`.
+- **Locations** and **types** don't need exact spelling — `narb`, `NARBERTH`
+  and `Narberth Center` all land on Narberth; `none`, `no`, `closed` and
+  `n/a` all mean `Not Serving`.
+- **Commas inside a description** are fine if you quote the field:
+  `2026-09-14, Narberth, Hot, "Chicken, rice and beans", Chx`
+- Anything it **can't read stays in the box** with a note saying why, so a
+  bad row 40 never swallows a good row 41. Fix it in place and it goes in.
+- A row you're **still typing** is left alone. It moves up once it has a
+  date, a location and a type.
+
+Prefer a dialog, or have the menu in a **`.csv` file**? Use
+**🍱 Add Menu Items (paste/upload CSV)…** on the menu. Same reader, same rules.
+
+To fix an existing menu, just **edit the row in the table** — it stays exactly
+where it is (dates and spellings get tidied up as you go).
+
+#### Getting the menu onto the forms
+
+Editing the menu **does not** rewrite live registration forms on the spot.
+That used to happen on every keystroke and made typing a month of menus
+impossible. Instead:
+
+- The **daily Sync Cal** picks it up on its own, or
+- click **🍱 Push Menu Changes to Forms** when you want it out there now.
+
+It asks first, then rewrites the date labels — and adds or removes the lunch
+question — on every form covering an upcoming menu date. Past dates are left
+alone.
 
 ### 5. Member_Roll and Program_Options — your own notes
 
@@ -421,19 +480,43 @@ row is marked `Superseded`.
 
 ## The menu
 
-Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet:
+Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet.
+
+**There are two versions of this menu.** Everyone sees the day-to-day items.
+The **🔧 Admin** submenu only appears for the accounts listed in
+`AUTHORIZED_ADMIN_EMAILS` (see [Admin-only actions](#admin-only-actions)).
+
+**Everyone:**
 
 | Item | What it does |
 |---|---|
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
-| **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
-| **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
-| **Find Leftover Tabs (preview)** | Read-only: reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
-| **Merge + Delete Leftover Tabs** | Folds those tabs into the current ones, then removes them |
+| **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
+| **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
+| **🔁 Apply Type Changes to Calendar** | Makes a Grouped/Monthly change typed on the dashboard stick, by writing it onto the calendar events |
+| **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
-You normally don't need these. Automatically:
+**🔧 Admin (admin accounts only):**
+
+| Item | What it does |
+|---|---|
+| **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
+| **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
+| **Find Leftover Tabs (read-only report)** | Reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
+| **Archive Old Months (report)** | Read-only: how much history each tab is carrying — see [Old months](#old-months) |
+
+**Not on any menu, on purpose.** Anything that deletes or rebuilds runs from
+the Apps Script editor only, by someone who went looking for it:
+`mergeLegacyTabs()` (deletes tabs), `initSheet()` (rebuilds every tab),
+`initializeAndSyncAll()`, `cancelBootstrapCalendars()`,
+`restoreTriagedRegistrants()`, `confirmLargeTriage()`,
+`recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`. They all still
+work and are all still admin-gated. Keeping them off a menu that sits open all
+day is about mis-clicks, not permissions.
+
+You normally don't need any of this. Automatically:
 
 - **Sync Cal** runs **daily at ~5am**, and also whenever you edit a program
   calendar
@@ -442,15 +525,13 @@ You normally don't need these. Automatically:
 
 Press a menu item when you want something *now* instead of waiting.
 
-> **Check Triggers** and **Import Everything** only work for the account(s)
-> listed in `AUTHORIZED_ADMIN_EMAILS` in the code (currently
-> `admin@newhorizonsseniorcenter.org` and
-> `maxfishman@newhorizonsseniorcenter.org`). Anyone else clicking them gets a
-> toast explaining that and nothing happens — see
-> [Admin-only actions](#admin-only-actions) below. **Sync Cal**, **Sync
-> Registrations**, and **Resize All Sheets** are open to everyone.
+> **If you're an admin and the 🔧 Admin submenu isn't there**, click
+> **🔧 Admin Tools (sign-in check)…** at the bottom of the menu. Google
+> sometimes can't tell the script who you are at the moment the spreadsheet
+> opens, and the code deliberately assumes "not an admin" when it can't tell.
+> That menu item re-checks properly and adds the submenu.
 
-> If the menu isn't there, reload the spreadsheet page.
+> If the menu isn't there at all, reload the spreadsheet page.
 
 ---
 
@@ -465,12 +546,23 @@ say no:
 |---|---|
 | Press **Sync Cal** | It can create forms, change form dates, and edit calendar descriptions |
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
-| Edit a **Lunch_Schedule** menu row | It rewrites the date labels on live forms, and can add/remove the lunch question |
+| Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
+| Add a **walk-in** from the Quick Mark panel | It writes a person into the record, and into the catering count |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
-| **Merge + Delete Leftover Tabs** | It deletes tabs (after moving their rows to safety) |
+| `mergeLegacyTabs()` (editor only) | It deletes tabs (after moving their rows to safety) |
 
-For a cell edit, saying **no puts the old value straight back** — the cell
-reverts, nothing is left half-changed.
+For a **single-cell** edit, saying **no puts the old value straight back** —
+the cell reverts, nothing is left half-changed.
+
+For a **paste or fill-down** over several cells there's no single old value to
+restore, so saying no leaves what you pasted on the sheet but **doesn't act on
+it**: the next sync recomputes those cells from the calendar, which is the
+honest undo. The toast says so at the time.
+
+**Typing a menu into Lunch_Schedule does not ask.** It used to, on every
+keystroke, and that made entering a month of menus unusable. Menu edits stay
+in the workbook until you deliberately push them out — see
+[Getting the menu onto the forms](#getting-the-menu-onto-the-forms).
 
 The **scheduled** runs (daily Sync Cal, hourly Sync Registrations) don't ask —
 there's nobody at the keyboard to answer, and doing their job on schedule is the
@@ -488,14 +580,19 @@ more:
   layout was found
 - `Copy of …`, `… (old)`, anything made by hand while troubleshooting
 
-Those rows are invisible to every sync and quietly rot. Two menu items deal
-with it:
+Those rows are invisible to every sync and quietly rot. Two steps deal with it:
 
-1. **Find Leftover Tabs (preview)** — read-only. Lists what it found, which
-   current tab each one matches, and how many rows are in it. Changes nothing,
-   so run it first.
-2. **Merge + Delete Leftover Tabs** — folds the rows in, then deletes the tabs.
-   It names every tab before doing anything and does nothing if you say no.
+1. **🔧 Admin ▸ Find Leftover Tabs (read-only report)** — lists what it found,
+   which current tab each one matches, and how many rows are in it. Changes
+   nothing, so run it first.
+2. **`mergeLegacyTabs()`** — folds the rows in, then deletes the tabs. It names
+   every tab before doing anything and does nothing if you say no.
+
+   **This one is not on the menu.** It deletes tabs and there's no undo beyond
+   File ▸ Version history, so it is run deliberately from
+   **Extensions ▸ Apps Script**: pick `mergeLegacyTabs` from the function
+   dropdown and press Run. It's still admin-gated — a non-admin running it
+   there gets refused.
 
 **How it decides.** By the tab's **column headers**, not its name — so a tab
 called anything at all is handled, and a tab of your own notes is left alone
@@ -528,13 +625,23 @@ the code:
 - `maxfishman@newhorizonsseniorcenter.org`
 
 **Gated:** Check Triggers, Import Everything (First Run), Find Leftover Tabs,
-Merge + Delete Leftover Tabs, `initSheet()`, `cancelBootstrapCalendars()`,
-`confirmLargeTriage()`, `restoreTriagedRegistrants()`,
-`recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`.
+Archive Old Months (report), `mergeLegacyTabs()`, `initSheet()`,
+`initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
+`restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
+`cleanupNeverPolicyForms()`.
 
-**Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, and
-everyone's ability to register, edit rows, and view every dashboard. Ordinary
-day-to-day use needs no special account.
+**Not gated, by design:** Sync Cal, Sync Registrations, the two lunch-menu
+items, Apply Type Changes to Calendar, Show All Past Rows, Resize All Sheets,
+and everyone's ability to register, edit rows, and view every dashboard.
+Ordinary day-to-day use needs no special account.
+
+> **The menu split is convenience, not security.** Admin items are hidden from
+> the menu for non-admins, but anyone with edit access to the spreadsheet can
+> open **Extensions ▸ Apps Script** and run any function by name. What actually
+> stops them is the `requireAuthorizedAdmin()` check inside each gated
+> function, which refuses regardless of how it was started. If you need real
+> access control, that comes from **who you share the spreadsheet with**, not
+> from this list.
 
 If someone outside that list runs a gated action, nothing happens — no tabs
 rebuilt, no triggers touched, no data changed — and they see a toast (and the
@@ -556,6 +663,65 @@ address on it; an empty list locks everyone out, including you.
 
 ---
 
+## Old months
+
+Every date-sorted tab grows in one direction forever. A year in, the **Past**
+section of Lunch_and_Event_Registrants is thousands of rows nobody scrolls
+through.
+
+**What happens now.** Past rows older than **this month and last month** are
+**hidden**. The Past banner says how many:
+
+> 🕓 Past Registrants — 1,240 row(s) before 2026-07 are hidden (they're still
+> here and still searchable; "Show All Past Rows" on the menu brings them back)
+
+Nothing is moved and nothing is deleted:
+
+- Every count, dashboard, rollup and Member_Roll figure is unchanged — they
+  read the rows, not the screen.
+- **Ctrl+F still finds a hidden row.** "Was Marion here last March?" still has
+  an answer; the tab just doesn't open onto last March.
+- **🕓 Show All Past Rows** brings everything back on every tab at once. They
+  collapse again on the next sync.
+
+**Checking the size.** **🔧 Admin ▸ Archive Old Months (report)** counts what
+each tab is carrying, by month, and says whether it's worth doing anything
+about. It's read-only.
+
+### When hiding isn't enough
+
+Hiding solves *being in the way*. It doesn't solve *cost*: those rows are still
+re-read and re-written on every render, and a full render has to finish inside
+Apps Script's 6-minute limit. Somewhere north of ~150,000 cells across the
+history tabs (the report tells you), that stops being comfortable — probably
+2–4 years in at this size, sooner if registrant volume grows.
+
+Three ways out, worth knowing before you need one:
+
+**1. Archive to a second spreadsheet, once a year.** Rows older than N months
+move to `Program Registrations — 2026` and off these tabs. Cheapest to run and
+the only option that actually reduces the working set. Costs: history is in
+another file, so a year-boundary question means opening two; and the move has
+to be transactional (write there, verify, only then delete here) or a failure
+halfway through loses rows. **The recommended one when the report says to act.**
+
+**2. Archive to tabs in this workbook** (`Registrants_2026`). Keeps everything
+in one file and is easy to undo. But Sheets' 10-million-cell limit is
+per-file, so this defers the cell problem rather than solving it — it only
+fixes render time. Reasonable as a first step.
+
+**3. Summarize instead of archiving.** Replace each old month with one row per
+program per month (attendance, meals served, no-shows). Enormous reduction,
+and it answers the questions anyone actually asks of old data. But it is
+**lossy** — "which Tuesdays did Marion come to?" is gone forever. Only do this
+alongside 1 or 2, never instead of them.
+
+**Not recommended: deleting.** These rows are the only record that a person
+attended and was fed. Whatever the retention policy ends up being, it should be
+a decision someone makes on purpose, not a side effect of a tab getting long.
+
+---
+
 ## Common tasks
 
 **Add a new program**
@@ -568,8 +734,14 @@ Edit `[Cap: N]` in the event description. New sign-ups respect the new number on
 the next sync; already-recorded rows keep the status they were given.
 
 **Change what's for lunch**
-Edit **Lunch_Schedule**. You'll be asked whether to push it to the forms now or
-let the next sync do it.
+Edit the row on **Lunch_Schedule** — it stays where it is, no dialog. To get it
+onto live forms now, press **🍱 Push Menu Changes to Forms**; otherwise the
+daily sync does it.
+
+**Add a month of menus at once**
+Paste your CSV into the **➕ ADD MENU ITEMS** block at the bottom of
+**Lunch_Schedule**, or use **🍱 Add Menu Items (paste/upload CSV)…** on the
+menu. See [Adding menu items](#adding-menu-items--paste-csv).
 
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
@@ -590,10 +762,10 @@ The `Manual_Override` cell turns purple and the row is protected from being
 overwritten.
 
 **Add a walk-in who never filled out the form**
-Add a row on **Lunch_and_Event_Registrants** and set `Manual_Override` to
-`Manually Added`. It'll be counted and never overwritten. (Or just tick
-`Lunch_Served` on any row — walk-in meals count toward `Served_Confirmed`
-regardless of what the form said.)
+Use **⚡ Quick Mark**: pick the location and program, pick or **type** their
+name, tick Attended or Lunch. It offers to add them, then does it — the row is
+flagged `Manually Added` and never overwritten. (You can still add the row by
+hand and set `Manual_Override` to `Manually Added` yourself if you prefer.)
 
 **Move someone off the waitlist**
 Change `Program_Status` from `Waitlisted` to `Active`. You'll get a reminder
@@ -619,6 +791,16 @@ same person, so a person doesn't get double-counted or double-catered.
 Today blocks are regenerated from scratch each sync. Only the pencil columns on
 Master_Lunch_Dashboard and manually-marked registrant rows survive.
 
+**`Type_Tag` lives on the calendar, not the sheet.** The Grouped/Monthly cell
+on the program dashboard is a view of what the calendar event's description
+says. Changing it writes the new value back onto every one of that program's
+calendar events — that's what makes it stick. If it can't reach the calendar
+at that moment you'll get a warning toast; press **🔁 Apply Type Changes to
+Calendar** and it goes through. Without that, the next sync quietly puts the
+old value back.
+
+**Old months are hidden, not gone.** See [Old months](#old-months).
+
 ---
 
 ## Troubleshooting
@@ -629,8 +811,24 @@ event (those are skipped)? Is it more than ~60 days out? Is it on one of the
 three configured calendars?
 
 **A form shows the wrong dates or meals**
-Run **Sync Cal**. If the meal text is stale, re-save the row on
-**Lunch_Schedule**.
+Press **🍱 Push Menu Changes to Forms**. Editing `Lunch_Schedule` deliberately
+does *not* rewrite live forms on the spot — that push (or the daily Sync Cal)
+is what delivers it.
+
+**A menu row I typed didn't go anywhere**
+It's in the **➕ ADD MENU ITEMS** block at the bottom of `Lunch_Schedule` and
+it's missing something. A row moves up into the schedule once it has a
+**date, a location and a type** — anything else it couldn't read stays in the
+box with a note saying why.
+
+**I changed Grouped/Monthly and it changed itself back**
+`Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
+can't always reach the calendar. Press **🔁 Apply Type Changes to Calendar**,
+then **Sync Cal**.
+
+**Rows before this month are missing from a tab**
+They're hidden, not gone — see [Old months](#old-months). Press
+**🕓 Show All Past Rows**. (Ctrl+F finds them either way.)
 
 **Someone's registration never appeared**
 Check **Deleted_Event_Triage** — the event may have been deleted. Otherwise run

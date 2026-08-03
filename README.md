@@ -26,5 +26,7 @@ mixed in with an unrelated static site — full development history preserved.
 
 ## Docs
 
-[`USER_GUIDE.md`](./USER_GUIDE.md) covers setup, the menu, each sheet/tab,
-what registrants see, and troubleshooting.
+- [`USER_GUIDE.md`](./USER_GUIDE.md) — setup, the menu, each sheet/tab, what
+  registrants see, old months, and troubleshooting.
+- [`SYSTEM_REVIEW.md`](./SYSTEM_REVIEW.md) — known failure modes, short and
+  long term, and what to verify in a live workbook.
