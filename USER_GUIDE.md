@@ -63,6 +63,48 @@ existed.
 
 ---
 
+## Updating to a new version
+
+When new code is pasted into the Apps Script editor, the *tabs* are still
+drawn the old way — new columns, panels and formatting don't appear until
+something redraws them.
+
+**🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)** does exactly that, and
+nothing else. It reads the rows already sitting on your tabs and redraws every
+one of them in the current layout.
+
+**It does not touch anything outside the spreadsheet:**
+
+| Rebuilt from what's already here | Left completely alone |
+|---|---|
+| Master_Program_Dashboard | Your **calendars** — not read, not written |
+| Lunch_and_Event_Registrants (+ Quick Mark panel) | Your **registration forms** — none opened or changed |
+| Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
+| Master_Lunch_Dashboard (hand-entered columns kept) | |
+| Deleted_Event_Triage | |
+| Member_Roll / Program_Options (your notes kept) | |
+| Config, tab order, widths, dropdowns, colours | |
+
+**Nothing can be removed by it.** A normal sync cross-checks sessions against
+the live calendar and moves registrants to triage when an event has gone —
+this deliberately skips that step, so an unreachable calendar can't be
+mistaken for a cancelled program.
+
+It tells you what it found before doing anything ("1,240 registrant rows,
+830 sessions…") and does nothing if you say no. Safe to run twice.
+
+**Use it when:** you've pasted new code, or a tab looks wrong and you want it
+redrawn.
+
+**Don't use it when:** the workbook is empty — there's nothing to rebuild
+*from*, and it'll say so. That's what **Import Everything (First Run)** is for.
+
+> Rebuilding a **copy** of the workbook? Press **Check Triggers** afterwards
+> too. The rebuild deliberately doesn't touch automation, and a fresh copy has
+> no triggers of its own yet.
+
+---
+
 ## Setting up your calendar events
 
 This is the only "syntax" in the whole system, and it's the part worth getting
@@ -502,6 +544,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 
 | Item | What it does |
 |---|---|
+| **🧱 Rebuild Layout (no calendar sync)** | Redraws every tab from the rows already in the workbook — see [Updating to a new version](#updating-to-a-new-version) |
 | **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
 | **Find Leftover Tabs (read-only report)** | Reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
@@ -624,8 +667,8 @@ the code:
 - `admin@newhorizonsseniorcenter.org`
 - `maxfishman@newhorizonsseniorcenter.org`
 
-**Gated:** Check Triggers, Import Everything (First Run), Find Leftover Tabs,
-Archive Old Months (report), `mergeLegacyTabs()`, `initSheet()`,
+**Gated:** Rebuild Layout, Check Triggers, Import Everything (First Run),
+Find Leftover Tabs, Archive Old Months (report), `mergeLegacyTabs()`, `initSheet()`,
 `initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
 `restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
 `cleanupNeverPolicyForms()`.
@@ -829,6 +872,11 @@ then **Sync Cal**.
 **Rows before this month are missing from a tab**
 They're hidden, not gone — see [Old months](#old-months). Press
 **🕓 Show All Past Rows**. (Ctrl+F finds them either way.)
+
+**I pasted the new code and the tabs look the same**
+Nothing redraws a tab until something asks it to. Press **🔧 Admin ▸ 🧱
+Rebuild Layout (no calendar sync)** — see
+[Updating to a new version](#updating-to-a-new-version).
 
 **Someone's registration never appeared**
 Check **Deleted_Event_Triage** — the event may have been deleted. Otherwise run

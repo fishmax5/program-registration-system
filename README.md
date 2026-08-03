@@ -24,6 +24,14 @@ mixed in with an unrelated static site — full development history preserved.
    dedicated **Import Everything (First Run)** path for calendars that
    already have events on them) and day-to-day use.
 
+## Updating an existing workbook
+
+Paste the new [`Code.gs`](./Code.gs) over the old one, reload the spreadsheet,
+then run **🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)**. It redraws every
+tab from the rows already in the workbook — no calendar read, no form write,
+no trigger changes, and nothing can be removed. See
+[Updating to a new version](./USER_GUIDE.md#updating-to-a-new-version).
+
 ## Docs
 
 - [`USER_GUIDE.md`](./USER_GUIDE.md) — setup, the menu, each sheet/tab, what

@@ -227,7 +227,10 @@ live.
 
 ## Verify first, in the live workbook
 
-In rough order of what would change your plans:
+Start with **🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)** — that is what
+draws the new layout onto an existing workbook, and it reads nothing outside
+the spreadsheet, so it is also the safest thing to try first. Then, in rough
+order of what would change your plans:
 
 1. **Paste a few CSV rows** into the ADD block on `Lunch_Schedule`. Confirm
    they move up into the table and the block empties. Then paste one bad row

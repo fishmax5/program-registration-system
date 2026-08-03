@@ -2783,6 +2783,17 @@ function refreshFormsForChangedLunchDate(changedDate, location) {
 // 2. SHEET SETUP UTILITY  (initSheet)
 // ============================================================================
 
+/**
+ * FIRST-TIME setup for a workbook that has nothing in it yet: build every
+ * tab, create the template form, install the triggers, and hand off to the
+ * calendar import.
+ *
+ * NOT the right tool for a workbook already carrying data. To roll a layout
+ * change onto a live workbook — new columns, a new panel, changed
+ * formatting — use rebuildLayoutFromSheet() instead: same redraw, from the
+ * rows already on the tabs, with no calendar read, no form write, and no
+ * triage pass that could remove a session.
+ */
 function initSheet() {
   if (!requireAuthorizedAdmin('Initialize sheet setup')) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2822,6 +2833,124 @@ function initSheet() {
 
   toastIfPossible('Sheet setup complete ✅ — next: "Import Everything (First Run)".');
   log('initSheet complete.');
+}
+
+/**
+ * REBUILD EVERY TAB INTO THE CURRENT LAYOUT, USING ONLY WHAT IS ALREADY IN
+ * THE WORKBOOK. No calendar, no forms, no Drive, no network at all.
+ *
+ * The problem this exists for: shipping a layout change to a workbook that is
+ * already carrying a year of real data. initSheet() rebuilds the tabs, but a
+ * calendar sync is the normal partner to it, and on a busy calendar that is
+ * slow, quota-hungry, and — via triageDeletedSessions() — the one path in the
+ * system that can REMOVE sessions and shunt their registrants to triage. None
+ * of that is wanted when the only thing that actually changed is where the
+ * columns sit.
+ *
+ * So this is the same rebuild with every outward-facing step removed:
+ *
+ *   REBUILT (from the rows already on each tab)
+ *     Config (older layouts are backed up, current ones kept as-is)
+ *     Master_Program_Dashboard    — with triage OFF
+ *     Lunch_and_Event_Registrants — including the Quick Mark panel
+ *     Deleted_Event_Triage
+ *     Lunch_Schedule              — including the new ADD block
+ *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
+ *     Member_Roll / Program_Options — staff columns never touched
+ *     Tab order, column widths, dropdowns, conditional formatting
+ *
+ *   NOT TOUCHED
+ *     The calendars.       Nothing is read from or written to them.
+ *     The registration forms. No form is opened, created, or relabelled.
+ *     The triggers.        Automation keeps running exactly as it was.
+ *     The template form.   Not created or version-checked.
+ *
+ * EVERY ROW IS READ BEFORE ANY TAB IS CLEARED. Each render is otherwise a
+ * read-then-clear-then-write on its own tab, which is fine in isolation, but
+ * reading up front also means the confirmation dialog can state real counts —
+ * and a dialog that says "1,240 registrant rows" is one somebody can actually
+ * check before agreeing to it.
+ *
+ * Safe to run repeatedly. Nothing here is order-dependent on a sync having
+ * happened, and running it twice produces the same workbook.
+ */
+function rebuildLayoutFromSheet() {
+  if (!requireAuthorizedAdmin('Rebuild Layout (from sheet)')) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const read = (name, headers, marker) => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return [];
+    try {
+      return name === SHEET_NAMES.LUNCH_SCHEDULE
+        ? readLunchScheduleRows(sheet)
+        : readAllSectionedRows(sheet, headers, marker);
+    } catch (err) {
+      log(`⚠️ Rebuild: could not read "${name}" (${err}) — treating it as empty.`);
+      return [];
+    }
+  };
+
+  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const registrantRows = read(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+  const triageRows = read(SHEET_NAMES.TRIAGE, HEADERS.Deleted_Event_Triage, 'Event_ID');
+  const menuRows = read(SHEET_NAMES.LUNCH_SCHEDULE, HEADERS.Lunch_Schedule, 'Event_Date');
+
+  // A workbook with no sessions has nothing to rebuild FROM, and quietly
+  // producing a set of correctly-formatted empty tabs would look like success
+  // while destroying the "wait, where did everything go?" signal.
+  if (sessionRows.length === 0 && registrantRows.length === 0 && menuRows.length === 0) {
+    const message = 'Nothing to rebuild from — this workbook has no sessions, registrants or menu rows yet. ' +
+      'Use "Import Everything (First Run)" to bring the calendar in.';
+    log(`rebuildLayoutFromSheet: ${message}`);
+    toastIfPossible(message);
+    return null;
+  }
+
+  if (!confirmConsequentialAction('Rebuild every tab from the data already here?',
+    `Found: ${sessionRows.length} session(s), ${registrantRows.length} registrant row(s), ` +
+    `${triageRows.length} triaged row(s), ${menuRows.length} menu row(s).\n\n` +
+    'Every tab is redrawn in the current layout using exactly these rows. ' +
+    'Your hand-entered columns, notes and manual rows are all kept.\n\n' +
+    'The calendars, the registration forms and the automatic triggers are NOT touched — ' +
+    'nothing outside this spreadsheet changes, and no session can be removed.', false)) {
+    return null;
+  }
+
+  toastIfPossible('Rebuilding every tab from the data already here…');
+
+  buildConfigSheet(ss);
+
+  // Triage OFF — see renderProgramDashboard(). This is what makes the whole
+  // operation calendar-free, and it is the single most important line here.
+  renderProgramDashboard(true, { sessionRows, skipTriage: true, registrantRows });
+
+  renderRegistrantsSheet(true, registrantRows);
+  renderTriageSheet(true, triageRows);
+  renderLunchScheduleSheet(true, menuRows);
+
+  // After the tabs above, in this order, on purpose:
+  //  - counts are recomputed from the registrant rows onto the session table;
+  //  - the lunch dashboard reads the menu index, which only becomes correct
+  //    once Lunch_Schedule has been rewritten (renderLunchScheduleSheet()
+  //    invalidates that cache);
+  //  - the memory tabs are derived from both of the tabs above them.
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  if (registrySheet && registrantsSheet) {
+    recomputeEventRegistryCounts(registrySheet, registrantsSheet, registrantRows);
+  }
+  updateMasterLunchDashboard(registrantRows);
+  refreshMemoryTabs(registrantRows, sessionRows);
+
+  reorderTabs(ss);
+
+  const summary = `Rebuilt from existing data ✅ — ${sessionRows.length} session(s), ` +
+    `${registrantRows.length} registrant row(s), ${menuRows.length} menu row(s). ` +
+    `Calendars, forms and triggers untouched.`;
+  log(`rebuildLayoutFromSheet: ${summary}`);
+  toastIfPossible(summary);
+  return { sessionRows: sessionRows.length, registrantRows: registrantRows.length, menuRows: menuRows.length };
 }
 
 /**
@@ -3519,6 +3648,7 @@ function buildAppMenu(ui, includeAdmin) {
 
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
+      .addItem('🧱 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
       .addItem('Check Triggers', 'writeTriggers')
       .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
       .addSeparator()
@@ -8437,6 +8567,15 @@ function renderProgramDashboardFromRows(rows) {
  * triage pass didn't rewrite the tab underneath them (see registrantsMoved).
  * Returns { registrantsMoved } so a caller holding those rows knows whether
  * they are still safe to reuse afterward.
+ *
+ * options.sessionRows — already-in-memory session rows, same idea.
+ *
+ * options.skipTriage — do NOT cross-check the sessions against the live
+ * calendars. This is the ONLY thing in a dashboard render that reads outside
+ * the spreadsheet, and it is also the only thing that can remove data, so
+ * rebuildLayoutFromSheet() turns it off: a re-layout must not be able to
+ * decide, on the strength of one unreadable calendar, that a program was
+ * cancelled. Nothing else in here needs the network.
  */
 function renderProgramDashboard(force, options) {
   options = options || {};
@@ -8446,9 +8585,11 @@ function renderProgramDashboard(force, options) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
 
-  let sessionRows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  let sessionRows = options.sessionRows || readAllSectionedRows(sheet, headers, 'Event_ID');
 
-  const triageResult = triageDeletedSessions(sessionRows, map, registrantsSheet);
+  const triageResult = options.skipTriage
+    ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
+    : triageDeletedSessions(sessionRows, map, registrantsSheet);
   sessionRows = triageResult.rows;
 
   sessionRows.forEach(row => {
