@@ -172,25 +172,30 @@ The columns you read first are at the **front**:
 |---|---|
 | `Registered_Count` | What the **forms** say — how many asked for lunch |
 | `Served_Confirmed` | What **actually happened** — how many `Lunch_Served` boxes you ticked on the Registrants tab |
+| `Lunches_Assigned_To_Registrants` | Not editable. Counts registrants whose `Lunch_Assignment` (see the Registrants tab) was explicitly set to this date+location — for reconciling meals eaten on a different day/location than originally registered |
 | `Total_to_Order` | Live formula: `Registered_Count + Standard_Buffer + Tester_Buffer` |
 
-`Served_Confirmed` stays **blank** until you've ticked something — a real `0`
-("nobody came") and "not counted yet" mean very different things, so it won't
-claim the first. It counts every tick, including walk-ins who never registered.
+`Served_Confirmed` and `Lunches_Assigned_To_Registrants` both stay **blank**
+until something has actually been ticked/assigned — a real `0` ("nobody came")
+and "not counted yet" mean very different things, so neither claims the first.
+`Served_Confirmed` counts every tick, including walk-ins who never registered.
 
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
-system never overwrites them. They now sit at the **end** of the row, because
-they're reconciliation detail and were pushing the numbers you actually order
-against off the screen:
+system never overwrites them. The buffer amounts sit at the very **end** of
+the row, because they're set once from Config and rarely touched again, and
+having them up near the counts you read every day pushed those numbers off
+the screen:
 
-`Standard_Buffer` · `Tester_Buffer` · `Actual_Ordered` · `Day_1_In-Person` ·
-`Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` · `Total_Consumed` ·
-`Thrown_Away` · `Discrepancy`
+`Actual_Ordered` · `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` ·
+`Subs_Takeaway` · `Total_Consumed` · `Thrown_Away` · `Discrepancy` ·
+`Standard_Buffer` · `Tester_Buffer`
 
-Because there's one row per date **per location**, each row is **shaded by
-location** — Narberth light orange, Ashbridge light green, Zoom lavender — so a
-week with several sites reads as blocks of color. The `Event_Date` cell keeps
-its month tint and the ✍️ columns keep their yellow.
+The `Location` cell itself is **color-coded** — Narberth light orange,
+Ashbridge light green, Zoom lavender — the same convention as every other tab,
+so you can scan down the column and tell locations apart at a glance without a
+whole row of tint competing with the manual-override purple, the grey
+"Not Serving" cell, and the ✍️ yellow hand-entry columns. The `Event_Date` cell
+keeps its own month tint.
 
 ### 3. Lunch_and_Event_Registrants
 One row **per person, per session** — guests get their own rows, not a note on
@@ -203,18 +208,24 @@ without hunting for their row:
 
 1. **Location** — pick from the dropdown.
 2. **Program** — the list narrows to programs at that location.
-3. **Name** — narrows again to people registered for it.
-4. Tick **✓ Attended** or **✓ Lunch**.
+3. **Date** — optional. Narrows to the exact session, when you need it.
+4. **Name** — narrows again to people registered for it (on that date, if one
+   was picked).
+5. Tick **✓ Attended** or **✓ Lunch**.
 
 That's it. The system finds that person's row wherever it is, ticks it, tells
 you what it did on the line underneath, and clears itself for the next person.
-The **Clear** box resets it if you pick wrong.
+The **Clear** box resets it if you pick wrong. Guests brought by another
+registrant show up in the Program/Date/Name dropdowns exactly like anyone
+else — there's no separate step for them.
 
 - **Ticking Lunch also ticks Attended** — you can't be fed without being there.
-- If someone's registered for **several dates** of the same program, it marks
-  the nearest one (today first, then the next upcoming) and says so, e.g.
-  *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
-  the nearest)."* If that's the wrong one, tick the right row directly.
+- **Date is optional.** Leave it blank and, if someone's registered for
+  **several dates** of the same program, it marks the nearest one (today
+  first, then the next upcoming) and says so, e.g. *"Marked attendance for
+  Marion Webb — Tue, Aug 5 (2 sessions matched — marked the nearest)."* Pick a
+  Date instead to mark that **exact** session with no guessing — useful when
+  the nearest one isn't the one actually being served.
 - If nothing matches, it says so and **changes nothing** — no silent guesses.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
@@ -232,6 +243,8 @@ scrolling.
 | `Location` / `Event` | Which program and location this row belongs to |
 | ✍️ `Attended` | **Yours to tick.** They turned up |
 | ✍️ `Lunch_Served` | **Yours to tick.** They were actually fed — this is what `Served_Confirmed` on the lunch dashboard counts |
+| ✍️ `Serving_Method` | **Yours to set.** How the meal was served — Day 1 In-Person, Day 1 Takeaway, Subs In-Person, Subs Takeaway |
+| ✍️ `Lunch_Assignment` | **Yours to set.** A dropdown of every scheduled lunch (from Lunch_Schedule) — set it when this person's meal should count against a *different* date/location than the one they registered for. Rolls up into `Lunches_Assigned_To_Registrants` on Master_Lunch_Dashboard |
 | `Person_Type` | `Attendee` (registered themselves) or `Guest` |
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
@@ -285,6 +298,32 @@ say **no** to just save it here and let the next Sync Cal apply it. Useful when
 you're part-way through typing a week's menu and don't want each keystroke
 rewriting live forms.
 
+#### Adding rows the easy way
+
+Typing rows by hand works, but the tab is sorted and split into Upcoming/Past
+sections, so finding — or creating — the right row gets tedious. Two menu
+items do it for you instead:
+
+**Add Lunch Schedule Entry** — one row, a few prompts: Location, date, Type,
+description, shorthand. Cancel any prompt and nothing is changed.
+
+**Add Lunch Schedule Entries (Batch)** — a whole run at once: Location, a
+start and end date, an optional day-of-week filter (e.g. "Mon,Wed,Fri" — leave
+blank for every day in the range), then ONE Type/description/shorthand applied
+to every date produced. It shows you a summary — including how many existing
+rows it's about to overwrite — before it writes anything. Use this for
+something like "Cold lunch, every Tuesday and Thursday, for the next two
+months." For a run where different dates need different menus, either run it
+more than once (once per menu) or edit the generated rows afterward.
+
+Both **upsert**: a date+location that already has a row gets its
+Type/Meal_Description/Meal_Shorthand overwritten — same as hand-editing that
+row — rather than creating a duplicate. Both also ask **whether to push the
+change out to the forms**, exactly like hand-editing a row does.
+
+Neither needs an authorized admin account — adding a menu row this way is the
+same capability as hand-editing the tab, just faster.
+
 ### 5. Member_Roll and Program_Options — your own notes
 
 These two tabs are the only ones holding knowledge the system can't work out for
@@ -299,11 +338,13 @@ itself. Each is split down the middle:
 
 | Recomputed | Yours |
 |---|---|
-| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
+| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
 
 This is where "Marion always brings her sister" or "cold lunch only, no dairy"
 lives. People stay on the roll even after their sessions age out, so the notes
-don't evaporate.
+don't evaporate. `Confirmed_Member` is a plain checkbox — tick it once you've
+personally verified someone as a real member, independent of how many times
+the recomputed history shows them attending.
 
 **Program_Options** — one row per program per location:
 
@@ -314,7 +355,7 @@ don't evaporate.
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
 ### 6. Config
-Four small settings blocks:
+Five small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold, used to
   pre-fill new lunch rows
@@ -322,6 +363,7 @@ Four small settings blocks:
   inside that window get flagged.
 - **📧 Admin Notifications** — one email address (optional)
 - **🍽️ Lunch Service by Location** — see below
+- **🔗 Registration Link on Calendar** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -344,6 +386,29 @@ If you set the email, you get **at most one message per sync**, and only when
 something needs a person: waitlisted registrants, forms that couldn't be opened,
 and events sent to triage. A quiet sync sends nothing. **Leave it blank to turn
 notifications off.**
+
+**Registration Link on Calendar** controls what a calendar event's
+registration line looks like — useful if that calendar is embedded or shared
+publicly somewhere, where you may not want a stranger able to click straight
+into a registration form from the description.
+
+| Setting | Effect |
+|---|---|
+| **Show** (default) | The description carries a clickable **"📝 Register for …"** link, as always |
+| **Hide** | The description carries a plain, **non-clickable** line instead — something like *"📝 Registration for Yoga Basics is available on our dashboard/website."* |
+
+This **only** ever touches the registration line. The `[Cap: 12]` /
+`[Grouped]`/`[Monthly]` settings brackets are completely unaffected either
+way — the system still reads those from the description exactly as before,
+so switching to **Hide** never resets a program's capacity or grouping.
+
+The **Hide** placeholder still carries a small `[Form: …]` tag — visible,
+the same way `[Cap: 12]` already is, but not a link — so the system can still
+recognize which form an event belongs to if it ever needs to recover that
+without creating a duplicate.
+
+Changing this **asks you to confirm**, and applies to **every** calendar
+event on the **next sync** — nothing to do per-event.
 
 ### 7. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
@@ -428,6 +493,8 @@ Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet:
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
 | **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
+| **Add Lunch Schedule Entry** | Adds/updates one Lunch_Schedule row via a few prompts — see [Adding rows the easy way](#adding-rows-the-easy-way) |
+| **Add Lunch Schedule Entries (Batch)** | Generates a whole run of Lunch_Schedule rows at once |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
 | **Find Leftover Tabs (preview)** | Read-only: reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
 | **Merge + Delete Leftover Tabs** | Folds those tabs into the current ones, then removes them |
@@ -467,6 +534,7 @@ say no:
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
 | Edit a **Lunch_Schedule** menu row | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
+| Change **Registration Link on Calendar** in Config | It rewrites the registration line on every calendar event on the next sync |
 | **Merge + Delete Leftover Tabs** | It deletes tabs (after moving their rows to safety) |
 
 For a cell edit, saying **no puts the old value straight back** — the cell
@@ -532,9 +600,10 @@ Merge + Delete Leftover Tabs, `initSheet()`, `cancelBootstrapCalendars()`,
 `confirmLargeTriage()`, `restoreTriagedRegistrants()`,
 `recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`.
 
-**Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, and
-everyone's ability to register, edit rows, and view every dashboard. Ordinary
-day-to-day use needs no special account.
+**Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, Add
+Lunch Schedule Entry (individual and batch), and everyone's ability to
+register, edit rows, and view every dashboard. Ordinary day-to-day use needs
+no special account.
 
 If someone outside that list runs a gated action, nothing happens — no tabs
 rebuilt, no triggers touched, no data changed — and they see a toast (and the
@@ -573,8 +642,9 @@ let the next sync do it.
 
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
-**Lunch_and_Event_Registrants** — location, program, name, then tick Attended or
-Lunch. See [that tab's section](#3-lunch_and_event_registrants).
+**Lunch_and_Event_Registrants** — location, program, optionally a date, then
+name, then tick Attended or Lunch. See
+[that tab's section](#3-lunch_and_event_registrants).
 
 **Check how many lunches actually went out**
 Compare `Registered_Count` (what the forms said) with `Served_Confirmed` (what

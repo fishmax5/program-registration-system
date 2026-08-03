@@ -16,10 +16,9 @@
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.
- *      Every row is one date PER LOCATION, so the row itself is tinted by
- *      location (LOCATION_COLOR_MAP / buildLocationRowTintRules()) — except
- *      the month-tinted Event_Date cell and the yellow hand-entry columns,
- *      which keep their own meaning.
+ *      Every row is one date PER LOCATION; the Location cell itself is
+ *      tinted by location (LOCATION_COLOR_MAP / buildLocationColorRules()),
+ *      the same convention as every other tab.
  *    - Lunch_and_Event_Registrants : one row per person per session, split
  *      into "Upcoming Registrants" / "Past Registrants" sub-tables. Leads
  *      with Event_Date (like every other date-bearing tab), then Location
@@ -474,10 +473,11 @@ function confirmCellEditOrRevert(e, title, detail) {
 
 /** Calendar ID -> human-readable location name. */
 const CALENDAR_MAP = {
-  'c_a1a2cd2f999f1bed82d1f21c59a1cb381485a28297a3ff1b8d394e2ad5fdc282@group.calendar.google.com': 'Narberth',
-  'c_e75805d7180c15888ed58e5625878088059c001053181bbaffceac8f6a64e1dd@group.calendar.google.com': 'Ashbridge',
-  'c_562b3332ef81d94b74100a3075f00d0f68061a01edcf46ea1378872c60d91c07@group.calendar.google.com': 'Zoom'
+  'c7706e8a3c057e02a4adca78268262aeb7116b9717b9325926bf746728566faa@group.calendar.google.com': 'Narberth',
+  '1073e5cc279f84bff722d0b03695b38011d845e6230e2f704adab49d31c3d652@group.calendar.google.com': 'Ashbridge',
+  'ac990016bc9f04e0d7ef9da8b463367cd34b2aa5a137535d876af9ae4db2f675@group.calendar.google.com': 'Zoom'
 };
+
 
 /**
  * Hardcoded soft colors per "Month Year" label — used to tint the Event_Date
@@ -642,9 +642,8 @@ function isGroupedTypeTag(value) {
 }
 
 /**
- * One color per location, used BOTH for the Location cell itself and (on
- * Master_Lunch_Dashboard) for the whole row band — see
- * buildLocationColorRules() / buildLocationRowTintRules().
+ * One color per location, used for the Location cell on every tab that
+ * carries one — see buildLocationColorRules().
  */
 const LOCATION_COLOR_MAP = {
   'Narberth': '#FCE5CD',  // light orange
@@ -693,27 +692,38 @@ const HEADERS = {
   // a glance.
   // Attended and Lunch_Served are the two DAY-OF columns: they're what staff
   // tick on the day, and they sit immediately after Name so marking a row is
-  // one glance and one click, with no horizontal scrolling. Everything the
-  // form supplied (Lunch_Type, Party_Size, Form_Source...) follows behind
-  // them, and the internal keys trail at the end.
+  // one glance and one click, with no horizontal scrolling. Serving_Method
+  // and Lunch_Assignment follow right behind — they only mean anything once
+  // Lunch_Served is ticked, recording HOW that meal was served (Day 1
+  // in-person, takeaway, ...) and WHICH scheduled lunch (see Lunch_Schedule)
+  // it should be counted against, for the case someone eats a meal that
+  // isn't their own registered date's. Everything else the form supplied
+  // (Lunch_Type, Party_Size, Form_Source...) follows behind them, and the
+  // internal keys trail at the end.
   Lunch_and_Event_Registrants: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+    'Serving_Method', 'Lunch_Assignment',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
-  // Registered_Count (what the forms say) and Served_Confirmed (what was
-  // actually ticked off on the Registrants tab) sit side by side on purpose —
-  // planned versus real is the comparison this tab exists to support.
-  // The hand-entry buffer/consumption columns now trail at the END: they're
-  // reconciliation detail, and having them between the counts pushed the
-  // numbers staff actually order against off the screen.
+  // Registered_Count (what the forms say), Served_Confirmed (what was
+  // actually ticked off on the Registrants tab) and
+  // Lunches_Assigned_To_Registrants (how many registrant rows are actually
+  // assigned to THIS date+location's lunch — see Lunch_Assignment above) sit
+  // side by side on purpose: planned versus real versus reconciled is the
+  // comparison this tab exists to support. Lunches_Assigned_To_Registrants
+  // is computed, never hand-edited (see updateMasterLunchDashboard()).
+  // The hand-entry buffer columns now trail at the very END: they're set once
+  // from Config and rarely touched again, and having them up near the counts
+  // staff actually read every day pushed those numbers off the screen.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
-    'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
-    'Standard_Buffer', 'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway',
-    'Subs_In-Person', 'Subs_Takeaway', 'Total_Consumed', 'Thrown_Away',
-    'Discrepancy', 'Manual_Override'
+    'Registered_Count', 'Served_Confirmed', 'Lunches_Assigned_To_Registrants',
+    'Total_to_Order', 'Actual_Ordered',
+    'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway',
+    'Total_Consumed', 'Thrown_Away', 'Discrepancy',
+    'Standard_Buffer', 'Tester_Buffer', 'Manual_Override'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
   // (see CATERED_LUNCH_TYPES vs LUNCH_TYPE_OPTIONS below).
@@ -725,6 +735,7 @@ const HEADERS = {
   // landing in triage rows automatically, with no per-column wiring.
   Deleted_Event_Triage: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+    'Serving_Method', 'Lunch_Assignment',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
@@ -738,13 +749,15 @@ const HEADERS = {
    * every time.
    *
    * Times_Seen/First_Seen/Last_Seen/Locations/Usual_Lunch are RECOMPUTED from
-   * the registrant history on every refresh; Usual_Guests, Dietary_Notes,
-   * Contact and Staff_Notes are never touched once written — see
-   * MEMBER_ROLL_STAFF_COLUMNS.
+   * the registrant history on every refresh; Confirmed_Member, Usual_Guests,
+   * Dietary_Notes, Contact and Staff_Notes are never touched once written —
+   * see MEMBER_ROLL_STAFF_COLUMNS. Confirmed_Member is a plain checkbox: it
+   * marks someone staff have actually verified as a real member, independent
+   * of how many times the recomputed history shows them attending.
    */
   Member_Roll: [
     'Name', 'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations', 'Usual_Lunch',
-    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'
+    'Confirmed_Member', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'
   ],
   /**
    * Program_Options — one row per unique PROGRAM (Clean_Title x Location),
@@ -758,7 +771,9 @@ const HEADERS = {
 };
 
 /** Member_Roll columns the refresh must never overwrite — the staff's own knowledge. */
-const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+const MEMBER_ROLL_STAFF_COLUMNS = ['Confirmed_Member', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+/** Member_Roll columns rendered as real checkboxes rather than free text. */
+const MEMBER_ROLL_CHECKBOX_COLUMNS = ['Confirmed_Member'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'];
 
@@ -799,9 +814,14 @@ const CONFIG_LAYOUT = {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
     headers: ['Location', 'Catering_Policy']
+  },
+  REGISTRATION_LINK: {
+    title: '🔗 Registration Link on Calendar',
+    startCol: 13,
+    headers: ['Registration_Link_Visibility']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 const CONFIG_HEADER_ROW = 2;
@@ -812,6 +832,29 @@ const CATERED_LUNCH_TYPES = ['Hot', 'Cold'];
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
 /** Lunch_and_Event_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
+/** Lunch_and_Event_Registrants' Serving_Method domain — how THIS person's meal was actually served, day-of. */
+const SERVING_METHOD_OPTIONS = ['Day 1 In-Person', 'Day 1 Takeaway', 'Subs In-Person', 'Subs Takeaway'];
+
+/**
+ * Config's "🔗 Registration Link on Calendar" toggle.
+ *
+ *   SHOW  the description gets the clickable "📝 Register for X" link, same
+ *         as always.
+ *   HIDE  the description gets a plain, non-clickable placeholder line
+ *         instead — for a calendar that's embedded/shared publicly, where a
+ *         raw registration link isn't something you want a stranger clicking
+ *         straight into. The [Cap:]/[Grouped] settings brackets are NOT
+ *         affected either way — this only ever touches the registration
+ *         line, never the settings this script reads back from the
+ *         description (see resolveEventSettings()).
+ *
+ * The placeholder still carries the form ID in a small `[Form: ...]` tag —
+ * visible, same as the [Cap:]/[Grouped] brackets already are, but not a link
+ * — so findExistingFormIdFromEvents() can still recover a lost form registry
+ * from the calendar even with the link hidden.
+ */
+const REGISTRATION_LINK_VISIBILITY_OPTIONS = ['Show', 'Hide'];
+const DEFAULT_REGISTRATION_LINK_VISIBILITY = 'Show';
 
 /**
  * A location's STANDING catering posture. Until this existed the only way
@@ -1357,32 +1400,6 @@ function buildLocationColorRules(ranges) {
   );
 }
 
-/**
- * Same colors as buildLocationColorRules(), but painted across a row BAND
- * rather than just the Location cell, keyed off that row's own Location
- * column — so a lunch schedule mixing several locations on the same date
- * reads as blocks of color instead of one tinted cell per row.
- *
- * excludeCols (1-based) carves out the cells that already carry their own
- * meaning — the month-tinted Event_Date, the yellow hand-entry columns — the
- * same way buildManualOverrideRowTintRules() does. Push these rules AFTER any
- * more specific rule over the same cells (the purple manual-override tint,
- * the grey "Not Serving" type cell): the first matching rule wins.
- */
-function buildLocationRowTintRules(sheet, dataStartRow, numRows, numCols, locationCol, excludeCols) {
-  if (numRows < 1 || !locationCol) return [];
-  const colLetter = columnToLetter(locationCol);
-  const ranges = buildRowRangesExcludingColumns(sheet, dataStartRow, numRows, numCols, excludeCols);
-  if (ranges.length === 0) return [];
-  return Object.keys(LOCATION_COLOR_MAP).map(loc =>
-    SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(`=$${colLetter}${dataStartRow}="${loc}"`)
-      .setBackground(LOCATION_COLOR_MAP[loc])
-      .setRanges(ranges)
-      .build()
-  );
-}
-
 /** Converts a 1-based column index to its A1 letter(s) (1 -> 'A', 27 -> 'AA'). */
 function columnToLetter(col) {
   let letter = '';
@@ -1621,6 +1638,8 @@ let __adminNotificationEmailCache = null;
 let __cateringPolicyIndexCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
+let __lunchAssignmentIndexCache = null;
+let __registrationLinkVisibilityCache = null;
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -1661,12 +1680,62 @@ function invalidateMealInfoIndex() {
   __mealInfoIndexCache = null;
 }
 
+/**
+ * Every real (catered) Lunch_Schedule date+location, one option per row, as
+ * { label, dateKey, location }. Backs BOTH the Registrants "Lunch_Assignment"
+ * dropdown (getLunchAssignmentOptions()) and buildDashboardRollup()'s reverse
+ * lookup for Lunches_Assigned_To_Registrants — built from the exact same rows
+ * with the exact same label format, so a label picked from the dropdown
+ * always resolves back to exactly the Lunch_Schedule row it came from.
+ * "Not Serving" rows are excluded — there is no lunch to assign anyone to.
+ */
+function getLunchAssignmentIndex() {
+  if (__lunchAssignmentIndexCache) return __lunchAssignmentIndexCache;
+  const byLabel = {};
+  const labels = [];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE) : null;
+  if (sheet) {
+    const headers = HEADERS.Lunch_Schedule;
+    const map = getIndexMap(headers);
+    readAllSectionedRows(sheet, headers, 'Event_Date').forEach(row => {
+      const type = String(row[map['Type']] || '').trim();
+      if (!type || type === 'Not Serving') return;
+      const d = coerceDate(row[map['Event_Date']]);
+      const location = String(row[map['Location']] || '').trim();
+      if (!d || !location) return;
+      const shorthand = String(row[map['Meal_Shorthand']] || '').trim();
+      const label = `${formatDateLabel(d)} — ${location}${shorthand ? ` (${shorthand})` : ''}`;
+      if (byLabel[label]) return; // same date+location+shorthand already seen
+      byLabel[label] = { dateKey: formatDateKey(d), location };
+      labels.push(label);
+    });
+  }
+  __lunchAssignmentIndexCache = { byLabel, labels };
+  return __lunchAssignmentIndexCache;
+}
+
+/** Sorted dropdown options for Lunch_Assignment — every scheduled lunch, oldest first. */
+function getLunchAssignmentOptions() {
+  const index = getLunchAssignmentIndex();
+  return index.labels.slice().sort((a, b) => {
+    const da = index.byLabel[a], db = index.byLabel[b];
+    return da.dateKey === db.dateKey ? da.location.localeCompare(db.location) : (da.dateKey < db.dateKey ? -1 : 1);
+  });
+}
+
+/** Called by renderLunchScheduleSheet() — the only thing that rewrites the tab this index is built from. */
+function invalidateLunchAssignmentIndex() {
+  __lunchAssignmentIndexCache = null;
+}
+
 /** Called by buildConfigSheet() — the only thing that rewrites/seeds the Config tab. */
 function invalidateConfigCaches() {
   __mealBufferIndexCache = null;
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __cateringPolicyIndexCache = null;
+  __registrationLinkVisibilityCache = null;
 }
 
 /**
@@ -2106,12 +2175,22 @@ function handleLunchScheduleEdit(e, sheet) {
   // Re-sorting the tab is harmless and always safe to do.
   renderLunchScheduleSheet();
 
+  offerToPushLunchScheduleChanges(dateLocationPairs);
+}
+
+/**
+ * Shared by handleLunchScheduleEdit() and the Add Lunch Schedule Entry/Batch
+ * menu actions: offers to push a set of changed {date, location} pairs out
+ * to their forms right now.
+ *
+ * Pushing is NOT harmless: it rewrites the visible date labels on live
+ * registration forms, and can add or remove the lunch question entirely
+ * (see syncLunchQuestionsOnForm). Someone mid-way through typing a menu
+ * doesn't necessarily want that yet, so this always asks first.
+ */
+function offerToPushLunchScheduleChanges(dateLocationPairs) {
   if (dateLocationPairs.length === 0) return;
 
-  // Pushing the menu out to forms is NOT harmless: it rewrites the visible
-  // date labels on live registration forms, and can add or remove the lunch
-  // question entirely (see syncLunchQuestionsOnForm). Someone mid-way through
-  // typing a menu doesn't necessarily want that yet.
   const dateList = dateLocationPairs
     .map(p => `${formatDateLabel(p.date)}${p.location ? ` (${p.location})` : ''}`)
     .slice(0, 5)
@@ -2188,6 +2267,270 @@ function refreshFormsForChangedLunchDate(changedDate, location) {
 
 
 // ============================================================================
+// 1d. ADD TO LUNCH SCHEDULE  (menu-driven, single row or a whole batch)
+// ============================================================================
+//
+// Hand-typing a row is fine for one date, but finding the right spot in a
+// tab that's sorted and split into Upcoming/Past sections — or typing out
+// twenty rows for a recurring menu — is exactly the kind of thing worth a
+// couple of prompts instead. Both menu items below UPSERT: a date+location
+// that already has a row gets its Type/Meal_Description/Meal_Shorthand
+// overwritten (same as hand-editing that row directly) rather than adding a
+// duplicate.
+//
+// Neither of these requires an authorized admin account: adding a menu row
+// is exactly what hand-editing Lunch_Schedule already lets anyone do (see
+// handleLunchScheduleEdit()) — this is just a faster way to do the same
+// thing, not a new capability.
+// ============================================================================
+
+/**
+ * Adds or updates one row per {date, location, type, description, shorthand}
+ * entry on Lunch_Schedule, then re-renders the tab. Returns the {date,
+ * location} pairs touched, so a caller can offer to push the change out to
+ * registration forms the same way a manual edit does (see
+ * offerToPushLunchScheduleChanges()).
+ */
+function applyLunchScheduleEntries(entries) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(sheet, headers, 'Event_Date');
+
+  const byKey = {};
+  rows.forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return;
+    byKey[`${formatDateKey(d)}|${row[map['Location']]}`] = row;
+  });
+
+  const touched = [];
+  let added = 0;
+  let updated = 0;
+  entries.forEach(entry => {
+    const key = `${formatDateKey(entry.date)}|${entry.location}`;
+    let row = byKey[key];
+    if (row) {
+      updated++;
+    } else {
+      row = new Array(headers.length).fill('');
+      row[map['Event_Date']] = entry.date;
+      row[map['Location']] = entry.location;
+      rows.push(row);
+      byKey[key] = row;
+      added++;
+    }
+    row[map['Type']] = entry.type;
+    row[map['Meal_Description']] = entry.description || '';
+    row[map['Meal_Shorthand']] = entry.shorthand || '';
+    touched.push({ date: entry.date, location: entry.location });
+  });
+
+  renderLunchScheduleSheet(false, rows);
+  return { touched, added, updated };
+}
+
+/** How many of `dates` already have a Lunch_Schedule row for `location` — used to warn before a batch add overwrites them. */
+function countExistingLunchScheduleRows(dates, location) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  if (!sheet) return 0;
+  const headers = HEADERS.Lunch_Schedule;
+  const map = getIndexMap(headers);
+  const existingKeys = new Set();
+  readAllSectionedRows(sheet, headers, 'Event_Date').forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (d) existingKeys.add(`${formatDateKey(d)}|${row[map['Location']]}`);
+  });
+  return dates.filter(d => existingKeys.has(`${formatDateKey(d)}|${location}`)).length;
+}
+
+/** Prompts for a Location, validated against CALENDAR_MAP's location names (case-insensitive). Returns null on cancel or an invalid entry. */
+function promptForLocation(ui) {
+  const options = Object.values(CALENDAR_MAP);
+  const result = ui.prompt('Location', `Which location? (${options.join(' / ')})`, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const match = options.filter(o => o.toLowerCase() === typed.toLowerCase())[0];
+  if (!match) {
+    ui.alert(`"${typed}" isn't one of: ${options.join(', ')}. Nothing was added — try again.`);
+    return null;
+  }
+  return match;
+}
+
+/** Prompts for a single date (anything coerceDate() can parse, e.g. "8/5/2026"). Returns null on cancel or an invalid entry. */
+function promptForDate(ui, label) {
+  const result = ui.prompt(label, 'Enter a date, e.g. 8/5/2026', ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const d = coerceDate(typed);
+  if (!d) {
+    ui.alert(`"${typed}" doesn't look like a date. Nothing was added — try again.`);
+    return null;
+  }
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Prompts for a Type, validated against LUNCH_TYPE_OPTIONS. Returns null on cancel or an invalid entry. */
+function promptForLunchType(ui) {
+  const result = ui.prompt('Type', `${LUNCH_TYPE_OPTIONS.join(' / ')}?`, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  const match = LUNCH_TYPE_OPTIONS.filter(o => o.toLowerCase() === typed.toLowerCase())[0];
+  if (!match) {
+    ui.alert(`"${typed}" isn't one of: ${LUNCH_TYPE_OPTIONS.join(', ')}. Nothing was added — try again.`);
+    return null;
+  }
+  return match;
+}
+
+/** Prompts for free text. Returns '' for a blank OK, or null on Cancel (so callers can tell "left blank" apart from "abandon everything"). */
+function promptForOptionalText(ui, title, message) {
+  const result = ui.prompt(title, message, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  return result.getResponseText().trim();
+}
+
+/** Weekday abbreviations accepted by promptForWeekdays(), matching Date.getDay() (0=Sun..6=Sat). */
+const WEEKDAY_ABBREVIATIONS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+/**
+ * Prompts for a comma-separated weekday filter for the batch add (e.g.
+ * "Mon,Wed,Fri"). A blank answer means every day in the range. Returns a Set
+ * of Date.getDay() values (empty = no filter), or null on cancel/an
+ * unrecognized day name.
+ */
+function promptForWeekdays(ui) {
+  const result = ui.prompt('Which days of the week?',
+    'Comma-separated, e.g. "Mon,Wed,Fri" — leave blank for every day in the range.', ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const typed = result.getResponseText().trim();
+  if (!typed) return new Set(); // no filter
+
+  const set = new Set();
+  const unrecognized = [];
+  typed.split(',').forEach(part => {
+    const trimmed = part.trim();
+    if (!trimmed) return;
+    const key = trimmed.slice(0, 3).toLowerCase();
+    if (WEEKDAY_ABBREVIATIONS[key] !== undefined) set.add(WEEKDAY_ABBREVIATIONS[key]);
+    else unrecognized.push(trimmed);
+  });
+  if (unrecognized.length > 0) {
+    ui.alert(`Didn't recognize: ${unrecognized.join(', ')}. Use Sun/Mon/Tue/Wed/Thu/Fri/Sat. Nothing was added — try again.`);
+    return null;
+  }
+  return set;
+}
+
+/**
+ * Menu item: "Add Lunch Schedule Entry". Adds (or updates) ONE Lunch_Schedule
+ * row via a short series of prompts, so a single date+location doesn't
+ * require finding the right row in a tab that's sorted and split into
+ * Upcoming/Past sections. Cancelling any prompt aborts with nothing changed.
+ */
+function addLunchScheduleEntryUi() {
+  const ui = SpreadsheetApp.getUi();
+
+  const location = promptForLocation(ui);
+  if (!location) return;
+
+  const date = promptForDate(ui, 'What date?');
+  if (!date) return;
+
+  const type = promptForLunchType(ui);
+  if (!type) return;
+
+  const description = promptForOptionalText(ui, 'Meal description',
+    'e.g. "Turkey sandwich, chips, apple" — leave blank if none.');
+  if (description === null) return;
+
+  const shorthand = promptForOptionalText(ui, 'Meal shorthand',
+    'A short label registrants see on the form, e.g. "Turkey Sub". Leave blank if none.');
+  if (shorthand === null) return;
+
+  const result = applyLunchScheduleEntries([{ date, location, type, description, shorthand }]);
+  const verb = result.updated > 0 ? 'Updated existing' : 'Added';
+  toastIfPossible(`${verb} row for ${formatDateLabel(date)} (${location}) on Lunch_Schedule ✅`);
+  offerToPushLunchScheduleChanges(result.touched);
+}
+
+/**
+ * Menu item: "Add Lunch Schedule Entries (Batch)". Generates a whole run of
+ * Lunch_Schedule rows at once — one location, one date range, an optional
+ * weekday filter, and ONE Type/description/shorthand applied to every date
+ * produced. For different menus on different dates in the same run, use
+ * "Add Lunch Schedule Entry" (individual) instead, or edit the generated
+ * rows afterward — this is deliberately a bulk tool, not a per-row editor.
+ */
+function addLunchScheduleBatchUi() {
+  const ui = SpreadsheetApp.getUi();
+
+  const location = promptForLocation(ui);
+  if (!location) return;
+
+  const startDate = promptForDate(ui, 'Start date (inclusive)?');
+  if (!startDate) return;
+
+  const endDate = promptForDate(ui, 'End date (inclusive)?');
+  if (!endDate) return;
+  if (endDate < startDate) {
+    ui.alert('End date is before the start date — nothing was added.');
+    return;
+  }
+
+  const weekdays = promptForWeekdays(ui);
+  if (weekdays === null) return;
+
+  const type = promptForLunchType(ui);
+  if (!type) return;
+
+  const description = promptForOptionalText(ui, 'Meal description (applies to every date)',
+    'e.g. "Turkey sandwich, chips, apple" — leave blank if none.');
+  if (description === null) return;
+
+  const shorthand = promptForOptionalText(ui, 'Meal shorthand (applies to every date)',
+    'A short label registrants see on the form, e.g. "Turkey Sub". Leave blank if none.');
+  if (shorthand === null) return;
+
+  const dates = [];
+  for (const d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    if (weekdays.size === 0 || weekdays.has(d.getDay())) dates.push(new Date(d));
+  }
+
+  if (dates.length === 0) {
+    ui.alert('No dates matched that range/weekday combination — nothing was added.');
+    return;
+  }
+
+  const overwriting = countExistingLunchScheduleRows(dates, location);
+  const weekdayNote = weekdays.size > 0
+    ? ` (${Array.from(weekdays).sort().map(n => {
+        const abbr = Object.keys(WEEKDAY_ABBREVIATIONS).find(k => WEEKDAY_ABBREVIATIONS[k] === n);
+        return abbr.charAt(0).toUpperCase() + abbr.slice(1);
+      }).join(', ')} only)`
+    : '';
+  const detail = `This adds ${dates.length} Lunch_Schedule row(s) for ${location}, ` +
+    `${formatDateLabel(startDate)} through ${formatDateLabel(endDate)}${weekdayNote}, ` +
+    `all as "${type}"${shorthand ? ` — ${shorthand}` : ''}.` +
+    (overwriting > 0 ? `\n\n${overwriting} of those date(s) already have a menu row — they will be overwritten.` : '');
+
+  if (!confirmConsequentialAction(`Add ${dates.length} Lunch_Schedule row(s)?`, detail, false)) {
+    toastIfPossible('Cancelled — nothing was added.');
+    return;
+  }
+
+  const result = applyLunchScheduleEntries(
+    dates.map(date => ({ date, location, type, description, shorthand })));
+  toastIfPossible(`Lunch_Schedule updated: ${result.added} row(s) added, ${result.updated} updated ✅`);
+  offerToPushLunchScheduleChanges(result.touched);
+}
+
+
+// ============================================================================
 // 2. SHEET SETUP UTILITY  (initSheet)
 // ============================================================================
 
@@ -2246,6 +2589,23 @@ function initLunchScheduleSheet(ss) {
       `The new tab tracks one row per date PER LOCATION (with a "Not Serving" Type option) — please migrate anything you still need.`);
   }
   renderLunchScheduleSheet(true);
+}
+
+/**
+ * TEMPORARY — run directly from the Apps Script editor (select this
+ * function in the dropdown, then Run). (Re)builds ONLY the Lunch_Schedule
+ * tab — creates it if missing, renames an old Month-based layout out of the
+ * way if found — without touching Config, the template form, Registrants,
+ * Triage, either dashboard, or triggers the way the full initSheet() does.
+ *
+ * Safe to run more than once. Delete this function once you no longer
+ * need it — it's scaffolding, not part of the normal workflow.
+ */
+function tempInitLunchScheduleOnly() {
+  if (!requireAuthorizedAdmin('Initialize Lunch_Schedule only')) return;
+  initLunchScheduleSheet(SpreadsheetApp.getActiveSpreadsheet());
+  toastIfPossible('Lunch_Schedule initialized ✅');
+  log('tempInitLunchScheduleOnly complete — delete this function when you no longer need it.');
 }
 
 /** Puts tabs in a logical, at-a-glance order. */
@@ -2319,6 +2679,10 @@ const ROW_HEIGHTS = {
   BANNER_HERO: 40,
   HERO_DATA: 34
 };
+
+/** Wrapped-line sizing for Master_Program_Dashboard's "Programs Today" cell — see writeProgramDashboardSheet(). */
+const PROGRAMS_TODAY_LINE_HEIGHT_PX = 16;
+const PROGRAMS_TODAY_MAX_LINES = 4;
 
 /**
  * Writes a section banner at an arbitrary row: text in column A, the banner
@@ -2434,6 +2798,14 @@ function applyZebraStripingBanding(sheet, startRow) {
  * sheet.getLastColumn() hasn't caught up yet this execution. options.force
  * additionally clears any lingering WRAP strategy first (wrapped cells
  * report a fixed/incorrect content width and block autosize).
+ *
+ * Frozen columns are unfrozen for the resize and refrozen immediately after:
+ * autoResizeColumns() measures the frozen pane and the scrolling pane
+ * separately, and a column sitting IN the frozen pane comes back sized to
+ * its (often narrower) frozen-pane rendering instead of its real content —
+ * so a tab with frozen columns would drift out of fit on every render. Every
+ * caller already re-freezes right before calling this, so the count read
+ * here is always the one that's meant to end up back in place.
  */
 function autosizeColumns(sheet, options) {
   options = options || {};
@@ -2441,15 +2813,20 @@ function autosizeColumns(sheet, options) {
   const lastCol = Math.max(sheet.getLastColumn(), options.minCols || 0);
   if (lastCol < 1) return;
 
+  const frozenCols = sheet.getFrozenColumns();
+
   try {
     if (force) {
       const lastRow = Math.max(sheet.getLastRow(), 1);
       sheet.getRange(1, 1, lastRow, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
     }
+    if (frozenCols > 0) sheet.setFrozenColumns(0);
     sheet.autoResizeColumns(1, lastCol);
     applyColumnWidthBuffer(sheet, lastCol);
   } catch (err) {
     log(`autosizeColumns skipped on "${sheet.getName()}": ${err}`);
+  } finally {
+    if (frozenCols > 0) freezeColumnsSafely(sheet, frozenCols);
   }
 }
 
@@ -2572,10 +2949,14 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, policySection.startCol, Object.values(CALENDAR_MAP), CONFIG_DATA_START_ROW, policyRows);
   applyValueListValidationBounded(sheet, policySection.startCol + 1, CATERING_POLICY_OPTIONS, CONFIG_DATA_START_ROW, policyRows);
 
+  const linkSection = CONFIG_LAYOUT.REGISTRATION_LINK;
+  applyValueListValidationBounded(sheet, linkSection.startCol, REGISTRATION_LINK_VISIBILITY_OPTIONS, CONFIG_DATA_START_ROW, 1);
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
   seedCateringPolicyRows(sheet);
+  seedRegistrationLinkVisibilityRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -2671,6 +3052,20 @@ function seedAdminNotificationRow(sheet) {
   if (String(cell.getValue() || '').trim() === '') {
     cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
       + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
+  }
+}
+
+/** Defaults to Show — never silently hides a link nobody asked to hide. */
+function seedRegistrationLinkVisibilityRow(sheet) {
+  const section = CONFIG_LAYOUT.REGISTRATION_LINK;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_REGISTRATION_LINK_VISIBILITY);
+    cell.setNote('Show = the calendar event description carries a clickable "Register for..." link, as always.\n'
+      + 'Hide = the description gets a plain, non-clickable line instead — for a calendar embedded/shared '
+      + 'publicly, where you don\'t want a stranger clicking straight into a registration form. This never '
+      + 'affects the [Cap:]/[Grouped] settings brackets, only the registration line. Takes effect on the next sync.');
+    log(`Seeded default Registration Link visibility (${DEFAULT_REGISTRATION_LINK_VISIBILITY}) on "${SHEET_NAMES.CONFIG}".`);
   }
 }
 
@@ -2804,6 +3199,26 @@ function getAdminNotificationEmail() {
   return email;
 }
 
+/** Config's "🔗 Registration Link on Calendar" setting — 'Show' or 'Hide'. See REGISTRATION_LINK_VISIBILITY_OPTIONS. */
+function getRegistrationLinkVisibility() {
+  if (__registrationLinkVisibilityCache !== null) return __registrationLinkVisibilityCache;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  let visibility = DEFAULT_REGISTRATION_LINK_VISIBILITY;
+  if (sheet) {
+    const section = CONFIG_LAYOUT.REGISTRATION_LINK;
+    const val = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
+    if (REGISTRATION_LINK_VISIBILITY_OPTIONS.indexOf(val) !== -1) visibility = val;
+  }
+  __registrationLinkVisibilityCache = visibility;
+  return visibility;
+}
+
+/** True when Config's Registration Link setting is 'Hide'. */
+function isRegistrationLinkHidden() {
+  return getRegistrationLinkVisibility() === 'Hide';
+}
+
 /**
  * Sends one admin email, if an address is configured. Never throws — a
  * failed notification must not take down the sync that triggered it.
@@ -2891,6 +3306,9 @@ function onOpen() {
     .addItem('Sync Cal', 'syncCalendars')
     .addItem('Sync Registrations', 'syncRegistrations')
     .addItem('Check Triggers', 'writeTriggers')
+    .addSeparator()
+    .addItem('Add Lunch Schedule Entry', 'addLunchScheduleEntryUi')
+    .addItem('Add Lunch Schedule Entries (Batch)', 'addLunchScheduleBatchUi')
     .addSeparator()
     .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
     .addSeparator()
@@ -3121,9 +3539,13 @@ function handleProgramDashboardEdit(e, sheet) {
   if (!confirmCellEditOrRevert(e, `Change ${title} to "${newTag}"?`, detail)) return;
 
   const stamped = writeTypeTagToCalendarEvents(sheet, editedRow, headerMap, newTag);
+  // Plain-text status only — no color or emoji on the cell itself beyond the
+  // standard "this is yours to edit" yellow every editable cell already
+  // gets. What matters is telling staff, in words, whether the change
+  // actually took effect on the calendar or needs a manual follow-up.
   toastIfPossible(stamped > 0
-    ? `Set "${title}" to ${newTag} on ${stamped} calendar event(s) — run Sync Cal to rebuild its form(s).`
-    : `⚠️ Set "${title}" to ${newTag} on the sheet, but no calendar event could be updated — ` +
+    ? `"${title}" is now ${newTag} — ${stamped} calendar event(s) updated. Run Sync Cal to rebuild its form(s).`
+    : `"${title}" was set to ${newTag} on the sheet, but no calendar event could be updated — ` +
       `the next render may revert it. Set [${newTag}] in the event description by hand.`);
 }
 
@@ -3213,17 +3635,30 @@ function setGroupingBracketInDescription(description, newTag) {
 function handleConfigEdit(e, sheet) {
   if (typeof e.value === 'undefined') return; // multi-cell paste
   const editedCol = e.range.getColumn();
+  const editedRow = e.range.getRow();
   const policySection = CONFIG_LAYOUT.CATERING_POLICY;
-  const isPolicyEdit = editedCol === policySection.startCol + 1 &&
-    e.range.getRow() >= CONFIG_DATA_START_ROW;
+  const isPolicyEdit = editedCol === policySection.startCol + 1 && editedRow >= CONFIG_DATA_START_ROW;
 
   if (isPolicyEdit) {
-    const location = String(sheet.getRange(e.range.getRow(), policySection.startCol).getValue() || 'this location');
+    const location = String(sheet.getRange(editedRow, policySection.startCol).getValue() || 'this location');
     const detail = `Lunch service for "${location}" becomes "${e.value}".\n\n` +
       `This changes whether its registration forms ask about lunch at all, and whether its dates ` +
       `appear on the lunch dashboard. Existing forms are updated on the next sync.`;
     if (!confirmCellEditOrRevert(e, `Change lunch service for ${location}?`, detail)) return;
     toastIfPossible(`Lunch service for ${location} set to "${e.value}" — forms update on the next sync.`);
+  }
+
+  const linkSection = CONFIG_LAYOUT.REGISTRATION_LINK;
+  const isLinkVisibilityEdit = editedCol === linkSection.startCol && editedRow === CONFIG_DATA_START_ROW;
+
+  if (isLinkVisibilityEdit) {
+    const detail = e.value === 'Hide'
+      ? `Every calendar event's registration link becomes a plain, non-clickable line instead of a link.\n\n` +
+        `The [Cap:]/[Grouped] settings brackets are unaffected. This applies to every event on the next sync.`
+      : `Every calendar event's registration line goes back to being a clickable "Register for..." link.\n\n` +
+        `This applies to every event on the next sync.`;
+    if (!confirmCellEditOrRevert(e, `${e.value === 'Hide' ? 'Hide' : 'Show'} the registration link on the calendar?`, detail)) return;
+    toastIfPossible(`Registration Link set to "${e.value}" — every event updates on the next sync.`);
   }
 
   // Any Config edit can invalidate a cached read of it, confirmed or not.
@@ -3314,21 +3749,29 @@ function handleRegistrantsEdit(e, sheet) {
  */
 function handleQuickMarkEdit(e, sheet, editedCol) {
   if (editedCol === QUICK_MARK.LOCATION_COL) {
-    // A new location invalidates whatever program/name was chosen under the
-    // previous one — clearing them is what keeps an impossible combination
-    // from being submitted.
-    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL, 1, 2).clearContent();
+    // A new location invalidates whatever program/date/name was chosen under
+    // the previous one — clearing them is what keeps an impossible
+    // combination from being submitted.
+    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL, 1, 3).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.programList.length} program(s) at this location — pick one, or go straight to a name.`);
+      `${lists.programList.length} program(s) at this location — pick one, or go straight to a date/name.`);
     return;
   }
 
   if (editedCol === QUICK_MARK.EVENT_COL) {
+    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.DATE_COL, 1, 2).clearContent();
+    const lists = refreshQuickMarkDropdowns(sheet, null);
+    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
+      `${lists.dateList.length} date(s) — pick one to mark an exact session, or go straight to a name.`);
+    return;
+  }
+
+  if (editedCol === QUICK_MARK.DATE_COL) {
     sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.nameList.length} registrant(s) — pick a name, then tick Attended or Lunch.`);
+      `${lists.nameList.length} registrant(s) on ${e.value || 'that date'} — pick a name, then tick Attended or Lunch.`);
     return;
   }
 
@@ -4459,10 +4902,14 @@ function toastIfPossible(message) {
  * it keeps the ID machine-recoverable, which is what lets
  * findExistingFormIdFromEvents() rebuild a lost form registry instead of
  * spawning duplicate forms.
+ *
+ * Config's "🔗 Registration Link on Calendar" toggle (isRegistrationLinkHidden())
+ * swaps this for a plain, non-clickable line instead — see buildHiddenRegistrationLine().
  */
 const REGISTRATION_LINK_FRAGMENT_KEY = 'form';
 
 function buildRegistrationLinkLine(group, formInfo) {
+  if (isRegistrationLinkHidden()) return buildHiddenRegistrationLine(group, formInfo);
   const label = group.isFixed
     ? `📝 Register for ${group.cleanTitle}`
     : `📝 Register for ${group.cleanTitle} — ${group.monthLabel}`;
@@ -4470,18 +4917,39 @@ function buildRegistrationLinkLine(group, formInfo) {
   return `<a href="${href}">${label}</a>`;
 }
 
+/**
+ * Config's Hide mode: no href, no clickable anchor at all — just plain text
+ * telling a public viewer where to actually register, plus the SAME `[Form:
+ * ...]` recovery tag the rest of this workbook already leaves visible for
+ * [Cap:]/[Grouped] (see EVENT_TYPES) — a small bracketed tag was already the
+ * accepted trade-off for those, so reusing it here costs nothing new and
+ * keeps findExistingFormIdFromEvents() working without a clickable link.
+ */
+function buildHiddenRegistrationLine(group, formInfo) {
+  return `📝 Registration for ${group.cleanTitle} is available on our dashboard/website. [Form: ${formInfo.formId}]`;
+}
+
 /** Matches our anchor, capturing (1) the URL without fragment and (2) the form ID. */
 const REGISTRATION_ANCHOR_REGEX =
   new RegExp(`<a href="([^"#]*)#${REGISTRATION_LINK_FRAGMENT_KEY}=([a-zA-Z0-9_-]+)"[^>]*>.*?</a>`, 'i');
+/** Matches buildHiddenRegistrationLine()'s placeholder, capturing the form ID from its `[Form: ...]` tag. */
+const HIDDEN_REGISTRATION_LINE_REGEX = /📝 Registration for .*? is available on our dashboard\/website\.\s*\[Form:\s*([a-zA-Z0-9_-]+)\]/;
 /** Pre-anchor format, still read so events stamped by older versions keep working. */
 const LEGACY_REGISTRATION_LINE_REGEX = /^.*Registration Link:\s*(\S+)\s*\[Form ID:\s*([a-zA-Z0-9_-]+)\]\s*$/m;
 
-/** Finds our registration line in a description in either format. Returns { url, formId, matchText } or null. */
+/**
+ * Finds our registration line in a description, in whichever of the three
+ * formats it's currently in. Returns { url, formId, matchText, isLegacy,
+ * isHidden } or null. `url` is null for the Hide-mode placeholder, which
+ * carries no link at all.
+ */
 function findRegistrationLineInDescription(description) {
   const anchor = REGISTRATION_ANCHOR_REGEX.exec(description);
-  if (anchor) return { url: anchor[1], formId: anchor[2], matchText: anchor[0], isLegacy: false };
+  if (anchor) return { url: anchor[1], formId: anchor[2], matchText: anchor[0], isLegacy: false, isHidden: false };
+  const hidden = HIDDEN_REGISTRATION_LINE_REGEX.exec(description);
+  if (hidden) return { url: null, formId: hidden[1], matchText: hidden[0], isLegacy: false, isHidden: true };
   const legacy = LEGACY_REGISTRATION_LINE_REGEX.exec(description);
-  if (legacy) return { url: legacy[1], formId: legacy[2], matchText: legacy[0], isLegacy: true };
+  if (legacy) return { url: legacy[1], formId: legacy[2], matchText: legacy[0], isLegacy: true, isHidden: false };
   return null;
 }
 
@@ -4752,15 +5220,23 @@ function restoreTriagedRegistrants() {
 
 function backInjectCalendarDescriptions(group, formInfo) {
   const linkLine = buildRegistrationLinkLine(group, formInfo);
+  const hidden = isRegistrationLinkHidden();
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
     const found = findRegistrationLineInDescription(existing);
 
     if (found) {
-      // Already current, in the current format — leave the event alone
-      // rather than burning a write (and a notification) on every sync.
-      if (!found.isLegacy && found.url === formInfo.publishedUrl && found.formId === formInfo.formId) return;
+      // Already current, in the current format AND the current Show/Hide
+      // mode — leave the event alone rather than burning a write (and a
+      // notification) on every sync. A Config toggle flip always forces a
+      // rewrite even when the form ID hasn't changed, since that's the
+      // whole point of flipping it — a stale anchor left behind after
+      // switching to Hide would defeat the setting entirely. Hide mode has
+      // no URL to compare, so the form ID alone is what "current" means.
+      const alreadyCurrent = found.isHidden === hidden && found.formId === formInfo.formId &&
+        (hidden || (!found.isLegacy && found.url === formInfo.publishedUrl));
+      if (alreadyCurrent) return;
       const corrected = existing.replace(found.matchText, linkLine);
       if (corrected !== existing) ev.setDescription(corrected);
       return;
@@ -5946,11 +6422,17 @@ function renderRegistrantsSheet(force, allRows) {
 // scroll right, tick two boxes, don't lose your place. The tab is sorted by
 // date, so a given program's people aren't even contiguous.
 //
-// The Quick Mark panel puts that on four cells at the top of the tab:
-// Location -> Program -> Name, each a dropdown narrowed by the one before it,
-// then Attended/Lunch checkboxes. Tick either and the matching registrant row
-// is updated in place, wherever it happens to be, and the panel reports what
-// it did and clears itself for the next person.
+// The Quick Mark panel puts that on five cells at the top of the tab:
+// Location -> Program -> Date -> Name, each a dropdown narrowed by the one
+// before it, then Attended/Lunch checkboxes. Tick either and the matching
+// registrant row is updated in place, wherever it happens to be, and the
+// panel reports what it did and clears itself for the next person.
+//
+// Date is optional — leaving it blank keeps the old "nearest session"
+// behavior (today first, then soonest upcoming, then most recent past).
+// Picking one instead marks that EXACT session, for the case a person is
+// registered for several dates of the same program and the nearest guess
+// isn't the one actually being served.
 //
 // The dropdowns are rebuilt on every edit of the cell to their left, because a
 // static list of every name in the workbook is not a usable dropdown once
@@ -5966,20 +6448,21 @@ const QUICK_MARK = {
   // 1-based columns within the panel.
   LOCATION_COL: 1,
   EVENT_COL: 2,
-  NAME_COL: 3,
-  ATTENDED_COL: 4,
-  LUNCH_COL: 5,
-  CLEAR_COL: 6
+  DATE_COL: 3,
+  NAME_COL: 4,
+  ATTENDED_COL: 5,
+  LUNCH_COL: 6,
+  CLEAR_COL: 7
 };
 
-const QUICK_MARK_LABELS = ['1. Location', '2. Program', '3. Name', '✓ Attended', '✓ Lunch', 'Clear'];
+const QUICK_MARK_LABELS = ['1. Location', '2. Program', '3. Date', '4. Name', '✓ Attended', '✓ Lunch', 'Clear'];
 
 /** Writes (or rewrites) the Quick Mark panel and seeds its Location dropdown. */
 function writeQuickMarkPanel(sheet, headers, rows) {
   const numCols = Math.max(headers.length, QUICK_MARK_LABELS.length);
 
   writeSectionBanner(sheet, QUICK_MARK.bannerRow, numCols,
-    '⚡ QUICK MARK — pick a location, program and name, then tick Attended / Lunch', { hero: true });
+    '⚡ QUICK MARK — pick a location, program, date and name, then tick Attended / Lunch', { hero: true });
 
   sheet.getRange(QUICK_MARK.labelRow, 1, 1, QUICK_MARK_LABELS.length)
     .setValues([QUICK_MARK_LABELS])
@@ -6005,8 +6488,8 @@ function writeQuickMarkPanel(sheet, headers, rows) {
       .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   });
 
-  // Program/Name start empty and are filled in by the cascade as soon as a
-  // location is chosen — see refreshQuickMarkDropdowns().
+  // Program/Date/Name start empty and are filled in by the cascade as soon
+  // as a location is chosen — see refreshQuickMarkDropdowns().
   refreshQuickMarkDropdowns(sheet, rows);
 
   setQuickMarkStatus(sheet, numCols, 'Ready — choose a location to begin.');
@@ -6034,13 +6517,22 @@ function setQuickMarkStatus(sheet, numCols, message) {
 }
 
 /**
- * Rebuilds the Program and Name dropdowns from whatever Location/Program is
- * currently selected, narrowing each list to what's actually possible.
+ * Rebuilds the Program, Date and Name dropdowns from whatever Location/
+ * Program/Date is currently selected, narrowing each list to what's
+ * actually possible.
  *
  * Sourced from the CURRENT registrant rows, not the Member_Roll tab: the point
  * is to mark someone who is registered for a specific session, and offering a
  * name nobody has registered under would just produce a "no match" a moment
  * later. Member_Roll is the standing directory; this is today's actual list.
+ * Person_Type is never filtered on here, so a guest brought by another
+ * registrant narrows and lists exactly like everyone else.
+ *
+ * Date is optional, same as Location/Program: leaving it blank falls back to
+ * applyQuickMark()'s "nearest session" guess, same as before this column
+ * existed. Picking one instead narrows Name to just the people on that exact
+ * date, and makes the mark land on that exact row — no guessing needed when
+ * someone is registered for several sessions of the same program.
  */
 function refreshQuickMarkDropdowns(sheet, rows) {
   const headers = HEADERS.Lunch_and_Event_Registrants;
@@ -6049,27 +6541,36 @@ function refreshQuickMarkDropdowns(sheet, rows) {
 
   const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
   const program = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
+  const dateLabel = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.DATE_COL).getValue() || '').trim();
 
   const programs = {};
+  const dates = {};
   const names = {};
   registrantRows.forEach(row => {
     const rowLocation = String(row[map['Location']] || '').trim();
     const rowEvent = String(row[map['Event']] || '').trim();
     const rowName = String(row[map['Name']] || '').trim();
+    const rowDate = coerceDate(row[map['Event_Date']]);
+    const rowDateLabel = rowDate ? formatDateLabel(rowDate) : '';
     if (location && rowLocation !== location) return;
     if (rowEvent) programs[rowEvent] = true;
     if (program && rowEvent !== program) return;
+    if (rowDateLabel) dates[rowDateLabel] = rowDate;
+    if (dateLabel && rowDateLabel !== dateLabel) return;
     if (rowName) names[rowName] = true;
   });
 
   const programList = Object.keys(programs).sort();
+  const dateList = Object.keys(dates).sort((a, b) => dates[a] - dates[b]);
   const nameList = Object.keys(names).sort();
 
   applyValueListValidationBounded(sheet, QUICK_MARK.EVENT_COL, programList.length ? programList : ['(no programs yet)'],
     QUICK_MARK.inputRow, 1);
+  applyValueListValidationBounded(sheet, QUICK_MARK.DATE_COL, dateList.length ? dateList : ['(no dates yet)'],
+    QUICK_MARK.inputRow, 1);
   applyValueListValidationBounded(sheet, QUICK_MARK.NAME_COL, nameList.length ? nameList : ['(no registrants yet)'],
     QUICK_MARK.inputRow, 1);
-  return { programList, nameList };
+  return { programList, dateList, nameList };
 }
 
 /** Blanks the panel's inputs, ready for the next person. */
@@ -6080,12 +6581,14 @@ function clearQuickMarkInputs(sheet) {
 /**
  * Applies a Quick Mark tick to the real registrant row(s).
  *
- * Matches on Location + Event + Name. A name legitimately appears on several
- * rows — the same person registered for several dates of the same program — so
- * this marks the one for the NEAREST session (today first, then the next
- * upcoming, then the most recent past), which is what someone standing at a
- * sign-in desk means. The status line always says which date it marked, so a
- * wrong guess is visible immediately rather than silent.
+ * Matches on Location + Event + Name, plus Date when one was picked. A name
+ * legitimately appears on several rows — the same person registered for
+ * several dates of the same program — so with no Date chosen this marks the
+ * NEAREST session (today first, then the next upcoming, then the most
+ * recent past), which is what someone standing at a sign-in desk usually
+ * means. Picking a Date instead marks that exact one, no guessing. The
+ * status line always says which date it marked, so a wrong guess is visible
+ * immediately rather than silent.
  */
 function applyQuickMark(sheet, column) {
   const headers = HEADERS.Lunch_and_Event_Registrants;
@@ -6093,6 +6596,7 @@ function applyQuickMark(sheet, column) {
 
   const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
   const program = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
+  const dateLabel = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.DATE_COL).getValue() || '').trim();
   const name = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).getValue() || '').trim();
   const numCols = headers.length;
 
@@ -6116,25 +6620,33 @@ function applyQuickMark(sheet, column) {
       if (location && String(row[map['Location']] || '').trim() !== location) return;
       if (program && String(row[map['Event']] || '').trim() !== program) return;
       const d = coerceDate(row[map['Event_Date']]);
-      candidates.push({ sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '' });
+      candidates.push({ sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '', dateLabel: d ? formatDateLabel(d) : '' });
     });
   });
 
-  if (candidates.length === 0) {
+  // A picked Date is exact, not a hint — someone registered for several
+  // sessions of the same program needs the RIGHT one marked, not the
+  // nearest guess. So it narrows the candidate pool before the "nearest"
+  // fallback below ever runs, and comes back its own warning if it matches
+  // nothing (rather than silently falling back to nearest-date behavior).
+  const pool = dateLabel ? candidates.filter(c => c.dateLabel === dateLabel) : candidates;
+
+  if (pool.length === 0) {
     setQuickMarkStatus(sheet, numCols,
-      `⚠️ No registrant row found for "${name}"${program ? ` on ${program}` : ''}${location ? ` at ${location}` : ''}. Nothing was marked.`);
+      `⚠️ No registrant row found for "${name}"${dateLabel ? ` on ${dateLabel}` : ''}` +
+      `${program ? ` (${program})` : ''}${location ? ` at ${location}` : ''}. Nothing was marked.`);
     sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
     return;
   }
 
   // Today, else the soonest future date, else the most recent past one.
-  candidates.sort((a, b) => {
+  pool.sort((a, b) => {
     const rank = c => (c.dateKey === todayKey ? 0 : (c.dateKey > todayKey ? 1 : 2));
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
     if (rank(a) === 2) return (b.date || 0) - (a.date || 0); // past: newest first
     return (a.date || 0) - (b.date || 0);                    // future: soonest first
   });
-  const target = candidates[0];
+  const target = pool[0];
 
   const isLunch = column === QUICK_MARK.LUNCH_COL;
   const columnName = isLunch ? 'Lunch_Served' : 'Attended';
@@ -6156,11 +6668,11 @@ function applyQuickMark(sheet, column) {
     if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
   }
 
-  const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
-  const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
+  const targetDateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
+  const extra = pool.length > 1 ? ` (${pool.length} sessions matched — marked the nearest)` : '';
   const what = isLunch ? 'lunch + attendance' : 'attendance';
-  setQuickMarkStatus(sheet, numCols, `✅ Marked ${what} for ${name} — ${dateLabel}${extra}.`);
-  toastIfPossible(`✅ ${name}: ${what} marked for ${dateLabel}.`);
+  setQuickMarkStatus(sheet, numCols, `✅ Marked ${what} for ${name} — ${targetDateLabel}${extra}.`);
+  toastIfPossible(`✅ ${name}: ${what} marked for ${targetDateLabel}.`);
 
   clearQuickMarkInputs(sheet);
   refreshQuickMarkDropdowns(sheet, null);
@@ -6192,7 +6704,8 @@ function renderTriageSheet(force, allRows) {
  * dashboard's hand-entry columns, via labelManualEntryColumns()).
  */
 const REGISTRANT_EDITABLE_COLUMNS = [
-  'Attended', 'Lunch_Served', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
+  'Attended', 'Lunch_Served', 'Serving_Method', 'Lunch_Assignment',
+  'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
 ];
 
 /**
@@ -6213,6 +6726,8 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     { start: result.upcomingDataStart, count: result.upcomingCount },
     { start: result.pastDataStart, count: result.pastCount }
   ];
+  // Sourced from Lunch_Schedule, not a fixed list — see getLunchAssignmentOptions().
+  const lunchOptions = getLunchAssignmentOptions();
 
   zones.forEach(z => {
     if (z.count < 1) return;
@@ -6220,6 +6735,9 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     applyValueListValidationBounded(sheet, map['Program_Status'] + 1, PROGRAM_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Status'] + 1, LUNCH_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, REGISTRANT_LUNCH_TYPE_OPTIONS, z.start, z.count);
+    applyValueListValidationBounded(sheet, map['Serving_Method'] + 1, SERVING_METHOD_OPTIONS, z.start, z.count);
+    applyValueListValidationBounded(sheet, map['Lunch_Assignment'] + 1,
+      lunchOptions.length ? lunchOptions : ['(no lunches scheduled yet)'], z.start, z.count);
     // Real checkboxes, not free text: a tick is one click and reads back as a
     // boolean, which is what Served_Confirmed counts.
     REGISTRANT_DAYOF_COLUMNS.forEach(h => {
@@ -6382,6 +6900,7 @@ function renderLunchScheduleSheet(force, allRows) {
     afterWrite: applyLunchScheduleFormatting
   });
   invalidateMealInfoIndex(); // this tab is exactly what getMealInfoIndex() is built from
+  invalidateLunchAssignmentIndex(); // ...and what getLunchAssignmentIndex() is built from
   return result;
 }
 
@@ -6522,7 +7041,8 @@ function refreshMemberRoll(ss, registrantRows) {
     banner: '👤 Member Roll — everyone who has ever registered',
     staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
     dateColumns: ['First_Seen', 'Last_Seen'],
-    numberColumns: ['Times_Seen']
+    numberColumns: ['Times_Seen'],
+    checkboxColumns: MEMBER_ROLL_CHECKBOX_COLUMNS
   });
   log(`Member_Roll refreshed: ${outRows.length} member(s).`);
 }
@@ -6662,6 +7182,14 @@ function writeMemoryTab(sheet, headers, rows, options) {
     });
     (options.numberColumns || []).forEach(h => {
       sheet.getRange(MEMORY_TAB_DATA_ROW, map[h] + 1, rows.length, 1).setNumberFormat('0');
+    });
+    // Real checkboxes, not free text — same reasoning as Attended/Lunch_Served
+    // on the Registrants tab: a tick is one click and reads back as a boolean.
+    (options.checkboxColumns || []).forEach(h => {
+      if (map[h] === undefined) return;
+      sheet.getRange(MEMORY_TAB_DATA_ROW, map[h] + 1, rows.length, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
     });
     applyZebraStripingManualBounded(sheet, MEMORY_TAB_DATA_ROW, rows.length, numCols);
     tintManualEntryColumns(sheet, MEMORY_TAB_DATA_ROW, rows.length, headers, options.staffColumns);
@@ -7390,13 +7918,30 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
     // someone reads while walking past, so the numbers get real size.
     sheet.getRange(todayDataStart, 1, todayRowsOut.length, 1)
       .setFontSize(TYPO.HERO_LABEL.size).setFontWeight('bold');
-    sheet.getRange(todayDataStart, 2, todayRowsOut.length, TODAY_AT_LOCATIONS_HEADERS.length - 1)
+    const programsCol = TODAY_AT_LOCATIONS_HEADERS.indexOf('Programs Today') + 1;
+    // Programs Today is a comma-joined list of names, not a single number —
+    // the hero-value size that suits Sessions/Registered Today would let one
+    // busy location's list crowd out the rest of the row, so it gets a
+    // smaller, wrapping cell of its own instead of competing for that font.
+    sheet.getRange(todayDataStart, programsCol, todayRowsOut.length, 1)
+      .setFontSize(TYPO.MUTED.size + 1)
+      .setFontWeight('normal')
+      .setHorizontalAlignment('left')
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    sheet.getRange(todayDataStart, programsCol + 1, todayRowsOut.length, TODAY_AT_LOCATIONS_HEADERS.length - programsCol)
       .setFontSize(TYPO.HERO_VALUE.size)
       .setFontWeight(TYPO.HERO_VALUE.weight)
       .setFontColor(TYPO.HERO_VALUE.color)
       .setHorizontalAlignment('center');
     for (let r = 0; r < todayRowsOut.length; r++) {
-      try { sheet.setRowHeight(todayDataStart + r, ROW_HEIGHTS.HERO_DATA); } catch (err) { /* row absent */ }
+      // A location running several programs today needs more than one
+      // wrapped line to show them all — grow just that row instead of
+      // clipping the list or leaving every other row's height stretched.
+      const programCount = todayData[r].programsToday === 'No programs today'
+        ? 1 : todayData[r].programsToday.split(', ').length;
+      const lines = Math.min(Math.max(programCount, 1), PROGRAMS_TODAY_MAX_LINES);
+      const rowHeight = Math.max(ROW_HEIGHTS.HERO_DATA, lines * PROGRAMS_TODAY_LINE_HEIGHT_PX);
+      try { sheet.setRowHeight(todayDataStart + r, rowHeight); } catch (err) { /* row absent */ }
     }
   }
   applyZebraStripingManualBounded(sheet, todayDataStart, todayRowsOut.length, TODAY_AT_LOCATIONS_HEADERS.length);
@@ -7516,7 +8061,10 @@ function getDashboardRowPlan() {
  * into one row per (date, location): how many people need lunch, plus that
  * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
  * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed
- * count toward catering.
+ * count toward catering. Lunches_Assigned_To_Registrants is separate from
+ * that: it counts registrants whose Lunch_Assignment was explicitly set to
+ * this date+location, regardless of their OWN Program_Status/Lunch_Status or
+ * which session they actually registered for.
  *
  * Every UPCOMING session date+location is seeded at count 0 whether or not
  * anyone has registered yet, so the catering schedule shows what is coming
@@ -7560,7 +8108,7 @@ function buildDashboardRollup(registrantRows) {
     if (!isLunchOfferedOn(parseDateKey(meta.dateKey), meta.location)) return;
     const key = `${meta.dateKey}|${meta.location}`;
     if (!rollup[key]) {
-      rollup[key] = { dateKey: meta.dateKey, location: meta.location, registeredCount: 0, servedConfirmed: 0 };
+      rollup[key] = { dateKey: meta.dateKey, location: meta.location, registeredCount: 0, servedConfirmed: 0, lunchesAssigned: 0 };
     }
   });
 
@@ -7568,6 +8116,7 @@ function buildDashboardRollup(registrantRows) {
     const lrHeaders = HEADERS.Lunch_and_Event_Registrants;
     const lrRows = registrantRows || readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID');
     const lrMap = getIndexMap(lrHeaders);
+    const lunchAssignmentIndex = getLunchAssignmentIndex();
     lrRows.forEach(row => {
       const eventId = row[lrMap['Event_ID']];
       const meta = eventMeta[eventId];
@@ -7583,10 +8132,29 @@ function buildDashboardRollup(registrantRows) {
         if (!rollup[servedKey]) {
           rollup[servedKey] = {
             dateKey: meta.dateKey, location: meta.location,
-            registeredCount: 0, servedConfirmed: 0, unplanned: true
+            registeredCount: 0, servedConfirmed: 0, lunchesAssigned: 0, unplanned: true
           };
         }
         rollup[servedKey].servedConfirmed = (rollup[servedKey].servedConfirmed || 0) + 1;
+      }
+
+      // Lunches_Assigned_To_Registrants counts registrants whose
+      // Lunch_Assignment dropdown (see getLunchAssignmentOptions()) was set
+      // to THIS date+location's lunch — which may not be the same
+      // date+location the row itself is for (that's the whole point: it
+      // covers someone eating a meal other than their own registered
+      // session's, e.g. a takeaway counted against a different day).
+      const assignedLabel = String(row[lrMap['Lunch_Assignment']] || '').trim();
+      const assignedTarget = assignedLabel ? lunchAssignmentIndex.byLabel[assignedLabel] : null;
+      if (assignedTarget) {
+        const assignedKey = `${assignedTarget.dateKey}|${assignedTarget.location}`;
+        if (!rollup[assignedKey]) {
+          rollup[assignedKey] = {
+            dateKey: assignedTarget.dateKey, location: assignedTarget.location,
+            registeredCount: 0, servedConfirmed: 0, lunchesAssigned: 0, unplanned: true
+          };
+        }
+        rollup[assignedKey].lunchesAssigned = (rollup[assignedKey].lunchesAssigned || 0) + 1;
       }
 
       if (row[lrMap['Program_Status']] !== 'Active' || row[lrMap['Lunch_Status']] !== 'Needed') return;
@@ -7616,7 +8184,7 @@ function buildDashboardRollup(registrantRows) {
       if (!rollup[key]) {
         rollup[key] = {
           dateKey: meta.dateKey, location: meta.location,
-          registeredCount: 0, servedConfirmed: 0, unplanned: true
+          registeredCount: 0, servedConfirmed: 0, lunchesAssigned: 0, unplanned: true
         };
       }
       rollup[key].registeredCount++;
@@ -7690,6 +8258,10 @@ function updateMasterLunchDashboard(registrantRows) {
     // zero ("nobody turned up") and "not counted yet" mean very different
     // things to whoever reconciles this, and 0 would assert the first.
     row[map['Served_Confirmed']] = r.servedConfirmed > 0 ? r.servedConfirmed : '';
+    // Non-editable — see protectDerivedColumns() below. Same blank-vs-zero
+    // reasoning as Served_Confirmed: nobody has assigned anyone yet reads
+    // differently than a real zero.
+    row[map['Lunches_Assigned_To_Registrants']] = r.lunchesAssigned > 0 ? r.lunchesAssigned : '';
   });
 
   writeMasterLunchDashboardSheet(sheet, plan, headers, existingTable, rollup);
@@ -7802,9 +8374,9 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
     { start: result.upcomingDataStart, count: result.upcomingCount },
     { start: result.pastDataStart, count: result.pastCount }
   ];
-  const numericCols = ['Registered_Count', 'Served_Confirmed', 'Actual_Ordered', 'Standard_Buffer',
-    'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway',
-    'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
+  const numericCols = ['Registered_Count', 'Served_Confirmed', 'Lunches_Assigned_To_Registrants',
+    'Actual_Ordered', 'Standard_Buffer', 'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway',
+    'Subs_In-Person', 'Subs_Takeaway', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
 
   zones.forEach(z => {
     if (z.count < 1) return;
@@ -7839,17 +8411,14 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   const notServingRule = buildTextEqualsRuleForRanges(typeRanges, 'Not Serving', NOT_SERVING_COLOR);
   if (notServingRule) rules.push(notServingRule);
 
-  // Location color-coding, painted across the row rather than on the single
-  // Location cell — this tab is one row per date PER LOCATION, so the block
-  // of color is what makes "everything for Ashbridge that week" scannable.
-  // Last in the rule list on purpose: the manual-override tint and the grey
-  // "Not Serving" cell above both need to win where they overlap.
-  activeZones.forEach(z => {
-    rules.push(...buildLocationRowTintRules(sheet, z.start, z.count, numCols, locationCol,
-      [map['Event_Date'] + 1, ...manualEntryColIndexes]));
-  });
-  rules.push(...buildLocationRowTintRules(sheet, plan.todayDataStart, plan.numLocations,
-    TODAY_LUNCH_HEADERS.length, todayLocationCol, []));
+  // Location color-coding, confined to the Location cell itself (same
+  // treatment as every other tab) rather than washing the whole row — a
+  // whole-row tint fought with the manual-override tint, the grey "Not
+  // Serving" cell, and the yellow hand-entry columns for the same visual
+  // channel, on the tab that already has the most of them.
+  const scheduleLocationRanges = activeZones.map(z => sheet.getRange(z.start, locationCol, z.count, 1));
+  rules.push(...buildLocationColorRules(scheduleLocationRanges));
+  rules.push(...buildLocationColorRules([sheet.getRange(plan.todayDataStart, todayLocationCol, plan.numLocations, 1)]));
 
   sheet.setConditionalFormatRules(rules);
 
@@ -7858,7 +8427,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   // editable on purpose: switching a row to "Manually Added" is precisely how
   // staff tell the sync to stop managing it.
   protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed'],
+    ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed',
+      'Lunches_Assigned_To_Registrants'],
     zones);
 
   // Nothing on this tab is an internal key, so nothing is hidden — but the
