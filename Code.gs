@@ -804,11 +804,36 @@ const CONFIG_LAYOUT = {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
     headers: ['Location', 'Catering_Policy']
+  },
+  LINK_DISPLAY: {
+    title: '🔗 Registration Link in Events',
+    startCol: 13,
+    headers: ['Link_Display']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
+
+/**
+ * Whether the registration link appears in the calendar event's description.
+ *
+ * "Show link" is the normal setting: attendees open the event and there is a
+ * "📝 Register for X" link at the top of it.
+ *
+ * "Hide link" leaves the description with no registration link at all — for
+ * programs where sign-up is handled at the desk and a self-serve link in a
+ * shared calendar would be wrong. It has ONE real cost, and it is worth
+ * understanding before choosing it: findExistingFormIdFromEvents() recovers a
+ * lost form by reading its ID back out of an event description, and with no
+ * link there is nothing to read. Form ownership then rests entirely on the
+ * Script Properties registry and the Form_ID column of the dashboard, so a
+ * workbook rebuilt from scratch under this setting will build new forms
+ * rather than adopting the existing ones.
+ */
+const LINK_DISPLAY_OPTIONS = { SHOW: 'Show link', HIDE: 'Hide link' };
+const LINK_DISPLAY_OPTION_LIST = Object.values(LINK_DISPLAY_OPTIONS);
+const DEFAULT_LINK_DISPLAY = LINK_DISPLAY_OPTIONS.SHOW;
 const CONFIG_HEADER_ROW = 2;
 const CONFIG_DATA_START_ROW = 3;
 /** Types that actually need a Meal Buffer Amounts row in Config (a "Not Serving" day never does). */
@@ -1636,6 +1661,7 @@ let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
 let __adminNotificationEmailCache = null;
 let __cateringPolicyIndexCache = null;
+let __linkDisplayCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 
@@ -1684,6 +1710,7 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __cateringPolicyIndexCache = null;
+  __linkDisplayCache = null;
 }
 
 /**
@@ -3335,10 +3362,14 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, policySection.startCol, Object.values(CALENDAR_MAP), CONFIG_DATA_START_ROW, policyRows);
   applyValueListValidationBounded(sheet, policySection.startCol + 1, CATERING_POLICY_OPTIONS, CONFIG_DATA_START_ROW, policyRows);
 
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.LINK_DISPLAY.startCol,
+    LINK_DISPLAY_OPTION_LIST, CONFIG_DATA_START_ROW, 1);
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
   seedCateringPolicyRows(sheet);
+  seedLinkDisplayRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -3435,6 +3466,46 @@ function seedAdminNotificationRow(sheet) {
     cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
       + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
   }
+}
+
+/** Seeds "Show link" and explains the trade-off in the cell note. */
+function seedLinkDisplayRow(sheet) {
+  const section = CONFIG_LAYOUT.LINK_DISPLAY;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_LINK_DISPLAY);
+    log(`Seeded default Registration Link display ("${DEFAULT_LINK_DISPLAY}") on "${SHEET_NAMES.CONFIG}".`);
+  }
+  cell.setNote(
+    'Show link = every upcoming event description carries a "📝 Register for ..." link at the top.\n'
+    + 'Hide link = no registration link in event descriptions at all.\n\n'
+    + 'Changing this does not rewrite existing events on its own — run '
+    + '"🔗 Rewrite Event Links" from the Admin menu to apply it to what is already out there.');
+}
+
+/**
+ * The current Registration Link setting. Anything unrecognized reads as
+ * "Show link": a typo in this cell must not silently strip the registration
+ * link off every event in the calendar.
+ */
+function getLinkDisplayMode() {
+  if (__linkDisplayCache !== null) return __linkDisplayCache;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  let mode = DEFAULT_LINK_DISPLAY;
+  if (sheet) {
+    const raw = String(sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.LINK_DISPLAY.startCol).getValue() || '').trim();
+    const match = LINK_DISPLAY_OPTION_LIST.filter(o => o.toLowerCase() === raw.toLowerCase())[0];
+    if (match) mode = match;
+    else if (raw) log(`⚠️ Config's Link_Display reads "${raw}", which isn't one of ${LINK_DISPLAY_OPTION_LIST.join(' / ')} — using "${DEFAULT_LINK_DISPLAY}".`);
+  }
+  __linkDisplayCache = mode;
+  return mode;
+}
+
+/** True when registration links belong in calendar event descriptions. */
+function shouldShowLinkInDescription() {
+  return getLinkDisplayMode() !== LINK_DISPLAY_OPTIONS.HIDE;
 }
 
 /**
@@ -3819,6 +3890,7 @@ function buildAppMenu(ui, includeAdmin) {
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
       .addItem('🧱 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
+      .addItem('🔗 Rewrite Event Links (fix duplicates)', 'rewriteEventRegistrationLinks')
       .addItem('Check Triggers', 'writeTriggers')
       .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
       .addSeparator()
@@ -4321,6 +4393,26 @@ function handleConfigEdit(e, sheet) {
       `appear on the lunch dashboard. Existing forms are updated on the next sync.`;
     if (!confirmCellEditOrRevert(e, `Change lunch service for ${location}?`, detail)) return;
     toastIfPossible(`Lunch service for ${location} set to "${e.value}" — forms update on the next sync.`);
+  }
+
+  const isLinkDisplayEdit = editedCol === CONFIG_LAYOUT.LINK_DISPLAY.startCol &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isLinkDisplayEdit) {
+    const hiding = String(e.value || '').trim().toLowerCase() === LINK_DISPLAY_OPTIONS.HIDE.toLowerCase();
+    if (!confirmCellEditOrRevert(e, `Set the registration link to "${e.value}"?`,
+      hiding
+        ? 'Upcoming calendar events will stop showing a registration link. The forms keep working — ' +
+          'you hand the link out yourself from the program dashboard.\n\n' +
+          'Events already in the calendar keep their link until you run ' +
+          '"🔗 Rewrite Event Links" from the Admin menu.'
+        : 'Upcoming calendar events will show a "📝 Register for ..." link at the top of their ' +
+          'description.\n\nEvents already in the calendar are updated on the next sync, or straight ' +
+          'away with "🔗 Rewrite Event Links" from the Admin menu.')) {
+      // Reverted — the cache must reflect the value actually on the sheet.
+      invalidateConfigCaches();
+      return;
+    }
+    toastIfPossible(`Registration link set to "${e.value}". Run "🔗 Rewrite Event Links" to apply it to existing events.`);
   }
 
   // Any Config edit can invalidate a cached read of it, confirmed or not.
@@ -5599,6 +5691,271 @@ function findExistingFormIdFromEvents(events) {
   return null;
 }
 
+
+// ============================================================================
+// 4f. EVENT DESCRIPTIONS — stripping every registration link, then writing one
+// ============================================================================
+//
+// findRegistrationLineInDescription() above finds the FIRST link in a
+// description, which is all a normal sync needs. It is not enough for cleanup.
+//
+// Descriptions accumulate registration links. Google Calendar rewrites HTML in
+// a description whenever the event is edited in the web UI, and an anchor that
+// goes through that can come back out as a bare URL sitting next to the
+// original — so one event ends up advertising the same form twice, in two
+// formats. Older versions of this script wrote a different format again, and
+// pasting an event to duplicate it copies whatever was there. A find-the-first
+// -one-and-replace-it pass leaves every extra copy exactly where it was.
+//
+// So this section takes the other approach: remove EVERY registration link in
+// a description, whatever shape it is in, then write back at most one. What it
+// removes is deliberately limited to registration links and their orphaned
+// labels — every other line, tag and bracket in the description is preserved
+// byte for byte, because a description is also where staff keep room numbers,
+// notes to volunteers, and the [Cap: N] / [Grouped] settings this system reads.
+// ============================================================================
+
+/** Every occurrence of our anchor format, not just the first. */
+const REGISTRATION_ANCHOR_REGEX_GLOBAL =
+  new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi');
+/** Every occurrence of the pre-anchor "Registration Link: ... [Form ID: ...]" line. */
+const LEGACY_REGISTRATION_LINE_REGEX_GLOBAL =
+  /^.*Registration Link:\s*\S+\s*\[Form ID:\s*[a-zA-Z0-9_-]+\].*$/gim;
+/** Any anchor pointing at a Google Form — the shape a mangled/duplicated link usually survives as. */
+const ANY_FORMS_ANCHOR_REGEX = /<a[^>]*href="[^"]*docs\.google\.com\/forms\/[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+/** A bare Google Forms URL with no anchor around it — what Calendar leaves behind when it flattens one. */
+const BARE_FORMS_URL_REGEX = /https?:\/\/docs\.google\.com\/forms\/\S*/gi;
+/** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
+const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
+
+/**
+ * Removes every registration link from a description and reports how many
+ * distinct ones it found.
+ *
+ * Order matters: the specific patterns run first so the count reflects real
+ * registration links rather than the debris they leave behind, and the
+ * catch-all forms-link patterns clean up whatever survived in a shape we no
+ * longer recognize.
+ *
+ * WHAT IT WILL NOT TOUCH: anything that isn't a Google Forms link or one of
+ * our own labels. Room numbers, volunteer notes, [Cap: 12], [Grouped], other
+ * hyperlinks, blank lines between real paragraphs — all preserved. The one
+ * thing it can over-reach on is a link to some OTHER Google Form that a person
+ * put in a program event description by hand; on these calendars a forms link
+ * is this system's link, and the confirmation dialog says so before anything
+ * is written.
+ */
+function stripAllRegistrationLines(description) {
+  const original = String(description || '');
+  if (!original) return { text: '', removed: 0 };
+
+  let removed = 0;
+  const countAndClear = (text, regex) => text.replace(regex, () => { removed++; return ''; });
+
+  let text = original;
+  text = countAndClear(text, REGISTRATION_ANCHOR_REGEX_GLOBAL);
+  text = countAndClear(text, LEGACY_REGISTRATION_LINE_REGEX_GLOBAL);
+  text = countAndClear(text, ANY_FORMS_ANCHOR_REGEX);
+  text = countAndClear(text, BARE_FORMS_URL_REGEX);
+  // Labels are debris, not links — cleared, but never counted as a link found,
+  // or an event with a flattened anchor would report two.
+  text = text.replace(ORPHAN_REGISTER_LABEL_REGEX, '');
+
+  return { text: tidyDescriptionWhitespace(text), removed };
+}
+
+/**
+ * Closes up the hole left by removing a link, in both the formats a Google
+ * Calendar description actually arrives in.
+ *
+ * Descriptions written by a person through the Calendar UI are HTML with
+ * `<br>` as the line break; descriptions written by this script use real
+ * newlines; and an event that has been through both has a mix. Removing a link
+ * from either leaves a run of separators around the gap, so both are
+ * collapsed: 3+ blank lines become one blank line, 3+ `<br>` become two, and
+ * separators at the very start or end go entirely.
+ *
+ * Deliberately conservative — ONE blank line (or a `<br><br>`) between two
+ * paragraphs is meaningful formatting somebody typed on purpose, and is kept.
+ */
+function tidyDescriptionWhitespace(text) {
+  const BR_RUN = /(?:\s*<br\s*\/?>\s*){3,}/gi;
+  return String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => (line.replace(/<br\s*\/?>/gi, '').trim() === '' ? '' : line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(BR_RUN, '<br><br>')
+    .replace(/^(?:\s*<br\s*\/?>\s*)+/i, '')
+    .replace(/(?:\s*<br\s*\/?>\s*)+$/i, '')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '');
+}
+
+/** Puts the registration link at the very top, above whatever else is there. */
+function prependRegistrationLine(description, linkLine) {
+  const body = tidyDescriptionWhitespace(description);
+  return body ? `${linkLine}\n\n${body}` : linkLine;
+}
+
+/**
+ * ADMIN ACTION — "🔗 Rewrite Event Links".
+ *
+ * Walks every UPCOMING event on every calendar, strips out every registration
+ * link it can find (all formats, all duplicates), and then writes back exactly
+ * one — or none — according to Config's "Registration Link in Events" setting.
+ * The link always goes at the TOP of the description; everything else in the
+ * description keeps its content and its order.
+ *
+ * ONLY UPCOMING EVENTS. A past event's description is a record of what people
+ * were sent, and rewriting it changes nothing anyone will act on while
+ * spending quota and — worse — generating a calendar notification for an event
+ * that has already happened.
+ *
+ * The form for each event comes from the SESSION TABLE (Event_ID -> Form_ID),
+ * not from the description being replaced. That's the point: the description
+ * is the thing that is wrong, so it can't also be the source of truth for
+ * what should replace it.
+ */
+function rewriteEventRegistrationLinks() {
+  if (!requireAuthorizedAdmin('Rewrite Event Links')) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first.');
+    return null;
+  }
+
+  const showLinks = shouldShowLinkInDescription();
+  const mode = getLinkDisplayMode();
+
+  if (!confirmConsequentialAction('Rewrite the registration link on every upcoming event?',
+    `Config says "${mode}".\n\n` +
+    'Every UPCOMING event on all program calendars will have every registration link removed — ' +
+    'including duplicates and older formats — and then ' +
+    (showLinks
+      ? 'exactly one fresh link written at the top of its description.'
+      : 'NO link written back, because the setting is "Hide link".') +
+    '\n\nEverything else in each description (room notes, [Cap: N], [Grouped], other text) is kept ' +
+    'exactly as it is. Past events are not touched.\n\n' +
+    'Note: any link to a Google Form in these descriptions is treated as a registration link and removed.',
+    false)) {
+    return null;
+  }
+
+  // Event_ID -> what the session table says this event's form is.
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const sessionByEventId = {};
+  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!eventId || !d || formatDateKey(d) < todayKey) return;
+    sessionByEventId[eventId] = {
+      formId: String(row[map['Form_ID']] || '').trim(),
+      cleanTitle: String(row[map['Clean_Title']] || '').trim(),
+      isGrouped: isGroupedTypeTag(row[map['Type_Tag']]),
+      date: d
+    };
+  });
+
+  // computeSyncDateRange() starts at the 1st of the current month, so its
+  // window includes events that have already happened. Fetch that window (it
+  // is the one getCalendarEventsForWindow() caches, shared with every other
+  // caller in the run) but only rewrite from today forward.
+  const { start, end } = computeSyncDateRange();
+  const windowStart = parseDateKey(todayKey);
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+
+  const formInfoCache = {};
+  const stats = { scanned: 0, linksRemoved: 0, rewritten: 0, cleared: 0, unchanged: 0, noForm: 0, calendarsSkipped: 0 };
+
+  Object.keys(CALENDAR_MAP).forEach(calendarId => {
+    const events = eventsByCalendar[calendarId];
+    if (!events) {
+      log(`⚠️ Rewrite Event Links: "${CALENDAR_MAP[calendarId]}" could not be read — skipped.`);
+      stats.calendarsSkipped++;
+      return;
+    }
+
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const startTime = ev.getStartTime();
+      if (startTime < windowStart) return; // past — left as the record it is
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed) return;
+
+      stats.scanned++;
+      const existing = ev.getDescription() || '';
+      const stripped = stripAllRegistrationLines(existing);
+      stats.linksRemoved += stripped.removed;
+
+      let updated = stripped.text;
+      if (showLinks) {
+        const eventId = computeEventId(calendarId, parsed.cleanTitle, formatDateKey(startTime));
+        const session = sessionByEventId[eventId];
+        const formInfo = session && session.formId ? getFormInfoForLink(session.formId, formInfoCache) : null;
+        if (!formInfo) {
+          // No form on the session table (or it wouldn't open). The old links
+          // still come off — a stale link to a form nobody is reading is worse
+          // than none — but there is nothing correct to put back.
+          stats.noForm++;
+        } else {
+          updated = prependRegistrationLine(stripped.text, buildRegistrationLinkLine({
+            isFixed: session.isGrouped,
+            cleanTitle: session.cleanTitle || parsed.cleanTitle,
+            monthLabel: getMonthLabel(startTime)
+          }, formInfo));
+        }
+      }
+
+      if (updated === existing) { stats.unchanged++; return; }
+      ev.setDescription(updated);
+      if (showLinks && updated !== stripped.text) stats.rewritten++; else stats.cleared++;
+    });
+  });
+
+  invalidateCalendarEventsCache(); // descriptions just changed under the cache
+
+  const summary = `Event links rewritten ✅ — ${stats.scanned} upcoming event(s) scanned, ` +
+    `${stats.linksRemoved} old link(s) removed, ${stats.rewritten} rewritten, ${stats.cleared} left with no link, ` +
+    `${stats.unchanged} already correct` +
+    (stats.noForm > 0 ? `, ⚠️ ${stats.noForm} with no form on the dashboard` : '') +
+    (stats.calendarsSkipped > 0 ? `, ⚠️ ${stats.calendarsSkipped} calendar(s) unreadable` : '') + '.';
+  log(`rewriteEventRegistrationLinks: ${summary}`);
+  toastIfPossible(summary);
+
+  if (stats.noForm > 0) {
+    noteForAdmin('Events with no registration form',
+      `${stats.noForm} upcoming event(s) had their old link(s) removed but no form on the session table to link to. ` +
+      `Run Sync Cal to build their forms, then run "🔗 Rewrite Event Links" again.`);
+  }
+  flushAdminDigest('Rewrite event links');
+  return stats;
+}
+
+/**
+ * { formId, publishedUrl } for a form, memoized per run — the same form covers
+ * a whole series, and opening it once per event would be the expensive part of
+ * this by an order of magnitude. A form that won't open is cached as null so
+ * it isn't retried on every one of its events either.
+ */
+function getFormInfoForLink(formId, cache) {
+  if (Object.prototype.hasOwnProperty.call(cache, formId)) return cache[formId];
+  let info = null;
+  try {
+    const form = FormApp.openById(formId);
+    info = { formId, publishedUrl: buildRegistrationUrl(form) };
+  } catch (err) {
+    log(`⚠️ Could not open form ${formId} to rebuild its event link (${err}).`);
+  }
+  cache[formId] = info;
+  return info;
+}
+
 /**
  * Reopens an already-existing form for a series/month and refreshes its
  * date-dependent items. Not-serving dates are excluded from the lunch grid
@@ -5851,23 +6208,44 @@ function restoreTriagedRegistrants() {
 }
 
 function backInjectCalendarDescriptions(group, formInfo) {
+  // Config decides whether a link belongs in a description at all. Checked
+  // here as well as in rewriteEventRegistrationLinks(), or the next sync would
+  // simply put back every link that cleanup just removed.
+  if (!shouldShowLinkInDescription()) {
+    let cleared = 0;
+    group.events.forEach(ev => {
+      const existing = ev.getDescription() || '';
+      const stripped = stripAllRegistrationLines(existing);
+      if (stripped.removed === 0 || stripped.text === existing) return;
+      ev.setDescription(stripped.text);
+      cleared++;
+    });
+    if (cleared > 0) {
+      log(`Link display is "${LINK_DISPLAY_OPTIONS.HIDE}" — removed the registration link from ${cleared} event(s) of "${group.cleanTitle}".`);
+    }
+    return;
+  }
+
   const linkLine = buildRegistrationLinkLine(group, formInfo);
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
     const found = findRegistrationLineInDescription(existing);
 
-    if (found) {
-      // Already current, in the current format — leave the event alone
-      // rather than burning a write (and a notification) on every sync.
-      if (!found.isLegacy && found.url === formInfo.publishedUrl && found.formId === formInfo.formId) return;
-      const corrected = existing.replace(found.matchText, linkLine);
-      if (corrected !== existing) ev.setDescription(corrected);
+    // Already current, in the current format, and already at the top — leave
+    // the event alone rather than burning a write (and a notification) on
+    // every sync.
+    if (found && !found.isLegacy && found.url === formInfo.publishedUrl &&
+      found.formId === formInfo.formId && existing.indexOf(linkLine) === 0) {
       return;
     }
 
-    const appended = existing ? `${existing}\n\n${linkLine}` : linkLine;
-    if (appended !== existing) ev.setDescription(appended);
+    // Otherwise rebuild: every link out (duplicates included — see
+    // stripAllRegistrationLines), one back in AT THE TOP. Replacing in place
+    // was what let a second, mangled copy sit in a description untouched
+    // forever, since the first match was always the one that got corrected.
+    const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text, linkLine);
+    if (updated !== existing) ev.setDescription(updated);
   });
 }
 

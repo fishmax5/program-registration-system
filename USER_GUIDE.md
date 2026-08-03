@@ -105,6 +105,50 @@ redrawn.
 
 ---
 
+## Fixing duplicate links in event descriptions
+
+Event descriptions collect registration links. Google Calendar rewrites the
+HTML in a description whenever someone edits the event in the web UI, and a
+link that goes through that can come back out as **plain text sitting next to
+the original** — so one event advertises the same form twice, in two formats.
+Copy-pasting an event to duplicate it brings whatever was there along with it,
+and older versions of this system wrote a different format again.
+
+**🔧 Admin ▸ 🔗 Rewrite Event Links (fix duplicates)** clears the lot and
+starts again:
+
+1. Every **upcoming** event on all program calendars is scanned.
+2. **Every** registration link is removed — all copies, all formats: the
+   current hyperlink, the older `Registration Link: … [Form ID: …]` line,
+   flattened plain-text links, and orphaned "📝 Register for …" labels.
+3. Then **one** link is written back at the **top** of the description — or
+   none, if Config's [🔗 Registration Link in Events](#-registration-link-in-events)
+   says **Hide link**.
+
+**Everything else in the description is kept exactly as it was** — room notes,
+volunteer names, `[Cap: 12]`, `[Grouped]`, other hyperlinks, and your paragraph
+breaks. Only the blank space left behind by a removed link is closed up.
+
+Which form each event gets is read from the **program dashboard**
+(`Event_ID` → `Form_ID`), not from the description being replaced — the
+description is the thing that's wrong, so it can't also be the source of truth.
+
+- **Past events are never touched.** Their descriptions are a record of what
+  people were sent, and rewriting them would generate calendar notifications
+  for events that already happened.
+- **An event with no form on the dashboard** still gets its old links removed
+  (a stale link to a form nobody reads is worse than none) but nothing written
+  back. Those are counted in the summary and go in the admin email — run
+  **Sync Cal** to build their forms, then run this again.
+- Safe to run twice; the second run reports everything already correct.
+
+> Any link to a **Google Form** in a program event description is treated as a
+> registration link and removed. On these calendars that's always this
+> system's link — but if you've hand-added a link to some *other* Google Form
+> in an event, it will go too.
+
+---
+
 ## Setting up your calendar events
 
 This is the only "syntax" in the whole system, and it's the part worth getting
@@ -454,7 +498,7 @@ don't evaporate.
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
 ### 6. Config
-Four small settings blocks:
+Five small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold, used to
   pre-fill new lunch rows
@@ -462,6 +506,7 @@ Four small settings blocks:
   inside that window get flagged.
 - **📧 Admin Notifications** — one email address (optional)
 - **🍽️ Lunch Service by Location** — see below
+- **🔗 Registration Link in Events** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -484,6 +529,30 @@ If you set the email, you get **at most one message per sync**, and only when
 something needs a person: waitlisted registrants, forms that couldn't be opened,
 and events sent to triage. A quiet sync sends nothing. **Leave it blank to turn
 notifications off.**
+
+#### 🔗 Registration Link in Events
+
+Whether the registration link appears in the **calendar event description**.
+
+| Setting | What attendees see in the event |
+|---|---|
+| **Show link** (default) | A **📝 Register for …** link at the **top** of the description, above everything else |
+| **Hide link** | No registration link at all |
+
+Use **Hide link** when sign-up happens at the desk and a self-serve link in a
+shared calendar would be wrong. The forms still exist and still work — you just
+hand the link out yourself, from `Form_Response_Link` on the program dashboard.
+
+**Changing this setting doesn't rewrite events on its own.** It applies to
+events as they're next synced. To apply it to everything already out there,
+run **🔧 Admin ▸ 🔗 Rewrite Event Links**.
+
+> **One trade-off with Hide link.** The system can normally recover a
+> "lost" form by reading its ID back out of an event description. With no link
+> in the description there's nothing to read, so form ownership rests entirely
+> on the `Form_ID` column and the script's own registry. Fine in normal use —
+> worth knowing if you ever rebuild the workbook from scratch, because it will
+> then build *new* forms rather than adopting the existing ones.
 
 ### 7. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
@@ -584,6 +653,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | Item | What it does |
 |---|---|
 | **🧱 Rebuild Layout (no calendar sync)** | Redraws every tab from the rows already in the workbook — see [Updating to a new version](#updating-to-a-new-version) |
+| **🔗 Rewrite Event Links (fix duplicates)** | Strips every registration link off upcoming events and writes back one — see [Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions) |
 | **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
 | **Find Leftover Tabs (read-only report)** | Reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
@@ -706,8 +776,9 @@ the code:
 - `admin@newhorizonsseniorcenter.org`
 - `maxfishman@newhorizonsseniorcenter.org`
 
-**Gated:** Rebuild Layout, Check Triggers, Import Everything (First Run),
-Find Leftover Tabs, Archive Old Months (report), `mergeLegacyTabs()`, `initSheet()`,
+**Gated:** Rebuild Layout, Rewrite Event Links, Check Triggers, Import
+Everything (First Run), Find Leftover Tabs, Archive Old Months (report),
+`mergeLegacyTabs()`, `initSheet()`,
 `initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
 `restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
 `cleanupNeverPolicyForms()`.
@@ -911,6 +982,14 @@ then **Sync Cal**.
 **Rows before this month are missing from a tab**
 They're hidden, not gone — see [Old months](#old-months). Press
 **🕓 Show All Past Rows**. (Ctrl+F finds them either way.)
+
+**An event description has the registration link in it twice**
+Run **🔧 Admin ▸ 🔗 Rewrite Event Links (fix duplicates)** — see
+[Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions).
+
+**I don't want the registration link showing in the calendar at all**
+Set **🔗 Registration Link in Events** to `Hide link` in Config, then run
+**🔗 Rewrite Event Links** to strip it from events already out there.
 
 **I pasted the new code and the tabs look the same**
 Nothing redraws a tab until something asks it to. Press **🔧 Admin ▸ 🧱

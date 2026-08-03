@@ -120,7 +120,32 @@ session history fresh, or to rewrite `Calendar_Source` and `Event_ID` on the
 existing rows to match the new IDs. Do **not** just sync and sort it out
 afterwards — once duplicate forms exist, registrations start arriving on both.
 
-### 6. Triggers are private to the account that made them
+### 6. Event descriptions accumulated duplicate links. **FIXED**
+
+`backInjectCalendarDescriptions()` found the **first** registration link in a
+description and replaced it in place. Anything after that — a second copy left
+by Google Calendar flattening the HTML on a UI edit, a line in an older format,
+a link that came along with a copy-pasted event — was invisible to it, and
+stayed there permanently. Every sync corrected the first one and walked past
+the rest.
+
+Now: strip **every** link (all formats, all copies), write back exactly one, at
+the top. `stripAllRegistrationLines()` is deliberately narrow about what counts
+as a link, so `[Cap: N]`, `[Grouped]`, room notes and other hyperlinks survive
+untouched; `tidyDescriptionWhitespace()` closes the gap in both the newline and
+`<br>` flavours of description without eating deliberate paragraph breaks.
+
+**🔧 Admin ▸ 🔗 Rewrite Event Links** applies it to everything already out
+there, and Config gained a **Registration Link in Events** show/hide setting
+that both paths honour.
+
+**The one over-reach to know about:** any `docs.google.com/forms` link in a
+program event description is treated as ours and removed. On these calendars
+that is always true, and catching mangled duplicates requires it — but a
+hand-added link to some *other* Google Form would go with it. The confirmation
+dialog says so.
+
+### 7. Triggers are private to the account that made them
 
 Already documented in the code and guide, and the admin-email restriction is
 the right fix at the cause. Restating because it is the failure mode most
@@ -135,7 +160,7 @@ visible.
 
 ## Medium term — the next few months
 
-### 7. The hourly sync has no time budget
+### 8. The hourly sync has no time budget
 
 `bootstrapCalendars()` is carefully sliced against the 6-minute execution
 limit. `syncRegistrations()` is not, and it does an unbounded amount of work:
@@ -155,7 +180,7 @@ looks like a dead sync.**
 — check elapsed time between forms, stop cleanly, and advance the sync time
 only to the last response actually processed.
 
-### 8. Renders rewrite everything, every time
+### 9. Renders rewrite everything, every time
 
 Every render is `sheet.clear()` then a full rewrite of every row. It is what
 makes the layout code simple and the tabs self-healing, and it was the right
@@ -168,7 +193,7 @@ Hiding old months (added here) fixes the human problem, not this one. See
 watch is total cells across the history tabs; ~150,000 is where a full render
 starts eating a meaningful share of the execution budget.
 
-### 9. Quick Mark now reads three tabs per keystroke
+### 10. Quick Mark now reads three tabs per keystroke
 
 Widening the dropdowns to all programs and all members means
 `refreshQuickMarkDropdowns()` reads `Master_Program_Dashboard`,
@@ -179,7 +204,7 @@ That latency lands at a sign-in desk with a queue in front of it, and it grows
 with history. If it becomes noticeable: cache the derived lists on a hidden
 tab and rebuild them at the end of each sync, rather than deriving them live.
 
-### 10. `FORMS_FOLDER_ID` is empty
+### 11. `FORMS_FOLDER_ID` is empty
 
 `getOrCreateFormsFolder()` falls back to find-or-create **by name**. If a
 second folder called "Program Registration Forms" ever exists in the Drive —
@@ -189,7 +214,7 @@ whichever one Drive returns first, and they scatter across both.
 One-line fix: create the folder once, paste its ID into `FORMS_FOLDER_ID`.
 Worth doing now; it costs nothing and removes the ambiguity permanently.
 
-### 11. Renders from an edit aren't locked
+### 12. Renders from an edit aren't locked
 
 `harvestPastedMenuRows()` and the Quick Mark walk-in both re-render a whole
 tab from `onEdit`, which can collide with a scheduled sync rendering the same
@@ -200,7 +225,7 @@ same class of bug as #2 and will be worth a lock if either path grows.
 
 ## Long term — architectural, worth knowing before deciding anything big
 
-### 12. The spreadsheet is the database
+### 13. The spreadsheet is the database
 
 Every row on every tab is both storage and UI. That is genuinely the right
 choice here — the staff live in the sheet, and nothing else would have been
@@ -216,10 +241,10 @@ adopted. The costs to keep in view:
 - **The 10-million-cell limit is per file**, shared by every tab including any
   in-workbook archive.
 
-None of this argues for a database. It argues for the archive decision in #8
+None of this argues for a database. It argues for the archive decision in #9
 being made deliberately rather than discovered.
 
-### 13. The calendar is the source of truth, and it's editable by anyone
+### 14. The calendar is the source of truth, and it's editable by anyone
 
 Program identity is the event title; capacity and grouping are bracket tags in
 the description. Anyone with calendar access can rename an event and, from the
@@ -229,7 +254,7 @@ sweep more than 15 sessions or 25% of the table is what stands between a bulk
 calendar rename and a wiped dashboard, and it is doing more work than its size
 suggests. Leave those limits alone.
 
-### 14. Admin gating is convenience, not access control
+### 15. Admin gating is convenience, not access control
 
 `AUTHORIZED_ADMIN_EMAILS` is a constant in a file that anyone with edit access
 to the spreadsheet can open and change. The new two-tier menu hides
@@ -238,7 +263,7 @@ they are started. Both are real improvements to the chance of an accident.
 Neither is a boundary against someone who means it — that comes only from who
 the spreadsheet is shared with.
 
-### 15. Single-file, 8,000 lines
+### 16. Single-file, 8,000 lines
 
 `Code.gs` is well-organized and unusually well-commented; the comments explain
 *why*, which is what makes this maintainable at all. But it is one file with
@@ -279,6 +304,9 @@ order of what would change your plans:
    is signed up for lunch. You should get the named warning immediately, the
    row should leave Master_Lunch_Dashboard on the next sync, and the admin
    address should get an email about it.
-8. **Before the first sync on the new calendar IDs**, read #5 above and decide
+8. **Run 🔗 Rewrite Event Links** and open two or three events you know had
+   duplicate links. Check there's exactly one, at the top, and that your room
+   notes and `[Cap: N]` / `[Grouped]` brackets are untouched.
+9. **Before the first sync on the new calendar IDs**, read #5 above and decide
    which case you're in. That one is easier to get right beforehand than to
    unpick afterwards.
