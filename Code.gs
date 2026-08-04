@@ -4480,27 +4480,142 @@ function handleRegistrantsEdit(e, sheet) {
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Lunch_and_Event_Registrants);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
-  if (typeof e.value === 'undefined') return; // multi-cell paste, skip toast logic
+  // Computed from the RANGE, not just its top-left cell, so a fill-down or a
+  // paste over a block of statuses recalculates too — those are how somebody
+  // cancels a whole table's worth of people at once, which is exactly when the
+  // catering number matters most.
+  const lastCol = editedCol + e.range.getNumColumns() - 1;
+  const rangeCovers = name => headerMap[name] !== undefined &&
+    headerMap[name] + 1 >= editedCol && headerMap[name] + 1 <= lastCol;
+  const countingColumnsEdited = rangeCovers('Program_Status') || rangeCovers('Lunch_Status');
 
-  const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
-  const isLunchStatusCol = editedCol === headerMap['Lunch_Status'] + 1;
-  const isLunchServedCol = headerMap['Lunch_Served'] !== undefined &&
-    editedCol === headerMap['Lunch_Served'] + 1;
+  if (typeof e.value !== 'undefined') {
+    const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
+    const isLunchServedCol = headerMap['Lunch_Served'] !== undefined &&
+      editedCol === headerMap['Lunch_Served'] + 1;
 
-  // Ticking Lunch_Served directly on a row implies attendance, exactly as it
-  // does through the Quick Mark panel — one rule, wherever the tick happens.
-  if (isLunchServedCol && isTruthyCheckbox(e.value) && headerMap['Attended'] !== undefined) {
-    sheet.getRange(editedRow, headerMap['Attended'] + 1).setValue(true);
-    toastIfPossible('Lunch marked — attendance ticked too.');
+    // Ticking Lunch_Served directly on a row implies attendance, exactly as it
+    // does through the Quick Mark panel — one rule, wherever the tick happens.
+    if (isLunchServedCol && isTruthyCheckbox(e.value) && headerMap['Attended'] !== undefined) {
+      sheet.getRange(editedRow, headerMap['Attended'] + 1).setValue(true);
+      toastIfPossible('Lunch marked — attendance ticked too.');
+    }
+
+    if (isProgramStatusCol && e.oldValue === 'Waitlisted' && e.value === 'Active') {
+      toastIfPossible("🚀 Promoted off the waitlist — set their Lunch_Status to 'Needed' if they want a meal.");
+    }
   }
 
-  if ((isProgramStatusCol || isLunchStatusCol) && e.value === 'Cancelled') {
-    toastIfPossible('⚠️ Registration cancelled — check whether this changes your catering numbers.');
+  // The catering numbers are recomputed HERE, not left for the hourly sync.
+  //
+  // This used to be a toast — "check whether this changes your catering
+  // numbers" — which put the arithmetic back on the person who had just done
+  // the thing that changed it, and left Master_Lunch_Dashboard showing an
+  // order that included somebody who had cancelled, for up to an hour. On the
+  // one number in this workbook with a supplier deadline attached, "check it
+  // yourself later" was the wrong answer.
+  if (countingColumnsEdited) {
+    recalculateCateringCounts(sheet, headerMap, editedRow, e.range.getNumRows());
+  }
+}
+
+/**
+ * Rebuilds Master_Lunch_Dashboard (and the session table's Active/Waitlist
+ * counts) from the registrant rows as they stand right now, and reports the
+ * new lunch number for the date that was just edited.
+ *
+ * WHY THIS IS SAFE ON THE onEdit PATH, which is the constraint that shaped it:
+ * every step is SpreadsheetApp only. buildDashboardRollup() reads three tabs
+ * and Config; updateMasterLunchDashboard() writes one; recomputeEventRegistryCounts()
+ * writes cells. Nothing here opens a form, touches a calendar, or reads a
+ * script property — see onEdit(). protectDerivedColumns(), the one call
+ * underneath that needs authorization, already degrades instead of throwing.
+ *
+ * Any noteForAdmin() raised during the rollup is dropped rather than mailed:
+ * MailApp is unavailable here, and the next sync re-derives the same notes
+ * anyway from the same data.
+ *
+ * NOT triggered by Lunch_Served ticks, deliberately. Those happen dozens of
+ * times an hour at a sign-in desk, a full dashboard render each would make the
+ * tab unusable on the day it is needed most — and Served_Confirmed is a record
+ * of what happened, not a number anybody orders against. Only Program_Status
+ * and Lunch_Status, which are what change the ORDER, recalculate immediately.
+ */
+function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
+  const dateIdx = headerMap['Event_Date'];
+  const locationIdx = headerMap['Location'];
+
+  // Read the edited rows' date/location BEFORE the rebuild, to report against.
+  const touched = [];
+  if (dateIdx !== undefined && locationIdx !== undefined) {
+    const width = Math.max(dateIdx, locationIdx) + 1;
+    const values = sheet.getRange(editedRow, 1, numRows, width).getValues();
+    values.forEach(row => {
+      const d = coerceDate(row[dateIdx]);
+      const location = String(row[locationIdx] || '').trim();
+      if (!d || !location) return;
+      const key = `${formatDateKey(d)}|${location}`;
+      if (!touched.some(t => t.key === key)) touched.push({ key, date: d, location });
+    });
   }
 
-  if (isProgramStatusCol && e.oldValue === 'Waitlisted' && e.value === 'Active') {
-    toastIfPossible("🚀 Promoted off the waitlist — set their Lunch_Status to 'Needed' if they want a meal.");
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const registrantRows = readAllSectionedRows(sheet, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+
+    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (registrySheet) {
+      // Active_Count / Waitlist_Count / Status on the session table come from
+      // the same rows. Leaving those stale while the lunch numbers moved would
+      // just relocate the confusion to the other dashboard.
+      recomputeEventRegistryCounts(registrySheet, sheet, registrantRows);
+    }
+    updateMasterLunchDashboard(registrantRows);
+
+    toastIfPossible(describeRecalculatedCounts(touched));
+    log(`Catering counts recalculated after a status edit on ${numRows} row(s).`);
+    return true;
+  } catch (err) {
+    // Say so. A silently failed recalculation looks exactly like a correct one
+    // that happened to produce the same number.
+    log(`⚠️ Could not recalculate the catering counts after a status edit (${err}).`);
+    toastIfPossible(`⚠️ Status saved, but the lunch numbers could not be recalculated (${err}). Run "Sync Registrations".`);
+    return false;
   }
+}
+
+/** "Narberth, Mon Sep 14 — 12 lunches to order now." Reads the freshly-written dashboard. */
+function describeRecalculatedCounts(touched) {
+  if (touched.length === 0) return 'Catering numbers recalculated ✅';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_DASHBOARD);
+  if (!sheet) return 'Catering numbers recalculated ✅';
+
+  // The dashboard was written microseconds ago in this same execution; make
+  // sure those writes have landed before reading the number back out of it.
+  SpreadsheetApp.flush();
+
+  const headers = HEADERS.Master_Lunch_Dashboard;
+  const map = getIndexMap(headers);
+  const byKey = {};
+  readAllSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return;
+    byKey[`${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`] = row;
+  });
+
+  const parts = touched.slice(0, 3).map(t => {
+    const row = byKey[t.key];
+    if (!row) return `${t.location}, ${formatDateLabel(t.date)} — no longer on the lunch schedule`;
+    const registered = Number(row[map['Registered_Count']]) || 0;
+    const buffers = (Number(row[map['Standard_Buffer']]) || 0) + (Number(row[map['Tester_Buffer']]) || 0);
+    // Total_to_Order is a live formula, so it reads back as a formula string
+    // here rather than a number — recompute the same sum instead.
+    return `${t.location}, ${formatDateLabel(t.date)} — ${registered} registered, ${registered + buffers} to order`;
+  });
+  const more = touched.length > 3 ? ` (+${touched.length - 3} more date(s))` : '';
+  return `✅ Catering numbers updated: ${parts.join(' · ')}${more}`;
 }
 
 /**

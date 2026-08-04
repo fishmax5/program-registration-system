@@ -294,6 +294,13 @@ The columns you read first are at the **front**:
 ("nobody came") and "not counted yet" mean very different things, so it won't
 claim the first. It counts every tick, including walk-ins who never registered.
 
+> **Changing a `Program_Status` or `Lunch_Status` on the Registrants tab
+> updates these numbers straight away** — you don't wait for the hourly sync,
+> and you don't have to work out the new total yourself. A toast tells you what
+> it became. (Ticking `Lunch_Served` doesn't trigger a recalculation: that
+> happens dozens of times an hour at a sign-in desk, and `Served_Confirmed` is
+> a record of what happened rather than a number you order against.)
+
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
 system never overwrites them. They sit **after** the numbers you order against,
 because they're reconciliation detail and were pushing those numbers off the
@@ -947,7 +954,14 @@ overwrites your columns on that tab.
 **Cancel one person's registration**
 On **Lunch_and_Event_Registrants**, set their `Program_Status` to `Cancelled`.
 The `Manual_Override` cell turns purple and the row is protected from being
-overwritten.
+overwritten — and the **lunch numbers update immediately**, with a toast
+telling you the new count:
+
+> ✅ Catering numbers updated: Narberth, Mon Sep 14 — 12 registered, 14 to order
+
+Same for a whole block: select several `Program_Status` or `Lunch_Status` cells
+and fill or paste `Cancelled` down them; it recalculates once, for every date
+you touched.
 
 **Add a walk-in who never filled out the form**
 Use **⚡ Quick Mark**: pick the location and program, pick or **type** their
