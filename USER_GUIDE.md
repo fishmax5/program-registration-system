@@ -136,6 +136,14 @@ description is the thing that's wrong, so it can't also be the source of truth.
 - **Past events are never touched.** Their descriptions are a record of what
   people were sent, and rewriting them would generate calendar notifications
   for events that already happened.
+- **The calendar-watch triggers are switched off while it runs**, and rebuilt
+  when it finishes — including if it fails part-way. Every description it
+  writes is a calendar edit, and with the watchers live a run over a few
+  hundred events would queue a few hundred syncs. The summary tells you how
+  many triggers were rebuilt; if it ever says it couldn't, run **Check
+  Triggers**.
+- It **won't run during "Import Everything"** — that import has the same
+  triggers deliberately paused and restores them itself.
 - **An event with no form on the dashboard** still gets its old links removed
   (a stale link to a form nobody reads is worse than none) but nothing written
   back. Those are counted in the summary and go in the admin email — run

@@ -5823,9 +5823,33 @@ function prependRegistrationLine(description, linkLine) {
  * not from the description being replaced. That's the point: the description
  * is the thing that is wrong, so it can't also be the source of truth for
  * what should replace it.
+ *
+ * CALENDAR-EDIT TRIGGERS ARE TAKEN DOWN FOR THE DURATION, exactly as
+ * syncCalendarsInternal() does, and rebuilt in a `finally` so they come back
+ * whether this succeeds or throws. This function's entire job is editing the
+ * description of every upcoming event, and every one of those edits is a
+ * calendar update — with the triggers live, a run over a few hundred events
+ * queues a few hundred onCalendarChange executions, each of which can decide a
+ * full syncCalendars() is warranted. That is the trigger storm this codebase
+ * has been bitten by before; a cleanup pass is the single most efficient way
+ * to cause it.
+ *
+ * primeCalendarSyncTokens() then swallows this run's own edits BEFORE the
+ * triggers go back on, so the first delta check after the restore doesn't see
+ * every event we just touched and start a sync anyway.
  */
 function rewriteEventRegistrationLinks() {
   if (!requireAuthorizedAdmin('Rewrite Event Links')) return null;
+
+  // A bootstrap has deliberately paused these triggers and will restore them
+  // itself. Taking them down and putting them back underneath it would both
+  // fight that and re-arm automation mid-import.
+  if (isBootstrapActive()) {
+    const message = 'A large-setup import is running — try "Rewrite Event Links" once it finishes.';
+    log(`rewriteEventRegistrationLinks: ${message}`);
+    toastIfPossible(message);
+    return null;
+  }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -5837,6 +5861,9 @@ function rewriteEventRegistrationLinks() {
   const showLinks = shouldShowLinkInDescription();
   const mode = getLinkDisplayMode();
 
+  // Asked BEFORE the lock is taken: holding a script lock open while a modal
+  // waits for a human is how a scheduled sync gets skipped for ten minutes
+  // because somebody walked away from the dialog.
   if (!confirmConsequentialAction('Rewrite the registration link on every upcoming event?',
     `Config says "${mode}".\n\n` +
     'Every UPCOMING event on all program calendars will have every registration link removed — ' +
@@ -5851,6 +5878,24 @@ function rewriteEventRegistrationLinks() {
     return null;
   }
 
+  // The same lock syncCalendars() takes. Both edit calendar descriptions and
+  // both manage the calendar-edit triggers; overlapping them would have one
+  // restore the triggers while the other is still writing.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    log('rewriteEventRegistrationLinks: a sync is already running — skipping this run.');
+    toastIfPossible('A sync is already running — try again in a moment.');
+    return null;
+  }
+  try {
+    return rewriteEventRegistrationLinksInternal(registrySheet, showLinks);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** The rewrite itself, inside the lock. See rewriteEventRegistrationLinks(). */
+function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   // Event_ID -> what the session table says this event's form is.
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
@@ -5877,58 +5922,98 @@ function rewriteEventRegistrationLinks() {
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
 
   const formInfoCache = {};
-  const stats = { scanned: 0, linksRemoved: 0, rewritten: 0, cleared: 0, unchanged: 0, noForm: 0, calendarsSkipped: 0 };
+  const stats = {
+    scanned: 0, linksRemoved: 0, rewritten: 0, cleared: 0, unchanged: 0,
+    noForm: 0, calendarsSkipped: 0, triggersRemoved: 0, triggersRestored: 0
+  };
 
-  Object.keys(CALENDAR_MAP).forEach(calendarId => {
-    const events = eventsByCalendar[calendarId];
-    if (!events) {
-      log(`⚠️ Rewrite Event Links: "${CALENDAR_MAP[calendarId]}" could not be read — skipped.`);
-      stats.calendarsSkipped++;
-      return;
-    }
-
-    events.forEach(ev => {
-      if (ev.isAllDayEvent()) return;
-      const startTime = ev.getStartTime();
-      if (startTime < windowStart) return; // past — left as the record it is
-      const parsed = parseEventTitle(ev.getTitle());
-      if (!parsed) return;
-
-      stats.scanned++;
-      const existing = ev.getDescription() || '';
-      const stripped = stripAllRegistrationLines(existing);
-      stats.linksRemoved += stripped.removed;
-
-      let updated = stripped.text;
-      if (showLinks) {
-        const eventId = computeEventId(calendarId, parsed.cleanTitle, formatDateKey(startTime));
-        const session = sessionByEventId[eventId];
-        const formInfo = session && session.formId ? getFormInfoForLink(session.formId, formInfoCache) : null;
-        if (!formInfo) {
-          // No form on the session table (or it wouldn't open). The old links
-          // still come off — a stale link to a form nobody is reading is worse
-          // than none — but there is nothing correct to put back.
-          stats.noForm++;
-        } else {
-          updated = prependRegistrationLine(stripped.text, buildRegistrationLinkLine({
-            isFixed: session.isGrouped,
-            cleanTitle: session.cleanTitle || parsed.cleanTitle,
-            monthLabel: getMonthLabel(startTime)
-          }, formInfo));
-        }
+  // EVERY description write below is a calendar update. Take the watchers down
+  // first — see this function's header comment — and put them back in the
+  // `finally`, so an exception halfway through can't leave the project with no
+  // calendar-edit triggers at all.
+  stats.triggersRemoved = removeCalendarChangeTriggers();
+  if (stats.triggersRemoved === 0) {
+    // Either there genuinely were none — normal on a workbook where "Check
+    // Triggers" hasn't been run — or they belong to a DIFFERENT Google
+    // account, in which case this account cannot see or delete them (see
+    // writeTriggers()) and they will fire on every description written below.
+    // Not fatal, and not worth refusing over, but it is exactly the situation
+    // where a storm still happens after taking the precaution.
+    log('ℹ️ Rewrite Event Links: no calendar-edit triggers to pause under this account. If another ' +
+      'account created them, they are still live and will react to these edits — see the Triggers ' +
+      'page in the Apps Script editor.');
+  }
+  try {
+    Object.keys(CALENDAR_MAP).forEach(calendarId => {
+      const events = eventsByCalendar[calendarId];
+      if (!events) {
+        log(`⚠️ Rewrite Event Links: "${CALENDAR_MAP[calendarId]}" could not be read — skipped.`);
+        stats.calendarsSkipped++;
+        return;
       }
 
-      if (updated === existing) { stats.unchanged++; return; }
-      ev.setDescription(updated);
-      if (showLinks && updated !== stripped.text) stats.rewritten++; else stats.cleared++;
-    });
-  });
+      events.forEach(ev => {
+        if (ev.isAllDayEvent()) return;
+        const startTime = ev.getStartTime();
+        if (startTime < windowStart) return; // past — left as the record it is
+        const parsed = parseEventTitle(ev.getTitle());
+        if (!parsed) return;
 
-  invalidateCalendarEventsCache(); // descriptions just changed under the cache
+        stats.scanned++;
+        const existing = ev.getDescription() || '';
+        const stripped = stripAllRegistrationLines(existing);
+        stats.linksRemoved += stripped.removed;
+
+        let updated = stripped.text;
+        if (showLinks) {
+          const eventId = computeEventId(calendarId, parsed.cleanTitle, formatDateKey(startTime));
+          const session = sessionByEventId[eventId];
+          const formInfo = session && session.formId ? getFormInfoForLink(session.formId, formInfoCache) : null;
+          if (!formInfo) {
+            // No form on the session table (or it wouldn't open). The old links
+            // still come off — a stale link to a form nobody is reading is worse
+            // than none — but there is nothing correct to put back.
+            stats.noForm++;
+          } else {
+            updated = prependRegistrationLine(stripped.text, buildRegistrationLinkLine({
+              isFixed: session.isGrouped,
+              cleanTitle: session.cleanTitle || parsed.cleanTitle,
+              monthLabel: getMonthLabel(startTime)
+            }, formInfo));
+          }
+        }
+
+        if (updated === existing) { stats.unchanged++; return; }
+        ev.setDescription(updated);
+        if (showLinks && updated !== stripped.text) stats.rewritten++; else stats.cleared++;
+      });
+    });
+  } finally {
+    invalidateCalendarEventsCache(); // descriptions just changed under the cache
+    try {
+      // Order matters, same as syncCalendarsInternal(): swallow this run's own
+      // edits BEFORE the watchers come back on, or the first delta check after
+      // the restore sees every event we just touched and starts a sync anyway.
+      primeCalendarSyncTokens('link rewrite');
+      // force: the bootstrap check happened at the top of the public entry
+      // point, and automation staying off is the one outcome worth avoiding
+      // more than a redundant rebuild.
+      stats.triggersRestored = writeCalendarChangeTriggers(true).created;
+    } catch (err) {
+      // The loudest failure this function has. Silent automation is how "the
+      // calendar stopped syncing" becomes a mystery two weeks later.
+      log(`⚠️ Rewrite Event Links: could not restore the calendar-edit triggers (${err}) — run "Check Triggers".`);
+      noteForAdmin('Calendar triggers not restored',
+        `"Rewrite Event Links" finished but could not rebuild the calendar-edit triggers (${err}). ` +
+        `Run "Check Triggers" from the Admin menu — until then, edits made directly on a calendar ` +
+        `will not be picked up until the next daily sync.`);
+      toastIfPossible('⚠️ Links rewritten, but the calendar-edit triggers could not be restored — run "Check Triggers".');
+    }
+  }
 
   const summary = `Event links rewritten ✅ — ${stats.scanned} upcoming event(s) scanned, ` +
     `${stats.linksRemoved} old link(s) removed, ${stats.rewritten} rewritten, ${stats.cleared} left with no link, ` +
-    `${stats.unchanged} already correct` +
+    `${stats.unchanged} already correct; ${stats.triggersRestored} calendar-edit trigger(s) rebuilt` +
     (stats.noForm > 0 ? `, ⚠️ ${stats.noForm} with no form on the dashboard` : '') +
     (stats.calendarsSkipped > 0 ? `, ⚠️ ${stats.calendarsSkipped} calendar(s) unreadable` : '') + '.';
   log(`rewriteEventRegistrationLinks: ${summary}`);
