@@ -241,16 +241,30 @@ The **Status** column is computed for you:
 | 🟡 Almost Full | Within the last 15% of seats |
 | 🔴 Waitlist Only | Full — new sign-ups are waitlisted |
 
+**Column order.** `Active_Count` sits right next to `Status` — how many signed
+up and whether it's full is the pair you read first. The three **capacity**
+columns are at the **end** of the visible row:
+
+`Max_Capacity` · `Waitlist_Count` · `Remaining_Seats`
+
+Most programs here are uncapped, so all three are blank on most rows; sitting
+between the count and the status they were three columns of nothing pushing the
+form links off the screen.
+
 **This whole tab is rebuilt from the calendar on every sync.** Don't hand-edit
 it; your changes will be overwritten (you'll get a warning if you try). If a
 session is wrong here, fix the calendar event.
 
-**The one exception is `Type_Tag`** — it's yellow because it *is* yours to
-change, and changing it writes back to the calendar so it sticks. See
-[Grouped vs Monthly](#setting-up-your-calendar-events) above.
+**The one exception is `Type_Tag`** — it *is* yours to change, and changing it
+writes back to the calendar so it sticks. It's a dropdown with an "are you
+sure?" behind it rather than a yellow cell: it always already holds a real
+value, so marking it as a blank-to-fill-in would have read as a column of
+problems. See [Grouped vs Monthly](#setting-up-your-calendar-events) above, and
+**🔁 Apply Type Changes to Calendar** if a change doesn't stick.
 
 `Form_ID`, `Event_ID`, `Calendar_Source` and `Calendar_Synced?` are **hidden** —
-internal plumbing. The "View Live Form" link you actually hand out stays visible.
+internal plumbing, kept after the capacity columns at the far right. The "View
+Live Form" link you actually hand out stays visible.
 
 ### 2. Master_Lunch_Dashboard
 What to order. **Today's Lunch Needs** sits at the top and always stays visible.

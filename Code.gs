@@ -679,11 +679,24 @@ const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
  */
 const HEADERS = {
   // The per-session table inside Master_Program_Dashboard (section C).
+  //
+  // Active_Count sits directly beside Status — "how many signed up" and "is it
+  // full" is the pair anyone reads first. The three CAPACITY columns
+  // (Max_Capacity / Waitlist_Count / Remaining_Seats) trail at the end of the
+  // VISIBLE run instead, ahead of the hidden plumbing block: most programs
+  // here are uncapped, so all three read "" / "🟢 Unlimited" on most rows, and
+  // three columns of nothing sitting between the count and the status pushed
+  // the form links off the screen to say it.
+  //
+  // Hidden columns (PROGRAM_DASHBOARD_HIDDEN_COLUMNS) stay last. They don't
+  // have to be — applyColumnVisibility() hides by NAME, not position — but
+  // keeping them there means the visible table is a contiguous block, which
+  // is what makes "the end of the row" mean anything.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag',
-    'Active_Count', 'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats', 'Status',
-    'Form_Response_Link', 'Edit_Form_Link', 'Form_ID', 'Calendar_Synced?',
-    'Event_ID', 'Calendar_Source'
+    'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
+    'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
+    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
