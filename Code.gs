@@ -710,15 +710,21 @@ const HEADERS = {
   // Registered_Count (what the forms say) and Served_Confirmed (what was
   // actually ticked off on the Registrants tab) sit side by side on purpose —
   // planned versus real is the comparison this tab exists to support.
-  // The hand-entry buffer/consumption columns now trail at the END: they're
-  // reconciliation detail, and having them between the counts pushed the
-  // numbers staff actually order against off the screen.
+  //
+  // The two BUFFER columns now trail at the very end, behind even the
+  // consumption/reconciliation block. They are set once from Config and then
+  // rarely touched, but sitting next to Total_to_Order they read as part of
+  // the ordering arithmetic and pushed Actual_Ordered — the number someone
+  // types the morning after — off a laptop screen. Total_to_Order's formula
+  // still references them by cell (setEventTimeFormulas' sibling in
+  // writeMasterLunchDashboardSheet builds the A1 refs from this array), so
+  // moving them here costs nothing.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
-    'Standard_Buffer', 'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway',
-    'Subs_In-Person', 'Subs_Takeaway', 'Total_Consumed', 'Thrown_Away',
-    'Discrepancy', 'Manual_Override'
+    'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway',
+    'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
+    'Standard_Buffer', 'Tester_Buffer'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
   // (see CATERED_LUNCH_TYPES vs LUNCH_TYPE_OPTIONS below).
@@ -9599,11 +9605,12 @@ function buildDashboardRollup(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
-  if (!registrySheet) return [];
 
+  // No early return on a missing/empty session table any more: the menu is now
+  // a source of dashboard rows in its own right (see SEED 1), so a catered day
+  // still has to appear even on a workbook whose calendar hasn't been imported.
   const regHeaders = HEADERS.Master_Program_Dashboard;
-  const regRows = readAllSectionedRows(registrySheet, regHeaders, 'Event_ID');
-  if (regRows.length === 0) return [];
+  const regRows = registrySheet ? readAllSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
   const regMap = getIndexMap(regHeaders);
 
   const eventMeta = {};
@@ -9617,21 +9624,66 @@ function buildDashboardRollup(registrantRows) {
   const rollup = {};
   /** date|location -> people who wanted lunch on a day now marked Not Serving. */
   const notServingWithSignups = {};
-
-  // Seed upcoming date+location pairs at 0 so the schedule shows what's
-  // coming rather than only what's already been registered for — but only
-  // where the location's catering policy says lunch is on the table. Without
-  // this filter a never-catering location (Zoom) contributes a blank row for
-  // every single session it runs. See isLunchOfferedOn().
   const todayKey = formatDateKey(new Date());
+
+  const seed = (dateKey, location) => {
+    const key = `${dateKey}|${location}`;
+    if (!rollup[key]) {
+      rollup[key] = { dateKey, location, registeredCount: 0, servedConfirmed: 0 };
+    }
+    return rollup[key];
+  };
+
+  // SEED 1 — every upcoming Hot/Cold row on Lunch_Schedule, whether or not a
+  // program runs that day.
+  //
+  // A catered day is a catering commitment. The kitchen is cooking, the order
+  // has to be placed, and the number has to appear somewhere someone looks —
+  // and "somewhere someone looks" is this tab. Seeding only from the session
+  // table meant a meal with no programming behind it (a drop-in lunch, a
+  // holiday meal, a day whose calendar event hasn't been made yet) was
+  // invisible here even though the menu plainly said it was happening.
+  //
+  // The menu row is taken as authoritative, deliberately over the location's
+  // catering policy: a policy is a default about what USUALLY happens, and an
+  // explicit Hot/Cold row for a specific date is somebody overriding it on
+  // purpose. The one case worth querying is a menu row at a Never location,
+  // which is contradictory rather than deliberate — flagged below, not
+  // silently dropped.
+  const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
+  (menuSheet ? readLunchScheduleRows(menuSheet) : []).forEach(row => {
+    const d = coerceDate(row[menuMap['Event_Date']]);
+    const location = String(row[menuMap['Location']] || '').trim();
+    const type = String(row[menuMap['Type']] || '').trim();
+    if (!d || !location) return;
+    if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return; // "Not Serving", or blank
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey) return; // past dates are never seeded — see below
+
+    if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) {
+      noteForAdmin('Menu set at a Never-catering location',
+        `Lunch_Schedule has a ${type} row for ${location} on ${formatDateLabel(d)}, but that location's ` +
+        `policy in Config is "Never". Either change the policy or remove the menu row — as it stands the ` +
+        `date is being catered for a location that is supposed to serve no food.`);
+      return;
+    }
+    seed(dateKey, location);
+  });
+
+  // SEED 2 — upcoming session date+location pairs, so the schedule also shows
+  // programming that is coming but has no menu row yet. Gated on
+  // isLunchOfferedOn(), or a never-catering location (Zoom) would contribute a
+  // blank row for every single session it runs.
+  //
+  // Past dates are never seeded by either pass — that would backfill a wall of
+  // empty history. Past rows appear only where a registrant or a served meal
+  // put them there.
   Object.keys(eventMeta).forEach(eventId => {
     const meta = eventMeta[eventId];
     if (!meta.location || meta.dateKey < todayKey) return;
     if (!isLunchOfferedOn(parseDateKey(meta.dateKey), meta.location)) return;
-    const key = `${meta.dateKey}|${meta.location}`;
-    if (!rollup[key]) {
-      rollup[key] = { dateKey: meta.dateKey, location: meta.location, registeredCount: 0, servedConfirmed: 0 };
-    }
+    seed(meta.dateKey, meta.location);
   });
 
   if (registrantsSheet || registrantRows) {
@@ -10007,17 +10059,18 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   const notServingRule = buildTextEqualsRuleForRanges(typeRanges, 'Not Serving', NOT_SERVING_COLOR);
   if (notServingRule) rules.push(notServingRule);
 
-  // Location color-coding, painted across the row rather than on the single
-  // Location cell — this tab is one row per date PER LOCATION, so the block
-  // of color is what makes "everything for Ashbridge that week" scannable.
-  // Last in the rule list on purpose: the manual-override tint and the grey
-  // "Not Serving" cell above both need to win where they overlap.
-  activeZones.forEach(z => {
-    rules.push(...buildLocationRowTintRules(sheet, z.start, z.count, numCols, locationCol,
-      [map['Event_Date'] + 1, ...manualEntryColIndexes]));
-  });
-  rules.push(...buildLocationRowTintRules(sheet, plan.todayDataStart, plan.numLocations,
-    TODAY_LUNCH_HEADERS.length, todayLocationCol, []));
+  // Location color-coding on the LOCATION CELL ONLY, the same as every other
+  // tab. It used to wash the whole row, on the theory that a block of color
+  // makes "everything for Ashbridge that week" scannable — but this tab
+  // already carries the month tint on Event_Date, the grey "Not Serving"
+  // type, the purple manual-override tint and a yellow band of hand-entry
+  // columns, and a full-row wash underneath all of that turned the numbers
+  // people read into figures on a colored background rather than making
+  // anything easier to find. One cell says the same thing and gets out of
+  // the way.
+  const locationRanges = activeZones.map(z => sheet.getRange(z.start, locationCol, z.count, 1));
+  locationRanges.push(sheet.getRange(plan.todayDataStart, todayLocationCol, plan.numLocations, 1));
+  rules.push(...buildLocationColorRules(locationRanges));
 
   sheet.setConditionalFormatRules(rules);
 

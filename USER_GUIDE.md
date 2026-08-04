@@ -248,11 +248,31 @@ internal plumbing. The "View Live Form" link you actually hand out stays visible
 What to order. **Today's Lunch Needs** sits at the top and always stays visible.
 Below it is the full schedule, split upcoming/past.
 
-Every **upcoming** date and location where lunch is on the table appears here
-**even with zero registrants**, so you can plan ahead and enter buffers before
-anyone signs up. What counts as "on the table" is set per location in Config
-under **Lunch Service by Location** — that's what keeps Zoom (which never serves
-lunch) from adding a blank row for every session it runs.
+**What appears here.** Every **upcoming** date and location where lunch is on
+the table, **even with zero registrants**, so you can plan ahead and enter
+buffers before anyone signs up. Two things put a date on this tab:
+
+1. **A `Hot` or `Cold` row on Lunch_Schedule.** If the menu says food is
+   happening that day, the date is here — **whether or not a program runs**.
+   A drop-in lunch, a holiday meal, or a day whose calendar event hasn't been
+   made yet is still a meal somebody has to order.
+2. **An upcoming session**, where that location's **Lunch Service** in Config
+   allows it. This is what shows you programming that has no menu set yet —
+   and what keeps Zoom (which never serves lunch) from adding a blank row for
+   every session it runs.
+
+A `Not Serving` menu row removes the date — see
+[Not Serving](#not-serving--closing-the-kitchen-for-a-day).
+
+> A **`Hot`/`Cold` menu row beats the location's policy**, because it's a
+> deliberate statement about one specific date and the policy is only a
+> default. The exception is a location set to **Never**: a menu row there is a
+> contradiction rather than a decision, so the date is left off and it goes in
+> the admin email to be sorted out.
+
+**Past dates are never added empty** — that would backfill a wall of blank
+history. A past date appears only if someone registered for lunch or was
+actually served.
 
 The columns you read first are at the **front**:
 
@@ -267,18 +287,25 @@ The columns you read first are at the **front**:
 claim the first. It counts every tick, including walk-ins who never registered.
 
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
-system never overwrites them. They now sit at the **end** of the row, because
-they're reconciliation detail and were pushing the numbers you actually order
-against off the screen:
+system never overwrites them. They sit **after** the numbers you order against,
+because they're reconciliation detail and were pushing those numbers off the
+screen:
 
-`Standard_Buffer` · `Tester_Buffer` · `Actual_Ordered` · `Day_1_In-Person` ·
-`Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` · `Total_Consumed` ·
-`Thrown_Away` · `Discrepancy`
+`Actual_Ordered` · `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` ·
+`Subs_Takeaway` · `Total_Consumed` · `Thrown_Away` · `Discrepancy`
 
-Because there's one row per date **per location**, each row is **shaded by
-location** — Narberth light orange, Ashbridge light green, Zoom lavender — so a
-week with several sites reads as blocks of color. The `Event_Date` cell keeps
-its month tint and the ✍️ columns keep their yellow.
+…and the two **buffer** columns are at the **very end** of the row:
+
+`Standard_Buffer` · `Tester_Buffer`
+
+They're set once from Config and then rarely touched, so they've been moved out
+of the way — but `Total_to_Order` still adds them, wherever they sit.
+
+**Color:** the `Location` cell is shaded by location — Narberth light orange,
+Ashbridge light green, Zoom lavender — the same as every other tab. The rest of
+the row is left plain so the numbers read as numbers. `Event_Date` keeps its
+month tint, `Lunch_Type` goes grey on `Not Serving`, the ✍️ columns keep their
+yellow, and a hand-edited row's `Manual_Override` cell goes purple.
 
 ### 3. Lunch_and_Event_Registrants
 One row **per person, per session** — guests get their own rows, not a note on
