@@ -24,144 +24,6 @@ Everything runs on a schedule. You rarely need to press anything.
 
 ---
 
-## First run
-
-The very first import is the one genuinely big job this system ever does: it
-has to build a registration form for **every program on every calendar**, and
-write a link into **every event**. That is far more than Google gives a script
-in a single run, so pressing **Sync Cal** on a busy calendar times out
-part-way — and a timed-out sync leaves things half-done: triggers switched off,
-some programs imported, and forms it had just created forgotten (so a second
-attempt makes duplicates).
-
-**🔧 Admin ▸ Import Everything (First Run)** exists for exactly this (the
-🔧 Admin submenu only shows for admin accounts — see
-[Admin-only actions](#admin-only-actions)):
-
-- It **pauses all automation** first — the scheduled syncs and the
-  calendar-watch triggers — and keeps them paused for the whole import, not
-  just the first minute of it. **Check Triggers** deliberately does nothing
-  while it's running (it says so); the import puts everything back itself.
-- It imports in **batches across several background runs**, a few minutes
-  apart. The first batch happens while you watch; the rest carry on by
-  themselves. Nothing is lost if a batch is cut short — the next one picks up
-  where it left off.
-- Programs whose events **already carry a registration link** keep their
-  existing form; it isn't replaced.
-- When it's done it **rebuilds every trigger**, redraws the dashboard, and
-  toasts a summary. The link it wrote into each calendar event is *not*
-  treated as a calendar change to react to, so finishing doesn't kick off a
-  pile of syncs.
-
-Press it once and let it run — expect a few minutes for a small calendar and
-up to half an hour for a big one, and watch rows appear on
-**Master_Program_Dashboard** as it goes. Pressing it again is harmless:
-anything already imported is skipped, which also makes it the way to recover
-if an import was interrupted. When it finishes, run **Sync Registrations** (or
-just wait for the hourly run) to pull in responses to any forms that already
-existed.
-
----
-
-## Updating to a new version
-
-When new code is pasted into the Apps Script editor, the *tabs* are still
-drawn the old way — new columns, panels and formatting don't appear until
-something redraws them.
-
-**🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)** does exactly that, and
-nothing else. It reads the rows already sitting on your tabs and redraws every
-one of them in the current layout.
-
-**It does not touch anything outside the spreadsheet:**
-
-| Rebuilt from what's already here | Left completely alone |
-|---|---|
-| Master_Program_Dashboard | Your **calendars** — not read, not written |
-| Lunch_and_Event_Registrants (+ Quick Mark panel) | Your **registration forms** — none opened or changed |
-| Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
-| Master_Lunch_Dashboard (hand-entered columns kept) | |
-| Deleted_Event_Triage | |
-| Member_Roll / Program_Options (your notes kept) | |
-| Config, tab order, widths, dropdowns, colours | |
-
-**Nothing can be removed by it.** A normal sync cross-checks sessions against
-the live calendar and moves registrants to triage when an event has gone —
-this deliberately skips that step, so an unreachable calendar can't be
-mistaken for a cancelled program.
-
-It tells you what it found before doing anything ("1,240 registrant rows,
-830 sessions…") and does nothing if you say no. Safe to run twice.
-
-**Use it when:** you've pasted new code, or a tab looks wrong and you want it
-redrawn.
-
-**Don't use it when:** the workbook is empty — there's nothing to rebuild
-*from*, and it'll say so. That's what **Import Everything (First Run)** is for.
-
-> Rebuilding a **copy** of the workbook? Press **Check Triggers** afterwards
-> too. The rebuild deliberately doesn't touch automation, and a fresh copy has
-> no triggers of its own yet.
-
----
-
-## Fixing duplicate links in event descriptions
-
-Event descriptions collect registration links. Google Calendar rewrites the
-HTML in a description whenever someone edits the event in the web UI, and a
-link that goes through that can come back out as **plain text sitting next to
-the original** — so one event advertises the same form twice, in two formats.
-Copy-pasting an event to duplicate it brings whatever was there along with it,
-and older versions of this system wrote a different format again.
-
-**🔧 Admin ▸ 🔗 Rewrite Event Links (fix duplicates)** clears the lot and
-starts again:
-
-1. Every **upcoming** event on all program calendars is scanned.
-2. **Every** registration link is removed — all copies, all formats: the
-   current hyperlink, the older `Registration Link: … [Form ID: …]` line,
-   flattened plain-text links, and orphaned "📝 Register for …" labels.
-3. Then **one** link is written back at the **top** of the description — or
-   none, if Config's [🔗 Registration Link in Events](#-registration-link-in-events)
-   says **Hide link**.
-
-**Everything else in the description is kept exactly as it was** — room notes,
-volunteer names, `[Cap: 12]`, `[Grouped]`, other hyperlinks, and your paragraph
-breaks. Only the blank space left behind by a removed link is closed up.
-
-Which form each event gets is read from the **program dashboard**
-(`Event_ID` → `Form_ID`), not from the description being replaced — the
-description is the thing that's wrong, so it can't also be the source of truth.
-
-- **Past events are never touched.** Their descriptions are a record of what
-  people were sent, and rewriting them would generate calendar notifications
-  for events that already happened.
-- **The calendar-watch triggers are switched off while it runs**, and rebuilt
-  when it finishes — including if it fails part-way. Every description it
-  writes is a calendar edit, and with the watchers live a run over a few
-  hundred events would queue a few hundred syncs. The summary tells you how
-  many triggers were rebuilt; if it ever says it couldn't, run **Check
-  Triggers**.
-  - It only ever puts back triggers **your account already had**. If you
-    weren't holding any and you're not the recorded
-    [Trigger_Owner](#-automation--trigger-ownership), it rebuilds nothing
-    rather than creating a fresh set under you — that set would be invisible
-    to the owner and would double every sync from then on.
-- It **won't run during "Import Everything"** — that import has the same
-  triggers deliberately paused and restores them itself.
-- **An event with no form on the dashboard** still gets its old links removed
-  (a stale link to a form nobody reads is worse than none) but nothing written
-  back. Those are counted in the summary and go in the admin email — run
-  **Sync Cal** to build their forms, then run this again.
-- Safe to run twice; the second run reports everything already correct.
-
-> Any link to a **Google Form** in a program event description is treated as a
-> registration link and removed. On these calendars that's always this
-> system's link — but if you've hand-added a link to some *other* Google Form
-> in an event, it will go too.
-
----
-
 ## Setting up your calendar events
 
 This is the only "syntax" in the whole system, and it's the part worth getting
@@ -895,6 +757,144 @@ the tab stays put so you can try again. Deleted tabs are recoverable from
 > You do **not** need this for ordinary column changes. When a tab's columns are
 > re-ordered or added to, the system re-aligns its existing rows by header name
 > automatically on the next sync.
+
+---
+
+## First run
+
+The very first import is the one genuinely big job this system ever does: it
+has to build a registration form for **every program on every calendar**, and
+write a link into **every event**. That is far more than Google gives a script
+in a single run, so pressing **Sync Cal** on a busy calendar times out
+part-way — and a timed-out sync leaves things half-done: triggers switched off,
+some programs imported, and forms it had just created forgotten (so a second
+attempt makes duplicates).
+
+**🔧 Admin ▸ Import Everything (First Run)** exists for exactly this (the
+🔧 Admin submenu only shows for admin accounts — see
+[Admin-only actions](#admin-only-actions)):
+
+- It **pauses all automation** first — the scheduled syncs and the
+  calendar-watch triggers — and keeps them paused for the whole import, not
+  just the first minute of it. **Check Triggers** deliberately does nothing
+  while it's running (it says so); the import puts everything back itself.
+- It imports in **batches across several background runs**, a few minutes
+  apart. The first batch happens while you watch; the rest carry on by
+  themselves. Nothing is lost if a batch is cut short — the next one picks up
+  where it left off.
+- Programs whose events **already carry a registration link** keep their
+  existing form; it isn't replaced.
+- When it's done it **rebuilds every trigger**, redraws the dashboard, and
+  toasts a summary. The link it wrote into each calendar event is *not*
+  treated as a calendar change to react to, so finishing doesn't kick off a
+  pile of syncs.
+
+Press it once and let it run — expect a few minutes for a small calendar and
+up to half an hour for a big one, and watch rows appear on
+**Master_Program_Dashboard** as it goes. Pressing it again is harmless:
+anything already imported is skipped, which also makes it the way to recover
+if an import was interrupted. When it finishes, run **Sync Registrations** (or
+just wait for the hourly run) to pull in responses to any forms that already
+existed.
+
+---
+
+## Updating to a new version
+
+When new code is pasted into the Apps Script editor, the *tabs* are still
+drawn the old way — new columns, panels and formatting don't appear until
+something redraws them.
+
+**🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)** does exactly that, and
+nothing else. It reads the rows already sitting on your tabs and redraws every
+one of them in the current layout.
+
+**It does not touch anything outside the spreadsheet:**
+
+| Rebuilt from what's already here | Left completely alone |
+|---|---|
+| Master_Program_Dashboard | Your **calendars** — not read, not written |
+| Lunch_and_Event_Registrants (+ Quick Mark panel) | Your **registration forms** — none opened or changed |
+| Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
+| Master_Lunch_Dashboard (hand-entered columns kept) | |
+| Deleted_Event_Triage | |
+| Member_Roll / Program_Options (your notes kept) | |
+| Config, tab order, widths, dropdowns, colours | |
+
+**Nothing can be removed by it.** A normal sync cross-checks sessions against
+the live calendar and moves registrants to triage when an event has gone —
+this deliberately skips that step, so an unreachable calendar can't be
+mistaken for a cancelled program.
+
+It tells you what it found before doing anything ("1,240 registrant rows,
+830 sessions…") and does nothing if you say no. Safe to run twice.
+
+**Use it when:** you've pasted new code, or a tab looks wrong and you want it
+redrawn.
+
+**Don't use it when:** the workbook is empty — there's nothing to rebuild
+*from*, and it'll say so. That's what **Import Everything (First Run)** is for.
+
+> Rebuilding a **copy** of the workbook? Press **Check Triggers** afterwards
+> too. The rebuild deliberately doesn't touch automation, and a fresh copy has
+> no triggers of its own yet.
+
+---
+
+## Fixing duplicate links in event descriptions
+
+Event descriptions collect registration links. Google Calendar rewrites the
+HTML in a description whenever someone edits the event in the web UI, and a
+link that goes through that can come back out as **plain text sitting next to
+the original** — so one event advertises the same form twice, in two formats.
+Copy-pasting an event to duplicate it brings whatever was there along with it,
+and older versions of this system wrote a different format again.
+
+**🔧 Admin ▸ 🔗 Rewrite Event Links (fix duplicates)** clears the lot and
+starts again:
+
+1. Every **upcoming** event on all program calendars is scanned.
+2. **Every** registration link is removed — all copies, all formats: the
+   current hyperlink, the older `Registration Link: … [Form ID: …]` line,
+   flattened plain-text links, and orphaned "📝 Register for …" labels.
+3. Then **one** link is written back at the **top** of the description — or
+   none, if Config's [🔗 Registration Link in Events](#-registration-link-in-events)
+   says **Hide link**.
+
+**Everything else in the description is kept exactly as it was** — room notes,
+volunteer names, `[Cap: 12]`, `[Grouped]`, other hyperlinks, and your paragraph
+breaks. Only the blank space left behind by a removed link is closed up.
+
+Which form each event gets is read from the **program dashboard**
+(`Event_ID` → `Form_ID`), not from the description being replaced — the
+description is the thing that's wrong, so it can't also be the source of truth.
+
+- **Past events are never touched.** Their descriptions are a record of what
+  people were sent, and rewriting them would generate calendar notifications
+  for events that already happened.
+- **The calendar-watch triggers are switched off while it runs**, and rebuilt
+  when it finishes — including if it fails part-way. Every description it
+  writes is a calendar edit, and with the watchers live a run over a few
+  hundred events would queue a few hundred syncs. The summary tells you how
+  many triggers were rebuilt; if it ever says it couldn't, run **Check
+  Triggers**.
+  - It only ever puts back triggers **your account already had**. If you
+    weren't holding any and you're not the recorded
+    [Trigger_Owner](#-automation--trigger-ownership), it rebuilds nothing
+    rather than creating a fresh set under you — that set would be invisible
+    to the owner and would double every sync from then on.
+- It **won't run during "Import Everything"** — that import has the same
+  triggers deliberately paused and restores them itself.
+- **An event with no form on the dashboard** still gets its old links removed
+  (a stale link to a form nobody reads is worse than none) but nothing written
+  back. Those are counted in the summary and go in the admin email — run
+  **Sync Cal** to build their forms, then run this again.
+- Safe to run twice; the second run reports everything already correct.
+
+> Any link to a **Google Form** in a program event description is treated as a
+> registration link and removed. On these calendars that's always this
+> system's link — but if you've hand-added a link to some *other* Google Form
+> in an event, it will go too.
 
 ---
 
