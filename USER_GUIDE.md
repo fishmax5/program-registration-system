@@ -142,6 +142,11 @@ description is the thing that's wrong, so it can't also be the source of truth.
   hundred events would queue a few hundred syncs. The summary tells you how
   many triggers were rebuilt; if it ever says it couldn't, run **Check
   Triggers**.
+  - It only ever puts back triggers **your account already had**. If you
+    weren't holding any and you're not the recorded
+    [Trigger_Owner](#-automation--trigger-ownership), it rebuilds nothing
+    rather than creating a fresh set under you — that set would be invisible
+    to the owner and would double every sync from then on.
 - It **won't run during "Import Everything"** — that import has the same
   triggers deliberately paused and restores them itself.
 - **An event with no form on the dashboard** still gets its old links removed

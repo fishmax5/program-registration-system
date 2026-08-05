@@ -6859,10 +6859,23 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
       // edits BEFORE the watchers come back on, or the first delta check after
       // the restore sees every event we just touched and starts a sync anyway.
       primeCalendarSyncTokens('link rewrite');
+      // RESTORE ONLY, for the same reason syncCalendarsInternal() is —
+      // rebuilding unconditionally here would CREATE a full set of
+      // calendar-edit triggers under whichever admin ran this, and an admin
+      // is not necessarily the trigger owner. That is how an invisible second
+      // set gets made by someone doing nothing more suspicious than fixing
+      // duplicate links. An account that held none a moment ago ends with
+      // none; the log line above already told them why they might hold none.
+      //
       // force: the bootstrap check happened at the top of the public entry
       // point, and automation staying off is the one outcome worth avoiding
       // more than a redundant rebuild.
-      stats.triggersRestored = writeCalendarChangeTriggers(true).created;
+      if (stats.triggersRemoved > 0 || isTriggerOwnerAccount()) {
+        stats.triggersRestored = writeCalendarChangeTriggers(true).created;
+      } else {
+        log('Rewrite Event Links: calendar-edit triggers not restored — this account held none before the ' +
+          'run and is not the recorded trigger owner. Creating them here would add a second, invisible set.');
+      }
     } catch (err) {
       // The loudest failure this function has. Silent automation is how "the
       // calendar stopped syncing" becomes a mystery two weeks later.
