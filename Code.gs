@@ -38,7 +38,9 @@
  *      Upcoming/Past sub-tables like every other date-bearing tab.
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
- *      an optional Admin Notification Email. Unaffected by the
+ *      an optional Admin Notification Email + Lunch Service by Location +
+ *      Automation & Trigger Ownership (the kill switch and the trigger
+ *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
  *      first-column/month-tint treatment as Lunch_and_Event_Registrants.
@@ -167,6 +169,38 @@
  *      API — lists every trigger regardless of creator) and delete the
  *      other account's copies, and to agree only one account manages
  *      triggers going forward.
+ *    - MULTI-ACCOUNT TRIGGER COORDINATION. "Agree only one account manages
+ *      triggers" is not something an agreement can enforce, so it is now
+ *      enforced in code. Three parts, in Config's "⚙️ Automation & Trigger
+ *      Ownership" section and in section 3a:
+ *        1. WHERE THE SECOND SET ACTUALLY CAME FROM. It was mostly not
+ *           "Check Triggers" — that's admin-gated and rarely pressed.
+ *           syncCalendarsInternal() tears the calendar-edit triggers down
+ *           and rebuilt them in its `finally`, and syncCalendars() is
+ *           deliberately UNGATED (top menu item, used daily by anyone with
+ *           edit access). So every "Sync Cal" click by a non-owner removed
+ *           nothing and then created a whole set under that account. That
+ *           finally is now RESTORE-ONLY: an account that held none before
+ *           the sync ends with none.
+ *        2. Trigger_Owner records the one account allowed to build
+ *           triggers. writeTriggers() and bootstrapCalendars() refuse from
+ *           anyone else and name the owner, so an account that cannot see
+ *           the triggers at least learns who to ask. Moving it is a
+ *           deliberate act (takeOverTriggerOwnership()) that says plainly
+ *           it cannot delete the old owner's copies.
+ *        3. Automation_Enabled is a kill switch every managed handler reads
+ *           first. Script-level state is shared across accounts even though
+ *           triggers are not — so this is the only lever that reaches a
+ *           trigger you have no power to delete. It cannot remove the
+ *           duplicate, but it stops it firing, from any account, without
+ *           editor access.
+ *      And because all of that is still bookkeeping that can be bypassed by
+ *      running a function straight from the script editor, recordHandlerRun()
+ *      stamps who each handler ACTUALLY ran as (an installable trigger runs
+ *      as its creator). Two accounts seen firing one handler is duplicate
+ *      sets, observed rather than inferred — "Admin → Trigger Status" shows
+ *      that next to what this account can see and what Config claims, and it
+ *      is the disagreement between the three that identifies the problem.
  *    - TRIAGE DISTRUSTS ITSELF. triageDeletedSessions() is the only thing
  *      that removes sessions, and "the calendar didn't come back" used to
  *      read identically to "every session was deleted." It now ignores
@@ -804,9 +838,14 @@ const CONFIG_LAYOUT = {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
     headers: ['Location', 'Catering_Policy']
+  },
+  AUTOMATION: {
+    title: '⚙️ Automation & Trigger Ownership',
+    startCol: 13,
+    headers: ['Automation_Enabled', 'Trigger_Owner', 'Triggers_Verified_At']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 const CONFIG_HEADER_ROW = 2;
@@ -858,6 +897,86 @@ const DEFAULT_CATERING_POLICY_BY_LOCATION = {
   Zoom: CATERING_POLICIES.NEVER
 };
 const FALLBACK_CATERING_POLICY = CATERING_POLICIES.ALWAYS;
+
+// ---------------------------------------------------------------------------
+// AUTOMATION KILL SWITCH + TRIGGER OWNERSHIP  (Config -> "⚙️ Automation & Trigger Ownership")
+// ---------------------------------------------------------------------------
+//
+// THE PROBLEM THESE EXIST FOR. Apps Script installable triggers are private
+// to the Google account that created them. ScriptApp.getProjectTriggers()
+// returns only what the CURRENTLY RUNNING account can see, and
+// ScriptApp.deleteTrigger() can only delete those. So when two accounts have
+// each run "Check Triggers", both own a full set, both sets fire, and
+// NEITHER account can see or remove the other's from code. writeTriggers()
+// documents this at length; resetTriggersForHandler() fixes it only within
+// one account.
+//
+// What IS shared across every account on this project: Script Properties,
+// and this spreadsheet. That asymmetry is the whole design here — no account
+// can DELETE another's trigger, but every account can write state that the
+// other account's trigger will read and obey when it fires.
+//
+//   Automation_Enabled    A kill switch any account can flip. Every managed
+//                         handler reads it as its first act and returns
+//                         immediately when it's "No". You still cannot delete
+//                         a trigger you can't see — but you can make it a
+//                         no-op from your own login, without editor access.
+//   Trigger_Owner         The one account that is supposed to hold the
+//                         triggers. writeTriggers() refuses to run from any
+//                         other account, which is what stops a SECOND
+//                         invisible set from ever being created. The admin
+//                         list (AUTHORIZED_ADMIN_EMAILS) holds more than one
+//                         account on purpose; this narrows trigger creation
+//                         to exactly one at a time without shrinking it.
+//   Triggers_Verified_At  When that owner last rebuilt them, so "is this
+//                         claim stale?" is answerable.
+//
+// See also recordHandlerRun() — the runtime detector that catches duplicate
+// sets even when nobody has kept any of this bookkeeping honest.
+// ---------------------------------------------------------------------------
+
+const AUTOMATION_ENABLED_OPTIONS = ['Yes', 'No'];
+
+/**
+ * FAILS OPEN, and that is the opposite of requireAuthorizedAdmin() on
+ * purpose. A blank/unreadable cell reads as ENABLED.
+ *
+ * The two failure costs are not symmetric. Wrongly enabled means one extra
+ * sync, which is idempotent and self-correcting. Wrongly disabled means
+ * every calendar sync and registration import silently stops — and because
+ * nothing visibly breaks (the sheet just quietly goes stale), that can run
+ * for weeks before anyone notices a registration never arrived. So a Config
+ * tab that is missing, mid-rebuild, or throwing must never be able to
+ * switch automation off by accident. Only the literal string "No" does.
+ */
+const DEFAULT_AUTOMATION_ENABLED = true;
+
+/** The handlers the kill switch governs, and that recordHandlerRun() attributes. */
+const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange'];
+
+/**
+ * Cross-execution cache TTL for the kill-switch read. onCalendarChange can
+ * fire many times a minute during a busy calendar edit; without this, each
+ * firing pays a spreadsheet open just to learn it should stop. A minute of
+ * staleness on a pause is a fine trade — the point of the switch is stopping
+ * a runaway within minutes, not within milliseconds.
+ */
+const AUTOMATION_FLAG_CACHE_SECONDS = 60;
+const AUTOMATION_FLAG_CACHE_KEY = 'AUTOMATION_ENABLED_FLAG';
+
+/** Script Property prefix for the per-handler "which accounts actually ran this" record. */
+const HANDLER_ATTRIBUTION_PROP_PREFIX = 'HANDLER_RUN_BY_';
+
+/**
+ * How far back recordHandlerRun() looks when deciding whether more than one
+ * account is firing the same handler. Wide enough that the once-daily
+ * syncCalendars trigger is caught (two accounts' daily triggers can be up to
+ * ~24h apart), which is the slowest handler and therefore what sets the floor.
+ */
+const HANDLER_ATTRIBUTION_WINDOW_MS = 26 * 60 * 60 * 1000;
+
+/** How long an account's stamp for a handler suppresses re-stamping — see recordHandlerRun(). */
+const HANDLER_ATTRIBUTION_THROTTLE_SECONDS = 10 * 60;
 
 const FORM_FOOTER_BY_LOCATION = {
   Narberth: 'Additional notes or dietary needs? Let us know here.',
@@ -1636,6 +1755,8 @@ let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
 let __adminNotificationEmailCache = null;
 let __cateringPolicyIndexCache = null;
+let __automationEnabledCache = null;
+let __triggerOwnerCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 
@@ -1684,6 +1805,12 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __cateringPolicyIndexCache = null;
+  __automationEnabledCache = null;
+  __triggerOwnerCache = null;
+  // This one also lives in the CROSS-execution cache, which a plain
+  // per-execution reset would leave serving the old value to the next
+  // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.
+  clearAutomationFlagCache();
 }
 
 /**
@@ -3095,7 +3222,7 @@ function resizeAllSheets() {
 
 
 // ============================================================================
-// 2b. CONFIG SHEET (Meal Buffer Amounts + Order Ahead Time — see CONFIG_LAYOUT above)
+// 2b. CONFIG SHEET (Meal Buffers, Order Ahead, Catering Policy, Automation — see CONFIG_LAYOUT above)
 // ============================================================================
 
 function buildConfigSheet(ss) {
@@ -3164,10 +3291,17 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, policySection.startCol, Object.values(CALENDAR_MAP), CONFIG_DATA_START_ROW, policyRows);
   applyValueListValidationBounded(sheet, policySection.startCol + 1, CATERING_POLICY_OPTIONS, CONFIG_DATA_START_ROW, policyRows);
 
+  // Automation_Enabled is a two-value dropdown so the kill switch can never
+  // be half-set by a typo — "no", "NO", "nope" and "off" are not the same
+  // thing to isAutomationEnabled(), and only one of them stops anything.
+  const automationSection = CONFIG_LAYOUT.AUTOMATION;
+  applyValueListValidationBounded(sheet, automationSection.startCol, AUTOMATION_ENABLED_OPTIONS, CONFIG_DATA_START_ROW, 1);
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
   seedCateringPolicyRows(sheet);
+  seedAutomationRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -3264,6 +3398,37 @@ function seedAdminNotificationRow(sheet) {
     cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
       + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
   }
+}
+
+/**
+ * Seeds Automation_Enabled to "Yes" and annotates all three cells.
+ *
+ * NEVER overwrites an existing value — a rebuild of the Config tab must not
+ * silently switch automation back on underneath someone who paused it on
+ * purpose, which is exactly the moment they are most likely to be running
+ * setup functions. Trigger_Owner is likewise left alone; only a successful
+ * writeTriggers() writes that (see claimTriggerOwnership()).
+ */
+function seedAutomationRow(sheet) {
+  const section = CONFIG_LAYOUT.AUTOMATION;
+  const enabledCell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(enabledCell.getValue() || '').trim() === '') {
+    enabledCell.setValue(AUTOMATION_ENABLED_OPTIONS[0]); // 'Yes'
+  }
+  enabledCell.setNote('Master switch for the calendar sync, registration sync, and calendar-edit handlers. '
+    + 'Set to "No" to stop all of them — including triggers created by a DIFFERENT Google account, '
+    + 'which is the only way to stop those without opening the Apps Script editor. '
+    + 'Anything other than "No" (including blank) means enabled.');
+
+  sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + 1).setNote(
+    'The one account that holds this project\'s triggers. Written automatically when that account runs '
+    + 'Admin → Check Triggers. Other admins are blocked from rebuilding triggers so a second, invisible '
+    + 'set can never be created — use Admin → Take Over Trigger Ownership to move it deliberately.');
+
+  sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + 2).setNote(
+    'When the owner above last rebuilt the triggers.');
+
+  invalidateConfigCaches();
 }
 
 /**
@@ -3397,6 +3562,158 @@ function getAdminNotificationEmail() {
 }
 
 /**
+ * Reads one cell of Config's Automation section, or '' if anything at all
+ * gets in the way (no spreadsheet in this context, tab missing, tab
+ * mid-rebuild). Never throws — every caller here treats '' as "not set",
+ * and the whole point of the kill switch is that it cannot be tripped by
+ * an unrelated failure.
+ */
+function readAutomationConfigCell(offset) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (!sheet) return '';
+    const section = CONFIG_LAYOUT.AUTOMATION;
+    return String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + offset).getValue() || '').trim();
+  } catch (err) {
+    log(`⚠️ Could not read the Automation section of Config (${err}).`);
+    return '';
+  }
+}
+
+/**
+ * Is automation allowed to do work right now?
+ *
+ * Read by every managed handler as its first act, INCLUDING handlers fired
+ * by triggers belonging to an account that cannot see this one. That is the
+ * entire value: Script-level state is shared even though triggers are not,
+ * so this is the only lever that reaches a trigger you have no ability to
+ * delete.
+ *
+ * Cached twice over — once per execution, and once across executions via
+ * CacheService (see AUTOMATION_FLAG_CACHE_SECONDS) — so a burst of
+ * onCalendarChange firings costs one spreadsheet read between them all
+ * rather than one apiece.
+ *
+ * Only the literal "No" disables. See DEFAULT_AUTOMATION_ENABLED for why
+ * this fails open.
+ */
+function isAutomationEnabled() {
+  if (__automationEnabledCache !== null) return __automationEnabledCache;
+
+  const cache = tryGetScriptCache();
+  if (cache) {
+    try {
+      const cached = cache.get(AUTOMATION_FLAG_CACHE_KEY);
+      if (cached === 'yes' || cached === 'no') {
+        __automationEnabledCache = cached === 'yes';
+        return __automationEnabledCache;
+      }
+    } catch (err) { /* cache is an optimization; never let it decide anything */ }
+  }
+
+  const raw = readAutomationConfigCell(0);
+  // Anything that isn't a deliberate "No" leaves automation on.
+  const enabled = raw === '' ? DEFAULT_AUTOMATION_ENABLED : raw.toLowerCase() !== 'no';
+  if (cache) {
+    try { cache.put(AUTOMATION_FLAG_CACHE_KEY, enabled ? 'yes' : 'no', AUTOMATION_FLAG_CACHE_SECONDS); } catch (err) { /* non-fatal */ }
+  }
+  __automationEnabledCache = enabled;
+  return enabled;
+}
+
+/**
+ * CacheService is unavailable in some execution contexts (notably a simple
+ * trigger running without authorization), and asking for it there throws.
+ * Returns null instead so callers can just skip the cache.
+ */
+function tryGetScriptCache() {
+  try {
+    return CacheService.getScriptCache();
+  } catch (err) {
+    return null;
+  }
+}
+
+function clearAutomationFlagCache() {
+  const cache = tryGetScriptCache();
+  if (!cache) return;
+  try { cache.remove(AUTOMATION_FLAG_CACHE_KEY); } catch (err) { /* non-fatal */ }
+}
+
+/**
+ * The gate itself. Call as the first line of a managed handler and return
+ * immediately if it comes back false.
+ *
+ * `quiet` suppresses the toast for the hot path (onCalendarChange, which can
+ * fire hundreds of times while a paused calendar is being edited); the log
+ * line is always written, because "why did nothing happen?" has to be
+ * answerable afterwards.
+ */
+function automationGateAllows(actionLabel, quiet) {
+  if (isAutomationEnabled()) return true;
+  const message = `⏸️ Automation is paused — "${actionLabel}" did nothing. ` +
+    `Set Automation_Enabled back to "Yes" on the Config tab (${CONFIG_LAYOUT.AUTOMATION.title}) to resume.`;
+  log(message);
+  if (!quiet) toastIfPossible(message);
+  return false;
+}
+
+/**
+ * The account recorded in Config as holding this project's triggers, or ''
+ * when nobody has claimed them yet (in which case writeTriggers() lets the
+ * first admin through and records them).
+ */
+function getTriggerOwner() {
+  if (__triggerOwnerCache !== null) return __triggerOwnerCache;
+  __triggerOwnerCache = readAutomationConfigCell(1).toLowerCase();
+  return __triggerOwnerCache;
+}
+
+/**
+ * Is the account running right now the recorded trigger owner?
+ *
+ * An UNCLAIMED project answers false — deliberately. "Nobody has claimed
+ * these" is not permission to create them from whichever account happened to
+ * click a menu item; it just means "Check Triggers" hasn't been run yet, and
+ * that is the one path allowed to make the first claim.
+ */
+function isTriggerOwnerAccount() {
+  const owner = getTriggerOwner();
+  if (!owner) return false;
+  const me = getCurrentUserEmail();
+  return !!me && me === owner;
+}
+
+/** When the recorded owner last rebuilt the triggers — display only, '' if never. */
+function getTriggersVerifiedAt() {
+  return readAutomationConfigCell(2);
+}
+
+/**
+ * Records `email` as the trigger owner and stamps the verification time.
+ * Called by writeTriggers() after a successful rebuild, so the claim always
+ * reflects an account that genuinely holds a live set rather than an
+ * intention someone typed in.
+ */
+function claimTriggerOwnership(email) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (!sheet) return;
+    const section = CONFIG_LAYOUT.AUTOMATION;
+    sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + 1).setValue(email);
+    sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + 2)
+      .setValue(Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm'));
+    __triggerOwnerCache = null;
+  } catch (err) {
+    // Not fatal: the triggers themselves were built successfully, and a
+    // missing claim only costs the next admin a confirmation prompt.
+    log(`⚠️ Triggers were rebuilt but the ownership claim could not be written to Config (${err}).`);
+  }
+}
+
+/**
  * Sends one admin email, if an address is configured. Never throws — a
  * failed notification must not take down the sync that triggered it.
  */
@@ -3519,7 +3836,11 @@ function buildAppMenu(ui, includeAdmin) {
 
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
+      .addItem('Trigger Status', 'showTriggerStatus')
       .addItem('Check Triggers', 'writeTriggers')
+      .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
+      .addItem('Release My Triggers', 'releaseMyTriggers')
+      .addSeparator()
       .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
       .addSeparator()
       .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
@@ -3612,7 +3933,7 @@ function initializeAndSyncAll() {
  * finishBootstrap() passes force, restoring everything when the import is
  * genuinely done.
  */
-function writeTriggers(force) {
+function writeTriggers(force, takingOwnership) {
   if (!requireAuthorizedAdmin('Check Triggers')) return;
   if (!force && isBootstrapActive()) {
     const message = `Triggers stay paused until the large-setup import finishes — it restores them itself.`;
@@ -3620,6 +3941,14 @@ function writeTriggers(force) {
     toastIfPossible(message);
     return;
   }
+  // `force` is only ever passed by finishBootstrap()/cancelBootstrapCalendars(),
+  // which are RESTORING triggers they themselves removed. Those must never be
+  // blocked by the ownership check: refusing there would leave the project
+  // with no automation at all, which is a far worse failure than a duplicate
+  // set, and it would happen precisely when someone is least likely to notice.
+  // bootstrapCalendars() carries the ownership check instead, so a non-owner
+  // cannot get into that state to begin with.
+  if (!force && !takingOwnership && !requireTriggerOwnership()) return;
 
   let removed = 0;
   removed += resetTriggersForHandler('syncCalendars', () =>
@@ -3630,11 +3959,353 @@ function writeTriggers(force) {
   const calendarResult = writeCalendarChangeTriggers(true); // the bootstrap check above already ran
   removed += calendarResult.removed;
 
+  // Claimed only after the rebuild actually succeeded, so the recorded owner
+  // is always an account that demonstrably holds a live set.
+  claimTriggerOwnership(getCurrentUserEmail());
+
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
     : `All triggers verified — 1 daily, 1 hourly, ${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
+}
+
+/**
+ * Blocks trigger creation from any account except the recorded owner.
+ *
+ * THIS IS THE CAUSE FIX for the duplicate-trigger problem, one level below
+ * the admin gate. AUTHORIZED_ADMIN_EMAILS holds more than one account by
+ * design — but two admins are exactly enough to reproduce the bug, because
+ * each one's "Check Triggers" click builds a set the other cannot see or
+ * delete. resetTriggersForHandler() cleans up duplicates WITHIN an account;
+ * nothing can clean up across accounts. So the only real fix is to stop the
+ * second set from being created at all.
+ *
+ * Passes when no owner is recorded yet (first run claims it), and when the
+ * current account IS the owner. Otherwise refuses and names the owner —
+ * the point being that someone who cannot see the triggers at least learns
+ * who to ask, which a bare "triggers already exist" boolean could not tell
+ * them.
+ */
+function requireTriggerOwnership() {
+  const owner = getTriggerOwner();
+  if (!owner) return true; // unclaimed — whoever rebuilds first becomes the owner
+  const me = getCurrentUserEmail();
+  if (me && me === owner) return true;
+
+  const verifiedAt = getTriggersVerifiedAt();
+  const when = verifiedAt ? ` (last rebuilt ${verifiedAt})` : '';
+  const message = `⛔ This project's triggers are owned by ${owner}${when}. ` +
+    `Rebuilding them from ${me || 'an unidentified account'} would create a SECOND set that neither account ` +
+    `can see or delete — which is the exact problem this check exists to prevent. ` +
+    `Ask ${owner} to run it, or use Admin → Take Over Trigger Ownership if that account is gone.`;
+  log(message);
+  toastIfPossible(message);
+  return false;
+}
+
+/**
+ * Deliberately moves trigger ownership to the current account.
+ *
+ * The honest part of this, and why it prompts rather than just doing it:
+ * this CANNOT delete the previous owner's triggers. Nothing can, from here.
+ * All it does is build this account's set and update the claim — so on its
+ * own it makes the duplicate problem WORSE, not better, unless the previous
+ * owner's set is genuinely gone (account deleted, triggers already removed)
+ * or is cleaned up by hand afterwards.
+ *
+ * So the prompt says exactly that, and the success message ends with the
+ * manual step rather than implying the job is finished.
+ */
+function takeOverTriggerOwnership() {
+  if (!requireAuthorizedAdmin('Take Over Trigger Ownership')) return;
+
+  const owner = getTriggerOwner();
+  const me = getCurrentUserEmail();
+  if (owner && me && owner === me) {
+    toastIfPossible(`You already own this project's triggers (${me}) — use "Check Triggers" to rebuild them.`);
+    return;
+  }
+
+  const detail = owner
+    ? `Triggers are currently owned by ${owner}.\n\n` +
+      `IMPORTANT: this cannot delete ${owner}'s triggers — Apps Script does not allow one account to remove ` +
+      `another's, which is the whole reason duplicates are possible. Taking over builds YOUR set and records ` +
+      `you as the owner. If ${owner}'s triggers still exist, BOTH sets will fire until someone deletes theirs ` +
+      `from the Apps Script editor's Triggers page (clock icon → "Created by" column).\n\n` +
+      `Only do this if ${owner} is gone or has already removed theirs.`
+    : `No owner is recorded yet. This will build the triggers under ${me || 'this account'} and record it as the owner.`;
+
+  if (!confirmConsequentialAction('Take over trigger ownership?', detail, false)) return;
+
+  writeTriggers(false, true);
+  const followUp = owner
+    ? `Ownership moved to ${me} ✅ — now check the Apps Script editor's Triggers page and delete anything still listed under ${owner}.`
+    : `Trigger ownership recorded as ${me} ✅`;
+  toastIfPossible(followUp);
+  log(followUp);
+}
+
+/**
+ * The one useful thing a NON-owner account can do about triggers it holds:
+ * remove its own. Ungated beyond the admin check on purpose — telling a
+ * second admin "you have a duplicate set" while denying them the ability to
+ * clear it would leave them stuck waiting on the owner for a mess only they
+ * can clean up.
+ */
+function releaseMyTriggers() {
+  if (!requireAuthorizedAdmin('Release My Triggers')) return;
+
+  const me = getCurrentUserEmail();
+  const mine = ScriptApp.getProjectTriggers()
+    .filter(t => MANAGED_AUTOMATION_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
+
+  if (mine.length === 0) {
+    toastIfPossible(`No managed triggers exist under ${me || 'this account'} — nothing to release.`);
+    return;
+  }
+
+  const owner = getTriggerOwner();
+  const ownerWarning = owner && me && owner === me
+    ? `\n\nNOTE: you are the RECORDED OWNER. Releasing leaves this project with no scheduled syncing at all ` +
+      `until someone runs "Check Triggers" again.`
+    : '';
+
+  if (!confirmConsequentialAction('Release your triggers?',
+    `This deletes the ${mine.length} managed trigger(s) created by ${me || 'this account'}. ` +
+    `Triggers belonging to other accounts are unaffected — this cannot see or touch those.${ownerWarning}`, false)) {
+    return;
+  }
+
+  mine.forEach(t => ScriptApp.deleteTrigger(t));
+  clearHandlerAttributionForCurrentUser();
+  const message = `Released ${mine.length} trigger(s) held by ${me} ✅`;
+  log(message);
+  toastIfPossible(message);
+}
+
+
+// ============================================================================
+// 3a. RUNTIME TRIGGER ATTRIBUTION  ("who is actually firing this handler?")
+// ============================================================================
+//
+// Every other defence here depends on bookkeeping staying honest: the owner
+// claim can be bypassed by running writeTriggers() straight from the script
+// editor, and a trigger deleted from the editor's Triggers page updates
+// nothing at all. This does not depend on any of that.
+//
+// An installable trigger runs AS THE ACCOUNT THAT CREATED IT, and
+// Session.getEffectiveUser() inside the handler therefore reports exactly
+// who owns the trigger that just fired (see getCurrentUserEmail()). So each
+// handler stamps its own runs, and if two different accounts are seen
+// firing the SAME handler inside one window, duplicate trigger sets exist —
+// observed, not inferred. That is the detector that would have caught the
+// original bug with no discipline required from anyone.
+//
+// Stored in Script Properties (shared across accounts, unlike the triggers
+// themselves) as { email: lastRunIso } per handler.
+// ============================================================================
+
+function getHandlerAttributionPropKey(handlerName) {
+  return `${HANDLER_ATTRIBUTION_PROP_PREFIX}${handlerName}`;
+}
+
+/**
+ * Reads one handler's attribution map, dropping anything older than
+ * HANDLER_ATTRIBUTION_WINDOW_MS. Unreadable JSON reads as empty — this is a
+ * diagnostic, and it must never be able to break a sync it is only watching.
+ */
+function getHandlerAttribution(handlerName) {
+  let raw;
+  try {
+    raw = PropertiesService.getScriptProperties().getProperty(getHandlerAttributionPropKey(handlerName));
+  } catch (err) {
+    return {};
+  }
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {};
+  }
+  const cutoff = Date.now() - HANDLER_ATTRIBUTION_WINDOW_MS;
+  const fresh = {};
+  Object.keys(parsed || {}).forEach(email => {
+    const at = Date.parse(parsed[email]);
+    if (!isNaN(at) && at >= cutoff) fresh[email] = parsed[email];
+  });
+  return fresh;
+}
+
+/**
+ * Stamps "this handler just ran as me" and returns the distinct accounts
+ * seen firing it inside the window — length > 1 means duplicate sets. A
+ * throttled or failed call returns [] (i.e. "nothing measured this run",
+ * never "no duplicates"); detectDuplicateTriggerAccounts() is the read-only
+ * question to ask when you want a real answer.
+ *
+ * Wrapped so it can never throw into a caller: this runs at the top of the
+ * sync handlers, and a failed diagnostic write must not stop a real sync.
+ *
+ * Read-modify-write on a Script Property is not atomic, so two firings
+ * landing in the same instant can lose one of the two stamps. That only
+ * delays detection to the next run — the duplicate account will stamp again
+ * within a day — and the alternative (taking the script lock the syncs
+ * themselves use) would make a diagnostic capable of blocking real work.
+ */
+function recordHandlerRun(handlerName) {
+  try {
+    const email = getCurrentUserEmail() || 'unidentified';
+
+    // Throttled per handler PER ACCOUNT, which matters: a throttle keyed on
+    // the handler alone would let the first account's stamp suppress the
+    // second account's, hiding the very duplication this is here to find.
+    // Keyed this way, each account still stamps, and onCalendarChange —
+    // which can fire many times a minute — stops paying a property write
+    // on every one of them. The throttle is minutes against a window of
+    // hours, so nothing ages out un-refreshed.
+    const cache = tryGetScriptCache();
+    const throttleKey = `ATTR_${handlerName}_${email}`;
+    if (cache) {
+      try {
+        // Returns [] rather than reading the property to report accounts:
+        // paying a read on the throttled path would give back most of what
+        // the throttle is here to save. No caller uses the return value for
+        // anything but logging, and the un-throttled call a few minutes
+        // later reports the same thing.
+        if (cache.get(throttleKey)) return [];
+      } catch (err) { /* cache is an optimization only */ }
+    }
+
+    const attribution = getHandlerAttribution(handlerName);
+    attribution[email] = new Date().toISOString();
+    PropertiesService.getScriptProperties()
+      .setProperty(getHandlerAttributionPropKey(handlerName), JSON.stringify(attribution));
+    if (cache) {
+      try { cache.put(throttleKey, '1', HANDLER_ATTRIBUTION_THROTTLE_SECONDS); } catch (err) { /* non-fatal */ }
+    }
+
+    const accounts = Object.keys(attribution);
+    if (accounts.length > 1) {
+      log(`⚠️ DUPLICATE TRIGGERS: "${handlerName}" has fired under ${accounts.length} different accounts in the ` +
+        `last ${Math.round(HANDLER_ATTRIBUTION_WINDOW_MS / 3600000)}h (${accounts.join(', ')}). Each account's ` +
+        `triggers are invisible to the others, so "Check Triggers" cannot remove them — open the Apps Script ` +
+        `editor's Triggers page (clock icon), sort by "Created by", and delete the set that shouldn't be there.`);
+    }
+    return accounts;
+  } catch (err) {
+    log(`⚠️ Could not record trigger attribution for "${handlerName}" (${err}) — continuing.`);
+    return [];
+  }
+}
+
+/** Drops the current account's stamps — used by releaseMyTriggers(), so a released set stops being reported as a duplicate. */
+function clearHandlerAttributionForCurrentUser() {
+  const me = getCurrentUserEmail() || 'unidentified';
+  try {
+    const props = PropertiesService.getScriptProperties();
+    MANAGED_AUTOMATION_HANDLERS.forEach(handler => {
+      const attribution = getHandlerAttribution(handler);
+      if (attribution[me] === undefined) return;
+      delete attribution[me];
+      props.setProperty(getHandlerAttributionPropKey(handler), JSON.stringify(attribution));
+    });
+  } catch (err) {
+    log(`⚠️ Could not clear trigger attribution for ${me} (${err}) — harmless, it ages out on its own.`);
+  }
+}
+
+/** Handlers currently seen firing under more than one account: { handler: [emails] }. */
+function detectDuplicateTriggerAccounts() {
+  const found = {};
+  MANAGED_AUTOMATION_HANDLERS.forEach(handler => {
+    const accounts = Object.keys(getHandlerAttribution(handler));
+    if (accounts.length > 1) found[handler] = accounts;
+  });
+  return found;
+}
+
+/**
+ * The combined picture, in one dialog — deliberately showing all three
+ * views side by side, because it is the DISAGREEMENT between them that
+ * identifies the problem:
+ *
+ *   • what this account can see   (authoritative, but only for this account)
+ *   • who Config says owns them   (a claim, which can be stale or bypassed)
+ *   • who has actually been firing (observed, and the one that can't lie)
+ *
+ * An account showing in the third list but holding nothing in the first is
+ * precisely the invisible duplicate set that no amount of "Check Triggers"
+ * will clear.
+ */
+function showTriggerStatus() {
+  if (!requireAuthorizedAdmin('Trigger Status')) return;
+
+  const me = getCurrentUserEmail() || 'unidentified';
+  const owner = getTriggerOwner();
+  const verifiedAt = getTriggersVerifiedAt();
+  const visible = ScriptApp.getProjectTriggers();
+  const managed = visible.filter(t => MANAGED_AUTOMATION_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
+
+  const counts = {};
+  managed.forEach(t => {
+    const handler = t.getHandlerFunction();
+    counts[handler] = (counts[handler] || 0) + 1;
+  });
+
+  const lines = [];
+  lines.push(`Signed in as: ${me}`);
+  lines.push(`Automation: ${isAutomationEnabled() ? 'ENABLED' : '⏸️ PAUSED (Config → Automation_Enabled = No)'}`);
+  lines.push(`Recorded owner: ${owner || '(unclaimed)'}${verifiedAt ? ` — last rebuilt ${verifiedAt}` : ''}`);
+  if (owner && owner !== me) {
+    lines.push(`  ⚠️ You are NOT the owner. "Check Triggers" will refuse to run from this account.`);
+  }
+  lines.push('');
+
+  lines.push(`Triggers visible to THIS account (${managed.length}):`);
+  if (managed.length === 0) {
+    lines.push('  (none — either you never created any, or you released them)');
+  } else {
+    MANAGED_AUTOMATION_HANDLERS.forEach(handler => {
+      if (counts[handler]) lines.push(`  ${handler}: ${counts[handler]}`);
+    });
+    lines.push(`  Expected for the owner: syncCalendars 1, syncRegistrations 1, onCalendarChange ${Object.keys(CALENDAR_MAP).length}`);
+  }
+  lines.push('');
+
+  lines.push(`Accounts actually seen firing (last ${Math.round(HANDLER_ATTRIBUTION_WINDOW_MS / 3600000)}h):`);
+  let sawAny = false;
+  MANAGED_AUTOMATION_HANDLERS.forEach(handler => {
+    const accounts = Object.keys(getHandlerAttribution(handler));
+    if (accounts.length === 0) return;
+    sawAny = true;
+    lines.push(`  ${handler}: ${accounts.join(', ')}${accounts.length > 1 ? '  ⚠️ DUPLICATES' : ''}`);
+  });
+  if (!sawAny) lines.push('  (nothing has fired yet — this fills in as the triggers run)');
+
+  const duplicates = detectDuplicateTriggerAccounts();
+  if (Object.keys(duplicates).length > 0) {
+    lines.push('');
+    lines.push('⚠️ DUPLICATE TRIGGER SETS EXIST. More than one account is firing the same handler.');
+    lines.push('Nothing in this script can delete another account\'s triggers. To fix it:');
+    lines.push('  1. Open the Apps Script editor → Triggers (clock icon in the left sidebar).');
+    lines.push('  2. That page lists EVERY trigger with a "Created by" column — unlike this script, which');
+    lines.push('     only ever sees its own account\'s.');
+    lines.push('  3. Delete the sets belonging to any account other than ' + (owner || 'the intended owner') + '.');
+    lines.push('  4. That account can also run Admin → Release My Triggers from its own login.');
+    lines.push('');
+    lines.push('In the meantime, setting Automation_Enabled to "No" on Config stops ALL of them,');
+    lines.push('including the ones you cannot see.');
+  }
+
+  const report = lines.join('\n');
+  log(`Trigger status:\n${report}`);
+  try {
+    SpreadsheetApp.getUi().alert('Trigger Status', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    // No UI (editor run) — the log above is the output.
+  }
 }
 
 /**
@@ -4212,10 +4883,17 @@ function onCalendarChange(e) {
   // it free: one log line, no delta call, no lock, no sheet read. If these
   // keep appearing long after an import ends, the triggers are being
   // re-created rather than drained — logProjectTriggers() tells you which.
+  if (!automationGateAllows('onCalendarChange', true)) return; // quiet: this can fire hundreds of times
+
   if (isBootstrapActive()) {
     log('onCalendarChange ignored — a large-setup import is running and is editing these events itself.');
     return;
   }
+
+  // After the bootstrap check, not before: firings that arrive from a
+  // torn-down notification channel during an import are drained noise, and
+  // attributing them would report an account that no longer holds a trigger.
+  recordHandlerRun('onCalendarChange');
 
   const calendarId = e && e.calendarId;
   if (!calendarId) {
@@ -4527,6 +5205,13 @@ function resolveEventSettings(event, parsedTitle) {
 
 /** Public entry point: acquires a script lock so overlapping executions can't race each other. */
 function syncCalendars() {
+  // Before the bootstrap check, which reads a Script Property, and before
+  // anything touches CalendarApp: a paused run should cost as close to
+  // nothing as possible, because the account whose trigger is firing may be
+  // one nobody here can see or stop any other way.
+  if (!automationGateAllows('Sync Cal')) return;
+  recordHandlerRun('syncCalendars');
+
   if (isBootstrapActive()) {
     log(`syncCalendars: a large-setup import (${BOOTSTRAP_ENTRY_NAME}()) is in progress — skipping this run so the two don't fight over the same forms.`);
     return;
@@ -4559,7 +5244,10 @@ function syncCalendars() {
 }
 
 function syncCalendarsInternal() {
-  removeCalendarChangeTriggers();
+  // How many THIS account had, which decides whether the finally below is
+  // allowed to put any back. See the restore comment there — this is the
+  // path that actually manufactured most of the duplicate calendar triggers.
+  const calendarTriggersHeld = removeCalendarChangeTriggers();
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -4579,7 +5267,28 @@ function syncCalendarsInternal() {
     // Order matters: swallow our own description edits BEFORE the triggers
     // that would otherwise react to them come back on.
     primeCalendarSyncTokens('sync');
-    writeCalendarChangeTriggers();
+
+    // RESTORE ONLY — never create from scratch. This used to call
+    // writeCalendarChangeTriggers() unconditionally, and that was the widest
+    // route to the duplicate-trigger problem by far: syncCalendars() is
+    // deliberately ungated (anyone with edit access can click "Sync Cal",
+    // and it's the first item on the menu), so every such click by a
+    // non-owner removed nothing — they had nothing — and then created a
+    // COMPLETE set of calendar-edit triggers under their own account,
+    // invisible to and undeletable by the owner. Admin-gating "Check
+    // Triggers" never touched this path.
+    //
+    // An account that held none before this sync therefore ends with none.
+    // The owner still rebuilds normally, because it genuinely had them a
+    // moment ago; and an owner that legitimately has none yet (a first sync
+    // before "Check Triggers" was ever run) is covered by the second test.
+    if (calendarTriggersHeld > 0 || isTriggerOwnerAccount()) {
+      writeCalendarChangeTriggers();
+    } else {
+      log('Calendar-edit triggers not restored: this account held none before the sync and is not the ' +
+        'recorded trigger owner. Creating them here would add a second, invisible set — run ' +
+        'Admin → Check Triggers from the owner account if they are genuinely missing.');
+    }
   }
 }
 
@@ -4969,6 +5678,12 @@ function isBootstrapActive() {
  */
 function bootstrapCalendars() {
   if (!requireAuthorizedAdmin('Import Everything (First Run)')) return;
+  // Ownership is checked HERE rather than in the writeTriggers(true) that
+  // finishBootstrap() ends with, because by that point refusing would strand
+  // the project with no triggers at all. An import both tears automation
+  // down and builds it back up — so the account that starts one is choosing
+  // to own the triggers, and has to be the owner going in.
+  if (!requireTriggerOwnership()) return;
   if (isBootstrapActive()) {
     const state = getBootstrapState();
     const message = `A large-setup import is already running (slice ${state.slices} of at most ${BOOTSTRAP_MAX_SLICES}) — leaving it alone.`;
@@ -4990,6 +5705,21 @@ function bootstrapCalendars() {
 }
 
 /** Trigger handler for the next slice. Never call this directly — use bootstrapCalendars(). */
+/**
+ * DELIBERATELY NOT behind the Automation_Enabled kill switch, unlike the
+ * three handlers in MANAGED_AUTOMATION_HANDLERS.
+ *
+ * An import that stops halfway is not a paused import — it's a stranded one:
+ * the triggers stay torn down, the bootstrap state stays active (so every
+ * normal sync keeps standing down), and the form registry never gets
+ * flushed. Letting the kill switch hit this would turn "pause automation for
+ * a minute" into a broken workbook that only cancelBootstrapCalendars() can
+ * clear. An import already has its own stop control, which cleans up after
+ * itself — that's what to use instead.
+ *
+ * bootstrapCalendars() is where the ownership check lives, so nothing an
+ * un-owned account started can reach here in the first place.
+ */
 function resumeBootstrapCalendars() {
   runBootstrapSlice();
 }
@@ -5228,7 +5958,12 @@ function cancelBootstrapCalendars() {
   const state = getBootstrapState();
   if (!state) {
     deleteBootstrapResumeTriggers();
-    writeTriggers(true);
+    // NOT forced: with no import in flight there is nothing paused to
+    // restore, so this is an ordinary "verify my triggers" and has to
+    // respect trigger ownership like any other. Forcing here would let a
+    // non-owner admin build a full set (and claim ownership) just by running
+    // the escape hatch on a project that was working fine.
+    writeTriggers();
     log('No large-setup import was running — triggers verified anyway.');
     return;
   }
@@ -5586,6 +6321,9 @@ function setLastSyncTime(date) {
 }
 
 function syncRegistrations() {
+  if (!automationGateAllows('Sync Registrations')) return;
+  recordHandlerRun('syncRegistrations');
+
   if (isBootstrapActive()) {
     log(`syncRegistrations: a large-setup import (${BOOTSTRAP_ENTRY_NAME}()) is writing to the session table — skipping this run.`);
     return;

@@ -355,7 +355,7 @@ the recomputed history shows them attending.
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
 ### 6. Config
-Five small settings blocks:
+Six small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold, used to
   pre-fill new lunch rows
@@ -364,6 +364,7 @@ Five small settings blocks:
 - **📧 Admin Notifications** — one email address (optional)
 - **🍽️ Lunch Service by Location** — see below
 - **🔗 Registration Link on Calendar** — see below
+- **⚙️ Automation & Trigger Ownership** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -409,6 +410,34 @@ without creating a duplicate.
 
 Changing this **asks you to confirm**, and applies to **every** calendar
 event on the **next sync** — nothing to do per-event.
+
+**Automation & Trigger Ownership** is what keeps two different Google
+accounts from quietly fighting over this project's automation. Three cells:
+
+| Cell | What it does |
+|---|---|
+| **Automation_Enabled** | Master switch. Set it to **No** and the calendar sync, registration sync, and calendar-edit handlers all stop immediately — *including ones set up by another account*. Set it back to **Yes** to resume. Anything other than "No" means enabled. |
+| **Trigger_Owner** | The one account that holds the triggers. Filled in automatically when that account runs **Check Triggers**. |
+| **Triggers_Verified_At** | When that account last rebuilt them. |
+
+**Why the kill switch matters.** Google gives an installable trigger to
+whichever account created it, and *no other account can see or delete it* —
+not through this script, anyway. So if someone else's leftover triggers are
+double-syncing your calendar, you genuinely cannot remove them from your own
+login. But this cell is shared by everyone, and every handler checks it
+before doing anything. **Setting it to "No" stops triggers you have no power
+to delete** — it's the fastest way to stop a runaway sync while you sort out
+whose triggers are whose. It doesn't remove anything, so once the mess is
+cleaned up, flip it back to "Yes".
+
+Pausing takes effect within about a minute (the setting is cached briefly so
+a busy calendar doesn't re-read the sheet hundreds of times).
+
+**Why ownership matters.** Only the recorded owner can run **Check Triggers**
+or **Import Everything** — everyone else gets a message naming who the owner
+is, so you know who to ask instead of guessing. This is what stops a second,
+invisible set of triggers from ever being created. See
+[Admin-only actions](#admin-only-actions).
 
 ### 7. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
@@ -492,7 +521,10 @@ Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet:
 |---|---|
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
-| **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates |
+| **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
+| **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates. **Owner account only** |
+| **Take Over Trigger Ownership** | Moves ownership to your account, if the recorded owner is gone. Warns you that it can't delete their triggers |
+| **Release My Triggers** | Deletes the triggers *your* account created. The one useful thing a non-owner can do about a duplicate set they're responsible for |
 | **Add Lunch Schedule Entry** | Adds/updates one Lunch_Schedule row via a few prompts — see [Adding rows the easy way](#adding-rows-the-easy-way) |
 | **Add Lunch Schedule Entries (Batch)** | Generates a whole run of Lunch_Schedule rows at once |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run) |
@@ -509,13 +541,18 @@ You normally don't need these. Automatically:
 
 Press a menu item when you want something *now* instead of waiting.
 
-> **Check Triggers** and **Import Everything** only work for the account(s)
-> listed in `AUTHORIZED_ADMIN_EMAILS` in the code (currently
+> The whole **🔧 Admin** submenu only works for the account(s) listed in
+> `AUTHORIZED_ADMIN_EMAILS` in the code (currently
 > `admin@newhorizonsseniorcenter.org` and
 > `maxfishman@newhorizonsseniorcenter.org`). Anyone else clicking them gets a
 > toast explaining that and nothing happens — see
 > [Admin-only actions](#admin-only-actions) below. **Sync Cal**, **Sync
 > Registrations**, and **Resize All Sheets** are open to everyone.
+>
+> **Check Triggers** and **Import Everything** need one thing more: that
+> you're the account in Config's **Trigger_Owner** cell. Being an admin isn't
+> enough, because two admins building triggers is precisely what creates the
+> duplicate sets neither of them can see.
 
 > If the menu isn't there, reload the spreadsheet page.
 
@@ -595,10 +632,21 @@ the code:
 - `admin@newhorizonsseniorcenter.org`
 - `maxfishman@newhorizonsseniorcenter.org`
 
-**Gated:** Check Triggers, Import Everything (First Run), Find Leftover Tabs,
+**Gated:** Check Triggers, Trigger Status, Take Over Trigger Ownership,
+Release My Triggers, Import Everything (First Run), Find Leftover Tabs,
 Merge + Delete Leftover Tabs, `initSheet()`, `cancelBootstrapCalendars()`,
 `confirmLargeTriage()`, `restoreTriagedRegistrants()`,
 `recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`.
+
+**A second, narrower gate on top of that: trigger ownership.** Being an admin
+is no longer enough to *build* triggers — two admins is exactly enough people
+to cause the duplicate-trigger problem, since each one's set is invisible to
+the other. So **Check Triggers** and **Import Everything** additionally
+require that you're the account recorded in Config's **Trigger_Owner** cell.
+The first admin to run **Check Triggers** claims it; everyone else gets a
+message naming the owner. If that account is genuinely gone, use **Take Over
+Trigger Ownership**, which explains up front that it *cannot* delete the old
+owner's triggers — only the Apps Script editor's Triggers page can do that.
 
 **Not gated, by design:** Sync Cal, Sync Registrations, Resize All Sheets, Add
 Lunch Schedule Entry (individual and batch), and everyone's ability to
@@ -796,6 +844,27 @@ regardless of who created it, with a "Created by" column — delete anything
 that isn't the account you intend to use going forward.
 
 Going forward, **only ever run setup and trigger actions from one Google
-account** — ideally whoever owns the spreadsheet. Everyone else can register,
-view dashboards, and hand-edit rows freely; just don't have more than one
-person press **Check Triggers**, **Import Everything**, or run `initSheet()`.
+account** — ideally whoever owns the spreadsheet. This is now enforced rather
+than left to memory: see **Trigger_Owner** under
+[Config](#6-config). Everyone else can register, view dashboards, and
+hand-edit rows freely.
+
+**Start with Admin → Trigger Status.** It tells you, in one dialog, whether
+this is actually what's happening: it lists which accounts have been *seen
+firing* each handler in the last day or so. More than one account against the
+same handler means two sets exist, confirmed rather than guessed. It also
+shows which triggers your own account holds, so you can tell whether you're
+part of the problem — if you are, **Release My Triggers** clears your set
+without touching anyone else's.
+
+**To stop the double-syncing right now, before anyone has cleaned anything
+up:** set **Automation_Enabled** to **No** on the Config tab. That halts every
+handler, including the other account's triggers that you can't see or delete.
+Sort out the triggers, then set it back to **Yes**.
+
+**One thing that used to cause this quietly, now fixed:** pressing **Sync
+Cal** — which is open to everyone, not admin-gated — used to rebuild the
+calendar-watch triggers under *whoever clicked it*. So a non-admin clicking
+the top menu item on an ordinary Tuesday could create a whole invisible set
+without any idea they'd done it. Sync Cal now only ever puts back triggers
+your account already had, so it can't create a new set anymore.
