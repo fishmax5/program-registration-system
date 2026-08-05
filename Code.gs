@@ -679,11 +679,24 @@ const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
  */
 const HEADERS = {
   // The per-session table inside Master_Program_Dashboard (section C).
+  //
+  // Active_Count sits directly beside Status — "how many signed up" and "is it
+  // full" is the pair anyone reads first. The three CAPACITY columns
+  // (Max_Capacity / Waitlist_Count / Remaining_Seats) trail at the end of the
+  // VISIBLE run instead, ahead of the hidden plumbing block: most programs
+  // here are uncapped, so all three read "" / "🟢 Unlimited" on most rows, and
+  // three columns of nothing sitting between the count and the status pushed
+  // the form links off the screen to say it.
+  //
+  // Hidden columns (PROGRAM_DASHBOARD_HIDDEN_COLUMNS) stay last. They don't
+  // have to be — applyColumnVisibility() hides by NAME, not position — but
+  // keeping them there means the visible table is a contiguous block, which
+  // is what makes "the end of the row" mean anything.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag',
-    'Active_Count', 'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats', 'Status',
-    'Form_Response_Link', 'Edit_Form_Link', 'Form_ID', 'Calendar_Synced?',
-    'Event_ID', 'Calendar_Source'
+    'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
+    'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
+    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
@@ -710,15 +723,21 @@ const HEADERS = {
   // Registered_Count (what the forms say) and Served_Confirmed (what was
   // actually ticked off on the Registrants tab) sit side by side on purpose —
   // planned versus real is the comparison this tab exists to support.
-  // The hand-entry buffer/consumption columns now trail at the END: they're
-  // reconciliation detail, and having them between the counts pushed the
-  // numbers staff actually order against off the screen.
+  //
+  // The two BUFFER columns now trail at the very end, behind even the
+  // consumption/reconciliation block. They are set once from Config and then
+  // rarely touched, but sitting next to Total_to_Order they read as part of
+  // the ordering arithmetic and pushed Actual_Ordered — the number someone
+  // types the morning after — off a laptop screen. Total_to_Order's formula
+  // still references them by cell (setEventTimeFormulas' sibling in
+  // writeMasterLunchDashboardSheet builds the A1 refs from this array), so
+  // moving them here costs nothing.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
-    'Standard_Buffer', 'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway',
-    'Subs_In-Person', 'Subs_Takeaway', 'Total_Consumed', 'Thrown_Away',
-    'Discrepancy', 'Manual_Override'
+    'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway',
+    'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
+    'Standard_Buffer', 'Tester_Buffer'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
   // (see CATERED_LUNCH_TYPES vs LUNCH_TYPE_OPTIONS below).
@@ -804,11 +823,36 @@ const CONFIG_LAYOUT = {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
     headers: ['Location', 'Catering_Policy']
+  },
+  LINK_DISPLAY: {
+    title: '🔗 Registration Link in Events',
+    startCol: 13,
+    headers: ['Link_Display']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
+
+/**
+ * Whether the registration link appears in the calendar event's description.
+ *
+ * "Show link" is the normal setting: attendees open the event and there is a
+ * "📝 Register for X" link at the top of it.
+ *
+ * "Hide link" leaves the description with no registration link at all — for
+ * programs where sign-up is handled at the desk and a self-serve link in a
+ * shared calendar would be wrong. It has ONE real cost, and it is worth
+ * understanding before choosing it: findExistingFormIdFromEvents() recovers a
+ * lost form by reading its ID back out of an event description, and with no
+ * link there is nothing to read. Form ownership then rests entirely on the
+ * Script Properties registry and the Form_ID column of the dashboard, so a
+ * workbook rebuilt from scratch under this setting will build new forms
+ * rather than adopting the existing ones.
+ */
+const LINK_DISPLAY_OPTIONS = { SHOW: 'Show link', HIDE: 'Hide link' };
+const LINK_DISPLAY_OPTION_LIST = Object.values(LINK_DISPLAY_OPTIONS);
+const DEFAULT_LINK_DISPLAY = LINK_DISPLAY_OPTIONS.SHOW;
 const CONFIG_HEADER_ROW = 2;
 const CONFIG_DATA_START_ROW = 3;
 /** Types that actually need a Meal Buffer Amounts row in Config (a "Not Serving" day never does). */
@@ -1636,6 +1680,7 @@ let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
 let __adminNotificationEmailCache = null;
 let __cateringPolicyIndexCache = null;
+let __linkDisplayCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 
@@ -1684,6 +1729,7 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __cateringPolicyIndexCache = null;
+  __linkDisplayCache = null;
 }
 
 /**
@@ -2236,6 +2282,7 @@ function normalizeLunchScheduleCells(e, sheet) {
   let changed = false;
   let touchedUpcoming = false;
   const todayKey = formatDateKey(new Date());
+  const nowNotServing = [];
 
   values.forEach(row => {
     const date = coerceDate(row[map['Event_Date']]);
@@ -2247,12 +2294,23 @@ function normalizeLunchScheduleCells(e, sheet) {
     if (loc && loc !== row[map['Location']]) { row[map['Location']] = loc; changed = true; }
     const type = canonicalizeLunchType(row[map['Type']]);
     if (type && type !== row[map['Type']]) { row[map['Type']] = type; changed = true; }
+    const finalType = String(row[map['Type']] || '').trim();
+    if (date && finalType === 'Not Serving') {
+      nowNotServing.push({ date, location: String(row[map['Location']] || '').trim() });
+    }
   });
 
   if (changed) range.setValues(values);
+  // Before the sign-up check below: it asks getMealInfoForDate() what the
+  // schedule says, and the answer has to be what was just typed.
   invalidateMealInfoIndex();
 
-  if (touchedUpcoming) {
+  // Say it now, while the person who closed the kitchen is still looking at
+  // the screen. The durable version goes out by email on the next sync — see
+  // buildDashboardRollup().
+  const warned = warnAboutNotServingSignups(nowNotServing);
+
+  if (touchedUpcoming && warned === 0) {
     toastIfPossible('Menu updated. Live forms still show the old text — use ' +
       '"🍱 Push Menu Changes to Forms", or wait for the next Sync Cal.');
   }
@@ -2309,11 +2367,31 @@ function harvestPastedMenuRows(sheet, add) {
     sheet.getRange(after.firstRow, 1, back.length, LUNCH_ADD_HEADERS.length).setValues(back);
   }
 
+  // A pasted month routinely contains "Not Serving" rows, and one of them can
+  // land on a date people have already signed up to eat on. Same warning as
+  // typing it by hand — see warnAboutNotServingSignups().
+  const warned = warnAboutNotServingSignups(collectNotServingPairs(parsed.rows));
+
   const parts = [`✅ ${merged.added} added`];
   if (merged.updated > 0) parts.push(`${merged.updated} updated`);
   if (parsed.rejects.length > 0) parts.push(`⚠️ ${parsed.rejects.length} left in the add area (${parsed.rejects[0].reason})`);
-  toastIfPossible(`${parts.join(', ')}. Use "🍱 Push Menu Changes to Forms" when you want the forms to show it.`);
+  if (warned === 0) {
+    toastIfPossible(`${parts.join(', ')}. Use "🍱 Push Menu Changes to Forms" when you want the forms to show it.`);
+  }
   log(`Lunch menu add: ${merged.added} new, ${merged.updated} updated, ${parsed.rejects.length} rejected.`);
+}
+
+/** The {date, location} pairs among canonical menu rows whose Type is "Not Serving". */
+function collectNotServingPairs(menuRows) {
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+  const pairs = [];
+  (menuRows || []).forEach(row => {
+    if (String(row[map['Type']] || '').trim() !== 'Not Serving') return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    pairs.push({ date, location: String(row[map['Location']] || '').trim() });
+  });
+  return pairs;
 }
 
 /**
@@ -2644,7 +2722,17 @@ function importLunchMenuCsv(text) {
   const parts = [`${merged.added} added`];
   if (merged.updated > 0) parts.push(`${merged.updated} updated`);
   if (parsed.rejects.length > 0) parts.push(`${parsed.rejects.length} skipped — ${parsed.rejects[0].reason}`);
-  return `✅ ${parts.join(', ')}. Use "Push Menu Changes to Forms" when you want the forms to show it.`;
+
+  // Reported in the dialog rather than as a toast — a modal is in the way of
+  // the toast, and this is the one line in the result somebody must not miss.
+  const clash = checkNotServingSignups(collectNotServingPairs(parsed.rows));
+  const warning = clash.total > 0
+    ? ` ⚠️ ${clash.total} person(s) had signed up for lunch on a date you marked "Not Serving" ` +
+      `(${formatDateLabel(clash.affected[0].date)} at ${clash.affected[0].location}: ` +
+      `${describePeopleList(clash.affected[0].people)}) — they need telling.`
+    : '';
+
+  return `✅ ${parts.join(', ')}. Use "Push Menu Changes to Forms" when you want the forms to show it.${warning}`;
 }
 
 /**
@@ -2783,6 +2871,17 @@ function refreshFormsForChangedLunchDate(changedDate, location) {
 // 2. SHEET SETUP UTILITY  (initSheet)
 // ============================================================================
 
+/**
+ * FIRST-TIME setup for a workbook that has nothing in it yet: build every
+ * tab, create the template form, install the triggers, and hand off to the
+ * calendar import.
+ *
+ * NOT the right tool for a workbook already carrying data. To roll a layout
+ * change onto a live workbook — new columns, a new panel, changed
+ * formatting — use rebuildLayoutFromSheet() instead: same redraw, from the
+ * rows already on the tabs, with no calendar read, no form write, and no
+ * triage pass that could remove a session.
+ */
 function initSheet() {
   if (!requireAuthorizedAdmin('Initialize sheet setup')) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2822,6 +2921,124 @@ function initSheet() {
 
   toastIfPossible('Sheet setup complete ✅ — next: "Import Everything (First Run)".');
   log('initSheet complete.');
+}
+
+/**
+ * REBUILD EVERY TAB INTO THE CURRENT LAYOUT, USING ONLY WHAT IS ALREADY IN
+ * THE WORKBOOK. No calendar, no forms, no Drive, no network at all.
+ *
+ * The problem this exists for: shipping a layout change to a workbook that is
+ * already carrying a year of real data. initSheet() rebuilds the tabs, but a
+ * calendar sync is the normal partner to it, and on a busy calendar that is
+ * slow, quota-hungry, and — via triageDeletedSessions() — the one path in the
+ * system that can REMOVE sessions and shunt their registrants to triage. None
+ * of that is wanted when the only thing that actually changed is where the
+ * columns sit.
+ *
+ * So this is the same rebuild with every outward-facing step removed:
+ *
+ *   REBUILT (from the rows already on each tab)
+ *     Config (older layouts are backed up, current ones kept as-is)
+ *     Master_Program_Dashboard    — with triage OFF
+ *     Lunch_and_Event_Registrants — including the Quick Mark panel
+ *     Deleted_Event_Triage
+ *     Lunch_Schedule              — including the new ADD block
+ *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
+ *     Member_Roll / Program_Options — staff columns never touched
+ *     Tab order, column widths, dropdowns, conditional formatting
+ *
+ *   NOT TOUCHED
+ *     The calendars.       Nothing is read from or written to them.
+ *     The registration forms. No form is opened, created, or relabelled.
+ *     The triggers.        Automation keeps running exactly as it was.
+ *     The template form.   Not created or version-checked.
+ *
+ * EVERY ROW IS READ BEFORE ANY TAB IS CLEARED. Each render is otherwise a
+ * read-then-clear-then-write on its own tab, which is fine in isolation, but
+ * reading up front also means the confirmation dialog can state real counts —
+ * and a dialog that says "1,240 registrant rows" is one somebody can actually
+ * check before agreeing to it.
+ *
+ * Safe to run repeatedly. Nothing here is order-dependent on a sync having
+ * happened, and running it twice produces the same workbook.
+ */
+function rebuildLayoutFromSheet() {
+  if (!requireAuthorizedAdmin('Rebuild Layout (from sheet)')) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const read = (name, headers, marker) => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return [];
+    try {
+      return name === SHEET_NAMES.LUNCH_SCHEDULE
+        ? readLunchScheduleRows(sheet)
+        : readAllSectionedRows(sheet, headers, marker);
+    } catch (err) {
+      log(`⚠️ Rebuild: could not read "${name}" (${err}) — treating it as empty.`);
+      return [];
+    }
+  };
+
+  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const registrantRows = read(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+  const triageRows = read(SHEET_NAMES.TRIAGE, HEADERS.Deleted_Event_Triage, 'Event_ID');
+  const menuRows = read(SHEET_NAMES.LUNCH_SCHEDULE, HEADERS.Lunch_Schedule, 'Event_Date');
+
+  // A workbook with no sessions has nothing to rebuild FROM, and quietly
+  // producing a set of correctly-formatted empty tabs would look like success
+  // while destroying the "wait, where did everything go?" signal.
+  if (sessionRows.length === 0 && registrantRows.length === 0 && menuRows.length === 0) {
+    const message = 'Nothing to rebuild from — this workbook has no sessions, registrants or menu rows yet. ' +
+      'Use "Import Everything (First Run)" to bring the calendar in.';
+    log(`rebuildLayoutFromSheet: ${message}`);
+    toastIfPossible(message);
+    return null;
+  }
+
+  if (!confirmConsequentialAction('Rebuild every tab from the data already here?',
+    `Found: ${sessionRows.length} session(s), ${registrantRows.length} registrant row(s), ` +
+    `${triageRows.length} triaged row(s), ${menuRows.length} menu row(s).\n\n` +
+    'Every tab is redrawn in the current layout using exactly these rows. ' +
+    'Your hand-entered columns, notes and manual rows are all kept.\n\n' +
+    'The calendars, the registration forms and the automatic triggers are NOT touched — ' +
+    'nothing outside this spreadsheet changes, and no session can be removed.', false)) {
+    return null;
+  }
+
+  toastIfPossible('Rebuilding every tab from the data already here…');
+
+  buildConfigSheet(ss);
+
+  // Triage OFF — see renderProgramDashboard(). This is what makes the whole
+  // operation calendar-free, and it is the single most important line here.
+  renderProgramDashboard(true, { sessionRows, skipTriage: true, registrantRows });
+
+  renderRegistrantsSheet(true, registrantRows);
+  renderTriageSheet(true, triageRows);
+  renderLunchScheduleSheet(true, menuRows);
+
+  // After the tabs above, in this order, on purpose:
+  //  - counts are recomputed from the registrant rows onto the session table;
+  //  - the lunch dashboard reads the menu index, which only becomes correct
+  //    once Lunch_Schedule has been rewritten (renderLunchScheduleSheet()
+  //    invalidates that cache);
+  //  - the memory tabs are derived from both of the tabs above them.
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  if (registrySheet && registrantsSheet) {
+    recomputeEventRegistryCounts(registrySheet, registrantsSheet, registrantRows);
+  }
+  updateMasterLunchDashboard(registrantRows);
+  refreshMemoryTabs(registrantRows, sessionRows);
+
+  reorderTabs(ss);
+
+  const summary = `Rebuilt from existing data ✅ — ${sessionRows.length} session(s), ` +
+    `${registrantRows.length} registrant row(s), ${menuRows.length} menu row(s). ` +
+    `Calendars, forms and triggers untouched.`;
+  log(`rebuildLayoutFromSheet: ${summary}`);
+  toastIfPossible(summary);
+  return { sessionRows: sessionRows.length, registrantRows: registrantRows.length, menuRows: menuRows.length };
 }
 
 /**
@@ -3164,10 +3381,14 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, policySection.startCol, Object.values(CALENDAR_MAP), CONFIG_DATA_START_ROW, policyRows);
   applyValueListValidationBounded(sheet, policySection.startCol + 1, CATERING_POLICY_OPTIONS, CONFIG_DATA_START_ROW, policyRows);
 
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.LINK_DISPLAY.startCol,
+    LINK_DISPLAY_OPTION_LIST, CONFIG_DATA_START_ROW, 1);
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
   seedCateringPolicyRows(sheet);
+  seedLinkDisplayRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -3266,6 +3487,46 @@ function seedAdminNotificationRow(sheet) {
   }
 }
 
+/** Seeds "Show link" and explains the trade-off in the cell note. */
+function seedLinkDisplayRow(sheet) {
+  const section = CONFIG_LAYOUT.LINK_DISPLAY;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_LINK_DISPLAY);
+    log(`Seeded default Registration Link display ("${DEFAULT_LINK_DISPLAY}") on "${SHEET_NAMES.CONFIG}".`);
+  }
+  cell.setNote(
+    'Show link = every upcoming event description carries a "📝 Register for ..." link at the top.\n'
+    + 'Hide link = no registration link in event descriptions at all.\n\n'
+    + 'Changing this does not rewrite existing events on its own — run '
+    + '"🔗 Rewrite Event Links" from the Admin menu to apply it to what is already out there.');
+}
+
+/**
+ * The current Registration Link setting. Anything unrecognized reads as
+ * "Show link": a typo in this cell must not silently strip the registration
+ * link off every event in the calendar.
+ */
+function getLinkDisplayMode() {
+  if (__linkDisplayCache !== null) return __linkDisplayCache;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  let mode = DEFAULT_LINK_DISPLAY;
+  if (sheet) {
+    const raw = String(sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.LINK_DISPLAY.startCol).getValue() || '').trim();
+    const match = LINK_DISPLAY_OPTION_LIST.filter(o => o.toLowerCase() === raw.toLowerCase())[0];
+    if (match) mode = match;
+    else if (raw) log(`⚠️ Config's Link_Display reads "${raw}", which isn't one of ${LINK_DISPLAY_OPTION_LIST.join(' / ')} — using "${DEFAULT_LINK_DISPLAY}".`);
+  }
+  __linkDisplayCache = mode;
+  return mode;
+}
+
+/** True when registration links belong in calendar event descriptions. */
+function shouldShowLinkInDescription() {
+  return getLinkDisplayMode() !== LINK_DISPLAY_OPTIONS.HIDE;
+}
+
 /**
  * Looks up the static Standard_Buffer/Tester_Buffer amounts configured for
  * one location + lunch type (Hot/Cold) in Config's "Meal Buffer Amounts"
@@ -3361,6 +3622,134 @@ function isLunchOfferedOn(date, locationName) {
     return !!meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1;
   }
   return true; // ALWAYS
+}
+
+/**
+ * Is there a Lunch_Schedule row for this date+location that explicitly says
+ * "Not Serving"?
+ *
+ * THE DISTINCTION THIS EXISTS TO DRAW, and it is the whole point of the
+ * Not-Serving handling: a date with NO menu row is a GAP — somebody hasn't
+ * got to it yet — and a gap must never suppress a lunch a real person is
+ * signed up for. A date whose row READS "Not Serving" is a DECISION. It has
+ * an author, and the answer to "but three people signed up" is not to quietly
+ * cater it anyway; it is to tell somebody those three people need telling.
+ *
+ * Everywhere the catering pipeline says "demand always wins", it means over a
+ * gap. This is what it does not win over.
+ *
+ * Location-specific on purpose: getMealInfoForDate() with a location matches
+ * only that location's row, so Narberth closing its kitchen says nothing
+ * about Ashbridge on the same day.
+ */
+function isExplicitlyNotServing(date, locationName) {
+  if (!date || !locationName) return false;
+  const meal = getMealInfoForDate(date, locationName);
+  return !!meal && String(meal.type || '').trim() === 'Not Serving';
+}
+
+/**
+ * Everyone still expecting to eat at `location` on `dateKey` — Active
+ * registrations with Lunch_Status "Needed". Returns [{name, event}].
+ *
+ * Reads the registrant rows' own Event_Date/Location rather than joining
+ * through Event_ID and the session table, so it works from a plain
+ * spreadsheet read and is safe to call from an onEdit (see onEdit()).
+ */
+function findRegistrantsExpectingLunch(dateKey, location, registrantRows) {
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const map = getIndexMap(headers);
+
+  let rows = registrantRows;
+  if (!rows) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS) : null;
+    if (!sheet) return [];
+    try {
+      rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+    } catch (err) {
+      log(`ℹ️ Could not read the registrants tab to check for lunch sign-ups (${err}).`);
+      return [];
+    }
+  }
+
+  const wantedLocation = String(location || '').trim();
+  const found = [];
+  rows.forEach(row => {
+    if (String(row[map['Program_Status']] || '').trim() !== 'Active') return;
+    if (String(row[map['Lunch_Status']] || '').trim() !== 'Needed') return;
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d || formatDateKey(d) !== dateKey) return;
+    if (wantedLocation && String(row[map['Location']] || '').trim() !== wantedLocation) return;
+    found.push({
+      name: String(row[map['Name']] || '').trim() || '(unnamed)',
+      event: String(row[map['Event']] || '').trim()
+    });
+  });
+  return found;
+}
+
+/** "Marion Webb, Ada Cole and 3 more" — a name list short enough for a toast. */
+function describePeopleList(people, max) {
+  const limit = max || 4;
+  const names = people.map(p => p.name);
+  if (names.length <= limit) return names.join(', ');
+  return `${names.slice(0, limit).join(', ')} and ${names.length - limit} more`;
+}
+
+/**
+ * Called the moment a date+location is marked "Not Serving" by hand or by
+ * paste. Says, right there, whether anyone was counting on that meal.
+ *
+ * TOAST ONLY — no email. This runs on the onEdit path, where MailApp is
+ * unavailable (see onEdit()); the same finding is raised as a real admin
+ * notification by buildDashboardRollup() on the next sync, which is where the
+ * durable record belongs. The toast is for the person who just typed it, who
+ * is the one who can still ring those people.
+ *
+ * Past dates are skipped: there is nothing left to act on.
+ */
+function warnAboutNotServingSignups(pairs, registrantRows) {
+  const result = checkNotServingSignups(pairs, registrantRows);
+  if (result.total === 0) return 0;
+
+  const first = result.affected[0];
+  const more = result.affected.length > 1 ? ` (+${result.affected.length - 1} other date(s))` : '';
+  toastIfPossible(
+    `⚠️ ${result.total} person(s) had signed up for lunch on a date now marked "Not Serving" — ` +
+    `${formatDateLabel(first.date)} at ${first.location}: ${describePeopleList(first.people)}${more}. ` +
+    `They will drop off the lunch dashboard; they still need telling.`);
+  return result.total;
+}
+
+/**
+ * The query behind the warning, with no side effects beyond a log line, so
+ * callers that report through something other than a toast (the CSV dialog)
+ * can use the same answer.
+ *
+ * Returns { total, affected: [{date, location, people}] }. Past dates are
+ * excluded — there is nothing left to act on.
+ */
+function checkNotServingSignups(pairs, registrantRows) {
+  const todayKey = formatDateKey(new Date());
+  const affected = [];
+  let total = 0;
+
+  (pairs || []).forEach(p => {
+    if (!p.date || !p.location) return;
+    const dateKey = formatDateKey(p.date);
+    if (dateKey < todayKey) return;
+    if (!isExplicitlyNotServing(p.date, p.location)) return;
+    const people = findRegistrantsExpectingLunch(dateKey, p.location, registrantRows);
+    if (people.length === 0) return;
+    affected.push({ date: p.date, location: p.location, people });
+    total += people.length;
+  });
+
+  if (total > 0) {
+    log(`Not Serving: ${total} lunch sign-up(s) affected across ${affected.length} date(s).`);
+  }
+  return { total, affected };
 }
 
 function getOrderAheadDays() {
@@ -3519,6 +3908,8 @@ function buildAppMenu(ui, includeAdmin) {
 
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
+      .addItem('🧱 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
+      .addItem('🔗 Rewrite Event Links (fix duplicates)', 'rewriteEventRegistrationLinks')
       .addItem('Check Triggers', 'writeTriggers')
       .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
       .addSeparator()
@@ -4023,6 +4414,26 @@ function handleConfigEdit(e, sheet) {
     toastIfPossible(`Lunch service for ${location} set to "${e.value}" — forms update on the next sync.`);
   }
 
+  const isLinkDisplayEdit = editedCol === CONFIG_LAYOUT.LINK_DISPLAY.startCol &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isLinkDisplayEdit) {
+    const hiding = String(e.value || '').trim().toLowerCase() === LINK_DISPLAY_OPTIONS.HIDE.toLowerCase();
+    if (!confirmCellEditOrRevert(e, `Set the registration link to "${e.value}"?`,
+      hiding
+        ? 'Upcoming calendar events will stop showing a registration link. The forms keep working — ' +
+          'you hand the link out yourself from the program dashboard.\n\n' +
+          'Events already in the calendar keep their link until you run ' +
+          '"🔗 Rewrite Event Links" from the Admin menu.'
+        : 'Upcoming calendar events will show a "📝 Register for ..." link at the top of their ' +
+          'description.\n\nEvents already in the calendar are updated on the next sync, or straight ' +
+          'away with "🔗 Rewrite Event Links" from the Admin menu.')) {
+      // Reverted — the cache must reflect the value actually on the sheet.
+      invalidateConfigCaches();
+      return;
+    }
+    toastIfPossible(`Registration link set to "${e.value}". Run "🔗 Rewrite Event Links" to apply it to existing events.`);
+  }
+
   // Any Config edit can invalidate a cached read of it, confirmed or not.
   invalidateConfigCaches();
 }
@@ -4082,27 +4493,142 @@ function handleRegistrantsEdit(e, sheet) {
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Lunch_and_Event_Registrants);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
-  if (typeof e.value === 'undefined') return; // multi-cell paste, skip toast logic
+  // Computed from the RANGE, not just its top-left cell, so a fill-down or a
+  // paste over a block of statuses recalculates too — those are how somebody
+  // cancels a whole table's worth of people at once, which is exactly when the
+  // catering number matters most.
+  const lastCol = editedCol + e.range.getNumColumns() - 1;
+  const rangeCovers = name => headerMap[name] !== undefined &&
+    headerMap[name] + 1 >= editedCol && headerMap[name] + 1 <= lastCol;
+  const countingColumnsEdited = rangeCovers('Program_Status') || rangeCovers('Lunch_Status');
 
-  const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
-  const isLunchStatusCol = editedCol === headerMap['Lunch_Status'] + 1;
-  const isLunchServedCol = headerMap['Lunch_Served'] !== undefined &&
-    editedCol === headerMap['Lunch_Served'] + 1;
+  if (typeof e.value !== 'undefined') {
+    const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
+    const isLunchServedCol = headerMap['Lunch_Served'] !== undefined &&
+      editedCol === headerMap['Lunch_Served'] + 1;
 
-  // Ticking Lunch_Served directly on a row implies attendance, exactly as it
-  // does through the Quick Mark panel — one rule, wherever the tick happens.
-  if (isLunchServedCol && isTruthyCheckbox(e.value) && headerMap['Attended'] !== undefined) {
-    sheet.getRange(editedRow, headerMap['Attended'] + 1).setValue(true);
-    toastIfPossible('Lunch marked — attendance ticked too.');
+    // Ticking Lunch_Served directly on a row implies attendance, exactly as it
+    // does through the Quick Mark panel — one rule, wherever the tick happens.
+    if (isLunchServedCol && isTruthyCheckbox(e.value) && headerMap['Attended'] !== undefined) {
+      sheet.getRange(editedRow, headerMap['Attended'] + 1).setValue(true);
+      toastIfPossible('Lunch marked — attendance ticked too.');
+    }
+
+    if (isProgramStatusCol && e.oldValue === 'Waitlisted' && e.value === 'Active') {
+      toastIfPossible("🚀 Promoted off the waitlist — set their Lunch_Status to 'Needed' if they want a meal.");
+    }
   }
 
-  if ((isProgramStatusCol || isLunchStatusCol) && e.value === 'Cancelled') {
-    toastIfPossible('⚠️ Registration cancelled — check whether this changes your catering numbers.');
+  // The catering numbers are recomputed HERE, not left for the hourly sync.
+  //
+  // This used to be a toast — "check whether this changes your catering
+  // numbers" — which put the arithmetic back on the person who had just done
+  // the thing that changed it, and left Master_Lunch_Dashboard showing an
+  // order that included somebody who had cancelled, for up to an hour. On the
+  // one number in this workbook with a supplier deadline attached, "check it
+  // yourself later" was the wrong answer.
+  if (countingColumnsEdited) {
+    recalculateCateringCounts(sheet, headerMap, editedRow, e.range.getNumRows());
+  }
+}
+
+/**
+ * Rebuilds Master_Lunch_Dashboard (and the session table's Active/Waitlist
+ * counts) from the registrant rows as they stand right now, and reports the
+ * new lunch number for the date that was just edited.
+ *
+ * WHY THIS IS SAFE ON THE onEdit PATH, which is the constraint that shaped it:
+ * every step is SpreadsheetApp only. buildDashboardRollup() reads three tabs
+ * and Config; updateMasterLunchDashboard() writes one; recomputeEventRegistryCounts()
+ * writes cells. Nothing here opens a form, touches a calendar, or reads a
+ * script property — see onEdit(). protectDerivedColumns(), the one call
+ * underneath that needs authorization, already degrades instead of throwing.
+ *
+ * Any noteForAdmin() raised during the rollup is dropped rather than mailed:
+ * MailApp is unavailable here, and the next sync re-derives the same notes
+ * anyway from the same data.
+ *
+ * NOT triggered by Lunch_Served ticks, deliberately. Those happen dozens of
+ * times an hour at a sign-in desk, a full dashboard render each would make the
+ * tab unusable on the day it is needed most — and Served_Confirmed is a record
+ * of what happened, not a number anybody orders against. Only Program_Status
+ * and Lunch_Status, which are what change the ORDER, recalculate immediately.
+ */
+function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
+  const dateIdx = headerMap['Event_Date'];
+  const locationIdx = headerMap['Location'];
+
+  // Read the edited rows' date/location BEFORE the rebuild, to report against.
+  const touched = [];
+  if (dateIdx !== undefined && locationIdx !== undefined) {
+    const width = Math.max(dateIdx, locationIdx) + 1;
+    const values = sheet.getRange(editedRow, 1, numRows, width).getValues();
+    values.forEach(row => {
+      const d = coerceDate(row[dateIdx]);
+      const location = String(row[locationIdx] || '').trim();
+      if (!d || !location) return;
+      const key = `${formatDateKey(d)}|${location}`;
+      if (!touched.some(t => t.key === key)) touched.push({ key, date: d, location });
+    });
   }
 
-  if (isProgramStatusCol && e.oldValue === 'Waitlisted' && e.value === 'Active') {
-    toastIfPossible("🚀 Promoted off the waitlist — set their Lunch_Status to 'Needed' if they want a meal.");
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const registrantRows = readAllSectionedRows(sheet, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+
+    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (registrySheet) {
+      // Active_Count / Waitlist_Count / Status on the session table come from
+      // the same rows. Leaving those stale while the lunch numbers moved would
+      // just relocate the confusion to the other dashboard.
+      recomputeEventRegistryCounts(registrySheet, sheet, registrantRows);
+    }
+    updateMasterLunchDashboard(registrantRows);
+
+    toastIfPossible(describeRecalculatedCounts(touched));
+    log(`Catering counts recalculated after a status edit on ${numRows} row(s).`);
+    return true;
+  } catch (err) {
+    // Say so. A silently failed recalculation looks exactly like a correct one
+    // that happened to produce the same number.
+    log(`⚠️ Could not recalculate the catering counts after a status edit (${err}).`);
+    toastIfPossible(`⚠️ Status saved, but the lunch numbers could not be recalculated (${err}). Run "Sync Registrations".`);
+    return false;
   }
+}
+
+/** "Narberth, Mon Sep 14 — 12 lunches to order now." Reads the freshly-written dashboard. */
+function describeRecalculatedCounts(touched) {
+  if (touched.length === 0) return 'Catering numbers recalculated ✅';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_DASHBOARD);
+  if (!sheet) return 'Catering numbers recalculated ✅';
+
+  // The dashboard was written microseconds ago in this same execution; make
+  // sure those writes have landed before reading the number back out of it.
+  SpreadsheetApp.flush();
+
+  const headers = HEADERS.Master_Lunch_Dashboard;
+  const map = getIndexMap(headers);
+  const byKey = {};
+  readAllSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return;
+    byKey[`${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`] = row;
+  });
+
+  const parts = touched.slice(0, 3).map(t => {
+    const row = byKey[t.key];
+    if (!row) return `${t.location}, ${formatDateLabel(t.date)} — no longer on the lunch schedule`;
+    const registered = Number(row[map['Registered_Count']]) || 0;
+    const buffers = (Number(row[map['Standard_Buffer']]) || 0) + (Number(row[map['Tester_Buffer']]) || 0);
+    // Total_to_Order is a live formula, so it reads back as a formula string
+    // here rather than a number — recompute the same sum instead.
+    return `${t.location}, ${formatDateLabel(t.date)} — ${registered} registered, ${registered + buffers} to order`;
+  });
+  const more = touched.length > 3 ? ` (+${touched.length - 3} more date(s))` : '';
+  return `✅ Catering numbers updated: ${parts.join(' · ')}${more}`;
 }
 
 /**
@@ -5299,6 +5825,356 @@ function findExistingFormIdFromEvents(events) {
   return null;
 }
 
+
+// ============================================================================
+// 4f. EVENT DESCRIPTIONS — stripping every registration link, then writing one
+// ============================================================================
+//
+// findRegistrationLineInDescription() above finds the FIRST link in a
+// description, which is all a normal sync needs. It is not enough for cleanup.
+//
+// Descriptions accumulate registration links. Google Calendar rewrites HTML in
+// a description whenever the event is edited in the web UI, and an anchor that
+// goes through that can come back out as a bare URL sitting next to the
+// original — so one event ends up advertising the same form twice, in two
+// formats. Older versions of this script wrote a different format again, and
+// pasting an event to duplicate it copies whatever was there. A find-the-first
+// -one-and-replace-it pass leaves every extra copy exactly where it was.
+//
+// So this section takes the other approach: remove EVERY registration link in
+// a description, whatever shape it is in, then write back at most one. What it
+// removes is deliberately limited to registration links and their orphaned
+// labels — every other line, tag and bracket in the description is preserved
+// byte for byte, because a description is also where staff keep room numbers,
+// notes to volunteers, and the [Cap: N] / [Grouped] settings this system reads.
+// ============================================================================
+
+/** Every occurrence of our anchor format, not just the first. */
+const REGISTRATION_ANCHOR_REGEX_GLOBAL =
+  new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi');
+/** Every occurrence of the pre-anchor "Registration Link: ... [Form ID: ...]" line. */
+const LEGACY_REGISTRATION_LINE_REGEX_GLOBAL =
+  /^.*Registration Link:\s*\S+\s*\[Form ID:\s*[a-zA-Z0-9_-]+\].*$/gim;
+/** Any anchor pointing at a Google Form — the shape a mangled/duplicated link usually survives as. */
+const ANY_FORMS_ANCHOR_REGEX = /<a[^>]*href="[^"]*docs\.google\.com\/forms\/[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+/** A bare Google Forms URL with no anchor around it — what Calendar leaves behind when it flattens one. */
+const BARE_FORMS_URL_REGEX = /https?:\/\/docs\.google\.com\/forms\/\S*/gi;
+/** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
+const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
+
+/**
+ * Removes every registration link from a description and reports how many
+ * distinct ones it found.
+ *
+ * Order matters: the specific patterns run first so the count reflects real
+ * registration links rather than the debris they leave behind, and the
+ * catch-all forms-link patterns clean up whatever survived in a shape we no
+ * longer recognize.
+ *
+ * WHAT IT WILL NOT TOUCH: anything that isn't a Google Forms link or one of
+ * our own labels. Room numbers, volunteer notes, [Cap: 12], [Grouped], other
+ * hyperlinks, blank lines between real paragraphs — all preserved. The one
+ * thing it can over-reach on is a link to some OTHER Google Form that a person
+ * put in a program event description by hand; on these calendars a forms link
+ * is this system's link, and the confirmation dialog says so before anything
+ * is written.
+ */
+function stripAllRegistrationLines(description) {
+  const original = String(description || '');
+  if (!original) return { text: '', removed: 0 };
+
+  let removed = 0;
+  const countAndClear = (text, regex) => text.replace(regex, () => { removed++; return ''; });
+
+  let text = original;
+  text = countAndClear(text, REGISTRATION_ANCHOR_REGEX_GLOBAL);
+  text = countAndClear(text, LEGACY_REGISTRATION_LINE_REGEX_GLOBAL);
+  text = countAndClear(text, ANY_FORMS_ANCHOR_REGEX);
+  text = countAndClear(text, BARE_FORMS_URL_REGEX);
+  // Labels are debris, not links — cleared, but never counted as a link found,
+  // or an event with a flattened anchor would report two.
+  text = text.replace(ORPHAN_REGISTER_LABEL_REGEX, '');
+
+  return { text: tidyDescriptionWhitespace(text), removed };
+}
+
+/**
+ * Closes up the hole left by removing a link, in both the formats a Google
+ * Calendar description actually arrives in.
+ *
+ * Descriptions written by a person through the Calendar UI are HTML with
+ * `<br>` as the line break; descriptions written by this script use real
+ * newlines; and an event that has been through both has a mix. Removing a link
+ * from either leaves a run of separators around the gap, so both are
+ * collapsed: 3+ blank lines become one blank line, 3+ `<br>` become two, and
+ * separators at the very start or end go entirely.
+ *
+ * Deliberately conservative — ONE blank line (or a `<br><br>`) between two
+ * paragraphs is meaningful formatting somebody typed on purpose, and is kept.
+ */
+function tidyDescriptionWhitespace(text) {
+  const BR_RUN = /(?:\s*<br\s*\/?>\s*){3,}/gi;
+  return String(text || '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => (line.replace(/<br\s*\/?>/gi, '').trim() === '' ? '' : line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(BR_RUN, '<br><br>')
+    .replace(/^(?:\s*<br\s*\/?>\s*)+/i, '')
+    .replace(/(?:\s*<br\s*\/?>\s*)+$/i, '')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '');
+}
+
+/** Puts the registration link at the very top, above whatever else is there. */
+function prependRegistrationLine(description, linkLine) {
+  const body = tidyDescriptionWhitespace(description);
+  return body ? `${linkLine}\n\n${body}` : linkLine;
+}
+
+/**
+ * ADMIN ACTION — "🔗 Rewrite Event Links".
+ *
+ * Walks every UPCOMING event on every calendar, strips out every registration
+ * link it can find (all formats, all duplicates), and then writes back exactly
+ * one — or none — according to Config's "Registration Link in Events" setting.
+ * The link always goes at the TOP of the description; everything else in the
+ * description keeps its content and its order.
+ *
+ * ONLY UPCOMING EVENTS. A past event's description is a record of what people
+ * were sent, and rewriting it changes nothing anyone will act on while
+ * spending quota and — worse — generating a calendar notification for an event
+ * that has already happened.
+ *
+ * The form for each event comes from the SESSION TABLE (Event_ID -> Form_ID),
+ * not from the description being replaced. That's the point: the description
+ * is the thing that is wrong, so it can't also be the source of truth for
+ * what should replace it.
+ *
+ * CALENDAR-EDIT TRIGGERS ARE TAKEN DOWN FOR THE DURATION, exactly as
+ * syncCalendarsInternal() does, and rebuilt in a `finally` so they come back
+ * whether this succeeds or throws. This function's entire job is editing the
+ * description of every upcoming event, and every one of those edits is a
+ * calendar update — with the triggers live, a run over a few hundred events
+ * queues a few hundred onCalendarChange executions, each of which can decide a
+ * full syncCalendars() is warranted. That is the trigger storm this codebase
+ * has been bitten by before; a cleanup pass is the single most efficient way
+ * to cause it.
+ *
+ * primeCalendarSyncTokens() then swallows this run's own edits BEFORE the
+ * triggers go back on, so the first delta check after the restore doesn't see
+ * every event we just touched and start a sync anyway.
+ */
+function rewriteEventRegistrationLinks() {
+  if (!requireAuthorizedAdmin('Rewrite Event Links')) return null;
+
+  // A bootstrap has deliberately paused these triggers and will restore them
+  // itself. Taking them down and putting them back underneath it would both
+  // fight that and re-arm automation mid-import.
+  if (isBootstrapActive()) {
+    const message = 'A large-setup import is running — try "Rewrite Event Links" once it finishes.';
+    log(`rewriteEventRegistrationLinks: ${message}`);
+    toastIfPossible(message);
+    return null;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first.');
+    return null;
+  }
+
+  const showLinks = shouldShowLinkInDescription();
+  const mode = getLinkDisplayMode();
+
+  // Asked BEFORE the lock is taken: holding a script lock open while a modal
+  // waits for a human is how a scheduled sync gets skipped for ten minutes
+  // because somebody walked away from the dialog.
+  if (!confirmConsequentialAction('Rewrite the registration link on every upcoming event?',
+    `Config says "${mode}".\n\n` +
+    'Every UPCOMING event on all program calendars will have every registration link removed — ' +
+    'including duplicates and older formats — and then ' +
+    (showLinks
+      ? 'exactly one fresh link written at the top of its description.'
+      : 'NO link written back, because the setting is "Hide link".') +
+    '\n\nEverything else in each description (room notes, [Cap: N], [Grouped], other text) is kept ' +
+    'exactly as it is. Past events are not touched.\n\n' +
+    'Note: any link to a Google Form in these descriptions is treated as a registration link and removed.',
+    false)) {
+    return null;
+  }
+
+  // The same lock syncCalendars() takes. Both edit calendar descriptions and
+  // both manage the calendar-edit triggers; overlapping them would have one
+  // restore the triggers while the other is still writing.
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    log('rewriteEventRegistrationLinks: a sync is already running — skipping this run.');
+    toastIfPossible('A sync is already running — try again in a moment.');
+    return null;
+  }
+  try {
+    return rewriteEventRegistrationLinksInternal(registrySheet, showLinks);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** The rewrite itself, inside the lock. See rewriteEventRegistrationLinks(). */
+function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
+  // Event_ID -> what the session table says this event's form is.
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const sessionByEventId = {};
+  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!eventId || !d || formatDateKey(d) < todayKey) return;
+    sessionByEventId[eventId] = {
+      formId: String(row[map['Form_ID']] || '').trim(),
+      cleanTitle: String(row[map['Clean_Title']] || '').trim(),
+      isGrouped: isGroupedTypeTag(row[map['Type_Tag']]),
+      date: d
+    };
+  });
+
+  // computeSyncDateRange() starts at the 1st of the current month, so its
+  // window includes events that have already happened. Fetch that window (it
+  // is the one getCalendarEventsForWindow() caches, shared with every other
+  // caller in the run) but only rewrite from today forward.
+  const { start, end } = computeSyncDateRange();
+  const windowStart = parseDateKey(todayKey);
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+
+  const formInfoCache = {};
+  const stats = {
+    scanned: 0, linksRemoved: 0, rewritten: 0, cleared: 0, unchanged: 0,
+    noForm: 0, calendarsSkipped: 0, triggersRemoved: 0, triggersRestored: 0
+  };
+
+  // EVERY description write below is a calendar update. Take the watchers down
+  // first — see this function's header comment — and put them back in the
+  // `finally`, so an exception halfway through can't leave the project with no
+  // calendar-edit triggers at all.
+  stats.triggersRemoved = removeCalendarChangeTriggers();
+  if (stats.triggersRemoved === 0) {
+    // Either there genuinely were none — normal on a workbook where "Check
+    // Triggers" hasn't been run — or they belong to a DIFFERENT Google
+    // account, in which case this account cannot see or delete them (see
+    // writeTriggers()) and they will fire on every description written below.
+    // Not fatal, and not worth refusing over, but it is exactly the situation
+    // where a storm still happens after taking the precaution.
+    log('ℹ️ Rewrite Event Links: no calendar-edit triggers to pause under this account. If another ' +
+      'account created them, they are still live and will react to these edits — see the Triggers ' +
+      'page in the Apps Script editor.');
+  }
+  try {
+    Object.keys(CALENDAR_MAP).forEach(calendarId => {
+      const events = eventsByCalendar[calendarId];
+      if (!events) {
+        log(`⚠️ Rewrite Event Links: "${CALENDAR_MAP[calendarId]}" could not be read — skipped.`);
+        stats.calendarsSkipped++;
+        return;
+      }
+
+      events.forEach(ev => {
+        if (ev.isAllDayEvent()) return;
+        const startTime = ev.getStartTime();
+        if (startTime < windowStart) return; // past — left as the record it is
+        const parsed = parseEventTitle(ev.getTitle());
+        if (!parsed) return;
+
+        stats.scanned++;
+        const existing = ev.getDescription() || '';
+        const stripped = stripAllRegistrationLines(existing);
+        stats.linksRemoved += stripped.removed;
+
+        let updated = stripped.text;
+        if (showLinks) {
+          const eventId = computeEventId(calendarId, parsed.cleanTitle, formatDateKey(startTime));
+          const session = sessionByEventId[eventId];
+          const formInfo = session && session.formId ? getFormInfoForLink(session.formId, formInfoCache) : null;
+          if (!formInfo) {
+            // No form on the session table (or it wouldn't open). The old links
+            // still come off — a stale link to a form nobody is reading is worse
+            // than none — but there is nothing correct to put back.
+            stats.noForm++;
+          } else {
+            updated = prependRegistrationLine(stripped.text, buildRegistrationLinkLine({
+              isFixed: session.isGrouped,
+              cleanTitle: session.cleanTitle || parsed.cleanTitle,
+              monthLabel: getMonthLabel(startTime)
+            }, formInfo));
+          }
+        }
+
+        if (updated === existing) { stats.unchanged++; return; }
+        ev.setDescription(updated);
+        if (showLinks && updated !== stripped.text) stats.rewritten++; else stats.cleared++;
+      });
+    });
+  } finally {
+    invalidateCalendarEventsCache(); // descriptions just changed under the cache
+    try {
+      // Order matters, same as syncCalendarsInternal(): swallow this run's own
+      // edits BEFORE the watchers come back on, or the first delta check after
+      // the restore sees every event we just touched and starts a sync anyway.
+      primeCalendarSyncTokens('link rewrite');
+      // force: the bootstrap check happened at the top of the public entry
+      // point, and automation staying off is the one outcome worth avoiding
+      // more than a redundant rebuild.
+      stats.triggersRestored = writeCalendarChangeTriggers(true).created;
+    } catch (err) {
+      // The loudest failure this function has. Silent automation is how "the
+      // calendar stopped syncing" becomes a mystery two weeks later.
+      log(`⚠️ Rewrite Event Links: could not restore the calendar-edit triggers (${err}) — run "Check Triggers".`);
+      noteForAdmin('Calendar triggers not restored',
+        `"Rewrite Event Links" finished but could not rebuild the calendar-edit triggers (${err}). ` +
+        `Run "Check Triggers" from the Admin menu — until then, edits made directly on a calendar ` +
+        `will not be picked up until the next daily sync.`);
+      toastIfPossible('⚠️ Links rewritten, but the calendar-edit triggers could not be restored — run "Check Triggers".');
+    }
+  }
+
+  const summary = `Event links rewritten ✅ — ${stats.scanned} upcoming event(s) scanned, ` +
+    `${stats.linksRemoved} old link(s) removed, ${stats.rewritten} rewritten, ${stats.cleared} left with no link, ` +
+    `${stats.unchanged} already correct; ${stats.triggersRestored} calendar-edit trigger(s) rebuilt` +
+    (stats.noForm > 0 ? `, ⚠️ ${stats.noForm} with no form on the dashboard` : '') +
+    (stats.calendarsSkipped > 0 ? `, ⚠️ ${stats.calendarsSkipped} calendar(s) unreadable` : '') + '.';
+  log(`rewriteEventRegistrationLinks: ${summary}`);
+  toastIfPossible(summary);
+
+  if (stats.noForm > 0) {
+    noteForAdmin('Events with no registration form',
+      `${stats.noForm} upcoming event(s) had their old link(s) removed but no form on the session table to link to. ` +
+      `Run Sync Cal to build their forms, then run "🔗 Rewrite Event Links" again.`);
+  }
+  flushAdminDigest('Rewrite event links');
+  return stats;
+}
+
+/**
+ * { formId, publishedUrl } for a form, memoized per run — the same form covers
+ * a whole series, and opening it once per event would be the expensive part of
+ * this by an order of magnitude. A form that won't open is cached as null so
+ * it isn't retried on every one of its events either.
+ */
+function getFormInfoForLink(formId, cache) {
+  if (Object.prototype.hasOwnProperty.call(cache, formId)) return cache[formId];
+  let info = null;
+  try {
+    const form = FormApp.openById(formId);
+    info = { formId, publishedUrl: buildRegistrationUrl(form) };
+  } catch (err) {
+    log(`⚠️ Could not open form ${formId} to rebuild its event link (${err}).`);
+  }
+  cache[formId] = info;
+  return info;
+}
+
 /**
  * Reopens an already-existing form for a series/month and refreshes its
  * date-dependent items. Not-serving dates are excluded from the lunch grid
@@ -5551,23 +6427,44 @@ function restoreTriagedRegistrants() {
 }
 
 function backInjectCalendarDescriptions(group, formInfo) {
+  // Config decides whether a link belongs in a description at all. Checked
+  // here as well as in rewriteEventRegistrationLinks(), or the next sync would
+  // simply put back every link that cleanup just removed.
+  if (!shouldShowLinkInDescription()) {
+    let cleared = 0;
+    group.events.forEach(ev => {
+      const existing = ev.getDescription() || '';
+      const stripped = stripAllRegistrationLines(existing);
+      if (stripped.removed === 0 || stripped.text === existing) return;
+      ev.setDescription(stripped.text);
+      cleared++;
+    });
+    if (cleared > 0) {
+      log(`Link display is "${LINK_DISPLAY_OPTIONS.HIDE}" — removed the registration link from ${cleared} event(s) of "${group.cleanTitle}".`);
+    }
+    return;
+  }
+
   const linkLine = buildRegistrationLinkLine(group, formInfo);
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
     const found = findRegistrationLineInDescription(existing);
 
-    if (found) {
-      // Already current, in the current format — leave the event alone
-      // rather than burning a write (and a notification) on every sync.
-      if (!found.isLegacy && found.url === formInfo.publishedUrl && found.formId === formInfo.formId) return;
-      const corrected = existing.replace(found.matchText, linkLine);
-      if (corrected !== existing) ev.setDescription(corrected);
+    // Already current, in the current format, and already at the top — leave
+    // the event alone rather than burning a write (and a notification) on
+    // every sync.
+    if (found && !found.isLegacy && found.url === formInfo.publishedUrl &&
+      found.formId === formInfo.formId && existing.indexOf(linkLine) === 0) {
       return;
     }
 
-    const appended = existing ? `${existing}\n\n${linkLine}` : linkLine;
-    if (appended !== existing) ev.setDescription(appended);
+    // Otherwise rebuild: every link out (duplicates included — see
+    // stripAllRegistrationLines), one back in AT THE TOP. Replacing in place
+    // was what let a second, mangled copy sit in a description untouched
+    // forever, since the first match was always the one that got corrected.
+    const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text, linkLine);
+    if (updated !== existing) ev.setDescription(updated);
   });
 }
 
@@ -8437,6 +9334,15 @@ function renderProgramDashboardFromRows(rows) {
  * triage pass didn't rewrite the tab underneath them (see registrantsMoved).
  * Returns { registrantsMoved } so a caller holding those rows knows whether
  * they are still safe to reuse afterward.
+ *
+ * options.sessionRows — already-in-memory session rows, same idea.
+ *
+ * options.skipTriage — do NOT cross-check the sessions against the live
+ * calendars. This is the ONLY thing in a dashboard render that reads outside
+ * the spreadsheet, and it is also the only thing that can remove data, so
+ * rebuildLayoutFromSheet() turns it off: a re-layout must not be able to
+ * decide, on the strength of one unreadable calendar, that a program was
+ * cancelled. Nothing else in here needs the network.
  */
 function renderProgramDashboard(force, options) {
   options = options || {};
@@ -8446,9 +9352,11 @@ function renderProgramDashboard(force, options) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
 
-  let sessionRows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  let sessionRows = options.sessionRows || readAllSectionedRows(sheet, headers, 'Event_ID');
 
-  const triageResult = triageDeletedSessions(sessionRows, map, registrantsSheet);
+  const triageResult = options.skipTriage
+    ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
+    : triageDeletedSessions(sessionRows, map, registrantsSheet);
   sessionRows = triageResult.rows;
 
   sessionRows.forEach(row => {
@@ -8910,11 +9818,12 @@ function buildDashboardRollup(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
-  if (!registrySheet) return [];
 
+  // No early return on a missing/empty session table any more: the menu is now
+  // a source of dashboard rows in its own right (see SEED 1), so a catered day
+  // still has to appear even on a workbook whose calendar hasn't been imported.
   const regHeaders = HEADERS.Master_Program_Dashboard;
-  const regRows = readAllSectionedRows(registrySheet, regHeaders, 'Event_ID');
-  if (regRows.length === 0) return [];
+  const regRows = registrySheet ? readAllSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
   const regMap = getIndexMap(regHeaders);
 
   const eventMeta = {};
@@ -8926,21 +9835,68 @@ function buildDashboardRollup(registrantRows) {
   });
 
   const rollup = {};
-
-  // Seed upcoming date+location pairs at 0 so the schedule shows what's
-  // coming rather than only what's already been registered for — but only
-  // where the location's catering policy says lunch is on the table. Without
-  // this filter a never-catering location (Zoom) contributes a blank row for
-  // every single session it runs. See isLunchOfferedOn().
+  /** date|location -> people who wanted lunch on a day now marked Not Serving. */
+  const notServingWithSignups = {};
   const todayKey = formatDateKey(new Date());
+
+  const seed = (dateKey, location) => {
+    const key = `${dateKey}|${location}`;
+    if (!rollup[key]) {
+      rollup[key] = { dateKey, location, registeredCount: 0, servedConfirmed: 0 };
+    }
+    return rollup[key];
+  };
+
+  // SEED 1 — every upcoming Hot/Cold row on Lunch_Schedule, whether or not a
+  // program runs that day.
+  //
+  // A catered day is a catering commitment. The kitchen is cooking, the order
+  // has to be placed, and the number has to appear somewhere someone looks —
+  // and "somewhere someone looks" is this tab. Seeding only from the session
+  // table meant a meal with no programming behind it (a drop-in lunch, a
+  // holiday meal, a day whose calendar event hasn't been made yet) was
+  // invisible here even though the menu plainly said it was happening.
+  //
+  // The menu row is taken as authoritative, deliberately over the location's
+  // catering policy: a policy is a default about what USUALLY happens, and an
+  // explicit Hot/Cold row for a specific date is somebody overriding it on
+  // purpose. The one case worth querying is a menu row at a Never location,
+  // which is contradictory rather than deliberate — flagged below, not
+  // silently dropped.
+  const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
+  (menuSheet ? readLunchScheduleRows(menuSheet) : []).forEach(row => {
+    const d = coerceDate(row[menuMap['Event_Date']]);
+    const location = String(row[menuMap['Location']] || '').trim();
+    const type = String(row[menuMap['Type']] || '').trim();
+    if (!d || !location) return;
+    if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return; // "Not Serving", or blank
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey) return; // past dates are never seeded — see below
+
+    if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) {
+      noteForAdmin('Menu set at a Never-catering location',
+        `Lunch_Schedule has a ${type} row for ${location} on ${formatDateLabel(d)}, but that location's ` +
+        `policy in Config is "Never". Either change the policy or remove the menu row — as it stands the ` +
+        `date is being catered for a location that is supposed to serve no food.`);
+      return;
+    }
+    seed(dateKey, location);
+  });
+
+  // SEED 2 — upcoming session date+location pairs, so the schedule also shows
+  // programming that is coming but has no menu row yet. Gated on
+  // isLunchOfferedOn(), or a never-catering location (Zoom) would contribute a
+  // blank row for every single session it runs.
+  //
+  // Past dates are never seeded by either pass — that would backfill a wall of
+  // empty history. Past rows appear only where a registrant or a served meal
+  // put them there.
   Object.keys(eventMeta).forEach(eventId => {
     const meta = eventMeta[eventId];
     if (!meta.location || meta.dateKey < todayKey) return;
     if (!isLunchOfferedOn(parseDateKey(meta.dateKey), meta.location)) return;
-    const key = `${meta.dateKey}|${meta.location}`;
-    if (!rollup[key]) {
-      rollup[key] = { dateKey: meta.dateKey, location: meta.location, registeredCount: 0, servedConfirmed: 0 };
-    }
+    seed(meta.dateKey, meta.location);
   });
 
   if (registrantsSheet || registrantRows) {
@@ -8986,6 +9942,24 @@ function buildDashboardRollup(registrantRows) {
         return;
       }
 
+      // ...EXCEPT over an explicit "Not Serving". A missing menu row is a gap
+      // and demand rightly overrides it (below); a row that READS "Not
+      // Serving" is somebody's decision that the kitchen is closed that day,
+      // and quietly catering it anyway because three people ticked a box on a
+      // form weeks ago is not a safety net, it's an unordered meal.
+      //
+      // So the date leaves the dashboard, and the people who signed up are
+      // collected here and reported by name below. Suppressing them silently
+      // would be the actually dangerous version of this.
+      if (isExplicitlyNotServing(parseDateKey(meta.dateKey), meta.location)) {
+        const nsKey = `${meta.dateKey}|${meta.location}`;
+        if (!notServingWithSignups[nsKey]) {
+          notServingWithSignups[nsKey] = { dateKey: meta.dateKey, location: meta.location, people: [] };
+        }
+        notServingWithSignups[nsKey].people.push(String(row[lrMap['Name']] || '').trim() || '(unnamed)');
+        return;
+      }
+
       // DEMAND ALWAYS WINS (for ALWAYS/BY_EXCEPTION). Policy decides what
       // gets SEEDED; it never suppresses a date somebody is actually signed
       // up to eat on. This is the safety net for "By exception" — forgetting
@@ -9013,6 +9987,23 @@ function buildDashboardRollup(registrantRows) {
     noteForAdmin('Lunch needed with no menu set',
       `${r.registeredCount} person(s) need lunch at ${r.location} on ${formatDateLabel(parseDateKey(r.dateKey))}, ` +
       `but Lunch_Schedule has no Hot/Cold row for it.`);
+  });
+
+  // THE ONE THAT MATTERS MOST IN THIS FILE'S DIGEST. Everything else it
+  // reports is a number that looks wrong somewhere; this is real people who
+  // asked for a meal, are going to turn up expecting it, and are about to
+  // stop appearing on every screen anyone looks at. The dashboard row going
+  // away is correct — the kitchen is closed — but it must not be the last
+  // anyone hears of it, so the names go out by email rather than only to a
+  // log nobody reads.
+  Object.keys(notServingWithSignups).forEach(key => {
+    const entry = notServingWithSignups[key];
+    if (entry.dateKey < todayKey) return; // already happened; nothing to act on
+    noteForAdmin('⚠️ Lunch cancelled with people signed up',
+      `${entry.people.length} person(s) asked for lunch at ${entry.location} on ` +
+      `${formatDateLabel(parseDateKey(entry.dateKey))}, which Lunch_Schedule now marks "Not Serving": ` +
+      `${entry.people.join(', ')}. They have been removed from the catering count and need telling. ` +
+      `To keep the meal, change that date's Type back to Hot or Cold on Lunch_Schedule.`);
   });
 
   return Object.values(rollup).map(r => {
@@ -9071,7 +10062,69 @@ function updateMasterLunchDashboard(registrantRows) {
     row[map['Served_Confirmed']] = r.servedConfirmed > 0 ? r.servedConfirmed : '';
   });
 
-  writeMasterLunchDashboardSheet(sheet, plan, headers, existingTable, rollup);
+  writeMasterLunchDashboardSheet(sheet, plan, headers,
+    dropNotServingRows(existingTable, map, rollup), rollup);
+}
+
+/**
+ * Removes the schedule rows for upcoming dates that Lunch_Schedule now marks
+ * "Not Serving".
+ *
+ * WHY THIS IS NEEDED AT ALL: the Full Schedule table is UPSERTED, not rebuilt.
+ * That's deliberate — it's what makes hand-entered buffers and actuals survive
+ * every sync — but it also means a row, once written, never leaves on its own.
+ * So closing the kitchen on a date the dashboard had already picked up left
+ * the row sitting there with its old count, indefinitely, and the ordering
+ * number stayed on the screen the kitchen orders from.
+ *
+ * Three things are deliberately NOT dropped:
+ *
+ *   PAST DATES. Those rows hold Actual_Ordered / Total_Consumed / Thrown_Away —
+ *   a record of what really happened. Marking an old date "Not Serving" is
+ *   almost always a correction to the plan, and it must not erase the receipt.
+ *
+ *   HAND-EDITED ROWS (Manually Added / Manually Edited). Everything else in
+ *   this workbook treats those as untouchable; an exception here would be the
+ *   one place a person's own row disappears under them. Reported instead.
+ *
+ *   ROWS STILL IN THE ROLLUP. A "Not Serving" day where somebody's
+ *   Lunch_Served box is ticked stays, because food demonstrably happened —
+ *   Served_Confirmed records reality, not the plan.
+ */
+function dropNotServingRows(tableRows, map, rollup) {
+  const inRollup = {};
+  (rollup || []).forEach(r => { inRollup[`${r.dateKey}|${r.location}`] = true; });
+
+  const todayKey = formatDateKey(new Date());
+  const kept = [];
+  let dropped = 0;
+
+  tableRows.forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    const location = String(row[map['Location']] || '').trim();
+    if (!d || !location) { kept.push(row); return; }
+
+    const dateKey = formatDateKey(d);
+    if (inRollup[`${dateKey}|${location}`]) { kept.push(row); return; }
+    if (dateKey < todayKey) { kept.push(row); return; }
+    if (!isExplicitlyNotServing(d, location)) { kept.push(row); return; }
+
+    const override = String(row[map['Manual_Override']] || '').trim();
+    if (override === 'Manually Added' || override === 'Manually Edited') {
+      noteForAdmin('Not-Serving date still on the lunch dashboard',
+        `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row was ` +
+        `hand-edited (${override}) so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
+      kept.push(row);
+      return;
+    }
+
+    dropped++;
+  });
+
+  if (dropped > 0) {
+    log(`Master_Lunch_Dashboard: removed ${dropped} upcoming row(s) for date+location(s) now marked "Not Serving".`);
+  }
+  return kept;
 }
 
 function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rollup) {
@@ -9219,17 +10272,18 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   const notServingRule = buildTextEqualsRuleForRanges(typeRanges, 'Not Serving', NOT_SERVING_COLOR);
   if (notServingRule) rules.push(notServingRule);
 
-  // Location color-coding, painted across the row rather than on the single
-  // Location cell — this tab is one row per date PER LOCATION, so the block
-  // of color is what makes "everything for Ashbridge that week" scannable.
-  // Last in the rule list on purpose: the manual-override tint and the grey
-  // "Not Serving" cell above both need to win where they overlap.
-  activeZones.forEach(z => {
-    rules.push(...buildLocationRowTintRules(sheet, z.start, z.count, numCols, locationCol,
-      [map['Event_Date'] + 1, ...manualEntryColIndexes]));
-  });
-  rules.push(...buildLocationRowTintRules(sheet, plan.todayDataStart, plan.numLocations,
-    TODAY_LUNCH_HEADERS.length, todayLocationCol, []));
+  // Location color-coding on the LOCATION CELL ONLY, the same as every other
+  // tab. It used to wash the whole row, on the theory that a block of color
+  // makes "everything for Ashbridge that week" scannable — but this tab
+  // already carries the month tint on Event_Date, the grey "Not Serving"
+  // type, the purple manual-override tint and a yellow band of hand-entry
+  // columns, and a full-row wash underneath all of that turned the numbers
+  // people read into figures on a colored background rather than making
+  // anything easier to find. One cell says the same thing and gets out of
+  // the way.
+  const locationRanges = activeZones.map(z => sheet.getRange(z.start, locationCol, z.count, 1));
+  locationRanges.push(sheet.getRange(plan.todayDataStart, todayLocationCol, plan.numLocations, 1));
+  rules.push(...buildLocationColorRules(locationRanges));
 
   sheet.setConditionalFormatRules(rules);
 
