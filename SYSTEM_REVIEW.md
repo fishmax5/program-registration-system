@@ -204,6 +204,16 @@ That latency lands at a sign-in desk with a queue in front of it, and it grows
 with history. If it becomes noticeable: cache the derived lists on a hidden
 tab and rebuild them at the end of each sync, rather than deriving them live.
 
+Box 2 (Program & Date) reads `Master_Program_Dashboard` on every panel edit to
+rebuild its upcoming-session list, and `getBulkRegistrantContext()` reads the
+same tab once per dialog open. Same fix if it ever bites; the bulk dialog is
+deliberately one read for the whole session, not one per dropdown change.
+
+`Member_Roll` now carries an ADD MEMBER block, so every read of that tab goes
+through `getMemberRollEndRow()`. A reader that forgets to would absorb
+half-typed rows into the roll — the same trap `getLunchScheduleEndRow()`
+exists to avoid on `Lunch_Schedule`.
+
 ### 11. `FORMS_FOLDER_ID` is empty
 
 `getOrCreateFormsFolder()` falls back to find-or-create **by name**. If a
@@ -296,8 +306,24 @@ order of what would change your plans:
 4. **Open the workbook as a non-admin account** and confirm the 🔧 Admin
    submenu is absent. Then as an admin, confirm it's present — and if it
    isn't, that **🔧 Admin Tools (sign-in check)…** brings it back.
-5. **Quick Mark a walk-in**: pick a program nobody has registered for, type a
-   new name, tick Attended, confirm the row appears flagged `Manually Added`.
+5. **Quick Mark a walk-in**: pick today's session in box 2, type a name nobody
+   has registered under, tick Attended, confirm the row appears flagged
+   `Manually Added` with a `Registration_Type` on it.
+5b. **Quick Mark a future registration**: pick a session **weeks away** in
+   box 2 (Program & Date), set Registration Type to `Call In`, tick
+   **➕ Register**, answer the lunch question. Confirm the row lands on the
+   right date, `Attended` is blank, and the catering number for that date
+   moved only if you said yes to lunch. Then tick **✓ Attended** on that same
+   future session and confirm it asks first.
+5c. **Bulk**: **⚡ Quick Mark ▸ 👥 Bulk Add / Mark Registrants…**, paste a
+   dozen names against a future session (include one who is already
+   registered). Confirm one render, one summary line, the already-registered
+   person is reported rather than duplicated.
+5d. **Add a member by hand**: type a name into the ➕ ADD MEMBER block at the
+   bottom of `Member_Roll`, tick ✓ Add, and confirm they appear on the roll
+   with `Times_Seen` 0 and in the Quick Mark name list. Then type a second
+   name, run a registration sync WITHOUT ticking, and confirm the half-typed
+   row is still sitting in the block afterwards.
 6. **Check the Past sections** show the hidden-row note, and that
    **🕓 Show All Past Rows** brings them back.
 7. **Mark an upcoming date "Not Serving"** on `Lunch_Schedule` where somebody

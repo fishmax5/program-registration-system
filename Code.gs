@@ -747,9 +747,16 @@ const HEADERS = {
   // one glance and one click, with no horizontal scrolling. Everything the
   // form supplied (Lunch_Type, Party_Size, Form_Source...) follows behind
   // them, and the internal keys trail at the end.
+  // Registration_Type sits next to Person_Type — "who they are" and "how they
+  // got here" belong together. It is how a row got onto this tab from the
+  // registrant's point of view (Online / Physical / Call In / Other), which is
+  // a different question from Form_Source (which submission produced it) and
+  // from Manual_Override (whether staff have touched it since). Rows written
+  // by the form sync say Online; rows added at the desk or over the phone say
+  // whatever the person taking them picked.
   Lunch_and_Event_Registrants: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
-    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
+    'Person_Type', 'Registration_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
@@ -782,7 +789,7 @@ const HEADERS = {
   // landing in triage rows automatically, with no per-column wiring.
   Deleted_Event_Triage: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
-    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
+    'Person_Type', 'Registration_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
     'Deleted_Event_Title', 'Deleted_Event_Location', 'Flagged_Date', 'Triage_Notes'
@@ -821,6 +828,44 @@ const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', '
 
 /** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
 const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
+
+/**
+ * How a registration reached us. Four values, deliberately few — this is a
+ * column people fill in dozens of times a week at a desk or on the phone, and
+ * a long vocabulary would be answered by whichever value is on top.
+ *
+ *   Online    — the person filled in the Google Form themselves. Everything
+ *               the registration sync writes gets this, automatically.
+ *   Physical  — signed up in the building: a paper sheet, or walked in.
+ *   Call In   — rang up and was added by staff.
+ *   Other     — anything else (a relative signed them up, an email, a note
+ *               passed on by a program leader). Say which in Admin_Notes.
+ */
+const REGISTRATION_TYPE_OPTIONS = ['Online', 'Physical', 'Call In', 'Other'];
+/** What the registration SYNC writes — a form submission is by definition online. */
+const REGISTRATION_TYPE_ONLINE = 'Online';
+/** What a person added at the sign-in desk gets when nobody says otherwise. */
+const REGISTRATION_TYPE_WALK_IN = 'Physical';
+
+/**
+ * Snaps free text onto a REGISTRATION_TYPE_OPTIONS value, or '' if it matches
+ * none. Tolerant of the spellings people actually type ("call-in", "phone",
+ * "in person", "walk in"), because this value arrives from a dropdown, a
+ * dialog and hand-typed cells alike.
+ */
+function canonicalizeRegistrationType(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  if (!text) return '';
+  const exact = REGISTRATION_TYPE_OPTIONS.filter(opt => opt.toLowerCase() === text)[0];
+  if (exact) return exact;
+  if (['call in', 'call-in', 'callin', 'phone', 'by phone', 'telephone'].indexOf(text) !== -1) return 'Call In';
+  if (['physical', 'in person', 'in-person', 'walk in', 'walk-in', 'walkin', 'paper', 'desk'].indexOf(text) !== -1) {
+    return 'Physical';
+  }
+  if (['online', 'form', 'web', 'internet', 'google form'].indexOf(text) !== -1) return 'Online';
+  if (['other', 'misc', 'unknown'].indexOf(text) !== -1) return 'Other';
+  return '';
+}
 
 /** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */
 const TODAY_AT_LOCATIONS_HEADERS = ['Location', 'Programs Today', 'Sessions Today', 'Registered Today'];
@@ -2357,11 +2402,21 @@ function getLunchScheduleZones(sheet) {
  * treats as "no add area" rather than an error.
  */
 function findLunchAddBlock(sheet) {
+  return findAddBlockByMarker(sheet, LUNCH_ADD_MARKER);
+}
+
+/**
+ * The shared implementation: scan column A for a banner marker and report the
+ * block's three rows. Used by both bottom-of-tab add areas (Lunch_Schedule's
+ * menu paste block and Member_Roll's add-a-member block), because "where does
+ * the real table stop and the typing area begin" is the same question on both.
+ */
+function findAddBlockByMarker(sheet, marker) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 1) return null;
   const colA = sheet.getRange(1, 1, lastRow, 1).getValues();
   for (let i = 0; i < colA.length; i++) {
-    if (String(colA[i][0] || '').indexOf(LUNCH_ADD_MARKER) === 0) {
+    if (String(colA[i][0] || '').indexOf(marker) === 0) {
       const bannerRow = i + 1;
       return { bannerRow, headerRow: bannerRow + 1, firstRow: bannerRow + 2 };
     }
@@ -4215,6 +4270,14 @@ function buildAppMenu(ui, includeAdmin) {
     .addItem('Sync Cal', 'syncCalendars')
     .addItem('Sync Registrations', 'syncRegistrations')
     .addSeparator()
+    // The bulk counterpart to the Quick Mark panel. It lives on the menu
+    // rather than on the tab because it is a sit-down job (a sign-up sheet, a
+    // phone list) rather than a standing-at-the-desk one, and because a modal
+    // is the only place a dozen names can be pasted at once.
+    .addSubMenu(ui.createMenu('⚡ Quick Mark')
+      .addItem('👥 Bulk Add / Mark Registrants…', 'showBulkRegistrantDialog')
+      .addItem('🔄 Rebuild Quick Mark Panel', 'rebuildQuickMarkPanel'))
+    .addSeparator()
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
     .addItem('🔁 Apply Type Changes to Calendar', 'applyTypeTagChangesToCalendar')
@@ -4809,6 +4872,8 @@ function onEdit(e) {
       handleProgramDashboardEdit(e, sheet);
     } else if (name === SHEET_NAMES.CONFIG) {
       handleConfigEdit(e, sheet);
+    } else if (name === SHEET_NAMES.MEMBER_ROLL) {
+      handleMemberRollEdit(e, sheet);
     }
   } catch (err) {
     // Say something. A silent catch here is how "I typed it and nothing
@@ -5308,37 +5373,54 @@ function describeRecalculatedCounts(touched) {
  */
 function handleQuickMarkEdit(e, sheet, editedCol) {
   if (editedCol === QUICK_MARK.LOCATION_COL) {
-    // A new location invalidates whatever program/name was chosen under the
+    // A new location invalidates whatever session/name was chosen under the
     // previous one — clearing them is what keeps an impossible combination
     // from being submitted.
-    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL, 1, 2).clearContent();
+    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.SESSION_COL, 1, 2).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.programList.length} program(s) at this location, soonest first — pick one, or go straight to a name.`);
+    quickMarkSay(sheet, lists.sessions.length === 0
+      ? 'No upcoming sessions at this location — run Sync Cal if the calendar has them.'
+      : `${lists.sessions.length} upcoming session(s) here, soonest first — pick one in box 2.`);
     return;
   }
 
-  if (editedCol === QUICK_MARK.EVENT_COL) {
+  if (editedCol === QUICK_MARK.SESSION_COL) {
+    // The name list narrows to the people on THAT session, so it is rebuilt
+    // rather than left showing everyone.
     sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).clearContent();
     const lists = refreshQuickMarkDropdowns(sheet, null);
     const others = lists.nameList.length - lists.registeredCount;
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.registeredCount} registered` +
+    const which = lists.session ? `for ${formatDateLabel(lists.session.date)}` : 'so far';
+    quickMarkSay(sheet,
+      `${lists.registeredCount} registered ${which}` +
       (others > 0 ? `, plus ${others} other known member(s)` : '') +
-      ` — pick a name (or type a new one), then tick Attended or Lunch.`);
+      ` — pick a name, set the Registration Type, then tick Attended / Lunch or ➕ Register.`);
     return;
   }
 
   if (editedCol === QUICK_MARK.NAME_COL) {
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `Ready — tick Attended or Lunch to mark ${e.value || 'them'}.`);
+    const inputs = readQuickMarkInputs(sheet);
+    quickMarkSay(sheet,
+      `Ready — tick Attended or Lunch to mark ${e.value || 'them'}, or ➕ Register to book them in` +
+      (inputs.registrationType ? ` as "${inputs.registrationType}"` : ' (pick a Registration Type first)') + '.');
+    return;
+  }
+
+  if (editedCol === QUICK_MARK.REG_TYPE_COL) {
+    quickMarkSay(sheet, `Registration type set to "${e.value || '(blank)'}" — it is written onto any row this panel adds.`);
     return;
   }
 
   if (editedCol === QUICK_MARK.CLEAR_COL) {
     clearQuickMarkInputs(sheet);
     refreshQuickMarkDropdowns(sheet, null);
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length, 'Cleared — choose a location to begin.');
+    quickMarkSay(sheet, 'Cleared — pick a program & date in box 2 to begin.');
+    return;
+  }
+
+  if (editedCol === QUICK_MARK.REGISTER_COL) {
+    if (!isTruthyCheckbox(e.value)) return; // un-ticking the panel box does nothing
+    registerFromQuickMark(sheet);
     return;
   }
 
@@ -7734,6 +7816,13 @@ function buildRegistrantRow(args) {
       existingRow[map['Party_Size']] = partySize || '';
       existingRow[map['Order_Ahead_Flag']] = computeOrderAheadFlag(registryEntry.eventDate, submittedAt, orderAheadDays);
       existingRow[map['Form_Source']] = makeHyperlinkFormula(formEditUrl, 'View Submission');
+      // Backfill only. A row that already carries a Registration_Type was
+      // either written by this sync (Online, same value) or set by hand — and
+      // a person who registered by phone and later edited their response is
+      // still a phone registration, so a filled cell is left alone.
+      if (map['Registration_Type'] !== undefined && !String(existingRow[map['Registration_Type']] || '').trim()) {
+        existingRow[map['Registration_Type']] = REGISTRATION_TYPE_ONLINE;
+      }
       return null; // nothing new to append — the existing row was updated in place
     }
     // A genuinely different submission (a different Party_ID) for the same
@@ -7767,6 +7856,7 @@ function buildRegistrantRow(args) {
   row[map['Manual_Override']] = 'Auto-Synced';
   row[map['Name']] = displayName;
   row[map['Person_Type']] = personType;
+  row[map['Registration_Type']] = REGISTRATION_TYPE_ONLINE; // it came off a form
   row[map['Lunch_Type']] = resolveRegistrantLunchType(wantsLunch, registryEntry);
   row[map['Primary_Registrant']] = primaryRegistrant;
   row[map['Party_ID']] = partyId || '';
@@ -8631,7 +8721,7 @@ function renderRegistrantsSheet(force, allRows) {
 
 
 // ============================================================================
-// 6d. QUICK MARK  (the top-of-Registrants panel)
+// 6d. QUICK MARK  (the top-of-Registrants panel + its bulk counterpart)
 // ============================================================================
 //
 // Marking people off on a serving day is the highest-frequency job in this
@@ -8639,11 +8729,46 @@ function renderRegistrantsSheet(force, allRows) {
 // scroll right, tick two boxes, don't lose your place. The tab is sorted by
 // date, so a given program's people aren't even contiguous.
 //
-// The Quick Mark panel puts that on four cells at the top of the tab:
-// Location -> Program -> Name, each a dropdown narrowed by the one before it,
-// then Attended/Lunch checkboxes. Tick either and the matching registrant row
-// is updated in place, wherever it happens to be, and the panel reports what
-// it did and clears itself for the next person.
+// WHAT THE PANEL IS NOW. It started as "tick someone off today's list" and
+// grew a walk-in path underneath it, which quietly made it a registration
+// tool that could only ever register people for the session nearest to today.
+// Somebody ringing up in September to book a place in October had no way in:
+// the panel would find the nearest session, add them to THAT, and mark them
+// as having attended a thing that hasn't happened.
+//
+// So the panel now says out loud what it always half-did — it is the desk's
+// way of putting a person against a session:
+//
+//   1. Location  2. Program & Date  3. Name  4. Registration Type
+//   then one of three actions: ✓ Attended, ✓ Lunch, ➕ Register
+//
+// BOX 2 IS ONE CHOICE, NOT TWO. A program and the day it runs are not separate
+// decisions at a sign-in desk — "Chair Yoga" alone is not a thing you can
+// register someone for, and picking a program only to then pick its date was
+// two dropdowns for one fact. So box 2 lists SESSIONS: every upcoming one on
+// the program dashboard, in date order from today to the last one scheduled,
+// each reading "Chair Yoga — Tue, Oct 14, 2026 · Narberth".
+//
+// UPCOMING ONLY, deliberately. This panel's two jobs are marking today's
+// people off and booking people onto something that hasn't happened yet;
+// neither wants a list led by last spring. A past session is still marked the
+// way it always could be — tick Attended / Lunch_Served on the row itself.
+//
+// REGISTRATION TYPE records how the booking reached us (Online / Physical /
+// Call In / Other) and is written onto the row, so a phone booking is
+// distinguishable from a form submission forever after — see
+// REGISTRATION_TYPE_OPTIONS.
+//
+// ➕ REGISTER is the action the panel was missing: add a registration WITHOUT
+// claiming attendance. Attended/Lunch stay what they always were, except that
+// marking attendance on a session that hasn't happened yet now asks first,
+// because that is nearly always the wrong line picked out of box 2.
+//
+// ONE ENGINE, THREE DOORWAYS. The panel, the ➕ Register box and the bulk
+// dialog (Bulk Add / Mark Registrants… on the menu) all funnel into
+// runRegistrantActions() — the same matching, the same walk-in row, the same
+// protection flags, whether it is one person at a desk or forty names pasted
+// out of an email.
 //
 // The dropdowns are rebuilt on every edit of the cell to their left, because a
 // static list of every name in the workbook is not a usable dropdown once
@@ -8658,21 +8783,41 @@ const QUICK_MARK = {
   rowCount: 5, // 4 used + 1 spacer before the tables begin
   // 1-based columns within the panel.
   LOCATION_COL: 1,
-  EVENT_COL: 2,
+  SESSION_COL: 2,
   NAME_COL: 3,
-  ATTENDED_COL: 4,
-  LUNCH_COL: 5,
-  CLEAR_COL: 6
+  REG_TYPE_COL: 4,
+  ATTENDED_COL: 5,
+  LUNCH_COL: 6,
+  REGISTER_COL: 7,
+  CLEAR_COL: 8
 };
 
-const QUICK_MARK_LABELS = ['1. Location', '2. Program', '3. Name', '✓ Attended', '✓ Lunch', 'Clear'];
+const QUICK_MARK_LABELS = [
+  '1. Location', '2. Program & Date', '3. Name', '4. Registration Type',
+  '✓ Attended', '✓ Lunch', '➕ Register', 'Clear'
+];
 
-/** Writes (or rewrites) the Quick Mark panel and seeds its Location dropdown. */
+/** The three action checkboxes, as opposed to the four selection cells. */
+const QUICK_MARK_ACTION_COLS = [QUICK_MARK.ATTENDED_COL, QUICK_MARK.LUNCH_COL, QUICK_MARK.REGISTER_COL];
+
+/**
+ * A Sheets dropdown built from a list this long stops being a dropdown. Cap
+ * it — the ordering below guarantees the cut falls on the least relevant end.
+ */
+const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
+/**
+ * Sessions offered in box 2. Date-ordered from today, so the cut falls on the
+ * furthest-away sessions — the ones nobody is registering for at a desk yet.
+ */
+const QUICK_MARK_MAX_SESSION_ITEMS = 300;
+
+/** Writes (or rewrites) the Quick Mark panel and seeds its fixed dropdowns. */
 function writeQuickMarkPanel(sheet, headers, rows) {
   const numCols = Math.max(headers.length, QUICK_MARK_LABELS.length);
 
   writeSectionBanner(sheet, QUICK_MARK.bannerRow, numCols,
-    '⚡ QUICK MARK — pick a location, program and name, then tick Attended / Lunch', { hero: true });
+    '⚡ QUICK MARK — location → program & date → name → type, then tick Attended / Lunch, or ➕ Register for an upcoming session',
+    { hero: true });
 
   sheet.getRange(QUICK_MARK.labelRow, 1, 1, QUICK_MARK_LABELS.length)
     .setValues([QUICK_MARK_LABELS])
@@ -8693,16 +8838,31 @@ function writeQuickMarkPanel(sheet, headers, rows) {
   try { sheet.setRowHeight(QUICK_MARK.inputRow, ROW_HEIGHTS.HERO_DATA); } catch (err) { /* row absent */ }
 
   applyValueListValidationBounded(sheet, QUICK_MARK.LOCATION_COL, Object.values(CALENDAR_MAP), QUICK_MARK.inputRow, 1);
-  [QUICK_MARK.ATTENDED_COL, QUICK_MARK.LUNCH_COL, QUICK_MARK.CLEAR_COL].forEach(col => {
+  // Registration Type is a fixed four-value list, so unlike the cascade it is
+  // seeded once and never rebuilt.
+  applyValueListValidationBounded(sheet, QUICK_MARK.REG_TYPE_COL, REGISTRATION_TYPE_OPTIONS, QUICK_MARK.inputRow, 1);
+  QUICK_MARK_ACTION_COLS.concat([QUICK_MARK.CLEAR_COL]).forEach(col => {
     sheet.getRange(QUICK_MARK.inputRow, col)
       .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   });
 
-  // Program/Name start empty and are filled in by the cascade as soon as a
-  // location is chosen — see refreshQuickMarkDropdowns().
+  // Box 2 and the Name list are rebuilt by the cascade — see
+  // refreshQuickMarkDropdowns(). Box 2 is populated even before a location is
+  // chosen (every location's upcoming sessions), because on a one-location day
+  // that is one dropdown fewer to touch.
   refreshQuickMarkDropdowns(sheet, rows);
 
-  setQuickMarkStatus(sheet, numCols, 'Ready — choose a location to begin.');
+  setQuickMarkStatus(sheet, numCols, 'Ready — pick a program & date in box 2 (or narrow it with a location first).');
+}
+
+/**
+ * Menu entry. A full re-render is the honest way to "reset the panel": it also
+ * migrates the header row of a tab written before a column existed (which is
+ * how an older workbook grows its Registration_Type column).
+ */
+function rebuildQuickMarkPanel() {
+  renderRegistrantsSheet(true);
+  toastIfPossible('⚡ Quick Mark panel rebuilt.');
 }
 
 /**
@@ -8726,93 +8886,119 @@ function setQuickMarkStatus(sheet, numCols, message) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
 }
 
+/** setQuickMarkStatus() without the caller having to know the tab's width. */
+function quickMarkSay(sheet, message) {
+  setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length, message);
+}
+
 /**
- * Every program the workbook knows about at `location` (or everywhere, if
- * `location` is blank), NEAREST TO TODAY FIRST.
- *
- * WHAT THIS FIXES. The Program dropdown used to be built purely from the
- * registrant rows, which means a program only appeared once somebody had
- * already registered for it — precisely backwards for a panel whose job is
- * adding people. A brand-new program, or one whose sign-ups all live on
- * paper, was unreachable: it was not in the list, so nobody could be marked
- * onto it, so it stayed not in the list.
- *
- * Three sources, unioned:
- *   Master_Program_Dashboard — every session the calendar has ever produced,
- *                              past AND future. The authoritative list.
- *   Program_Options          — the memory tab, so a program whose sessions
- *                              have aged off the dashboard is still offered.
- *   the registrant rows      — belt and braces for anything hand-added.
- *
- * ORDERED BY DISTANCE FROM TODAY, not alphabetically. Someone standing at a
- * sign-in desk wants today's program first and last month's twentieth; an
- * A-Z list of two years of programs puts "Armchair Yoga" above the thing
- * happening in the next room. Ties break toward the future.
+ * Everything the panel currently holds, in one read. The session behind box 2
+ * is NOT resolved here — that costs a dashboard read, and the callers that
+ * need it either have the session list already (the cascade) or want it once
+ * (an action). Use resolveQuickMarkSession() for that.
  */
-function collectKnownPrograms(location, registrantRows) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const todayKey = formatDateKey(new Date());
-  const todayMidnight = parseDateKey(todayKey);
-  const byName = {};
-
-  const note = (title, loc, date) => {
-    const name = String(title || '').trim();
-    if (!name) return;
-    if (location && String(loc || '').trim() !== location) return;
-    if (!byName[name]) byName[name] = { name, best: null, future: false };
-    const d = coerceDate(date);
-    if (!d) return;
-    const distance = Math.abs(d - todayMidnight);
-    const entry = byName[name];
-    if (entry.best === null || distance < entry.best) {
-      entry.best = distance;
-      entry.future = formatDateKey(d) >= todayKey;
-    }
+function readQuickMarkInputs(sheet) {
+  const values = sheet.getRange(QUICK_MARK.inputRow, 1, 1, QUICK_MARK_LABELS.length).getValues()[0];
+  const at = col => String(values[col - 1] === null || values[col - 1] === undefined ? '' : values[col - 1]).trim();
+  return {
+    location: at(QUICK_MARK.LOCATION_COL),
+    sessionChoice: at(QUICK_MARK.SESSION_COL),
+    name: at(QUICK_MARK.NAME_COL),
+    registrationType: canonicalizeRegistrationType(at(QUICK_MARK.REG_TYPE_COL))
   };
+}
+
+/**
+ * The session behind whatever box 2 is showing, or null.
+ *
+ * Matched by LABEL against a freshly built list rather than parsed out of the
+ * text. The label is generated by one function from one list, so regenerating
+ * it is exact — and it keeps the label free to read like something a person
+ * would say ("Chair Yoga — Tue, Oct 14, 2026 · Narberth") instead of carrying
+ * a machine-readable key through the middle of it.
+ */
+function resolveQuickMarkSession(sessionChoice, location, sessions) {
+  const choice = String(sessionChoice || '').trim();
+  if (!choice) return null;
+  const list = sessions || collectUpcomingSessions(location);
+  return list.filter(s => formatSessionChoiceLabel(s) === choice)[0] || null;
+}
+
+/** Blanks the panel's inputs, ready for the next person. */
+function clearQuickMarkInputs(sheet) {
+  sheet.getRange(QUICK_MARK.inputRow, 1, 1, QUICK_MARK_LABELS.length).clearContent();
+}
+
+/** Puts one action checkbox back down without touching the selection above it. */
+function untickQuickMarkBox(sheet, column) {
+  sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
+}
+
+/**
+ * Every UPCOMING session on the program dashboard — today through the last one
+ * scheduled — in date order, optionally narrowed to one location.
+ *
+ * THIS IS BOX 2. The panel used to offer a program list and then a date list;
+ * a program on its own is not something a person can be registered for, so the
+ * two are now one choice. Date order (not program order) is what a desk wants:
+ * the thing happening in the next room is at the top, and scrolling forward in
+ * the list is scrolling forward in time.
+ *
+ * Read from the session table, which is the only place an Event_ID — the key
+ * every registrant row is joined on — can come from. A program with no session
+ * there cannot be registered against, which is the honest answer: there is
+ * nothing to register onto until the calendar has produced it.
+ *
+ * PAST SESSIONS ARE NOT HERE, on purpose. Marking last month's attendance is
+ * done on the row itself; leading this list with history would push today's
+ * programs off the bottom of a dropdown.
+ */
+function collectUpcomingSessions(location) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!dash) return [];
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const wantedLocation = String(location || '').trim();
+  const seen = {};
+  const sessions = [];
 
   try {
-    const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (dash) {
-      const headers = HEADERS.Master_Program_Dashboard;
-      const map = getIndexMap(headers);
-      readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
-        note(row[map['Clean_Title']], row[map['Location']], row[map['Event_Date']]);
+    readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+      const title = String(row[map['Clean_Title']] || '').trim();
+      if (!title) return;
+      const rowLocation = String(row[map['Location']] || '').trim();
+      if (wantedLocation && rowLocation !== wantedLocation) return;
+      const date = coerceDate(row[map['Event_Date']]);
+      if (!date) return;
+      const dateKey = formatDateKey(date);
+      if (dateKey < todayKey) return; // today counts as upcoming — it is the busiest case
+      // One entry per program+date+location: the same session listed twice (a
+      // re-sync, a duplicated calendar entry) must not become two
+      // indistinguishable dropdown lines.
+      const key = `${dateKey}|${rowLocation}|${normalizeNameKey(title)}`;
+      if (seen[key]) return;
+      seen[key] = true;
+      sessions.push({
+        date,
+        dateKey,
+        location: rowLocation,
+        title,
+        eventId: String(row[map['Event_ID']] || '').trim()
       });
-    }
+    });
   } catch (err) {
-    log(`ℹ️ Quick Mark could not read the program dashboard for its program list (${err}).`);
+    log(`ℹ️ Quick Mark could not read the program dashboard for its session list (${err}).`);
+    return [];
   }
 
-  try {
-    const options = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
-    if (options) {
-      const headers = HEADERS.Program_Options;
-      const map = getIndexMap(headers);
-      readSimpleTable(options, headers).forEach(row => {
-        // Next_Date if there is one, else Last_Date — either way it is that
-        // program's nearest known session.
-        note(row[map['Event']], row[map['Location']], row[map['Next_Date']] || row[map['Last_Date']]);
-      });
-    }
-  } catch (err) {
-    log(`ℹ️ Quick Mark could not read Program_Options for its program list (${err}).`);
-  }
-
-  const lrMap = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
-  (registrantRows || []).forEach(row => {
-    note(row[lrMap['Event']], row[lrMap['Location']], row[lrMap['Event_Date']]);
+  return sessions.sort((a, b) => {
+    if (a.dateKey !== b.dateKey) return a.date - b.date;
+    if (a.title !== b.title) return a.title.localeCompare(b.title);
+    return a.location.localeCompare(b.location);
   });
-
-  return Object.keys(byName)
-    .map(k => byName[k])
-    .sort((a, b) => {
-      const da = a.best === null ? Infinity : a.best;
-      const db = b.best === null ? Infinity : b.best;
-      if (da !== db) return da - db;
-      if (a.future !== b.future) return a.future ? -1 : 1; // a tie goes to the upcoming one
-      return a.name.localeCompare(b.name);
-    })
-    .map(p => p.name);
 }
 
 /** Every name on Member_Roll — the standing directory, registered or not. */
@@ -8821,9 +9007,8 @@ function collectKnownMembers() {
   try {
     const sheet = ss.getSheetByName(SHEET_NAMES.MEMBER_ROLL);
     if (!sheet) return [];
-    const headers = HEADERS.Member_Roll;
-    const map = getIndexMap(headers);
-    return readSimpleTable(sheet, headers)
+    const map = getIndexMap(HEADERS.Member_Roll);
+    return readMemberRollRows(sheet)
       .map(row => String(row[map['Name']] || '').trim())
       .filter(Boolean);
   } catch (err) {
@@ -8833,35 +9018,32 @@ function collectKnownMembers() {
 }
 
 /**
- * A Sheets dropdown built from a list this long stops being a dropdown. Cap
- * it — the ordering above guarantees the cut falls on the least relevant end.
- */
-const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
-
-/**
- * Rebuilds the Program and Name dropdowns from whatever Location/Program is
- * currently selected, narrowing each list to what's actually possible.
+ * Rebuilds box 2 (Program & Date) and the Name list from whatever is currently
+ * selected to their left, narrowing each to what's actually possible.
  *
- * PROGRAMS: every past and present program, nearest first — see
- * collectKnownPrograms().
+ * SESSIONS: every upcoming session, date-ordered from today — see
+ * collectUpcomingSessions(). Narrowed by Location when one is chosen; offered
+ * in full when it isn't, because on a one-location day picking the location
+ * first is a step that buys nothing.
  *
- * NAMES: the people already registered for the chosen program first (the
- * common case — you are ticking someone off a list), then everyone else on
- * Member_Roll. The SAME BUG the program list had applied here: sourcing names
- * from registrant rows alone meant a known member who had not registered for
- * this particular session could not be selected, which is exactly the walk-in
- * this panel is for. applyQuickMark() adds a row for them.
+ * NAMES: the people already registered for the chosen session first — the
+ * common case, you are ticking someone off a list — then everyone else on
+ * Member_Roll. Sourcing names from registrant rows alone would mean a known
+ * member who hasn't registered for this particular session could not be
+ * selected, which is exactly the walk-in this panel is for;
+ * runRegistrantActions() adds a row for them.
  */
 function refreshQuickMarkDropdowns(sheet, rows) {
   const headers = HEADERS.Lunch_and_Event_Registrants;
   const map = getIndexMap(headers);
   const registrantRows = rows || readAllSectionedRows(sheet, headers, 'Event_ID');
 
-  const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
-  const program = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
+  const inputs = readQuickMarkInputs(sheet);
+  const location = inputs.location;
 
-  const programList = collectKnownPrograms(location, registrantRows)
-    .slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
+  const sessions = collectUpcomingSessions(location).slice(0, QUICK_MARK_MAX_SESSION_ITEMS);
+  const sessionLabels = sessions.map(s => formatSessionChoiceLabel(s));
+  const session = resolveQuickMarkSession(inputs.sessionChoice, location, sessions);
 
   // Registered-for-this-selection names, in the order the rows themselves are
   // in (the tab is date-sorted, so that is nearest-session-first already).
@@ -8871,9 +9053,13 @@ function refreshQuickMarkDropdowns(sheet, rows) {
     const rowLocation = String(row[map['Location']] || '').trim();
     const rowEvent = String(row[map['Event']] || '').trim();
     const rowName = String(row[map['Name']] || '').trim();
+    const rowDate = coerceDate(row[map['Event_Date']]);
     if (!rowName) return;
     if (location && rowLocation !== location) return;
-    if (program && rowEvent !== program) return;
+    if (session) {
+      if (rowEvent !== session.title) return;
+      if (!rowDate || formatDateKey(rowDate) !== session.dateKey) return;
+    }
     const key = normalizeNameKey(rowName);
     if (registeredSeen[key]) return;
     registeredSeen[key] = true;
@@ -8890,239 +9076,914 @@ function refreshQuickMarkDropdowns(sheet, rows) {
 
   const nameList = registered.concat(others).slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
 
-  applyValueListValidationBounded(sheet, QUICK_MARK.EVENT_COL, programList.length ? programList : ['(no programs yet)'],
+  applyValueListValidationBounded(sheet, QUICK_MARK.SESSION_COL,
+    sessionLabels.length ? sessionLabels : ['(no upcoming sessions — run Sync Cal)'],
     QUICK_MARK.inputRow, 1);
   // allowInvalid on the NAME cell: a first-time walk-in has no row and is on
   // no roll, so their name has to be typeable rather than only selectable.
   applyOpenValueListValidationBounded(sheet, QUICK_MARK.NAME_COL,
     nameList.length ? nameList : ['(type a name)'], QUICK_MARK.inputRow, 1);
-  return { programList, nameList, registeredCount: registered.length };
+
+  return {
+    sessions,
+    sessionLabels,
+    session,
+    nameList,
+    registeredCount: registered.length
+  };
 }
 
-/** Blanks the panel's inputs, ready for the next person. */
-function clearQuickMarkInputs(sheet) {
-  sheet.getRange(QUICK_MARK.inputRow, 1, 1, QUICK_MARK_LABELS.length).clearContent();
+
+// ----------------------------------------------------------------------------
+// The panel's three actions
+// ----------------------------------------------------------------------------
+
+/**
+ * ✓ Attended / ✓ Lunch. Marks the person's existing row for the chosen
+ * session — or, if they have none, offers to add them the way the walk-in
+ * path always did.
+ *
+ * A tick against a session in the FUTURE asks first. Attendance is a record of
+ * something that happened, and the only reason to record it in advance is that
+ * box 2 is showing a session the person didn't mean.
+ */
+function applyQuickMark(sheet, column) {
+  const inputs = readQuickMarkInputs(sheet);
+  const isLunch = column === QUICK_MARK.LUNCH_COL;
+
+  if (!inputs.name) {
+    quickMarkSay(sheet, '⚠️ Pick a name first — nothing was marked.');
+    untickQuickMarkBox(sheet, column);
+    return;
+  }
+
+  untickQuickMarkBox(sheet, column); // the box is a button, not a stored state
+
+  // No session chosen is still a usable ask — "tick this person off wherever
+  // they are" — so it falls through to matching by name alone.
+  const session = resolveQuickMarkSession(inputs.sessionChoice, inputs.location);
+
+  const result = runRegistrantActions({
+    session,
+    location: inputs.location,
+    names: [inputs.name],
+    registrationType: inputs.registrationType,
+    markAttended: true,
+    markLunch: isLunch,
+    includeLunch: isLunch,
+    note: `Marked at the desk on ${formatDateLabel(new Date())}.`,
+    confirmFutureMark: (name, target) => confirmConsequentialAction(
+      `Mark ${name} as attended for a future date?`,
+      `${session ? session.title + ' — ' : ''}${target.dateLabel} hasn't happened yet.\n\n` +
+      `If you meant to book them in rather than tick them off, say No and use the ➕ Register box instead.`,
+      false),
+    confirmAdd: (name, target) => confirmConsequentialAction(
+      `Add ${name} as a walk-in?`,
+      `"${name}" has no registration for ${target.title} on ${formatDateLabel(target.date)}.\n\n` +
+      `A new row will be added for ${target.title} — ${formatDateLabel(target.date)} (${target.location}), ` +
+      `marked ${isLunch ? 'attended + lunch served' : 'attended'}, registered as ` +
+      `"${inputs.registrationType || REGISTRATION_TYPE_WALK_IN}" and flagged "Manually Added".` +
+      (isLunch && !isLunchOfferedOn(target.date, target.location)
+        ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : ''),
+      false)
+  });
+
+  finishQuickMarkAction(sheet, result, isLunch ? 'lunch + attendance' : 'attendance');
 }
 
 /**
- * Applies a Quick Mark tick to the real registrant row(s).
+ * ➕ Register. Books the person onto the session chosen in box 2 WITHOUT
+ * marking attendance — the whole reason that box lists upcoming dates.
  *
- * Matches on Location + Event + Name. A name legitimately appears on several
- * rows — the same person registered for several dates of the same program — so
- * this marks the one for the NEAREST session (today first, then the next
- * upcoming, then the most recent past), which is what someone standing at a
- * sign-in desk means. The status line always says which date it marked, so a
- * wrong guess is visible immediately rather than silent.
+ * Requires a Registration Type. Everywhere else in the panel a blank cell can
+ * be sensibly guessed at; here it can't. The value is the point of the action,
+ * and the person taking the booking is the only one who knows whether it came
+ * in by phone or on paper.
  */
-function applyQuickMark(sheet, column) {
-  const headers = HEADERS.Lunch_and_Event_Registrants;
-  const map = getIndexMap(headers);
+function registerFromQuickMark(sheet) {
+  const inputs = readQuickMarkInputs(sheet);
+  untickQuickMarkBox(sheet, QUICK_MARK.REGISTER_COL);
 
-  const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
-  const program = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
-  const name = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).getValue() || '').trim();
-  const numCols = headers.length;
-
-  if (!name) {
-    setQuickMarkStatus(sheet, numCols, '⚠️ Pick a name first — nothing was marked.');
-    sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
+  if (!inputs.sessionChoice) {
+    quickMarkSay(sheet, '⚠️ Pick a program & date in box 2 — ➕ Register needs to know which session to book them onto.');
+    return;
+  }
+  if (!inputs.name) {
+    quickMarkSay(sheet, '⚠️ Pick or type a name in box 3 — nothing was registered.');
+    return;
+  }
+  if (!inputs.registrationType) {
+    quickMarkSay(sheet, `⚠️ Pick a Registration Type in box 4 (${REGISTRATION_TYPE_OPTIONS.join(' / ')}) — nothing was registered.`);
     return;
   }
 
-  const zones = getSectionZones(sheet, 'Event_ID');
-  const nameKey = normalizeNameKey(name);
-  const todayKey = formatDateKey(new Date());
-  const candidates = [];
+  const session = resolveQuickMarkSession(inputs.sessionChoice, inputs.location);
+  if (!session) {
+    quickMarkSay(sheet,
+      `⚠️ "${inputs.sessionChoice}" is no longer on the dashboard — pick box 2 again (the list may have moved on since today).`);
+    return;
+  }
 
-  zones.forEach(zone => {
-    const count = zone.dataEnd - zone.dataStart + 1;
-    if (count < 1) return;
-    const values = sheet.getRange(zone.dataStart, 1, count, numCols).getValues();
-    values.forEach((row, i) => {
-      if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
-      if (location && String(row[map['Location']] || '').trim() !== location) return;
-      if (program && String(row[map['Event']] || '').trim() !== program) return;
-      const d = coerceDate(row[map['Event_Date']]);
-      candidates.push({ sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '' });
-    });
+  // Lunch is asked, not assumed. A registration that silently books a meal
+  // moves the catering number, and a registration that silently doesn't leaves
+  // someone unfed — neither is a guess worth making on the person's behalf.
+  const lunchChoice = askLunchForRegistration(session, inputs.name);
+  if (lunchChoice === null) {
+    quickMarkSay(sheet, `Nothing registered. "${inputs.name}" was not added to ${session.title}.`);
+    return;
+  }
+
+  const result = runRegistrantActions({
+    session,
+    names: [inputs.name],
+    registrationType: inputs.registrationType,
+    markAttended: false,
+    markLunch: false,
+    includeLunch: lunchChoice,
+    note: `${inputs.registrationType} registration taken by staff on ${formatDateLabel(new Date())}.`,
+    confirmAdd: () => true // the lunch prompt above already confirmed it
   });
 
-  if (candidates.length === 0) {
-    // Nobody registered under that name for that program. Now that the
-    // dropdowns offer every program and every known member, this is no longer
-    // a dead end — it is the walk-in case, and it is the reason the lists were
-    // widened in the first place.
-    sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
-    addQuickMarkWalkIn(sheet, { name, program, location, column, numCols });
-    return;
+  finishQuickMarkAction(sheet, result, 'registration');
+}
+
+/**
+ * Hot/Cold/none for a registration being taken by hand. Returns true (book a
+ * lunch), false (don't) or null (the person changed their mind — do nothing at
+ * all). A date that serves no lunch never asks.
+ */
+function askLunchForRegistration(session, name) {
+  if (!isLunchOfferedOn(session.date, session.location)) return false;
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    return false; // unattended: register them, book no meal — the reversible half
   }
+  if (!ui) return false;
 
-  // Today, else the soonest future date, else the most recent past one.
-  candidates.sort((a, b) => {
-    const rank = c => (c.dateKey === todayKey ? 0 : (c.dateKey > todayKey ? 1 : 2));
-    if (rank(a) !== rank(b)) return rank(a) - rank(b);
-    if (rank(a) === 2) return (b.date || 0) - (a.date || 0); // past: newest first
-    return (a.date || 0) - (b.date || 0);                    // future: soonest first
-  });
-  const target = candidates[0];
+  const meal = getMealInfoForDate(session.date, session.location);
+  const hint = meal && (meal.shorthand || meal.description) ? ` (${meal.shorthand || meal.description})` : '';
+  const answer = ui.alert(`Register ${name} — do they want lunch?`,
+    `${session.title} — ${formatDateLabel(session.date)} (${session.location})${hint}\n\n` +
+    `Yes — register them and count a lunch.\n` +
+    `No — register them, no lunch.\n` +
+    `Cancel — don't register them at all.`,
+    ui.ButtonSet.YES_NO_CANCEL);
 
-  const isLunch = column === QUICK_MARK.LUNCH_COL;
-  const columnName = isLunch ? 'Lunch_Served' : 'Attended';
-  if (map[columnName] === undefined) {
-    setQuickMarkStatus(sheet, numCols, `⚠️ This tab has no "${columnName}" column yet — run Sync Registrations once.`);
-    return;
-  }
+  if (answer === ui.Button.YES) return true;
+  if (answer === ui.Button.NO) return false;
+  return null;
+}
 
-  sheet.getRange(target.sheetRow, map[columnName] + 1).setValue(true);
-  // Ticking lunch implies they were there. Marking someone as fed but absent
-  // is never what anyone means, and the lunch count is derived from the tick.
-  if (isLunch && map['Attended'] !== undefined) {
-    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
-  }
-  // Hand-marking is a manual edit — say so, the same as any other.
-  if (map['Manual_Override'] !== undefined) {
-    const overrideCell = sheet.getRange(target.sheetRow, map['Manual_Override'] + 1);
-    const current = String(overrideCell.getValue() || '').trim();
-    if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
-  }
-
-  const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
-  const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
-  const what = isLunch ? 'lunch + attendance' : 'attendance';
-  setQuickMarkStatus(sheet, numCols, `✅ Marked ${what} for ${name} — ${dateLabel}${extra}.`);
-  toastIfPossible(`✅ ${name}: ${what} marked for ${dateLabel}.`);
-
+/**
+ * Shared tail for every panel action: report what the engine did, clear the
+ * inputs, and re-cascade the dropdowns for the next person.
+ */
+function finishQuickMarkAction(sheet, result, what) {
+  const message = describeRegistrantActions(result, what);
+  quickMarkSay(sheet, message);
+  if (result.marked.length > 0 || result.added.length > 0) toastIfPossible(message);
   clearQuickMarkInputs(sheet);
   refreshQuickMarkDropdowns(sheet, null);
 }
 
+/** One human sentence for a runRegistrantActions() result. */
+function describeRegistrantActions(result, what) {
+  const parts = [];
+  if (result.marked.length > 0) {
+    const sample = result.marked[0];
+    parts.push(result.marked.length === 1
+      ? `Marked ${what} for ${sample.name} — ${sample.dateLabel}` +
+        (sample.matches > 1 ? ` (${sample.matches} sessions matched — marked the nearest)` : '')
+      : `Marked ${what} for ${result.marked.length} people`);
+  }
+  if (result.added.length > 0) {
+    const sample = result.added[0];
+    parts.push(result.added.length === 1
+      ? `Added ${sample.name} to ${sample.program} — ${sample.dateLabel} (${sample.registrationType})`
+      : `Added ${result.added.length} new registrations`);
+  }
+  if (result.already.length > 0) {
+    parts.push(result.already.length === 1
+      ? `${result.already[0].name} was already registered for ${result.already[0].dateLabel}`
+      : `${result.already.length} were already registered`);
+  }
+  if (parts.length === 0) {
+    const why = result.skipped.length > 0 ? result.skipped[0].reason : 'nothing to do';
+    return `⚠️ Nothing changed — ${why}.`;
+  }
+  const skipped = result.skipped.length > 0
+    ? ` (${result.skipped.length} skipped — ${result.skipped[0].reason})`
+    : '';
+  return `✅ ${parts.join('; ')}${skipped}.`;
+}
+
+
+// ----------------------------------------------------------------------------
+// The engine: one implementation behind the panel, ➕ Register and the bulk
+// dialog. No UI of its own — callers pass confirmation callbacks in and get a
+// structured account of what happened back.
+// ----------------------------------------------------------------------------
+
 /**
- * The walk-in path: someone is standing there, they are not on the list for
- * this program, and marking them has to be possible without a form
- * submission.
+ * Puts a set of names against a session.
  *
- * Creates a "Manually Added" registrant row against the NEAREST session of
- * the chosen program (today first, then the next upcoming, then the most
- * recent past — the same rule applyQuickMark() uses to pick among existing
- * rows), then marks it. Manually Added is a protected state: see
- * getProtectedRegistrantKeys(), which is what stops the next registration
- * sync from overwriting or removing the row.
+ * spec:
+ *   location, program   — narrow the match (either may be blank)
+ *   dateKey             — 'yyyy-MM-dd' for one specific session, or '' for
+ *                         "nearest to today", which is the historical behaviour
+ *   session             — a resolved session from collectUpcomingSessions() /
+ *                         findSessionsForProgram(); supplied instead of the
+ *                         three fields above, which it then stands in for
+ *   names[]             — one or many; a bulk paste and a single desk tick are
+ *                         the same operation at different sizes
+ *   registrationType    — written onto new rows, and onto existing rows that
+ *                         don't have one yet (never over an existing value)
+ *   markAttended / markLunch — the day-of ticks
+ *   includeLunch        — book a meal for rows this call CREATES
+ *   note                — Admin_Notes for created rows
+ *   confirmAdd(name, session)      — return false to skip creating that row
+ *   confirmFutureMark(name, target) — return false to skip marking a session
+ *                                     that hasn't happened yet
  *
- * Asks first. It writes a person into the record and, if the row is for a
- * lunch-serving date, into the catering count — small, but not something to
- * do because a checkbox was clicked by accident.
+ * Returns { session, marked[], added[], already[], skipped[], rendered }.
+ *
+ * EXISTING ROWS ARE MARKED IN PLACE and new ones are appended through a single
+ * re-render at the end — so a bulk of forty names costs one render, not forty,
+ * and a plain "tick someone off" costs none at all.
  */
-function addQuickMarkWalkIn(sheet, args) {
-  const { name, program, location, column, numCols } = args;
+function runRegistrantActions(spec) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const result = { session: null, marked: [], added: [], already: [], skipped: [], rendered: false };
 
-  if (!program) {
-    setQuickMarkStatus(sheet, numCols,
-      `⚠️ "${name}" has no registration yet. Pick a program in box 2 and tick again to add them as a walk-in.`);
-    return;
+  // A caller that already holds the session (the panel, whose box 2 IS a
+  // session) passes it straight in; one that only knows what it was told (the
+  // bulk dialog) passes the three fields and lets this resolve them.
+  const given = spec.session || null;
+  const location = String((given && given.location) || spec.location || '').trim();
+  const program = String((given && given.title) || spec.program || '').trim();
+  const dateKey = String((given && given.dateKey) || spec.dateKey || '').trim();
+  const registrationType = canonicalizeRegistrationType(spec.registrationType);
+  const markAttended = !!spec.markAttended || !!spec.markLunch; // fed implies present
+  const markLunch = !!spec.markLunch;
+  const confirmAdd = spec.confirmAdd || (() => true);
+  const confirmFutureMark = spec.confirmFutureMark || (() => true);
+
+  const names = dedupeNames(spec.names);
+  if (names.length === 0) {
+    result.skipped.push({ name: '', reason: 'no names given' });
+    return result;
   }
 
-  const session = findNearestSessionForProgram(program, location);
-  if (!session) {
-    setQuickMarkStatus(sheet, numCols,
-      `⚠️ Couldn't find any session of "${program}"${location ? ` at ${location}` : ''} to add "${name}" to. ` +
-      `Run Sync Cal if the program is new.`);
-    return;
+  // The session new rows would be created against. Resolved once: every name
+  // in one call is being put against the same thing.
+  const session = given ||
+    (program
+      ? (dateKey ? findSessionForProgramOn(program, location, dateKey) : findNearestSessionForProgram(program, location))
+      : null);
+  result.session = session;
+
+  const todayKey = formatDateKey(new Date());
+  const existing = readRegistrantRowIndex(sheet);
+  const additions = [];
+
+  names.forEach(name => {
+    const nameKey = normalizeNameKey(name);
+    const candidates = existing.filter(row =>
+      row.nameKey === nameKey &&
+      (!location || row.location === location) &&
+      (!program || row.event === program) &&
+      (!dateKey || row.dateKey === dateKey));
+
+    if (candidates.length > 0) {
+      // Today, else the soonest future date, else the most recent past one —
+      // what someone standing at a sign-in desk means by "their row".
+      candidates.sort((a, b) => {
+        const rank = c => (c.dateKey === todayKey ? 0 : (c.dateKey > todayKey ? 1 : 2));
+        if (rank(a) !== rank(b)) return rank(a) - rank(b);
+        if (rank(a) === 2) return (b.date || 0) - (a.date || 0); // past: newest first
+        return (a.date || 0) - (b.date || 0);                    // future: soonest first
+      });
+      const target = candidates[0];
+      const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
+
+      if (!markAttended && !markLunch) {
+        // A ➕ Register for somebody who already has a row. Nothing to add and
+        // nothing to tick — but the registration type is still worth recording
+        // if the row never had one.
+        if (registrationType) applyRegistrantRowUpdate(sheet, target, { registrationType });
+        result.already.push({ name, dateLabel, sheetRow: target.sheetRow });
+        return;
+      }
+
+      if (target.dateKey > todayKey && !confirmFutureMark(name, { dateLabel, dateKey: target.dateKey })) {
+        result.skipped.push({ name, reason: `${dateLabel} hasn't happened yet` });
+        return;
+      }
+
+      applyRegistrantRowUpdate(sheet, target, { markAttended, markLunch, registrationType });
+      result.marked.push({ name, dateLabel, matches: candidates.length, sheetRow: target.sheetRow });
+      return;
+    }
+
+    // No row for this person on this session: the walk-in / phone-booking case,
+    // and the reason the dropdowns offer every program and every known member.
+    if (!session) {
+      result.skipped.push({
+        name,
+        reason: program
+          ? `no session of "${program}" found to add them to`
+          : 'no program chosen, so there is nothing to register them for'
+      });
+      return;
+    }
+    if (!confirmAdd(name, session)) {
+      result.skipped.push({ name, reason: 'not confirmed' });
+      return;
+    }
+    additions.push(buildManualRegistrantRow({
+      session,
+      name,
+      registrationType: registrationType || REGISTRATION_TYPE_WALK_IN,
+      attended: markAttended,
+      lunchServed: markLunch,
+      wantsLunch: spec.includeLunch === undefined || spec.includeLunch === null ? markLunch : !!spec.includeLunch,
+      note: spec.note || ''
+    }));
+    result.added.push({
+      name,
+      program: session.title,
+      dateLabel: formatDateLabel(session.date),
+      dateKey: session.dateKey,
+      registrationType: registrationType || REGISTRATION_TYPE_WALK_IN
+    });
+  });
+
+  if (additions.length > 0) {
+    // Read AFTER the in-place marks above, so this render carries them too.
+    const all = readAllSectionedRows(sheet, headers, 'Event_ID');
+    additions.forEach(row => all.push(row));
+    renderRegistrantsSheet(false, all);
+    result.rendered = true;
   }
 
-  const isLunch = column === QUICK_MARK.LUNCH_COL;
-  const lunchOffered = isLunchOfferedOn(session.date, session.location);
-  const dateLabel = formatDateLabel(session.date);
+  return result;
+}
 
-  if (!confirmConsequentialAction(`Add ${name} as a walk-in?`,
-    `"${name}" has no registration for ${program}.\n\n` +
-    `A new row will be added for ${program} — ${dateLabel} (${session.location}), marked ` +
-    `${isLunch ? 'attended + lunch served' : 'attended'} and flagged "Manually Added".` +
-    (isLunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : ''),
-    false)) {
-    setQuickMarkStatus(sheet, numCols, `Nothing added. "${name}" is still not registered for ${program}.`);
-    return;
+/** Trimmed, non-empty, first-spelling-wins — a pasted list repeats people. */
+function dedupeNames(names) {
+  const seen = {};
+  const out = [];
+  (names || []).forEach(raw => {
+    const name = String(raw === null || raw === undefined ? '' : raw).trim();
+    if (!name) return;
+    const key = normalizeNameKey(name);
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(name);
+  });
+  return out;
+}
+
+/**
+ * Every registrant row currently ON THE SHEET, with the sheet row number and
+ * the live column map of the zone it sits in.
+ *
+ * Reading the live header map per zone (rather than trusting the canonical
+ * array) is what lets this write to the right cells on a tab that was last
+ * rendered before a column existed — the tab an older workbook has right up
+ * until its next full render.
+ */
+function readRegistrantRowIndex(sheet) {
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const numCols = Math.max(sheet.getLastColumn(), headers.length);
+  const rows = [];
+
+  getSectionZones(sheet, 'Event_ID').forEach(zone => {
+    const count = zone.dataEnd - zone.dataStart + 1;
+    if (count < 1) return;
+    const map = getLiveHeaderMap(sheet, zone.headerRow, headers);
+    const values = sheet.getRange(zone.dataStart, 1, count, numCols).getValues();
+    values.forEach((row, i) => {
+      const name = String(row[map['Name']] || '').trim();
+      if (!name) return;
+      const date = coerceDate(row[map['Event_Date']]);
+      rows.push({
+        sheetRow: zone.dataStart + i,
+        map,
+        name,
+        nameKey: normalizeNameKey(name),
+        location: String(row[map['Location']] || '').trim(),
+        event: String(row[map['Event']] || '').trim(),
+        date,
+        dateKey: date ? formatDateKey(date) : '',
+        registrationType: map['Registration_Type'] === undefined
+          ? '' : String(row[map['Registration_Type']] || '').trim()
+      });
+    });
+  });
+  return rows;
+}
+
+/**
+ * Writes the day-of ticks (and a missing Registration_Type) onto one real
+ * registrant row, wherever it happens to sit.
+ *
+ * Registration_Type is only ever FILLED IN, never overwritten: how someone
+ * signed up is a fact about the past, and a later tick at the desk is not
+ * evidence about it.
+ */
+function applyRegistrantRowUpdate(sheet, target, opts) {
+  const map = target.map;
+  let touched = false;
+
+  if (opts.markAttended && map['Attended'] !== undefined) {
+    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+    touched = true;
+  }
+  if (opts.markLunch && map['Lunch_Served'] !== undefined) {
+    sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
+    // Ticking lunch implies they were there. Marking someone as fed but absent
+    // is never what anyone means, and the lunch count is derived from the tick.
+    if (map['Attended'] !== undefined) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+    touched = true;
+  }
+  if (opts.registrationType && map['Registration_Type'] !== undefined && !target.registrationType) {
+    sheet.getRange(target.sheetRow, map['Registration_Type'] + 1).setValue(opts.registrationType);
+    target.registrationType = opts.registrationType;
+    touched = true;
   }
 
+  // Hand-marking is a manual edit — say so, the same as any other.
+  if (touched && map['Manual_Override'] !== undefined) {
+    const overrideCell = sheet.getRange(target.sheetRow, map['Manual_Override'] + 1);
+    const current = String(overrideCell.getValue() || '').trim();
+    if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
+  }
+  return touched;
+}
+
+/**
+ * A registrant row created by staff rather than by a form.
+ *
+ * "Manually Added" is a protected state: see getProtectedRegistrantKeys(),
+ * which is what stops the next registration sync from overwriting or removing
+ * the row.
+ */
+function buildManualRegistrantRow(args) {
+  const { session, name, registrationType, attended, lunchServed, wantsLunch, note } = args;
   const headers = HEADERS.Lunch_and_Event_Registrants;
   const map = getIndexMap(headers);
+  const eating = (!!wantsLunch || !!lunchServed) && isLunchOfferedOn(session.date, session.location);
+
   const row = new Array(headers.length).fill('');
   row[map['Event_Date']] = session.date;
   row[map['Location']] = session.location;
   row[map['Event']] = session.title;
   row[map['Name']] = name;
-  row[map['Attended']] = true;
-  row[map['Lunch_Served']] = isLunch;
+  row[map['Attended']] = !!attended;
+  row[map['Lunch_Served']] = !!lunchServed && eating;
   row[map['Person_Type']] = 'Attendee';
-  row[map['Lunch_Type']] = isLunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
-  row[map['Lunch_Status']] = isLunch && lunchOffered ? 'Needed' : 'No Lunch';
+  row[map['Registration_Type']] = registrationType || REGISTRATION_TYPE_WALK_IN;
+  row[map['Lunch_Type']] = eating ? resolveWalkInLunchType(session) : 'No Lunch';
+  row[map['Lunch_Status']] = eating ? 'Needed' : 'No Lunch';
   row[map['Program_Status']] = 'Active';
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
-  row[map['Admin_Notes']] = `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
+  row[map['Admin_Notes']] = note || `Added by staff on ${formatDateLabel(new Date())}.`;
   row[map['Manual_Override']] = 'Manually Added';
-  row[map['Form_Source']] = 'Walk-in (no form)';
+  row[map['Form_Source']] = 'Added by staff (no form)';
   row[map['Event_ID']] = session.eventId;
-
-  const existing = readAllSectionedRows(sheet, headers, 'Event_ID');
-  existing.push(row);
-  renderRegistrantsSheet(false, existing);
-
-  const what = isLunch ? 'attendance + lunch' : 'attendance';
-  toastIfPossible(`✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what} marked.`);
-  setQuickMarkStatus(sheet, numCols,
-    `✅ Added ${name} to ${program} — ${dateLabel} (walk-in), ${what} marked.`);
-  clearQuickMarkInputs(sheet);
-  refreshQuickMarkDropdowns(sheet, null);
+  return row;
 }
 
+
+// ----------------------------------------------------------------------------
+// Sessions: the list the Date box is built from
+// ----------------------------------------------------------------------------
+
 /**
- * The session of `program` nearest to today: today, else the soonest
- * upcoming, else the most recent past. Read from the session table, which is
- * the only place an Event_ID (the key every registrant row is joined on)
- * can come from.
+ * Every session of `program` (optionally at `location`), NEAREST TO TODAY
+ * FIRST: today, then upcoming soonest-first, then past newest-first.
+ *
+ * Read from the session table, which is the only place an Event_ID — the key
+ * every registrant row is joined on — can come from. A program with no session
+ * there cannot be registered against, which is the honest answer: there is
+ * nothing to register onto until the calendar has produced it.
  */
-function findNearestSessionForProgram(program, location) {
+function findSessionsForProgram(program, location) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!dash) return null;
+  if (!dash) return [];
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const wanted = normalizeNameKey(program);
-
+  const seen = {};
   const matches = [];
+
   readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
     if (normalizeNameKey(row[map['Clean_Title']]) !== wanted) return;
     const rowLocation = String(row[map['Location']] || '').trim();
     if (location && rowLocation !== location) return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) return;
+    const dateKey = formatDateKey(date);
+    // One entry per date+location: the same session listed twice (a re-sync, a
+    // duplicated calendar entry) must not become two indistinguishable
+    // dropdown lines.
+    const key = `${dateKey}|${rowLocation}`;
+    if (seen[key]) return;
+    seen[key] = true;
     matches.push({
       date,
-      dateKey: formatDateKey(date),
+      dateKey,
       location: rowLocation,
       title: String(row[map['Clean_Title']] || '').trim(),
-      eventId: String(row[map['Event_ID']] || '').trim(),
-      lunchType: ''
+      eventId: String(row[map['Event_ID']] || '').trim()
     });
   });
-  if (matches.length === 0) return null;
 
-  matches.sort((a, b) => {
-    const rank = c => (c.dateKey === todayKey ? 0 : (c.dateKey > todayKey ? 1 : 2));
-    if (rank(a) !== rank(b)) return rank(a) - rank(b);
-    if (rank(a) === 2) return b.date - a.date; // past: newest first
-    return a.date - b.date;                    // future: soonest first
-  });
-  return matches[0];
+  return sortSessionsNearestFirst(matches, todayKey);
 }
 
-/** Hot/Cold for a walk-in's meal, taken from that day's menu; 'Hot' if the menu says nothing. */
+/** Today first, then soonest upcoming, then most recent past. */
+function sortSessionsNearestFirst(sessions, todayKey) {
+  const key = todayKey || formatDateKey(new Date());
+  return sessions.sort((a, b) => {
+    const rank = s => (s.dateKey === key ? 0 : (s.dateKey > key ? 1 : 2));
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    if (rank(a) === 2) return b.date - a.date; // past: newest first
+    if (a.dateKey !== b.dateKey) return a.date - b.date; // future: soonest first
+    return a.location.localeCompare(b.location);
+  });
+}
+
+/** The one session of `program` on `dateKey`, or null. */
+function findSessionForProgramOn(program, location, dateKey) {
+  if (!dateKey) return findNearestSessionForProgram(program, location);
+  return findSessionsForProgram(program, location).filter(s => s.dateKey === dateKey)[0] || null;
+}
+
+/**
+ * The session of `program` nearest to today: today, else the soonest
+ * upcoming, else the most recent past.
+ */
+function findNearestSessionForProgram(program, location) {
+  return findSessionsForProgram(program, location)[0] || null;
+}
+
+/**
+ * A session as one line of box 2: "Chair Yoga — Tue, Oct 14, 2026 · Narberth".
+ *
+ * READ AS WELL AS MATCHED. A dropdown value is the only place this choice is
+ * stored — there is no hidden cell behind it — so resolveQuickMarkSession()
+ * finds the session again by regenerating labels and comparing, which lets
+ * this read like something a person would say instead of carrying a machine
+ * key through the middle of it. Change the format and both ends change
+ * together; a stale value simply stops matching and says so.
+ */
+function formatSessionChoiceLabel(session) {
+  return `${session.title} — ${formatDateLabel(session.date)}` +
+    (session.location ? ` · ${session.location}` : '');
+}
+
+/** Hot/Cold for a hand-added registrant's meal, taken from that day's menu; 'Hot' if the menu says nothing. */
 function resolveWalkInLunchType(session) {
   const info = getMealInfoForDate(session.date, session.location);
   const type = info ? String(info.type || '').trim() : '';
   return (type === 'Hot' || type === 'Cold') ? type : 'Hot';
+}
+
+
+// ----------------------------------------------------------------------------
+// 6d (cont.). BULK ADD / MARK  (the menu's doorway onto the same engine)
+// ----------------------------------------------------------------------------
+//
+// The panel is one person at a time by design. The other half of the job is a
+// list: a paper sign-up sheet with fourteen names on it, a phone message with
+// six, a coach trip roster. Typing those one at a time through a cascade of
+// dropdowns is the thing this workbook exists to stop.
+//
+// So: same five choices, made ONCE, then a box of names. It calls
+// runRegistrantActions() with all of them, which means one render, one set of
+// rules, and a result summary that names what it skipped and why.
+// ----------------------------------------------------------------------------
+
+/** How far back the bulk dialog's session list reaches. Older than this and you are not registering people. */
+const BULK_DIALOG_PAST_DAYS = 120;
+/** Hard cap on the sessions shipped to the dialog — it holds them all in memory. */
+const BULK_DIALOG_MAX_SESSIONS = 800;
+/** More names than this in one go is a paste of the wrong thing, not a sign-up sheet. */
+const BULK_MAX_NAMES = 200;
+
+function showBulkRegistrantDialog() {
+  const html = HtmlService.createHtmlOutput(buildBulkRegistrantHtml())
+    .setWidth(640)
+    .setHeight(660);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Bulk Add / Mark Registrants');
+}
+
+/**
+ * Everything the dialog needs to build its cascade, in ONE call — the dropdowns
+ * narrow client-side from this array rather than round-tripping to the server
+ * per keystroke, which on Apps Script would make the dialog feel broken.
+ */
+function getBulkRegistrantContext() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const todayKey = formatDateKey(new Date());
+  const floor = new Date();
+  floor.setDate(floor.getDate() - BULK_DIALOG_PAST_DAYS);
+  const floorKey = formatDateKey(floor);
+
+  const sessions = [];
+  const seen = {};
+  if (dash) {
+    const headers = HEADERS.Master_Program_Dashboard;
+    const map = getIndexMap(headers);
+    readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+      const title = String(row[map['Clean_Title']] || '').trim();
+      const location = String(row[map['Location']] || '').trim();
+      const date = coerceDate(row[map['Event_Date']]);
+      if (!title || !date) return;
+      const dateKey = formatDateKey(date);
+      if (dateKey < floorKey) return;
+      const key = `${dateKey}|${location}|${normalizeNameKey(title)}`;
+      if (seen[key]) return;
+      seen[key] = true;
+      sessions.push({
+        program: title,
+        location,
+        dateKey,
+        when: dateKey === todayKey ? 'TODAY' : (dateKey > todayKey ? 'upcoming' : 'past'),
+        label: `${formatDateLabel(date)}${dateKey === todayKey ? ' · TODAY' : ''}`,
+        lunch: isLunchOfferedOn(date, location)
+      });
+    });
+  }
+  sessions.sort((a, b) => (a.dateKey === b.dateKey ? a.program.localeCompare(b.program) : (a.dateKey < b.dateKey ? -1 : 1)));
+
+  return {
+    locations: Object.values(CALENDAR_MAP),
+    registrationTypes: REGISTRATION_TYPE_OPTIONS,
+    defaultRegistrationType: REGISTRATION_TYPE_WALK_IN,
+    todayKey,
+    sessions: sessions.slice(0, BULK_DIALOG_MAX_SESSIONS)
+  };
+}
+
+/**
+ * Called from the dialog. One doorway onto runRegistrantActions() — same
+ * matching, same protected "Manually Added" rows, same everything the panel
+ * does, just with the confirmation already given by pressing the button.
+ * Returns a human-readable summary for the dialog to show.
+ */
+function submitBulkRegistrants(payload) {
+  payload = payload || {};
+  const program = String(payload.program || '').trim();
+  const location = String(payload.location || '').trim();
+  const dateKey = String(payload.dateKey || '').trim();
+  const registrationType = canonicalizeRegistrationType(payload.registrationType);
+  const names = parseBulkNameList(payload.names);
+
+  if (!program) return '⚠️ Pick a program first — nothing was changed.';
+  if (!dateKey) return '⚠️ Pick a date first — nothing was changed.';
+  if (!registrationType) {
+    return `⚠️ Pick a registration type (${REGISTRATION_TYPE_OPTIONS.join(' / ')}) — nothing was changed.`;
+  }
+  if (names.length === 0) return '⚠️ No names found — put one name per line and try again.';
+  if (names.length > BULK_MAX_NAMES) {
+    return `⚠️ That's ${names.length} names. Do it in batches of ${BULK_MAX_NAMES} or fewer — nothing was changed.`;
+  }
+
+  const session = findSessionForProgramOn(program, location, dateKey);
+  if (!session) {
+    return `⚠️ Couldn't find "${program}"${location ? ` at ${location}` : ''} on ${dateKey}. ` +
+      `Run Sync Cal if the session is new — nothing was changed.`;
+  }
+
+  const result = runRegistrantActions({
+    location: session.location,
+    program: session.title,
+    dateKey: session.dateKey,
+    names,
+    registrationType,
+    markAttended: !!payload.markAttended,
+    markLunch: !!payload.markLunch,
+    includeLunch: !!payload.includeLunch || !!payload.markLunch,
+    note: `${registrationType} registration added in bulk on ${formatDateLabel(new Date())}.`,
+    confirmAdd: () => true // pressing the button in the dialog IS the confirmation
+  });
+
+  log(`submitBulkRegistrants: ${session.title} ${session.dateKey} — ` +
+    `${result.added.length} added, ${result.marked.length} marked, ${result.already.length} already there, ` +
+    `${result.skipped.length} skipped.`);
+
+  const detail = describeRegistrantActions(result, payload.markLunch ? 'lunch + attendance' : 'attendance');
+  const skippedNames = result.skipped.length > 0
+    ? ` Skipped: ${result.skipped.map(s => s.name).filter(Boolean).slice(0, 8).join(', ')}.`
+    : '';
+  return `${detail} — ${session.title}, ${formatDateLabel(session.date)} (${session.location}).${skippedNames}`;
+}
+
+/** One name per line, but a comma-separated paste works too. */
+function parseBulkNameList(text) {
+  return dedupeNames(String(text || '')
+    .split(/[\r\n;]+/)
+    .reduce((acc, line) => acc.concat(line.split(',')), [])
+    .map(s => s.trim()));
+}
+
+/** The dialog's markup. Inline so this project stays a single .gs file. */
+function buildBulkRegistrantHtml() {
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  label { display: block; font-weight: bold; margin: 0 0 3px 0; }
+  select, textarea { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;
+                     padding: 6px; font-size: 13px; font-family: inherit; }
+  textarea { height: 150px; font-family: Consolas, Menlo, monospace; font-size: 12px; }
+  .row { margin: 10px 0; }
+  .cols { display: flex; gap: 10px; }
+  .cols > div { flex: 1; }
+  .checks { margin: 10px 0; line-height: 1.9; }
+  .checks label { display: block; font-weight: normal; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
+           font-size: 13px; cursor: pointer; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 10px; min-height: 18px; font-weight: bold; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+  .note { color: #666; font-size: 12px; margin-top: 4px; }
+</style>
+<h3>Add or mark a whole list at once</h3>
+<p class="hint">
+  Pick the session once, then paste the names — <strong>one per line</strong>.
+  Anyone already registered is <strong>marked</strong>; anyone who isn't gets a new
+  row flagged <code>Manually Added</code>, which no sync will overwrite.
+  <strong>Future sessions are fine</strong> — that's what this is for.
+</p>
+
+<div class="cols">
+  <div class="row">
+    <label for="location">Location</label>
+    <select id="location" onchange="rebuild()"><option value="">All locations</option></select>
+  </div>
+  <div class="row">
+    <label for="program">Program</label>
+    <select id="program" onchange="rebuildDates()"></select>
+  </div>
+</div>
+
+<div class="cols">
+  <div class="row">
+    <label for="date">Date</label>
+    <select id="date" onchange="dateChanged()"></select>
+    <div class="note" id="lunchNote"></div>
+  </div>
+  <div class="row">
+    <label for="regType">Registration Type</label>
+    <select id="regType"></select>
+  </div>
+</div>
+
+<div class="row">
+  <label for="names">Names</label>
+  <textarea id="names" placeholder="Marion Webb
+Alan Reid
+Dorothy Kaplan"></textarea>
+</div>
+
+<div class="checks">
+  <label><input type="checkbox" id="includeLunch"> Count a lunch for each new registration</label>
+  <label><input type="checkbox" id="markAttended"> Also mark them <strong>Attended</strong></label>
+  <label><input type="checkbox" id="markLunch"> Also mark <strong>Lunch Served</strong> (implies attended)</label>
+</div>
+
+<div class="row"><button id="go" onclick="submit()">Add / mark these people</button></div>
+<div id="status"></div>
+
+<script>
+  var CTX = { sessions: [] };
+
+  google.script.run.withSuccessHandler(function (ctx) {
+    CTX = ctx;
+    fill('location', ctx.locations, 'All locations');
+    fill('regType', ctx.registrationTypes, null);
+    document.getElementById('regType').value = ctx.defaultRegistrationType;
+    rebuild();
+  }).withFailureHandler(function (err) {
+    say('Could not read the session list: ' + err.message, 'err');
+  }).getBulkRegistrantContext();
+
+  function fill(id, values, blankLabel) {
+    var el = document.getElementById(id);
+    el.innerHTML = '';
+    if (blankLabel !== null) el.appendChild(new Option(blankLabel, ''));
+    values.forEach(function (v) { el.appendChild(new Option(v, v)); });
+  }
+
+  function visibleSessions() {
+    var loc = document.getElementById('location').value;
+    return CTX.sessions.filter(function (s) { return !loc || s.location === loc; });
+  }
+
+  function rebuild() {
+    var sessions = visibleSessions();
+    var programs = [];
+    sessions.forEach(function (s) { if (programs.indexOf(s.program) === -1) programs.push(s.program); });
+    programs.sort();
+
+    var progEl = document.getElementById('program');
+    var keepProgram = progEl.value;
+    fill('program', programs, 'Pick a program…');
+    if (programs.indexOf(keepProgram) !== -1) progEl.value = keepProgram;
+
+    rebuildDates();
+  }
+
+  function rebuildDates() {
+    var program = document.getElementById('program').value;
+    var rows = visibleSessions().filter(function (s) { return s.program === program; });
+    var dateEl = document.getElementById('date');
+    dateEl.innerHTML = '';
+    if (!program) {
+      dateEl.appendChild(new Option('Pick a program first…', ''));
+      document.getElementById('lunchNote').textContent = '';
+      return;
+    }
+    if (rows.length === 0) dateEl.appendChild(new Option('No sessions found', ''));
+    rows.forEach(function (s) {
+      dateEl.appendChild(new Option(s.label + ' · ' + s.when + ' · ' + s.location, s.dateKey + '|' + s.location));
+    });
+    // Default to today's session, else the first upcoming one.
+    var preferred = rows.filter(function (s) { return s.dateKey >= CTX.todayKey; })[0] || rows[0];
+    if (preferred) dateEl.value = preferred.dateKey + '|' + preferred.location;
+    dateChanged();
+  }
+
+  function currentSession() {
+    var raw = document.getElementById('date').value;
+    if (!raw) return null;
+    var parts = raw.split('|');
+    var program = document.getElementById('program').value;
+    return visibleSessions().filter(function (s) {
+      return s.program === program && s.dateKey === parts[0] && s.location === parts[1];
+    })[0] || null;
+  }
+
+  function dateChanged() {
+    var s = currentSession();
+    var note = document.getElementById('lunchNote');
+    if (!s) { note.textContent = ''; return; }
+    note.textContent = s.lunch ? 'Lunch is served on this date.' : 'No lunch is served on this date.';
+    if (!s.lunch) {
+      document.getElementById('includeLunch').checked = false;
+      document.getElementById('markLunch').checked = false;
+    }
+  }
+
+  function submit() {
+    var s = currentSession();
+    if (!s) { say('Pick a program and a date first.', 'err'); return; }
+    var names = document.getElementById('names').value;
+    if (!names.trim()) { say('Nothing to do — paste some names first.', 'err'); return; }
+
+    document.getElementById('go').disabled = true;
+    say('Working…', '');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        document.getElementById('go').disabled = false;
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('go').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      })
+      .submitBulkRegistrants({
+        program: s.program,
+        location: s.location,
+        dateKey: s.dateKey,
+        registrationType: document.getElementById('regType').value,
+        names: names,
+        includeLunch: document.getElementById('includeLunch').checked,
+        markAttended: document.getElementById('markAttended').checked,
+        markLunch: document.getElementById('markLunch').checked
+      });
+  }
+
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+</script>`;
 }
 
 function renderTriageSheet(force, allRows) {
@@ -9151,7 +10012,8 @@ function renderTriageSheet(force, allRows) {
  * dashboard's hand-entry columns, via labelManualEntryColumns()).
  */
 const REGISTRANT_EDITABLE_COLUMNS = [
-  'Attended', 'Lunch_Served', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
+  'Attended', 'Lunch_Served', 'Registration_Type', 'Lunch_Type', 'Lunch_Status',
+  'Program_Status', 'Admin_Notes'
 ];
 
 /**
@@ -9179,6 +10041,12 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     applyValueListValidationBounded(sheet, map['Program_Status'] + 1, PROGRAM_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Status'] + 1, LUNCH_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, REGISTRANT_LUNCH_TYPE_OPTIONS, z.start, z.count);
+    // Registration_Type is restricted, not suggested: the whole point of the
+    // column is that four values can be counted, and a free-text variant
+    // ("phone", "Phone call") would quietly split the count in two.
+    if (map['Registration_Type'] !== undefined) {
+      applyValueListValidationBounded(sheet, map['Registration_Type'] + 1, REGISTRATION_TYPE_OPTIONS, z.start, z.count);
+    }
     // Real checkboxes, not free text: a tick is one click and reads back as a
     // boolean, which is what Served_Confirmed counts.
     REGISTRANT_DAYOF_COLUMNS.forEach(h => {
@@ -9485,9 +10353,10 @@ function refreshMemberRoll(ss, registrantRows) {
   const headers = HEADERS.Member_Roll;
   const map = getIndexMap(headers);
 
-  // What staff have already written, by person key.
+  // What staff have already written, by person key. Bounded to the roll
+  // proper: a half-typed row in the ADD MEMBER block is not a member yet.
   const existingByKey = {};
-  readSimpleTable(sheet, headers).forEach(row => {
+  readMemberRollRows(sheet).forEach(row => {
     const key = normalizeNameKey(row[map['Name']]);
     if (key) existingByKey[key] = row;
   });
@@ -9535,18 +10404,268 @@ function refreshMemberRoll(ss, registrantRows) {
     outRows.push(row);
     seen[key] = true;
   });
+  // Anyone on the roll but absent from the history stays put — a member whose
+  // sessions have aged out, and now also a member added by hand who hasn't
+  // registered for anything yet (see harvestMemberRollAdditions()).
   Object.keys(existingByKey).forEach(key => {
     if (!seen[key]) outRows.push(existingByKey[key]);
   });
 
-  writeMemoryTab(sheet, headers, outRows, {
-    banner: '👤 Member Roll — everyone who has ever registered',
-    staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
-    dateColumns: ['First_Seen', 'Last_Seen'],
-    numberColumns: ['Times_Seen']
-  });
+  writeMemberRollTab(sheet, outRows);
   log(`Member_Roll refreshed: ${outRows.length} member(s).`);
 }
+
+/**
+ * The one writer for this tab — both the sync's refresh and the ADD MEMBER
+ * harvest go through it, so the banner, the staff-column wash and the add
+ * block can never drift apart between the two paths.
+ */
+function writeMemberRollTab(sheet, rows, options) {
+  // The registration sync rewrites this tab every hour. Anything half-typed in
+  // the add block at that moment would be cleared with it — so it is lifted
+  // out first and put back into the fresh block afterwards. The harvest passes
+  // preservePending:false, because it has just consumed those rows itself.
+  const keepPending = !options || options.preservePending !== false;
+  const pending = keepPending ? readPendingMemberAdditions(sheet) : [];
+
+  writeMemoryTab(sheet, HEADERS.Member_Roll, rows, {
+    banner: '👤 Member Roll — everyone who has ever registered, plus anyone you add',
+    staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
+    dateColumns: ['First_Seen', 'Last_Seen'],
+    numberColumns: ['Times_Seen'],
+    addBlock: true
+  });
+
+  if (pending.length > 0) restorePendingMemberAdditions(sheet, pending);
+}
+
+/** Whatever is sitting unharvested in the add block, checkbox column excluded. */
+function readPendingMemberAdditions(sheet) {
+  const add = findMemberAddBlock(sheet);
+  if (!add) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < add.firstRow) return [];
+  const width = MEMBER_ADD_HEADERS.length - 1; // the ✓ Add tick is not content
+  return sheet.getRange(add.firstRow, 1, lastRow - add.firstRow + 1, width)
+    .getValues()
+    .filter(cells => cells.some(v => String(v === null || v === undefined ? '' : v).trim() !== ''))
+    .slice(0, 200);
+}
+
+/** Puts those rows back into the block after a re-render moved it. */
+function restorePendingMemberAdditions(sheet, pending) {
+  const add = findMemberAddBlock(sheet);
+  if (!add) return;
+  const width = MEMBER_ADD_HEADERS.length - 1;
+  const needed = add.firstRow + pending.length - 1;
+  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+  sheet.getRange(add.firstRow, 1, pending.length, width).setValues(pending);
+}
+
+
+// ----------------------------------------------------------------------------
+// ADD MEMBER  (the typing area at the bottom of Member_Roll)
+// ----------------------------------------------------------------------------
+//
+// Member_Roll was read-only in one direction that mattered: a person became a
+// member by filling in a form, and there was no way to say "this is Dorothy,
+// she comes every Tuesday, here is her phone number" until she had. That is
+// backwards for a tab whose entire purpose is remembering people — and it is
+// what the Quick Mark name dropdown is built from, so somebody the office has
+// known for years was un-pickable until their first online registration.
+//
+// So the tab gets an ADD MEMBER block, the same shape as Lunch_Schedule's menu
+// paste area: type or paste names at the bottom, tick ✓ Add, and they join the
+// roll above. A hand-added member has no history yet (Times_Seen 0), keeps
+// every staff column typed alongside their name, and is preserved by every
+// refresh exactly like a member whose sessions have aged out — see
+// refreshMemberRoll().
+//
+// THE TICK IS THE COMMIT, and that is the whole design. Harvesting on any edit
+// (what the menu block does, where a row is complete or it isn't) would fold a
+// half-typed member in the moment their name was entered and send the phone
+// number they typed next into a blank row. One deliberate tick — on any row of
+// the block — takes everything sitting in it.
+// ----------------------------------------------------------------------------
+
+/** Column A marker that locates the block. Must not collide with a real header. */
+const MEMBER_ADD_MARKER = '➕ ADD MEMBER';
+/**
+ * The block's own header labels. Deliberately NOT the canonical
+ * HEADERS.Member_Roll names — the roll's real header row is found at a fixed
+ * row, but a second row repeating 'Name' in column A invites exactly the kind
+ * of "which header did I just read?" bug buildHeaderProjection() exists to
+ * prevent.
+ */
+const MEMBER_ADD_HEADERS = ['Full Name', 'Contact', 'Dietary Notes', 'Usual Guests', 'Staff Notes', '✓ Add'];
+/** Which roll column each typing column feeds, by position after the name. */
+const MEMBER_ADD_STAFF_COLUMNS = ['Contact', 'Dietary_Notes', 'Usual_Guests', 'Staff_Notes'];
+/** Blank rows left under the block's header. A bigger paste simply extends past it. */
+const MEMBER_ADD_BLANK_ROWS = 8;
+
+/** The last row of Member_Roll that is genuinely ROLL — everything above the block. */
+function getMemberRollEndRow(sheet) {
+  const add = findMemberAddBlock(sheet);
+  return add ? add.bannerRow - 1 : sheet.getLastRow();
+}
+
+/** Locates the block, or null on a tab last rendered before it existed. */
+function findMemberAddBlock(sheet) {
+  return findAddBlockByMarker(sheet, MEMBER_ADD_MARKER);
+}
+
+/** Every real member row, the add block excluded. */
+function readMemberRollRows(sheet) {
+  return readSimpleTable(sheet, HEADERS.Member_Roll, getMemberRollEndRow(sheet));
+}
+
+/** Draws the block: banner, its own header row, and the yellow typing area. */
+function writeMemberAddBlock(sheet, startRow) {
+  const numCols = MEMBER_ADD_HEADERS.length;
+  // Make room BEFORE writing anything: getRange() throws on a row that isn't
+  // there, and a long roll easily runs past the sheet's default height.
+  const needed = startRow + 1 + MEMBER_ADD_BLANK_ROWS;
+  if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+
+  writeSectionBanner(sheet, startRow, numCols,
+    `${MEMBER_ADD_MARKER} — type or paste names here (one per row), then tick ✓ Add on any row. ` +
+    `They join the roll above and become pickable in Quick Mark straight away.`);
+
+  const headerRow = startRow + 1;
+  sheet.getRange(headerRow, 1, 1, numCols)
+    .setValues([MEMBER_ADD_HEADERS])
+    .setFontWeight('bold')
+    .setFontSize(TYPO.COLUMN_HEADER.size)
+    .setFontColor(TYPO.COLUMN_HEADER.color)
+    .setBackground(TYPO.COLUMN_HEADER.background);
+
+  const firstRow = headerRow + 1;
+  sheet.getRange(firstRow, 1, MEMBER_ADD_BLANK_ROWS, numCols)
+    .setBackground(MANUAL_ENTRY_CELL_TINT)
+    .setBorder(true, true, true, true, true, true, '#D9D9D9', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(firstRow, numCols, MEMBER_ADD_BLANK_ROWS, 1)
+    .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+    .setHorizontalAlignment('center');
+}
+
+/**
+ * Fired via onEdit() when Member_Roll is hand-edited.
+ *
+ * Edits to the roll itself need no handling at all — the staff columns are
+ * carried forward by every refresh, which is what makes them staff columns.
+ * Only the ✓ Add tick does anything.
+ */
+function handleMemberRollEdit(e, sheet) {
+  const add = findMemberAddBlock(sheet);
+  if (!add) return;
+
+  const editedLastRow = e.range.getRow() + e.range.getNumRows() - 1;
+  if (editedLastRow < add.firstRow) return; // an edit up in the roll
+
+  const tickCol = MEMBER_ADD_HEADERS.length;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (tickCol < firstCol || tickCol > lastCol) return; // still typing — not a commit
+
+  // A single-cell tick has to actually be a tick; a paste covering the column
+  // carries no usable value, so it is taken at face value.
+  const isSingleCell = e.range.getNumRows() === 1 && e.range.getNumColumns() === 1;
+  if (isSingleCell && !isTruthyCheckbox(e.value)) return; // un-ticking adds nobody
+
+  harvestMemberRollAdditions(sheet, add);
+}
+
+/**
+ * Folds everything sitting in the ADD MEMBER block into the roll: new people
+ * are appended, people already on the roll have their staff columns FILLED IN
+ * (never blanked — an empty box in the block means "nothing to add here", not
+ * "delete what you know").
+ *
+ * Re-renders the tab, which redraws the block empty, so the accepted rows are
+ * now in the table above and there is nothing left to tidy up by hand.
+ */
+function harvestMemberRollAdditions(sheet, add) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < add.firstRow) return;
+
+  const raw = sheet.getRange(add.firstRow, 1, lastRow - add.firstRow + 1, MEMBER_ADD_HEADERS.length).getValues();
+  const headers = HEADERS.Member_Roll;
+  const map = getIndexMap(headers);
+
+  const rows = readMemberRollRows(sheet);
+  const byKey = {};
+  rows.forEach(row => {
+    const key = normalizeNameKey(row[map['Name']]);
+    if (key) byKey[key] = row;
+  });
+
+  let added = 0;
+  let updated = 0;
+  let alreadyThere = 0;
+  let orphanNotes = 0;
+
+  raw.forEach(cells => {
+    const name = String(cells[0] === null || cells[0] === undefined ? '' : cells[0]).trim();
+    const staff = MEMBER_ADD_STAFF_COLUMNS.map((h, i) =>
+      String(cells[i + 1] === null || cells[i + 1] === undefined ? '' : cells[i + 1]).trim());
+
+    if (!name) {
+      // Notes typed against no name can't be filed anywhere. Counted so the
+      // toast can say so rather than silently discarding them on the re-render.
+      if (staff.some(v => v !== '')) orphanNotes++;
+      return;
+    }
+
+    const key = normalizeNameKey(name);
+    const existing = byKey[key];
+    if (existing) {
+      let changed = false;
+      MEMBER_ADD_STAFF_COLUMNS.forEach((h, i) => {
+        if (!staff[i]) return;
+        if (String(existing[map[h]] || '').trim() === staff[i]) return;
+        existing[map[h]] = staff[i];
+        changed = true;
+      });
+      if (changed) updated++; else alreadyThere++;
+      return;
+    }
+
+    const row = new Array(headers.length).fill('');
+    row[map['Name']] = name;
+    row[map['Times_Seen']] = 0; // no history yet — they have registered for nothing
+    MEMBER_ADD_STAFF_COLUMNS.forEach((h, i) => { row[map[h]] = staff[i]; });
+    rows.push(row);
+    byKey[key] = row;
+    added++;
+  });
+
+  if (added === 0 && updated === 0) {
+    if (alreadyThere > 0) {
+      toastIfPossible(`${alreadyThere} name(s) are already on the roll — nothing to change.`);
+      writeMemberRollTab(sheet, sortMemberRows(rows, map), { preservePending: false }); // still clears the block
+    } else if (orphanNotes > 0) {
+      toastIfPossible('⚠️ Nothing added — those notes have no name next to them. Put a name in the first column.');
+    }
+    return;
+  }
+
+  writeMemberRollTab(sheet, sortMemberRows(rows, map), { preservePending: false });
+
+  const parts = [];
+  if (added > 0) parts.push(`${added} member(s) added`);
+  if (updated > 0) parts.push(`${updated} updated`);
+  if (alreadyThere > 0) parts.push(`${alreadyThere} already on the roll`);
+  if (orphanNotes > 0) parts.push(`⚠️ ${orphanNotes} row(s) with notes but no name were dropped`);
+  toastIfPossible(`✅ ${parts.join(', ')}.`);
+  log(`Member_Roll add: ${added} added, ${updated} updated, ${alreadyThere} unchanged, ${orphanNotes} nameless.`);
+}
+
+/** Alphabetical by display name — the order the roll is written in everywhere. */
+function sortMemberRows(rows, map) {
+  return rows.sort((a, b) =>
+    String(a[map['Name']] || '').localeCompare(String(b[map['Name']] || '')));
+}
+
 
 /** One row per unique program (Event x Location), same recomputed/staff split. */
 function refreshProgramOptions(ss, sessionRows) {
@@ -9646,9 +10765,14 @@ function pickMostFrequent(counts) {
  * Reads a plain (single header row at row 2, banner at row 1) tab into rows,
  * projected into `headers` order by NAME — so these tabs survive a layout
  * change the same way the sectioned ones do (see buildHeaderProjection()).
+ *
+ * `endRow` bounds the read, the way getLunchScheduleEndRow() does for the menu
+ * tab: Member_Roll now carries an ADD MEMBER block at the bottom, and a row
+ * being typed there is emphatically not a member yet. Every reader of that tab
+ * goes through getMemberRollEndRow().
  */
-function readSimpleTable(sheet, headers) {
-  const lastRow = sheet.getLastRow();
+function readSimpleTable(sheet, headers, endRow) {
+  const lastRow = endRow ? Math.min(endRow, sheet.getLastRow()) : sheet.getLastRow();
   if (lastRow < MEMORY_TAB_DATA_ROW) return [];
   const lastCol = Math.max(sheet.getLastColumn(), headers.length);
   const projection = buildHeaderProjection(sheet, MEMORY_TAB_HEADER_ROW, headers, lastCol);
@@ -9687,6 +10811,10 @@ function writeMemoryTab(sheet, headers, rows, options) {
     applyZebraStripingManualBounded(sheet, MEMORY_TAB_DATA_ROW, rows.length, numCols);
     tintManualEntryColumns(sheet, MEMORY_TAB_DATA_ROW, rows.length, headers, options.staffColumns);
   }
+
+  // The typing area, below the table and one blank row clear of it. Only
+  // Member_Roll asks for one — see writeMemberAddBlock().
+  if (options.addBlock) writeMemberAddBlock(sheet, MEMORY_TAB_DATA_ROW + rows.length + 1);
 
   sheet.setFrozenRows(MEMORY_TAB_HEADER_ROW);
   freezeColumnsSafely(sheet, 1); // the name/program is the row's identity — keep it visible
