@@ -215,20 +215,21 @@ The panel at the **top of this tab** does two jobs: ticking people in on the
 day, and putting someone onto a session — **including a session that hasn't
 happened yet**.
 
-Five boxes, then one of three actions:
+Four boxes, then one of three actions:
 
-1. **Location** — pick from the dropdown.
-2. **Program** — **every** program at that location, past and present,
-   **soonest first**. Not just the ones somebody has already registered for.
-3. **Date** — every session of that program: today, upcoming and past,
-   nearest first, each line reading e.g.
-   `2026-10-14 · Tue, Oct 14, 2026 · upcoming · Narberth`. Leave it on
-   **`Nearest session (auto)`** and it behaves the way it always did — today's
-   session, else the next one, else the most recent past one.
-4. **Name** — the people registered for that program (and date, once you've
-   picked one) first, then **everyone else on Member_Roll**. You can also just
-   **type a name** that isn't on either list.
-5. **Registration Type** — `Online` · `Physical` · `Call In` · `Other`. How
+1. **Location** — optional. It just narrows box 2; skip it if you like.
+2. **Program & Date** — **one choice, not two.** Every **upcoming** session on
+   the program dashboard, **in date order from today to the last one
+   scheduled**, each line reading:
+
+   > `Chair Yoga — Tue, Oct 14, 2026 · Narberth`
+
+   A program on its own isn't something you can register anyone for, so the
+   program and the day it runs are picked together.
+3. **Name** — the people already registered for that session first, then
+   **everyone else on Member_Roll**. You can also just **type a name** that's
+   on neither list.
+4. **Registration Type** — `Online` · `Physical` · `Call In` · `Other`. How
    this booking reached you. It's written onto the row.
 
 Then:
@@ -245,17 +246,20 @@ what it did on the line underneath, and clears itself for the next person.
 Guests brought by another registrant show up in the dropdowns exactly like
 anyone else — there's no separate step for them.
 
-- If someone's registered for **several dates** of the same program and you
-  left the Date box on auto, it marks the nearest one and says so, e.g.
-  *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
-  the nearest)."* Pick the date explicitly in box 3 if that's not the one.
+- **Box 2 is upcoming sessions only** — today counts as upcoming. Marking
+  someone off for a session that's already been is done the old way: tick
+  `Attended` / `Lunch_Served` **on their row**. Leading the list with last
+  spring would push today's programs off the bottom of it.
+- **You can skip box 2 entirely.** Pick just a name and tick Attended and it
+  marks that person's nearest row — today's, else the soonest upcoming, else
+  their most recent past one — and says which date it chose.
 - **Ticking Attended for a session in the future asks first.** That's almost
-  always a mis-set Date box — say No and use **➕ Register** instead.
+  always the wrong line picked out of box 2 — say No and use **➕ Register**.
 
 **Registering someone for a future session** (the phone rings in September
 about the October trip):
 
-1. Location → Program → the **October date** in box 3 → their name.
+1. Pick **`Chair Yoga — Wed, Oct 14, 2026 · Narberth`** in box 2 → their name.
 2. Registration Type → **`Call In`**.
 3. Tick **➕ Register**.
 
@@ -264,7 +268,7 @@ the row: `Active`, `Needed`/`No Lunch` as you answered, `Call In`, flagged
 **Manually Added** so no future sync overwrites it. Nothing is marked as
 attended — you tick that on the day.
 
-➕ Register needs a **program**, a **name** and a **Registration Type**; it
+➕ Register needs a **session**, a **name** and a **Registration Type**; it
 won't guess how a booking reached you.
 
 **Walk-ins.** If the person you picked has **no registration** for that
@@ -278,9 +282,16 @@ session, ticking Attended or Lunch offers to add them:
 
 Say yes and the row appears, already marked. Say no and nothing happens.
 
+**Nobody in the name list?** Anyone can be typed in, and you can also put them
+on the roll properly first — see
+[Adding a member yourself](#-adding-a-member-yourself) at the bottom of
+**Member_Roll**.
+
 **A whole list at once?** Use **⚡ Quick Mark → 👥 Bulk Add / Mark
 Registrants…** on the menu — see
-[Bulk add or mark a list of people](#bulk-add-or-mark-a-list-of-people).
+[Bulk add or mark a list of people](#bulk-add-or-mark-a-list-of-people). That
+dialog **can** reach recent past sessions, which is what you want when
+yesterday's paper sign-in sheet lands on your desk.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
 the panel is just faster when you're standing at a sign-in desk.
@@ -502,13 +513,38 @@ itself. Each is split down the middle:
 
 | Recomputed | Yours |
 |---|---|
-| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
+| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
 
 This is where "Marion always brings her sister" or "cold lunch only, no dairy"
 lives. People stay on the roll even after their sessions age out, so the notes
-don't evaporate. `Confirmed_Member` is a plain checkbox — tick it once you've
-personally verified someone as a real member, independent of how many times
-the recomputed history shows them attending.
+don't evaporate.
+
+#### ➕ Adding a member yourself
+
+You don't have to wait for someone to fill in a form. At the **bottom of
+Member_Roll** there's a **➕ ADD MEMBER** block:
+
+| Full Name | Contact | Dietary Notes | Usual Guests | Staff Notes | ✓ Add |
+|---|---|---|---|---|---|
+
+1. Type or paste names — **one per row**. Fill in as much or as little of the
+   rest as you like.
+2. Tick **✓ Add** on any row.
+
+Everything sitting in the block goes in at once, the block clears itself, and
+the new people are **immediately pickable in the Quick Mark name list** — which
+is the point: someone the office has known for years shouldn't be un-selectable
+just because they've never registered online.
+
+- A hand-added member starts with `Times_Seen` **0**. It fills in on its own as
+  they register and attend.
+- A name **already on the roll** isn't duplicated — anything you typed
+  alongside it fills in the blanks on their existing row. Boxes you leave
+  **empty never erase** what's already there.
+- Notes with **no name** next to them can't be filed, so they're dropped and
+  the toast says so.
+- The hourly sync rewrites this tab, but **anything half-typed in the block is
+  put back** — you won't lose a list mid-entry.
 
 **Program_Options** — one row per program per location:
 
@@ -762,7 +798,7 @@ say no:
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Add a **walk-in** from the Quick Mark panel | It writes a person into the record, and into the catering count |
 | Press **➕ Register** on the Quick Mark panel | Same — it asks whether they want lunch, and Cancel means don't register them at all |
-| Tick **✓ Attended** for a **future** session | Attendance is a record of something that happened; this is nearly always a mis-set Date box |
+| Tick **✓ Attended** for a **future** session | Attendance is a record of something that happened; this is nearly always the wrong line picked out of box 2 |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
 | `mergeLegacyTabs()` (editor only) | It deletes tabs (after moving their rows to safety) |
 
@@ -1110,14 +1146,19 @@ menu. See [Adding menu items](#adding-menu-items--paste-csv).
 
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
-**Lunch_and_Event_Registrants** — location, program, date (or leave it on
-auto), name, registration type, then tick Attended or Lunch. See
+**Lunch_and_Event_Registrants** — pick today's session in box 2 (program and
+date together), then a name, then tick Attended or Lunch. See
 [that tab's section](#3-lunch_and_event_registrants).
 
 **Register someone for a future event**
-Same panel: pick the **date** in box 3, set **Registration Type** (`Call In`
-for a phone booking), then tick **➕ Register**. It books them without
-marking them as having attended.
+Same panel: box 2 lists every upcoming session in date order, so pick the
+October one, set **Registration Type** (`Call In` for a phone booking), then
+tick **➕ Register**. It books them without marking them as having attended.
+
+**Add someone to the member list who has never registered**
+Type their name into the **➕ ADD MEMBER** block at the bottom of
+**Member_Roll** and tick ✓ Add — see
+[Adding a member yourself](#-adding-a-member-yourself).
 
 **Add a whole sign-up sheet at once**
 **⚡ Quick Mark → 👥 Bulk Add / Mark Registrants…** on the menu: pick the
@@ -1145,15 +1186,15 @@ and fill or paste `Cancelled` down them; it recalculates once, for every date
 you touched.
 
 **Add a walk-in who never filled out the form**
-Use **⚡ Quick Mark**: pick the location and program, pick or **type** their
+Use **⚡ Quick Mark**: pick today's session in box 2, pick or **type** their
 name, set Registration Type to `Physical`, tick Attended or Lunch. It offers to
 add them, then does it — the row is flagged `Manually Added` and never
 overwritten. (You can still add the row by hand and set `Manual_Override` to
 `Manually Added` yourself if you prefer.)
 
 **Someone rang up to book a place**
-**⚡ Quick Mark**: location → program → **their date** → name → Registration
-Type `Call In` → tick **➕ Register**. Works for any session the calendar
+**⚡ Quick Mark**: pick **their session** in box 2 → name → Registration Type
+`Call In` → tick **➕ Register**. Works for any upcoming session the calendar
 knows about, months ahead included.
 
 **Move someone off the waitlist**
