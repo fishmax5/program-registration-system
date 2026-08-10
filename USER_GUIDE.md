@@ -271,7 +271,7 @@ without hunting for their row:
 3. **Name** — the people registered for that program first, then **everyone
    else on Member_Roll**. You can also just **type a name** that isn't on
    either list.
-4. Tick **✓ Attended** or **✓ Lunch**.
+4. Tick **✓ Attended**, **✓ Lunch**, or **🥡 Lunch Only**.
 
 That's it. The system finds that person's row wherever it is, ticks it, tells
 you what it did on the line underneath, and clears itself for the next person.
@@ -279,7 +279,14 @@ The **Clear** box resets it if you pick wrong. Guests brought by another
 registrant show up in the Program/Date/Name dropdowns exactly like anyone
 else — there's no separate step for them.
 
-- **Ticking Lunch also ticks Attended** — you can't be fed without being there.
+- **Attended and Lunch are independent — ticking Lunch does *not* also tick
+  Attended.** A member can pick up a **take-out** meal without ever coming
+  in, so being fed no longer implies being present. For a normal dine-in
+  mark, tick both boxes.
+- **🥡 Lunch Only** is the one-tick way to record take-out: it marks
+  `Lunch_Served` **and clears `Attended`**, even if Attended was already
+  ticked — useful both for a walk-up take-out pickup and for correcting
+  someone wrongly marked present.
 - If someone's registered for **several dates** of the same program, it marks
   the nearest one (today first, then the next upcoming) and says so, e.g.
   *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
@@ -290,15 +297,20 @@ program, ticking a box offers to add them:
 
 > *Add Marion Webb as a walk-in?*
 > A new row will be added for Chair Yoga — Tue, Aug 5 (Narberth), marked
-> attended + lunch served and flagged "Manually Added".
+> lunch served (take-out — not marked attended) and flagged "Manually Added".
 
 Say yes and the row appears, already marked. It's flagged **Manually Added**,
 which means no future sync will touch or remove it. Say no and nothing
 happens. You need a **program** picked in box 2 for this — the system won't
-guess which one they walked into.
+guess which one they walked into. A walk-in only comes in marked **Attended**
+if you triggered it with the ✓ Attended box — a Lunch or Lunch Only walk-in is
+fed without being recorded as present, same as it would be for an existing
+registrant.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
-the panel is just faster when you're standing at a sign-in desk.
+the panel is just faster when you're standing at a sign-in desk. The same rule
+applies there too — ticking `Lunch_Served` on a row does not tick `Attended`
+for you.
 
 #### The columns
 
@@ -1108,8 +1120,13 @@ dashboard row, no lunch counted for that date.
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
 **Lunch_and_Event_Registrants** — location, program, optionally a date, then
-name, then tick Attended or Lunch. See
+name, then tick Attended, Lunch, or Lunch Only. See
 [that tab's section](#3-lunch_and_event_registrants).
+
+**Mark a take-out lunch for someone who isn't attending**
+Same **⚡ Quick Mark** panel — pick their name, tick **🥡 Lunch Only**. It marks
+`Lunch_Served` without marking `Attended` (and clears `Attended` if it was
+already ticked by mistake).
 
 **Check how many lunches actually went out**
 Compare `Registered_Count` (what the forms said) with `Served_Confirmed` (what
@@ -1133,8 +1150,9 @@ you touched.
 
 **Add a walk-in who never filled out the form**
 Use **⚡ Quick Mark**: pick the location and program, pick or **type** their
-name, tick Attended or Lunch. It offers to add them, then does it — the row is
-flagged `Manually Added` and never overwritten. (You can still add the row by
+name, tick Attended, Lunch, or Lunch Only. It offers to add them, then does
+it — the row is flagged `Manually Added` and never overwritten. (You can
+still add the row by
 hand and set `Manual_Override` to `Manually Added` yourself if you prefer.)
 
 **Move someone off the waitlist**

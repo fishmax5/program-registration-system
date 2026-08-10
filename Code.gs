@@ -5763,15 +5763,12 @@ function handleRegistrantsEdit(e, sheet) {
 
   if (typeof e.value !== 'undefined') {
     const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
-    const isLunchServedCol = headerMap['Lunch_Served'] !== undefined &&
-      editedCol === headerMap['Lunch_Served'] + 1;
 
-    // Ticking Lunch_Served directly on a row implies attendance, exactly as it
-    // does through the Quick Mark panel — one rule, wherever the tick happens.
-    if (isLunchServedCol && isTruthyCheckbox(e.value) && headerMap['Attended'] !== undefined) {
-      sheet.getRange(editedRow, headerMap['Attended'] + 1).setValue(true);
-      toastIfPossible('Lunch marked — attendance ticked too.');
-    }
+    // Lunch_Served no longer implies Attended, on a direct edit any more than
+    // through the Quick Mark panel — one rule, wherever the tick happens. A
+    // member can get a take-out meal without ever attending the session, so
+    // ticking Lunch here marks lunch only; tick Attended separately for a
+    // normal dine-in mark.
 
     if (isProgramStatusCol && e.oldValue === 'Waitlisted' && e.value === 'Active') {
       toastIfPossible("🚀 Promoted off the waitlist — set their Lunch_Status to 'Needed' if they want a meal.");
@@ -5913,13 +5910,13 @@ function handleQuickMarkEdit(e, sheet, editedCol) {
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
       `${lists.registeredCount} registered` +
       (others > 0 ? `, plus ${others} other known member(s)` : '') +
-      ` — pick a name (or type a new one), then tick Attended or Lunch.`);
+      ` — pick a name (or type a new one), then tick Attended, Lunch, or Lunch Only.`);
     return;
   }
 
   if (editedCol === QUICK_MARK.NAME_COL) {
     setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `Ready — tick Attended or Lunch to mark ${e.value || 'them'}.`);
+      `Ready — tick Attended, Lunch, or Lunch Only to mark ${e.value || 'them'}.`);
     return;
   }
 
@@ -5930,7 +5927,8 @@ function handleQuickMarkEdit(e, sheet, editedCol) {
     return;
   }
 
-  if (editedCol === QUICK_MARK.ATTENDED_COL || editedCol === QUICK_MARK.LUNCH_COL) {
+  if (editedCol === QUICK_MARK.ATTENDED_COL || editedCol === QUICK_MARK.LUNCH_COL ||
+    editedCol === QUICK_MARK.LUNCH_ONLY_COL) {
     if (!isTruthyCheckbox(e.value)) return; // un-ticking the panel box marks nothing
     applyQuickMark(sheet, editedCol);
   }
@@ -9368,11 +9366,18 @@ function renderRegistrantsSheet(force, allRows) {
 // scroll right, tick two boxes, don't lose your place. The tab is sorted by
 // date, so a given program's people aren't even contiguous.
 //
-// The Quick Mark panel puts that on four cells at the top of the tab:
-// Location -> Program -> Name, each a dropdown narrowed by the one before it,
-// then Attended/Lunch checkboxes. Tick either and the matching registrant row
-// is updated in place, wherever it happens to be, and the panel reports what
-// it did and clears itself for the next person.
+// The Quick Mark panel puts that on cells at the top of the tab: Location ->
+// Program -> Name, each a dropdown narrowed by the one before it, then
+// Attended / Lunch / Lunch Only checkboxes. Tick one and the matching
+// registrant row is updated in place, wherever it happens to be, and the
+// panel reports what it did and clears itself for the next person.
+//
+// Attended and Lunch are independent: a member can pick up a take-out meal
+// without ever attending the session, so ticking Lunch marks Lunch_Served
+// only — it does not also mark Attended. Lunch Only exists for exactly that
+// case: it marks Lunch_Served and explicitly clears Attended, so a walk-in
+// take-out pickup (or a correction to one wrongly marked present) is one tick
+// instead of two.
 //
 // The dropdowns are rebuilt on every edit of the cell to their left, because a
 // static list of every name in the workbook is not a usable dropdown once
@@ -9391,17 +9396,24 @@ const QUICK_MARK = {
   NAME_COL: 3,
   ATTENDED_COL: 4,
   LUNCH_COL: 5,
-  CLEAR_COL: 6
+  // Take-out: a member can pick up a meal without attending the session at
+  // all, so "they got lunch" can no longer be read as "they were here" (see
+  // LUNCH_COL below). This is the explicit way to record that — Lunch_Served
+  // ticked, Attended left alone (or cleared, if it was already set) — instead
+  // of forcing staff to reason about it via two separate ticks every time.
+  LUNCH_ONLY_COL: 6,
+  CLEAR_COL: 7
 };
 
-const QUICK_MARK_LABELS = ['1. Location', '2. Program', '3. Name', '✓ Attended', '✓ Lunch', 'Clear'];
+const QUICK_MARK_LABELS =
+  ['1. Location', '2. Program', '3. Name', '✓ Attended', '✓ Lunch', '🥡 Lunch Only', 'Clear'];
 
 /** Writes (or rewrites) the Quick Mark panel and seeds its Location dropdown. */
 function writeQuickMarkPanel(sheet, headers, rows) {
   const numCols = Math.max(headers.length, QUICK_MARK_LABELS.length);
 
   writeSectionBanner(sheet, QUICK_MARK.bannerRow, numCols,
-    '⚡ QUICK MARK — pick a location, program and name, then tick Attended / Lunch', { hero: true });
+    '⚡ QUICK MARK — pick a location, program and name, then tick Attended / Lunch / Lunch Only', { hero: true });
 
   sheet.getRange(QUICK_MARK.labelRow, 1, 1, QUICK_MARK_LABELS.length)
     .setValues([QUICK_MARK_LABELS])
@@ -9422,7 +9434,7 @@ function writeQuickMarkPanel(sheet, headers, rows) {
   try { sheet.setRowHeight(QUICK_MARK.inputRow, ROW_HEIGHTS.HERO_DATA); } catch (err) { /* row absent */ }
 
   applyValueListValidationBounded(sheet, QUICK_MARK.LOCATION_COL, Object.values(CALENDAR_MAP), QUICK_MARK.inputRow, 1);
-  [QUICK_MARK.ATTENDED_COL, QUICK_MARK.LUNCH_COL, QUICK_MARK.CLEAR_COL].forEach(col => {
+  [QUICK_MARK.ATTENDED_COL, QUICK_MARK.LUNCH_COL, QUICK_MARK.LUNCH_ONLY_COL, QUICK_MARK.CLEAR_COL].forEach(col => {
     sheet.getRange(QUICK_MARK.inputRow, col)
       .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   });
@@ -9695,7 +9707,8 @@ function applyQuickMark(sheet, column) {
   });
   const target = candidates[0];
 
-  const isLunch = column === QUICK_MARK.LUNCH_COL;
+  const isLunchOnly = column === QUICK_MARK.LUNCH_ONLY_COL;
+  const isLunch = column === QUICK_MARK.LUNCH_COL || isLunchOnly;
   const columnName = isLunch ? 'Lunch_Served' : 'Attended';
   if (map[columnName] === undefined) {
     setQuickMarkStatus(sheet, numCols, `⚠️ This tab has no "${columnName}" column yet — run Sync Registrations once.`);
@@ -9703,10 +9716,14 @@ function applyQuickMark(sheet, column) {
   }
 
   sheet.getRange(target.sheetRow, map[columnName] + 1).setValue(true);
-  // Ticking lunch implies they were there. Marking someone as fed but absent
-  // is never what anyone means, and the lunch count is derived from the tick.
-  if (isLunch && map['Attended'] !== undefined) {
-    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+  // Lunch no longer implies attendance in either direction: a member can pick
+  // up a meal without ever coming in (take-out), so a Lunch tick alone leaves
+  // Attended exactly as it was — tick Attended too for a normal dine-in mark.
+  // Lunch Only goes one step further and CLEARS Attended, because it exists
+  // specifically to say "fed, not present" even when Attended was already
+  // ticked (e.g. correcting an earlier mistaken mark).
+  if (isLunchOnly && map['Attended'] !== undefined) {
+    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
   }
   // Hand-marking is a manual edit — say so, the same as any other.
   if (map['Manual_Override'] !== undefined) {
@@ -9717,7 +9734,7 @@ function applyQuickMark(sheet, column) {
 
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
   const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
-  const what = isLunch ? 'lunch + attendance' : 'attendance';
+  const what = isLunchOnly ? 'lunch (take-out, not attending)' : (isLunch ? 'lunch' : 'attendance');
   setQuickMarkStatus(sheet, numCols, `✅ Marked ${what} for ${name} — ${dateLabel}${extra}.`);
   toastIfPossible(`✅ ${name}: ${what} marked for ${dateLabel}.`);
 
@@ -9758,14 +9775,23 @@ function addQuickMarkWalkIn(sheet, args) {
     return;
   }
 
-  const isLunch = column === QUICK_MARK.LUNCH_COL;
+  const isAttendedCol = column === QUICK_MARK.ATTENDED_COL;
+  const isLunchOnly = column === QUICK_MARK.LUNCH_ONLY_COL;
+  const isLunch = column === QUICK_MARK.LUNCH_COL || isLunchOnly;
   const lunchOffered = isLunchOfferedOn(session.date, session.location);
   const dateLabel = formatDateLabel(session.date);
+  // A walk-in takes its Attended value from WHICH box triggered it, the same
+  // as an existing row does in applyQuickMark(): the Attended tick is the
+  // only one that marks attendance, so a brand-new Lunch or Lunch Only
+  // walk-in is fed without being recorded as present — a take-out pickup can
+  // add someone to the record for the first time too.
+  const marksAttended = isAttendedCol;
 
   if (!confirmConsequentialAction(`Add ${name} as a walk-in?`,
     `"${name}" has no registration for ${program}.\n\n` +
     `A new row will be added for ${program} — ${dateLabel} (${session.location}), marked ` +
-    `${isLunch ? 'attended + lunch served' : 'attended'} and flagged "Manually Added".` +
+    `${isLunchOnly ? 'lunch served (take-out — not marked attended)' : (isLunch ? 'lunch served' : 'attended')} ` +
+    `and flagged "Manually Added".` +
     (isLunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : ''),
     false)) {
     setQuickMarkStatus(sheet, numCols, `Nothing added. "${name}" is still not registered for ${program}.`);
@@ -9779,7 +9805,7 @@ function addQuickMarkWalkIn(sheet, args) {
   row[map['Location']] = session.location;
   row[map['Event']] = session.title;
   row[map['Name']] = name;
-  row[map['Attended']] = true;
+  row[map['Attended']] = marksAttended;
   row[map['Lunch_Served']] = isLunch;
   row[map['Person_Type']] = 'Attendee';
   row[map['Lunch_Type']] = isLunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
@@ -9787,7 +9813,9 @@ function addQuickMarkWalkIn(sheet, args) {
   row[map['Program_Status']] = 'Active';
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
-  row[map['Admin_Notes']] = `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
+  row[map['Admin_Notes']] = isLunchOnly
+    ? `Take-out walk-in added at the desk on ${formatDateLabel(new Date())}.`
+    : `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
   row[map['Manual_Override']] = 'Manually Added';
   row[map['Form_Source']] = 'Walk-in (no form)';
   row[map['Event_ID']] = session.eventId;
@@ -9796,7 +9824,7 @@ function addQuickMarkWalkIn(sheet, args) {
   existing.push(row);
   renderRegistrantsSheet(false, existing);
 
-  const what = isLunch ? 'attendance + lunch' : 'attendance';
+  const what = isLunchOnly ? 'lunch (take-out, not attending)' : (isLunch ? 'lunch' : 'attendance');
   toastIfPossible(`✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what} marked.`);
   setQuickMarkStatus(sheet, numCols,
     `✅ Added ${name} to ${program} — ${dateLabel} (walk-in), ${what} marked.`);
