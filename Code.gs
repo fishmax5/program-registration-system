@@ -68,6 +68,16 @@
  *        Title "Yoga Basics"           + description "[Monthly]"  -> a form per
  *          calendar month (the default, so this is only ever explicit intent)
  *        description "[Cap: 12, Grouped]" or "[Cap: 12] [Grouped]" -> both
+ *        description "[All Locations]"  -> this event's sessions share ONE
+ *          form with the same-titled sessions on EVERY other calendar,
+ *          instead of one form per location. Composes with the above:
+ *          "[Grouped, All Locations]" is one form for the whole series
+ *          everywhere; "[Monthly, All Locations]" is one form per month
+ *          everywhere. Also spelled [Shared] / [All Sites] / [Combined] /
+ *          [Multi-Site]. See SHARED_LOCATION_SCOPE, and the menu action
+ *          "🔗 Link Program Across Locations…" which tags every location's
+ *          events and moves the sessions already on the dashboard onto one
+ *          form in a single step.
  *      [Fixed] and [Regular] are still read as [Grouped] / [Monthly], so no
  *      existing calendar description needs editing — see EVENT_TYPES.
  *      A title is what attendees read on a shared calendar, so scheduling
@@ -82,6 +92,10 @@
  *          SAME Event_ID — it just flows through as a new session with no
  *          reconciliation. (Re-adding an asterisk to an already-confirmed
  *          event does NOT triage it; existing registrations are kept.)
+ *          The asterisk is also how a CANCELLED occurrence is marked: an
+ *          event named "*NO Tai Chi" stays visible on the calendar for
+ *          staff and attendees while generating no form and no dashboard
+ *          row.
  *    - THE REGISTRATION LINK injected into each event description is an
  *      HTML ANCHOR, not a raw URL, and carries no visible Form ID. The ID
  *      rides in the href's #fragment — invisible to the reader, ignored by
@@ -680,6 +694,75 @@ function isGroupedTypeTag(value) {
 }
 
 /**
+ * CROSS-LOCATION PROGRAMS — the [All Locations] tag.
+ *
+ * Grouping has always had two dimensions, but only one of them was sayable:
+ * WHEN sessions share a form ([Grouped] = the whole series, [Monthly] = a
+ * month at a time). WHERE was fixed — the group key started with the calendar
+ * ID, so the same program running at Narberth and at Ashbridge always got two
+ * separate forms, even when it is one program with one roster that simply
+ * meets in two rooms.
+ *
+ * `[All Locations]` in an event's DESCRIPTION opens up the second dimension:
+ * that event's sessions pool with the same-titled sessions on EVERY other
+ * program calendar, onto one form. It composes with the existing tags rather
+ * than replacing them —
+ *
+ *   [Grouped, All Locations]  one form for the whole series, everywhere
+ *   [Monthly, All Locations]  one form per calendar month, everywhere
+ *   [Cap: 12, All Locations]  ...and the cap still applies PER SESSION
+ *
+ * — because it only changes the SCOPE half of the group key
+ * (SHARED_LOCATION_SCOPE in place of the calendar ID; see buildEventGroups()).
+ *
+ * The tag is read per EVENT, exactly like [Cap: N] and [Grouped]: an event
+ * that carries it joins the shared form, one that doesn't keeps its own
+ * per-location form. That makes a half-tagged program a describable state
+ * rather than an ambiguous one — and since it is nearly always a mistake,
+ * warnAboutPartiallySharedPrograms() says so out loud.
+ *
+ * WHAT A SHARED FORM HAS TO DO DIFFERENTLY. Its dates are no longer all at
+ * one place, so:
+ *   - every date label names its location (formatSessionLabel()), which is
+ *     also what keeps two locations' sessions on the SAME day from collapsing
+ *     into one grid row or one registry-index key;
+ *   - lunch is decided per date+location as it always was (isLunchOfferedOn),
+ *     so a Never-catering location's dates simply never reach the lunch grid,
+ *     and the lunch questions come off only when NO location on the form
+ *     caters;
+ *   - the footer note and the form description list every location involved.
+ * Everything downstream — Event_IDs, registrant rows, counts, the lunch
+ * dashboard — is already keyed per session, and a session still knows exactly
+ * one location. Nothing there had to learn about sharing.
+ */
+const SHARED_LOCATION_SCOPE = 'ALL_LOCATIONS';
+
+/** What this system WRITES into a description to mark a program cross-location. */
+const SHARED_LOCATION_TAG = 'All Locations';
+
+/**
+ * What it READS. Several plain-English spellings are accepted for the same
+ * reason [Fixed] is still read as [Grouped]: the tag is typed by hand into a
+ * calendar, and "Shared"/"All Sites" are what people reach for.
+ */
+const SHARED_LOCATION_WORDS_REGEX = /\b(All\s+Locations|All\s+Sites|Shared|Combined|Multi-?Site)\b/i;
+
+/**
+ * Separator between the date and the location on a cross-location form's row
+ * label ("Mon, Jan 5, 2026 · Narberth"). Deliberately NOT the " — " used for
+ * meal hints or the " (FULL - Waitlist)" capacity suffix, so stripMealHint()
+ * keeps returning a label that still identifies the SESSION — which is what
+ * buildRegistryIndex() matches a grid row back to.
+ */
+const LOCATION_LABEL_SEPARATOR = ' · ';
+
+/** "Narberth" / "Narberth + Ashbridge" — how a form's locations read in prose. */
+function describeLocations(locations) {
+  const list = (locations || []).filter(Boolean);
+  return list.length > 0 ? list.join(' + ') : 'this location';
+}
+
+/**
  * One color per location, used BOTH for the Location cell itself and (on
  * Master_Lunch_Dashboard) for the whole row band — see
  * buildLocationColorRules() / buildLocationRowTintRules().
@@ -1239,9 +1322,13 @@ function addLunchGridItem(form) {
  * note when any date is lunch-free, and a tip about the "all dates" option
  * for Grouped-series forms.
  */
-function buildFormDescription(locationName, dateLabels, isFixed, hasLunchDates) {
+function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates) {
+  const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
   const dateList = dateLabels.map(label => `• ${label}`).join('\n');
-  let description = `Location: ${locationName}\n\nDates:\n${dateList}\n\nPlease register below.`;
+  const heading = list.length > 1
+    ? `Locations: ${list.join(', ')}\n(This program runs at more than one location — each date below says where.)`
+    : `Location: ${list[0] || ''}`;
+  let description = `${heading}\n\nDates:\n${dateList}\n\nPlease register below.`;
   if (hasLunchDates === false) {
     // Nothing on this form is catered, so the form isn't asking about lunch
     // at all (see syncLunchQuestionsOnForm()) — say so rather than leaving
@@ -1935,6 +2022,30 @@ function getFormFooterForLocation(locationName) {
 }
 
 /**
+ * The footer note for a form covering `locations` — the one location's note
+ * when there is one, and every DISTINCT note (each prefixed with the location
+ * it belongs to) when a cross-location form spans several. Locations that
+ * share a note are not repeated, so the common "three sites, one house rule"
+ * case still reads as a single sentence.
+ */
+function buildFooterNoteForLocations(locations) {
+  const list = (locations || []).filter(Boolean);
+  if (list.length <= 1) return getFormFooterForLocation(list[0]);
+
+  const byNote = {};
+  list.forEach(loc => {
+    const note = getFormFooterForLocation(loc);
+    if (!note) return;
+    if (!byNote[note]) byNote[note] = [];
+    byNote[note].push(loc);
+  });
+  const notes = Object.keys(byNote);
+  if (notes.length === 0) return DEFAULT_FORM_FOOTER;
+  if (notes.length === 1) return notes[0];
+  return notes.map(note => `${byNote[note].join(' / ')}: ${note}`).join('\n');
+}
+
+/**
  * Looks up the day's meal info (Type, Meal_Description, Meal_Shorthand)
  * from Lunch_Schedule for one specific date AND location. Returns null if
  * no row exists for that date+location yet. Type may be 'Hot' | 'Cold' |
@@ -1960,8 +2071,8 @@ function getMealInfoForDate(date, location) {
  * internal matching/storage always uses the plain label via
  * stripMealHint()/formatDateLabel().
  */
-function formatDateLabelWithMeal(date, location, capacityHint) {
-  const baseLabel = formatDateLabel(date);
+function formatDateLabelWithMeal(date, location, capacityHint, showLocation) {
+  const baseLabel = formatSessionLabel(date, location, showLocation);
   const meal = getMealInfoForDate(date, location);
   let label;
   if (!meal) label = baseLabel;
@@ -1974,14 +2085,50 @@ function formatDateLabelWithMeal(date, location, capacityHint) {
 }
 
 /**
- * Splits a set of session dates into the full label list (for the
- * attendance roster grid — every date, whether or not lunch is served) and
- * the lunch-grid label subset (only dates where Lunch_Schedule doesn't mark
- * that date+location "Not Serving") — so the lunch grid never offers a
- * choice on a day nothing is actually being catered. capacityHints is an
- * optional { 'yyyy-MM-dd': CAPACITY_HINT_SUFFIX } map (see
- * buildCapacityHintsFromRegistryRows()) — omit it and no date gets a
- * capacity hint.
+ * The plain, meal-and-capacity-free label that IDENTIFIES one session on a
+ * form: its date, plus its location when the form covers more than one (see
+ * SHARED_LOCATION_SCOPE).
+ *
+ * This is the join key between a form and the session table — the grid row
+ * label a respondent ticks, and the key buildRegistryIndex() looks that row
+ * back up by. On a single-location form it is exactly the date label it has
+ * always been, so nothing about existing forms changes. On a cross-location
+ * form the location is not decoration: two sites running the same program on
+ * the same day would otherwise produce one indistinguishable row label, which
+ * a Forms grid rejects outright and which no lookup could resolve back to a
+ * session anyway.
+ */
+function formatSessionLabel(date, location, showLocation) {
+  const base = formatDateLabel(date);
+  return (showLocation && location) ? `${base}${LOCATION_LABEL_SEPARATOR}${location}` : base;
+}
+
+/** The distinct locations in a list of names, in the order they appear. */
+function distinctLocations(names) {
+  return dedupePreservingOrder((names || []).map(n => String(n || '').trim()).filter(Boolean));
+}
+
+/** The distinct locations a set of [{date, location}] sessions touches. */
+function locationsOfSessions(sessions) {
+  return distinctLocations((sessions || []).map(s => s.location));
+}
+
+/**
+ * Splits a form's SESSIONS — [{ date, location }], each session knowing the
+ * one place it happens — into the full label list (for the attendance roster
+ * grid: every date, whether or not lunch is served) and the lunch-grid label
+ * subset (only date+location pairs Lunch_Schedule doesn't mark "Not Serving"),
+ * so the lunch grid never offers a choice on a day nothing is being catered.
+ *
+ * options:
+ *   capacityHints  { 'yyyy-MM-dd': CAPACITY_HINT_SUFFIX } (see
+ *                  buildCapacityHintsFromRegistryRows()) — omit for none.
+ *   showLocation   whether labels name their location. Defaults to "only if
+ *                  the sessions actually span more than one", which is right
+ *                  for any caller that isn't holding a form's own scope; a
+ *                  caller that knows the form is cross-location passes true
+ *                  explicitly so its labels stay stable even in a window
+ *                  where only one location happens to have dates.
  *
  * Both lists are DE-DUPLICATED. A group with two sessions on the same day —
  * a morning and an afternoon sitting of the same program — produces the same
@@ -1992,12 +2139,80 @@ function formatDateLabelWithMeal(date, location, capacityHint) {
  * `formId|label`), so the two sittings were always going to resolve to one
  * row anyway.
  */
-function buildDateLabelSets(dates, locationName, capacityHints) {
-  capacityHints = capacityHints || {};
-  const label = d => formatDateLabelWithMeal(d, locationName, capacityHints[formatDateKey(d)]);
-  const allDateLabels = dedupePreservingOrder(dates.map(label));
-  const lunchDateLabels = dedupePreservingOrder(dates.filter(d => isLunchOfferedOn(d, locationName)).map(label));
+function buildDateLabelSets(sessions, options) {
+  options = options || {};
+  const capacityHints = options.capacityHints || {};
+  const showLocation = options.showLocation === undefined
+    ? locationsOfSessions(sessions).length > 1
+    : !!options.showLocation;
+
+  const label = s => formatDateLabelWithMeal(s.date, s.location, capacityHints[formatDateKey(s.date)], showLocation);
+  const allDateLabels = dedupePreservingOrder(sessions.map(label));
+  const lunchDateLabels = dedupePreservingOrder(
+    sessions.filter(s => isLunchOfferedOn(s.date, s.location)).map(label));
   return { allDateLabels, lunchDateLabels };
+}
+
+/**
+ * The Form_IDs known to belong to a CROSS-LOCATION group, read off the
+ * persistent groupKey -> Form_ID registry (a shared group's key is scoped
+ * SHARED_LOCATION_SCOPE — see buildEventGroups()).
+ *
+ * Why it's needed at all: a form's scope is otherwise inferred from its own
+ * session rows spanning several locations, which is true in the steady state
+ * but not in the window where a shared program has dates at only one of its
+ * locations. Reading the registry keeps such a form labelling itself the same
+ * way before and after its second location shows up — labels that flip would
+ * strand every response already collected against the old ones.
+ */
+function getSharedFormIdSet() {
+  const registry = getPersistentFormRegistry();
+  const prefix = `${SHARED_LOCATION_SCOPE}::`;
+  const shared = new Set();
+  Object.keys(registry).forEach(key => {
+    if (key.indexOf(prefix) === 0 && registry[key]) shared.add(registry[key]);
+  });
+  return shared;
+}
+
+/**
+ * Everything the form-facing layer needs about ONE form, derived from that
+ * form's own session rows: its sessions (each date with the location it
+ * happens at, in date order), the distinct locations it covers, whether its
+ * labels name the location, and its capacity hints.
+ *
+ * Every "refresh a live form from the sheet" path goes through this, so
+ * cross-location handling is decided in exactly one place rather than
+ * re-derived (differently) in five.
+ */
+function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
+  const sessions = formRows
+    .map(row => ({
+      date: coerceDate(row[map['Event_Date']]),
+      location: String(row[map['Location']] || '').trim()
+    }))
+    .filter(s => s.date)
+    .sort((a, b) => a.date - b.date);
+
+  const locations = locationsOfSessions(sessions);
+  return {
+    formId,
+    sessions,
+    locations,
+    showLocation: locations.length > 1 || !!(sharedFormIds && sharedFormIds.has(formId)),
+    capacityHints: buildCapacityHintsFromRegistryRows(formRows, map)
+  };
+}
+
+/** { Form_ID: whether its labels name a location } for a batch of session rows. */
+function buildShowLocationByForm(rows, map) {
+  const sharedFormIds = getSharedFormIdSet();
+  const byForm = groupRegistryRowsByForm(rows, map);
+  const out = {};
+  Object.keys(byForm).forEach(formId => {
+    out[formId] = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds).showLocation;
+  });
+  return out;
 }
 
 /** First occurrence of each value, in the order they appeared. */
@@ -2199,7 +2414,8 @@ function buildRegistrationUrl(form) {
  * returns null when the item is absent and getResponseValueByTitle()
  * returns '', both of which already resolve to "No Lunch" for everyone.
  */
-function removeLunchQuestionsFromForm(form, locationName, reason) {
+function removeLunchQuestionsFromForm(form, locations, reason) {
+  const where = describeLocations(Array.isArray(locations) ? locations : [locations]);
   const doomed = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE];
   let removed = 0;
   form.getItems().forEach(item => {
@@ -2208,12 +2424,12 @@ function removeLunchQuestionsFromForm(form, locationName, reason) {
       form.deleteItem(item);
       removed++;
     } catch (err) {
-      log(`⚠️ Could not remove "${item.getTitle()}" from the ${locationName} form (${err}).`);
+      log(`⚠️ Could not remove "${item.getTitle()}" from the ${where} form (${err}).`);
     }
   });
   if (removed > 0) {
-    log(`Removed ${removed} lunch question(s) from a ${locationName} form — ` +
-      (reason || `that location's catering policy is "${CATERING_POLICIES.NEVER}"`) + '.');
+    log(`Removed ${removed} lunch question(s) from a ${where} form — ` +
+      (reason || `no location on it caters (policy "${CATERING_POLICIES.NEVER}")`) + '.');
   }
   return removed;
 }
@@ -2255,9 +2471,14 @@ function restoreLunchQuestionsOnForm(form) {
 
 /**
  * Single decision point for whether a form asks about lunch at all: it does
- * when its location caters AND at least one date on the form actually
- * serves lunch. Both directions are handled, so a form self-heals whichever
- * way its schedule moves.
+ * when at least one of its locations caters AND at least one date on the form
+ * actually serves lunch. Both directions are handled, so a form self-heals
+ * whichever way its schedule moves.
+ *
+ * "At least one of its locations" is what a cross-location form needs: a
+ * shared form covering a catering site and a Never site must still ask, and
+ * the Never site's dates are already absent from the lunch grid because
+ * buildDateLabelSets() filters per date+location.
  *
  * Per-DATE filtering is separate and already handled by buildDateLabelSets()
  * — the lunch grid's rows are only the dates that serve lunch, so a date
@@ -2268,12 +2489,14 @@ function restoreLunchQuestionsOnForm(form) {
  * the date-label write that has to follow a restore (a restored grid still
  * holds the template's placeholder row).
  */
-function syncLunchQuestionsOnForm(form, locationName, hasLunchDates) {
-  if (getCateringPolicyForLocation(locationName) === CATERING_POLICIES.NEVER) {
-    return removeLunchQuestionsFromForm(form, locationName);
+function syncLunchQuestionsOnForm(form, locations, hasLunchDates) {
+  const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
+  const catersSomewhere = list.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER);
+  if (!catersSomewhere) {
+    return removeLunchQuestionsFromForm(form, list);
   }
   if (!hasLunchDates) {
-    return removeLunchQuestionsFromForm(form, locationName, 'no date on this form serves lunch');
+    return removeLunchQuestionsFromForm(form, list, 'no date on this form serves lunch');
   }
   return restoreLunchQuestionsOnForm(form);
 }
@@ -2960,12 +3183,10 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   const formRows = sessionRows.filter(row => row[map['Form_ID']] === formId);
   if (formRows.length === 0) return false;
 
-  const formLocation = formRows[0][map['Location']];
-  const dates = formRows.map(row => coerceDate(row[map['Event_Date']])).filter(Boolean).sort((a, b) => a - b);
-  if (dates.length === 0) return false;
+  const formContext = buildFormSessionContext(formId, formRows, map, getSharedFormIdSet());
+  if (formContext.sessions.length === 0) return false;
 
-  const capacityHints = buildCapacityHintsFromRegistryRows(formRows, map);
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, formLocation, capacityHints);
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
 
   // A menu edit is exactly how a form gains or loses its last lunch date, so
   // the question set is re-checked here, not just the row labels.
@@ -2973,7 +3194,7 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   let questionsChanged = 0;
   try {
     form = FormApp.openById(formId);
-    questionsChanged = syncLunchQuestionsOnForm(form, formLocation, lunchDateLabels.length > 0);
+    questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0);
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);
     return false;
@@ -4218,6 +4439,7 @@ function buildAppMenu(ui, includeAdmin) {
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
     .addItem('🔁 Apply Type Changes to Calendar', 'applyTypeTagChangesToCalendar')
+    .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
     .addSeparator()
     .addItem('🕓 Show All Past Rows', 'showAllPastRows')
     .addItem('Resize All Sheets', 'resizeAllSheets');
@@ -5008,23 +5230,35 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
 
   const { start, end } = computeSyncDateRange();
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
-  const events = eventsByCalendar[calendarId];
-  if (!events) {
+  if (!eventsByCalendar[calendarId]) {
     log(`⚠️ Type_Tag change for "${title}": calendar ${calendarId} could not be read — nothing stamped.`);
     return 0;
   }
 
   let stamped = 0;
-  events.forEach(ev => {
-    if (ev.isAllDayEvent()) return;
-    const parsed = parseEventTitle(ev.getTitle());
-    if (!parsed || parsed.cleanTitle !== title) return;
+  // Every calendar is walked, but only this program's own calendar is stamped
+  // unconditionally. The exception is a session tagged [All Locations]: it
+  // shares ONE form with the other locations, so leaving them on a different
+  // Grouped/Monthly tag would split that shared program back into two forms —
+  // one keyed ::FIXED and one keyed by month. Grouping is a property of a
+  // program, and a linked program's program spans locations.
+  Object.keys(CALENDAR_MAP).forEach(otherCalendarId => {
+    const events = eventsByCalendar[otherCalendarId];
+    if (!events) return;
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed || parsed.cleanTitle !== title) return;
 
-    const existing = ev.getDescription() || '';
-    const updated = setGroupingBracketInDescription(existing, newTag);
-    if (updated === existing) return;
-    ev.setDescription(updated);
-    stamped++;
+      const existing = ev.getDescription() || '';
+      if (otherCalendarId !== calendarId &&
+        !(parseSettingsBrackets(existing).isShared || parsed.legacyIsShared)) return;
+
+      const updated = setGroupingBracketInDescription(existing, newTag);
+      if (updated === existing) return;
+      ev.setDescription(updated);
+      stamped++;
+    });
   });
 
   if (stamped > 0) {
@@ -5061,6 +5295,360 @@ function setGroupingBracketInDescription(description, newTag) {
 
   if (!replaced) out = raw ? `${raw.replace(/\s*$/, '')}\n[${newTag}]` : `[${newTag}]`;
   return out;
+}
+
+/**
+ * Returns `description` with the [All Locations] tag added or removed,
+ * preserving [Cap: N], [Grouped]/[Monthly] and any unrelated bracketed notes.
+ * Removing it empties a bracket that held nothing else, which is why the
+ * result goes through tidyDescriptionWhitespace().
+ */
+function setSharedBracketInDescription(description, shared) {
+  const raw = String(description || '');
+  let sawShared = false;
+
+  let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
+    if (!SHARED_LOCATION_WORDS_REGEX.test(content)) return whole;
+    sawShared = true;
+    if (shared) return whole; // already tagged — leave the author's spelling alone
+    const kept = content
+      .split(',')
+      .map(part => part.trim())
+      .filter(part => part && !SHARED_LOCATION_WORDS_REGEX.test(part));
+    return kept.length > 0 ? `[${kept.join(', ')}]` : '';
+  });
+
+  if (shared && !sawShared) {
+    out = raw ? `${raw.replace(/\s*$/, '')}\n[${SHARED_LOCATION_TAG}]` : `[${SHARED_LOCATION_TAG}]`;
+  }
+  if (!shared && sawShared) out = tidyDescriptionWhitespace(out);
+  return out;
+}
+
+/**
+ * Menu action: put one program's sessions at every location onto ONE
+ * registration form — or take them back apart.
+ *
+ * The tag itself is just text in a calendar description ([All Locations], see
+ * SHARED_LOCATION_SCOPE) and could be typed by hand on every event. This
+ * exists because typing it by hand does only half the job on a calendar that
+ * has already been imported:
+ *
+ *   1. it has to go on the events at EVERY location, or the program ends up
+ *      half-linked (warnAboutPartiallySharedPrograms());
+ *   2. the dates already on the session table are not re-imported — a group
+ *      whose dates are all present is skipped wholesale by
+ *      collectCalendarWork() — so without step 3 the change would appear to
+ *      do nothing until the next new date appeared months later.
+ *   3. so the sessions ALREADY on the table are re-pointed onto whichever of
+ *      the program's existing forms is keeping the roster, the survivor form
+ *      is relabelled to name its locations, and every calendar link is
+ *      rewritten to match.
+ *
+ * PAST sessions are deliberately left alone: they carry the form their
+ * registrations actually came in on, and that is the record.
+ */
+function linkProgramAcrossLocations() {
+  if (!requireAuthorizedAdmin('Link Program Across Locations')) return null;
+
+  if (isBootstrapActive()) {
+    toastIfPossible('A large-setup import is running — try this once it finishes.');
+    return null;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first.');
+    return null;
+  }
+
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    log(`linkProgramAcrossLocations: no UI available (${err}) — this action has to be run from the menu.`);
+    return null;
+  }
+
+  const answer = ui.prompt('Link a program across locations',
+    'Type the program name exactly as it appears in Clean_Title on the dashboard ' +
+    '(e.g. "Tai Chi").\n\n' +
+    'Every calendar event with that name, at every location, will be tagged ' +
+    `[${SHARED_LOCATION_TAG}] so they all share ONE registration form. Run it again on an ` +
+    'already-linked program to unlink it.', ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return null;
+
+  const title = String(answer.getResponseText() || '').trim();
+  if (!title) {
+    toastIfPossible('No program name typed — nothing changed.');
+    return null;
+  }
+
+  const matches = findProgramEventsAcrossCalendars(title);
+  if (matches.total === 0) {
+    ui.alert(`No calendar events named "${title}" in the sync window. ` +
+      'Check the spelling against the Clean_Title column (the name without any [brackets] or "*").');
+    return null;
+  }
+
+  // Already fully tagged -> this is an unlink. Otherwise -> link.
+  const linking = matches.tagged < matches.total;
+  const locationSummary = Object.keys(matches.byLocation)
+    .map(loc => `• ${loc}: ${matches.byLocation[loc].total} event(s), ${matches.byLocation[loc].tagged} already tagged`)
+    .join('\n');
+
+  const detail = linking
+    ? `"${title}" — ${matches.total} event(s) across ${Object.keys(matches.byLocation).length} location(s):\n` +
+      `${locationSummary}\n\n` +
+      `They will all be tagged [${SHARED_LOCATION_TAG}], and their UPCOMING sessions re-pointed onto one shared ` +
+      `form — one for the whole series if this program is Grouped, one per month if it is Monthly, in each case ` +
+      `whichever existing form already carries the most of those sessions. Its dates will be relabelled to name ` +
+      `their location — "Mon, Jan 5, 2026${LOCATION_LABEL_SEPARATOR}Narberth" — and every upcoming event's ` +
+      `registration link rewritten to point at it.\n\n` +
+      `Past sessions keep the form they were registered on. Registrations already imported are untouched.`
+    : `"${title}" is currently linked across ${Object.keys(matches.byLocation).length} location(s):\n` +
+      `${locationSummary}\n\n` +
+      `The [${SHARED_LOCATION_TAG}] tag will be removed from all ${matches.total} event(s), so each location's ` +
+      `FUTURE dates go back onto their own form. Sessions already on the dashboard keep the shared form they ` +
+      `are on now — moving live registrations back apart is not something this can do safely.`;
+
+  if (!confirmConsequentialAction(linking ? 'Link this program across locations?' : 'Unlink this program?', detail, false)) {
+    return null;
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    toastIfPossible('A sync is already running — try again in a moment.');
+    return null;
+  }
+  try {
+    const stamped = stampSharedTagOnCalendars(matches.events, linking);
+    let repointed = { moved: 0, survivors: [] };
+    if (linking) repointed = repointProgramSessionsToOneForm(registrySheet, title);
+
+    const summary = linking
+      ? `"${title}" linked across locations ✅ — ${stamped} event(s) tagged, ` +
+        `${repointed.moved} upcoming session(s) moved onto ${repointed.survivors.length || 1} shared form(s).`
+      : `"${title}" unlinked ✅ — the tag came off ${stamped} event(s). Run Sync Cal to build each location's own form.`;
+    log(`linkProgramAcrossLocations: ${summary}`);
+    toastIfPossible(summary);
+    flushAdminDigest('Link program across locations');
+    return { linking, stamped, repointed };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Every timed event named `title` on every program calendar in the sync
+ * window, with a per-location tally of how many already carry the
+ * [All Locations] tag. Matching is on cleanTitle, so "*Tai Chi" and
+ * "Tai Chi [Cap: 12]" both count as "Tai Chi".
+ */
+function findProgramEventsAcrossCalendars(title) {
+  const wanted = String(title || '').trim().toLowerCase();
+  const { start, end } = computeSyncDateRange();
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+
+  const result = { total: 0, tagged: 0, byLocation: {}, events: [] };
+  Object.keys(CALENDAR_MAP).forEach(calendarId => {
+    const locationName = CALENDAR_MAP[calendarId];
+    const events = eventsByCalendar[calendarId];
+    if (!events) {
+      log(`⚠️ Link across locations: "${locationName}" could not be read — skipped.`);
+      return;
+    }
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed || parsed.cleanTitle.toLowerCase() !== wanted) return;
+
+      const isTagged = parseSettingsBrackets(ev.getDescription() || '').isShared || parsed.legacyIsShared;
+      if (!result.byLocation[locationName]) result.byLocation[locationName] = { total: 0, tagged: 0 };
+      result.byLocation[locationName].total++;
+      if (isTagged) result.byLocation[locationName].tagged++;
+      result.total++;
+      if (isTagged) result.tagged++;
+      result.events.push({ event: ev, calendarId, locationName });
+    });
+  });
+  return result;
+}
+
+/** Writes (or clears) the [All Locations] tag on a set of events. Returns how many descriptions changed. */
+function stampSharedTagOnCalendars(matchedEvents, shared) {
+  let stamped = 0;
+  matchedEvents.forEach(({ event }) => {
+    const existing = event.getDescription() || '';
+    const updated = setSharedBracketInDescription(existing, shared);
+    if (updated === existing) return;
+    event.setDescription(updated);
+    stamped++;
+  });
+  if (stamped > 0) {
+    invalidateCalendarEventsCache(); // descriptions just changed under the cache
+    log(`${shared ? 'Tagged' : 'Untagged'} [${SHARED_LOCATION_TAG}] on ${stamped} calendar event(s).`);
+  }
+  return stamped;
+}
+
+/**
+ * Moves the UPCOMING sessions of `title` onto one form PER SPAN — one form
+ * for the whole series if the program is [Grouped], one per calendar month if
+ * it is [Monthly]. That mirrors exactly what a fresh import would build, so a
+ * program linked here and a program linked before its dates existed end up in
+ * the same shape.
+ *
+ * Within a span the surviving form is the one already carrying the most of
+ * that span's sessions (earliest date breaks a tie), so the form that keeps
+ * the roster is the one most people are already looking at.
+ *
+ * Rewrites Form_ID and both link columns in place, records the resulting
+ * cross-location group keys in the persistent registry (so the next sync
+ * reuses these forms instead of building more), relabels each surviving form
+ * to name its locations, and rewrites the registration link on every upcoming
+ * calendar event so nothing still points at a retired form.
+ */
+function repointProgramSessionsToOneForm(registrySheet, title) {
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return { moved: 0, survivors: [] };
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  const todayKey = formatDateKey(new Date());
+  const wanted = String(title || '').trim().toLowerCase();
+
+  // The form-span this row belongs to — the same partition buildEventGroups()
+  // uses, so re-pointing lands where the next import would have put it.
+  const spanOf = (typeTag, date) => isGroupedTypeTag(typeTag) ? 'FIXED' : getMonthLabel(date);
+
+  // Pass 1: read the zones once and work out which form survives in each span.
+  const zones = [];
+  const tally = {};
+  headerRows.forEach((hRow, i) => {
+    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+    if (!zone) return;
+    const read = col => registrySheet.getRange(zone.start, sheetMap[col], zone.count, 1).getValues();
+    const info = {
+      zone,
+      dates: read('Event_Date'),
+      titles: read('Clean_Title'),
+      types: read('Type_Tag'),
+      formIds: read('Form_ID')
+    };
+    zones.push(info);
+
+    info.dates.forEach((dateRow, r) => {
+      const d = coerceDate(dateRow[0]);
+      const rowTitle = String(info.titles[r][0] || '').trim().toLowerCase();
+      const formId = String(info.formIds[r][0] || '').trim();
+      if (!d || rowTitle !== wanted || !formId || formatDateKey(d) < todayKey) return;
+      const span = spanOf(info.types[r][0], d);
+      if (!tally[span]) tally[span] = {};
+      if (!tally[span][formId]) tally[span][formId] = { count: 0, earliest: d };
+      tally[span][formId].count++;
+      if (d < tally[span][formId].earliest) tally[span][formId].earliest = d;
+    });
+  });
+
+  const spans = Object.keys(tally);
+  if (spans.length === 0) {
+    log(`repointProgramSessionsToOneForm: no upcoming "${title}" sessions on the dashboard yet — the next Sync Cal ` +
+      `will build the shared form(s) from the calendar.`);
+    return { moved: 0, survivors: [] };
+  }
+
+  // The survivor for each span, and its links — resolved up front so a form
+  // that won't open costs its own span only, not the whole run.
+  const survivorBySpan = {};
+  const linksBySpan = {};
+  spans.forEach(span => {
+    const candidates = Object.keys(tally[span]);
+    const survivor = candidates.sort((a, b) =>
+      (tally[span][b].count - tally[span][a].count) || (tally[span][a].earliest - tally[span][b].earliest))[0];
+    try {
+      const form = FormApp.openById(survivor);
+      survivorBySpan[span] = survivor;
+      linksBySpan[span] = {
+        view: makeHyperlinkFormula(buildRegistrationUrl(form), 'View Live Form'),
+        edit: makeHyperlinkFormula(form.getEditUrl(), 'Edit Form Settings')
+      };
+    } catch (err) {
+      log(`⚠️ repointProgramSessionsToOneForm: could not open form ${survivor} for "${title}" / ${span} (${err}) — ` +
+        `those sessions were left where they are.`);
+      noteForAdmin('Programs that could not be linked across locations',
+        `"${title}" (${span}) — the form its sessions would move onto (${survivor}) could not be opened: ${err}`);
+    }
+  });
+
+  // Pass 2: write Form_ID and both links on the rows that are moving.
+  let moved = 0;
+  zones.forEach(info => {
+    const { zone } = info;
+    const idRange = registrySheet.getRange(zone.start, sheetMap['Form_ID'], zone.count, 1);
+    const viewRange = registrySheet.getRange(zone.start, sheetMap['Form_Response_Link'], zone.count, 1);
+    const editRange = registrySheet.getRange(zone.start, sheetMap['Edit_Form_Link'], zone.count, 1);
+    const ids = idRange.getValues();
+    // Formula-or-value, so rows that are NOT moving are written back exactly
+    // as they were (the same care updateRegistryFormLinks() takes).
+    const viewValues = viewRange.getValues();
+    const editValues = editRange.getValues();
+    const views = viewRange.getFormulas().map((f, r) => [f[0] || viewValues[r][0]]);
+    const edits = editRange.getFormulas().map((f, r) => [f[0] || editValues[r][0]]);
+
+    let touched = false;
+    info.dates.forEach((dateRow, r) => {
+      const d = coerceDate(dateRow[0]);
+      const rowTitle = String(info.titles[r][0] || '').trim().toLowerCase();
+      const formId = String(ids[r][0] || '').trim();
+      if (!d || rowTitle !== wanted || !formId || formatDateKey(d) < todayKey) return;
+      const survivor = survivorBySpan[spanOf(info.types[r][0], d)];
+      if (!survivor || formId === survivor) return;
+      ids[r] = [survivor];
+      views[r] = [linksBySpan[spanOf(info.types[r][0], d)].view];
+      edits[r] = [linksBySpan[spanOf(info.types[r][0], d)].edit];
+      touched = true;
+      moved++;
+    });
+
+    if (touched) {
+      idRange.setValues(ids);
+      viewRange.setValues(views);
+      editRange.setValues(edits);
+    }
+  });
+
+  const survivors = spans.map(span => survivorBySpan[span]).filter(Boolean);
+  if (moved === 0) {
+    log(`repointProgramSessionsToOneForm: "${title}" already sits on one form per span — nothing to move.`);
+    return { moved, survivors };
+  }
+  SpreadsheetApp.flush(); // the refresh below re-reads these rows
+
+  // These forms now span locations. Record that where the next sync looks for
+  // them, then relabel each one (buildFormSessionContext() sees the
+  // multi-location rows and adds the location to every date label).
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const derived = { eventIds: new Set(), groupFormMap: {} };
+  addSharedGroupKeysFromRows(derived, rows, map);
+  Object.keys(derived.groupFormMap).forEach(key => {
+    if (survivors.indexOf(derived.groupFormMap[key]) !== -1) {
+      savePersistentFormRegistryEntry(key, derived.groupFormMap[key]);
+    }
+  });
+  flushPersistentRegistries();
+
+  dedupePreservingOrder(survivors).forEach(formId =>
+    refreshOneFormDateLabels(formId, rows, map, 'cross-location link'));
+  flushPersistentRegistries();
+
+  // Retired forms are still linked from every calendar event they used to
+  // cover. Rewriting from the session table is exactly what this does.
+  rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+
+  return { moved, survivors };
 }
 
 /**
@@ -5632,6 +6220,10 @@ const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
  *   [Grouped]            -> one form for the whole series (see EVENT_TYPES)
  *   [Monthly]            -> one form per calendar month (the default anyway)
  *   [Cap: 12, Grouped]   -> both, one bracket
+ *   [All Locations]      -> this event's sessions pool with the same-titled
+ *                           sessions on every other calendar, onto ONE form
+ *                           (see SHARED_LOCATION_SCOPE). Also spelled
+ *                           [Shared] / [All Sites] / [Combined] / [Multi-Site].
  *
  * [Fixed] is still read as [Grouped] and [Regular] as [Monthly], so
  * descriptions written before the rename keep working untouched — there is
@@ -5644,6 +6236,7 @@ function parseSettingsBrackets(text) {
   const raw = String(text || '');
   let capacity = 0;
   let isFixed = false;
+  let isShared = false;
   let sawAny = false;
 
   BRACKET_GROUP_REGEX.lastIndex = 0; // the /g regex is module-level; never trust its cursor
@@ -5652,6 +6245,9 @@ function parseSettingsBrackets(text) {
     const content = match[1] || '';
     const capMatch = /Cap:\s*(\d+)/i.exec(content);
     if (capMatch) { capacity = parseInt(capMatch[1], 10); sawAny = true; }
+    // The WHERE half of grouping, orthogonal to Grouped/Monthly above — see
+    // SHARED_LOCATION_SCOPE.
+    if (SHARED_LOCATION_WORDS_REGEX.test(content)) { isShared = true; sawAny = true; }
     // "Grouped" is the current word, "Fixed" the one it replaced — both mean
     // "one form for the whole series." An explicit [Monthly]/[Regular] is
     // recognized too, purely so it counts as sawAny (a deliberate statement
@@ -5659,7 +6255,7 @@ function parseSettingsBrackets(text) {
     if (/\b(Grouped|Fixed)\b/i.test(content)) { isFixed = true; sawAny = true; }
     if (/\b(Monthly|Regular)\b/i.test(content)) { sawAny = true; }
   }
-  return { capacity, isFixed, sawAny };
+  return { capacity, isFixed, isShared, sawAny };
 }
 
 /**
@@ -5704,14 +6300,15 @@ function parseEventTitle(title) {
     isTentative,
     legacyCapacity: legacy.capacity,
     legacyIsFixed: legacy.isFixed,
+    legacyIsShared: legacy.isShared,
     hasLegacyBrackets: legacy.sawAny
   };
 }
 
 /**
- * Resolves { capacity, isFixed } for one event: the DESCRIPTION's brackets
- * win, and anything the description doesn't specify falls back to legacy
- * brackets left in the title (with a one-time nudge in the log).
+ * Resolves { capacity, isFixed, isShared } for one event: the DESCRIPTION's
+ * brackets win, and anything the description doesn't specify falls back to
+ * legacy brackets left in the title (with a one-time nudge in the log).
  */
 function resolveEventSettings(event, parsedTitle) {
   const description = (event && typeof event.getDescription === 'function')
@@ -5721,12 +6318,13 @@ function resolveEventSettings(event, parsedTitle) {
 
   const capacity = fromDescription.capacity || parsedTitle.legacyCapacity || 0;
   const isFixed = fromDescription.isFixed || parsedTitle.legacyIsFixed || false;
+  const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
 
   if (parsedTitle.hasLegacyBrackets && !fromDescription.sawAny) {
     log(`ℹ️ "${parsedTitle.cleanTitle}" still carries its settings in the TITLE. That still works, but the supported ` +
       `place is now the event DESCRIPTION — move "[Cap: N]" / "[Grouped]" there and drop them from the title.`);
   }
-  return { capacity, isFixed };
+  return { capacity, isFixed, isShared };
 }
 
 /** Public entry point: acquires a script lock so overlapping executions can't race each other. */
@@ -5869,7 +6467,7 @@ function importCalendarGroups(registrySheet, options) {
       summary.groupsFailed++;
       log(`⚠️ Could not import "${item.group.groupKey}" (${err}) — continuing with the rest.`);
       noteForAdmin('Programs that could not be imported',
-        `${item.group.cleanTitle} (${item.locationName}) — ${err}`);
+        `${item.group.cleanTitle} (${describeLocations(item.group.locations)}) — ${err}`);
     }
     if (options.onGroupDone) options.onGroupDone(summary);
   }
@@ -5889,13 +6487,17 @@ function describeImportSummary(summary) {
 
 /**
  * Turns the raw calendar fetch into an ordered list of units of work —
- * `{ group, locationName, configInfo, newEvents }` — skipping groups whose
- * dates are all already on the session table. Pure in-memory work: no form,
- * sheet or calendar writes happen here, so a caller can safely build the
- * whole list up front and then process as much of it as it has time for.
+ * `{ group, configInfo, newSessions }` — skipping groups whose dates are all
+ * already on the session table. Pure in-memory work: no form, sheet or
+ * calendar writes happen here, so a caller can safely build the whole list up
+ * front and then process as much of it as it has time for.
+ *
+ * Parsing is per calendar (a calendar IS a location), but GROUPING is done
+ * once across all of them — that is what lets a program tagged
+ * [All Locations] pool its sessions onto one form instead of one per site.
  */
 function collectCalendarWork(eventsByCalendar, existingState) {
-  const work = [];
+  const parsedSessions = [];
 
   Object.keys(CALENDAR_MAP).forEach(calendarId => {
     const locationName = CALENDAR_MAP[calendarId];
@@ -5906,11 +6508,11 @@ function collectCalendarWork(eventsByCalendar, existingState) {
     }
 
     const tentativeTitles = new Set();
-    const parsedEvents = events
+    events
       .filter(ev => !ev.isAllDayEvent())
-      .map(ev => {
+      .forEach(ev => {
         const parsed = parseEventTitle(ev.getTitle());
-        if (!parsed) return null;
+        if (!parsed) return;
         // Tentative events are skipped WHOLESALE — no form, no registry
         // row — until the leading "*" comes off. Because parseEventTitle()
         // strips the asterisk from cleanTitle, confirming an event later
@@ -5918,36 +6520,70 @@ function collectCalendarWork(eventsByCalendar, existingState) {
         // a brand-new session with no reconciliation needed.
         if (parsed.isTentative) {
           tentativeTitles.add(parsed.cleanTitle);
-          return null;
+          return;
         }
         const settings = resolveEventSettings(ev, parsed);
         parsed.capacity = settings.capacity;
         parsed.isFixed = settings.isFixed;
-        return { ev, parsed };
-      })
-      .filter(Boolean);
+        parsed.isShared = settings.isShared;
+        parsedSessions.push({ event: ev, parsed, calendarId, locationName });
+      });
 
     if (tentativeTitles.size > 0) {
       log(`Skipped ${tentativeTitles.size} tentative program(s) at ${locationName} (title starts with "*"): ` +
         `${Array.from(tentativeTitles).join(', ')}. Remove the asterisk to generate forms.`);
     }
+  });
 
-    const configInfo = { footerNote: getFormFooterForLocation(locationName) };
+  const groups = buildEventGroups(parsedSessions);
+  warnAboutPartiallySharedPrograms(groups);
 
-    buildEventGroups(parsedEvents, calendarId).forEach(group => {
-      const newEvents = group.events.filter(ev => {
-        const eventId = computeEventId(calendarId, group.cleanTitle, formatDateKey(ev.getStartTime()));
-        return !existingState.eventIds.has(eventId);
-      });
-      if (newEvents.length === 0) {
-        log(`No new dates for "${group.groupKey}" — already up to date, skipping.`);
-        return;
-      }
-      work.push({ group, locationName, configInfo, newEvents });
+  const work = [];
+  groups.forEach(group => {
+    const newSessions = group.sessions.filter(s => {
+      const eventId = computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()));
+      return !existingState.eventIds.has(eventId);
+    });
+    if (newSessions.length === 0) {
+      log(`No new dates for "${group.groupKey}" — already up to date, skipping.`);
+      return;
+    }
+    work.push({
+      group,
+      configInfo: { footerNote: buildFooterNoteForLocations(group.locations) },
+      newSessions
     });
   });
 
   return work;
+}
+
+/**
+ * A program that carries [All Locations] on SOME of its events and not others
+ * is almost always a half-finished edit — someone tagged one calendar's copies
+ * and stopped. It is handled coherently either way (each event follows its own
+ * tag, so the untagged ones keep their own per-location form), but it is worth
+ * saying out loud: the symptom otherwise is "the shared form is missing
+ * Ashbridge" with nothing anywhere explaining why.
+ */
+function warnAboutPartiallySharedPrograms(groups) {
+  const byTitle = {};
+  groups.forEach(g => {
+    if (!byTitle[g.cleanTitle]) byTitle[g.cleanTitle] = { shared: [], own: [] };
+    byTitle[g.cleanTitle][g.isShared ? 'shared' : 'own'].push(g);
+  });
+
+  Object.keys(byTitle).forEach(title => {
+    const { shared, own } = byTitle[title];
+    if (shared.length === 0 || own.length === 0) return;
+    const strayLocations = dedupePreservingOrder(own.reduce((acc, g) => acc.concat(g.locations), []));
+    const message = `"${title}" is tagged [${SHARED_LOCATION_TAG}] at ${describeLocations(shared[0].locations)} ` +
+      `but NOT at ${strayLocations.join(', ')}, so those sessions keep their own separate form(s). ` +
+      `Add [${SHARED_LOCATION_TAG}] to their calendar events too (or use "🔗 Link Program Across Locations…") ` +
+      `if they were meant to share one.`;
+    log(`⚠️ ${message}`);
+    noteForAdmin('Programs only partly linked across locations', message);
+  });
 }
 
 /**
@@ -5956,7 +6592,7 @@ function collectCalendarWork(eventsByCalendar, existingState) {
  * { formCreated, eventsAdded }.
  */
 function processCalendarGroup(registrySheet, item, existingState) {
-  const { group, locationName, configInfo, newEvents } = item;
+  const { group, configInfo, newSessions } = item;
 
   let existingFormId = existingState.groupFormMap[group.groupKey];
   if (!existingFormId) {
@@ -5970,17 +6606,18 @@ function processCalendarGroup(registrySheet, item, existingState) {
   let formCreated = false;
   if (existingFormId) {
     try {
-      formInfo = refreshFormForNewDates(existingFormId, group, locationName, configInfo);
-      log(`Reused existing form for "${group.groupKey}"; added ${newEvents.length} new date(s).`);
+      formInfo = refreshFormForNewDates(existingFormId, group, configInfo);
+      log(`Reused existing form for "${group.groupKey}"; added ${newSessions.length} new date(s).`);
     } catch (err) {
       log(`⚠️ Could not reopen existing form ${existingFormId} for "${group.groupKey}" (${err}) — creating a replacement form.`);
-      formInfo = createRegistrationForm(group, locationName, configInfo);
+      formInfo = createRegistrationForm(group, configInfo);
       formCreated = true;
     }
   } else {
-    formInfo = createRegistrationForm(group, locationName, configInfo);
+    formInfo = createRegistrationForm(group, configInfo);
     formCreated = true;
-    log(`Created new form for "${group.groupKey}" with ${newEvents.length} date(s).`);
+    log(`Created new form for "${group.groupKey}" with ${newSessions.length} date(s)` +
+      (group.isShared ? ` across ${describeLocations(group.locations)}` : '') + '.');
   }
   savePersistentFormRegistryEntry(group.groupKey, formInfo.formId);
   // Flushed HERE, not at the end of the run: between creating a form and
@@ -5992,50 +6629,79 @@ function processCalendarGroup(registrySheet, item, existingState) {
   // description.)
   flushPersistentRegistries();
 
-  const newEventsGroup = Object.assign({}, group, { events: newEvents });
-  writeEventRegistryRows(registrySheet, newEventsGroup, locationName, formInfo);
+  const newSessionsGroup = Object.assign({}, group, {
+    sessions: newSessions,
+    events: newSessions.map(s => s.event)
+  });
+  writeEventRegistryRows(registrySheet, newSessionsGroup, formInfo);
 
   backInjectCalendarDescriptions(group, formInfo);
 
   // Keep the in-memory state honest for the rest of THIS run: these dates now
   // exist, and this group now has a form.
-  newEvents.forEach(ev => existingState.eventIds.add(
-    computeEventId(group.calendarId, group.cleanTitle, formatDateKey(ev.getStartTime()))));
+  newSessions.forEach(s => existingState.eventIds.add(
+    computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()))));
   existingState.groupFormMap[group.groupKey] = formInfo.formId;
 
-  return { formCreated, eventsAdded: newEvents.length };
+  return { formCreated, eventsAdded: newSessions.length };
 }
 
-/** Groups parsed calendar events into Grouped-series or per-month buckets. */
-function buildEventGroups(parsedEvents, calendarId) {
+/**
+ * Buckets parsed sessions — `{ event, parsed, calendarId, locationName }`,
+ * from every calendar at once — into the groups that each get ONE form.
+ *
+ * A group key is `<scope>::<title>::<span>`:
+ *   scope  the calendar ID, or SHARED_LOCATION_SCOPE when the event is tagged
+ *          [All Locations] — the WHERE half of grouping.
+ *   span   'FIXED' for a [Grouped] series, else the month label — the WHEN
+ *          half. ('FIXED' is deliberately not renamed alongside the Type_Tag
+ *          vocabulary; it is a persisted internal key, see
+ *          getExistingRegistryState().)
+ *
+ * Every group carries `sessions` (each with the calendar and location it came
+ * from, so nothing downstream has to assume a group is single-location) and
+ * `events`, the same list flattened, for the calendar-facing helpers.
+ */
+function buildEventGroups(parsedSessions) {
   const groups = {};
 
-  parsedEvents.forEach(({ ev, parsed }) => {
-    const startTime = ev.getStartTime();
+  parsedSessions.forEach(({ event, parsed, calendarId, locationName }) => {
+    const startTime = event.getStartTime();
     const monthLabel = getMonthLabel(startTime);
     const typeTag = parsed.isFixed ? EVENT_TYPES.GROUPED : EVENT_TYPES.MONTHLY;
 
-    const key = parsed.isFixed
-      ? `${calendarId}::${parsed.cleanTitle}::FIXED`
-      : `${calendarId}::${parsed.cleanTitle}::${monthLabel}`;
+    const scope = parsed.isShared ? SHARED_LOCATION_SCOPE : calendarId;
+    const span = parsed.isFixed ? 'FIXED' : monthLabel;
+    const key = `${scope}::${parsed.cleanTitle}::${span}`;
 
     if (!groups[key]) {
       groups[key] = {
         groupKey: key,
-        calendarId,
+        scope,
+        isShared: !!parsed.isShared,
+        // The one calendar a non-shared group belongs to. A shared group has
+        // no single one — its rows take their Calendar_Source per session.
+        calendarId: parsed.isShared ? null : calendarId,
         cleanTitle: parsed.cleanTitle,
         capacity: parsed.capacity,
         isFixed: parsed.isFixed,
         typeTag,
         monthLabel: parsed.isFixed ? null : monthLabel,
-        events: []
+        sessions: []
       };
     }
-    groups[key].events.push(ev);
+    // A capacity typed on any one of a group's events applies to the group
+    // (it always has — this just keeps that true when the first event seen
+    // happens to be an untagged one from another calendar).
+    if (!groups[key].capacity && parsed.capacity) groups[key].capacity = parsed.capacity;
+    groups[key].sessions.push({ event, calendarId, locationName });
   });
 
   return Object.values(groups).map(g => {
-    g.events.sort((a, b) => a.getStartTime() - b.getStartTime());
+    g.sessions.sort((a, b) => a.event.getStartTime() - b.event.getStartTime());
+    g.events = g.sessions.map(s => s.event);
+    g.locations = distinctLocations(g.sessions.map(s => s.locationName));
+    g.calendarIds = dedupePreservingOrder(g.sessions.map(s => s.calendarId));
     if (g.isFixed) {
       const first = g.events[0].getStartTime();
       const last = g.events[g.events.length - 1].getStartTime();
@@ -6043,6 +6709,11 @@ function buildEventGroups(parsedEvents, calendarId) {
     }
     return g;
   });
+}
+
+/** The [{date, location}] sessions of a group, in the shape the form layer wants. */
+function sessionsOfGroup(group) {
+  return group.sessions.map(s => ({ date: s.event.getStartTime(), location: s.locationName }));
 }
 
 /**
@@ -6079,12 +6750,50 @@ function getExistingRegistryState(registrySheet) {
     if (!state.groupFormMap[key]) state.groupFormMap[key] = formId;
   });
 
+  addSharedGroupKeysFromRows(state, rows, map);
+
   const persistent = getPersistentFormRegistry();
   Object.keys(persistent).forEach(key => {
     if (!state.groupFormMap[key]) state.groupFormMap[key] = persistent[key];
   });
 
   return state;
+}
+
+/**
+ * Teaches the sheet-derived half of getExistingRegistryState() about
+ * CROSS-LOCATION groups, whose key is scoped SHARED_LOCATION_SCOPE rather than
+ * to any one calendar and so can never be reconstructed from a single row.
+ *
+ * It doesn't need a new column to do it: a form whose sessions span more than
+ * one Calendar_Source IS a shared group's form — nothing else in this system
+ * puts two calendars on one form. So the evidence is already on the sheet, and
+ * the sheet stays a genuine fallback for a lost Script-Properties registry
+ * (the case this whole function exists for) instead of quietly duplicating
+ * every shared form the first time that registry is missing.
+ */
+function addSharedGroupKeysFromRows(state, rows, map) {
+  const byForm = {};
+  rows.forEach(row => {
+    const formId = row[map['Form_ID']];
+    const source = row[map['Calendar_Source']];
+    const title = row[map['Clean_Title']];
+    if (!formId || !source || !title) return;
+    if (!byForm[formId]) byForm[formId] = { title, sources: new Set(), keys: new Set() };
+    byForm[formId].sources.add(source);
+
+    const d = coerceDate(row[map['Event_Date']]);
+    const span = isGroupedTypeTag(row[map['Type_Tag']]) ? 'FIXED' : (d ? getMonthLabel(d) : '');
+    byForm[formId].keys.add(`${SHARED_LOCATION_SCOPE}::${title}::${span}`);
+  });
+
+  Object.keys(byForm).forEach(formId => {
+    const info = byForm[formId];
+    if (info.sources.size < 2) return;
+    info.keys.forEach(key => {
+      if (!state.groupFormMap[key]) state.groupFormMap[key] = formId;
+    });
+  });
 }
 
 
@@ -6928,19 +7637,19 @@ function getFormInfoForLink(formId, cache) {
  * date-dependent items. Not-serving dates are excluded from the lunch grid
  * rows (see buildDateLabelSets()) but still appear on the Dates checkbox.
  */
-function refreshFormForNewDates(formId, group, locationName, configInfo) {
+function refreshFormForNewDates(formId, group, configInfo) {
   const form = FormApp.openById(formId);
-  const dates = group.events.map(ev => ev.getStartTime());
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, locationName);
+  const sessions = sessionsOfGroup(group);
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
-  form.setDescription(buildFormDescription(locationName, allDateLabels, group.isFixed, lunchDateLabels.length > 0));
+  form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0));
 
   // Catches a form that predates this location's policy being set to Never,
   // or predates the policy feature entirely, and re-checks whether the dates
   // now on the form serve lunch at all. Both directions are handled and both
   // are no-ops once the form already matches, so this is cheap on every
   // subsequent call.
-  const questionsChanged = syncLunchQuestionsOnForm(form, locationName, lunchDateLabels.length > 0);
+  const questionsChanged = syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0);
 
   // Only ROWS are refreshed here — grid COLUMNS (the person labels) are the
   // same on every form and are set once at template-build time.
@@ -6958,10 +7667,13 @@ function refreshFormForNewDates(formId, group, locationName, configInfo) {
 }
 
 /** Creates a new per-group registration form by COPYING the one shared template. */
-function createRegistrationForm(group, locationName, configInfo) {
-  const formTitle = group.isFixed
+function createRegistrationForm(group, configInfo) {
+  const baseTitle = group.isFixed
     ? `${group.cleanTitle} — Registration`
     : `${group.cleanTitle} - ${group.monthLabel}`;
+  // A cross-location form sits in the same Drive folder as the per-location
+  // ones and would otherwise be indistinguishable from them by name.
+  const formTitle = group.isShared ? `${baseTitle} (${SHARED_LOCATION_TAG})` : baseTitle;
 
   // One template for everything now — the Attendance Mode fast path is on
   // every form, so Grouped and Monthly groups no longer need separate bases.
@@ -6981,14 +7693,14 @@ function createRegistrationForm(group, locationName, configInfo) {
     log(`⚠️ Could not explicitly publish copied form "${formTitle}" (${err}) — copies are published by default in most accounts.`);
   }
 
-  const dates = group.events.map(ev => ev.getStartTime());
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, locationName);
+  const sessions = sessionsOfGroup(group);
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
-  form.setDescription(buildFormDescription(locationName, allDateLabels, group.isFixed, lunchDateLabels.length > 0));
+  form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0));
 
-  // A location that never caters — or a form none of whose dates serve lunch
-  // — shouldn't be asking about lunch at all.
-  syncLunchQuestionsOnForm(form, locationName, lunchDateLabels.length > 0);
+  // A form whose locations never cater — or none of whose dates serve lunch —
+  // shouldn't be asking about lunch at all.
+  syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0);
 
   // Only ROWS are set here — grid COLUMNS (the person labels) were already
   // baked into the template. force:true because a fresh copy still carries
@@ -7013,19 +7725,27 @@ function applyFormFooterNote(form, footerNote) {
     .forEach(it => it.asSectionHeaderItem().setTitle(footerNote));
 }
 
-function writeEventRegistryRows(registrySheet, group, locationName, formInfo) {
+/**
+ * Writes one session table row per session in `group`. Each row takes its
+ * Location and Calendar_Source from the SESSION, not from the group — on a
+ * cross-location group those differ from row to row, and everything
+ * downstream (Event_IDs, lunch policy, the lunch dashboard, triage) keys off
+ * the row rather than the form.
+ */
+function writeEventRegistryRows(registrySheet, group, formInfo) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const isUncapped = !group.capacity || group.capacity <= 0;
 
-  const rows = group.events.map(ev => {
+  const rows = group.sessions.map(session => {
+    const ev = session.event;
     const startTime = ev.getStartTime();
     const dateKey = formatDateKey(startTime);
-    const eventId = computeEventId(group.calendarId, group.cleanTitle, dateKey);
+    const eventId = computeEventId(session.calendarId, group.cleanTitle, dateKey);
     const row = new Array(headers.length).fill('');
 
     row[map['Event_Date']] = startTime;
-    row[map['Location']] = locationName;
+    row[map['Location']] = session.locationName;
     row[map['Clean_Title']] = group.cleanTitle;
     // Fallback only — renderProgramDashboard() always overwrites this with
     // a =TEXT(Event_Date,...) formula (see that function for why a formula
@@ -7044,7 +7764,7 @@ function writeEventRegistryRows(registrySheet, group, locationName, formInfo) {
     row[map['Form_ID']] = formInfo.formId;
     row[map['Calendar_Synced?']] = true;
     row[map['Event_ID']] = eventId;
-    row[map['Calendar_Source']] = group.calendarId;
+    row[map['Calendar_Source']] = session.calendarId;
     return row;
   });
 
@@ -7344,24 +8064,33 @@ function getDistinctFormIds(registrySheet, sessionRows) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-/** Maps "Form_ID|Plain Session Date Label" -> { eventId, maxCapacity, eventDate }. */
+/**
+ * Maps "Form_ID|Plain Session Label" -> { eventId, maxCapacity, eventDate,
+ * location, cleanTitle }. The label is exactly what a grid row on that form
+ * says once its meal/capacity hints are stripped (formatSessionLabel() /
+ * stripMealHint()) — including the location on a cross-location form, which
+ * is what keeps two sites' sessions on the same date resolving to two
+ * different registry entries instead of one.
+ */
 function buildRegistryIndex(registrySheet, sessionRows) {
   const index = {};
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
+  const showLocationByForm = buildShowLocationByForm(rows, map);
   rows.forEach(row => {
     const formId = row[map['Form_ID']];
     const eventDateRaw = row[map['Event_Date']];
     if (!formId || !eventDateRaw) return;
     const eventDate = coerceDate(eventDateRaw);
     if (!eventDate) return;
-    const label = formatDateLabel(eventDate);
+    const location = row[map['Location']] || '';
+    const label = formatSessionLabel(eventDate, location, showLocationByForm[formId]);
     index[`${formId}|${label}`] = {
       eventId: row[map['Event_ID']],
       maxCapacity: Number(row[map['Max_Capacity']]) || 0,
       eventDate,
-      location: row[map['Location']] || '',
+      location,
       cleanTitle: row[map['Clean_Title']] || ''
     };
   });
@@ -7859,6 +8588,7 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
   if (rows.length === 0) return;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
+  const sharedFormIds = getSharedFormIdSet();
 
   Object.keys(byForm).forEach(formId => {
     const formRows = byForm[formId];
@@ -7868,11 +8598,9 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
     });
     if (!hasCappedSession) return; // nothing on this form can ever go FULL — skip the API round trip
 
-    const location = formRows[0][map['Location']];
-    const dates = formRows.map(r => coerceDate(r[map['Event_Date']])).filter(Boolean).sort((a, b) => a - b);
-    if (dates.length === 0) return;
-    const capacityHints = buildCapacityHintsFromRegistryRows(formRows, map);
-    const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, location, capacityHints);
+    const formContext = buildFormSessionContext(formId, formRows, map, sharedFormIds);
+    if (formContext.sessions.length === 0) return;
+    const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
     // Fingerprinted: on the overwhelmingly common "nothing filled up since
     // last hour" sync this costs a hash compare and no FormApp call at all.
     applyFormDateLabels(formId, allDateLabels, lunchDateLabels, { context: 'capacity labels' });
@@ -7935,13 +8663,13 @@ function rebuildFormFromCurrentTemplate(form, context) {
   }
   addTemplateItemsToForm(form);
 
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.dates, context.location, context.capacityHints);
-  form.setDescription(buildFormDescription(context.location, allDateLabels, context.isFixed, lunchDateLabels.length > 0));
-  syncLunchQuestionsOnForm(form, context.location, lunchDateLabels.length > 0);
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
+  form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0));
+  syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0);
   // force: a rebuilt form's grids are back to the template placeholder row,
   // and its fingerprint on file still describes the labels it had before.
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'template migration' });
-  applyFormFooterNote(form, getFormFooterForLocation(context.location));
+  applyFormFooterNote(form, buildFooterNoteForLocations(context.locations));
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
 }
 
@@ -8008,6 +8736,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
   const versions = getFormTemplateVersions();
+  const sharedFormIds = getSharedFormIdSet();
 
   const newUrlByFormId = {};
   let rebuilt = 0;
@@ -8032,17 +8761,14 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
     }
 
     const formRows = byForm[formId];
-    const location = formRows[0][map['Location']];
-    const dates = formRows.map(r => coerceDate(r[map['Event_Date']])).filter(Boolean).sort((a, b) => a - b);
-    if (dates.length === 0) return;
+    const formContext = buildFormSessionContext(formId, formRows, map, sharedFormIds);
+    const location = describeLocations(formContext.locations);
+    if (formContext.sessions.length === 0) return;
 
     try {
-      rebuildFormFromCurrentTemplate(form, {
-        location,
-        dates,
-        isFixed: formRows.some(r => isGroupedTypeTag(r[map['Type_Tag']])),
-        capacityHints: buildCapacityHintsFromRegistryRows(formRows, map)
-      });
+      rebuildFormFromCurrentTemplate(form, Object.assign({}, formContext, {
+        isFixed: formRows.some(r => isGroupedTypeTag(r[map['Type_Tag']]))
+      }));
     } catch (err) {
       log(`⚠️ migrateFormsToCurrentTemplate: could not rebuild form ${formId} for "${location}" (${err}).`);
       noteForAdmin('Forms that could not be updated',
@@ -8148,23 +8874,26 @@ function cleanupNeverPolicyForms() {
   const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
 
-  const locationByForm = {};
+  const locationsByForm = {};
   rows.forEach(row => {
     const formId = row[map['Form_ID']];
-    const location = row[map['Location']];
+    const location = String(row[map['Location']] || '').trim();
     if (!formId || !location) return;
-    if (!locationByForm[formId]) locationByForm[formId] = location;
+    if (!locationsByForm[formId]) locationsByForm[formId] = [];
+    if (locationsByForm[formId].indexOf(location) === -1) locationsByForm[formId].push(location);
   });
 
   let checked = 0;
-  Object.keys(locationByForm).forEach(formId => {
-    const location = locationByForm[formId];
-    if (getCateringPolicyForLocation(location) !== CATERING_POLICIES.NEVER) return;
+  Object.keys(locationsByForm).forEach(formId => {
+    const locations = locationsByForm[formId];
+    // A cross-location form only qualifies when EVERY location on it is
+    // Never — one catering site on the form is reason enough to keep asking.
+    if (locations.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER)) return;
     checked++;
     try {
-      removeLunchQuestionsFromForm(FormApp.openById(formId), location);
+      removeLunchQuestionsFromForm(FormApp.openById(formId), locations);
     } catch (err) {
-      log(`⚠️ cleanupNeverPolicyForms: could not open form ${formId} for "${location}" (${err}).`);
+      log(`⚠️ cleanupNeverPolicyForms: could not open form ${formId} for "${describeLocations(locations)}" (${err}).`);
     }
   });
   log(`cleanupNeverPolicyForms: checked ${checked} form(s) at Never-policy location(s).`);
@@ -10272,26 +11001,20 @@ function confirmLargeTriage() {
 
 /** After sessions are removed (their calendar event vanished), pushes an updated date list to any form those sessions belonged to. */
 function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
-  const datesByForm = {};
-  const locationByForm = {};
   const rowsByForm = {};
   keptSessionRows.forEach(row => {
     const formId = row[map['Form_ID']];
     if (!formId || !affectedFormIds.has(formId)) return;
-    const d = coerceDate(row[map['Event_Date']]);
-    if (!d) return;
-    if (!datesByForm[formId]) datesByForm[formId] = [];
-    datesByForm[formId].push(d);
-    if (!locationByForm[formId]) locationByForm[formId] = row[map['Location']];
     if (!rowsByForm[formId]) rowsByForm[formId] = [];
     rowsByForm[formId].push(row);
   });
+  const sharedFormIds = getSharedFormIdSet();
 
   affectedFormIds.forEach(formId => {
-    const dates = (datesByForm[formId] || []).sort((a, b) => a - b);
-    const location = locationByForm[formId];
-    const capacityHints = buildCapacityHintsFromRegistryRows(rowsByForm[formId] || [], map);
-    const { allDateLabels, lunchDateLabels } = buildDateLabelSets(dates, location, capacityHints);
+    const formContext = buildFormSessionContext(formId, rowsByForm[formId] || [], map, sharedFormIds);
+    const dates = formContext.sessions;
+    const location = describeLocations(formContext.locations);
+    const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
     const attendanceLabels = allDateLabels.length > 0 ? allDateLabels : ['No upcoming dates'];
     const lunchLabels = lunchDateLabels.length > 0 ? lunchDateLabels : ['No upcoming dates'];
     if (applyFormDateLabels(formId, attendanceLabels, lunchLabels, { context: 'deleted-event cleanup' })) {
@@ -10301,7 +11024,8 @@ function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
       // Emptying a live form is a big enough thing to say out loud: it means
       // every session that form covered is gone from the calendar.
       noteForAdmin('Registration forms left with no dates',
-        `Form ${formId} (${location || 'unknown location'}) now shows "No upcoming dates" — every session it covered ` +
+        `Form ${formId} (${formContext.locations.length > 0 ? location : 'unknown location'}) now shows ` +
+        `"No upcoming dates" — every session it covered ` +
         `disappeared from the calendar. Check that this was intended.`);
     }
   });

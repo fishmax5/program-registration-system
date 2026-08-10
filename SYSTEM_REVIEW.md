@@ -120,6 +120,30 @@ session history fresh, or to rewrite `Calendar_Source` and `Event_ID` on the
 existing rows to match the new IDs. Do **not** just sync and sort it out
 afterwards — once duplicate forms exist, registrations start arriving on both.
 
+### 5b. Re-grouping only reaches dates that haven't been imported yet
+
+Both grouping tags — `[Grouped]`/`[Monthly]` and the new `[All Locations]` —
+are read when a session is **imported**. `collectCalendarWork()` skips any
+group whose dates are all already on the session table, so re-tagging a
+program in the calendar changes **future** dates and leaves the ones already
+imported on the form they were built with. On a live calendar that reads as
+"I changed it and nothing happened."
+
+`🔗 Link Program Across Locations…` is the only path that closes this gap, and
+it closes it only for linking: it stamps the tag, moves the **upcoming**
+sessions onto one form (`repointProgramSessionsToOneForm()`), re-labels that
+form, and rewrites the calendar links. Past sessions are deliberately left on
+the form their registrations arrived on.
+
+Nothing equivalent exists for `Grouped` ⇄ `Monthly`, which has always had this
+behaviour — the toast still says "run Sync Cal to rebuild their forms", and a
+sync will only do that for dates that aren't on the table yet. Worth either
+generalising the re-point step to any tag change, or making the toast honest.
+
+Unlinking is also asymmetric on purpose: sessions already on a shared form stay
+there, because splitting a live roster back across two forms has no safe
+answer to "which form does an existing registrant belong to?"
+
 ### 6. Event descriptions accumulated duplicate links. **FIXED**
 
 `backInjectCalendarDescriptions()` found the **first** registration link in a
@@ -307,6 +331,13 @@ order of what would change your plans:
 8. **Run 🔗 Rewrite Event Links** and open two or three events you know had
    duplicate links. Check there's exactly one, at the top, and that your room
    notes and `[Cap: N]` / `[Grouped]` brackets are untouched.
-9. **Before the first sync on the new calendar IDs**, read #5 above and decide
+9. **Link one program across locations** (🔗 Link Program Across Locations…)
+   on a program that runs at two sites. Check: one form left carrying all the
+   upcoming sessions, every date on it reading "… · Narberth" / "… ·
+   Ashbridge", both locations' calendar events pointing at the same link, and
+   a test submission landing as rows at the right location. Then register on
+   it and confirm the lunch counts still split per location on
+   Master_Lunch_Dashboard.
+10. **Before the first sync on the new calendar IDs**, read #5 above and decide
    which case you're in. That one is easier to get right beforehand than to
    unpick afterwards.

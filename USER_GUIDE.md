@@ -41,9 +41,10 @@ calendar, so no settings go there.
 | `[Grouped]` | One continuous series — **one form** for the whole run |
 | `[Monthly]` | A **separate form per calendar month** (the default) |
 | `[Cap: 12, Grouped]` | Both. `[Cap: 12] [Grouped]` on separate lines works too. |
+| `[All Locations]` | This program's sessions at **every** location share **one** form |
 
 You can write anything else you like in the description around them — only
-brackets containing `Cap:`, `Grouped` or `Monthly` are read.
+brackets containing `Cap:`, `Grouped`, `Monthly` or `All Locations` are read.
 
 **Grouped vs Monthly** — this is just "how many forms?":
 
@@ -69,6 +70,48 @@ Say no and the cell goes straight back to what it was.
 > system reads them and logs a reminder to move them. New events should put
 > everything in the description.
 
+### One form across several locations
+
+`[Grouped]` and `[Monthly]` answer *"how many forms over time?"*. `[All
+Locations]` answers the other question: *"how many forms across places?"*
+
+Normally the same program at Narberth and at Ashbridge gets **two** forms —
+they're two separate things that happen to share a name. Put `[All Locations]`
+in the description and they become **one** program with **one** form and one
+roster, wherever it meets. It combines with the other tags:
+
+| In the description | It means |
+|---|---|
+| `[Grouped, All Locations]` | One form for the whole series, at every location |
+| `[Monthly, All Locations]` | One form per month, covering every location |
+| `[Cap: 12, All Locations]` | Shared form — and the cap still applies **per session**, not across them |
+
+`[Shared]`, `[All Sites]`, `[Combined]` and `[Multi-Site]` all mean the same
+thing, so whichever you reach for works.
+
+**What a shared form looks like to a registrant.** Every date says where it
+is — *"Mon, Jan 5, 2026 · Narberth"* — so someone can sign up for Tuesday at
+Narberth and Thursday at Ashbridge on one form. Lunch is still decided per date
+and location: a Zoom date on a shared form simply never appears in the lunch
+grid, and the lunch questions only come off the form when **none** of its
+locations caters.
+
+**The easy way to do it: `🔗 Link Program Across Locations…`** on the menu. Type
+the program name, and it tags the events at every location for you *and* moves
+the sessions already on the dashboard onto one form — pointing every upcoming
+calendar event at it. Tagging by hand only affects dates that haven't been
+imported yet, which is usually not what you want on a calendar that's already
+running. Run the same menu item again on a linked program to unlink it.
+
+> **Tag every location, or none.** An event that carries the tag joins the
+> shared form; one that doesn't keeps its own. If you tag Narberth's copies and
+> forget Ashbridge's, the system will do exactly that and tell you it did — it
+> shows up in the log and in the admin email as "only partly linked".
+
+> **What doesn't change:** capacity, waitlisting, lunch counts, the dashboards
+> and the registrant list are all still **per session**. A shared form is one
+> place to sign up, not one shared headcount.
+
 **Tentative events** — start the **title** with `*`:
 
 | Title | Result |
@@ -78,6 +121,14 @@ Say no and the cell goes straight back to what it was.
 
 Use it while a date is still being confirmed. Remove the `*` and the event flows
 through normally on the next sync and gets its form.
+
+**Use the same `*` to mark a session that ISN'T happening.** If you cancel one
+week of a recurring program, put a `*` in front of whatever you'd normally call
+it — `*NO Tai Chi`, `*Tai Chi — cancelled` — and leave the event on the
+calendar. Staff and anyone sharing the calendar can see the week is off, while
+the system skips it entirely: no form, no dashboard row, no lunch on the
+catering plan for that date. That's what the asterisk is for in general — *"on
+the calendar, but not a session."*
 
 > Removing the `*` is safe and creates no duplicates. Re-adding a `*` to an
 > event that *already* has registrations does **not** delete anything — existing
@@ -631,6 +682,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
 | **🔁 Apply Type Changes to Calendar** | Makes a Grouped/Monthly change typed on the dashboard stick, by writing it onto the calendar events |
+| **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. **Admin accounts only** |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
@@ -693,6 +745,7 @@ say no:
 |---|---|
 | Press **Sync Cal** | It can create forms, change form dates, and edit calendar descriptions |
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
+| Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Add a **walk-in** from the Quick Mark panel | It writes a person into the record, and into the catering count |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
@@ -1040,6 +1093,18 @@ Paste your CSV into the **➕ ADD MENU ITEMS** block at the bottom of
 **Lunch_Schedule**, or use **🍱 Add Menu Items (paste/upload CSV)…** on the
 menu. See [Adding menu items](#adding-menu-items--paste-csv).
 
+**Run one program at two locations off a single form**
+**🔗 Link Program Across Locations…** on the menu, type the program name, say
+yes. Every location's events get the `[All Locations]` tag, the sessions
+already on the dashboard move onto one form, and each date on that form now
+says where it is. See [One form across several
+locations](#one-form-across-several-locations).
+
+**Mark a week of a recurring program as cancelled**
+Rename that one event so its title starts with `*` — `*NO Tai Chi`. It stays on
+the calendar for everyone to see, and the system skips it: no form, no
+dashboard row, no lunch counted for that date.
+
 **Mark people in on the day**
 Use the **⚡ Quick Mark** panel at the top of
 **Lunch_and_Event_Registrants** — location, program, optionally a date, then
@@ -1130,6 +1195,16 @@ box with a note saying why.
 `Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
 can't always reach the calendar. Press **🔁 Apply Type Changes to Calendar**,
 then **Sync Cal**.
+
+**Only some locations ended up on the shared form**
+The `[All Locations]` tag is read per event, so the locations you didn't tag
+kept their own form. The log and the admin email both say which ones ("only
+partly linked"). Running **🔗 Link Program Across Locations…** tags them all.
+
+**A shared form's dates suddenly show location names**
+That's intended — a form covering more than one location labels every date
+with where it is, otherwise two sites meeting on the same day would be
+indistinguishable on the form.
 
 **Rows before this month are missing from a tab**
 They're hidden, not gone — see [Old months](#old-months). Press
