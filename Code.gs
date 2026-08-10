@@ -590,9 +590,14 @@ const NA_CELL_COLOR = '#E8E8E8';
 /** Grey used on a Lunch_Schedule/Master_Lunch_Dashboard Type cell reading "Not Serving". */
 const NOT_SERVING_COLOR = '#D9D9D9';
 
+// Day_1_In-Person / Day_1_Takeaway / Subs_In-Person / Subs_Takeaway used to be
+// hand-typed here too, but are now tallied automatically from the Registrants
+// tab's Dine_In_Count/Subs_Count/Meals_In_Fridge columns (see
+// buildDashboardRollup()) — the same way Served_Confirmed already worked — so
+// they're no longer offered as manual entry and get the protectDerivedColumns()
+// warning instead (see writeMasterLunchDashboardSheet()).
 const LUNCH_DASHBOARD_MANUAL_COLUMNS = [
-  'Standard_Buffer', 'Tester_Buffer', 'Actual_Ordered', 'Day_1_In-Person', 'Day_1_Takeaway',
-  'Subs_In-Person', 'Subs_Takeaway', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'
+  'Standard_Buffer', 'Tester_Buffer', 'Actual_Ordered', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'
 ];
 
 /**
@@ -827,11 +832,17 @@ const HEADERS = {
   // a glance.
   // Attended and Lunch_Served are the two DAY-OF columns: they're what staff
   // tick on the day, and they sit immediately after Name so marking a row is
-  // one glance and one click, with no horizontal scrolling. Everything the
-  // form supplied (Lunch_Type, Party_Size, Form_Source...) follows behind
-  // them, and the internal keys trail at the end.
+  // one glance and one click, with no horizontal scrolling. Dine_In_Count,
+  // Subs_Count and Meals_In_Fridge ride right behind Lunch_Served — they're
+  // the detail of HOW that meal was served, and buildDashboardRollup() tallies
+  // them straight into Master_Lunch_Dashboard's Day_1_*/Subs_* columns
+  // (Meals_In_Fridge unchecked -> In-Person, checked -> Takeaway), the same
+  // way Lunch_Served rolls into Served_Confirmed. Everything the form supplied
+  // (Lunch_Type, Party_Size, Form_Source...) follows behind them, and the
+  // internal keys trail at the end.
   Lunch_and_Event_Registrants: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+    'Dine_In_Count', 'Subs_Count', 'Meals_In_Fridge',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
@@ -839,6 +850,15 @@ const HEADERS = {
   // Registered_Count (what the forms say) and Served_Confirmed (what was
   // actually ticked off on the Registrants tab) sit side by side on purpose —
   // planned versus real is the comparison this tab exists to support.
+  //
+  // Day_1_In-Person / Day_1_Takeaway / Subs_In-Person / Subs_Takeaway are no
+  // longer hand-typed here (see LUNCH_DASHBOARD_MANUAL_COLUMNS): they're
+  // tallied by buildDashboardRollup() from Dine_In_Count/Subs_Count/
+  // Meals_In_Fridge on Lunch_and_Event_Registrants, the same way
+  // Served_Confirmed is tallied from Lunch_Served. updateMasterLunchDashboard()
+  // only overwrites a cell when the tally is greater than zero, so a value
+  // typed here before that wiring existed is left alone until the Registrants
+  // tab actually reports something for that date+location.
   //
   // The two BUFFER columns now trail at the very end, behind even the
   // consumption/reconciliation block. They are set once from Config and then
@@ -865,6 +885,7 @@ const HEADERS = {
   // landing in triage rows automatically, with no per-column wiring.
   Deleted_Event_Triage: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+    'Dine_In_Count', 'Subs_Count', 'Meals_In_Fridge',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
@@ -903,7 +924,15 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', '
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'];
 
 /** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
-const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
+const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served', 'Meals_In_Fridge'];
+
+/**
+ * Day-of NUMBER columns on Registrants — how many meals this row accounts for,
+ * split by type. Meals_In_Fridge (see REGISTRANT_DAYOF_COLUMNS) says whether
+ * those meals were served in-person or taken away, so buildDashboardRollup()
+ * can tally both into the right Master_Lunch_Dashboard column.
+ */
+const REGISTRANT_MEAL_COUNT_COLUMNS = ['Dine_In_Count', 'Subs_Count'];
 
 /** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */
 const TODAY_AT_LOCATIONS_HEADERS = ['Location', 'Programs Today', 'Sessions Today', 'Registered Today'];
@@ -9908,7 +9937,8 @@ function renderTriageSheet(force, allRows) {
  * dashboard's hand-entry columns, via labelManualEntryColumns()).
  */
 const REGISTRANT_EDITABLE_COLUMNS = [
-  'Attended', 'Lunch_Served', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
+  'Attended', 'Lunch_Served', 'Dine_In_Count', 'Subs_Count', 'Meals_In_Fridge',
+  'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
 ];
 
 /**
@@ -9942,6 +9972,18 @@ function applyRegistrantsFormatting(sheet, headers, result) {
       if (map[h] === undefined) return;
       sheet.getRange(z.start, map[h] + 1, z.count, 1)
         .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
+    // Whole meal counts, not free text — this is what buildDashboardRollup()
+    // sums into Master_Lunch_Dashboard's Day_1_*/Subs_* columns.
+    REGISTRANT_MEAL_COUNT_COLUMNS.forEach(h => {
+      if (map[h] === undefined) return;
+      sheet.getRange(z.start, map[h] + 1, z.count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation()
+          .requireNumberGreaterThanOrEqualTo(0)
+          .setAllowInvalid(false)
+          .build())
+        .setNumberFormat('0')
         .setHorizontalAlignment('center');
     });
   });
@@ -11427,6 +11469,32 @@ function buildDashboardRollup(registrantRows) {
         rollup[servedKey].servedConfirmed = (rollup[servedKey].servedConfirmed || 0) + 1;
       }
 
+      // Dine_In_Count / Subs_Count feed Master_Lunch_Dashboard's Day_1_*/
+      // Subs_* columns the same way Lunch_Served feeds Served_Confirmed —
+      // tallied unconditionally, before the Program_Status/Lunch_Status
+      // filter below, because a walk-in's actual meal counts whether or not
+      // they were ever registered. Meals_In_Fridge decides which bucket
+      // (In-Person vs Takeaway) each count lands in.
+      const dineInCount = Number(row[lrMap['Dine_In_Count']]) || 0;
+      const subsCount = Number(row[lrMap['Subs_Count']]) || 0;
+      if (dineInCount > 0 || subsCount > 0) {
+        const mealKey = `${meta.dateKey}|${meta.location}`;
+        if (!rollup[mealKey]) {
+          rollup[mealKey] = {
+            dateKey: meta.dateKey, location: meta.location,
+            registeredCount: 0, servedConfirmed: 0, unplanned: true
+          };
+        }
+        const bucket = rollup[mealKey];
+        if (isTruthyCheckbox(row[lrMap['Meals_In_Fridge']])) {
+          bucket.dayOneTakeaway = (bucket.dayOneTakeaway || 0) + dineInCount;
+          bucket.subsTakeaway = (bucket.subsTakeaway || 0) + subsCount;
+        } else {
+          bucket.dayOneInPerson = (bucket.dayOneInPerson || 0) + dineInCount;
+          bucket.subsInPerson = (bucket.subsInPerson || 0) + subsCount;
+        }
+      }
+
       if (row[lrMap['Program_Status']] !== 'Active' || row[lrMap['Lunch_Status']] !== 'Needed') return;
 
       if (getCateringPolicyForLocation(meta.location) === CATERING_POLICIES.NEVER) {
@@ -11563,6 +11631,17 @@ function updateMasterLunchDashboard(registrantRows) {
     // zero ("nobody turned up") and "not counted yet" mean very different
     // things to whoever reconciles this, and 0 would assert the first.
     row[map['Served_Confirmed']] = r.servedConfirmed > 0 ? r.servedConfirmed : '';
+
+    // Day_1_*/Subs_* only move when the Registrants tab actually reports a
+    // meal for this date+location — a zero tally leaves whatever is already
+    // in the cell alone, rather than blanking out a value someone typed
+    // before this wiring existed (or that a still-manual date's staff typed
+    // by hand). Once real counts start coming in from Dine_In_Count/
+    // Subs_Count they take over automatically, same as Served_Confirmed did.
+    if (r.dayOneInPerson > 0) row[map['Day_1_In-Person']] = r.dayOneInPerson;
+    if (r.dayOneTakeaway > 0) row[map['Day_1_Takeaway']] = r.dayOneTakeaway;
+    if (r.subsInPerson > 0) row[map['Subs_In-Person']] = r.subsInPerson;
+    if (r.subsTakeaway > 0) row[map['Subs_Takeaway']] = r.subsTakeaway;
   });
 
   writeMasterLunchDashboardSheet(sheet, plan, headers,
@@ -11795,7 +11874,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   // editable on purpose: switching a row to "Manually Added" is precisely how
   // staff tell the sync to stop managing it.
   protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed'],
+    ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed',
+      'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway'],
     zones);
 
   // Nothing on this tab is an internal key, so nothing is hidden — but the

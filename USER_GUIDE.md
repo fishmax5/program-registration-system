@@ -220,13 +220,12 @@ The columns you read first are at the **front**:
 |---|---|
 | `Registered_Count` | What the **forms** say — how many asked for lunch |
 | `Served_Confirmed` | What **actually happened** — how many `Lunch_Served` boxes you ticked on the Registrants tab |
-| `Lunches_Assigned_To_Registrants` | Not editable. Counts registrants whose `Lunch_Assignment` (see the Registrants tab) was explicitly set to this date+location — for reconciling meals eaten on a different day/location than originally registered |
 | `Total_to_Order` | Live formula: `Registered_Count + Standard_Buffer + Tester_Buffer` |
 
-`Served_Confirmed` and `Lunches_Assigned_To_Registrants` both stay **blank**
-until something has actually been ticked/assigned — a real `0` ("nobody came")
-and "not counted yet" mean very different things, so neither claims the first.
-`Served_Confirmed` counts every tick, including walk-ins who never registered.
+`Served_Confirmed` stays **blank** until something has actually been ticked —
+a real `0` ("nobody came") and "not counted yet" mean very different things, so
+it doesn't claim the first. It counts every tick, including walk-ins who never
+registered.
 
 > **Changing a `Program_Status` or `Lunch_Status` on the Registrants tab
 > updates these numbers straight away** — you don't wait for the hourly sync,
@@ -235,13 +234,21 @@ and "not counted yet" mean very different things, so neither claims the first.
 > happens dozens of times an hour at a sign-in desk, and `Served_Confirmed` is
 > a record of what happened rather than a number you order against.)
 
+`Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` are
+**not typed here any more** — they're totaled automatically from the
+Registrants tab's `Dine_In_Count` / `Subs_Count` / `Meals_In_Fridge` columns
+(see [Lunch_and_Event_Registrants](#3-lunch_and_event_registrants) below),
+the same way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only
+updates once the Registrants tab actually reports a meal for that
+date+location — it never gets blanked back out, so a number typed here before
+this existed (or on a date nobody has logged counts for yet) is left alone.
+
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
 system never overwrites them. They sit **after** the numbers you order against,
 because they're reconciliation detail and were pushing those numbers off the
 screen:
 
-`Actual_Ordered` · `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` ·
-`Subs_Takeaway` · `Total_Consumed` · `Thrown_Away` · `Discrepancy`
+`Actual_Ordered` · `Total_Consumed` · `Thrown_Away` · `Discrepancy`
 
 …and the two **buffer** columns are at the **very end** of the row:
 
@@ -315,7 +322,8 @@ for you.
 #### The columns
 
 `Event_Date`, `Location` and `Event` lead the row, then **`Name`, `Attended`,
-`Lunch_Served`** — so who-they-are and did-they-come sit together with no
+`Lunch_Served`, `Dine_In_Count`, `Subs_Count`, `Meals_In_Fridge`** — so
+who-they-are, did-they-come, and what-they-ate sit together with no
 scrolling.
 
 | Column | What it tells you |
@@ -324,8 +332,9 @@ scrolling.
 | `Location` / `Event` | Which program and location this row belongs to |
 | ✍️ `Attended` | **Yours to tick.** They turned up |
 | ✍️ `Lunch_Served` | **Yours to tick.** They were actually fed — this is what `Served_Confirmed` on the lunch dashboard counts |
-| ✍️ `Serving_Method` | **Yours to set.** How the meal was served — Day 1 In-Person, Day 1 Takeaway, Subs In-Person, Subs Takeaway |
-| ✍️ `Lunch_Assignment` | **Yours to set.** A dropdown of every scheduled lunch (from Lunch_Schedule) — set it when this person's meal should count against a *different* date/location than the one they registered for. Rolls up into `Lunches_Assigned_To_Registrants` on Master_Lunch_Dashboard |
+| ✍️ `Dine_In_Count` | **Yours to fill in.** How many meals from this row were the regular Day 1 meal — usually 1, but can be more for a party sharing one row |
+| ✍️ `Subs_Count` | **Yours to fill in.** How many "sub" (substitute) meals from this row were served instead |
+| ✍️ `Meals_In_Fridge?` | **Yours to tick.** Whether this row's meals were put in the fridge for later rather than eaten now. Unticked = In-Person, ticked = Takeaway — this is what splits `Dine_In_Count`/`Subs_Count` into the `Day_1_In-Person`/`Day_1_Takeaway`/`Subs_In-Person`/`Subs_Takeaway` totals on Master_Lunch_Dashboard |
 | `Person_Type` | `Attendee` (registered themselves) or `Guest` |
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
