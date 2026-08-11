@@ -5027,6 +5027,7 @@ function buildAppMenu(ui, includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
       .addItem('🧱 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
       .addItem('🔗 Rewrite Event Links (fix duplicates)', 'rewriteEventRegistrationLinks')
+      .addItem('💣 Destroy & Rebuild Forms…', 'destroyAndRebuildAllForms')
       .addSeparator()
       .addItem('Trigger Status', 'showTriggerStatus')
       .addItem('Check Triggers', 'writeTriggers')
@@ -14459,10 +14460,53 @@ function createCombinedRegistrationForm(sessionRows, map, requestedTitle) {
 
   const locations = locationsOfSessions(sessions);
   const titles = distinctSessionTitles(sessions);
-  const isClub = sessionRows.some(row => isClubColumnValue(row[map['Club']]));
   const formTitle = String(requestedTitle || '').trim() ||
     `${titles.slice(0, 2).join(' + ')}${titles.length > 2 ? ' + more' : ''} — ` +
     `${formatDateLabel(sessions[0].date)} onward`;
+
+  const created = createFormFromSpec({
+    sessions,
+    locations,
+    showLocation: locations.length > 1,
+    // showTitle: this form's whole point is that its dates belong to different
+    // programs, so every row says which — see formatSessionLabel().
+    showTitle: titles.length > 1,
+    // A combined form is one form for one fixed list of dates, which is what
+    // Grouped means — and what makes "sign up for every date on this form"
+    // the truthful wording.
+    isFixed: true,
+    isClub: sessionRows.some(row => isClubColumnValue(row[map['Club']])),
+    programTitle: titles.length === 1 ? titles[0] : ''
+  }, formTitle, 'combined form');
+  if (!created) return null;
+
+  log(`Created combined registration form "${formTitle}" (${created.formId}) covering ${sessions.length} ` +
+    `session(s) across ${titles.length} program(s).`);
+  return created;
+}
+
+/**
+ * Copies the template and dresses the copy up for one specific set of
+ * sessions: title, description, sign-up options, lunch questions, date labels,
+ * footer note, version stamp.
+ *
+ * `spec` is deliberately the same shape buildFormSessionContext() returns —
+ * sessions, locations, showLocation, showTitle, isFixed, isClub, programTitle,
+ * capacityHints — so a caller holding a live form's context can rebuild it
+ * without translating anything, and a caller inventing a new grouping can hand
+ * over a literal.
+ *
+ * Every "a brand-new form appears" path goes through here: the combined-form
+ * builder above and the destroy-and-rebuild sweep in section 11. The
+ * per-group createRegistrationForm() deliberately does NOT — it is on the sync
+ * hot path and works from a calendar group rather than from sheet rows.
+ *
+ * Returns { formId, formTitle }, or null if the sessions are empty.
+ */
+function createFormFromSpec(spec, formTitle, context) {
+  const sessions = (spec.sessions || []).filter(s => s.date);
+  if (sessions.length === 0) return null;
+  const locations = spec.locations || locationsOfSessions(sessions);
 
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
@@ -14472,32 +14516,31 @@ function createCombinedRegistrationForm(sessionRows, map, requestedTitle) {
   try {
     form.setAcceptingResponses(true);
   } catch (err) {
-    log(`⚠️ Could not confirm "accepting responses" on combined form "${formTitle}" (${err}).`);
+    log(`⚠️ Could not confirm "accepting responses" on "${formTitle}" (${err}).`);
   }
   try {
     if (typeof form.setPublished === 'function') form.setPublished(true);
   } catch (err) {
-    log(`⚠️ Could not explicitly publish combined form "${formTitle}" (${err}).`);
+    log(`⚠️ Could not explicitly publish "${formTitle}" (${err}).`);
   }
 
-  // showTitle: this form's whole point is that its dates belong to different
-  // programs, so every row says which — see formatSessionLabel().
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, {
-    showLocation: locations.length > 1,
-    showTitle: titles.length > 1
+    showLocation: spec.showLocation,
+    showTitle: spec.showTitle,
+    capacityHints: spec.capacityHints
   });
 
-  form.setDescription(buildFormDescription(locations, allDateLabels, true, lunchDateLabels.length > 0,
-    { isClub, programTitle: titles.length === 1 ? titles[0] : '' }));
-  applyAttendanceModeChoices(form, { isFixed: true, isClub, programTitle: titles.length === 1 ? titles[0] : '' });
+  form.setDescription(buildFormDescription(locations, allDateLabels, spec.isFixed, lunchDateLabels.length > 0,
+    { isClub: spec.isClub, programTitle: spec.programTitle }));
+  applyAttendanceModeChoices(form,
+    { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle });
   syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0);
-  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'combined form' });
+  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels,
+    { form, force: true, context: context || 'new form' });
   applyFormFooterNote(form, buildFooterNoteForLocations(locations));
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
   flushPersistentRegistries();
 
-  log(`Created combined registration form "${formTitle}" (${form.getId()}) covering ${sessions.length} session(s) ` +
-    `across ${titles.length} program(s).`);
   return { formId: form.getId(), formTitle };
 }
 
@@ -14518,5 +14561,365 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
     });
   } catch (err) {
     log(`⚠️ Could not update the sign-up options on form ${formId} (${err}).`);
+  }
+}
+
+
+// ============================================================================
+// 11. DESTROY AND REBUILD FORMS  (the last resort, on the Admin menu)
+// ============================================================================
+//
+// THREE WAYS TO FIX A FORM, and it is worth knowing which one you want,
+// because they differ by exactly how much they throw away:
+//
+//   1. The hourly sync's own migration (migrateFormsToCurrentTemplate()) —
+//      rewrites a form's questions IN PLACE, keeping its ID. Automatic,
+//      invisible, and the right answer almost always.
+//   2. recheckAllRegistrationForms() — the same thing, on demand, for every
+//      form at once. Run it from the Apps Script editor when you don't want to
+//      wait an hour.
+//   3. THIS. Throws each form away and builds a brand-new one in its place.
+//
+// (3) exists for the cases (1) and (2) cannot reach: a form somebody has
+// hand-edited into a state the parser no longer recognizes, one whose
+// questions were deleted, one whose responses are corrupt, one that Google
+// itself will no longer open. In every one of those the form's ID is not an
+// asset worth keeping — it is the thing tying you to the broken object.
+//
+// WHAT IT COSTS, stated plainly because the menu item has to say it out loud:
+// every registration link already handed out STOPS WORKING. Old links point at
+// the old form, and the old form is in the Drive trash. Calendar descriptions
+// and dashboard links are rewritten here, so anything anyone reaches through
+// this system is fine — but a link in an email somebody sent last week, or on
+// a printed flyer, is not.
+//
+// WHAT IT DOES NOT COST: registrations. Responses already imported are rows on
+// Lunch_and_Event_Registrants and are untouched. Responses NOT yet imported
+// would be destroyed with the form, so this imports them first and refuses to
+// go on if that import fails — losing a registration to a maintenance action
+// is the one outcome that would make this tool not worth having.
+//
+// Past-only forms are left alone: their sessions have happened, their links
+// are nobody's route to anything, and replacing them would break the archive
+// for no gain.
+// ============================================================================
+
+/**
+ * How many forms one run will replace. Building a form is a few dozen Forms
+ * calls plus a Drive copy, and this runs from a menu click with a six-minute
+ * ceiling. Whatever is left is reported and picked up by running it again —
+ * the work is strictly decreasing, since a rebuilt form is skipped next time.
+ */
+const MAX_FORM_REPLACEMENTS_PER_RUN = 8;
+
+/** What the confirmation prompt makes you type. Deliberately not "yes". */
+const DESTROY_REBUILD_CONFIRM_WORD = 'REBUILD';
+
+/**
+ * ADMIN MENU ENTRY. Replaces every live registration form covering an upcoming
+ * session with a brand-new one built from the current template.
+ */
+function destroyAndRebuildAllForms() {
+  if (!requireAuthorizedAdmin('Destroy and Rebuild Forms')) return null;
+  if (isBootstrapActive()) {
+    toastIfPossible('A large-setup import is running — try this once it finishes.');
+    return null;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first.');
+    return null;
+  }
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map);
+  if (plan.length === 0) {
+    toastIfPossible('Nothing to rebuild — no form on this workbook covers an upcoming session.');
+    return null;
+  }
+
+  const preview = plan.slice(0, 6)
+    .map(p => `• ${p.describe} (${p.upcomingCount} upcoming date(s))`).join('\n');
+  const more = plan.length > 6 ? `\n…and ${plan.length - 6} more` : '';
+  const batched = plan.length > MAX_FORM_REPLACEMENTS_PER_RUN
+    ? `\n\nOnly the first ${MAX_FORM_REPLACEMENTS_PER_RUN} will be done this run — run it again for the rest.`
+    : '';
+
+  if (!confirmConsequentialAction('Destroy and rebuild every registration form?',
+    `${plan.length} form(s) would be REPLACED with brand-new ones:\n${preview}${more}${batched}\n\n` +
+    `⚠️ EVERY REGISTRATION LINK ALREADY HANDED OUT WILL STOP WORKING. The old forms go to the Drive ` +
+    `trash (recoverable for 30 days); anything still pointing at them — a link in an email you sent, a ` +
+    `printed flyer — leads to a dead form. Calendar event descriptions and the dashboard's links are ` +
+    `rewritten here, so those stay right.\n\n` +
+    `Registrations are NOT lost: outstanding responses are imported first, and rows already on ` +
+    `${SHEET_NAMES.LUNCH_EVENT_REGISTRANTS} are untouched.\n\n` +
+    `If a form is merely out of date, you do not want this — the hourly sync already rebuilds forms ` +
+    `IN PLACE, keeping their links. This is for a form that is broken beyond that.`, false)) {
+    return null;
+  }
+
+  // A second, deliberately awkward gate. The first dialog is a Yes/No, and a
+  // Yes/No is one mis-aimed click; this one cannot be answered by accident.
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    log('destroyAndRebuildAllForms: no UI available — this action has to be run from the menu, by a person.');
+    return null;
+  }
+  const typed = ui.prompt('Confirm: rebuild from scratch',
+    `Type ${DESTROY_REBUILD_CONFIRM_WORD} to replace ${plan.length} form(s). Anything else cancels.`,
+    ui.ButtonSet.OK_CANCEL);
+  if (typed.getSelectedButton() !== ui.Button.OK ||
+    String(typed.getResponseText() || '').trim().toUpperCase() !== DESTROY_REBUILD_CONFIRM_WORD) {
+    toastIfPossible('Cancelled — nothing was changed.');
+    return null;
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    toastIfPossible('A sync is already running — try again in a moment.');
+    return null;
+  }
+  try {
+    return runFormRebuildSweep(registrySheet, plan);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Works out which forms are worth replacing, grouped exactly as they are TODAY
+ * — one new form per old form.
+ *
+ * Grouping by current Form_ID rather than re-deriving groups from the calendar
+ * is the whole point: it preserves whatever arrangement the workbook is
+ * actually in, including cross-location forms and hand-built combined ones. A
+ * rebuild should hand back what you had, not what a fresh import would have
+ * built.
+ *
+ * A form with no upcoming sessions is skipped — see the section note.
+ */
+function planFormRebuilds(sessionRows, map) {
+  const byForm = groupRegistryRowsByForm(sessionRows, map);
+  const sharedFormIds = getSharedFormIdSet();
+  const todayKey = formatDateKey(new Date());
+  const plan = [];
+
+  Object.keys(byForm).forEach(formId => {
+    const rows = byForm[formId];
+    const upcoming = rows.filter(row => {
+      const d = coerceDate(row[map['Event_Date']]);
+      return d && formatDateKey(d) >= todayKey;
+    });
+    if (upcoming.length === 0) return; // past business — leave its link alone
+
+    // Built from the UPCOMING rows only. A rebuilt form should offer the dates
+    // somebody can still sign up for, not re-list a term that has finished.
+    const context = buildFormSessionContext(formId, upcoming, map, sharedFormIds);
+    if (context.sessions.length === 0) return;
+
+    plan.push({
+      oldFormId: formId,
+      context,
+      upcomingCount: upcoming.length,
+      eventIds: new Set(upcoming.map(row => String(row[map['Event_ID']] || '').trim()).filter(Boolean)),
+      describe: `${context.titles.slice(0, 2).join(', ')}${context.titles.length > 2 ? '…' : ''} ` +
+        `(${describeLocations(context.locations)})`
+    });
+  });
+
+  return plan.sort((a, b) => a.describe.localeCompare(b.describe));
+}
+
+/**
+ * Does the work: import first, then replace each form, then bring everything
+ * that references a form back into agreement.
+ */
+function runFormRebuildSweep(registrySheet, plan) {
+  const result = { replaced: 0, failed: 0, deferred: 0, importFailed: false };
+
+  // IMPORT BEFORE DESTROYING. A response submitted since the last sync lives
+  // only on the form, and trashing the form takes it with it. This is the one
+  // step that makes the whole action safe, so a failure here aborts rather
+  // than being logged and stepped over.
+  toastIfPossible('Importing outstanding registrations before rebuilding…');
+  try {
+    syncRegistrationsInternal();
+  } catch (err) {
+    result.importFailed = true;
+    const message = `⚠️ Nothing was rebuilt. The registrations on the current forms could not be imported ` +
+      `first (${err}), and rebuilding would have destroyed any that had not come across yet. ` +
+      `Fix the import, or run "Sync Registrations" by hand, then try again.`;
+    log(`destroyAndRebuildAllForms: aborted — ${err}`);
+    toastIfPossible(message);
+    try { SpreadsheetApp.getUi().alert(message); } catch (uiErr) { /* no UI */ }
+    return result;
+  }
+
+  // RE-READ THE PLAN. The import above re-renders the dashboard and can move
+  // rows (its triage pass sends sessions whose calendar event has gone to
+  // Triage), so the contexts gathered for the confirmation dialog a moment ago
+  // may now describe dates that no longer exist. Rebuilding is restricted to
+  // the forms the user actually agreed to, but the SESSIONS on each one are
+  // taken fresh — otherwise a new form could be built listing a session that
+  // was triaged away between the click and the work.
+  const confirmed = new Set(plan.map(item => item.oldFormId));
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const currentPlan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+    .filter(item => confirmed.has(item.oldFormId));
+
+  for (const item of currentPlan) {
+    if (result.replaced >= MAX_FORM_REPLACEMENTS_PER_RUN) {
+      result.deferred++;
+      continue;
+    }
+    try {
+      if (replaceOneForm(registrySheet, item)) result.replaced++;
+      else result.failed++;
+    } catch (err) {
+      result.failed++;
+      log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
+      noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
+    }
+  }
+
+  if (result.replaced > 0) {
+    SpreadsheetApp.flush();
+    // Every event still carries a link to a form that is now in the trash.
+    rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+    renderProgramDashboard(false, { skipTriage: true });
+  }
+  flushPersistentRegistries();
+  flushAdminDigest('Destroy and rebuild forms');
+
+  const summary = `Rebuilt ${result.replaced} form(s)` +
+    (result.failed > 0 ? `, ${result.failed} failed` : '') +
+    (result.deferred > 0 ? `, ${result.deferred} left — run it again to continue` : '') +
+    '. Old forms are in the Drive trash.';
+  log(`destroyAndRebuildAllForms: ${summary}`);
+  toastIfPossible(`✅ ${summary}`);
+  return result;
+}
+
+/**
+ * Replaces ONE form: build the new one, point its sessions at it, carry the
+ * persistent registries across, then trash the old one.
+ *
+ * ORDER MATTERS, and it is the conservative one. The new form is built and the
+ * sheet is repointed BEFORE anything is trashed, so every failure mode leaves
+ * a working form somewhere: fail while building and nothing has changed; fail
+ * after building and the sessions are on a good new form with the old one
+ * still sitting there harmlessly. The only thing a crash can leave behind is
+ * an unused form in the Drive folder, which is noise, not damage.
+ */
+function replaceOneForm(registrySheet, item) {
+  const context = item.context;
+  const formTitle = readFormTitleOrDerive(item.oldFormId, context);
+
+  const created = createFormFromSpec(context, formTitle, 'destroy and rebuild');
+  if (!created) {
+    log(`⚠️ Rebuild skipped for ${item.describe}: no usable sessions to put on a form.`);
+    return false;
+  }
+
+  const moved = writeFormIdOntoSessions(registrySheet, item.eventIds, created.formId);
+  if (moved === 0) {
+    log(`⚠️ Rebuild for ${item.describe} built form ${created.formId} but moved no session rows onto it — ` +
+      `the old form has been left in place. Check the dashboard's Form_ID column.`);
+    return false;
+  }
+
+  remapFormRegistries(item.oldFormId, created.formId);
+  trashReplacedForm(item.oldFormId, item.describe);
+
+  log(`Rebuilt ${item.describe}: ${moved} session(s) moved from form ${item.oldFormId} to ${created.formId}.`);
+  noteForAdmin('Registration forms rebuilt from scratch',
+    `${item.describe} — a new form replaced ${item.oldFormId}. Any link handed out before now points at the ` +
+    `old form, which is in the Drive trash. The calendar events and the dashboard have the new link.`);
+  return true;
+}
+
+/** The old form's own title if it can still be opened, else one derived from its sessions. */
+function readFormTitleOrDerive(oldFormId, context) {
+  try {
+    const title = String(FormApp.openById(oldFormId).getTitle() || '').trim();
+    if (title) return title;
+  } catch (err) {
+    // Expected often enough to be worth not shouting about: a form nobody can
+    // open is one of the main reasons to be running this at all.
+    log(`ℹ️ Could not read the old title of form ${oldFormId} (${err}) — naming the replacement from its sessions.`);
+  }
+  const titles = context.titles || [];
+  const base = titles.length > 0
+    ? `${titles.slice(0, 2).join(' + ')}${titles.length > 2 ? ' + more' : ''}`
+    : 'Registration';
+  return `${base} — ${describeLocations(context.locations)}`;
+}
+
+/**
+ * Carries the per-form bookkeeping from the old ID to the new one.
+ *
+ * The ALL_DATES registry is the one that would actually hurt to lose: it is
+ * keyed by Form_ID and holds everyone who chose "sign up for every date", which
+ * is what keeps them being added to dates the series gains later. Dropping it
+ * would silently stop those people being booked, with nothing anywhere saying
+ * why. The group -> form map is remapped for the same reason in miniature: the
+ * next sync would otherwise reuse a trashed form.
+ *
+ * The label fingerprint is DELETED rather than moved — it describes labels
+ * written to a form that no longer exists, and the new form has its own
+ * (written with force:true at build time).
+ */
+function remapFormRegistries(oldFormId, newFormId) {
+  const allDates = getAllDatesRegistry();
+  if (allDates[oldFormId]) {
+    allDates[newFormId] = (allDates[newFormId] || []).concat(allDates[oldFormId]);
+    delete allDates[oldFormId];
+    __allDatesRegistryDirty = true;
+  }
+
+  const registry = getPersistentFormRegistry();
+  Object.keys(registry).forEach(groupKey => {
+    if (registry[groupKey] !== oldFormId) return;
+    registry[groupKey] = newFormId;
+    __formRegistryDirty = true;
+  });
+
+  const fingerprints = getFormLabelFingerprints();
+  if (fingerprints[oldFormId]) {
+    delete fingerprints[oldFormId];
+    __formLabelFingerprintDirty = true;
+  }
+
+  const versions = getFormTemplateVersions();
+  if (versions[oldFormId]) {
+    delete versions[oldFormId];
+    __formTemplateVersionDirty = true;
+  }
+
+  invalidateFormItemIndex(oldFormId);
+  flushPersistentRegistries();
+}
+
+/**
+ * Moves the replaced form to the Drive trash — recoverable for 30 days, which
+ * is the right level of destructive for something a person triggered from a
+ * menu. Never a hard delete.
+ *
+ * A failure here is logged, not raised: by this point the sessions are already
+ * on the new form and everything downstream is correct. An old form left
+ * sitting in the folder is untidy, not broken.
+ */
+function trashReplacedForm(oldFormId, describe) {
+  try {
+    DriveApp.getFileById(oldFormId).setTrashed(true);
+  } catch (err) {
+    log(`ℹ️ Rebuilt ${describe}, but the old form ${oldFormId} could not be trashed (${err}) — ` +
+      `nothing points at it any more; delete it by hand if you want it gone.`);
   }
 }

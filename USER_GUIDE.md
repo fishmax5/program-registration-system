@@ -884,6 +884,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 |---|---|
 | **🧱 Rebuild Layout (no calendar sync)** | Redraws every tab from the rows already in the workbook — see [Updating to a new version](#updating-to-a-new-version) |
 | **🔗 Rewrite Event Links (fix duplicates)** | Strips every registration link off upcoming events and writes back one — see [Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions) |
+| **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
 | **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates. **Trigger-owner account only** |
 | **Take Over Trigger Ownership** | Moves ownership to your account, if the recorded owner is gone. Warns you that it can't delete their triggers |
@@ -990,6 +991,54 @@ You can print for a **lunch-only day** (a meal with no programming behind it) �
 those appear in the picker as *"…(lunch only)"*.
 
 PDFs are filed in a Drive folder called **Printed Sign-In Sheets**.
+
+---
+
+## Destroy and rebuild forms
+
+**🔧 Admin ▸ 💣 Destroy & Rebuild Forms…** — the last resort, and almost
+certainly not what you want.
+
+**Try the gentler thing first.** Every registration sync already rebuilds
+out-of-date forms **in place, keeping their links** — nobody has to do
+anything, and no link breaks. If you don't want to wait for the next hourly
+run, `recheckAllRegistrationForms()` from the Apps Script editor does the same
+sweep immediately. Between them they fix a form that is merely out of date.
+
+**This is for a form that's broken past that:** hand-edited into a state the
+system can't read, questions deleted, responses corrupt, or one Google won't
+open at all. In those cases the form's ID isn't worth keeping — it's the thing
+tying you to the broken object.
+
+**What it does.** For every form covering an **upcoming** session:
+
+1. **Imports outstanding registrations first.** A response submitted since the
+   last sync lives only on the form, and throwing the form away would take it
+   with it. If that import fails, **nothing is rebuilt** — you'll get a message
+   saying so.
+2. Builds a brand-new form from the current template, covering that form's
+   upcoming dates, keeping its name and its arrangement (a cross-location form
+   stays cross-location; a combined form stays combined).
+3. Repoints the dashboard's `Form_ID` and both link columns, and rewrites the
+   registration link in every affected **calendar event**.
+4. Moves the old form to the **Drive trash** — recoverable for 30 days, never
+   hard-deleted.
+
+**⚠️ Every registration link already handed out stops working.** Anything this
+system controls is updated for you. A link in an email somebody sent last week,
+or on a printed flyer, points at a trashed form.
+
+**What survives:** all registrations. Rows on Lunch_and_Event_Registrants are
+untouched, club memberships are untouched, and "sign up for every date"
+registrants are carried across to the new form so they keep being booked onto
+dates the series gains later.
+
+**Forms with no upcoming sessions are left alone.** They're closed business,
+their links are nobody's route to anything, and replacing them would break the
+archive for nothing.
+
+It asks twice: a summary you can read, then a box you have to type `REBUILD`
+into. Eight forms per run — run it again for the rest.
 
 ---
 
