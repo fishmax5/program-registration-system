@@ -15,6 +15,8 @@ the spreadsheet fills itself in.
    tab, one row per person per session.
 4. **Master_Lunch_Dashboard** adds up who needs lunch each day so you know what
    to order.
+5. On the day, print a **sign-in sheet** to mark up by hand, or use
+   **⚡ Quick Mark** at the top of the Registrants tab.
 
 Everything runs on a schedule. You rarely need to press anything.
 
@@ -42,9 +44,11 @@ calendar, so no settings go there.
 | `[Monthly]` | A **separate form per calendar month** (the default) |
 | `[Cap: 12, Grouped]` | Both. `[Cap: 12] [Grouped]` on separate lines works too. |
 | `[All Locations]` | This program's sessions at **every** location share **one** form |
+| `[Club]` | People **join once and stay joined** — see [Clubs](#clubs) |
 
 You can write anything else you like in the description around them — only
-brackets containing `Cap:`, `Grouped`, `Monthly` or `All Locations` are read.
+brackets containing `Cap:`, `Grouped`, `Monthly`, `All Locations` or `Club`
+are read.
 
 **Grouped vs Monthly** — this is just "how many forms?":
 
@@ -111,6 +115,58 @@ running. Run the same menu item again on a linked program to unlink it.
 > **What doesn't change:** capacity, waitlisting, lunch counts, the dashboards
 > and the registrant list are all still **per session**. A shared form is one
 > place to sign up, not one shared headcount.
+
+### Clubs
+
+`[Grouped]`/`[Monthly]` answer *"how many forms?"*. `[All Locations]` answers
+*"how many places?"*. `[Club]` answers a third question entirely: **does
+signing up once keep you signed up?**
+
+A club is a program with a **membership** rather than a series of one-off
+sign-ups — the Thursday Book Club, the knitting circle. Put `[Club]` in the
+description and three things change:
+
+1. The registration form grows a **third** sign-up option:
+   *"I want to sign up for all future Book Club meetings."*
+2. Anyone who picks it lands on the **Club_Members** tab, and is booked into
+   **every** session of that club from then on — including next month's, on a
+   form that doesn't exist yet.
+3. Staff can take somebody back off, at any time, by unticking one box.
+
+It composes with everything else, which is the point of making it its own tag:
+
+| In the description | It means |
+|---|---|
+| `[Club]` | A club, with a new form each month (the default span) |
+| `[Club, Grouped]` | A club, one form for its whole run |
+| `[Club, Cap: 12]` | A club with a per-session cap |
+| `[Club, All Locations]` | One club that meets at more than one site, on one form |
+
+`[Membership]` and `[Members Only]` read as the same tag.
+
+**A club's roster follows the PROGRAM, not the form.** That's what makes a
+`[Club, Monthly]` work: January's form and February's form are different forms,
+and the same people are on both without anyone re-registering.
+
+**Adding `[Club]` to a program that already has dates works.** The next
+**Sync Cal** updates the `Club` column on every one of its sessions — you don't
+have to wait for a new date to appear.
+
+**Taking someone off a club** — the reason the tab exists. Nobody re-opens a
+registration form to un-sign-up, so the off switch has to live where staff are:
+
+1. Open **Club_Members**.
+2. Find their row and untick **Active**.
+3. You'll be asked whether to cancel the bookings that membership has already
+   made for upcoming sessions. **Yes** marks those rows `Cancelled` (never
+   deleted) and takes them out of the catering counts; **No** leaves those
+   dates alone and simply stops renewing.
+
+Re-tick **Active** and they're booked back in on the next sync.
+
+> **A member who signs up through a form again comes back on**, even if you'd
+> made them inactive — that's them asking, in the only way a form lets them ask.
+> It's reported in the admin email so it's never a silent surprise.
 
 **Tentative events** — start the **title** with `*`:
 
@@ -234,14 +290,22 @@ registered.
 > happens dozens of times an hour at a sign-in desk, and `Served_Confirmed` is
 > a record of what happened rather than a number you order against.)
 
-`Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` are
-**not typed here any more** — they're totaled automatically from the
-Registrants tab's `Dine_In_Count` / `Subs_Count` / `Meals_In_Fridge` columns
-(see [Lunch_and_Event_Registrants](#3-lunch_and_event_registrants) below),
-the same way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only
-updates once the Registrants tab actually reports a meal for that
-date+location — it never gets blanked back out, so a number typed here before
-this existed (or on a date nobody has logged counts for yet) is left alone.
+`Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` ·
+`In_Fridge` are **not typed here any more** — they're totaled automatically
+from the five per-person meal counts on the Registrants tab (see
+[Lunch_and_Event_Registrants](#3-lunch_and_event_registrants) below), the same
+way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only updates once
+the Registrants tab actually reports a meal for that date+location — it never
+gets blanked back out, so a number typed here before this existed (or on a date
+nobody has logged counts for yet) is left alone.
+
+**`Standard_Buffer` and `Tester_Buffer` aren't typed here either.** They're
+**read from Config** on every render, for that row's location and Hot/Cold type.
+They used to be yellow hand-entry columns that were only ever written once, when
+the row was first created — and written as `0` if nobody had registered yet,
+which is why every upcoming date showed a zero buffer no matter what Config
+said. Change a buffer in **Config ▸ 🍱 Meal Buffer Amounts** and every row
+follows on the next render.
 
 Columns with a **✍️ pencil and a yellow header are yours to fill in** — the
 system never overwrites them. They sit **after** the numbers you order against,
@@ -273,12 +337,22 @@ The panel at the **top of this tab** is how you tick people in on the day,
 without hunting for their row:
 
 1. **Location** — pick from the dropdown.
-2. **Program** — **every** program at that location, past and present,
-   **soonest first**. Not just the ones somebody has already registered for.
-3. **Name** — the people registered for that program first, then **everyone
-   else on Member_Roll**. You can also just **type a name** that isn't on
-   either list.
+2. **Program + Date** — one entry per **session**, each naming its date,
+   **nearest first**: *"Chair Yoga · Wed, Sep 16"*. Every program at that
+   location is offered, past and present, not just the ones somebody has
+   already registered for. The list also includes **🥡 Lunch Only (no
+   program)** for each catered day, for someone who came in only for the meal.
+3. **Name** — the people registered for **that session** first, then
+   **everyone else on Member_Roll**. You can also just **type a name** that
+   isn't on either list.
 4. Tick **✓ Attended**, **✓ Lunch**, or **🥡 Lunch Only**.
+
+> **Why the dates.** The dropdown used to hold bare program names, so a tick
+> meant "the nearest session" and nothing else — fine for marking somebody who
+> is standing in front of you, useless for correcting last Thursday or marking
+> someone off for a session two weeks out. Pick a dated entry and it marks
+> exactly that session. Programs whose sessions have aged off the dashboard
+> entirely still appear undated, and fall back to the old nearest-session rule.
 
 That's it. The system finds that person's row wherever it is, ticks it, tells
 you what it did on the line underneath, and clears itself for the next person.
@@ -322,9 +396,8 @@ for you.
 #### The columns
 
 `Event_Date`, `Location` and `Event` lead the row, then **`Name`, `Attended`,
-`Lunch_Served`, `Dine_In_Count`, `Subs_Count`, `Meals_In_Fridge`** — so
-who-they-are, did-they-come, and what-they-ate sit together with no
-scrolling.
+`Lunch_Served`** and the five meal counts — so who-they-are, did-they-come, and
+what-they-ate sit together with no scrolling.
 
 | Column | What it tells you |
 |---|---|
@@ -332,9 +405,13 @@ scrolling.
 | `Location` / `Event` | Which program and location this row belongs to |
 | ✍️ `Attended` | **Yours to tick.** They turned up |
 | ✍️ `Lunch_Served` | **Yours to tick.** They were actually fed — this is what `Served_Confirmed` on the lunch dashboard counts |
-| ✍️ `Dine_In_Count` | **Yours to fill in.** How many meals from this row were the regular Day 1 meal — usually 1, but can be more for a party sharing one row |
-| ✍️ `Subs_Count` | **Yours to fill in.** How many "sub" (substitute) meals from this row were served instead |
-| ✍️ `Meals_In_Fridge?` | **Yours to tick.** Whether this row's meals were put in the fridge for later rather than eaten now. Unticked = In-Person, ticked = Takeaway — this is what splits `Dine_In_Count`/`Subs_Count` into the `Day_1_In-Person`/`Day_1_Takeaway`/`Subs_In-Person`/`Subs_Takeaway` totals on Master_Lunch_Dashboard |
+| ✍️ `Day1_Dined_In` | **Yours to fill in.** Day-1 meals this person **ate here** |
+| ✍️ `Day1_Taken_Out` | **Yours to fill in.** Day-1 meals this person **carried out** |
+| ✍️ `Subs_Dined_In` | **Yours to fill in.** Subs eaten here |
+| ✍️ `Subs_Taken_Out` | **Yours to fill in.** Subs carried out |
+| ✍️ `Meals_In_Fridge` | **Yours to fill in.** How many of their meals went in the fridge to collect later |
+| ✍️ `Phone` | From the form. Correct it here if it's wrong |
+| `Email` | From the form. What a calendar invitation is sent to |
 | `Person_Type` | `Attendee` (registered themselves) or `Guest` |
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
@@ -348,6 +425,23 @@ scrolling.
 **✍️ and yellow means yours to fill in** — the same convention as every other
 tab. Everything without it came from a form or is worked out automatically, and
 will be overwritten if you type in it (you'll get a warning if you try).
+
+> **One person, several different meals.** The five meal counts are
+> **independent**, which is the whole point of them: Joe eats the day-1 meal in
+> the dining room *and* takes two subs home, so his row reads
+> `Day1_Dined_In = 1`, `Subs_Taken_Out = 2`. That's four meals accounted for,
+> attached to the person who took them — not just added to the day's total.
+> Each count feeds exactly one column on Master_Lunch_Dashboard
+> (`Day_1_In-Person`, `Day_1_Takeaway`, `Subs_In-Person`, `Subs_Takeaway`,
+> `In_Fridge`), and those are the same four count columns on the
+> [printed sign-in sheet](#printed-sign-in-sheets), in the same order — so
+> typing a finished paper sheet back in is column-for-column.
+>
+> This replaced a single `Meals_In_Fridge` **checkbox** that flipped a row's
+> whole meal count between "eaten here" and "taken away". That couldn't say
+> "some of each", which is what actually happens at the counter. Rows written
+> under the old scheme are read across automatically on the first render, with
+> ticked-fridge rows counted as taken away exactly as they were before.
 
 `Event_ID`, `Party_ID` and `Form_Source` are **hidden** — internal plumbing.
 Unhide them from Google Sheets' column menu if you're troubleshooting.
@@ -527,16 +621,19 @@ the recomputed history shows them attending.
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
 ### 6. Config
-Six small settings blocks:
+Seven small settings blocks:
 
-- **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold, used to
-  pre-fill new lunch rows
+- **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold. **This is
+  the only place buffers are set.** Master_Lunch_Dashboard re-reads them here on
+  every render, so the two can't disagree — and the column of zeroes that used
+  to appear on dates with no registrations yet is gone with it.
 - **⏰ Order Ahead Time** — how many days' notice you need. Registrations
   inside that window get flagged.
 - **📧 Admin Notifications** — one email address (optional)
 - **🍽️ Lunch Service by Location** — see below
 - **🔗 Registration Link in Events** — see below
 - **⚙️ Automation & Trigger Ownership** — see below
+- **📧 Calendar Invitations** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -612,7 +709,52 @@ is, so you know who to ask instead of guessing. This is what stops a second,
 invisible set of triggers from ever being created. See
 [Admin-only actions](#admin-only-actions).
 
-### 7. Deleted_Event_Triage
+#### 📧 Calendar Invitations
+
+Whether registrants are added as **guests on the real Google Calendar event**,
+so the program lands in their own calendar with Google's own reminders.
+
+| Setting | Effect |
+|---|---|
+| **Invite registrants** (default) | Anyone actively registered for an **upcoming** session, who gave an email address, is added as a guest. Google emails them an invitation. |
+| **Do not invite** | Calendar events are left exactly as they are. |
+
+**This one sends mail to real people**, which is why it has a switch of its own
+and asks before you turn it on. Three rules keep it from being a nuisance:
+
+- **Upcoming sessions only.** Nobody is ever invited to something that already
+  happened.
+- **It works both ways.** Somebody whose registration is `Cancelled`,
+  `Superseded` or `Waitlisted` is **removed** from the guest list — a
+  cancellation shouldn't leave them holding an invitation.
+- **Once.** The system remembers who it has already invited, so a sync that
+  changes nothing sends nothing. Without that, every hourly run would re-add
+  the same guests and Google would notify them each time.
+
+It runs at the end of every registration sync, and on demand from
+**📧 Invite Registrants to Calendar Events**. At most 40 events are updated per
+run; anything left over goes out on the next one.
+
+> Registrants who didn't give an email address (walk-ins, club members added by
+> hand) are simply skipped. Nothing else about them changes.
+
+### 7. Club_Members
+The standing roster for every `[Club]` program — one row per person per club.
+See [Clubs](#clubs) for how people get here and how to take them off.
+
+The columns on the **left** are refreshed automatically (which club, where,
+contact details). The **yellow** ones are yours:
+
+| Column | What it's for |
+|---|---|
+| **Lunch** | Whether this member wants lunch at club meetings. Applied to every session booked for them. |
+| **Active** | The on/off switch. Untick to stop booking them; you'll be asked whether to cancel bookings already made. |
+| **Staff_Notes** | Anything you want to remember |
+
+`Club_Key` is hidden — it's the machine key that keeps a roster attached to its
+program across a new form every month.
+
+### 8. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
 their rows are moved here instead of being deleted, with a note. Follow up with
 those people, then clear the rows.
@@ -624,16 +766,28 @@ those people, then clear the rows.
 Every form is the same shape. **Page 1** asks:
 
 - **Name** (required)
-- **Guest 1 / 2 / 3 Name** — all optional. There's no "how many guests?"
-  question; the headcount is simply how many names they fill in.
-- **Attendance Mode**, which is the only fork in the form:
+- **Phone Number** (required) — so you can reach someone when a program moves,
+  and so it's on the printed sign-in sheet
+- **How many guests are you bringing?** — *Just me*, 1, 2 or 3
+
+Picking a number sends them to a page with exactly that many name boxes, all
+required. Somebody coming on their own never sees a guest field at all, and
+"picked 3, typed 2 names" can't happen. **More than three guests?** The question
+says to call — the number is right there on it.
+
+Then one more question, the only real fork in the form:
 
 | They pick | They get |
 |---|---|
-| **Everyone, every date** | One question: who's eating. Applied to every date. |
-| **Let me pick specific dates/people** | The full roster grid |
+| **"I want to sign up for all events this month."** | One question: who's eating. Applied to every date. |
+| **"I want to choose specific days this month to attend."** | The full roster grid |
+| **"I want to sign up for all future *X* meetings."** | The same as the first — plus they join the club. Only on `[Club]` programs. |
 
-Most people take the first option and are done in three questions.
+On a `[Grouped]` series the first two read *"every date listed on this form"* and
+*"specific dates from the list"* instead, since a series isn't a month.
+
+The help text under the question spells out what each option does, rather than
+telling anyone which one to pick.
 
 The roster, for those who want it:
 
@@ -654,20 +808,35 @@ date independently, and eat or not eat independently.
 
 A few things worth knowing:
 
-- **The link you hand out arrives with every box already checked.** Most people
-  are coming to everything, so they just uncheck exceptions and submit.
+- **Nothing arrives pre-ticked.** The link used to come with every box already
+  checked, on the theory that most people are coming to everything. It was
+  quietly asserting an answer on their behalf: somebody who skims a wall of
+  checks and submits has told you they're coming to nine sessions they never
+  read, and you cater for all nine. The *"sign up for all events"* option covers
+  that case properly, as an answer somebody actually gives.
 - **Columns always show all three guests.** Columns for guests they didn't name
-  are ignored, so there's no harm in leaving them checked.
+  are ignored, so a blank one does no harm — and every grid carries a note
+  reminding them that Guest 1/2/3 are the names they typed earlier, in order,
+  and that the **Back** button is safe if they need to check which is which.
+  (Google Forms can't carry those names onto a later page.)
 - Each date shows the **meal shorthand** next to it, and `(FULL - Waitlist)` once
   a capped session runs out of seats — so nobody joins a waitlist unknowingly.
 - **Nobody is asked about a lunch that isn't happening.** A date marked
   `Not Serving` never appears as a lunch row, and a form with no catered dates
   at all doesn't show the lunch question in either branch.
-- Choosing **Everyone, every date** on a `[Fixed]` series also covers dates
-  added to that series *later* — they don't need to re-register.
-- There's a dedicated **Allergies / Dietary Needs** field.
+- Signing up for **all dates** on a `[Grouped]` series also covers dates added
+  to that series *later* — they don't need to re-register.
+- There's a dedicated **Allergies / Dietary Needs** field, and the "Anything
+  Else?" box carries your location's own note as its instructions. (It used to
+  be a bold heading floating above that question with nothing under it.)
+- **Every form ends with a way to reach a person:** *"If you need additional
+  assistance, please call (610) 664-2366 or email
+  info@newhorizonsseniorcenter.org"*. To change it, edit `CENTER_PHONE` /
+  `CENTER_EMAIL` at the top of `Code.gs` — the form description, the guest
+  question and the printed sign-in sheet all follow.
 - Email addresses are collected, so people get a receipt with a link to **edit
-  their own response** later.
+  their own response** later — and, if you've switched it on, an **invitation to
+  the calendar event** (see [Calendar Invitations](#-calendar-invitations)).
 
 If someone changes their mind and submits again, the new answers win and the old
 row is marked `Superseded`.
@@ -679,10 +848,9 @@ row is marked `Superseded`.
 > Every registration sync now checks each live form and rebuilds any that are
 > still on an older layout, **keeping the same link**, so calendar invites,
 > dashboard links and edit links all keep working. Nothing on
-> Lunch_and_Event_Registrants changes. The one visible side effect: a rebuilt
-> form's link stops arriving pre-checked until it's regenerated — the
-> dashboard's **View Live Form** link is refreshed right away, and the calendar
-> invite catches up the next time that program's dates change.
+> Lunch_and_Event_Registrants changes. No more than five forms are rebuilt per
+> sync, so a big backlog drains itself over a few hours rather than blowing the
+> execution budget in one go.
 
 ---
 
@@ -700,10 +868,13 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 |---|---|
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
+| **🖨️ Print Sign-In Sheet (PDF)…** | A landscape PDF of one session's expected people, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
+| **📧 Invite Registrants to Calendar Events** | Sends the calendar invitations now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
 | **🔁 Apply Type Changes to Calendar** | Makes a Grouped/Monthly change typed on the dashboard stick, by writing it onto the calendar events |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. **Admin accounts only** |
+| **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. **Admin accounts only** — see [Moving sessions between forms](#moving-sessions-between-forms) |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
@@ -788,6 +959,75 @@ in the workbook until you deliberately push them out — see
 The **scheduled** runs (daily Sync Cal, hourly Sync Registrations) don't ask —
 there's nobody at the keyboard to answer, and doing their job on schedule is the
 point. Only a person clicking gets the question.
+
+---
+
+## Printed sign-in sheets
+
+**🖨️ Print Sign-In Sheet (PDF)…** on the menu. Pick a date and location, and
+you get a **landscape PDF** with everyone expected already on it and empty boxes
+to mark up by hand:
+
+| In CoPilot | CAME | Last | First | Phone # | Family / Alt Name | Extra Notes | MEALS ORDERED | DINED IN # | TAKE OUT # | # PUT IN FRIDGE |
+|---|---|---|---|---|---|---|---|---|---|---|
+
+- **Sorted by last name**, which is how somebody finds their own name on a
+  paper list.
+- The header line carries the day's **menu**, how many meals were **requested**,
+  and what was **ordered** (registered + standard buffer + tester buffer).
+- **Family / Alt Name** says who a row is with: *"guest of Marion Webb"* for a
+  guest, *"+2 guest(s)"* for whoever brought them.
+- **Extra Notes** carries dietary needs and anything unusual about the
+  registration, trimmed to what fits.
+- **Eight blank rows** at the bottom for walk-ins nobody knew about.
+- One page unless the roster doesn't fit, then as many as it needs.
+
+The last four columns line up **one-for-one** with the meal counts on
+Lunch_and_Event_Registrants, so typing a finished sheet back in is
+column-for-column with nothing to reinterpret.
+
+You can print for a **lunch-only day** (a meal with no programming behind it) —
+those appear in the picker as *"…(lunch only)"*.
+
+PDFs are filed in a Drive folder called **Printed Sign-In Sheets**.
+
+---
+
+## Moving sessions between forms
+
+**📄 Move Sessions to Another Form…** on the menu (admin accounts only). Tick
+any sessions you like, then pick where they go:
+
+**Build a new combined form.** For the one-off that the grouping tags can't
+describe — *"these four different programs are one Tuesday afternoon this month;
+put them on a single form so people sign up once."* You can name it, or let it
+name itself.
+
+**Move onto an existing form.** For fixing a wrong or stale form link on a
+session or a whole run of them. Pick a form from the list, or paste its URL.
+
+> Paste the **edit** URL (`.../forms/d/<id>/edit`), not the published
+> `/d/e/...` one people fill in — that link doesn't contain the form's ID, and
+> the dialog will tell you so rather than failing obscurely.
+
+Either way, the same things are brought into line: the `Form_ID` and both link
+columns on the dashboard, the **date list on the destination form**, its sign-up
+options, and the registration link in every affected **calendar event**.
+
+**On a combined form every date names its own program** — *"Mon, Jan 5, 2026 ·
+Chair Yoga · Narberth"* — because a bare date on a form covering four programs
+tells a registrant nothing, and two programs on the same day would otherwise
+produce two identical rows (which Google Forms rejects outright).
+
+**Registrations already collected are not moved.** They stay attached to the
+session they were made for, which is correct — the session didn't change, only
+the form people reach it through. Anyone registering after the move comes in on
+the new form.
+
+> Sessions of a program you've moved may pull *future* dates onto the new form
+> too, since the system learns "this program's form is that one" from the rows
+> on the sheet. If you want a one-month-only combination, check the next sync's
+> result and move anything you didn't want back.
 
 ---
 
@@ -893,6 +1133,7 @@ one of them in the current layout.
 | Master_Lunch_Dashboard (hand-entered columns kept) | |
 | Deleted_Event_Triage | |
 | Member_Roll / Program_Options (your notes kept) | |
+| Club_Members (the roster is kept exactly as it is) | |
 | Config, tab order, widths, dropdowns, colours | |
 
 **Nothing can be removed by it.** A normal sync cross-checks sessions against
@@ -912,6 +1153,25 @@ redrawn.
 > Rebuilding a **copy** of the workbook? Press **Check Triggers** afterwards
 > too. The rebuild deliberately doesn't touch automation, and a fresh copy has
 > no triggers of its own yet.
+
+**What to expect the first time you update to the version with clubs, phone
+numbers and split meal counts:**
+
+1. **Rebuild Layout** adds the new columns (`Phone`, `Email`, the five meal
+   counts) and the new **Club_Members** tab, and moves the lunch dashboard's
+   buffers out of hand-entry. Anything already in `Dine_In_Count` /
+   `Subs_Count` is carried across into `Day1_Dined_In` / `Subs_Dined_In`
+   automatically.
+2. **Check Config.** A new **📧 Calendar Invitations** block appears, set to
+   *Invite registrants*. If you don't want Google emailing your members, set it
+   to **Do not invite** before the next registration sync. Nothing is sent for
+   sessions that have already happened either way.
+3. **The live forms update themselves.** Each registration sync rebuilds up to
+   five forms onto the new layout, keeping the same links, so give it a few
+   hours to work through them — or run `recheckAllRegistrationForms()` from the
+   Apps Script editor to start now.
+4. **Run Sync Cal once** so the `Club` column fills in for programs you've
+   tagged.
 
 ---
 
@@ -1195,6 +1455,15 @@ calendar events — that's what makes it stick. If it can't reach the calendar
 at that moment you'll get a warning toast; press **🔁 Apply Type Changes to
 Calendar** and it goes through. Without that, the next sync quietly puts the
 old value back.
+
+**`Club` lives on the calendar too**, in the same way and for the same reason —
+it comes from the `[Club]` tag in the event description. Unlike `Type_Tag` there
+is no dialog behind the cell, so typing in the `Club` column is simply
+overwritten on the next sync. Add or remove the tag on the calendar event.
+
+**Buffers live in Config, nowhere else.** `Standard_Buffer` / `Tester_Buffer` on
+the lunch dashboard are re-read from **Config ▸ 🍱 Meal Buffer Amounts** on
+every render.
 
 **Old months are hidden, not gone.** See [Old months](#old-months).
 

@@ -10,6 +10,17 @@ registration form, links it into the event description, and rolls every
 signup into a live dashboard — who's coming to which session, and how much
 lunch each location needs to order.
 
+It also:
+
+- keeps **club rosters** — programs tagged `[Club]` in their calendar
+  description, where people sign up once and stay signed up across every
+  future form, reversibly, from a `Club_Members` tab;
+- records **several different meals per person** on one day (ate the day-1
+  meal here, took two subs home), attached to whoever took them;
+- prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;
+- **invites registrants to the calendar event** they signed up for, and
+  un-invites them if they cancel.
+
 This repo was split out of `fishmax5.github.io`, where it had been
 mixed in with an unrelated static site — full development history preserved.
 

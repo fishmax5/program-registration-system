@@ -247,6 +247,54 @@ same class of bug as #2 and will be worth a lock if either path grows.
 
 ---
 
+### 12b. A club roster is a standing instruction, and standing instructions rot
+
+Clubs (`[Club]`, `Club_Members`) are the first thing in this system that keeps
+acting on somebody's behalf **indefinitely**, with no further input from them.
+Everything else expires: a form covers a month, a registration covers a session.
+A membership covers every meeting there will ever be.
+
+That is the feature, and it is also the risk. Concretely:
+
+- A member who stops coming keeps being booked, and keeps being counted in the
+  catering number, until a human notices and unticks **Active**. Nothing in the
+  system can tell "hasn't come since March" from "coming next week" — the rows
+  look identical.
+- Because club bookings are created by the sync rather than by a person, they
+  carry no `Manually Added` protection. That is deliberate (they must be able
+  to change when the schedule does), but it means the usual "hand-edited rows
+  are sacred" instinct does not apply here.
+
+**Worth adding when it starts to hurt:** a staleness report — club members with
+no `Attended` tick in N sessions — in the admin digest. Not a rule that removes
+them automatically. Deciding somebody has left a club is a judgement about a
+person, and the system should raise it, not make it.
+
+**Related and smaller:** `applyClubRosterCatchup()` only ever fills gaps, and
+never touches a session a person already has a row for. That is what makes
+individual dates manageable (cancel one meeting without leaving the club), but
+it also means a booking you delete outright comes back on the next sync.
+Cancel it rather than deleting it.
+
+### 12c. Calendar invitations reach outside the workbook
+
+`inviteRegistrantsToCalendarEvents()` is the only thing here that emails people
+who are not staff. It is guarded three ways — a Config switch, upcoming-only,
+and a ledger so nothing is sent twice — but the failure modes are worth naming:
+
+- **The ledger is Script Properties, not the calendar.** If it is cleared (or a
+  workbook is rebuilt from scratch), the next run re-adds every guest, and
+  Google notifies each of them again. Guest lists are read per event, so nothing
+  is *wrong* afterwards; it is a wave of duplicate invitations, which for a
+  membership of a few hundred is not nothing.
+- **Matching is by day + title.** A session whose calendar event has been
+  renamed is not found, and its registrants are quietly not invited (logged, not
+  raised). Storing the real calendar event ID would fix this properly and is the
+  obvious next step if it ever matters.
+- **Removal depends on a status.** Somebody deleted outright from the
+  Registrants tab, rather than marked `Cancelled`, is never removed from the
+  guest list — there is no row left to notice.
+
 ## Long term — architectural, worth knowing before deciding anything big
 
 ### 13. The spreadsheet is the database
@@ -341,3 +389,26 @@ order of what would change your plans:
 10. **Before the first sync on the new calendar IDs**, read #5 above and decide
    which case you're in. That one is easier to get right beforehand than to
    unpick afterwards.
+11. **Decide about calendar invitations before the next registration sync.**
+   Config's new **📧 Calendar Invitations** cell defaults to *Invite
+   registrants*, and the first sync after that will email every actively
+   registered person with an address on file, for every upcoming session. If
+   that is not what you want yet, set it to **Do not invite** first. When you do
+   turn it on, do it on a quiet afternoon and watch the first run.
+12. **Fill in one registration form end to end**, as a registrant would: check
+   that picking *Just me — no guests* skips the guest page entirely, that
+   picking 2 lands you on a page with exactly two required name boxes, and that
+   both sign-up options reach a page that submits. This is the part of the
+   change with the most moving pieces, and the one a real person meets first.
+13. **Tag one program `[Club]`**, run Sync Cal, and confirm the `Club` column
+   fills in on its *existing* sessions. Register on it choosing the club
+   option, then check: a row on `Club_Members`, registrant rows for every
+   upcoming meeting, and — the part that matters — that the same person is
+   still booked after the month rolls over onto a new form. Then untick
+   **Active** and confirm the cancellation prompt does what it says.
+14. **Print a sign-in sheet** for a real session and look at it on paper.
+   Column widths and font size are guesses until somebody has actually written
+   in the boxes.
+15. **Check one lunch dashboard row's buffers** against Config. They should
+   match, including on an upcoming date nobody has registered for yet — that
+   was the symptom the buffer change fixes.
