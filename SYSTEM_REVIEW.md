@@ -276,6 +276,41 @@ individual dates manageable (cancel one meeting without leaving the club), but
 it also means a booking you delete outright comes back on the next sync.
 Cancel it rather than deleting it.
 
+### 12d. Form items are addressed by title and by index, and both bite
+
+Two failures in the first live run of the v4 template, both from the same
+underlying fact: the Forms API gives you items keyed by **title** (which is not
+unique) and holding a **cached index** (which goes stale the moment you delete
+anything).
+
+**Title.** `TEMPLATE_PAGE_TITLES.MODE` was set to the same string as
+`TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE` — the page and the question on it
+naturally want the same words. Every lookup of that title returned the PAGE
+BREAK first, because it is added to the form first, and `asListItem()` on it
+threw *"Invalid conversion for item type: PAGE_BREAK"*. Fixed by renaming, by
+type-guarding the lookup, and by a test asserting no page title equals any item
+title — within-set uniqueness, which was already asserted, does not catch it.
+
+**Index.** Deleting a filtered list of items forward — `getItems().filter(…).
+forEach(deleteItem)` — invalidates every later item's index by one. Usually it
+silently deletes the wrong item; when the last item on the form is among the
+doomed it throws *"Cannot access item at index: N. Number of items: N"*, which
+is what a v3 form carrying two "Footer Note" headers did. Fixed by
+`deleteFormItems()`, which sorts highest-index-first; both delete sites now go
+through it.
+
+**The standing rule:** never address form items by a title that anything else
+can share, and never delete them in ascending order. Both are the kind of bug
+that works on a form you tested and fails on the fifth one in production.
+
+**And a third, non-bug:** *"Failed to edit the form. Please wait and try
+again."* is Forms rate-limiting a rebuild's ~35 writes to one document,
+repeated per form. `withFormRetry()` backs off and retries only on that class
+of message — a real defect is re-thrown immediately, since repeating it just
+burns the execution budget — and there is a 1.5s pause between forms so it is
+provoked less often. If rebuilds still fail in batches, lower
+`MAX_FORM_REBUILDS_PER_RUN` before doing anything cleverer.
+
 ### 12c. Calendar invitations reach outside the workbook
 
 `inviteRegistrantsToCalendarEvents()` is the only thing here that emails people

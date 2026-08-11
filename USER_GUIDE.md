@@ -852,6 +852,13 @@ row is marked `Superseded`.
 > sync, so a big backlog drains itself over a few hours rather than blowing the
 > execution budget in one go.
 
+> **"Failed to edit the form. Please wait and try again." in the log is normal
+> and self-correcting.** Rebuilding a form is about 35 writes to one document,
+> and doing several in a row makes Google's Forms API push back. It's retried
+> automatically with a pause; anything that still doesn't go through is left
+> exactly as it was — old questions, working link — and tried again on the next
+> sync. You don't need to do anything about it.
+
 ---
 
 ## The menu

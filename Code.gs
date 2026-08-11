@@ -1399,7 +1399,11 @@ function getOrCreateFormsFolder() {
  * are abandoned and rebuilt fresh instead of silently drifting out of sync
  * with what processFormResponse() expects to find.
  */
-const TEMPLATE_VERSION = 4;
+// v5 is a CORRECTNESS bump, not a design change: v4's mode page carried the
+// same title as the mode question, so every rebuild onto v4 threw partway
+// through (see TEMPLATE_PAGE_TITLES.MODE) and left the form with placeholder
+// grid rows. Any form that did get stamped v4 has to be redone.
+const TEMPLATE_VERSION = 5;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
@@ -1546,7 +1550,16 @@ const TEMPLATE_PAGE_TITLES = {
   GUEST_1: 'Your Guest',
   GUEST_2: 'Your Guests',
   GUEST_3: 'Your Guests (3)',
-  MODE: 'How would you like to sign up?',
+  // DELIBERATELY NOT the same text as TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE,
+  // which is the question that sits ON this page. They read almost the same to
+  // a person and it is tempting to use one string for both — but form items
+  // are looked up BY TITLE, and a page break sharing a question's title is
+  // returned by those lookups first (it is added to the form first). The
+  // caller then calls asListItem() on a PageBreakItem and Forms answers
+  // "Invalid conversion for item type: PAGE_BREAK", which is what this cost
+  // the first time. Every page title here must differ from every item title in
+  // TEMPLATE_ITEM_TITLES.
+  MODE: 'Choose How to Sign Up',
   ALL_DATES: 'Sign Up For Every Date',
   SPECIFIC_DATES: 'Pick Your Dates'
 };
@@ -1756,8 +1769,13 @@ function applyAttendanceModeChoices(form, options, refs) {
   const findPage = title => (items || []).filter(it =>
     it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null;
 
+  // Type-guarded as well as titled: a PAGE_BREAK can never be the question,
+  // and a title collision between a page and a question must fail visibly at
+  // build time rather than by handing back an item asListItem() will reject.
   const modeItem = refs.modeItem ||
-    ((items || []).filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE)[0] || null);
+    ((items || []).filter(it =>
+      it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE &&
+      it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null);
   const allDatesPage = refs.allDatesPage || findPage(TEMPLATE_PAGE_TITLES.ALL_DATES);
   const specificPage = refs.specificPage || findPage(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   if (!modeItem || !allDatesPage || !specificPage) {
@@ -2920,6 +2938,86 @@ function buildRegistrationUrl(form) {
 }
 
 /**
+ * Deletes a set of items from a form, HIGHEST INDEX FIRST. Returns how many
+ * went.
+ *
+ * The order is the whole point. An Apps Script `Item` carries the index it had
+ * when `getItems()` handed it over, and `deleteItem()` acts on that index — so
+ * deleting forward through a filtered list invalidates every later item's
+ * index by one. Usually that silently deletes the WRONG item; when the last
+ * item in the form is among the doomed, it fails outright with
+ * "Cannot access item at index: N. Number of items: N", which is what this
+ * cost on a v3 form carrying two "Footer Note" headers, the second of them
+ * last on the form.
+ *
+ * Deleting from the end backwards means no surviving item's index ever moves.
+ */
+function deleteFormItems(form, items, describe) {
+  const ordered = (items || []).slice().sort((a, b) => b.getIndex() - a.getIndex());
+  let removed = 0;
+  ordered.forEach(item => {
+    const title = item.getTitle();
+    try {
+      form.deleteItem(item);
+      removed++;
+    } catch (err) {
+      log(`⚠️ Could not remove "${title}" from ${describe || `form ${form.getId()}`} (${err}).`);
+    }
+  });
+  return removed;
+}
+
+/**
+ * Transient Forms failures, by the text Google puts in them.
+ *
+ * "Failed to edit the form. Please wait and try again." is the API telling you
+ * it is being written to faster than it likes — which is exactly what
+ * rebuilding a form does, since that is ~15 deletes and ~20 adds back to back,
+ * repeated per form. It is not a defect in the form and the same call succeeds
+ * moments later.
+ */
+const TRANSIENT_FORM_ERROR_PATTERNS = [
+  /please wait and try again/i,
+  /failed to edit the form/i,
+  /service (unavailable|error)/i,
+  /internal error/i,
+  /try again later/i,
+  /too many/i
+];
+
+function isTransientFormError(err) {
+  const text = String((err && err.message) || err || '');
+  return TRANSIENT_FORM_ERROR_PATTERNS.some(p => p.test(text));
+}
+
+/** Attempts before giving up, and the backoff between them (ms). */
+const FORM_RETRY_DELAYS_MS = [1000, 3000, 8000];
+
+/**
+ * Runs `fn`, retrying with backoff when Forms says it is busy rather than that
+ * something is wrong. A NON-transient error is re-thrown immediately — a
+ * genuine defect does not get better by being repeated, and burning twelve
+ * seconds discovering that costs the sync's whole budget.
+ *
+ * Safe for the form rebuilds it wraps: those are written to be re-runnable
+ * (delete-everything-then-rebuild reaches the same end state whether it starts
+ * from a full form or a half-emptied one).
+ */
+function withFormRetry(label, fn) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      if (!isTransientFormError(err) || attempt >= FORM_RETRY_DELAYS_MS.length) throw err;
+      const wait = FORM_RETRY_DELAYS_MS[attempt];
+      log(`ℹ️ ${label}: Forms is busy (${err}) — waiting ${wait}ms and trying again ` +
+        `(attempt ${attempt + 2} of ${FORM_RETRY_DELAYS_MS.length + 1}).`);
+      Utilities.sleep(wait);
+    }
+  }
+}
+
+/**
  * Strips both lunch questions — the per-date LUNCH_GRID and the all-dates
  * who-eats checkbox — off a form that has no lunch to offer: a location
  * whose catering policy is NEVER, or a form none of whose dates serve
@@ -2933,16 +3031,9 @@ function buildRegistrationUrl(form) {
 function removeLunchQuestionsFromForm(form, locations, reason) {
   const where = describeLocations(Array.isArray(locations) ? locations : [locations]);
   const doomed = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE];
-  let removed = 0;
-  form.getItems().forEach(item => {
-    if (doomed.indexOf(item.getTitle()) === -1) return;
-    try {
-      form.deleteItem(item);
-      removed++;
-    } catch (err) {
-      log(`⚠️ Could not remove "${item.getTitle()}" from the ${where} form (${err}).`);
-    }
-  });
+  const removed = deleteFormItems(form,
+    form.getItems().filter(item => doomed.indexOf(item.getTitle()) !== -1),
+    `the ${where} form`);
   if (removed > 0) {
     log(`Removed ${removed} lunch question(s) from a ${where} form — ` +
       (reason || `no location on it caters (policy "${CATERING_POLICIES.NEVER}")`) + '.');
@@ -8424,15 +8515,9 @@ function createRegistrationForm(group, configInfo) {
  * A form that has already been rebuilt has none, so the sweep costs nothing.
  */
 function applyFormFooterNote(form, footerNote) {
-  let removed = 0;
-  form.getItems().filter(it => it.getTitle() === LEGACY_FOOTER_ITEM_TITLE).forEach(it => {
-    try {
-      form.deleteItem(it);
-      removed++;
-    } catch (err) {
-      log(`ℹ️ Could not remove the old floating footer header from form ${form.getId()} (${err}).`);
-    }
-  });
+  const removed = deleteFormItems(form,
+    form.getItems().filter(it => it.getTitle() === LEGACY_FOOTER_ITEM_TITLE),
+    `form ${form.getId()}`);
   if (removed > 0) invalidateFormItemIndex(form.getId());
 
   if (!footerNote) return;
@@ -8906,6 +8991,11 @@ function getExistingRegistrantIndex(rows) {
 function getResponseValueByTitle(formIndex, response, title) {
   const items = formIndex.byTitle[title] || [];
   for (const item of items) {
+    // A PAGE_BREAK can share a question's title on a form built before that
+    // collision was fixed (see TEMPLATE_PAGE_TITLES.MODE), and asking for a
+    // response to a page break is meaningless at best. Skip rather than let a
+    // stray page title decide what a respondent answered.
+    if (item.getType() === FormApp.ItemType.PAGE_BREAK) continue;
     const itemResponse = response.getResponseForItem(item);
     if (!itemResponse) continue;
     const val = itemResponse.getResponse();
@@ -9512,13 +9602,34 @@ function rebuildFormFromCurrentTemplate(form, context) {
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
   form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0,
     { isClub: context.isClub, programTitle: context.programTitle }));
-  applyAttendanceModeChoices(form,
-    { isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle });
+
+  // THE DATE LABELS ARE THE ONE STEP THAT CANNOT BE SKIPPED. A rebuilt form's
+  // grids hold the template's placeholder row until they are written, so a
+  // form that gets here and then fails is a form nobody can register on —
+  // strictly worse than the out-of-date one it replaced. The two steps before
+  // it are therefore allowed to fail on their own: wrong sign-up wording or a
+  // missing footer is a blemish, and reporting it beats abandoning the rebuild.
+  // (This is not hypothetical — a title collision made applyAttendanceModeChoices
+  // throw here, and every form it touched was left showing
+  // "(dates will be filled in automatically)".)
+  try {
+    applyAttendanceModeChoices(form,
+      { isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle });
+  } catch (err) {
+    log(`⚠️ Rebuilt form ${form.getId()} but could not set its sign-up options (${err}) — ` +
+      `it carries the template's default wording.`);
+    noteForAdmin('Forms rebuilt with default sign-up wording',
+      `${form.getId()} (${describeLocations(context.locations)}) — its options could not be customized: ${err}`);
+  }
   syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0);
   // force: a rebuilt form's grids are back to the template placeholder row,
   // and its fingerprint on file still describes the labels it had before.
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'template migration' });
-  applyFormFooterNote(form, buildFooterNoteForLocations(context.locations));
+  try {
+    applyFormFooterNote(form, buildFooterNoteForLocations(context.locations));
+  } catch (err) {
+    log(`ℹ️ Rebuilt form ${form.getId()} but could not attach its footer note (${err}).`);
+  }
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
 }
 
@@ -9615,15 +9726,22 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
     if (formContext.sessions.length === 0) return;
 
     try {
-      rebuildFormFromCurrentTemplate(form, formContext);
+      withFormRetry(`rebuilding form ${formId} ("${location}")`,
+        () => rebuildFormFromCurrentTemplate(form, formContext));
     } catch (err) {
       log(`⚠️ migrateFormsToCurrentTemplate: could not rebuild form ${formId} for "${location}" (${err}).`);
       noteForAdmin('Forms that could not be updated',
-        `${formId} (${location}) still uses the old guest-count layout — rebuilding it failed with: ${err}`);
+        `${formId} (${location}) is still on an older layout — rebuilding it failed with: ${err}. ` +
+        `It keeps its old questions and its link still works; the next sync will try again.`);
       return;
     }
 
     rebuilt++;
+    // A breath between forms. A rebuild is ~35 writes to one document, and
+    // running several back to back is precisely what makes Forms start
+    // answering "please wait and try again" — the retry above recovers from
+    // that, but not provoking it is cheaper than recovering from it.
+    if (rebuilt < MAX_FORM_REBUILDS_PER_RUN) Utilities.sleep(1500);
     newUrlByFormId[formId] = buildRegistrationUrl(form);
     log(`Rebuilt form ${formId} ("${location}") on template v${TEMPLATE_VERSION} — the guest-count branch pages are gone.`);
     noteForAdmin('Registration forms updated',
@@ -14779,8 +14897,13 @@ function runFormRebuildSweep(registrySheet, plan) {
       continue;
     }
     try {
-      if (replaceOneForm(registrySheet, item)) result.replaced++;
-      else result.failed++;
+      if (replaceOneForm(registrySheet, item)) {
+        result.replaced++;
+        // See migrateFormsToCurrentTemplate() — same reason, same pause.
+        if (result.replaced < MAX_FORM_REPLACEMENTS_PER_RUN) Utilities.sleep(1500);
+      } else {
+        result.failed++;
+      }
     } catch (err) {
       result.failed++;
       log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
@@ -14821,7 +14944,8 @@ function replaceOneForm(registrySheet, item) {
   const context = item.context;
   const formTitle = readFormTitleOrDerive(item.oldFormId, context);
 
-  const created = createFormFromSpec(context, formTitle, 'destroy and rebuild');
+  const created = withFormRetry(`building the replacement for ${item.describe}`,
+    () => createFormFromSpec(context, formTitle, 'destroy and rebuild'));
   if (!created) {
     log(`⚠️ Rebuild skipped for ${item.describe}: no usable sessions to put on a form.`);
     return false;
