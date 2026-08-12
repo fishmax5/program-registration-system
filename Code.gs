@@ -1403,7 +1403,19 @@ function getOrCreateFormsFolder() {
 // same title as the mode question, so every rebuild onto v4 threw partway
 // through (see TEMPLATE_PAGE_TITLES.MODE) and left the form with placeholder
 // grid rows. Any form that did get stamped v4 has to be redone.
-const TEMPLATE_VERSION = 5;
+//
+// v6 changes only HELP TEXT — no item is added, removed or renamed, and the
+// page flow is identical — so nothing in processFormResponse() cares. It is
+// still a version bump because help text is the entire user-facing surface of
+// these three fixes, and a form is created once and reused for as long as its
+// group runs: without the bump, migrateFormsToCurrentTemplate() would never
+// pick up the live forms and the wording would only ever reach groups created
+// from now on. The three: the mode page now lists the dates it is asking
+// about (buildModePageDateNote()), the guest reminder points at the form's own
+// Back button instead of the browser's answer-destroying one
+// (GUEST_ORDER_REMINDER), and the guest columns say outright that a solo
+// registrant should ignore them (NO_GUESTS_NOTE).
+const TEMPLATE_VERSION = 6;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
@@ -1526,6 +1538,59 @@ function buildAttendanceModeHelpText(choiceSet) {
 }
 
 /**
+ * How much of the date list the mode page will carry, in characters.
+ *
+ * Google Forms rejects an over-long help text outright, and a section
+ * description that runs for several screens has stopped being read long before
+ * it hits any limit. A form with an unusually long date list shows as many as
+ * fit and says how many more there are.
+ */
+const MODE_PAGE_DATES_CHAR_BUDGET = 1200;
+
+/**
+ * The section description for the mode page: the dates this form actually
+ * covers, one per line.
+ *
+ * WHY THIS HAS TO BE REPEATED HERE. The mode page asks the one question the
+ * whole form turns on — "every date, or let me pick?" — and until now it asked
+ * it with the dates nowhere on screen. They ARE on the form
+ * (buildFormDescription() lists every one of them), but a Google Forms
+ * description renders at the top of the FIRST page only; by the time somebody
+ * has answered their name, their phone, a guest count and possibly a page of
+ * guest names, that list is several sections behind them. So the choice was
+ * being made from memory, and "sign me up for every date" was being picked by
+ * people who could no longer see how many dates that was or when they ran to.
+ *
+ * A page break's own help text is the section description, which is the one
+ * place on this page that can hold prose — so the list goes there, immediately
+ * above the question it informs.
+ */
+function buildModePageDateNote(dateLabels) {
+  const labels = (dateLabels || []).filter(Boolean);
+  if (labels.length === 0) return '';
+
+  const lines = [];
+  let used = 0;
+  for (const label of labels) {
+    const line = `• ${label}`;
+    if (used + line.length > MODE_PAGE_DATES_CHAR_BUDGET) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  // Never show a heading promising dates and then no dates: a budget too small
+  // for even one line means something is badly wrong with the labels, and a
+  // bare heading is worse than saying nothing.
+  if (lines.length === 0) return '';
+
+  const hidden = labels.length - lines.length;
+  const heading = labels.length === 1
+    ? 'This form covers one date:'
+    : `This form covers these ${labels.length} dates:`;
+  return `${heading}\n${lines.join('\n')}` +
+    (hidden > 0 ? `\n…and ${hidden} more — the full list is at the top of the first page.` : '');
+}
+
+/**
  * The title of the guest-count question on templates v1/v2 — a bare "Guest
  * Count" list that branched to a guest-detail page per count and then a roster
  * page per count. v3 removed guest routing entirely; v4 brings a much smaller
@@ -1586,12 +1651,39 @@ const MAX_GUESTS = PERSON_COLUMN_LABELS.length - 1;
  * names they typed are off-screen and "Guest 2" is a column heading with
  * nothing behind it. There is no way to interpolate the names into the grid —
  * the grid is written before anyone answers — so the honest fix is to say
- * where the answer is and that going back to look at it is safe.
+ * where the answer is and how to go back and look at it.
+ *
+ * WHICH back button matters, and this used to say the wrong one. Google Forms
+ * puts its own "Back" button at the BOTTOM LEFT of every page after the first,
+ * and that button walks back through the form with every answer still in
+ * place. The BROWSER's back arrow does not: it leaves the form page
+ * altogether, and what the respondent comes back to is a blank form with
+ * everything they had typed gone. Telling someone to use the browser's arrow
+ * to "check a name" was therefore advice that destroyed the registration they
+ * were part-way through filling in.
  */
 const GUEST_ORDER_REMINDER =
   'Guest 1, Guest 2 and Guest 3 are the names you typed earlier, in that order. ' +
-  'Not sure which is which? Use your browser\'s Back button to check — nothing you have ' +
-  'entered will be lost.';
+  'Not sure which is which? Use the "Back" button at the BOTTOM LEFT of this form to look — ' +
+  'nothing you have entered will be lost, and "Next" brings you straight back here. ' +
+  'Do not use your browser\'s back arrow: that leaves the form and loses your answers.';
+
+/**
+ * The note that tells a solo registrant the guest boxes are not their problem.
+ *
+ * The form asks the guest count FIRST and routes accordingly, so somebody
+ * coming alone never types a guest name (see getOrCreateTemplateForm()). What
+ * they DO still meet is Guest 1/2/3 sitting in every roster grid and in the
+ * all-dates lunch checkbox — because those columns are baked into the template
+ * once, at build time, and cannot vary per respondent. Met with no
+ * explanation, an empty labelled box reads as a question you are expected to
+ * answer, and the careful thing to do with a question you cannot answer is to
+ * stop and ring the office. Saying "ignore them" outright is cheaper than any
+ * amount of inferring.
+ */
+const NO_GUESTS_NOTE =
+  'Coming on your own? Ignore the Guest 1, Guest 2 and Guest 3 boxes completely — ' +
+  'leave them blank. You do not need to tick them, clear them, or put anything in them.';
 
 /** Placeholder row used on a freshly-built template's grids, before the first real date list is set. */
 const TEMPLATE_GRID_PLACEHOLDER_ROW = '(dates will be filled in automatically)';
@@ -1838,23 +1930,23 @@ function addClosingQuestions(form) {
 function addAllDatesLunchItem(form) {
   return form.addCheckboxItem().setTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE)
     .setChoiceValues(PERSON_COLUMN_LABELS)
-    .setHelpText('Tick everyone who will be eating. Leave the rest blank — including any guest rows ' +
-      'you did not name. This applies only to the dates lunch is actually served on.\n\n' +
-      GUEST_ORDER_REMINDER);
+    .setHelpText('Tick everyone who will be eating. This applies only to the dates lunch is ' +
+      'actually served on.\n\n' + NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER);
 }
 
 /** The per-date attendance roster grid. Rows are set later by applyFormDateLabels(). */
 function addAttendanceGridItem(form) {
   return form.addCheckboxGridItem().setTitle(TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID)
-    .setHelpText('Tick a box for each person on each date they are coming. Leave columns for guests ' +
-      'you did not name blank.\n\n' + GUEST_ORDER_REMINDER)
+    .setHelpText('Tick a box for each person on each date they are coming.\n\n' +
+      NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER)
     .setRows([TEMPLATE_GRID_PLACEHOLDER_ROW]).setColumns(PERSON_COLUMN_LABELS);
 }
 
 /** The per-date lunch roster grid. Rows are set later by applyFormDateLabels(). */
 function addLunchGridItem(form) {
   return form.addCheckboxGridItem().setTitle(TEMPLATE_ITEM_TITLES.LUNCH_GRID)
-    .setHelpText('Only the dates lunch is served on appear here.\n\n' + GUEST_ORDER_REMINDER)
+    .setHelpText('Only the dates lunch is served on appear here. Tick a box for each person on ' +
+      'each date they want lunch.\n\n' + NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER)
     .setRows([TEMPLATE_GRID_PLACEHOLDER_ROW]).setColumns(PERSON_COLUMN_LABELS);
 }
 
@@ -2876,12 +2968,19 @@ function computeFormLabelFingerprint(attendanceLabels, lunchLabels) {
 
 /**
  * Sets a form's ATTENDANCE_GRID rows to attendanceLabels and its LUNCH_GRID
- * rows to lunchLabels, skipping the whole thing when the labels match what we
- * last wrote to that form.
+ * rows to lunchLabels, plus the mode page's date list, skipping the whole
+ * thing when the labels match what we last wrote to that form.
  *
  * An EMPTY lunchLabels list means no date on this form serves lunch, in which
  * case the lunch grid isn't on the form at all any more (see
  * syncLunchQuestionsOnForm()) — the loop below simply finds nothing to write.
+ *
+ * THE MODE PAGE'S DATE LIST RIDES ALONG HERE deliberately, rather than being
+ * written by whichever caller happens to know the dates. It is derived from
+ * attendanceLabels, which is exactly what the fingerprint already covers, so
+ * putting it here means it is refreshed on precisely the syncs that change the
+ * dates and skipped on the many that do not — and no caller can add a date to
+ * a form's grids while leaving the mode page describing the old set.
  *
  * options.form    — an already-open Form, to avoid a second openById()
  * options.force   — write even if the fingerprint matches
@@ -2902,6 +3001,16 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
     if (lunchLabels && lunchLabels.length > 0) {
       items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID)
         .forEach(it => it.asCheckboxGridItem().setRows(lunchLabels));
+    }
+
+    // Type-guarded as well as titled, for the reason spelled out on
+    // TEMPLATE_PAGE_TITLES.MODE: a question and a page break must never be
+    // confused for one another by a title lookup.
+    const modeNote = buildModePageDateNote(attendanceLabels);
+    if (modeNote) {
+      items.filter(it => it.getType() === FormApp.ItemType.PAGE_BREAK &&
+        it.getTitle() === TEMPLATE_PAGE_TITLES.MODE)
+        .forEach(it => it.asPageBreakItem().setHelpText(modeNote));
     }
   } catch (err) {
     log(`⚠️ Could not write date labels to form ${formId}${options.context ? ` (${options.context})` : ''}: ${err}`);
@@ -9771,11 +9880,17 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
     // that, but not provoking it is cheaper than recovering from it.
     if (rebuilt < MAX_FORM_REBUILDS_PER_RUN) Utilities.sleep(1500);
     newUrlByFormId[formId] = buildRegistrationUrl(form);
-    log(`Rebuilt form ${formId} ("${location}") on template v${TEMPLATE_VERSION} — the guest-count branch pages are gone.`);
+    // Deliberately says only WHICH version, not what changed in it. This line
+    // used to name the v3 change ("the guest-count branch pages are gone") and
+    // was still saying it long after v4 brought that question back on purpose —
+    // a log line that describes one particular migration goes stale the moment
+    // the next one lands, and a stale one is worse than a terse one.
+    log(`Rebuilt form ${formId} ("${location}") on template v${TEMPLATE_VERSION}.`);
     noteForAdmin('Registration forms updated',
-      `"${form.getTitle()}" (${location}) was still on the old guest-count layout and has been rebuilt on the current one. ` +
-      `Its link is unchanged; the boxes it pre-checks are re-generated on the dashboard's "View Live Form" link, ` +
-      `and calendar invites pick the new one up the next time that program's dates change.`);
+      `"${form.getTitle()}" (${location}) was on an older layout and has been rebuilt on the current one ` +
+      `(template v${TEMPLATE_VERSION}). Its link is unchanged; the boxes it pre-checks are re-generated on the ` +
+      `dashboard's "View Live Form" link, and calendar invites pick the new one up the next time that ` +
+      `program's dates change.`);
   });
 
   if (rebuilt > 0) updateRegistryFormLinks(registrySheet, newUrlByFormId);
@@ -13753,8 +13868,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
 // location, plus what the kitchen is serving that day, and produces a
 // LANDSCAPE PDF whose columns are the ones the desk actually uses:
 //
-//   "In CoPilot"  CAME  Last  First  Phone #  Family / Alt Name  Extra Notes
-//   "MEALS ORDERED"  "DINED IN #"  "TAKE OUT #"  "# PUT IN FRIDGE"
+//   "In CoPilot"  CAME  Last  First  Phone #  Program  Family / Alt Name
+//   Extra Notes  "MEALS ORDERED"  "DINED IN #"  "TAKE OUT #"  "# PUT IN FRIDGE"
 //
 // The last four line up one-for-one with the per-registrant meal counts on the
 // Registrants tab (see REGISTRANT_MEAL_COUNT_COLUMNS), so transcribing a
@@ -13762,24 +13877,45 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
 // re-interpretation — which is the whole reason the meal counts were split per
 // person in the first place.
 //
+// IT IS A SHEET FOR A DAY AND A PLACE, NOT FOR A PROGRAM. The desk is one desk:
+// whoever is on it that morning signs in everybody who walks up, whichever
+// program they came for, and hands out lunch to the subset who ordered it. A
+// per-program sheet would mean the same person holding three sheets and
+// guessing which one a given arrival is on — so the picker asks for a LOCATION
+// and a DATE, and the roster is every registrant at that place on that day
+// across every program, with a Program column saying which is which.
+//
+// EVERYONE APPEARS, INCLUDING THE PEOPLE NOT EATING, and this is the part that
+// is easy to get wrong in the other direction. Printing only the lunch list
+// would give the kitchen a clean count and leave the sign-in desk unable to
+// tick off half the people in front of it. Printing everyone with the meal
+// columns left blank is worse still: a blank box is indistinguishable from a
+// box nobody has filled in yet, so at the end of service there is no way to
+// tell "ordered nothing" from "we forgot to ask". So a registrant with no
+// lunch is printed with a literal 0 in each of the four meal columns — already
+// answered, nothing to collect, and it transcribes back as the zero it is.
+//
 // ONE PAGE unless the roster does not fit, in which case it runs onto as many
 // as it needs, with the header row repeated. Landscape is not a preference:
-// eleven columns, several of them handwritten-into, do not fit across a
+// twelve columns, several of them handwritten-into, do not fit across a
 // portrait page at a legible size.
 // ============================================================================
 
 /** The printed sheet's columns, left to right, exactly as they appear on paper. */
 const SIGN_IN_SHEET_COLUMNS = [
-  'In CoPilot', 'CAME', 'Last', 'First', 'Phone #', 'Family / Alt Name', 'Extra Notes',
+  'In CoPilot', 'CAME', 'Last', 'First', 'Phone #', 'Program', 'Family / Alt Name', 'Extra Notes',
   'MEALS ORDERED', 'DINED IN #', 'TAKE OUT #', '# PUT IN FRIDGE'
 ];
 
 /**
- * Relative column widths. The three hand-tick columns are narrow, the name and
- * notes columns wide — a Doc table divides the page by these, so they are
- * proportions rather than measurements.
+ * Relative column widths. The three hand-tick columns are narrow, the name,
+ * program and notes columns wide — a Doc table divides the page by these, so
+ * they are proportions rather than measurements.
  */
-const SIGN_IN_SHEET_COLUMN_WEIGHTS = [7, 6, 12, 12, 12, 14, 17, 8, 7, 7, 8];
+const SIGN_IN_SHEET_COLUMN_WEIGHTS = [6, 6, 11, 11, 11, 12, 12, 14, 8, 7, 7, 8];
+
+/** Longest program name printed before it is clipped — the column is ~78pt wide. */
+const SIGN_IN_SHEET_MAX_PROGRAM_CHARS = 22;
 
 /** Blank rows added under the roster, for walk-ins nobody knew about. */
 const SIGN_IN_SHEET_BLANK_ROWS = 8;
@@ -13790,7 +13926,7 @@ const SIGN_IN_PAGE = { width: 792, height: 612, margin: 28 };
 /** Where finished PDFs are filed. Sits beside the forms folder rather than loose in My Drive. */
 const SIGN_IN_SHEET_FOLDER_NAME = 'Printed Sign-In Sheets';
 
-/** MENU ENTRY: pick a date + location, get a PDF. */
+/** MENU ENTRY: pick a location + date, get a PDF. */
 function showSignInSheetDialog() {
   const options = listSignInSheetOptions();
   if (options.length === 0) {
@@ -13799,23 +13935,30 @@ function showSignInSheetDialog() {
   }
   const html = HtmlService.createHtmlOutput(buildSignInSheetHtml(options))
     .setWidth(520)
-    .setHeight(360);
+    .setHeight(440); // three dropdowns now, not two
   SpreadsheetApp.getUi().showModalDialog(html, 'Print a Sign-In Sheet');
 }
 
 /**
- * The date+location pairs worth offering, nearest first: every session on the
- * dashboard and every catered day on the menu, within a window either side of
- * today.
+ * Every location+date worth offering: every session on the dashboard and every
+ * catered day on the menu, within a window either side of today.
  *
  * Both sources, because the two answer different questions — the dashboard
  * knows where people are expected, the menu knows where food is being served,
  * and a sign-in sheet is wanted for either. Yesterday and the day before are
  * included on purpose: the commonest reason to print one late is that the
  * original went missing mid-service.
+ *
+ * Returned as one flat list of entries rather than a location -> dates map:
+ * the dialog needs the locations for one dropdown and the dates for the other,
+ * and deriving both from a flat list in the browser keeps the shape this
+ * function has to promise down to a single thing.
  */
 const SIGN_IN_SHEET_WINDOW_BACK_DAYS = 7;
 const SIGN_IN_SHEET_WINDOW_FORWARD_DAYS = 45;
+
+/** Bound on how many location+date pairs the dialog carries. The window already limits this; the cap is a backstop. */
+const SIGN_IN_SHEET_MAX_OPTIONS = 400;
 
 function listSignInSheetOptions() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -13824,14 +13967,17 @@ function listSignInSheetOptions() {
   const to = formatDateKey(new Date(today.getTime() + SIGN_IN_SHEET_WINDOW_FORWARD_DAYS * 86400000));
 
   const byKey = {};
-  const note = (date, location, programTitle) => {
+  const note = (date, location, programTitle, catered) => {
     const d = coerceDate(date);
     const loc = String(location || '').trim();
     if (!d || !loc) return;
     const dateKey = formatDateKey(d);
     if (dateKey < from || dateKey > to) return;
     const key = `${dateKey}|${loc}`;
-    if (!byKey[key]) byKey[key] = { dateKey, location: loc, programs: [], distance: Math.abs(d - today) };
+    if (!byKey[key]) {
+      byKey[key] = { dateKey, location: loc, programs: [], catered: false, distance: Math.abs(d - today) };
+    }
+    if (catered) byKey[key].catered = true;
     const title = String(programTitle || '').trim();
     if (title && byKey[key].programs.indexOf(title) === -1) byKey[key].programs.push(title);
   };
@@ -13842,7 +13988,7 @@ function listSignInSheetOptions() {
       const headers = HEADERS.Master_Program_Dashboard;
       const map = getIndexMap(headers);
       readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
-        note(row[map['Event_Date']], row[map['Location']], row[map['Clean_Title']]);
+        note(row[map['Event_Date']], row[map['Location']], row[map['Clean_Title']], false);
       });
     }
   } catch (err) {
@@ -13856,7 +14002,7 @@ function listSignInSheetOptions() {
       readLunchScheduleRows(menu).forEach(row => {
         const type = String(row[map['Type']] || '').trim();
         if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
-        note(row[map['Event_Date']], row[map['Location']], '');
+        note(row[map['Event_Date']], row[map['Location']], '', true);
       });
     }
   } catch (err) {
@@ -13865,22 +14011,58 @@ function listSignInSheetOptions() {
 
   return Object.keys(byKey)
     .map(k => byKey[k])
+    // Nearest-first for the CAP only, so that trimming an overlong list drops
+    // the far-future dates rather than an arbitrary slice. The dialog re-sorts
+    // each location's dates chronologically, which is the order a person
+    // scanning a date dropdown expects.
     .sort((a, b) => (a.distance - b.distance) || a.location.localeCompare(b.location))
-    .slice(0, 120)
+    .slice(0, SIGN_IN_SHEET_MAX_OPTIONS)
     .map(entry => ({
       value: `${entry.dateKey}|${entry.location}`,
-      label: `${formatDateLabel(parseDateKey(entry.dateKey))} — ${entry.location}` +
+      dateKey: entry.dateKey,
+      location: entry.location,
+      distance: entry.distance,
+      label: formatDateLabel(parseDateKey(entry.dateKey)) +
+        (entry.catered ? '  •  lunch served' : '') +
         (entry.programs.length > 0
-          ? ` (${entry.programs.slice(0, 3).join(', ')}${entry.programs.length > 3 ? `, +${entry.programs.length - 3} more` : ''})`
-          : ' (lunch only)')
+          ? `  •  ${entry.programs.slice(0, 3).join(', ')}${entry.programs.length > 3 ? `, +${entry.programs.length - 3} more` : ''}`
+          : '  •  no program scheduled')
     }));
 }
 
-/** The dialog's markup. Inline, so this project stays a single .gs file. */
+/**
+ * The dialog's markup. Inline, so this project stays a single .gs file.
+ *
+ * TWO dropdowns — location, then date — rather than the single combined
+ * "date — location (programs)" list this used to show. That one list read as a
+ * program picker, because the program names were the most distinctive thing in
+ * each row, and it made the commonest task (I am on the desk at one site, show
+ * me today) a hunt through every site's dates interleaved. Picking the place
+ * first and then the day matches how somebody actually arrives at wanting this.
+ *
+ * The date list is filtered in the BROWSER from a JSON copy of the options,
+ * so changing location is instant — a google.script.run round trip per change
+ * would put a visible stall on a dropdown people flick between.
+ */
 function buildSignInSheetHtml(options) {
-  const optionTags = options
-    .map(o => `<option value="${escapeHtmlForDialog(o.value)}">${escapeHtmlForDialog(o.label)}</option>`)
+  const locations = [];
+  options.forEach(o => { if (locations.indexOf(o.location) === -1) locations.push(o.location); });
+  locations.sort();
+
+  // Whichever location owns the nearest date opens selected — on the day
+  // itself that is almost always the one wanted.
+  const nearest = options.slice().sort((a, b) => a.distance - b.distance)[0];
+  const defaultLocation = nearest ? nearest.location : (locations[0] || '');
+
+  const locationTags = locations
+    .map(loc => `<option value="${escapeHtmlForDialog(loc)}"${loc === defaultLocation ? ' selected' : ''}>` +
+      `${escapeHtmlForDialog(loc)}</option>`)
     .join('\n');
+
+  // `<` is escaped so a location or program name containing one can never
+  // close the script element early.
+  const payload = JSON.stringify(options).replace(/</g, '\\u003c');
+
   return `
 <style>
   body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
@@ -13897,11 +14079,14 @@ function buildSignInSheetHtml(options) {
 </style>
 <h3>Print a sign-in sheet</h3>
 <p class="hint">
-  One landscape page per session — everyone registered, with empty boxes for CAME, meals dined in,
-  taken out and put in the fridge. Extra blank rows are added for walk-ins.
+  One landscape page for a place and a day — everyone registered for any program there that day,
+  with empty boxes for CAME and the meal counts. Anyone who did not order lunch is printed with 0s
+  in the meal columns. Extra blank rows are added for walk-ins.
 </p>
-<label for="session">Date and location</label>
-<select id="session">${optionTags}</select>
+<label for="location">Location</label>
+<select id="location" onchange="fillDates()">${locationTags}</select>
+<label for="session">Date</label>
+<select id="session"></select>
 <label for="include">Who to list</label>
 <select id="include">
   <option value="active">Active registrations only (recommended)</option>
@@ -13910,9 +14095,32 @@ function buildSignInSheetHtml(options) {
 <button id="go" onclick="submit()">Create PDF</button>
 <div id="status"></div>
 <script>
+  var OPTIONS = ${payload};
+
+  function fillDates() {
+    var loc = document.getElementById('location').value;
+    var sel = document.getElementById('session');
+    sel.innerHTML = '';
+    var mine = OPTIONS.filter(function (o) { return o.location === loc; });
+    mine.sort(function (a, b) { return a.dateKey < b.dateKey ? -1 : (a.dateKey > b.dateKey ? 1 : 0); });
+    var best = null;
+    mine.forEach(function (o) {
+      var opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+      if (best === null || o.distance < best.distance) best = o;
+    });
+    if (best) sel.value = best.value; // land on the nearest day, not the earliest
+    document.getElementById('go').disabled = mine.length === 0;
+    if (mine.length === 0) say('Nothing scheduled at this location in the next few weeks.', 'err');
+    else say('', '');
+  }
+
   function submit() {
     var session = document.getElementById('session').value;
     var include = document.getElementById('include').value;
+    if (!session) { say('Pick a date first.', 'err'); return; }
     document.getElementById('go').disabled = true;
     say('Building the PDF…', '');
     google.script.run
@@ -13929,11 +14137,14 @@ function buildSignInSheetHtml(options) {
       })
       .createSignInSheetPdf(session, include);
   }
+
   function say(msg, cls) {
     var el = document.getElementById('status');
     el.textContent = msg;
     el.className = cls;
   }
+
+  fillDates();
 </script>`;
 }
 
@@ -13961,9 +14172,11 @@ function createSignInSheetPdf(sessionValue, include) {
   }
 
   const file = renderSignInSheetPdf(data);
-  const message = `✅ ${data.rows.length} name(s) on the sheet` +
+  const message = `✅ ${data.rows.length} name(s) on the sheet ` +
+    `(${data.lunchCount} with lunch, ${data.noLunchCount} without)` +
     (data.meal ? `, lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
-  log(`createSignInSheetPdf: built "${file.getName()}" with ${data.rows.length} row(s).`);
+  log(`createSignInSheetPdf: built "${file.getName()}" with ${data.rows.length} row(s) — ` +
+    `${data.lunchCount} with lunch, ${data.noLunchCount} without.`);
   return { url: file.getUrl(), message };
 }
 
@@ -13971,9 +14184,20 @@ function createSignInSheetPdf(sessionValue, include) {
  * Gathers everything one printed sheet needs: the day's meal, the people, and
  * the counts the kitchen is working to.
  *
+ * EVERY program at this location on this date, in one roster — see the section
+ * note. Which program each person came for is kept per row and printed in its
+ * own column, so a mixed sheet is still readable at the desk.
+ *
  * Sorted by LAST NAME, because that is how a person hunts for their own name
  * on a paper list at a desk — not by registration order, which is meaningless
  * to them, and not by first name, which is what the workbook happens to store.
+ *
+ * NOT sorted lunch-first, which is the obvious alternative and the wrong one.
+ * Grouping the eaters together would suit the kitchen, but the person holding
+ * this sheet is looking up arrivals by name, one at a time, all morning; a
+ * roster split into two alphabetical halves means every lookup is two lookups.
+ * The meal columns carry the lunch/no-lunch distinction instead, which is
+ * where somebody counting meals is looking anyway.
  */
 function collectSignInSheetData(dateKey, location, includeEveryone) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -14001,6 +14225,7 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
       last: split.last,
       first: split.first,
       phone: String(row[map['Phone']] || '').trim(),
+      program: truncateForPrinting(program, SIGN_IN_SHEET_MAX_PROGRAM_CHARS),
       // "Family / Alt Name" is the desk's column for who this person is WITH.
       // A guest is named against whoever brought them; a registrant who
       // brought people carries the size of their party. Either way the person
@@ -14015,6 +14240,7 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
 
   const meal = getMealInfoForDate(date, location);
+  const lunchCount = rows.filter(r => r.lunch).length;
   return {
     date,
     dateKey,
@@ -14022,9 +14248,16 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     programs,
     rows,
     meal: meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1 ? meal : null,
-    lunchCount: rows.filter(r => r.lunch).length,
+    lunchCount,
+    noLunchCount: rows.length - lunchCount,
     ordering: lookupOrderingNumbersForPrinting(dateKey, location)
   };
+}
+
+/** Clips a value to fit its printed column, with an ellipsis so the clipping is visible. */
+function truncateForPrinting(value, maxChars) {
+  const text = String(value || '').trim();
+  return text.length > maxChars ? `${text.substring(0, maxChars - 1)}…` : text;
 }
 
 /**
@@ -14070,7 +14303,9 @@ function buildSignInNotes(row, map, status) {
   const joined = parts.join(' · ');
   // Paper has a width. A note longer than this is a note nobody reads at a
   // desk anyway, and the full text is a click away on the Registrants tab.
-  return joined.length > 90 ? `${joined.substring(0, 87)}…` : joined;
+  // Shorter than it was, because the Program column now takes a slice of the
+  // width this column used to have.
+  return joined.length > 75 ? `${joined.substring(0, 72)}…` : joined;
 }
 
 /** The kitchen's own numbers for this day, read off the lunch dashboard if it has them. */
@@ -14166,6 +14401,7 @@ function writeSignInSheetHeading(body, data) {
     bits.push('Lunch: none scheduled');
   }
   bits.push(`${data.lunchCount} meal(s) requested`);
+  if (data.noLunchCount > 0) bits.push(`${data.noLunchCount} here without lunch`);
   if (data.ordering) {
     bits.push(`ordered ${data.ordering.total} (${data.ordering.registered} registered ` +
       `+ ${data.ordering.standard} standard + ${data.ordering.tester} tester)`);
@@ -14173,6 +14409,15 @@ function writeSignInSheetHeading(body, data) {
 
   const sub = body.appendParagraph(bits.join('   |   '));
   sub.editAsText().setFontSize(10).setBold(false).setForegroundColor('#444444');
+
+  // Says what the 0s mean. Without this the printed zeros look like a count
+  // somebody already took, which is the one reading that would make the sheet
+  // worse than blank columns.
+  if (data.noLunchCount > 0) {
+    const key = body.appendParagraph(
+      'Rows pre-filled with 0 ordered no lunch — nothing to serve them, nothing to write in those boxes.');
+    key.editAsText().setFontSize(9).setBold(false).setForegroundColor('#444444');
+  }
 
   const help = body.appendParagraph(`Questions at the desk: ${CENTER_PHONE}`);
   help.editAsText().setFontSize(9).setForegroundColor('#777777');
@@ -14182,9 +14427,14 @@ function writeSignInSheetHeading(body, data) {
 function writeSignInSheetTable(body, data) {
   const cells = [SIGN_IN_SHEET_COLUMNS.slice()];
   data.rows.forEach(row => {
+    // A registrant with no lunch gets a printed 0 in all four meal columns
+    // rather than four blanks — see the section note. Somebody WITH lunch gets
+    // the ordered count and three empty boxes, because what they actually ate
+    // is the thing the desk is there to record.
+    const zero = row.lunch ? '' : '0';
     cells.push([
-      '', '', row.last, row.first, row.phone, row.family, row.notes,
-      row.lunch ? '1' : '', '', '', ''
+      '', '', row.last, row.first, row.phone, row.program, row.family, row.notes,
+      row.lunch ? '1' : '0', zero, zero, zero
     ]);
   });
   for (let i = 0; i < SIGN_IN_SHEET_BLANK_ROWS; i++) {
@@ -14194,12 +14444,20 @@ function writeSignInSheetTable(body, data) {
   const table = body.appendTable(cells);
   table.setBorderWidth(1);
 
-  // Column widths, scaled to the printable width of the page.
+  // Column widths, scaled to the printable width of the page. The LAST column
+  // takes whatever is left rather than its own rounded share: twelve
+  // independently-rounded widths can add up to a point or two more than the
+  // page actually has, and a table half a rounding error wider than its
+  // margins is a table Docs pushes off the edge of the paper.
   const usable = SIGN_IN_PAGE.width - (SIGN_IN_PAGE.margin * 2);
   const totalWeight = SIGN_IN_SHEET_COLUMN_WEIGHTS.reduce((a, b) => a + b, 0);
+  let allocated = 0;
   SIGN_IN_SHEET_COLUMN_WEIGHTS.forEach((weight, i) => {
+    const last = i === SIGN_IN_SHEET_COLUMN_WEIGHTS.length - 1;
+    const width = last ? usable - allocated : Math.round(usable * (weight / totalWeight));
+    allocated += width;
     try {
-      table.setColumnWidth(i, Math.round(usable * (weight / totalWeight)));
+      table.setColumnWidth(i, width);
     } catch (err) { /* a column beyond the table — nothing to size */ }
   });
 

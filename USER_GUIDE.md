@@ -786,6 +786,16 @@ Then one more question, the only real fork in the form:
 On a `[Grouped]` series the first two read *"every date listed on this form"* and
 *"specific dates from the list"* instead, since a series isn't a month.
 
+**That page lists the dates it's asking about**, right above the question. They
+*are* on the form already — the description at the top spells out every one —
+but Google Forms only shows a description on the **first** page, and by the time
+somebody has answered a name, a phone number, a guest count and possibly a page
+of guest names, that list is several sections behind them. So *"sign me up for
+every date"* was being chosen by people who could no longer see how many dates
+that was or how far out they ran. Now the dates are on the page where the
+decision gets made. (A form with an unusually long list shows as many as fit and
+says how many more there are.)
+
 The help text under the question spells out what each option does, rather than
 telling anyone which one to pick.
 
@@ -814,11 +824,22 @@ A few things worth knowing:
   checks and submits has told you they're coming to nine sessions they never
   read, and you cater for all nine. The *"sign up for all events"* option covers
   that case properly, as an answer somebody actually gives.
-- **Columns always show all three guests.** Columns for guests they didn't name
-  are ignored, so a blank one does no harm — and every grid carries a note
-  reminding them that Guest 1/2/3 are the names they typed earlier, in order,
-  and that the **Back** button is safe if they need to check which is which.
-  (Google Forms can't carry those names onto a later page.)
+- **Columns always show all three guests**, even for somebody coming alone —
+  they're baked into the form once and can't vary per person. Columns for guests
+  they didn't name are ignored, so a blank one does no harm, but an empty
+  labelled box still *reads* as a question you're expected to answer. So every
+  grid now says it outright: **coming on your own? ignore the Guest boxes
+  completely — you don't need to tick them, clear them, or put anything in
+  them.**
+- **The note about which guest is which points at the right Back button.** Every
+  grid reminds them that Guest 1/2/3 are the names they typed earlier, in order,
+  and tells them to use the **"Back" button at the bottom left of the form** to
+  look. (Google Forms can't carry those names onto a later page.) It used to say
+  *"your browser's Back button"* — which was advice that **destroyed the
+  registration they were part-way through**: the browser's arrow leaves the form
+  page entirely and they come back to a blank form. Forms' own Back button walks
+  back with every answer still in place. The note now says which to use and
+  warns off the other.
 - Each date shows the **meal shorthand** next to it, and `(FULL - Waitlist)` once
   a capped session runs out of seats — so nobody joins a waitlist unknowingly.
 - **Nobody is asked about a lunch that isn't happening.** A date marked
@@ -875,7 +896,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 |---|---|
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
-| **🖨️ Print Sign-In Sheet (PDF)…** | A landscape PDF of one session's expected people, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
+| **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **📧 Invite Registrants to Calendar Events** | Sends the calendar invitations now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
@@ -972,17 +993,33 @@ point. Only a person clicking gets the question.
 
 ## Printed sign-in sheets
 
-**🖨️ Print Sign-In Sheet (PDF)…** on the menu. Pick a date and location, and
-you get a **landscape PDF** with everyone expected already on it and empty boxes
-to mark up by hand:
+**🖨️ Print Sign-In Sheet (PDF)…** on the menu. Pick a **location**, then a
+**date**, and you get a **landscape PDF** with everyone expected already on it
+and empty boxes to mark up by hand:
 
-| In CoPilot | CAME | Last | First | Phone # | Family / Alt Name | Extra Notes | MEALS ORDERED | DINED IN # | TAKE OUT # | # PUT IN FRIDGE |
-|---|---|---|---|---|---|---|---|---|---|---|
+| In CoPilot | CAME | Last | First | Phone # | Program | Family / Alt Name | Extra Notes | MEALS ORDERED | DINED IN # | TAKE OUT # | # PUT IN FRIDGE |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+
+**It's a sheet for a place and a day, not for a program.** The desk is one desk
+— whoever's on it signs in everybody who walks up, whichever program they came
+for. So the roster is **every registrant at that location on that date, across
+every program**, with a **Program** column saying which is which. One sheet, not
+three.
+
+**Everybody appears, including the people not eating.** Anyone who didn't order
+lunch is printed with a **0** in all four meal columns. That's deliberate: a
+blank box is indistinguishable from one nobody's filled in yet, so at the end of
+service you couldn't tell *"ordered nothing"* from *"we forgot to ask"*. A
+printed 0 is already answered — nothing to serve, nothing to write, and it types
+back in as the zero it is. A line under the header says so on the sheet itself.
 
 - **Sorted by last name**, which is how somebody finds their own name on a
-  paper list.
+  paper list. Deliberately *not* grouped lunch-first: you're looking people up
+  one at a time all morning, and a roster split into two alphabetical halves
+  makes every lookup two lookups.
 - The header line carries the day's **menu**, how many meals were **requested**,
-  and what was **ordered** (registered + standard buffer + tester buffer).
+  how many are **here without lunch**, and what was **ordered** (registered +
+  standard buffer + tester buffer).
 - **Family / Alt Name** says who a row is with: *"guest of Marion Webb"* for a
   guest, *"+2 guest(s)"* for whoever brought them.
 - **Extra Notes** carries dietary needs and anything unusual about the
@@ -995,7 +1032,8 @@ Lunch_and_Event_Registrants, so typing a finished sheet back in is
 column-for-column with nothing to reinterpret.
 
 You can print for a **lunch-only day** (a meal with no programming behind it) —
-those appear in the picker as *"…(lunch only)"*.
+the date picker marks those *"no program scheduled"*, and days with catering
+say *"lunch served"*.
 
 PDFs are filed in a Drive folder called **Printed Sign-In Sheets**.
 
@@ -1045,7 +1083,20 @@ their links are nobody's route to anything, and replacing them would break the
 archive for nothing.
 
 It asks twice: a summary you can read, then a box you have to type `REBUILD`
-into. Eight forms per run — run it again for the rest.
+into.
+
+**How much it does per run depends on how much there is to do.**
+
+- **50 forms or fewer** — it does up to **eight per run**, and tells you how many
+  are left. Run it again for the rest.
+- **More than 50** — one click starts a **background sweep**. It rebuilds a few
+  at a time and re-arms itself until every one is done, so **you don't run it
+  again**. Progress toasts as it goes. Calendar sync and registration sync pause
+  for the duration and switch themselves back on at the end — same machinery as
+  **Import Everything (First Run)**, which works the same way and for the same
+  reason. If a sweep ever gets stuck, `cancelFormRebuildSweep()` from the Apps
+  Script editor stops it and restores automation; whatever was already rebuilt
+  stays rebuilt.
 
 ---
 
