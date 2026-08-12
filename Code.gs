@@ -5220,7 +5220,7 @@ function initializeAndSyncAll() {
 function writeTriggers(force, takingOwnership) {
   if (!requireAuthorizedAdmin('Check Triggers')) return;
   if (!force && isBootstrapActive()) {
-    const message = `Triggers stay paused until the large-setup import finishes — it restores them itself.`;
+    const message = `Triggers stay paused until the large-setup import or forms-rebuild sweep finishes — it restores them itself.`;
     log(`writeTriggers: ${message}`);
     toastIfPossible(message);
     return;
@@ -5622,7 +5622,7 @@ function resetTriggersForHandler(handlerName, create) {
  */
 function writeCalendarChangeTriggers(force) {
   if (!force && isBootstrapActive()) {
-    log('writeCalendarChangeTriggers: skipped — a large-setup import has these paused on purpose.');
+    log('writeCalendarChangeTriggers: skipped — a large-setup import or forms-rebuild sweep has these paused on purpose.');
     return { removed: 0, created: 0 };
   }
 
@@ -6025,7 +6025,7 @@ function linkProgramAcrossLocations() {
   if (!requireAuthorizedAdmin('Link Program Across Locations')) return null;
 
   if (isBootstrapActive()) {
-    toastIfPossible('A large-setup import is running — try this once it finishes.');
+    toastIfPossible(bootstrapBusyMessage());
     return null;
   }
 
@@ -6692,7 +6692,7 @@ function onCalendarChange(e) {
   if (!automationGateAllows('onCalendarChange', true)) return; // quiet: this can fire hundreds of times
 
   if (isBootstrapActive()) {
-    log('onCalendarChange ignored — a large-setup import is running and is editing these events itself.');
+    log('onCalendarChange ignored — a large-setup import or forms-rebuild sweep is running and is editing these events itself.');
     return;
   }
 
@@ -6713,7 +6713,7 @@ function onCalendarChange(e) {
 
 function processCalendarDeltaForCalendar(calendarId) {
   if (isBootstrapActive()) {
-    log(`processCalendarDeltaForCalendar: a large-setup import is in progress — skipping (it is editing these events itself).`);
+    log(`processCalendarDeltaForCalendar: a large-setup import or forms-rebuild sweep is in progress — skipping (it is editing these events itself).`);
     return;
   }
   const lock = LockService.getScriptLock();
@@ -7040,7 +7040,7 @@ function syncCalendars() {
   recordHandlerRun('syncCalendars');
 
   if (isBootstrapActive()) {
-    log(`syncCalendars: a large-setup import (${BOOTSTRAP_ENTRY_NAME}()) is in progress — skipping this run so the two don't fight over the same forms.`);
+    log(`syncCalendars: a large-setup import or forms-rebuild sweep is in progress — skipping this run so they don't fight over the same forms.`);
     return;
   }
 
@@ -7669,8 +7669,8 @@ function clearBootstrapState() {
   PropertiesService.getScriptProperties().deleteProperty(BOOTSTRAP_STATE_PROP_KEY);
 }
 
-/** Is a sliced import in flight right now? Stale state (see BOOTSTRAP_STALE_MS) reads as "no". */
-function isBootstrapActive() {
+/** Is a sliced import in flight right now, specifically? Stale state (see BOOTSTRAP_STALE_MS) reads as "no". */
+function isBootstrapImportActive() {
   const state = getBootstrapState();
   if (!state) return false;
   const age = Date.now() - (state.lastSliceAt || state.startedAt || 0);
@@ -7680,6 +7680,28 @@ function isBootstrapActive() {
     return false;
   }
   return true;
+}
+
+/**
+ * Is EITHER kind of sliced background job in flight — the large-setup import
+ * above, or the destroy-and-rebuild forms sweep (see the "DESTROY-AND-REBUILD:
+ * BACKGROUND SWEEP" block further down)? Both are multi-execution jobs that
+ * pause syncCalendars/syncRegistrations/onCalendarChange for their duration
+ * and write to the same dashboard, session table, and form registries, so
+ * everything already guarded against one has to stand down for the other too.
+ * Kept as a single combined check so the many call sites written against the
+ * import don't each need to separately learn about the sweep.
+ */
+function isBootstrapActive() {
+  return isBootstrapImportActive() || isFormRebuildSweepActive();
+}
+
+/** Which of the two sliced jobs is blocking, in one line — for toasts/logs that need to say why. */
+function bootstrapBusyMessage() {
+  if (isFormRebuildSweepActive()) {
+    return 'A destroy-and-rebuild forms sweep is running in the background — try this once it finishes.';
+  }
+  return 'A large-setup import is running — try this once it finishes.';
 }
 
 /**
@@ -7700,9 +7722,15 @@ function bootstrapCalendars() {
   // down and builds it back up — so the account that starts one is choosing
   // to own the triggers, and has to be the owner going in.
   if (!requireTriggerOwnership()) return;
-  if (isBootstrapActive()) {
+  if (isBootstrapImportActive()) {
     const state = getBootstrapState();
     const message = `A large-setup import is already running (slice ${state.slices} of at most ${BOOTSTRAP_MAX_SLICES}) — leaving it alone.`;
+    log(message);
+    toastIfPossible(message);
+    return;
+  }
+  if (isFormRebuildSweepActive()) {
+    const message = 'A destroy-and-rebuild forms sweep is running in the background — leaving it alone; try this once it finishes.';
     log(message);
     toastIfPossible(message);
     return;
@@ -8196,7 +8224,7 @@ function rewriteEventRegistrationLinks() {
   // itself. Taking them down and putting them back underneath it would both
   // fight that and re-arm automation mid-import.
   if (isBootstrapActive()) {
-    const message = 'A large-setup import is running — try "Rewrite Event Links" once it finishes.';
+    const message = 'A large-setup import or forms-rebuild sweep is running — try "Rewrite Event Links" once it finishes.';
     log(`rewriteEventRegistrationLinks: ${message}`);
     toastIfPossible(message);
     return null;
@@ -8763,7 +8791,7 @@ function syncRegistrations() {
   recordHandlerRun('syncRegistrations');
 
   if (isBootstrapActive()) {
-    log(`syncRegistrations: a large-setup import (${BOOTSTRAP_ENTRY_NAME}()) is writing to the session table — skipping this run.`);
+    log(`syncRegistrations: a large-setup import or forms-rebuild sweep is writing to the session table — skipping this run.`);
     return;
   }
 
@@ -12765,7 +12793,7 @@ function triageDeletedSessions(sessionRows, map, registrantsSheet) {
   const empty = { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false };
 
   if (isBootstrapActive()) {
-    log('Triage skipped: a large-setup import is still writing the session table.');
+    log('Triage skipped: a large-setup import or forms-rebuild sweep is still writing the session table.');
     return empty;
   }
 
@@ -14239,7 +14267,7 @@ function getOrCreateSignInSheetFolder() {
 function showRepointSessionsDialog() {
   if (!requireAuthorizedAdmin('Move Sessions to Another Form')) return;
   if (isBootstrapActive()) {
-    toastIfPossible('A large-setup import is running — try this once it finishes.');
+    toastIfPossible(bootstrapBusyMessage());
     return;
   }
   const sessions = listRepointableSessions();
@@ -14723,12 +14751,28 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
 // ============================================================================
 
 /**
- * How many forms one run will replace. Building a form is a few dozen Forms
- * calls plus a Drive copy, and this runs from a menu click with a six-minute
- * ceiling. Whatever is left is reported and picked up by running it again —
- * the work is strictly decreasing, since a rebuilt form is skipped next time.
+ * How many forms one SYNCHRONOUS run will replace. Building a form is a few
+ * dozen Forms calls plus a Drive copy, and this runs from a menu click with a
+ * six-minute ceiling. Whatever is left is reported and picked up by running
+ * it again — the work is strictly decreasing, since a rebuilt form is
+ * skipped next time.
+ *
+ * This only governs plans at or below FORM_REBUILD_SLICE_THRESHOLD. Bigger
+ * plans skip it entirely and run as the self-continuing background sweep
+ * defined below instead — see the block comment above
+ * runFormRebuildSweepSlice() for why.
  */
 const MAX_FORM_REPLACEMENTS_PER_RUN = 8;
+
+/**
+ * Above this many forms, one click starts a background sweep that keeps
+ * itself going — the same slice/watchdog/hand-off-trigger technique
+ * bootstrapCalendars() uses for a first-time import. Below it, the plain
+ * single-run path above (reported leftovers, re-run by hand) is simple
+ * enough not to need that machinery, and the "run it again" it occasionally
+ * asks for tops out at a handful of clicks rather than dozens.
+ */
+const FORM_REBUILD_SLICE_THRESHOLD = 50;
 
 /** What the confirmation prompt makes you type. Deliberately not "yes". */
 const DESTROY_REBUILD_CONFIRM_WORD = 'REBUILD';
@@ -14736,11 +14780,17 @@ const DESTROY_REBUILD_CONFIRM_WORD = 'REBUILD';
 /**
  * ADMIN MENU ENTRY. Replaces every live registration form covering an upcoming
  * session with a brand-new one built from the current template.
+ *
+ * A plan of FORM_REBUILD_SLICE_THRESHOLD forms or fewer runs to completion (or
+ * as far as MAX_FORM_REPLACEMENTS_PER_RUN allows) in this one execution. A
+ * bigger plan hands off to startFormRebuildSweep() instead, which finishes the
+ * whole job in the background across as many executions as it takes — the
+ * person who clicked the menu does not click it again.
  */
 function destroyAndRebuildAllForms() {
   if (!requireAuthorizedAdmin('Destroy and Rebuild Forms')) return null;
   if (isBootstrapActive()) {
-    toastIfPossible('A large-setup import is running — try this once it finishes.');
+    toastIfPossible(bootstrapBusyMessage());
     return null;
   }
 
@@ -14759,12 +14809,18 @@ function destroyAndRebuildAllForms() {
     return null;
   }
 
+  const sliced = plan.length > FORM_REBUILD_SLICE_THRESHOLD;
   const preview = plan.slice(0, 6)
     .map(p => `• ${p.describe} (${p.upcomingCount} upcoming date(s))`).join('\n');
   const more = plan.length > 6 ? `\n…and ${plan.length - 6} more` : '';
-  const batched = plan.length > MAX_FORM_REPLACEMENTS_PER_RUN
-    ? `\n\nOnly the first ${MAX_FORM_REPLACEMENTS_PER_RUN} will be done this run — run it again for the rest.`
-    : '';
+  const batched = sliced
+    ? `\n\nThat is over ${FORM_REBUILD_SLICE_THRESHOLD}, so this runs as a BACKGROUND SWEEP: it rebuilds a ` +
+      `few forms at a time and re-arms itself automatically until every one is done — you will NOT need to ` +
+      `run this again. Calendar sync and registration sync pause for the duration and resume on their own ` +
+      `when the sweep finishes.`
+    : plan.length > MAX_FORM_REPLACEMENTS_PER_RUN
+      ? `\n\nOnly the first ${MAX_FORM_REPLACEMENTS_PER_RUN} will be done this run — run it again for the rest.`
+      : '';
 
   if (!confirmConsequentialAction('Destroy and rebuild every registration form?',
     `${plan.length} form(s) would be REPLACED with brand-new ones:\n${preview}${more}${batched}\n\n` +
@@ -14795,6 +14851,10 @@ function destroyAndRebuildAllForms() {
     String(typed.getResponseText() || '').trim().toUpperCase() !== DESTROY_REBUILD_CONFIRM_WORD) {
     toastIfPossible('Cancelled — nothing was changed.');
     return null;
+  }
+
+  if (sliced) {
+    return startFormRebuildSweep(plan);
   }
 
   const lock = LockService.getScriptLock();
@@ -14927,6 +14987,336 @@ function runFormRebuildSweep(registrySheet, plan) {
   log(`destroyAndRebuildAllForms: ${summary}`);
   toastIfPossible(`✅ ${summary}`);
   return result;
+}
+
+// ============================================================================
+// DESTROY-AND-REBUILD: BACKGROUND SWEEP FOR LARGE PLANS
+//
+// Below FORM_REBUILD_SLICE_THRESHOLD forms, runFormRebuildSweep() above does
+// the whole job (or as much of MAX_FORM_REPLACEMENTS_PER_RUN as fits) in the
+// one execution the menu click gave it, and any leftover count just says "run
+// it again". Fine for a handful of forms. It stops being fine once a plan
+// runs past what one execution — or even a few manual re-clicks — can
+// reasonably get through: nobody should have to sit at the sheet re-running a
+// menu item a dozen-plus times to replace fifty or a hundred forms.
+//
+// So a plan over the threshold takes the same route bootstrapCalendars() uses
+// for a first-time import (see the "BOOTSTRAP" block comment above
+// runBootstrapSlice(), which this mirrors closely — same shape, different
+// unit of work):
+//   - Automation (syncCalendars/syncRegistrations/onCalendarChange) is paused
+//     up front, via the same pauseAutomationForBootstrap() the import uses —
+//     both are long, multi-execution jobs writing to the same dashboard and
+//     session table, so both need the same quiet.
+//   - Each slice imports outstanding registrations first, then replaces
+//     forms until its time budget runs out, then hands off to the next slice
+//     via a one-off trigger. Importing every slice (not just the first)
+//     matters here: a response can land on a form that is not yet rebuilt in
+//     the gap between slices, and that form is about to be trashed — see
+//     runFormRebuildSweep()'s note on why the import has to happen before
+//     anything is destroyed.
+//   - Progress lives in the STATE (which old Form_IDs are done), not in
+//     memory, so a slice never repeats work and a killed slice's watchdog
+//     trigger picks up exactly where the state says to.
+//   - The final slice restores every trigger and clears the state.
+//
+// isBootstrapActive() treats this sweep as equivalent to a bootstrap import
+// for every guard already written against it (see its definition) — the two
+// jobs are different work, but "something big is rewriting the dashboard
+// across many executions" is the same fact either way, and everything that
+// has to stand down for one has to stand down for the other.
+// ============================================================================
+
+const FORM_REBUILD_RESUME_HANDLER = 'resumeFormRebuildSweep';
+const FORM_REBUILD_STATE_PROP_KEY = 'FORM_REBUILD_STATE_V1';
+
+/** Mirrors BOOTSTRAP_SLICE_BUDGET_MS — see its comment for why not a flat 5 minutes. */
+const FORM_REBUILD_SLICE_BUDGET_MS = 4.5 * 60 * 1000;
+/** Mirrors BOOTSTRAP_RESUME_DELAY_MS — gap before the next slice after a clean hand-off. */
+const FORM_REBUILD_RESUME_DELAY_MS = 30 * 1000;
+/** Mirrors BOOTSTRAP_WATCHDOG_DELAY_MS — armed before a slice starts, so a killed slice still gets a successor. */
+const FORM_REBUILD_WATCHDOG_DELAY_MS = FORM_REBUILD_SLICE_BUDGET_MS + 2.5 * 60 * 1000;
+/** Hard stop, so a bug can never leave the project trading triggers forever. */
+const FORM_REBUILD_MAX_SLICES = 60;
+/** Consecutive slices allowed to make no progress before giving up. */
+const FORM_REBUILD_MAX_STALLED_SLICES = 2;
+/** Mirrors BOOTSTRAP_STALE_MS — after this long with no slice completing, the sweep stops blocking normal syncs. */
+const FORM_REBUILD_STALE_MS = 2 * 60 * 60 * 1000;
+
+function getFormRebuildState() {
+  const raw = PropertiesService.getScriptProperties().getProperty(FORM_REBUILD_STATE_PROP_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    log(`⚠️ Form-rebuild sweep state was unreadable (${err}) — treating it as finished.`);
+    return null;
+  }
+}
+
+function saveFormRebuildState(state) {
+  PropertiesService.getScriptProperties().setProperty(FORM_REBUILD_STATE_PROP_KEY, JSON.stringify(state));
+}
+
+function clearFormRebuildState() {
+  PropertiesService.getScriptProperties().deleteProperty(FORM_REBUILD_STATE_PROP_KEY);
+}
+
+/** Is a sliced destroy-and-rebuild sweep in flight right now? Stale state (see FORM_REBUILD_STALE_MS) reads as "no". */
+function isFormRebuildSweepActive() {
+  const state = getFormRebuildState();
+  if (!state) return false;
+  const age = Date.now() - (state.lastSliceAt || state.startedAt || 0);
+  if (age > FORM_REBUILD_STALE_MS) {
+    log(`⚠️ Ignoring a destroy-and-rebuild sweep that hasn't advanced in ${Math.round(age / 60000)} minute(s) — ` +
+      `run destroyAndRebuildAllForms() to restart it, or cancelFormRebuildSweep() to clear it.`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Starts the background sweep for a plan over FORM_REBUILD_SLICE_THRESHOLD
+ * forms. Called only from destroyAndRebuildAllForms(), after both
+ * confirmations, so everything here can assume the user already agreed to
+ * replace exactly the forms in `plan`.
+ */
+function startFormRebuildSweep(plan) {
+  // Ownership is checked here for the same reason bootstrapCalendars() checks
+  // it before pausing automation: the sweep both tears triggers down and
+  // builds them back up, so the account starting it is choosing to own them.
+  if (!requireTriggerOwnership()) return null;
+  if (isFormRebuildSweepActive()) {
+    toastIfPossible('A destroy-and-rebuild sweep is already running — leaving it alone.');
+    return null;
+  }
+
+  pauseAutomationForBootstrap();
+  saveFormRebuildState({
+    startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0, stalledSlices: 0,
+    confirmed: plan.map(item => item.oldFormId), done: [], replaced: 0, failed: 0
+  });
+  log(`Destroy-and-rebuild sweep started: automation paused, replacing ${plan.length} form(s) in slices.`);
+  toastIfPossible(`Rebuild sweep started for ${plan.length} form(s) — this runs in the background and will ` +
+    `finish on its own; no need to run this again.`);
+
+  runFormRebuildSweepSlice();
+  return { started: true, planned: plan.length };
+}
+
+/** Trigger handler for the next slice. Never call this directly — use destroyAndRebuildAllForms(). */
+/**
+ * DELIBERATELY NOT behind the Automation_Enabled kill switch, for the same
+ * reason resumeBootstrapCalendars() isn't (see its comment): a sweep stopped
+ * halfway is not a paused sweep, it's a stranded one — the triggers stay
+ * torn down and the state stays active, so every normal sync keeps standing
+ * down until something explicitly finishes or cancels it. That "something"
+ * is this handler completing normally, or cancelFormRebuildSweep().
+ */
+function resumeFormRebuildSweep() {
+  runFormRebuildSweepSlice();
+}
+
+/** One execution's worth of rebuilding. Everything that decides whether there is a NEXT slice happens here. */
+function runFormRebuildSweepSlice() {
+  const state = getFormRebuildState();
+  if (!state) {
+    // Nothing in flight — a leftover trigger firing after the sweep finished.
+    deleteFormRebuildResumeTriggers();
+    return;
+  }
+
+  // Armed BEFORE anything else, including the lock: from here on every exit
+  // path leaves exactly one live successor behind, so neither an outright
+  // kill nor a lock we couldn't get can strand the sweep. finishFormRebuildSweep()
+  // is what finally clears it.
+  armFormRebuildResume(FORM_REBUILD_WATCHDOG_DELAY_MS);
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    log('Form-rebuild slice: another execution holds the lock — the next slice will retry.');
+    return;
+  }
+
+  try {
+    state.slices++;
+    state.lastSliceAt = Date.now();
+    saveFormRebuildState(state);
+    // Re-asserted every slice, not just at the start — see runBootstrapSlice()'s
+    // comment on why a trigger that reappears mid-sweep has to be removed again
+    // rather than trusted to stay gone.
+    pauseAutomationForBootstrap();
+
+    if (state.slices > FORM_REBUILD_MAX_SLICES) {
+      finishFormRebuildSweep(state, `stopped after ${FORM_REBUILD_MAX_SLICES} slices without finishing`);
+      return;
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (!registrySheet) {
+      finishFormRebuildSweep(state, 'stopped — the program dashboard sheet is gone');
+      return;
+    }
+
+    const remainingBefore = state.confirmed.length - state.done.length;
+    toastIfPossible(`Rebuild sweep: chunk ${state.slices} running… (${state.replaced} done, ${remainingBefore} left)`);
+
+    // Import outstanding registrations before every slice, not just the
+    // first — a response can be submitted on a not-yet-rebuilt form in the
+    // gap between slices, and that form is about to be trashed. This is the
+    // one step that makes the whole action safe, so a failure here stops the
+    // sweep rather than risking a form being destroyed with a response still
+    // on it (see runFormRebuildSweep()'s identical reasoning above).
+    try {
+      syncRegistrationsInternal();
+    } catch (err) {
+      finishFormRebuildSweep(state, `stopped — could not import outstanding registrations (${err})`);
+      return;
+    }
+
+    const headers = HEADERS.Master_Program_Dashboard;
+    const map = getIndexMap(headers);
+    const confirmedSet = new Set(state.confirmed);
+    const doneSet = new Set(state.done);
+    // Re-derived fresh every slice, same reason runFormRebuildSweep() re-reads
+    // the plan after its import: the sync above can move rows (triage sends a
+    // deleted session's row elsewhere), so only the SET of confirmed old
+    // Form_IDs is trusted from the original plan — the sessions on each one
+    // are taken as they stand right now.
+    const remainingPlan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+      .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId));
+
+    if (remainingPlan.length === 0) {
+      finishFormRebuildSweep(state, null);
+      return;
+    }
+
+    const deadline = Date.now() + FORM_REBUILD_SLICE_BUDGET_MS;
+    let processedThisSlice = 0;
+    for (const item of remainingPlan) {
+      if (Date.now() >= deadline) break;
+      try {
+        if (replaceOneForm(registrySheet, item)) {
+          state.replaced++;
+        } else {
+          state.failed++;
+        }
+      } catch (err) {
+        state.failed++;
+        log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
+        noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
+      }
+      state.done.push(item.oldFormId);
+      processedThisSlice++;
+      saveFormRebuildState(state);
+      // Pacing between forms — see migrateFormsToCurrentTemplate() / the
+      // identical sleep in runFormRebuildSweep() above for the same reason.
+      if (Date.now() < deadline) Utilities.sleep(1500);
+    }
+
+    if (processedThisSlice > 0) {
+      SpreadsheetApp.flush();
+      // Every event replaced this slice still carries a link to a form that
+      // is now in the trash.
+      rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+      renderProgramDashboard(false, { skipTriage: true });
+      flushPersistentRegistries();
+    }
+
+    const remaining = state.confirmed.length - state.done.length;
+    if (remaining <= 0) {
+      finishFormRebuildSweep(state, null);
+      return;
+    }
+
+    const madeProgress = processedThisSlice > 0;
+    state.stalledSlices = madeProgress ? 0 : (state.stalledSlices || 0) + 1;
+    saveFormRebuildState(state);
+
+    if (state.stalledSlices >= FORM_REBUILD_MAX_STALLED_SLICES) {
+      finishFormRebuildSweep(state, `stopped early — ${remaining} form(s) could not be processed`);
+      return;
+    }
+
+    toastIfPossible(`Rebuild sweep: chunk ${state.slices} done — ${state.replaced} form(s) rebuilt so far` +
+      (state.failed > 0 ? `, ${state.failed} failed` : '') +
+      `, ${remaining} to go. Next chunk starts in ${Math.round(FORM_REBUILD_RESUME_DELAY_MS / 1000)}s.`);
+    armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS); // replaces the watchdog with a prompt hand-off
+  } catch (err) {
+    // An exception, unlike a timeout, is ours to handle: put the system back
+    // together rather than leaving automation paused.
+    log(`⚠️ Form-rebuild slice failed (${err}) — restoring automation.`);
+    noteForAdmin('Destroy and rebuild forms', `The sweep stopped with an error and automation was restored: ${err}`);
+    finishFormRebuildSweep(getFormRebuildState() || state, `stopped by an error: ${err}`);
+  } finally {
+    flushPersistentRegistries(); // a killed slice's forms must never be forgotten
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Last slice: every trigger back in place, admin digest flushed, state
+ * cleared. `problem` is null on a clean finish.
+ */
+function finishFormRebuildSweep(state, problem) {
+  state = state || {};
+  deleteFormRebuildResumeTriggers();
+  clearFormRebuildState();
+
+  try {
+    // force: this IS the restore, and the state was cleared just above — but
+    // not relying on that ordering is what keeps automation from staying off.
+    writeTriggers(true);
+  } catch (err) {
+    log(`⚠️ Rebuild sweep: could not restore the triggers (${err}) — run "Check Triggers" from the menu.`);
+    noteForAdmin('Destroy and rebuild forms',
+      `The sweep finished but its triggers could not be restored (${err}). Run "Check Triggers" from the menu.`);
+  }
+
+  const totals = `${state.replaced || 0} form(s) rebuilt` + ((state.failed || 0) > 0 ? `, ${state.failed} failed` : '');
+  const headline = problem
+    ? `⚠️ Destroy-and-rebuild sweep ${problem}. ${totals}.`
+    : `Destroy-and-rebuild sweep complete ✅ (${totals}, over ${state.slices || 1} run(s)). Old forms are in the Drive trash.`;
+
+  log(headline);
+  if (problem) noteForAdmin('Destroy and rebuild forms', headline);
+  toastIfPossible(headline);
+  flushAdminDigest('Destroy and rebuild forms');
+}
+
+/** Replaces any pending hand-off with exactly one, `delayMs` out. Mirrors armBootstrapResume(). */
+function armFormRebuildResume(delayMs) {
+  deleteFormRebuildResumeTriggers();
+  ScriptApp.newTrigger(FORM_REBUILD_RESUME_HANDLER).timeBased().after(delayMs).create();
+}
+
+function deleteFormRebuildResumeTriggers() {
+  let removed = 0;
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() !== FORM_REBUILD_RESUME_HANDLER) return;
+    ScriptApp.deleteTrigger(t); // one-off triggers linger after firing; clear them out
+    removed++;
+  });
+  return removed;
+}
+
+/**
+ * ESCAPE HATCH — run from the Apps Script editor. Stops a sliced rebuild
+ * sweep and puts automation back exactly as finishFormRebuildSweep() would.
+ * Whatever was already rebuilt stays rebuilt; re-running
+ * destroyAndRebuildAllForms() picks up only the forms still left.
+ */
+function cancelFormRebuildSweep() {
+  if (!requireAuthorizedAdmin('Cancel Destroy-and-Rebuild Sweep')) return;
+  const state = getFormRebuildState();
+  if (!state) {
+    deleteFormRebuildResumeTriggers();
+    writeTriggers();
+    log('No destroy-and-rebuild sweep was running — triggers verified anyway.');
+    return;
+  }
+  finishFormRebuildSweep(state, 'was cancelled');
 }
 
 /**
