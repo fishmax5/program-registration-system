@@ -330,6 +330,47 @@ and a ledger so nothing is sent twice — but the failure modes are worth naming
   Registrants tab, rather than marked `Cancelled`, is never removed from the
   guest list — there is no row left to notice.
 
+### 12e. Two checkboxes that write to the calendar, and one that closes a form
+
+`Club` and `No_Registration` on the program dashboard are ticks that reach
+outside the workbook: each one writes its tag into the description of **every**
+calendar event of that program (`stampProgramFlagOnCalendar()`), and
+`[No Registration]` additionally strips the registration link off those events
+and calls `setAcceptingResponses(false)` on the program's form. Worth naming:
+
+- **A tick can be confirmed and not delivered.** The write happens on the
+  `onEdit` path, which in many workbooks has no authorization to touch
+  CalendarApp at all (see #1). The tick stays on the sheet, the toast says so,
+  and **🔁 Apply Type / Club / No-Reg Changes to Calendar** is the recovery —
+  the same shape as `Type_Tag`, with the same failure mode: nobody reads the
+  toast, and the next sync puts the calendar's answer back.
+- **Closing a form is remembered in Script Properties**
+  (`NO_REGISTRATION_CLOSED_FORMS_V1`), and only forms recorded there are ever
+  re-opened. If that property is cleared, a form closed by this feature stays
+  closed after the tag comes off, and nothing says why. The symptom is
+  "registration is on again but the form still refuses responses"; the fix is
+  one click in the Forms editor.
+- **`[Drop-In]` reads as no-registration.** That is intended — it is what staff
+  would type — but it is the loosest of the tag spellings, and a description
+  that says "drop-in welcome" *inside brackets* will turn a program's form off.
+  Prose outside brackets is safe.
+
+### 12f. Deleting registrations is the one destructive path
+
+`deleteRegistrationsForSessions()` is the only action in this system that
+removes registrant rows rather than marking them `Cancelled`, and with its
+optional tick it deletes Google Form responses too. It is gated by an admin
+check, a typed `DELETE`, and the script lock (a sync reading the tab either side
+of the deletion would otherwise write every row straight back). What remains:
+
+- **A deleted response can cover sessions that were not selected** — one
+  submission can span six dates of a grouped form. Those other rows survive as
+  the record, but the response behind them is gone, and a full re-import would
+  no longer recreate them.
+- **Club bookings come back.** Deleting a club member's row for an upcoming
+  session is undone by the next `applyClubRosterCatchup()`. The dialog says so;
+  the real off switch is **Active** on `Club_Members` (see #12b).
+
 ## Long term — architectural, worth knowing before deciding anything big
 
 ### 13. The spreadsheet is the database
@@ -447,3 +488,11 @@ order of what would change your plans:
 15. **Check one lunch dashboard row's buffers** against Config. They should
    match, including on an upcoming date nobody has registered for yet — that
    was the symptom the buffer change fixes.
+16. **Tick `No_Registration` on one program**, say yes, then run Sync Cal.
+   Check: no form link on its dashboard rows, no "📝 Register for…" line left in
+   its calendar events, its old form no longer accepting responses — and its
+   room notes and other brackets untouched. Then untick it and confirm all
+   three come back.
+17. **Delete one test registration** (🗑️ Delete Registrations…). Confirm the
+   rows go, the lunch dashboard number drops, and — with the responses tick
+   left off — the response is still in the form.

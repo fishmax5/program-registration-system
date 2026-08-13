@@ -45,10 +45,16 @@ calendar, so no settings go there.
 | `[Cap: 12, Grouped]` | Both. `[Cap: 12] [Grouped]` on separate lines works too. |
 | `[All Locations]` | This program's sessions at **every** location share **one** form |
 | `[Club]` | People **join once and stay joined** — see [Clubs](#clubs) |
+| `[No Registration]` | **No sign-ups at all** — no form is built — see [No registration](#no-registration) |
 
 You can write anything else you like in the description around them — only
-brackets containing `Cap:`, `Grouped`, `Monthly`, `All Locations` or `Club`
-are read.
+brackets containing `Cap:`, `Grouped`, `Monthly`, `All Locations`, `Club` or
+`No Registration` are read.
+
+**You don't have to type `[Club]` or `[No Registration]` by hand.** Both are
+also **checkboxes** on the Master_Program_Dashboard — tick one and the tag is
+written onto the program's calendar events for you. See
+[The two checkboxes](#the-two-checkboxes-club-and-no_registration).
 
 **Grouped vs Monthly** — this is just "how many forms?":
 
@@ -168,6 +174,57 @@ Re-tick **Active** and they're booked back in on the next sync.
 > made them inactive — that's them asking, in the only way a form lets them ask.
 > It's reported in the admin email so it's never a silent surprise.
 
+### No registration
+
+Some of what you run takes no sign-up at all: a drop-in coffee hour, an open
+art room, a lobby concert. Those events still belong on the calendar and on the
+dashboard — staff want to see what's on today — but a "📝 Register for…" link
+on them is worse than nothing, because it tells people to sign up for a list
+nobody is keeping.
+
+Put `[No Registration]` in the description (or tick the **No_Registration** box
+on the dashboard) and:
+
+1. **No form is ever built** for the program.
+2. Its dashboard rows still appear, with `— no registration —` where the form
+   link would be.
+3. If it *already had* a form, the registration link is **removed** from its
+   calendar events and the form **stops accepting responses** on the next sync.
+   The form and everything in it are kept.
+
+`[No Signup]`, `[No Sign-Up]`, `[Registration Not Required]` and `[Drop-In]`
+read as the same tag.
+
+**It's reversible.** Untick the box (or delete the tag) and the next **Sync Cal**
+re-opens the form, puts the link back on the calendar events, and restores the
+links on the dashboard. Only a form this system closed is re-opened — one you
+closed by hand in the Forms editor stays closed.
+
+**Registrations already collected are never touched.** Turning registration off
+stops new sign-ups; it doesn't erase the people who already signed up. To remove
+those, use [🗑️ Delete Registrations…](#deleting-registrations).
+
+### The two checkboxes: `Club` and `No_Registration`
+
+Both tags are also **tick boxes** on the Master_Program_Dashboard, and ticking
+one is exactly the same as typing the tag by hand — because that's what it does:
+
+1. You tick the box on any one of the program's rows.
+2. It asks what the change means, in words, and you say yes.
+3. The tag is written into the **description of every calendar event** of that
+   program — which is where the system reads it back from, so the tick sticks
+   instead of being wiped by the next sync.
+4. The next **Sync Cal** applies it: the form gains its club option, or the
+   program stops taking registrations.
+
+Untick to reverse, on the same terms.
+
+> **If the toast says the calendar couldn't be updated**, the tick is on the
+> sheet but hasn't reached the calendar — Google doesn't always give a cell edit
+> permission to write to a calendar. Click
+> **🔁 Apply Type / Club / No-Reg Changes to Calendar** on the menu and it
+> finishes the job. See [Things to know](#things-to-know).
+
 **Tentative events** — start the **title** with `*`:
 
 | Title | Result |
@@ -229,12 +286,20 @@ form links off the screen.
 it; your changes will be overwritten (you'll get a warning if you try). If a
 session is wrong here, fix the calendar event.
 
-**The one exception is `Type_Tag`** — it *is* yours to change, and changing it
-writes back to the calendar so it sticks. It's a dropdown with an "are you
-sure?" behind it rather than a yellow cell: it always already holds a real
-value, so marking it as a blank-to-fill-in would have read as a column of
-problems. See [Grouped vs Monthly](#setting-up-your-calendar-events) above, and
-**🔁 Apply Type Changes to Calendar** if a change doesn't stick.
+**The exceptions are `Type_Tag`, `Club` and `No_Registration`** — those three
+*are* yours to change, and changing one writes back to the calendar so it
+sticks. `Type_Tag` is a dropdown; `Club` and `No_Registration` are checkboxes;
+each has an "are you sure?" behind it rather than a yellow cell, because each
+always already holds a real value and marking them as blanks-to-fill-in would
+have read as columns of problems. See
+[Grouped vs Monthly](#setting-up-your-calendar-events),
+[The two checkboxes](#the-two-checkboxes-club-and-no_registration), and
+**🔁 Apply Type / Club / No-Reg Changes to Calendar** if a change doesn't stick.
+
+| Column | Tick it to |
+|---|---|
+| `Club` | Make this program a club — people sign up once and stay signed up ([Clubs](#clubs)) |
+| `No_Registration` | Stop this program taking sign-ups at all ([No registration](#no-registration)) |
 
 `Form_ID`, `Event_ID`, `Calendar_Source` and `Calendar_Synced?` are **hidden** —
 internal plumbing, kept after the capacity columns at the far right. The "View
@@ -900,9 +965,10 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **📧 Invite Registrants to Calendar Events** | Sends the calendar invitations now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
-| **🔁 Apply Type Changes to Calendar** | Makes a Grouped/Monthly change typed on the dashboard stick, by writing it onto the calendar events |
+| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Makes a Grouped/Monthly change — or a `Club` / `No_Registration` tick — typed on the dashboard stick, by writing it onto the calendar events |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. **Admin accounts only** |
 | **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. **Admin accounts only** — see [Moving sessions between forms](#moving-sessions-between-forms) |
+| **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). **Admin accounts only** |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
@@ -966,6 +1032,9 @@ say no:
 |---|---|
 | Press **Sync Cal** | It can create forms, change form dates, and edit calendar descriptions |
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
+| Tick or untick `Club` on the program dashboard | It changes whether signing up once keeps you signed up, and writes `[Club]` onto every one of its calendar events |
+| Tick or untick `No_Registration` on the program dashboard | It stops (or restarts) sign-ups for that program: no form is built, the registration link comes off its calendar events, and an existing form stops accepting responses |
+| Press **🗑️ Delete Registrations…** | It **permanently deletes** registrant rows, and can delete the form responses behind them. It also makes you type `DELETE` |
 | Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Add a **walk-in** from the Quick Mark panel | It writes a person into the record, and into the catering count |
@@ -1138,6 +1207,58 @@ the new form.
 
 ---
 
+## Deleting registrations
+
+**🗓️ Calendar & Form Manager ▸ 🗑️ Delete Registrations…** (admin accounts only)
+
+Everything else in this system **cancels**. Someone who drops out is marked
+`Cancelled` and stays on the tab; a session whose calendar event disappears
+sends its people to `Deleted_Event_Triage`. That's deliberate — who signed up
+for what is worth keeping.
+
+This is the exception, for rows that aren't history at all:
+
+- a **test run** — four submissions made while checking the form worked, by
+  people who don't exist;
+- a **duplicate import**, or rows made against a session that was set up wrong
+  and rebuilt;
+- a program **cancelled before it ever ran**, where nobody wants a permanent
+  list of people who were going to come.
+
+**How it works:**
+
+1. Open the dialog. It lists every session with registrations from the last
+   four months and the next six, with a count on each.
+2. Tick the sessions.
+3. Optionally tick **"delete the matching form responses too"** — see below.
+4. Type `DELETE` in the confirm box. The button stays greyed out until you do.
+
+The registrant rows go, and the catering numbers and the dashboard counts are
+recalculated straight away.
+
+> **To record that somebody isn't coming, don't use this.** Set their
+> `Program_Status` to `Cancelled` on **Lunch_and_Event_Registrants** — the row
+> and the history stay, and the catering counts drop them either way.
+
+**About deleting the form responses.** Deleting the rows doesn't touch the
+Google Form responses they came from. Left alone those responses sit in the form
+and would come back on a full re-import — which is exactly what clearing out a
+test run doesn't want. So it's offered as a separate tick, **off by default**,
+because it's the one part that can't be undone from inside the workbook.
+
+> One response can cover several rows — a party of four, or one person across
+> six dates of a grouped form. Deleting the response removes that whole object.
+> The rows for the other dates are left alone (they're the record), but the
+> response behind them is gone.
+
+**Clubs are the one thing it can't undo.** Membership lives on `Club_Members`,
+and every sync re-books active members into upcoming sessions — so deleting a
+club member's row for a *future* session just puts it back on the next sync. To
+take somebody off a club, untick **Active** on `Club_Members` instead. The
+dialog flags the sessions where this applies.
+
+---
+
 ## Leftover tabs
 
 Over time a workbook collects tabs that hold real data but nothing reads any
@@ -1280,6 +1401,14 @@ numbers and split meal counts:**
 4. **Run Sync Cal once** so the `Club` column fills in for programs you've
    tagged.
 
+**And when you update to the version with the two checkboxes:**
+
+1. **Rebuild Layout** adds the `No_Registration` column and turns both it and
+   `Club` into checkboxes. A `Club` column that currently holds the word
+   *"Club"* still reads correctly in the meantime.
+2. **Run Sync Cal once.** It rewrites those columns as real ticks and picks up
+   any `[No Registration]` tags already in your calendar descriptions.
+
 ---
 
 ## Fixing duplicate links in event descriptions
@@ -1369,7 +1498,8 @@ Trigger Ownership**, which explains up front that it *cannot* delete the old
 owner's triggers — only the Apps Script editor's Triggers page can do that.
 
 **Not gated, by design:** Sync Cal, Sync Registrations, the two lunch-menu
-items, Apply Type Changes to Calendar, Show All Past Rows, Resize All Sheets,
+items, Apply Type / Club / No-Reg Changes to Calendar, Show All Past Rows,
+Resize All Sheets,
 and everyone's ability to register, edit rows, and view every dashboard.
 Ordinary day-to-day use needs no special account.
 
@@ -1559,14 +1689,16 @@ Master_Lunch_Dashboard and manually-marked registrant rows survive.
 on the program dashboard is a view of what the calendar event's description
 says. Changing it writes the new value back onto every one of that program's
 calendar events — that's what makes it stick. If it can't reach the calendar
-at that moment you'll get a warning toast; press **🔁 Apply Type Changes to
-Calendar** and it goes through. Without that, the next sync quietly puts the
-old value back.
+at that moment you'll get a warning toast; press **🔁 Apply Type / Club /
+No-Reg Changes to Calendar** and it goes through. Without that, the next sync
+quietly puts the old value back.
 
-**`Club` lives on the calendar too**, in the same way and for the same reason —
-it comes from the `[Club]` tag in the event description. Unlike `Type_Tag` there
-is no dialog behind the cell, so typing in the `Club` column is simply
-overwritten on the next sync. Add or remove the tag on the calendar event.
+**`Club` and `No_Registration` live on the calendar too**, in the same way and
+for the same reason — they come from the `[Club]` and `[No Registration]` tags
+in the event description. Both are checkboxes with the same dialog-and-write-back
+behind them as `Type_Tag`, so ticking one is a real change, not a note: it is
+written onto every one of that program's calendar events. Same warning toast,
+same menu item, if it can't reach the calendar from the tick.
 
 **Buffers live in Config, nowhere else.** `Standard_Buffer` / `Tester_Buffer` on
 the lunch dashboard are re-read from **Config ▸ 🍱 Meal Buffer Amounts** on
@@ -1596,8 +1728,9 @@ box with a note saying why.
 
 **I changed Grouped/Monthly and it changed itself back**
 `Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
-can't always reach the calendar. Press **🔁 Apply Type Changes to Calendar**,
-then **Sync Cal**.
+can't always reach the calendar. Press **🔁 Apply Type / Club / No-Reg Changes
+to Calendar**, then **Sync Cal**. The same goes for a `Club` or
+`No_Registration` tick that didn't stick.
 
 **Only some locations ended up on the shared form**
 The `[All Locations]` tag is read per event, so the locations you didn't tag

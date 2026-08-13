@@ -15,6 +15,13 @@ It also:
 - keeps **club rosters** — programs tagged `[Club]` in their calendar
   description, where people sign up once and stay signed up across every
   future form, reversibly, from a `Club_Members` tab;
+- supports programs that take **no registration at all** (`[No Registration]`)
+  — a drop-in coffee hour still shows on the dashboard, but gets no form and no
+  "register here" link on its calendar events;
+- puts both of those on the dashboard as **checkboxes**: tick one and the tag
+  is written onto every one of that program's calendar events for you;
+- can **delete registrations** outright — test runs and duplicates, by session,
+  behind a typed confirmation, optionally taking the form responses with them;
 - records **several different meals per person** on one day (ate the day-1
   meal here, took two subs home), attached to whoever took them;
 - prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;

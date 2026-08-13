@@ -622,17 +622,21 @@ const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
 
 /**
  * Master_Program_Dashboard: the session table is rebuilt from the calendar
- * every render, so Type_Tag is the only cell a human can usefully change (and
- * handleProgramDashboardEdit() makes it stick by writing it back to the
- * calendar). Location is a dropdown for readability but is equally
- * calendar-derived, so it is NOT advertised as editable.
+ * every render, so the only cells a human can usefully change are the ones
+ * handleProgramDashboardEdit() writes back to the calendar — Type_Tag and the
+ * two flag checkboxes (Club, No_Registration; see PROGRAM_FLAG_COLUMNS).
+ * Location is a dropdown for readability but is equally calendar-derived, so
+ * it is NOT advertised as editable.
  *
  * NOT given the yellow manual-entry treatment the other tabs' editable
  * columns get — see writeProgramDashboardSheet(). Kept as the single named
  * list of "what a human may change here", which is what
  * protectDerivedColumns() is defined against.
  */
-const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag'];
+// Spelled out rather than derived from PROGRAM_FLAG_COLUMNS: that list is
+// declared further down this file, and a top-level const cannot read another
+// one that has not been evaluated yet.
+const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration'];
 
 /**
  * Internal plumbing on the program dashboard: the raw IDs and the duplicate
@@ -824,8 +828,125 @@ const CLUB_TAG = 'Club';
 /** What gets READ as the club tag. Kept as permissive as the shared-location one, and for the same reason: it is typed by hand into a calendar. */
 const CLUB_WORDS_REGEX = /\b(Club|Membership|Members\s+Only)\b/i;
 
-/** Value written into Master_Program_Dashboard's Club column for a club session. Blank means "not a club". */
-const CLUB_COLUMN_VALUE = 'Club';
+/**
+ * What gets WRITTEN into Master_Program_Dashboard's Club column for a club
+ * session: TRUE, because that column is now a real CHECKBOX (see
+ * PROGRAM_FLAG_COLUMNS). Earlier versions wrote the word "Club" there and
+ * plenty of workbooks still hold it, which is why isClubColumnValue() reads
+ * both spellings and only the WRITE side changed.
+ */
+const CLUB_COLUMN_VALUE = true;
+
+/**
+ * NO REGISTRATION — the [No Registration] tag.
+ *
+ * The other tags all answer "how should this program's registration work".
+ * This one answers "it shouldn't". Plenty of what a senior center runs takes
+ * no sign-up at all: a drop-in coffee hour, a rolling art room, a lobby
+ * concert. Those events belong on the calendar and on the dashboard — staff
+ * still want to see what is on today — but they must not get a form, and a
+ * "📝 Register for…" link on them is actively wrong: it tells people to sign
+ * up for something nobody is keeping a list for.
+ *
+ * WHAT THE TAG CHANGES:
+ *   - no registration form is ever built for the program (processCalendarGroup
+ *     writes its session rows with the link columns blank);
+ *   - any registration link already sitting in its calendar events is removed,
+ *     and a form it already had stops accepting responses — see
+ *     applyNoRegistrationEffects(). Both are reversible: untick the box and
+ *     the next sync re-opens the form and puts the link back.
+ *
+ * It composes with the others the same way [Club] does, though most of those
+ * combinations are contradictions worth nothing: a club with no registration
+ * is just a program. [No Registration] wins wherever they disagree, since it
+ * is the one that says "no form", and there is nothing for the rest to
+ * describe.
+ */
+const NO_REGISTRATION_TAG = 'No Registration';
+
+/**
+ * What gets READ as the no-registration tag. As permissive as the club and
+ * shared-location ones, and for the same reason: staff type it by hand into a
+ * calendar description and will spell it however it comes to them.
+ */
+const NO_REGISTRATION_WORDS_REGEX =
+  /\b(No\s*-?\s*Registration|No\s+Sign[\s-]?ups?|No\s+Sign\s*-?\s*Up|Registration\s+Not\s+Required|Drop[\s-]?In)\b/i;
+
+/** Written into the No_Registration checkbox column for a session that takes no sign-ups. */
+const NO_REGISTRATION_COLUMN_VALUE = true;
+
+/**
+ * What stands in for "View Live Form" on a session that takes no sign-ups.
+ * Words rather than a blank cell: an empty link column on one row of a table
+ * full of links reads as a form that failed to build, which is the bug this
+ * feature would otherwise look exactly like.
+ */
+const NO_REGISTRATION_LINK_LABEL = '— no registration —';
+
+/**
+ * The two TICKABLE tag columns on Master_Program_Dashboard, and everything
+ * that differs between them, in one place.
+ *
+ * They are the same mechanism twice over — a calendar-description bracket,
+ * shown as a checkbox, ticked or unticked by staff, stamped back onto every
+ * calendar event of that program — so the edit handler, the menu-driven
+ * reconcile and the sync-time catch-up all walk this list instead of naming
+ * either flag. Adding a third flag column is then a matter of adding an entry
+ * here plus its header.
+ *
+ *   column   the dashboard header it appears under
+ *   tag      the exact word this script WRITES into a description bracket
+ *   regex    every spelling it READS back out of one
+ *   groupKey the field buildEventGroups() carries it on
+ */
+const PROGRAM_FLAG_COLUMNS = [
+  {
+    column: 'Club',
+    tag: CLUB_TAG,
+    regex: CLUB_WORDS_REGEX,
+    groupKey: 'isClub',
+    onQuestion: title => `Make "${title}" a club?`,
+    onDetail: title =>
+      `People who sign up for "${title}" will stay signed up: its registration form grows a ` +
+      `"sign up for all future meetings" choice, and everyone on its Club_Members list is booked ` +
+      `into every future session automatically.\n\n[${CLUB_TAG}] is written onto its calendar events.`,
+    offDetail: title =>
+      `"${title}" will stop keeping a standing membership. Nobody is removed from Club_Members and ` +
+      `no existing booking is cancelled — the list simply stops being applied to new sessions.\n\n` +
+      `[${CLUB_TAG}] is removed from its calendar events.`
+  },
+  {
+    column: 'No_Registration',
+    tag: NO_REGISTRATION_TAG,
+    regex: NO_REGISTRATION_WORDS_REGEX,
+    groupKey: 'noRegistration',
+    onQuestion: title => `Turn registration off for "${title}"?`,
+    onDetail: title =>
+      `"${title}" will stop taking sign-ups. No registration form is built for it, the registration ` +
+      `link is removed from its calendar events, and any form it already has stops accepting ` +
+      `responses.\n\nRegistrations already collected are kept. Untick the box to turn registration ` +
+      `back on.\n\n[${NO_REGISTRATION_TAG}] is written onto its calendar events.`,
+    offDetail: title =>
+      `"${title}" will take sign-ups again: the next sync builds (or re-opens) its registration form ` +
+      `and puts the link back on its calendar events.\n\n[${NO_REGISTRATION_TAG}] is removed from ` +
+      `its calendar events.`
+  }
+];
+
+/**
+ * True when a tag-column cell is ON. Reads a real checkbox (a boolean, or the
+ * "TRUE" a pasted cell arrives as) AND the words earlier versions wrote there
+ * — a workbook that still says "Club" in that column must keep meaning it
+ * until the next render turns it into a tick.
+ */
+function isFlagColumnValue(value, wordsRegex) {
+  if (value === true) return true;
+  const text = String(value === false ? '' : (value || '')).trim();
+  if (!text) return false;
+  if (/^true$/i.test(text)) return true;
+  if (/^false$/i.test(text)) return false;
+  return wordsRegex.test(text);
+}
 
 /**
  * The stable key a club's membership is filed under: its title, plus the
@@ -845,7 +966,12 @@ function computeClubKey(cleanTitle, location, isShared) {
 
 /** True when a Master_Program_Dashboard row's Club cell marks it a club session. */
 function isClubColumnValue(value) {
-  return CLUB_WORDS_REGEX.test(String(value || ''));
+  return isFlagColumnValue(value, CLUB_WORDS_REGEX);
+}
+
+/** True when a Master_Program_Dashboard row's No_Registration cell says this session takes no sign-ups. */
+function isNoRegistrationColumnValue(value) {
+  return isFlagColumnValue(value, NO_REGISTRATION_WORDS_REGEX);
 }
 
 /**
@@ -896,13 +1022,18 @@ const HEADERS = {
   // keeping them there means the visible table is a contiguous block, which
   // is what makes "the end of the row" mean anything.
   //
-  // Club sits immediately after Type_Tag because the two together are what
-  // decide how a program behaves: Type_Tag says which sessions share a form,
-  // Club says whether signing up once keeps you signed up (see CLUB_TAG).
-  // It is derived from the calendar description like everything else on this
-  // table — the editable column here is still Type_Tag alone.
+  // Club and No_Registration sit immediately after Type_Tag because the three
+  // together are what decide how a program behaves: Type_Tag says which
+  // sessions share a form, Club says whether signing up once keeps you signed
+  // up (see CLUB_TAG), and No_Registration says whether there is a form at all
+  // (see NO_REGISTRATION_TAG).
+  //
+  // All three are calendar-derived AND editable here. The two flags are real
+  // checkboxes: ticking one asks, then writes its tag into the program's
+  // calendar event descriptions, which is what makes the tick stick instead of
+  // being wiped by the next render (see handleProgramDashboardEdit()).
   Master_Program_Dashboard: [
-    'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club',
+    'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source'
@@ -5216,9 +5347,10 @@ function buildAppMenu(ui, includeAdmin) {
     .addSeparator()
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
-    .addItem('🔁 Apply Type Changes to Calendar', 'applyTypeTagChangesToCalendar')
+    .addItem('🔁 Apply Type / Club / No-Reg Changes to Calendar', 'applyProgramTagChangesToCalendar')
     .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
     .addItem('📄 Move Sessions to Another Form…', 'showRepointSessionsDialog')
+    .addItem('🗑️ Delete Registrations…', 'showDeleteRegistrationsDialog')
     .addSeparator()
     .addItem('🕓 Show All Past Rows', 'showAllPastRows')
     .addItem('Resize All Sheets', 'resizeAllSheets');
@@ -5825,9 +5957,10 @@ function onEdit(e) {
 
 /**
  * Master_Program_Dashboard: the session table is rebuilt from the calendar on
- * every render, so almost nothing typed here survives — EXCEPT Type_Tag,
- * which decides how sessions are grouped onto forms and is a real, outward-
- * facing decision.
+ * every render, so almost nothing typed here survives — EXCEPT the three
+ * columns that describe how a program's registration works: Type_Tag, and the
+ * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,
+ * outward-facing decisions.
  *
  * Changing Grouped <-> Monthly re-partitions a program's sessions across
  * forms: Monthly means one form per calendar month, Grouped means one form for
@@ -5836,6 +5969,9 @@ function onEdit(e) {
  * the cell on "no", and on "yes" writes the tag back into the calendar
  * DESCRIPTION (the actual source of truth, see resolveEventSettings()) so the
  * change survives the next render instead of being overwritten by it.
+ *
+ * The two checkboxes work exactly the same way, one tick instead of a dropdown
+ * — see handleProgramFlagEdit().
  */
 function handleProgramDashboardEdit(e, sheet) {
   const zones = getSectionZones(sheet, 'Event_ID');
@@ -5844,6 +5980,13 @@ function handleProgramDashboardEdit(e, sheet) {
   if (!zone) return;
 
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+
+  // The flag checkboxes first: an edit lands in exactly one column, and
+  // handleProgramFlagEdit() reports whether that column was one of theirs.
+  for (let i = 0; i < PROGRAM_FLAG_COLUMNS.length; i++) {
+    if (handleProgramFlagEdit(e, sheet, zones, headerMap, PROGRAM_FLAG_COLUMNS[i])) return;
+  }
+
   const typeCol = headerMap['Type_Tag'];
   if (typeCol === undefined) return;
 
@@ -5917,6 +6060,104 @@ function describeTypeTagChange(title, newTag) {
       `registration link on every one of its calendar events.`;
 }
 
+/**
+ * One tick of a Club / No_Registration checkbox, made LIVE: ask, then write
+ * the matching tag into (or out of) every one of that program's calendar event
+ * descriptions, which is where resolveEventSettings() reads it back from.
+ *
+ * Returns TRUE when the edit belonged to this flag's column — handled or
+ * declined — so the caller can stop looking.
+ *
+ * WHY THE CALENDAR AND NOT JUST THE CELL. The session table is rebuilt from
+ * the calendar on every render. A tick that lives only on the sheet is erased
+ * by the next sync, which is the "my change didn't save" bug this whole path
+ * exists to avoid. The description is the source of truth for both flags, so
+ * that is what a tick has to change.
+ *
+ * WHEN THE CALENDAR CANNOT BE WRITTEN. A simple onEdit trigger runs without
+ * authorization (see onEdit()), so on some workbooks CalendarApp is simply not
+ * available here and the stamp writes nothing. That is not silent: the toast
+ * says the tick has not reached the calendar yet and names the menu item that
+ * finishes the job with full authorization ("🔁 Apply Type / Club / No-Reg
+ * Changes to Calendar"). The tick itself stays on the sheet either way.
+ */
+function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
+  const flagCol = headerMap[flag.column];
+  if (flagCol === undefined) return false;
+
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (flagCol + 1 < firstCol || flagCol + 1 > lastCol) return false;
+
+  const editedRow = e.range.getRow();
+  const numRows = e.range.getNumRows();
+  const titleOf = row => String(sheet.getRange(row, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
+  const calendarOf = row => String(sheet.getRange(row, (headerMap['Calendar_Source'] || 0) + 1).getValue() || '').trim();
+
+  if (numRows === 1 && e.range.getNumColumns() === 1) {
+    const on = isTruthyCheckbox(e.value);
+    if (on === isTruthyCheckbox(e.oldValue)) return true; // ticked to what it already said
+    const title = titleOf(editedRow) || 'this program';
+
+    if (!confirmConsequentialAction(
+      on ? flag.onQuestion(title) : `Turn "${flag.column.replace(/_/g, ' ')}" off for "${title}"?`,
+      on ? flag.onDetail(title) : flag.offDetail(title), false)) {
+      // Put the box back the way it was. Written as a boolean rather than
+      // echoing e.oldValue, which arrives as the string "TRUE"/"FALSE" and is
+      // undefined entirely on a cell that was blank before.
+      e.range.setValue(!on);
+      return true;
+    }
+
+    const stamped = stampProgramFlagOnCalendar(title, calendarOf(editedRow), flag, on);
+    toastIfPossible(stamped > 0
+      ? `${describeFlagState(flag, title, on)} — stamped on ${stamped} calendar event(s). ` +
+        `Run Sync Cal to apply it to the forms.`
+      : `⚠️ "${title}" now reads ${on ? 'ticked' : 'unticked'} on the sheet, but the calendar could not be ` +
+        `updated from a cell edit. Click "🔁 Apply Type / Club / No-Reg Changes to Calendar" on the menu to make it stick.`);
+    return true;
+  }
+
+  // A fill-down or paste over a block of these boxes. There is no oldValue to
+  // put back on a "no", so a decline leaves the cells alone and lets the next
+  // sync restore the calendar's own answer — the same honest undo the
+  // multi-row Type_Tag path uses.
+  const targets = [];
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (!isRowInAnyDataZone(zones, row)) continue;
+    const title = titleOf(row);
+    if (!title) continue;
+    const on = isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue());
+    if (targets.some(t => t.title === title && t.on === on)) continue; // one stamp per program
+    targets.push({ row, title, on });
+  }
+  if (targets.length === 0) return true;
+
+  const list = targets.slice(0, 8).map(t => `• ${describeFlagState(flag, t.title, t.on)}`).join('\n');
+  const more = targets.length > 8 ? `\n…and ${targets.length - 8} more` : '';
+  if (!confirmConsequentialAction(`Change "${flag.column.replace(/_/g, ' ')}" on ${targets.length} program(s)?`,
+    `${list}${more}\n\n[${flag.tag}] will be added to or removed from their calendar events.`, false)) {
+    toastIfPossible('Not applied. The boxes will go back to the calendar\'s own answer on the next sync.');
+    return true;
+  }
+
+  let stampedPrograms = 0;
+  targets.forEach(t => {
+    if (stampProgramFlagOnCalendar(t.title, calendarOf(t.row), flag, t.on) > 0) stampedPrograms++;
+  });
+  toastIfPossible(`Updated ${stampedPrograms}/${targets.length} program(s) — run Sync Cal to apply it to the forms.`);
+  return true;
+}
+
+/** "Book Club is a club" / "Coffee Hour takes no registration" — one line, for a toast or a list. */
+function describeFlagState(flag, title, on) {
+  if (flag.column === 'No_Registration') {
+    return on ? `"${title}" takes no registration` : `"${title}" takes registrations again`;
+  }
+  return on ? `"${title}" is a club` : `"${title}" is no longer a club`;
+}
+
 /** Stamps one program's new Type_Tag onto its calendar events and reports what happened. */
 function applyTypeTagToCalendar(sheet, editedRow, headerMap, newTag, title) {
   const stamped = writeTypeTagToCalendarEvents(sheet, editedRow, headerMap, newTag);
@@ -5928,57 +6169,89 @@ function applyTypeTagToCalendar(sheet, editedRow, headerMap, newTag, title) {
 }
 
 /**
- * Menu action: reconcile every program's Type_Tag on the dashboard with what
- * its calendar events actually say, and stamp the differences.
+ * Menu action: reconcile every program's Type_Tag AND its two flag checkboxes
+ * (Club, No_Registration) on the dashboard with what its calendar events
+ * actually say, and stamp the differences.
  *
  * THE RECOVERY PATH for the one thing a cell edit genuinely cannot finish.
  * Writing to a calendar needs authorization that a simple onEdit trigger does
- * not have (see onEdit()), so a Grouped/Monthly change typed into the sheet
- * can be confirmed but not delivered — and the next render, which recomputes
- * Type_Tag from the calendar, would quietly put the old value back. Running
- * this from the menu runs it fully authorized.
+ * not have (see onEdit()), so a change typed or ticked into the sheet can be
+ * confirmed but not delivered — and the next render, which recomputes all
+ * three columns from the calendar, would quietly put the old answer back.
+ * Running this from the menu runs it fully authorized.
  *
- * Safe to click at any time: it only ever writes a tag the sheet already
- * shows, and only where the calendar disagrees.
+ * Safe to click at any time: it only ever writes what the sheet already shows,
+ * and only where the calendar disagrees.
  */
-function applyTypeTagChangesToCalendar() {
+function applyProgramTagChangesToCalendar() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
+
+  // Which flag columns the sheet ACTUALLY has a header for. A workbook still
+  // on the older layout reads every missing column as blank, and a blank here
+  // means "untick" — which would have this action strip [Club] off calendars
+  // that are perfectly correct. A column that isn't there says nothing, so
+  // nothing is stamped for it. Run 🧱 Rebuild Layout first, as the upgrade
+  // notes say, and the column appears.
+  const liveHeaderRows = findProgramSessionHeaderRows(sheet);
+  const liveMap = liveHeaderRows.length > 0 ? getHeaderMapAt(sheet, liveHeaderRows[0]) : {};
+  const applicableFlags = PROGRAM_FLAG_COLUMNS.filter(flag => !!liveMap[flag.column]);
+
   const byProgram = {};
   readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
-    const tag = normalizeTypeTag(row[map['Type_Tag']]);
     if (!title || !calendarId) return;
-    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) return;
+    const tag = normalizeTypeTag(row[map['Type_Tag']]);
+    const flags = {};
+    applicableFlags.forEach(flag => {
+      flags[flag.column] = isFlagColumnValue(row[map[flag.column]], flag.regex);
+    });
     // Last row wins per program — they should all agree, and if they don't,
     // the most recently written one is the intent.
-    byProgram[`${title}|${calendarId}`] = { title, calendarId, tag };
+    byProgram[`${title}|${calendarId}`] = {
+      title,
+      calendarId,
+      tag: (tag === EVENT_TYPES.GROUPED || tag === EVENT_TYPES.MONTHLY) ? tag : null,
+      flags
+    };
   });
 
   const programs = Object.keys(byProgram).map(k => byProgram[k]);
   if (programs.length === 0) {
-    toastIfPossible('No programs with a grouping tag to apply.');
+    toastIfPossible('No programs on the dashboard yet — run Sync Cal first.');
     return 0;
   }
 
   let stampedEvents = 0;
   let changedPrograms = 0;
   programs.forEach(p => {
-    const n = stampTypeTagOnCalendar(p.title, p.calendarId, p.tag);
+    let n = p.tag ? stampTypeTagOnCalendar(p.title, p.calendarId, p.tag) : 0;
+    applicableFlags.forEach(flag => {
+      n += stampProgramFlagOnCalendar(p.title, p.calendarId, flag, !!p.flags[flag.column]);
+    });
     if (n > 0) { stampedEvents += n; changedPrograms++; }
   });
 
   const message = changedPrograms > 0
-    ? `Applied ${changedPrograms} grouping change(s) to ${stampedEvents} calendar event(s) — run Sync Cal to rebuild their forms.`
-    : `Every program's grouping already matches its calendar ✅ — nothing to change.`;
+    ? `Applied ${changedPrograms} program change(s) to ${stampedEvents} calendar event(s) — run Sync Cal to rebuild their forms.`
+    : `Every program's grouping, club and registration setting already matches its calendar ✅ — nothing to change.`;
   toastIfPossible(message);
-  log(`applyTypeTagChangesToCalendar: ${message}`);
+  log(`applyProgramTagChangesToCalendar: ${message}`);
   return changedPrograms;
+}
+
+/**
+ * The name this action had when it only handled Type_Tag. Kept so anything
+ * still bound to it — an old menu, a saved trigger, somebody's habit in the
+ * script editor — keeps working.
+ */
+function applyTypeTagChangesToCalendar() {
+  return applyProgramTagChangesToCalendar();
 }
 
 /**
@@ -6051,6 +6324,57 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
 }
 
 /**
+ * The flag equivalent of stampTypeTagOnCalendar(): writes [Club] or
+ * [No Registration] into — or out of — the DESCRIPTION of every calendar event
+ * of one program, and returns how many events changed.
+ *
+ * Same scoping rule as the grouping stamp, for the same reason. A program's
+ * own calendar is stamped unconditionally; another location's copy is stamped
+ * only when it is tagged [All Locations], because then it is genuinely the
+ * same program and a club (or a no-sign-up program) that is one at Narberth
+ * and not at Ashbridge is a contradiction rather than a setting.
+ *
+ * `flag` is an entry of PROGRAM_FLAG_COLUMNS; `on` is the state the checkbox
+ * was just put into.
+ */
+function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
+  if (!title || !calendarId || !flag) return 0;
+
+  const { start, end } = computeSyncDateRange();
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+  if (!eventsByCalendar[calendarId]) {
+    log(`⚠️ ${flag.column} change for "${title}": calendar ${calendarId} could not be read — nothing stamped.`);
+    return 0;
+  }
+
+  let stamped = 0;
+  Object.keys(CALENDAR_MAP).forEach(otherCalendarId => {
+    const events = eventsByCalendar[otherCalendarId];
+    if (!events) return;
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed || parsed.cleanTitle !== title) return;
+
+      const existing = ev.getDescription() || '';
+      if (otherCalendarId !== calendarId &&
+        !(parseSettingsBrackets(existing).isShared || parsed.legacyIsShared)) return;
+
+      const updated = setFlagBracketInDescription(existing, flag.regex, flag.tag, on);
+      if (updated === existing) return;
+      ev.setDescription(updated);
+      stamped++;
+    });
+  });
+
+  if (stamped > 0) {
+    invalidateCalendarEventsCache(); // descriptions just changed under the cache
+    log(`${on ? 'Added' : 'Removed'} [${flag.tag}] on ${stamped} calendar event(s) for "${title}".`);
+  }
+  return stamped;
+}
+
+/**
  * Returns `description` with any grouping bracket ([Grouped]/[Monthly], or the
  * legacy [Fixed]/[Regular]) replaced by [newTag] — preserving [Cap: N] and any
  * unrelated bracketed notes, and appending the tag if none was present.
@@ -6086,24 +6410,46 @@ function setGroupingBracketInDescription(description, newTag) {
  * result goes through tidyDescriptionWhitespace().
  */
 function setSharedBracketInDescription(description, shared) {
+  return setFlagBracketInDescription(description, SHARED_LOCATION_WORDS_REGEX, SHARED_LOCATION_TAG, shared);
+}
+
+/**
+ * The general form of the above: returns `description` with a one-word tag
+ * added or removed, preserving every other bracket and every other word inside
+ * a shared bracket.
+ *
+ * This is what a ticked checkbox on the dashboard turns into — [Club] and
+ * [No Registration] both go through here (see PROGRAM_FLAG_COLUMNS), as does
+ * [All Locations]. The rules that matter:
+ *
+ *   - adding, when some spelling of the tag is already there, changes nothing.
+ *     "[Members Only]" already says club; rewriting it to "[Club]" would edit
+ *     somebody's calendar to no effect, and every such edit is a notification
+ *     to everyone the event is shared with.
+ *   - removing takes the word out of whatever bracket held it and keeps the
+ *     rest, so [Cap: 12, Club] becomes [Cap: 12] rather than disappearing.
+ *   - a bracket left empty is dropped, and the hole it leaves is closed up by
+ *     tidyDescriptionWhitespace().
+ */
+function setFlagBracketInDescription(description, wordsRegex, tagWord, on) {
   const raw = String(description || '');
-  let sawShared = false;
+  let sawTag = false;
 
   let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
-    if (!SHARED_LOCATION_WORDS_REGEX.test(content)) return whole;
-    sawShared = true;
-    if (shared) return whole; // already tagged — leave the author's spelling alone
+    if (!wordsRegex.test(content)) return whole;
+    sawTag = true;
+    if (on) return whole; // already tagged — leave the author's spelling alone
     const kept = content
       .split(',')
       .map(part => part.trim())
-      .filter(part => part && !SHARED_LOCATION_WORDS_REGEX.test(part));
+      .filter(part => part && !wordsRegex.test(part));
     return kept.length > 0 ? `[${kept.join(', ')}]` : '';
   });
 
-  if (shared && !sawShared) {
-    out = raw ? `${raw.replace(/\s*$/, '')}\n[${SHARED_LOCATION_TAG}]` : `[${SHARED_LOCATION_TAG}]`;
+  if (on && !sawTag) {
+    out = raw ? `${raw.replace(/\s*$/, '')}\n[${tagWord}]` : `[${tagWord}]`;
   }
-  if (!shared && sawShared) out = tidyDescriptionWhitespace(out);
+  if (!on && sawTag) out = tidyDescriptionWhitespace(out);
   return out;
 }
 
@@ -7043,6 +7389,7 @@ function parseSettingsBrackets(text) {
   let isFixed = false;
   let isShared = false;
   let isClub = false;
+  let noRegistration = false;
   let sawAny = false;
 
   BRACKET_GROUP_REGEX.lastIndex = 0; // the /g regex is module-level; never trust its cursor
@@ -7057,6 +7404,9 @@ function parseSettingsBrackets(text) {
     // Orthogonal to BOTH of the above — see CLUB_TAG. Read from the same
     // bracket or its own, so [Club, Grouped] and [Club] [Grouped] both work.
     if (CLUB_WORDS_REGEX.test(content)) { isClub = true; sawAny = true; }
+    // Orthogonal to everything above, and the one that overrides them all —
+    // see NO_REGISTRATION_TAG. There is no form to group, cap or share.
+    if (NO_REGISTRATION_WORDS_REGEX.test(content)) { noRegistration = true; sawAny = true; }
     // "Grouped" is the current word, "Fixed" the one it replaced — both mean
     // "one form for the whole series." An explicit [Monthly]/[Regular] is
     // recognized too, purely so it counts as sawAny (a deliberate statement
@@ -7064,7 +7414,7 @@ function parseSettingsBrackets(text) {
     if (/\b(Grouped|Fixed)\b/i.test(content)) { isFixed = true; sawAny = true; }
     if (/\b(Monthly|Regular)\b/i.test(content)) { sawAny = true; }
   }
-  return { capacity, isFixed, isShared, isClub, sawAny };
+  return { capacity, isFixed, isShared, isClub, noRegistration, sawAny };
 }
 
 /**
@@ -7111,12 +7461,13 @@ function parseEventTitle(title) {
     legacyIsFixed: legacy.isFixed,
     legacyIsShared: legacy.isShared,
     legacyIsClub: legacy.isClub,
+    legacyNoRegistration: legacy.noRegistration,
     hasLegacyBrackets: legacy.sawAny
   };
 }
 
 /**
- * Resolves { capacity, isFixed, isShared, isClub } for one event: the
+ * Resolves { capacity, isFixed, isShared, isClub, noRegistration } for one event: the
  * DESCRIPTION's brackets win, and anything the description doesn't specify
  * falls back to legacy brackets left in the title (with a one-time nudge in
  * the log).
@@ -7131,12 +7482,13 @@ function resolveEventSettings(event, parsedTitle) {
   const isFixed = fromDescription.isFixed || parsedTitle.legacyIsFixed || false;
   const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
   const isClub = fromDescription.isClub || parsedTitle.legacyIsClub || false;
+  const noRegistration = fromDescription.noRegistration || parsedTitle.legacyNoRegistration || false;
 
   if (parsedTitle.hasLegacyBrackets && !fromDescription.sawAny) {
     log(`ℹ️ "${parsedTitle.cleanTitle}" still carries its settings in the TITLE. That still works, but the supported ` +
       `place is now the event DESCRIPTION — move "[Cap: N]" / "[Grouped]" / "[Club]" there and drop them from the title.`);
   }
-  return { capacity, isFixed, isShared, isClub };
+  return { capacity, isFixed, isShared, isClub, noRegistration };
 }
 
 /** Public entry point: acquires a script lock so overlapping executions can't race each other. */
@@ -7257,13 +7609,16 @@ function importCalendarGroups(registrySheet, options) {
   // Before the per-group loop, and independently of it: a group whose dates
   // are all already on the sheet is skipped below as "up to date", which is
   // right for forms and rows but wrong for a tag somebody has just added to an
-  // existing program. [Club] has to take effect the sync after it is typed,
-  // not the sync after the program's next new date.
-  reconcileClubTags(registrySheet, work.allGroups || []);
+  // existing program. [Club] and [No Registration] have to take effect the
+  // sync after they are ticked, not the sync after the program's next new
+  // date.
+  reconcileProgramFlagColumns(registrySheet, work.allGroups || []);
+  applyNoRegistrationEffects(registrySheet, work.allGroups || []);
 
   const summary = {
     groupsTotal: work.length, groupsProcessed: 0, groupsFailed: 0,
-    formsCreated: 0, formsReused: 0, eventsAdded: 0, remaining: 0, outOfTime: false
+    formsCreated: 0, formsReused: 0, groupsWithoutForms: 0,
+    eventsAdded: 0, remaining: 0, outOfTime: false
   };
 
   for (let i = 0; i < work.length; i++) {
@@ -7279,7 +7634,11 @@ function importCalendarGroups(registrySheet, options) {
       const result = processCalendarGroup(registrySheet, item, existingState);
       summary.groupsProcessed++;
       summary.eventsAdded += result.eventsAdded;
-      if (result.formCreated) summary.formsCreated++; else summary.formsReused++;
+      // A [No Registration] group has no form either way — counting it as
+      // "reused" would report forms this run never opened.
+      if (result.formCreated) summary.formsCreated++;
+      else if (result.noForm) summary.groupsWithoutForms++;
+      else summary.formsReused++;
     } catch (err) {
       // One bad group must not cost the whole run — especially mid-bootstrap,
       // where everything after it would be stranded too.
@@ -7292,6 +7651,11 @@ function importCalendarGroups(registrySheet, options) {
   }
 
   flushPersistentRegistries(); // one write covering every group touched above
+
+  // Once more, now that the loop has built or recovered forms: a program that
+  // has just come back off [No Registration] gets its dashboard links back on
+  // the SAME sync that restores its form, rather than on the one after.
+  updateRegistrationLinkCells(registrySheet, work.allGroups || [], buildFormIdByProgram(work.allGroups || []));
   return summary;
 }
 
@@ -7300,6 +7664,7 @@ function describeImportSummary(summary) {
   const parts = [`${summary.groupsProcessed} program group(s)`, `${summary.eventsAdded} new date(s)`];
   if (summary.formsCreated > 0) parts.push(`${summary.formsCreated} new form(s)`);
   if (summary.formsReused > 0) parts.push(`${summary.formsReused} existing form(s) reused`);
+  if (summary.groupsWithoutForms > 0) parts.push(`${summary.groupsWithoutForms} with no registration`);
   if (summary.groupsFailed > 0) parts.push(`${summary.groupsFailed} failed`);
   return parts.join(', ');
 }
@@ -7346,6 +7711,7 @@ function collectCalendarWork(eventsByCalendar, existingState) {
         parsed.isFixed = settings.isFixed;
         parsed.isShared = settings.isShared;
         parsed.isClub = settings.isClub;
+        parsed.noRegistration = settings.noRegistration;
         parsedSessions.push({ event: ev, parsed, calendarId, locationName });
       });
 
@@ -7364,9 +7730,22 @@ function collectCalendarWork(eventsByCalendar, existingState) {
       const eventId = computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()));
       return !existingState.eventIds.has(eventId);
     });
-    if (newSessions.length === 0) {
+    // A program whose rows still say "— no registration —" while its calendar
+    // no longer says [No Registration] is NOT up to date, however old its
+    // dates are: it needs its form back, and its registration link back on its
+    // events. That is the only reason a group with nothing new to add is
+    // processed — see processCalendarGroup(), which writes no rows for it and
+    // simply restores the form and the links.
+    const needsUnblocking = !group.noRegistration && group.sessions.some(s =>
+      existingState.blockedPrograms &&
+      existingState.blockedPrograms.has(`${s.calendarId}|${group.cleanTitle}`));
+
+    if (newSessions.length === 0 && !needsUnblocking) {
       log(`No new dates for "${group.groupKey}" — already up to date, skipping.`);
       return;
+    }
+    if (newSessions.length === 0) {
+      log(`No new dates for "${group.groupKey}", but it is coming back off [${NO_REGISTRATION_TAG}] — restoring its form and links.`);
     }
     work.push({
       group,
@@ -7376,14 +7755,15 @@ function collectCalendarWork(eventsByCalendar, existingState) {
   });
 
   // EVERY group that was seen, including the ones with nothing new to do.
-  // reconcileClubTags() needs those too — see importCalendarGroups().
+  // reconcileProgramFlagColumns() needs those too — see importCalendarGroups().
   work.allGroups = groups;
   return work;
 }
 
 /**
- * Brings the session table's Club column into line with what the calendar
- * currently says, for every program seen in this sync's window.
+ * Brings the session table's flag checkboxes (Club, No_Registration) into line
+ * with what the calendar currently says, for every program seen in this sync's
+ * window.
  *
  * Needed because writeEventRegistryRows() only ever writes NEW rows: adding
  * [Club] to a program whose twelve dates are already imported would otherwise
@@ -7391,24 +7771,230 @@ function collectCalendarWork(eventsByCalendar, existingState) {
  * present in `groups` are touched, so a program outside the sync window keeps
  * whatever it has.
  *
+ * This is also the half of "live" that runs the other way round. A tick on the
+ * sheet is pushed to the calendar by handleProgramFlagEdit(); this pulls the
+ * calendar's answer back onto every row of the program, so the two can never
+ * sit disagreeing for longer than one sync.
+ *
  * Returns how many cells changed.
  */
-function reconcileClubTags(registrySheet, groups) {
+function reconcileProgramFlagColumns(registrySheet, groups) {
   if (!groups || groups.length === 0) return 0;
-
-  // Keyed per calendar + title, matching how a session row identifies itself.
-  const expected = {};
-  groups.forEach(group => {
-    const value = group.isClub ? CLUB_COLUMN_VALUE : '';
-    group.sessions.forEach(session => {
-      expected[`${session.calendarId}|${group.cleanTitle}`] = value;
-    });
-  });
 
   const headerRows = findProgramSessionHeaderRows(registrySheet);
   if (headerRows.length === 0) return 0;
   const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
-  if (!sheetMap['Club'] || !sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
+  if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
+
+  let changed = 0;
+  PROGRAM_FLAG_COLUMNS.forEach(flag => {
+    if (!sheetMap[flag.column]) return; // a workbook still on the old layout
+
+    // Keyed per calendar + title, matching how a session row identifies itself.
+    const expected = {};
+    groups.forEach(group => {
+      const value = !!group[flag.groupKey];
+      group.sessions.forEach(session => {
+        expected[`${session.calendarId}|${group.cleanTitle}`] = value;
+      });
+    });
+
+    headerRows.forEach((hRow, i) => {
+      const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+      const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+      if (!zone) return;
+
+      const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
+      const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
+      const flagRange = registrySheet.getRange(zone.start, sheetMap[flag.column], zone.count, 1);
+      const current = flagRange.getValues();
+
+      let touched = false;
+      for (let r = 0; r < zone.count; r++) {
+        const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
+        if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
+        const want = expected[key];
+        // Compared through isFlagColumnValue(), so a row still carrying the
+        // word "Club" from an older version counts as already ticked in
+        // MEANING — but not in TYPE, hence the second test: it is rewritten as
+        // a real boolean so the checkbox renders, once, and never again.
+        if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
+        current[r] = [want];
+        touched = true;
+        changed++;
+      }
+      if (touched) flagRange.setValues(current);
+    });
+  });
+
+  if (changed > 0) log(`reconcileProgramFlagColumns: updated ${changed} flag cell(s) on the session table.`);
+  return changed;
+}
+
+/**
+ * The name this had when Club was the only flag column. Kept for anything
+ * still calling it.
+ */
+function reconcileClubTags(registrySheet, groups) {
+  return reconcileProgramFlagColumns(registrySheet, groups);
+}
+
+/**
+ * Makes [No Registration] mean something to the forms and the calendar, not
+ * just to a column.
+ *
+ * processCalendarGroup() already declines to BUILD a form for a tagged group.
+ * This handles the case that actually happens: a program that has been running
+ * with a form for months, whose box somebody has just ticked. Two things have
+ * to stop, and both have to be reversible —
+ *
+ *   1. the registration link in its calendar events, which otherwise keeps
+ *      inviting people to sign up for something nobody is listing;
+ *   2. the form itself, which otherwise keeps quietly accepting responses that
+ *      no longer reach anyone. It is CLOSED, never deleted or unlinked: the
+ *      responses already in it are the record of who came, and deleting a form
+ *      is not something a checkbox should be able to do.
+ *
+ * Untick the box and both are undone — the link goes back on the next sync,
+ * and the form is re-opened here. Only forms THIS function closed are ever
+ * re-opened (they are remembered in a Script Property), so a form staff closed
+ * by hand in the Forms UI stays closed.
+ */
+const NO_REGISTRATION_CLOSED_FORMS_PROP_KEY = 'NO_REGISTRATION_CLOSED_FORMS_V1';
+
+function applyNoRegistrationEffects(registrySheet, groups) {
+  if (!groups || groups.length === 0) return 0;
+
+  const props = PropertiesService.getScriptProperties();
+  let closedIds;
+  try {
+    closedIds = JSON.parse(props.getProperty(NO_REGISTRATION_CLOSED_FORMS_PROP_KEY) || '{}');
+  } catch (err) {
+    closedIds = {};
+  }
+  // Nothing tagged and nothing we have ever closed: every sync of every
+  // workbook that does not use this feature stops here, before a single
+  // Forms or Calendar call.
+  const tagged = groups.filter(g => g.noRegistration);
+  if (tagged.length === 0 && Object.keys(closedIds).length === 0) {
+    // Nothing to close, re-open or strip. The link columns are still checked:
+    // a row left saying "— no registration —" by an earlier tag has to get its
+    // links back, and that is cheap (a few reads per zone, and a Forms call
+    // only where such a row is actually found).
+    updateRegistrationLinkCells(registrySheet, groups, buildFormIdByProgram(groups));
+    return 0;
+  }
+
+  const formIdsByGroupKey = getPersistentFormRegistry();
+  let touched = 0;
+  let closedNow = 0;
+  let reopenedNow = 0;
+
+  groups.forEach(group => {
+    // The registry is the cheap answer. Reading a form ID back out of the
+    // event descriptions opens forms one at a time, so it is kept for the
+    // tagged groups that actually need one — which is where a form built
+    // before the registry existed has to be found.
+    const formId = formIdsByGroupKey[group.groupKey] ||
+      (group.noRegistration ? (findExistingFormIdFromEvents(group.events || []) || '') : '');
+
+    if (group.noRegistration) {
+      // 1. Every registration link out of every one of its events.
+      (group.events || []).forEach(ev => {
+        const existing = ev.getDescription() || '';
+        const stripped = stripAllRegistrationLines(existing);
+        if (stripped.removed === 0 || stripped.text === existing) return;
+        ev.setDescription(stripped.text);
+        touched++;
+      });
+
+      // 2. The form stops taking responses, and we remember that we did it.
+      if (formId && !closedIds[formId]) {
+        try {
+          const form = FormApp.openById(formId);
+          if (form.isAcceptingResponses()) {
+            form.setAcceptingResponses(false);
+            closedNow++;
+          }
+          closedIds[formId] = group.groupKey;
+        } catch (err) {
+          log(`ℹ️ "${group.cleanTitle}" is tagged [${NO_REGISTRATION_TAG}] but its form ${formId} could not be closed (${err}).`);
+        }
+      }
+      return;
+    }
+
+    // The tag has come off: re-open a form we closed for this reason. Anything
+    // we did not close ourselves is left exactly as it is.
+    if (formId && closedIds[formId]) {
+      try {
+        const form = FormApp.openById(formId);
+        if (!form.isAcceptingResponses()) {
+          form.setAcceptingResponses(true);
+          reopenedNow++;
+        }
+      } catch (err) {
+        log(`ℹ️ "${group.cleanTitle}" no longer says [${NO_REGISTRATION_TAG}], but its form ${formId} could not be re-opened (${err}).`);
+      }
+      delete closedIds[formId];
+    }
+  });
+
+  if (touched > 0) invalidateCalendarEventsCache();
+  props.setProperty(NO_REGISTRATION_CLOSED_FORMS_PROP_KEY, JSON.stringify(closedIds));
+  updateRegistrationLinkCells(registrySheet, groups, buildFormIdByProgram(groups));
+
+  if (touched || closedNow || reopenedNow) {
+    log(`applyNoRegistrationEffects: removed the registration link from ${touched} event(s), ` +
+      `closed ${closedNow} form(s), re-opened ${reopenedNow}.`);
+  }
+  return touched;
+}
+
+/**
+ * Keeps the session table's two link columns honest about [No Registration].
+ *
+ * A program that has been running with a form already has "View Live Form" on
+ * every one of its rows, and those rows are not rewritten by a sync that has
+ * no new dates to add — so ticking the box would leave a live registration
+ * link sitting on the dashboard for a program that no longer takes any. Rows
+ * of a tagged program therefore say so in words instead (see
+ * NO_REGISTRATION_LINK_LABEL), and rows that say so get their real links back
+ * when the tag comes off.
+ *
+ * A tagged program keeps its Form_ID — hidden plumbing, and what makes the
+ * restore possible without waiting for a new date to appear. Rows written
+ * WHILE the tag was on have no Form_ID at all, so `formIdByProgram`
+ * (`calendarId|title` -> Form_ID, from the persistent registry) is the
+ * fallback, and it is written into the row on the way past.
+ */
+function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return 0;
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  if (!sheetMap['Form_Response_Link'] || !sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
+
+  const wantsNoRegistration = {};
+  groups.forEach(group => {
+    group.sessions.forEach(session => {
+      wantsNoRegistration[`${session.calendarId}|${group.cleanTitle}`] = !!group.noRegistration;
+    });
+  });
+
+  const linksByFormId = {};
+  const linksFor = formId => {
+    if (!formId) return null;
+    if (!Object.prototype.hasOwnProperty.call(linksByFormId, formId)) {
+      try {
+        const form = FormApp.openById(formId);
+        linksByFormId[formId] = { publishedUrl: form.getPublishedUrl(), editUrl: form.getEditUrl() };
+      } catch (err) {
+        log(`ℹ️ Could not re-read form ${formId} to restore its links (${err}).`);
+        linksByFormId[formId] = null;
+      }
+    }
+    return linksByFormId[formId];
+  };
 
   let changed = 0;
   headerRows.forEach((hRow, i) => {
@@ -7418,24 +8004,60 @@ function reconcileClubTags(registrySheet, groups) {
 
     const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
     const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
-    const clubRange = registrySheet.getRange(zone.start, sheetMap['Club'], zone.count, 1);
-    const clubs = clubRange.getValues();
+    const formIds = sheetMap['Form_ID']
+      ? registrySheet.getRange(zone.start, sheetMap['Form_ID'], zone.count, 1).getValues()
+      : null;
+    // Read as VALUES but written CELL BY CELL. These columns hold =HYPERLINK()
+    // formulas, which getValues() flattens to their display text — writing a
+    // whole column back from that array would turn every link on it into the
+    // words "View Live Form".
+    const view = registrySheet.getRange(zone.start, sheetMap['Form_Response_Link'], zone.count, 1).getValues();
 
-    let touched = false;
     for (let r = 0; r < zone.count; r++) {
       const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
-      if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
-      const want = expected[key];
-      if (String(clubs[r][0] || '').trim() === want) continue;
-      clubs[r] = [want];
-      touched = true;
+      if (!Object.prototype.hasOwnProperty.call(wantsNoRegistration, key)) continue;
+      const isBlocked = String(view[r][0] || '').trim() === NO_REGISTRATION_LINK_LABEL;
+      const setCell = (colName, value) => {
+        if (!sheetMap[colName]) return;
+        registrySheet.getRange(zone.start + r, sheetMap[colName], 1, 1).setValue(value);
+      };
+
+      if (wantsNoRegistration[key]) {
+        if (isBlocked) continue;
+        setCell('Form_Response_Link', NO_REGISTRATION_LINK_LABEL);
+        setCell('Edit_Form_Link', '');
+        changed++;
+        continue;
+      }
+
+      if (!isBlocked) continue; // already showing its own links
+      const rowFormId = formIds ? String(formIds[r][0] || '').trim() : '';
+      const formId = rowFormId || (formIdByProgram ? (formIdByProgram[key] || '') : '');
+      const links = linksFor(formId);
+      if (!links) continue; // no form to point at yet — the next sync builds one
+      setCell('Form_Response_Link', makeHyperlinkFormula(links.publishedUrl, 'View Live Form'));
+      setCell('Edit_Form_Link', makeHyperlinkFormula(links.editUrl, 'Edit Form Settings'));
+      if (!rowFormId) setCell('Form_ID', formId);
       changed++;
     }
-    if (touched) clubRange.setValues(clubs);
   });
 
-  if (changed > 0) log(`reconcileClubTags: updated the Club column on ${changed} session row(s).`);
+  if (changed > 0) log(`updateRegistrationLinkCells: rewrote the link columns on ${changed} session row(s).`);
   return changed;
+}
+
+/** `calendarId|title` -> Form_ID, from the persistent form registry, for these groups. */
+function buildFormIdByProgram(groups) {
+  const registry = getPersistentFormRegistry();
+  const out = {};
+  (groups || []).forEach(group => {
+    const formId = registry[group.groupKey];
+    if (!formId) return;
+    group.sessions.forEach(session => {
+      out[`${session.calendarId}|${group.cleanTitle}`] = formId;
+    });
+  });
+  return out;
 }
 
 /**
@@ -7473,6 +8095,24 @@ function warnAboutPartiallySharedPrograms(groups) {
  */
 function processCalendarGroup(registrySheet, item, existingState) {
   const { group, configInfo, newSessions } = item;
+
+  // [No Registration] short-circuits the whole form half of this function.
+  // The dates still become session rows — the dashboard is what staff read to
+  // see what is on — but with no form built, no form reused, and no
+  // registration link written back. applyNoRegistrationEffects() has already
+  // taken care of any form and any link this program had before the tag went
+  // on.
+  if (group.noRegistration) {
+    const noFormGroup = Object.assign({}, group, {
+      sessions: newSessions,
+      events: newSessions.map(s => s.event)
+    });
+    writeEventRegistryRows(registrySheet, noFormGroup, null);
+    newSessions.forEach(s => existingState.eventIds.add(
+      computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()))));
+    log(`"${group.groupKey}" is tagged [${NO_REGISTRATION_TAG}] — wrote ${newSessions.length} date(s) with no form.`);
+    return { formCreated: false, noForm: true, eventsAdded: newSessions.length };
+  }
 
   let existingFormId = existingState.groupFormMap[group.groupKey];
   if (!existingFormId) {
@@ -7566,6 +8206,7 @@ function buildEventGroups(parsedSessions) {
         capacity: parsed.capacity,
         isFixed: parsed.isFixed,
         isClub: !!parsed.isClub,
+        noRegistration: !!parsed.noRegistration,
         typeTag,
         monthLabel: parsed.isFixed ? null : monthLabel,
         sessions: []
@@ -7580,6 +8221,10 @@ function buildEventGroups(parsedSessions) {
     // says so. Never un-set — a missing tag on one event is an omission, not a
     // statement that the club has been dissolved.
     if (parsed.isClub) groups[key].isClub = true;
+    // And again for [No Registration]: tagging one event of a program is how
+    // somebody says the program takes no sign-ups, and a missing tag on
+    // another of its events is an omission rather than a contradiction.
+    if (parsed.noRegistration) groups[key].noRegistration = true;
     groups[key].sessions.push({ event, calendarId, locationName });
   });
 
@@ -7613,7 +8258,12 @@ function sessionsOfGroup(group) {
  * registry for any group whose session rows aren't currently on the sheet.
  */
 function getExistingRegistryState(registrySheet) {
-  const state = { eventIds: new Set(), groupFormMap: {} };
+  // blockedPrograms: `calendarId|title` for every program whose rows currently
+  // say "— no registration —". Carried so collectCalendarWork() can tell the
+  // difference between a program that is up to date and one that is up to date
+  // BUT still showing the marks of a [No Registration] tag that has since come
+  // off — the second one has work to do even though it has no new dates.
+  const state = { eventIds: new Set(), groupFormMap: {}, blockedPrograms: new Set() };
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
@@ -7621,6 +8271,11 @@ function getExistingRegistryState(registrySheet) {
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
     if (eventId) state.eventIds.add(eventId);
+
+    if (String(row[map['Form_Response_Link']] || '').trim() === NO_REGISTRATION_LINK_LABEL) {
+      state.blockedPrograms.add(
+        `${String(row[map['Calendar_Source']] || '').trim()}|${String(row[map['Clean_Title']] || '').trim()}`);
+    }
 
     const source = row[map['Calendar_Source']];
     const title = row[map['Clean_Title']];
@@ -8696,7 +9351,11 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     // is required rather than a written time-like string).
     row[map['Event_Time']] = Utilities.formatDate(startTime, TIMEZONE, 'h:mm a');
     row[map['Type_Tag']] = group.typeTag;
-    row[map['Club']] = group.isClub ? CLUB_COLUMN_VALUE : '';
+    // Real checkbox columns: a boolean either way, never a blank. A blank cell
+    // under a checkbox reads as "this row has no box", which is not what an
+    // untagged program means — it means the box is there and unticked.
+    row[map['Club']] = group.isClub ? CLUB_COLUMN_VALUE : false;
+    row[map['No_Registration']] = group.noRegistration ? NO_REGISTRATION_COLUMN_VALUE : false;
 
     row[map['Max_Capacity']] = isUncapped ? '' : group.capacity;
     row[map['Active_Count']] = 0;
@@ -8704,9 +9363,13 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Remaining_Seats']] = isUncapped ? '' : group.capacity;
     row[map['Status']] = isUncapped ? '🟢 Unlimited' : computeStatus(0, group.capacity);
 
-    row[map['Form_Response_Link']] = makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form');
-    row[map['Edit_Form_Link']] = makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings');
-    row[map['Form_ID']] = formInfo.formId;
+    // formInfo is null for a [No Registration] group — there is no form to
+    // link to, and the link columns say so in words rather than sitting empty.
+    row[map['Form_Response_Link']] = formInfo
+      ? makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form')
+      : NO_REGISTRATION_LINK_LABEL;
+    row[map['Edit_Form_Link']] = formInfo ? makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings') : '';
+    row[map['Form_ID']] = formInfo ? formInfo.formId : '';
     row[map['Calendar_Synced?']] = true;
     row[map['Event_ID']] = eventId;
     row[map['Calendar_Source']] = session.calendarId;
@@ -13222,6 +13885,17 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
     });
     applyLocationValidationBounded(sheet, map['Location'] + 1, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Type_Tag'] + 1, EVENT_TYPE_OPTIONS, z.start, z.count);
+    // Club and No_Registration are real checkboxes — one click, and the click
+    // is what handleProgramFlagEdit() turns into a calendar-description tag.
+    // Text in these columns (a workbook written by an older version says
+    // "Club") is normalized to a tick by reconcileProgramFlagColumns() on the
+    // next sync, and reads correctly in the meantime — see isFlagColumnValue().
+    PROGRAM_FLAG_COLUMNS.forEach(flag => {
+      if (map[flag.column] === undefined) return;
+      sheet.getRange(z.start, map[flag.column] + 1, z.count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
 
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
@@ -13233,21 +13907,16 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
-  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag is the one cell
-  // a human changes on this table, but it is not a blank waiting to be filled
-  // in — it always already holds a real, calendar-derived value, and washing
-  // a full column of correct values in "please type here" yellow read as a
-  // column of problems on the tab people scan first. Grouped/Monthly is a
-  // dropdown with a confirmation dialog behind it (see
-  // handleProgramDashboardEdit) — the prompt is the affordance, not the color.
-  // Everything else keeps its warning protection.
+  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, Club and
+  // No_Registration are the cells a human changes on this table, but none of
+  // them is a blank waiting to be filled in — each always already holds a
+  // real, calendar-derived value, and washing full columns of correct values
+  // in "please type here" yellow read as columns of problems on the tab people
+  // scan first. A dropdown and two checkboxes, each with a confirmation dialog
+  // behind it (see handleProgramDashboardEdit) — the prompt is the affordance,
+  // not the color. Everything else keeps its warning protection.
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Active_Count', 'Waitlist_Count',
-      // Club comes off the calendar description's [Club] tag, exactly like
-      // Type_Tag — but unlike Type_Tag there is no dialog behind it, so typing
-      // here is simply overwritten on the next sync. Add or remove the tag on
-      // the calendar event instead.
-      'Club',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source'],
     zones);
 
@@ -14966,6 +15635,382 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
   } catch (err) {
     log(`⚠️ Could not update the sign-up options on form ${formId} (${err}).`);
   }
+}
+
+
+// ============================================================================
+// 10b. DELETING REGISTRATIONS  (showDeleteRegistrationsDialog)
+// ============================================================================
+//
+// Everything else in this system CANCELS. A registrant who drops out is marked
+// Cancelled and stays on the tab; a session whose calendar event disappears
+// sends its people to Deleted_Event_Triage. That is deliberate and it is
+// right: a registration is a record of something that happened, and the
+// history of who signed up for what is worth more than a tidy sheet.
+//
+// This is the exception, for the cases where the rows are not history at all:
+//
+//   - a test run. Somebody submitted the form four times while checking that
+//     it worked, and those four people do not exist.
+//   - a duplicate import, or rows created against a session that was set up
+//     wrong and rebuilt.
+//   - a program that was cancelled outright before it ever ran, where nobody
+//     wants a permanent list of people who were going to come.
+//
+// So it deletes, by session, and says so in the plainest words available. What
+// keeps it safe is not a soft delete but three gates: an admin check, an
+// explicit typed confirmation, and a summary of exactly how many rows on which
+// sessions before anything is touched.
+//
+// WHAT IT ALSO OFFERS, and why: deleting the ROWS does not delete the form
+// RESPONSES they came from. Left alone, those responses sit in the form
+// forever and reappear on any full re-import — which is exactly what somebody
+// clearing out a test run does not want. So "also delete the matching form
+// responses" is offered as a separate tick, defaulting to OFF, because
+// deleting a response is the one part of this that cannot be undone from
+// inside this workbook.
+//
+// WHAT IT WILL NOT DO: stop a club from re-booking somebody. Membership lives
+// on Club_Members and applyClubRosterCatchup() re-books active members into
+// upcoming sessions on every sync, so deleting a club member's row for a
+// FUTURE session removes it until the next sync puts it straight back. To
+// actually take somebody out of a club, untick them on Club_Members — the
+// dialog says so where a deletion is about to hit a club session.
+// ============================================================================
+
+/** The word that has to be typed before anything is deleted. */
+const DELETE_REGISTRATIONS_CONFIRM_WORD = 'DELETE';
+
+/** How far back the picker looks. Older sessions are archive; nobody clears a test run from last spring. */
+const DELETE_REGISTRATIONS_WINDOW_BACK_DAYS = 120;
+/** And how far forward. Wide enough to cover anything with a form open. */
+const DELETE_REGISTRATIONS_WINDOW_FORWARD_DAYS = 180;
+
+/** MENU ENTRY: pick the sessions whose registrations should be deleted. */
+function showDeleteRegistrationsDialog() {
+  if (!requireAuthorizedAdmin('Delete Registrations')) return;
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return;
+  }
+  const sessions = listSessionsWithRegistrations();
+  if (sessions.length === 0) {
+    toastIfPossible('No registrations to delete in the last few months.');
+    return;
+  }
+  const html = HtmlService.createHtmlOutput(buildDeleteRegistrationsHtml(sessions))
+    .setWidth(640)
+    .setHeight(640);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Delete Registrations');
+}
+
+/**
+ * Every session inside the window that actually HAS registrant rows, with the
+ * count, whether it is upcoming, and whether it is a club session (which
+ * changes what deleting means — see the section comment).
+ */
+function listSessionsWithRegistrations() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  if (!registrantsSheet) return [];
+
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const backKey = formatDateKey(new Date(Date.now() - DELETE_REGISTRATIONS_WINDOW_BACK_DAYS * 86400000));
+  const forwardKey = formatDateKey(new Date(Date.now() + DELETE_REGISTRATIONS_WINDOW_FORWARD_DAYS * 86400000));
+
+  const clubEventIds = collectClubEventIds();
+  const byEvent = {};
+  readAllSectionedRows(registrantsSheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!eventId || !date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < backKey || dateKey > forwardKey) return;
+
+    if (!byEvent[eventId]) {
+      byEvent[eventId] = {
+        value: eventId,
+        dateKey,
+        date,
+        title: String(row[map['Event']] || '').trim(),
+        location: String(row[map['Location']] || '').trim(),
+        count: 0,
+        upcoming: dateKey >= todayKey,
+        isClub: clubEventIds.has(eventId)
+      };
+    }
+    byEvent[eventId].count++;
+  });
+
+  return Object.keys(byEvent)
+    .map(k => byEvent[k])
+    .sort((a, b) => (a.dateKey < b.dateKey ? 1 : (a.dateKey > b.dateKey ? -1 : a.title.localeCompare(b.title))))
+    .map(s => ({
+      value: s.value,
+      count: s.count,
+      label: `${formatDateLabel(s.date)} — ${s.title || '(untitled)'} (${s.location}) — ` +
+        `${s.count} registration(s)${s.upcoming ? ' · upcoming' : ''}${s.isClub ? ' · club' : ''}`,
+      isClub: s.isClub && s.upcoming
+    }));
+}
+
+/** Event_IDs on the session table whose program is a club — see the club note in the section comment. */
+function collectClubEventIds() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const ids = new Set();
+  if (!sheet) return ids;
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    if (map['Club'] === undefined || !isClubColumnValue(row[map['Club']])) return;
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    if (eventId) ids.add(eventId);
+  });
+  return ids;
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildDeleteRegistrationsHtml(sessions) {
+  const sessionTags = sessions.map(s =>
+    `<label class="row"><input type="checkbox" name="session" value="${escapeHtmlForDialog(s.value)}"> ` +
+    `${escapeHtmlForDialog(s.label)}</label>`).join('\n');
+  const anyClub = sessions.some(s => s.isClub);
+  const clubNote = anyClub
+    ? `<p class="warn">Sessions marked <b>club</b> are upcoming meetings of a club. Deleting those rows removes
+       them until the next sync, which re-books every active member. To take somebody off a club for good,
+       untick them on the <b>Club_Members</b> tab instead.</p>`
+    : '';
+
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  p.warn { color: #B06000; background: #FFF8E1; border: 1px solid #FFE0A3; border-radius: 4px;
+           padding: 6px 8px; margin: 0 0 10px 0; line-height: 1.4; }
+  #sessions { border: 1px solid #ccc; border-radius: 4px; padding: 8px; height: 220px; overflow-y: auto; }
+  label.row { display: block; padding: 2px 0; }
+  fieldset { border: 1px solid #ddd; border-radius: 4px; margin: 12px 0 0 0; padding: 8px 10px; }
+  legend { font-weight: bold; padding: 0 4px; }
+  input[type=text] { width: 100%; padding: 6px; font-size: 13px; box-sizing: border-box; margin-top: 4px; }
+  button { background: #C5221F; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
+           font-size: 13px; cursor: pointer; margin-top: 14px; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 12px; min-height: 18px; font-weight: bold; line-height: 1.5; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+</style>
+<h3>Delete registrations</h3>
+<p class="hint">
+  Tick the sessions whose registrations should be <b>permanently deleted</b> from
+  Lunch_and_Event_Registrants. This is for test runs and duplicates — to record that somebody is no
+  longer coming, set their Program_Status to <b>Cancelled</b> instead, which keeps the row and the
+  history. The catering numbers are recalculated afterwards.
+</p>
+${clubNote}
+<div id="sessions">${sessionTags}</div>
+
+<fieldset>
+  <legend>Also delete the form responses</legend>
+  <label class="row">
+    <input type="checkbox" id="alsoResponses">
+    Delete the matching responses from the Google Form as well (cannot be undone)
+  </label>
+</fieldset>
+
+<fieldset>
+  <legend>Confirm</legend>
+  <input type="text" id="confirmWord" placeholder="Type ${DELETE_REGISTRATIONS_CONFIRM_WORD} to enable the button"
+         oninput="toggle()" autocomplete="off">
+</fieldset>
+
+<button id="go" onclick="submit()" disabled>Delete registrations</button>
+<div id="status"></div>
+<script>
+  function toggle() {
+    var typed = document.getElementById('confirmWord').value.trim().toUpperCase();
+    document.getElementById('go').disabled = typed !== '${DELETE_REGISTRATIONS_CONFIRM_WORD}';
+  }
+  function submit() {
+    var picked = [].slice.call(document.querySelectorAll('input[name=session]:checked')).map(function (el) { return el.value; });
+    if (picked.length === 0) { say('Tick at least one session first.', 'err'); return; }
+    document.getElementById('go').disabled = true;
+    say('Working… this can take a moment.', '');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        toggle();
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        toggle();
+        say('Failed: ' + err.message, 'err');
+      })
+      .deleteRegistrationsForSessions(picked, {
+        confirm: document.getElementById('confirmWord').value,
+        alsoDeleteResponses: document.getElementById('alsoResponses').checked
+      });
+  }
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+</script>`;
+}
+
+/**
+ * Called from the dialog. Deletes every registrant row belonging to the given
+ * sessions, optionally deletes the form responses behind them, and puts the
+ * counts that those rows were feeding back in line.
+ *
+ * Takes the same script lock syncRegistrations() does. Without it, a sync
+ * running in parallel would read the tab before the deletion and write its own
+ * copy back afterwards, restoring every row this just removed — the same
+ * lost-update race that lock was introduced for, in the other direction.
+ *
+ * Returns a human-readable summary for the dialog to show.
+ */
+function deleteRegistrationsForSessions(eventIds, options) {
+  if (!requireAuthorizedAdmin('Delete Registrations')) return '⚠️ Not permitted.';
+  options = options || {};
+  if (String(options.confirm || '').trim().toUpperCase() !== DELETE_REGISTRATIONS_CONFIRM_WORD) {
+    return `⚠️ Type ${DELETE_REGISTRATIONS_CONFIRM_WORD} to confirm.`;
+  }
+  const wanted = new Set((eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
+  if (wanted.size === 0) return '⚠️ No sessions were selected.';
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    return '⚠️ A sync is running right now — try again in a moment.';
+  }
+  try {
+    return deleteRegistrationsForSessionsInternal(wanted, !!options.alsoDeleteResponses);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  if (!sheet) return '⚠️ There is no registrants tab yet.';
+
+  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const map = getIndexMap(headers);
+  const allRows = readAllSectionedRows(sheet, headers, 'Event_ID');
+
+  const keepRows = [];
+  const doomedRows = [];
+  allRows.forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    (wanted.has(eventId) ? doomedRows : keepRows).push(row);
+  });
+  if (doomedRows.length === 0) return '⚠️ Those sessions have no registrations to delete.';
+
+  // The responses go FIRST, while the rows that name them are still readable.
+  // A failure here must not cost the deletion — it is reported and the rows go
+  // anyway, since "the rows are gone but two responses survived in the form"
+  // is recoverable and "half the rows are gone" is not.
+  let responsesDeleted = 0;
+  let responseFailures = 0;
+  if (alsoDeleteResponses) {
+    const result = deleteFormResponsesForRows(doomedRows, map, wanted);
+    responsesDeleted = result.deleted;
+    responseFailures = result.failed;
+  }
+
+  renderRegistrantsSheet(false, keepRows);
+  try {
+    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (registrySheet) recomputeEventRegistryCounts(registrySheet, sheet, keepRows);
+    updateMasterLunchDashboard(keepRows);
+  } catch (err) {
+    log(`⚠️ Deleted ${doomedRows.length} registration(s), but could not recalculate the counts (${err}).`);
+    return `Deleted ${doomedRows.length} registration(s) — but the counts could not be recalculated (${err}). ` +
+      `Run Sync Registrations to bring them back in line.`;
+  }
+
+  const message = `Deleted ${doomedRows.length} registration(s) across ${wanted.size} session(s).` +
+    (alsoDeleteResponses
+      ? ` ${responsesDeleted} form response(s) deleted${responseFailures > 0 ? `, ${responseFailures} could not be` : ''}.`
+      : ' The form responses behind them were left in place.');
+  log(`deleteRegistrationsForSessions: ${message}`);
+  return message;
+}
+
+/**
+ * Deletes the Google Form responses that produced `rows`.
+ *
+ * A row names its response in Party_ID (the response ID — see
+ * buildRegistrantRow()) and its session in Event_ID; the session table maps
+ * that Event_ID to the form the response lives in. Rows with no Party_ID —
+ * walk-ins, club bookings, anything typed straight onto the tab — never had a
+ * response and are simply skipped.
+ *
+ * ONE RESPONSE CAN COVER SEVERAL ROWS (a party of four, or one person on six
+ * dates of a grouped form), so response IDs are deduplicated. That also means
+ * deleting a response can reach further than the sessions picked: a response
+ * covering six dates is one object, and there is no way to remove three dates
+ * from it. The rows for the other dates are left exactly where they are — they
+ * are the record — but the response behind them is gone, which is stated in
+ * the dialog's warning that this cannot be undone.
+ */
+function deleteFormResponsesForRows(rows, map, wanted) {
+  const formIdByEventId = buildFormIdByEventId();
+  const byForm = {};
+  rows.forEach(row => {
+    const partyId = String(row[map['Party_ID']] || '').trim();
+    if (!partyId) return;
+    const formId = formIdByEventId[String(row[map['Event_ID']] || '').trim()] || '';
+    if (!formId) return;
+    if (!byForm[formId]) byForm[formId] = new Set();
+    byForm[formId].add(partyId);
+  });
+
+  let deleted = 0;
+  let failed = 0;
+  Object.keys(byForm).forEach(formId => {
+    let form;
+    try {
+      form = FormApp.openById(formId);
+    } catch (err) {
+      failed += byForm[formId].size;
+      log(`⚠️ Could not open form ${formId} to delete responses (${err}).`);
+      return;
+    }
+    byForm[formId].forEach(responseId => {
+      try {
+        form.deleteResponse(responseId);
+        deleted++;
+      } catch (err) {
+        failed++;
+        log(`⚠️ Could not delete response ${responseId} from form ${formId} (${err}).`);
+      }
+    });
+  });
+
+  if (deleted > 0 || failed > 0) {
+    log(`deleteFormResponsesForRows: deleted ${deleted} response(s), ${failed} failed (${wanted.size} session(s) selected).`);
+  }
+  return { deleted, failed };
+}
+
+/** { Event_ID: Form_ID } from the session table. */
+function buildFormIdByEventId() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const out = {};
+  if (!sheet) return out;
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const formId = String(row[map['Form_ID']] || '').trim();
+    if (eventId && formId) out[eventId] = formId;
+  });
+  return out;
 }
 
 
