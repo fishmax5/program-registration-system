@@ -99,8 +99,11 @@ Add `Meal_ID` to `Lunch_Schedule`. Derive it deterministically, because
 render and a random ID would not survive:
 
 ```
-M-<YYYYMMDD>-<LOCATION_SLUG>-<TYPE>        e.g.  M-20260916-NARB-HOT
+M-<YYYYMMDD>-<LOCATION_SLUG>-<TYPE>        e.g.  M-20260916-NARBERTH-HOT
 ```
+
+The location goes in whole rather than abbreviated: a four-letter prefix is
+tidier right up until two locations share one.
 
 Deterministic derivation means the ID can also be *recomputed* for every
 existing row with no migration step, and that an old row referencing a rebuilt
@@ -111,7 +114,7 @@ a `-2` suffix and the schedule needs to allow a second row. Worth asking; see
 
 The subs line needs the same treatment: either a `Type` of `Subs` on
 `Lunch_Schedule` (which gets subs a dish name, a shorthand and a batch date for
-free), or an explicit standing-item batch (`M-STANDING-NARB-SUBS`) if subs
+free), or an explicit standing-item batch (`M-STANDING-NARBERTH-SUBS`) if subs
 genuinely aren't cooked per-date. Recommendation: give subs real schedule rows.
 It is less special-casing everywhere else, and it is the only way "which sub"
 becomes answerable.
@@ -424,7 +427,7 @@ cut next Wednesday to 28 — and run short. Thursday reads as phantom demand:
 ordered.
 
 **What Phase 1 changes.** `Lunch_Schedule` gains a derived `Meal_ID`
-(`M-20260916-NARB-HOT`). Thursday's 8 rows get `Meal_Source` set to it — one
+(`M-20260916-NARBERTH-HOT`). Thursday's 8 rows get `Meal_Source` set to it — one
 dropdown, once. Every other row in the workbook stays blank, blank still means
 "today's meal", and so **no existing number moves**.
 
