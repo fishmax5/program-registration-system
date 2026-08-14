@@ -1111,6 +1111,33 @@ const HEADERS = {
   //   Subs_Taken_Out   subs carried out
   //   Meals_In_Fridge  meals of theirs left in the fridge to collect later
   //
+  // MEAL_SOURCE — WHICH lunch those counts were portions of. The five counts
+  // say how many and in what manner; none of them says what the food WAS.
+  // That was never a question the workbook could ask, because the answer was
+  // assumed: a meal counted on a row dated D at location L is a portion of
+  // whatever Lunch_Schedule lists for D x L. The join is a shared date key and
+  // nothing else.
+  //
+  // Leftovers break that assumption, and they break it in both directions at
+  // once. Serve Wednesday's chicken on Thursday and Wednesday reads as twelve
+  // meals wasted while Thursday reads as takeaway demand on a day nothing was
+  // ordered — one real batch, reported as two wrong numbers.
+  //
+  // So: Meal_Source holds the Meal_ID of the batch this row's meals came out
+  // of, and BLANK MEANS "today's" — which is exactly the rule the workbook has
+  // always followed silently. Every row in every existing workbook is blank,
+  // so turning this column on moves no number anywhere; it only gives staff a
+  // way to say the one thing they previously could not.
+  //
+  // buildDashboardRollup() sends the counts to the named batch's date and
+  // location instead of the row's own, so a carried-over meal lands on the
+  // batch that actually produced it (and shows up in that row's Carried_Over).
+  //
+  // One source per row is the deliberate limit: a row that ate today's meal
+  // AND carried out yesterday's can only name one of them. Recording several
+  // different batches per person per day needs a row per handover, which is a
+  // ledger, not a column — see MEAL_IDENTITY_DESIGN.md.
+  //
   // buildDashboardRollup() tallies the four straight into
   // Master_Lunch_Dashboard's Day_1_In-Person / Day_1_Takeaway /
   // Subs_In-Person / Subs_Takeaway columns (and Meals_In_Fridge into In_Fridge)
@@ -1125,6 +1152,7 @@ const HEADERS = {
   Lunch_and_Event_Registrants: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
+    'Meal_Source',
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
@@ -1156,16 +1184,42 @@ const HEADERS = {
   //
   // In_Fridge sits with the other consumption tallies: it is what the
   // Registrants tab's Meals_In_Fridge counts add up to for that date+location.
+  //
+  // Carried_Over is how many of the meals on THIS row were eaten on a
+  // different day from the one the row is dated — portions of this batch that
+  // went out later, attributed here because this is the row with the
+  // Actual_Ordered to reconcile them against (see Meal_Source on
+  // Lunch_and_Event_Registrants). It is always a subset of the consumption
+  // columns beside it, never an addition to them: it explains part of those
+  // numbers rather than adding to the total. A row reading 40 ordered, 14
+  // takeaway, 8 carried over means eight of that fourteen left the building
+  // on a later day.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
     'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
+    'Carried_Over',
     'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
     'Standard_Buffer', 'Tester_Buffer'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
   // (see CATERED_LUNCH_TYPES vs LUNCH_TYPE_OPTIONS below).
-  Lunch_Schedule: ['Event_Date', 'Location', 'Type', 'Meal_Description', 'Meal_Shorthand'],
+  // Meal_ID names the BATCH — the food itself, as distinct from the day it is
+  // handed over. Everything else on this tab describes a date; this is the one
+  // column that describes a thing that can outlive its date, which is what
+  // makes "we served yesterday's chicken today" recordable at all (see
+  // Meal_Source on Lunch_and_Event_Registrants).
+  //
+  // DERIVED, never typed: deriveMealId() computes it from the row's own date,
+  // location and type, and renderLunchScheduleSheet() re-stamps every row on
+  // every render. That is deliberate — this tab is cleared and rebuilt
+  // constantly, and an ID that had to be preserved across those rebuilds would
+  // be one more thing to lose. It also means an existing workbook needs no
+  // migration: the first render fills the whole column in.
+  //
+  // Last on the row because nobody reads it — it is a join key that happens to
+  // be visible, and the menu is what staff come to this tab for.
+  Lunch_Schedule: ['Event_Date', 'Location', 'Type', 'Meal_Description', 'Meal_Shorthand', 'Meal_ID'],
   // A superset of Lunch_and_Event_Registrants' own array (same columns, same
   // order) plus 4 triage-only columns — moveRegistrantsToTriage() copies by
   // HEADER NAME, so keeping this a true prefix-plus-extra of the Registrants
@@ -1174,6 +1228,7 @@ const HEADERS = {
   Deleted_Event_Triage: [
     'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
+    'Meal_Source',
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
@@ -1391,6 +1446,19 @@ const CONFIG_HEADER_ROW = 2;
 const CONFIG_DATA_START_ROW = 3;
 /** Types that actually need a Meal Buffer Amounts row in Config (a "Not Serving" day never does). */
 const CATERED_LUNCH_TYPES = ['Hot', 'Cold'];
+
+/**
+ * How far either side of today the Meal_Source dropdown looks for batches, and
+ * how many it will offer at most. See getRecentMealIdOptions().
+ *
+ * Two weeks back is generous for food — well past anything anyone should still
+ * be serving — and deliberately so: the list is there to be scanned, and a
+ * batch too old to hand out is a batch someone might still be RECORDING, days
+ * later, from a sign-in sheet nobody has typed up yet.
+ */
+const MEAL_SOURCE_LOOKBACK_DAYS = 14;
+const MEAL_SOURCE_LOOKAHEAD_DAYS = 7;
+const MEAL_SOURCE_MAX_OPTIONS = 40;
 /** Full set of Type choices offered on Lunch_Schedule / Master_Lunch_Dashboard. */
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
 /** Lunch_and_Event_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
@@ -2744,15 +2812,129 @@ function getMealInfoIndex() {
       const info = {
         type: row[map['Type']] || '',
         description: row[map['Meal_Description']] || '',
-        shorthand: row[map['Meal_Shorthand']] || ''
+        shorthand: row[map['Meal_Shorthand']] || '',
+        // Where this meal came from, carried on the info object so a lookup by
+        // Meal_ID can answer "which date and location was that batch?" without
+        // a second pass over the tab.
+        dateKey,
+        location,
+        mealId: deriveMealId(rowDate, location, row[map['Type']])
       };
       const locatedKey = `${dateKey}|${location}`;
       if (index[locatedKey] === undefined) index[locatedKey] = info;
       if (index[dateKey] === undefined) index[dateKey] = info;
+      // Third key shape: the batch's own ID. A Meal_ID starts with "M-" and a
+      // date key never does, so the three shapes share one object safely.
+      if (info.mealId && index[info.mealId] === undefined) index[info.mealId] = info;
     });
   }
   __mealInfoIndexCache = index;
   return index;
+}
+
+/**
+ * The ID of the BATCH a Lunch_Schedule row describes:
+ *
+ *     M-20260916-NARBERTH-HOT
+ *
+ * Derived rather than stored, because this tab is cleared and rebuilt on every
+ * render and an ID that had to survive that is an ID that eventually doesn't.
+ * Deriving it also means an existing workbook needs no migration step — the
+ * next render simply fills the column in, and every ID it produces for a row
+ * that already existed is the same one it would have produced last month.
+ *
+ * "Not Serving" and blank types get NO ID: there is no batch on a day the
+ * kitchen is closed, and handing one out would invite a registrant row to
+ * point at food that was never made.
+ *
+ * The location goes in whole rather than abbreviated. A four-letter prefix is
+ * tidier right up until two locations share one.
+ */
+function deriveMealId(date, location, type) {
+  const d = coerceDate(date);
+  const cleanType = String(type || '').trim();
+  const cleanLocation = String(location || '').trim();
+  if (!d || !cleanLocation) return '';
+  if (CATERED_LUNCH_TYPES.indexOf(cleanType) === -1) return '';
+  const slug = cleanLocation.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!slug) return '';
+  return `M-${Utilities.formatDate(d, TIMEZONE, 'yyyyMMdd')}-${slug}-${cleanType.toUpperCase()}`;
+}
+
+/**
+ * Looks a batch up by its Meal_ID. Returns the same info object
+ * getMealInfoForDate() returns (type/description/shorthand) plus the dateKey
+ * and location the batch belongs to, or null when nothing on Lunch_Schedule
+ * answers to that ID.
+ *
+ * A null here is the ORPHAN case — a row pointing at a batch that has since
+ * been retyped, re-dated or marked Not Serving. Callers must not drop those
+ * meals on the floor; they belong to the row's own day until someone fixes the
+ * reference. See buildDashboardRollup().
+ */
+function getMealBatchById(mealId) {
+  const key = parseMealIdReference(mealId);
+  if (!key) return null;
+  const info = getMealInfoIndex()[key];
+  return info && info.mealId ? info : null;
+}
+
+/**
+ * Pulls a bare Meal_ID out of whatever is actually in a Meal_Source cell.
+ *
+ * The dropdown offers "M-20260916-NARBERTH-HOT — Chicken Parm", because an ID
+ * on its own is unreadable at a serving counter and picking the wrong day off
+ * a list of near-identical strings is exactly the mistake this column exists
+ * to prevent. Sheets stores whatever was picked, so the label comes along with
+ * it and has to be trimmed back off here. Anything that doesn't contain a
+ * well-formed ID returns '' and is treated as an orphan reference — which is
+ * reported, never silently ignored.
+ */
+function parseMealIdReference(value) {
+  const text = String(value || '').trim().toUpperCase();
+  if (!text) return '';
+  const match = text.match(/^M-\d{8}-[A-Z0-9]+-[A-Z]+/);
+  return match ? match[0] : '';
+}
+
+/**
+ * Meal_Source dropdown options: every batch on Lunch_Schedule near enough to
+ * today to still be plausibly changing hands, newest first, each labelled with
+ * its dish.
+ *
+ * Bounded on purpose. A dropdown carrying every meal the kitchen has ever made
+ * is the same unusable list Quick Mark's name field would be without its
+ * cascade — and the whole point of the column is naming YESTERDAY'S food, not
+ * last spring's. The window looks forward a little as well as back, because a
+ * menu is typically pasted in a month ahead and a batch cooked tomorrow is a
+ * legitimate thing to point at once tomorrow arrives.
+ *
+ * Anything outside the window is still accepted if typed — the validation is
+ * open (see applyRegistrantsFormatting()).
+ */
+function getRecentMealIdOptions() {
+  const index = getMealInfoIndex();
+  const today = new Date();
+  const from = formatDateKey(new Date(today.getTime() - MEAL_SOURCE_LOOKBACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + MEAL_SOURCE_LOOKAHEAD_DAYS * 86400000));
+
+  const seen = {};
+  const batches = [];
+  Object.keys(index).forEach(key => {
+    const info = index[key];
+    // Every batch appears under three keys; take it once, from its own ID.
+    if (!info || !info.mealId || key !== info.mealId) return;
+    if (info.dateKey < from || info.dateKey > to) return;
+    if (seen[info.mealId]) return;
+    seen[info.mealId] = true;
+    batches.push(info);
+  });
+
+  batches.sort((a, b) => (a.dateKey < b.dateKey ? 1 : a.dateKey > b.dateKey ? -1 : 0));
+  return batches.slice(0, MEAL_SOURCE_MAX_OPTIONS).map(info => {
+    const dish = String(info.shorthand || info.description || info.type || '').trim();
+    return dish ? `${info.mealId} — ${dish}` : info.mealId;
+  });
 }
 
 /** Called by renderLunchScheduleSheet() — the only thing that rewrites the tab this index is built from. */
@@ -12506,6 +12688,7 @@ function renderTriageSheet(force, allRows) {
 const REGISTRANT_EDITABLE_COLUMNS = [
   'Attended', 'Lunch_Served',
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
+  'Meal_Source',
   'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
 ];
 
@@ -12557,6 +12740,15 @@ function applyRegistrantsFormatting(sheet, headers, result) {
         .setNumberFormat('0')
         .setHorizontalAlignment('center');
     });
+    // Meal_Source offers the batches anyone could plausibly still be handing
+    // out, newest first, and accepts anything — allowInvalid, like every other
+    // list on this tab, because a paste must never be rejected and because a
+    // batch that has aged off the list is still a legitimate thing to name.
+    // Blank stays the normal value: it means today's meal.
+    if (map['Meal_Source'] !== undefined) {
+      applyOpenValueListValidationBounded(sheet, map['Meal_Source'] + 1,
+        getRecentMealIdOptions(), z.start, z.count);
+    }
   });
 
   const overrideCol = map['Manual_Override'] + 1;
@@ -12714,7 +12906,7 @@ function renderLunchScheduleSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
   const headers = HEADERS.Lunch_Schedule;
-  const rows = allRows || readLunchScheduleRows(sheet);
+  const rows = stampMealIds(allRows || readLunchScheduleRows(sheet));
   const result = renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Menu',
     pastLabel: '🕓 Past Menu',
@@ -12723,6 +12915,24 @@ function renderLunchScheduleSheet(force, allRows) {
   });
   invalidateMealInfoIndex(); // this tab is exactly what getMealInfoIndex() is built from
   return result;
+}
+
+/**
+ * Fills in every row's Meal_ID before the tab is written.
+ *
+ * Unconditional, not fill-the-blanks: the ID is a pure function of the row's
+ * date, location and type, so a stale one (the date was corrected, the day was
+ * closed) has to be replaced rather than kept. This is the single place the
+ * column is written, and it runs on every render — which is what lets an
+ * existing workbook pick the column up with no migration.
+ */
+function stampMealIds(rows) {
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+  if (map['Meal_ID'] === undefined) return rows || [];
+  (rows || []).forEach(row => {
+    row[map['Meal_ID']] = deriveMealId(row[map['Event_Date']], row[map['Location']], row[map['Type']]);
+  });
+  return rows || [];
 }
 
 function applyLunchScheduleFormatting(sheet, headers, result) {
@@ -12748,6 +12958,11 @@ function applyLunchScheduleFormatting(sheet, headers, result) {
   if (notServingRule) rules.push(notServingRule);
 
   sheet.setConditionalFormatRules(rules);
+
+  // Meal_ID is computed from the three columns to its left on every render, so
+  // typing into it is work that disappears at the next sync. Same warning the
+  // dashboard's derived columns get.
+  protectDerivedColumns(sheet, headers, ['Meal_ID'], zones);
 
   // The ADD block goes last, below everything, so a paste of any size just
   // extends the sheet downward instead of colliding with the tables.
@@ -13056,6 +13271,48 @@ function readRegistrantMealCounts(row, map) {
     add(column, amount);
   });
   return out;
+}
+
+/**
+ * Where one registrant row's meals should be counted: { dateKey, location,
+ * carried }.
+ *
+ * Three outcomes, and the third is the one worth being careful about:
+ *
+ *   BLANK Meal_Source — the row's own date and location, which is what this
+ *   workbook has always assumed and what every row written before this column
+ *   existed means. `carried` is false.
+ *
+ *   A Meal_ID that resolves — that batch's date and location. `carried` is
+ *   true only when the batch's date differs from the handover's, so naming
+ *   today's meal explicitly (which the dropdown makes easy) is not reported as
+ *   a carry-over.
+ *
+ *   AN ORPHAN — a Meal_ID nothing on Lunch_Schedule answers to, because the
+ *   menu row was re-dated, retyped or closed after someone pointed at it. The
+ *   meals fall back to the row's own day, exactly as if the cell were blank,
+ *   and a human is told. They must never be dropped: an unreadable reference
+ *   is a reason to ask someone, not to lose a meal that demonstrably happened.
+ */
+function resolveMealSource(rawSource, meta, row, lrMap) {
+  const fallback = { dateKey: meta.dateKey, location: meta.location, carried: false };
+  const mealId = String(rawSource || '').trim();
+  if (!mealId) return fallback;
+
+  const batch = getMealBatchById(mealId);
+  if (!batch) {
+    noteForAdmin('Meal_Source points at a meal that no longer exists',
+      `${String(row[lrMap['Name']] || '').trim() || '(unnamed)'} on ` +
+      `${formatDateLabel(parseDateKey(meta.dateKey))} at ${meta.location} has Meal_Source "${mealId}", ` +
+      `which is not on Lunch_Schedule. Their meals are counted under their own date until the ` +
+      `reference is corrected — check that menu row's date and type.`);
+    return fallback;
+  }
+  return {
+    dateKey: batch.dateKey,
+    location: batch.location,
+    carried: batch.dateKey !== meta.dateKey
+  };
 }
 
 /** True only for a real ticked CHECKBOX — the pre-split meaning of Meals_In_Fridge. See readRegistrantMealCounts(). */
@@ -14555,10 +14812,21 @@ function buildDashboardRollup(registrantRows) {
       // row one way or the other, which made the mixed case unsayable.
       const meals = readRegistrantMealCounts(row, lrMap);
       if (meals.total > 0) {
-        const mealKey = `${meta.dateKey}|${meta.location}`;
+        // WHICH BATCH these meals came out of, which is not always the day
+        // they were handed over. Blank Meal_Source means today's — the rule
+        // this tab has always followed silently — so the overwhelming majority
+        // of rows resolve to exactly the bucket they used to.
+        //
+        // A named batch sends the counts to ITS date and location instead. The
+        // eight portions of Wednesday's chicken handed out on Thursday belong
+        // to Wednesday's order: that is the row that has an Actual_Ordered to
+        // reconcile against, and leaving them on Thursday reports the same
+        // batch as both waste and phantom demand.
+        const source = resolveMealSource(row[lrMap['Meal_Source']], meta, row, lrMap);
+        const mealKey = `${source.dateKey}|${source.location}`;
         if (!rollup[mealKey]) {
           rollup[mealKey] = {
-            dateKey: meta.dateKey, location: meta.location,
+            dateKey: source.dateKey, location: source.location,
             registeredCount: 0, servedConfirmed: 0, unplanned: true
           };
         }
@@ -14567,6 +14835,13 @@ function buildDashboardRollup(registrantRows) {
           bucket.mealTallies = bucket.mealTallies || {};
           bucket.mealTallies[column] = (bucket.mealTallies[column] || 0) + meals.byDashboardColumn[column];
         });
+        // Carried_Over is what makes the redirected number explainable. Without
+        // it Wednesday's takeaway count silently grows by eight and nothing on
+        // the row says why. Only counted when the food actually moved days —
+        // naming today's own batch explicitly is not a carry-over.
+        if (source.carried) {
+          bucket.carriedOver = (bucket.carriedOver || 0) + meals.total;
+        }
       }
 
       if (row[lrMap['Program_Status']] !== 'Active' || row[lrMap['Lunch_Status']] !== 'Needed') return;
@@ -14720,6 +14995,12 @@ function updateMasterLunchDashboard(registrantRows) {
     Object.keys(tallies).forEach(column => {
       if (map[column] !== undefined && tallies[column] > 0) row[map[column]] = tallies[column];
     });
+    // Same "only when there is something to say" rule as the tallies above:
+    // a batch nobody carried over leaves the cell alone rather than asserting
+    // a zero over it.
+    if (map['Carried_Over'] !== undefined && r.carriedOver > 0) {
+      row[map['Carried_Over']] = r.carriedOver;
+    }
   });
 
   writeMasterLunchDashboardSheet(sheet, plan, headers,
@@ -14897,7 +15178,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   ];
   const numericCols = ['Registered_Count', 'Served_Confirmed', 'Actual_Ordered', 'Standard_Buffer',
     'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
-    'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
+    'Carried_Over', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
 
   zones.forEach(z => {
     if (z.count < 1) return;
@@ -14953,7 +15234,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   // staff tell the sync to stop managing it.
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed',
-      'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
+      'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge', 'Carried_Over',
       // Config owns these now — typing over one is overwritten on the next
       // render, and the warning says where to change it instead.
       'Standard_Buffer', 'Tester_Buffer'],

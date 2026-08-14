@@ -25,7 +25,9 @@ It also:
 - can **delete registrations** outright — test runs and duplicates, by session,
   behind a typed confirmation, optionally taking the form responses with them;
 - records **several different meals per person** on one day (ate the day-1
-  meal here, took two subs home), attached to whoever took them;
+  meal here, took two subs home), attached to whoever took them — and **which
+  lunch** they were, so serving Wednesday's leftovers on Thursday stops
+  reporting one batch of food as both waste and phantom demand;
 - prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;
 - **invites registrants to the calendar event** they signed up for, and
   un-invites them if they cancel.

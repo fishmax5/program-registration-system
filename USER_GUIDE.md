@@ -376,6 +376,16 @@ the Registrants tab actually reports a meal for that date+location — it never
 gets blanked back out, so a number typed here before this existed (or on a date
 nobody has logged counts for yet) is left alone.
 
+**`Carried_Over`** sits with them and answers "how many of this day's meals
+were eaten on a *different* day?" — portions of this batch that went out later,
+counted here because this is the row with the `Actual_Ordered` to reconcile
+them against. It is always **part of** the consumption columns beside it, never
+an addition to them: a row reading *40 ordered · 14 takeaway · 8 carried over*
+means eight of that fourteen left the building on a later day. It fills in by
+itself from `Meal_Source` on the Registrants tab, and stays blank on every
+ordinary day — see
+[Lunch_and_Event_Registrants](#3-lunch_and_event_registrants).
+
 **`Standard_Buffer` and `Tester_Buffer` aren't typed here either.** They're
 **read from Config** on every render, for that row's location and Hot/Cold type.
 They used to be yellow hand-entry columns that were only ever written once, when
@@ -487,6 +497,7 @@ what-they-ate sit together with no scrolling.
 | ✍️ `Subs_Dined_In` | **Yours to fill in.** Subs eaten here |
 | ✍️ `Subs_Taken_Out` | **Yours to fill in.** Subs carried out |
 | ✍️ `Meals_In_Fridge` | **Yours to fill in.** How many of their meals went in the fridge to collect later |
+| ✍️ `Meal_Source` | **Yours to fill in, only when it isn't today's food.** Which meal those counts were portions of. Leave it blank and it means today's — see below |
 | ✍️ `Phone` | From the form. Correct it here if it's wrong |
 | `Email` | From the form. What a calendar invitation is sent to |
 | `Person_Type` | `Attendee` (registered themselves) or `Guest` |
@@ -520,6 +531,45 @@ will be overwritten if you type in it (you'll get a warning if you try).
 > under the old scheme are read across automatically on the first render, with
 > ticked-fridge rows counted as taken away exactly as they were before.
 
+> **`Meal_Source` — when you serve yesterday's food.** The counts say how many
+> meals and in what manner. They never said *what the food was*, because that
+> was assumed: a meal counted on a row dated the 17th is a portion of whatever
+> Lunch_Schedule lists for the 17th.
+>
+> Leftovers break that, and they break it in both directions at once. Serve
+> Wednesday's chicken on Thursday and **Wednesday reads as twelve meals
+> wasted** while **Thursday reads as takeaway demand on a day nothing was
+> ordered** — one real batch of food, reported as two wrong numbers.
+>
+> So on a row where the food came from an earlier day, pick that day's meal
+> from the `Meal_Source` dropdown:
+>
+> | | |
+> |---|---|
+> | **Blank** | Today's meal. This is the normal case and what every existing row means — leave it alone |
+> | `M-20260916-NARBERTH-HOT — Chicken Parm` | These meals were portions of **Wednesday's** chicken, handed over today |
+>
+> Those meals then count against **the day the food was made**, on the
+> dashboard row that has the `Actual_Ordered` to reconcile them against. That
+> row's `Carried_Over` says how many of its meals went out on a later day, so
+> the number is explained rather than just larger.
+>
+> Taking the example above: Wednesday goes from *40 ordered, 28 consumed, 12
+> unaccounted for* to *40 ordered, 36 consumed, `Carried_Over` 8* — and four
+> meals is what was actually thrown away. Thursday stops inventing demand for
+> a day the kitchen was closed.
+>
+> **The one thing it can't say:** a row names **one** meal. If someone ate
+> today's lunch *and* carried out yesterday's leftovers, the row can only name
+> one of the two. Recording several different meals per person per day needs a
+> row per meal handed over, which is a bigger change — see
+> `MEAL_IDENTITY_DESIGN.md`.
+>
+> If `Meal_Source` names a meal that's no longer on Lunch_Schedule (the menu
+> row was re-dated, or the day was later closed), those meals **stay counted**
+> under their own day and you get a notice naming the person — an unreadable
+> reference is a reason to check something, never a reason to lose a meal.
+
 `Event_ID`, `Party_ID` and `Form_Source` are **hidden** — internal plumbing.
 Unhide them from Google Sheets' column menu if you're troubleshooting.
 
@@ -546,6 +596,7 @@ from all counts automatically.
 | `Type` | `Hot`, `Cold`, or `Not Serving` |
 | `Meal_Description` | Full description |
 | `Meal_Shorthand` | Short label — **this is what registrants see on the form** |
+| `Meal_ID` | Worked out for you. The name of that day's meal, which is what `Meal_Source` on the Registrants tab points at. Don't type in it — it's rewritten every sync |
 
 #### "Not Serving" — closing the kitchen for a day
 

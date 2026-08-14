@@ -1,8 +1,15 @@
 # Meal Identity — design draft
 
-**Status: draft. Nothing here is implemented.** This is a proposal for how the
-workbook could answer *"which lunch did this person get?"* rather than only
-*"how many meals went out that day?"*
+**Status: Phase 1 (§7) is implemented. Phases 2 and 3 are still a proposal.**
+This is a design for how the workbook could answer *"which lunch did this
+person get?"* rather than only *"how many meals went out that day?"*
+
+What shipped: `Meal_ID` on `Lunch_Schedule` (derived, never typed),
+`Meal_Source` on `Lunch_and_Event_Registrants` (blank = today's meal), the
+rollup attributing meals to the batch they name, and `Carried_Over` on
+`Master_Lunch_Dashboard`. The worked example in §10 is what it does. What did
+NOT ship from Phase 1: giving subs their own `Lunch_Schedule` rows — that one
+reaches the registration forms, so it wants deciding on its own.
 
 The question comes from a real situation at the counter: a meal handed out on
 Wednesday is not necessarily Wednesday's meal. Leftovers get served the next
@@ -312,13 +319,30 @@ better `Member_Roll.Usual_Lunch` than the current mode-of-`Lunch_Type` guess at
 Each phase is independently shippable and independently useful. Stop after any
 of them.
 
-**Phase 1 — identity, no new tab.** Add `Meal_ID` to `Lunch_Schedule` (derived,
-so no migration). Give subs real schedule rows. Add a single
-`Meal_Source` column to the registrant row: blank means "today's batch,"
+**Phase 1 — identity, no new tab. SHIPPED**, except for the subs schedule rows.
+`Meal_ID` on `Lunch_Schedule` (derived, so no migration). A single
+`Meal_Source` column on the registrant row: blank means "today's batch,"
 which is exactly the current implicit rule, so **no existing number changes**.
 Staff can now write down that a whole row's meals were yesterday's. Crude — one
 source per row — but it covers the plain leftover case and it costs almost
 nothing.
+
+Two things came out slightly different from this sketch, both for the same
+reason — the counter, not the schema:
+
+- The dropdown offers `M-20260916-NARBERTH-HOT — Chicken Parm`, ID *and* dish.
+  A bare ID is unreadable at a serving counter and picking the wrong one off a
+  list of near-identical strings is the exact mistake the column exists to
+  prevent. `parseMealIdReference()` trims the label back off.
+- `Carried_Over` was added to `Master_Lunch_Dashboard` even though the batch
+  block is Phase 3 work. Without it, Wednesday's takeaway count silently grows
+  by eight and nothing on the row says why — a corrected number nobody can
+  explain is not obviously better than a wrong one.
+
+**Subs schedule rows are deliberately still outstanding.** `Lunch_Schedule`
+feeds the registration forms' date labels and the lunch question, so adding a
+`Subs` type changes what registrants see. That is a decision about the forms,
+not a data-model tidy-up, and it belongs with question 2 in §8.
 
 **Phase 2 — the ledger.** Add `Meal_Ledger`. Generate rows from Quick Mark, with
 the meal dropdown defaulting to today. Backfill from existing rows by minting
