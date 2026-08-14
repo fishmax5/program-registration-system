@@ -18,8 +18,10 @@ It also:
 - supports programs that take **no registration at all** (`[No Registration]`)
   — a drop-in coffee hour still shows on the dashboard, but gets no form and no
   "register here" link on its calendar events;
-- puts both of those on the dashboard as **checkboxes**: tick one and the tag
-  is written onto every one of that program's calendar events for you;
+- puts both of those on the dashboard as **checkboxes**: tick one and every
+  other row of that program ticks to match, and the tag is written onto every
+  one of its calendar events for you, seconds later — with the tick queued and
+  protected in the meantime, so a sync can't undo it before it lands;
 - can **delete registrations** outright — test runs and duplicates, by session,
   behind a typed confirmation, optionally taking the form responses with them;
 - records **several different meals per person** on one day (ate the day-1

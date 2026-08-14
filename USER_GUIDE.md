@@ -207,23 +207,35 @@ those, use [🗑️ Delete Registrations…](#deleting-registrations).
 ### The two checkboxes: `Club` and `No_Registration`
 
 Both tags are also **tick boxes** on the Master_Program_Dashboard, and ticking
-one is exactly the same as typing the tag by hand — because that's what it does:
+one is exactly the same as typing the tag by hand — because that's what it does.
+**Ticking the box is the only step.**
 
 1. You tick the box on any one of the program's rows.
-2. It asks what the change means, in words, and you say yes.
-3. The tag is written into the **description of every calendar event** of that
-   program — which is where the system reads it back from, so the tick sticks
-   instead of being wiped by the next sync.
-4. The next **Sync Cal** applies it: the form gains its club option, or the
-   program stops taking registrations.
+2. Every other row of that program ticks itself to match, immediately — all its
+   dates, past and upcoming, and its rows at the other locations if it's on one
+   shared form. A flag belongs to a program, not to a date.
+3. Within a few seconds the tag is written into the **description of every
+   calendar event** of that program, which is where the system reads it back
+   from.
+4. The next **Sync Cal** applies the consequences: the form gains its club
+   option, or the program stops taking registrations.
 
-Untick to reverse, on the same terms.
+Untick to reverse, on the same terms. There's no "are you sure?" — a checkbox
+is already the question and the undo — and the toast says what happened.
 
-> **If the toast says the calendar couldn't be updated**, the tick is on the
-> sheet but hasn't reached the calendar — Google doesn't always give a cell edit
-> permission to write to a calendar. Click
-> **🔁 Apply Type / Club / No-Reg Changes to Calendar** on the menu and it
-> finishes the job. See [Things to know](#things-to-know).
+**Why it can't be lost.** A cell edit isn't allowed to write to a calendar
+directly (Google's rule, not ours), so the tick is written to a hidden
+`_Pending_Tag_Changes` tab the instant you click, and stays there until a
+calendar has accepted it. While it's queued, **nothing overwrites your box** —
+not a sync, not a calendar change, not the daily run. This is what makes the box
+stay ticked while the write is on its way.
+
+> **Ticks land in seconds only if the edit trigger is installed.** Run
+> **🔧 Admin ▸ Check Triggers** once on a workbook to install it (it's part of
+> the normal trigger set, and **Trigger Status** tells you if it's missing).
+> Without it nothing is lost — the tick sits in the queue and the next
+> **Sync Cal** delivers it. **🔁 Apply Type / Club / No-Reg Changes to
+> Calendar** pushes the queue through by hand at any time.
 
 **Tentative events** — start the **title** with `*`:
 
@@ -965,7 +977,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **📧 Invite Registrants to Calendar Events** | Sends the calendar invitations now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
-| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Makes a Grouped/Monthly change — or a `Club` / `No_Registration` tick — typed on the dashboard stick, by writing it onto the calendar events |
+| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Monthly tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. **Admin accounts only** |
 | **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. **Admin accounts only** — see [Moving sessions between forms](#moving-sessions-between-forms) |
 | **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). **Admin accounts only** |
@@ -980,7 +992,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🔗 Rewrite Event Links (fix duplicates)** | Strips every registration link off upcoming events and writes back one — see [Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions) |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
-| **Check Triggers** | Resets the automatic schedule to exactly the expected triggers — safe to press any time, clears out duplicates. **Trigger-owner account only** |
+| **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
 | **Take Over Trigger Ownership** | Moves ownership to your account, if the recorded owner is gone. Warns you that it can't delete their triggers |
 | **Release My Triggers** | Deletes the triggers *your* account created. The one useful thing a non-owner can do about a duplicate set they're responsible for |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run). **Trigger-owner account only** |
@@ -1032,8 +1044,6 @@ say no:
 |---|---|
 | Press **Sync Cal** | It can create forms, change form dates, and edit calendar descriptions |
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
-| Tick or untick `Club` on the program dashboard | It changes whether signing up once keeps you signed up, and writes `[Club]` onto every one of its calendar events |
-| Tick or untick `No_Registration` on the program dashboard | It stops (or restarts) sign-ups for that program: no form is built, the registration link comes off its calendar events, and an existing form stops accepting responses |
 | Press **🗑️ Delete Registrations…** | It **permanently deletes** registrant rows, and can delete the form responses behind them. It also makes you type `DELETE` |
 | Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
@@ -1053,6 +1063,13 @@ honest undo. The toast says so at the time.
 keystroke, and that made entering a month of menus unusable. Menu edits stay
 in the workbook until you deliberately push them out — see
 [Getting the menu onto the forms](#getting-the-menu-onto-the-forms).
+
+**The two checkboxes don't ask either.** `Club` and `No_Registration` reach
+outside the workbook like everything above, but a tick box is already the
+question, the answer and the undo in one click — a modal on top of it would just
+be a second click saying the same thing. What they do instead is tell you: the
+toast names the change, and unticking reverses it. See
+[The two checkboxes](#the-two-checkboxes-club-and-no_registration).
 
 The **scheduled** runs (daily Sync Cal, hourly Sync Registrations) don't ask —
 there's nobody at the keyboard to answer, and doing their job on schedule is the
@@ -1695,10 +1712,17 @@ quietly puts the old value back.
 
 **`Club` and `No_Registration` live on the calendar too**, in the same way and
 for the same reason — they come from the `[Club]` and `[No Registration]` tags
-in the event description. Both are checkboxes with the same dialog-and-write-back
-behind them as `Type_Tag`, so ticking one is a real change, not a note: it is
-written onto every one of that program's calendar events. Same warning toast,
-same menu item, if it can't reach the calendar from the tick.
+in the event description. Ticking one is a real change, not a note: it is
+written onto every one of that program's calendar events, by an edit trigger
+that runs a second or two behind the click.
+
+**A queued tick is never overwritten.** Because a cell edit can't reach a
+calendar by itself, every tick is recorded on the hidden `_Pending_Tag_Changes`
+tab first, and the sync leaves that program's boxes alone until the calendar has
+accepted it. Without that, a calendar change anywhere — yours, a colleague's,
+Google moving a recurring event — fires a sync that recomputes these columns
+from descriptions nobody had told about your tick yet, and the box would untick
+itself while you watched.
 
 **Buffers live in Config, nowhere else.** `Standard_Buffer` / `Tester_Buffer` on
 the lunch dashboard are re-read from **Config ▸ 🍱 Meal Buffer Amounts** on
@@ -1729,8 +1753,15 @@ box with a note saying why.
 **I changed Grouped/Monthly and it changed itself back**
 `Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
 can't always reach the calendar. Press **🔁 Apply Type / Club / No-Reg Changes
-to Calendar**, then **Sync Cal**. The same goes for a `Club` or
-`No_Registration` tick that didn't stick.
+to Calendar**, then **Sync Cal**.
+
+**I ticked `Club` and it unticked itself**
+That was a real bug and it's fixed: ticks are now queued on the hidden
+`_Pending_Tag_Changes` tab and protected from the sync until a calendar accepts
+them. If a tick is still sitting in that tab hours later, the calendar can't be
+written — check **🔧 Admin ▸ Trigger Status** (is `onProgramFlagEditInstallable`
+listed?), run **Check Triggers** if it isn't, then
+**🔁 Apply Type / Club / No-Reg Changes to Calendar**.
 
 **Only some locations ended up on the shared form**
 The `[All Locations]` tag is read per event, so the locations you didn't tag

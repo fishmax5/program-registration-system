@@ -933,6 +933,48 @@ const PROGRAM_FLAG_COLUMNS = [
   }
 ];
 
+/** The flag definition for one dashboard column name, or null. */
+function getProgramFlagByColumn(columnName) {
+  return PROGRAM_FLAG_COLUMNS.filter(f => f.column === columnName)[0] || null;
+}
+
+/**
+ * PENDING FLAG CHANGES — the tab that makes a tick survive long enough to be
+ * delivered.
+ *
+ * A tick has to end up in a calendar description, and the trigger that sees
+ * the tick first is the SIMPLE onEdit, which has no authorization to write to
+ * a calendar (see onEdit()). Meanwhile anything at all happening on a watched
+ * calendar fires onCalendarChange -> a full syncCalendars(), which recomputes
+ * these columns FROM the calendar. Between those two facts sat the bug this
+ * tab exists to kill: you tick the box, a sync fires seconds later for an
+ * unrelated reason, the calendar still knows nothing about your tick, and the
+ * box quietly unticks itself — taking with it the only record that you ever
+ * asked for anything, so the menu-driven "apply" then has nothing to apply.
+ *
+ * So the tick is recorded HERE, on a hidden tab, the instant it happens —
+ * which a simple onEdit can do, because it is nothing but a spreadsheet write.
+ * From then on:
+ *
+ *   - reconcileProgramFlagColumns() leaves that program's checkboxes ALONE
+ *     while an entry is outstanding. The calendar no longer overwrites an
+ *     instruction it has not been told about yet.
+ *   - every authorized entry point drains the queue by stamping the calendar:
+ *     the installable onEdit (seconds later, the normal case), the next
+ *     Sync Cal, and the menu item. An entry is cleared only once its calendar
+ *     has actually accepted it.
+ *
+ * One row per program per flag; a later tick on the same program replaces the
+ * earlier one, so the queue holds intentions rather than history.
+ */
+const PENDING_FLAG_SHEET_NAME = '_Pending_Tag_Changes';
+const PENDING_FLAG_HEADERS = ['Column', 'Calendar_Source', 'Clean_Title', 'Turn_On', 'Requested_At'];
+
+/** The queue's identity for one program's one flag. */
+function pendingFlagKey(flagColumn, calendarId, title) {
+  return `${String(flagColumn || '').trim()}|${String(calendarId || '').trim()}|${String(title || '').trim()}`;
+}
+
 /**
  * True when a tag-column cell is ON. Reads a real checkbox (a boolean, or the
  * "TRUE" a pasted cell arrives as) AND the words earlier versions wrote there
@@ -1448,8 +1490,22 @@ const AUTOMATION_ENABLED_OPTIONS = ['Yes', 'No'];
  */
 const DEFAULT_AUTOMATION_ENABLED = true;
 
-/** The handlers the kill switch governs, and that recordHandlerRun() attributes. */
+/**
+ * The handlers the kill switch governs, and that recordHandlerRun() attributes.
+ *
+ * onProgramFlagEditInstallable is DELIBERATELY NOT HERE, though writeTriggers()
+ * installs it alongside these. The kill switch exists to stop AUTOMATION —
+ * things that run on their own, at their own times, while nobody is watching.
+ * That handler runs because somebody just clicked a checkbox, and it writes
+ * exactly what they asked for. Pausing automation should not mean a tick
+ * silently fails to save; the queue behind it would fill up instead, and the
+ * next unpause would deliver a pile of changes nobody remembers making. It is
+ * still listed by showTriggerStatus() as a trigger the workbook expects.
+ */
 const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange'];
+
+/** Every trigger writeTriggers() maintains — the automation ones plus the edit handler. */
+const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgramFlagEditInstallable']);
 
 /**
  * Cross-execution cache TTL for the kill-switch read. onCalendarChange can
@@ -5480,6 +5536,19 @@ function writeTriggers(force, takingOwnership) {
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
   removed += resetTriggersForHandler('syncRegistrations', () =>
     ScriptApp.newTrigger('syncRegistrations').timeBased().everyHours(1).create());
+  // The one trigger here that is not a schedule. An installable onEdit is the
+  // only execution in this project that sees a cell edit AND is allowed to
+  // write to a calendar, which is what makes ticking Club / No_Registration a
+  // one-step action instead of a tick plus two menu items — see
+  // onProgramFlagEditInstallable(). Without it everything still works; it just
+  // waits for the next sync.
+  removed += resetTriggersForHandler('onProgramFlagEditInstallable', () =>
+    ScriptApp.newTrigger('onProgramFlagEditInstallable')
+      .forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet()).onEdit().create());
+
+  // Built here, while there is authorization to spare, so the simple onEdit
+  // that needs it never has to create a tab mid-edit.
+  getPendingFlagSheet(true);
 
   const calendarResult = writeCalendarChangeTriggers(true); // the bootstrap check above already ran
   removed += calendarResult.removed;
@@ -5583,7 +5652,7 @@ function releaseMyTriggers() {
 
   const me = getCurrentUserEmail();
   const mine = ScriptApp.getProjectTriggers()
-    .filter(t => MANAGED_AUTOMATION_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
+    .filter(t => EXPECTED_TRIGGER_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
 
   if (mine.length === 0) {
     toastIfPossible(`No managed triggers exist under ${me || 'this account'} — nothing to release.`);
@@ -5771,7 +5840,7 @@ function showTriggerStatus() {
   const owner = getTriggerOwner();
   const verifiedAt = getTriggersVerifiedAt();
   const visible = ScriptApp.getProjectTriggers();
-  const managed = visible.filter(t => MANAGED_AUTOMATION_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
+  const managed = visible.filter(t => EXPECTED_TRIGGER_HANDLERS.indexOf(t.getHandlerFunction()) !== -1);
 
   const counts = {};
   managed.forEach(t => {
@@ -5792,10 +5861,15 @@ function showTriggerStatus() {
   if (managed.length === 0) {
     lines.push('  (none — either you never created any, or you released them)');
   } else {
-    MANAGED_AUTOMATION_HANDLERS.forEach(handler => {
+    EXPECTED_TRIGGER_HANDLERS.forEach(handler => {
       if (counts[handler]) lines.push(`  ${handler}: ${counts[handler]}`);
     });
-    lines.push(`  Expected for the owner: syncCalendars 1, syncRegistrations 1, onCalendarChange ${Object.keys(CALENDAR_MAP).length}`);
+    lines.push(`  Expected for the owner: syncCalendars 1, syncRegistrations 1, ` +
+      `onCalendarChange ${Object.keys(CALENDAR_MAP).length}, onProgramFlagEditInstallable 1`);
+    if (!counts['onProgramFlagEditInstallable']) {
+      lines.push(`  ⚠️ No onProgramFlagEditInstallable trigger. Ticking Club / No_Registration still works,`);
+      lines.push(`     but the calendar is only updated on the next Sync Cal. "Check Triggers" installs it.`);
+    }
   }
   lines.push('');
 
@@ -6061,25 +6135,39 @@ function describeTypeTagChange(title, newTag) {
 }
 
 /**
- * One tick of a Club / No_Registration checkbox, made LIVE: ask, then write
- * the matching tag into (or out of) every one of that program's calendar event
- * descriptions, which is where resolveEventSettings() reads it back from.
+ * One tick of a Club / No_Registration checkbox, made LIVE — and made to
+ * SURVIVE, which turned out to be the harder half.
  *
- * Returns TRUE when the edit belonged to this flag's column — handled or
- * declined — so the caller can stop looking.
+ * Returns TRUE when the edit belonged to this flag's column, so the caller can
+ * stop looking.
  *
- * WHY THE CALENDAR AND NOT JUST THE CELL. The session table is rebuilt from
- * the calendar on every render. A tick that lives only on the sheet is erased
- * by the next sync, which is the "my change didn't save" bug this whole path
- * exists to avoid. The description is the source of truth for both flags, so
- * that is what a tick has to change.
+ * WHAT THIS FUNCTION DOES, and deliberately does not do. It runs on the SIMPLE
+ * onEdit path, which has no authorization for CalendarApp (see onEdit()), so it
+ * does no calendar work at all. It does the two things a spreadsheet write can
+ * do, immediately:
  *
- * WHEN THE CALENDAR CANNOT BE WRITTEN. A simple onEdit trigger runs without
- * authorization (see onEdit()), so on some workbooks CalendarApp is simply not
- * available here and the stamp writes nothing. That is not silent: the toast
- * says the tick has not reached the calendar yet and names the menu item that
- * finishes the job with full authorization ("🔁 Apply Type / Club / No-Reg
- * Changes to Calendar"). The tick itself stays on the sheet either way.
+ *   1. ticks the same box on every OTHER row of the same program — same
+ *      Clean_Title on the same calendar, plus everything sharing the form (see
+ *      spreadFlagToSiblingRows()). A flag is a property of a program, never of
+ *      one date, and leaving eleven rows unticked said otherwise.
+ *   2. records the tick on the pending-changes tab (see
+ *      PENDING_FLAG_SHEET_NAME), which is what stops the next sync from
+ *      quietly undoing it before anything has had the authorization to write
+ *      it to a calendar. THIS IS THE BUG FIX: a calendar edit anywhere fires
+ *      onCalendarChange -> syncCalendars(), and that recomputes these columns
+ *      from calendar descriptions that had never been told about the tick.
+ *
+ * The calendar write itself happens seconds later in
+ * onProgramFlagEditInstallable(), the INSTALLABLE onEdit trigger, which is the
+ * same edit seen by a fully authorized execution. That is what makes ticking
+ * the box the only step. If that trigger is not installed (nobody has run
+ * 🔧 Admin ▸ Check Triggers on this workbook yet), nothing is lost: the entry
+ * stays queued, the box stays ticked, and the next Sync Cal delivers it.
+ *
+ * NO CONFIRMATION DIALOG. A dropdown holding a real value is worth asking
+ * about; a checkbox is already the question, the answer and the undo, and a
+ * modal here would also have to be answered before the installable trigger
+ * could safely act. The toast says what was done and how to reverse it.
  */
 function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
   const flagCol = headerMap[flag.column];
@@ -6091,63 +6179,301 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
 
   const editedRow = e.range.getRow();
   const numRows = e.range.getNumRows();
-  const titleOf = row => String(sheet.getRange(row, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
-  const calendarOf = row => String(sheet.getRange(row, (headerMap['Calendar_Source'] || 0) + 1).getValue() || '').trim();
+  const readCell = (row, name) =>
+    (headerMap[name] === undefined ? '' : String(sheet.getRange(row, headerMap[name] + 1).getValue() || '').trim());
 
-  if (numRows === 1 && e.range.getNumColumns() === 1) {
-    const on = isTruthyCheckbox(e.value);
-    if (on === isTruthyCheckbox(e.oldValue)) return true; // ticked to what it already said
-    const title = titleOf(editedRow) || 'this program';
-
-    if (!confirmConsequentialAction(
-      on ? flag.onQuestion(title) : `Turn "${flag.column.replace(/_/g, ' ')}" off for "${title}"?`,
-      on ? flag.onDetail(title) : flag.offDetail(title), false)) {
-      // Put the box back the way it was. Written as a boolean rather than
-      // echoing e.oldValue, which arrives as the string "TRUE"/"FALSE" and is
-      // undefined entirely on a cell that was blank before.
-      e.range.setValue(!on);
-      return true;
-    }
-
-    const stamped = stampProgramFlagOnCalendar(title, calendarOf(editedRow), flag, on);
-    toastIfPossible(stamped > 0
-      ? `${describeFlagState(flag, title, on)} — stamped on ${stamped} calendar event(s). ` +
-        `Run Sync Cal to apply it to the forms.`
-      : `⚠️ "${title}" now reads ${on ? 'ticked' : 'unticked'} on the sheet, but the calendar could not be ` +
-        `updated from a cell edit. Click "🔁 Apply Type / Club / No-Reg Changes to Calendar" on the menu to make it stick.`);
-    return true;
-  }
-
-  // A fill-down or paste over a block of these boxes. There is no oldValue to
-  // put back on a "no", so a decline leaves the cells alone and lets the next
-  // sync restore the calendar's own answer — the same honest undo the
-  // multi-row Type_Tag path uses.
+  // Every distinct program touched by this edit — one cell or a fill-down over
+  // a hundred — with the state its box now shows.
   const targets = [];
   for (let r = 0; r < numRows; r++) {
     const row = editedRow + r;
     if (!isRowInAnyDataZone(zones, row)) continue;
-    const title = titleOf(row);
-    if (!title) continue;
+    const title = readCell(row, 'Clean_Title');
+    const calendarId = readCell(row, 'Calendar_Source');
+    if (!title || !calendarId) continue;
     const on = isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue());
-    if (targets.some(t => t.title === title && t.on === on)) continue; // one stamp per program
-    targets.push({ row, title, on });
+    if (targets.some(t => t.title === title && t.calendarId === calendarId)) continue;
+    targets.push({ row, title, calendarId, on });
   }
   if (targets.length === 0) return true;
 
-  const list = targets.slice(0, 8).map(t => `• ${describeFlagState(flag, t.title, t.on)}`).join('\n');
-  const more = targets.length > 8 ? `\n…and ${targets.length - 8} more` : '';
-  if (!confirmConsequentialAction(`Change "${flag.column.replace(/_/g, ' ')}" on ${targets.length} program(s)?`,
-    `${list}${more}\n\n[${flag.tag}] will be added to or removed from their calendar events.`, false)) {
-    toastIfPossible('Not applied. The boxes will go back to the calendar\'s own answer on the next sync.');
-    return true;
-  }
-
-  let stampedPrograms = 0;
+  let spread = 0;
   targets.forEach(t => {
-    if (stampProgramFlagOnCalendar(t.title, calendarOf(t.row), flag, t.on) > 0) stampedPrograms++;
+    spread += spreadFlagToSiblingRows(sheet, zones, headerMap, flag, t.row, t.on);
+    recordPendingProgramFlag(flag.column, t.calendarId, t.title, t.on);
   });
-  toastIfPossible(`Updated ${stampedPrograms}/${targets.length} program(s) — run Sync Cal to apply it to the forms.`);
+
+  const headline = targets.length === 1
+    ? describeFlagState(flag, targets[0].title, targets[0].on)
+    : `${targets.length} program(s) updated`;
+  toastIfPossible(`${headline}${spread > 0 ? ` — ${spread} other session row(s) ticked to match` : ''}. ` +
+    `Writing [${flag.tag}] to the calendar; the forms follow on the next Sync Cal.`);
   return true;
+}
+
+/**
+ * Puts the same tick on every other row of the same program, and reports how
+ * many rows it changed.
+ *
+ * WHAT COUNTS AS THE SAME PROGRAM, on the sheet alone (this runs where nothing
+ * but SpreadsheetApp is available):
+ *
+ *   - same Clean_Title on the same Calendar_Source — the program itself, every
+ *     one of its dates, past and upcoming;
+ *   - anything sharing its Form_ID — which is how a program tagged
+ *     [All Locations] reaches its own rows at the other locations, since what
+ *     makes those one program is precisely that they share one form.
+ *
+ * Deliberately NOT "same title anywhere": two locations running an unlinked
+ * "Chair Yoga" are two programs with two forms, and stampProgramFlagOnCalendar()
+ * would not tag both either. The sheet and the calendar have to agree about
+ * what a program is, or the next sync unticks whatever went further.
+ */
+function spreadFlagToSiblingRows(sheet, zones, headerMap, flag, sourceRow, on) {
+  const flagCol = headerMap[flag.column];
+  const titleCol = headerMap['Clean_Title'];
+  const calCol = headerMap['Calendar_Source'];
+  if (flagCol === undefined || titleCol === undefined || calCol === undefined) return 0;
+  const formCol = headerMap['Form_ID'];
+
+  const title = String(sheet.getRange(sourceRow, titleCol + 1).getValue() || '').trim();
+  const calendarId = String(sheet.getRange(sourceRow, calCol + 1).getValue() || '').trim();
+  if (!title || !calendarId) return 0;
+  const formId = formCol === undefined
+    ? '' : String(sheet.getRange(sourceRow, formCol + 1).getValue() || '').trim();
+
+  let changed = 0;
+  (zones || []).forEach(zone => {
+    const count = zone.dataEnd - zone.dataStart + 1;
+    if (count < 1) return;
+
+    const titles = sheet.getRange(zone.dataStart, titleCol + 1, count, 1).getValues();
+    const calendars = sheet.getRange(zone.dataStart, calCol + 1, count, 1).getValues();
+    const forms = formCol === undefined
+      ? null : sheet.getRange(zone.dataStart, formCol + 1, count, 1).getValues();
+    const flagRange = sheet.getRange(zone.dataStart, flagCol + 1, count, 1);
+    const flags = flagRange.getValues();
+
+    let touched = false;
+    for (let r = 0; r < count; r++) {
+      const rowTitle = String(titles[r][0] || '').trim();
+      const rowCalendar = String(calendars[r][0] || '').trim();
+      const rowForm = forms ? String(forms[r][0] || '').trim() : '';
+      const sameProgram = (rowTitle === title && rowCalendar === calendarId) ||
+        (!!formId && rowForm === formId);
+      if (!sameProgram) continue;
+      if (isTruthyCheckbox(flags[r][0]) === on && typeof flags[r][0] === 'boolean') continue;
+      flags[r] = [on];
+      touched = true;
+      if (zone.dataStart + r !== sourceRow) changed++;
+    }
+    if (touched) flagRange.setValues(flags);
+  });
+  return changed;
+}
+
+/**
+ * THE INSTALLABLE onEdit TRIGGER. Same edit as onEdit() above, seen a second
+ * time by an execution that is fully authorized — which is the only way a
+ * cell edit in this project can reach a calendar at all.
+ *
+ * Installed by writeTriggers() (🔧 Admin ▸ Check Triggers). Without it
+ * everything still works, one sync later; with it, ticking the box is the
+ * whole job.
+ *
+ * It drains the pending-changes queue rather than reading the edit: whatever
+ * handleProgramFlagEdit() decided — including a fill-down that touched forty
+ * programs — is already recorded there, and draining also picks up anything
+ * an earlier failure left behind. Cheap to be wrong about: an edit anywhere
+ * else on the workbook costs one sheet-name comparison and returns.
+ */
+function onProgramFlagEditInstallable(e) {
+  try {
+    if (!e || !e.range) return;
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_NAMES.PROGRAM_DASHBOARD) return;
+    if (isBootstrapActive()) return; // it is rewriting the whole table anyway
+
+    // Was this edit in one of the flag columns? Both triggers start from the
+    // same edit and race, so when the answer is yes the queue entry may not be
+    // written yet — wait a moment for it rather than deciding there is nothing
+    // to do. When the answer is no, nothing is waited for: the drain still
+    // runs, but only if something is already queued (a retry of an earlier
+    // failure), and it costs one read of a two-column tab.
+    if (editTouchesProgramFlagColumn(e, sheet)) {
+      Utilities.sleep(1200);
+    } else if (readPendingProgramFlags().length === 0) {
+      return;
+    }
+
+    // The sync holds this lock while it reads every calendar and rewrites the
+    // table — and it drains the queue itself as its first act, so there is
+    // nothing here worth waiting for it to finish.
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(2000)) {
+      log('onProgramFlagEditInstallable: a sync is running and will deliver the queued change itself.');
+      return;
+    }
+    let result;
+    try {
+      result = applyPendingProgramFlags();
+    } finally {
+      lock.releaseLock();
+    }
+    if (result.applied === 0 && result.failed === 0) return;
+
+    toastIfPossible(result.failed === 0
+      ? `Calendar updated ✅ — ${result.stampedEvents} event(s) across ${result.applied} program(s). ` +
+        `The forms follow on the next Sync Cal.`
+      : `⚠️ ${result.failed} program change(s) could not reach the calendar and are still queued — ` +
+        `they will be retried on the next Sync Cal.`);
+  } catch (err) {
+    log(`onProgramFlagEditInstallable error: ${err}`);
+  }
+}
+
+/** True when `e` covers a Club / No_Registration cell inside a data zone of the session table. */
+function editTouchesProgramFlagColumn(e, sheet) {
+  const zone = findZoneForRow(getSectionZones(sheet, 'Event_ID'), e.range.getRow());
+  if (!zone) return false;
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  return PROGRAM_FLAG_COLUMNS.some(flag => {
+    const col = headerMap[flag.column];
+    return col !== undefined && col + 1 >= firstCol && col + 1 <= lastCol;
+  });
+}
+
+/**
+ * Drains the pending-changes queue: stamps each outstanding tick onto its
+ * program's calendar events and clears the entries that got through.
+ *
+ * Authorized callers only (it writes to calendars): the installable onEdit
+ * above, every sync, and the menu item. An entry survives a failed attempt on
+ * purpose — a calendar that could not be read this minute is a reason to try
+ * again later, not a reason to drop somebody's instruction.
+ */
+function applyPendingProgramFlags() {
+  const result = { applied: 0, failed: 0, stampedEvents: 0 };
+  const entries = readPendingProgramFlags();
+  if (entries.length === 0) return result;
+
+  const delivered = [];
+  entries.forEach(entry => {
+    const flag = getProgramFlagByColumn(entry.column);
+    if (!flag || !entry.title || !entry.calendarId) {
+      delivered.push(entry); // unreadable row — clearing it is the only sane end
+      return;
+    }
+    const outcome = stampProgramFlagOnCalendar(entry.title, entry.calendarId, flag, entry.on);
+    if (!outcome.ok) {
+      result.failed++;
+      return;
+    }
+    result.applied++;
+    result.stampedEvents += outcome.stamped;
+    delivered.push(entry);
+    log(`Pending ${entry.column} change delivered: ${describeFlagState(flag, entry.title, entry.on)} ` +
+      `(${outcome.stamped} calendar event(s) changed).`);
+  });
+
+  clearPendingProgramFlags(delivered);
+  return result;
+}
+
+/**
+ * The hidden queue tab, created on demand.
+ *
+ * Creating it puts the user somewhere they did not ask to be — insertSheet()
+ * makes the new tab ACTIVE, and this can run from a cell edit — so the tab
+ * they were working on is put back before anything else happens, and the new
+ * one is hidden only after that (a sheet cannot be hidden while it is active).
+ */
+function getPendingFlagSheet(createIfMissing) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(PENDING_FLAG_SHEET_NAME);
+  if (!sheet) {
+    if (!createIfMissing) return null;
+    const wasActive = ss.getActiveSheet();
+    sheet = ss.insertSheet(PENDING_FLAG_SHEET_NAME, ss.getNumSheets());
+    sheet.getRange(1, 1, 1, PENDING_FLAG_HEADERS.length)
+      .setValues([PENDING_FLAG_HEADERS])
+      .setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    try { if (wasActive) ss.setActiveSheet(wasActive); } catch (err) { /* nothing to go back to */ }
+    try { sheet.hideSheet(); } catch (err) { /* a lone or active tab cannot be hidden */ }
+  }
+  return sheet;
+}
+
+/** Every outstanding entry: { column, calendarId, title, on, row }. */
+function readPendingProgramFlags() {
+  const sheet = getPendingFlagSheet(false);
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  return sheet.getRange(2, 1, lastRow - 1, PENDING_FLAG_HEADERS.length).getValues()
+    .map((row, i) => ({
+      column: String(row[0] || '').trim(),
+      calendarId: String(row[1] || '').trim(),
+      title: String(row[2] || '').trim(),
+      on: isTruthyCheckbox(row[3]),
+      row: i + 2
+    }))
+    .filter(entry => entry.column);
+}
+
+/**
+ * Records (or replaces) one program's outstanding tick. Callable from a simple
+ * onEdit — it is a spreadsheet write and nothing else.
+ */
+function recordPendingProgramFlag(flagColumn, calendarId, title, on) {
+  try {
+    const sheet = getPendingFlagSheet(true);
+    const key = pendingFlagKey(flagColumn, calendarId, title);
+    const existing = readPendingProgramFlags()
+      .filter(entry => pendingFlagKey(entry.column, entry.calendarId, entry.title) === key);
+    const values = [flagColumn, calendarId, title, !!on, new Date()];
+
+    if (existing.length > 0) {
+      sheet.getRange(existing[0].row, 1, 1, values.length).setValues([values]);
+      // A duplicate can only exist if two edits raced; keep the first row.
+      existing.slice(1).reverse().forEach(entry => sheet.deleteRow(entry.row));
+      return;
+    }
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+  } catch (err) {
+    // Never let the queue break the edit itself. The box stays ticked; the
+    // menu item is still there to push it through.
+    log(`⚠️ Could not queue the ${flagColumn} change for "${title}" (${err}).`);
+  }
+}
+
+/** Removes the given entries (bottom-up, so earlier row numbers stay valid). */
+function clearPendingProgramFlags(entries) {
+  if (!entries || entries.length === 0) return 0;
+  const sheet = getPendingFlagSheet(false);
+  if (!sheet) return 0;
+  const rows = entries.map(entry => entry.row).filter(Boolean).sort((a, b) => b - a);
+  rows.forEach(row => {
+    try { sheet.deleteRow(row); } catch (err) { log(`⚠️ Could not clear pending row ${row} (${err}).`); }
+  });
+  return rows.length;
+}
+
+/**
+ * `Calendar_Source|Clean_Title` for every program with an outstanding tick of
+ * this flag — the set reconcileProgramFlagColumns() must not touch, because
+ * the calendar has not been told about them yet.
+ */
+function pendingProgramKeysFor(flagColumn) {
+  const keys = new Set();
+  readPendingProgramFlags().forEach(entry => {
+    if (entry.column !== flagColumn) return;
+    keys.add(`${entry.calendarId}|${entry.title}`);
+  });
+  return keys;
 }
 
 /** "Book Club is a club" / "Coffee Hour takes no registration" — one line, for a toast or a list. */
@@ -6169,77 +6495,65 @@ function applyTypeTagToCalendar(sheet, editedRow, headerMap, newTag, title) {
 }
 
 /**
- * Menu action: reconcile every program's Type_Tag AND its two flag checkboxes
- * (Club, No_Registration) on the dashboard with what its calendar events
- * actually say, and stamp the differences.
+ * Menu action: push everything the dashboard is still waiting to tell the
+ * calendar — every queued Club / No_Registration tick, plus every program's
+ * Type_Tag — and stamp the differences.
  *
  * THE RECOVERY PATH for the one thing a cell edit genuinely cannot finish.
  * Writing to a calendar needs authorization that a simple onEdit trigger does
- * not have (see onEdit()), so a change typed or ticked into the sheet can be
- * confirmed but not delivered — and the next render, which recomputes all
- * three columns from the calendar, would quietly put the old answer back.
- * Running this from the menu runs it fully authorized.
+ * not have (see onEdit()). Normally the installable onEdit trigger delivers a
+ * tick within seconds and the next sync catches anything it missed; this is
+ * what to click when neither has happened — no trigger installed, no sync
+ * since, or a calendar that was unreachable at the time.
  *
- * Safe to click at any time: it only ever writes what the sheet already shows,
- * and only where the calendar disagrees.
+ * THE FLAGS ARE TAKEN FROM THE QUEUE, NOT FROM THE CELLS, and that distinction
+ * matters enough to state. Reading the checkboxes and stamping whatever they
+ * currently show sounds equivalent and is not: an unticked box is indis-
+ * tinguishable from a box nobody has ever touched, so a sheet that had gone
+ * stale for any reason would have this action march through the calendar
+ * DELETING [Club] tags that were typed there by hand and were perfectly
+ * correct. The queue holds only what a person actually did. Type_Tag has no
+ * queue and keeps its sheet-driven behavior, which is safe for the reason the
+ * flags are not: it always holds a real, non-empty value.
+ *
+ * Safe to click at any time.
  */
 function applyProgramTagChangesToCalendar() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
+  const pending = applyPendingProgramFlags();
+
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-
-  // Which flag columns the sheet ACTUALLY has a header for. A workbook still
-  // on the older layout reads every missing column as blank, and a blank here
-  // means "untick" — which would have this action strip [Club] off calendars
-  // that are perfectly correct. A column that isn't there says nothing, so
-  // nothing is stamped for it. Run 🧱 Rebuild Layout first, as the upgrade
-  // notes say, and the column appears.
-  const liveHeaderRows = findProgramSessionHeaderRows(sheet);
-  const liveMap = liveHeaderRows.length > 0 ? getHeaderMapAt(sheet, liveHeaderRows[0]) : {};
-  const applicableFlags = PROGRAM_FLAG_COLUMNS.filter(flag => !!liveMap[flag.column]);
-
   const byProgram = {};
   readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
-    if (!title || !calendarId) return;
     const tag = normalizeTypeTag(row[map['Type_Tag']]);
-    const flags = {};
-    applicableFlags.forEach(flag => {
-      flags[flag.column] = isFlagColumnValue(row[map[flag.column]], flag.regex);
-    });
+    if (!title || !calendarId) return;
+    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) return;
     // Last row wins per program — they should all agree, and if they don't,
     // the most recently written one is the intent.
-    byProgram[`${title}|${calendarId}`] = {
-      title,
-      calendarId,
-      tag: (tag === EVENT_TYPES.GROUPED || tag === EVENT_TYPES.MONTHLY) ? tag : null,
-      flags
-    };
+    byProgram[`${title}|${calendarId}`] = { title, calendarId, tag };
   });
 
-  const programs = Object.keys(byProgram).map(k => byProgram[k]);
-  if (programs.length === 0) {
-    toastIfPossible('No programs on the dashboard yet — run Sync Cal first.');
-    return 0;
-  }
-
-  let stampedEvents = 0;
-  let changedPrograms = 0;
-  programs.forEach(p => {
-    let n = p.tag ? stampTypeTagOnCalendar(p.title, p.calendarId, p.tag) : 0;
-    applicableFlags.forEach(flag => {
-      n += stampProgramFlagOnCalendar(p.title, p.calendarId, flag, !!p.flags[flag.column]);
-    });
+  let stampedEvents = pending.stampedEvents;
+  let changedPrograms = pending.applied;
+  Object.keys(byProgram).forEach(k => {
+    const p = byProgram[k];
+    const n = stampTypeTagOnCalendar(p.title, p.calendarId, p.tag);
     if (n > 0) { stampedEvents += n; changedPrograms++; }
   });
 
+  const stillQueued = pending.failed > 0
+    ? ` ⚠️ ${pending.failed} queued change(s) still could not reach the calendar — check that the calendars are readable.`
+    : '';
   const message = changedPrograms > 0
-    ? `Applied ${changedPrograms} program change(s) to ${stampedEvents} calendar event(s) — run Sync Cal to rebuild their forms.`
-    : `Every program's grouping, club and registration setting already matches its calendar ✅ — nothing to change.`;
+    ? `Applied ${changedPrograms} program change(s) to ${stampedEvents} calendar event(s) — ` +
+      `run Sync Cal to rebuild their forms.${stillQueued}`
+    : `Everything on the dashboard already matches its calendar ✅ — nothing to change.${stillQueued}`;
   toastIfPossible(message);
   log(`applyProgramTagChangesToCalendar: ${message}`);
   return changedPrograms;
@@ -6336,15 +6650,22 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
  *
  * `flag` is an entry of PROGRAM_FLAG_COLUMNS; `on` is the state the checkbox
  * was just put into.
+ *
+ * Returns { stamped, ok }. The two are not the same question and the pending
+ * queue needs both: `stamped: 0, ok: true` means the calendar already agreed
+ * and the instruction is DONE, while `ok: false` means the calendar could not
+ * be read at all and the instruction must stay queued for another attempt.
+ * Conflating them is how a tick gets dropped on the one run where Calendar was
+ * briefly unavailable.
  */
 function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
-  if (!title || !calendarId || !flag) return 0;
+  if (!title || !calendarId || !flag) return { stamped: 0, ok: false };
 
   const { start, end } = computeSyncDateRange();
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
   if (!eventsByCalendar[calendarId]) {
     log(`⚠️ ${flag.column} change for "${title}": calendar ${calendarId} could not be read — nothing stamped.`);
-    return 0;
+    return { stamped: 0, ok: false };
   }
 
   let stamped = 0;
@@ -6371,7 +6692,7 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
     invalidateCalendarEventsCache(); // descriptions just changed under the cache
     log(`${on ? 'Added' : 'Removed'} [${flag.tag}] on ${stamped} calendar event(s) for "${title}".`);
   }
-  return stamped;
+  return { stamped, ok: true };
 }
 
 /**
@@ -7602,6 +7923,16 @@ function importCalendarGroups(registrySheet, options) {
   const { start, end } = computeSyncDateRange();
   log(`Calendar import window: ${start} -> ${end}`);
 
+  // FIRST, before a single event is read: deliver any checkbox tick that has
+  // not reached the calendar yet (see PENDING_FLAG_SHEET_NAME). This run is
+  // about to treat the calendar as the truth about every program, so an
+  // instruction still sitting in the queue has to become part of that truth
+  // now — otherwise this is the sync that unticks somebody's box.
+  const pending = applyPendingProgramFlags();
+  if (pending.applied > 0) {
+    log(`Delivered ${pending.applied} queued checkbox change(s) to the calendar before importing.`);
+  }
+
   const existingState = getExistingRegistryState(registrySheet);
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
   const work = collectCalendarWork(eventsByCalendar, existingState);
@@ -7790,6 +8121,12 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
   PROGRAM_FLAG_COLUMNS.forEach(flag => {
     if (!sheetMap[flag.column]) return; // a workbook still on the old layout
 
+    // Programs whose tick has not reached the calendar yet are LEFT ALONE.
+    // Without this the calendar — which has not been told about the tick —
+    // would win, and the box would untick itself between the click and the
+    // write. That is the whole bug the pending queue exists to close.
+    const pendingKeys = pendingProgramKeysFor(flag.column);
+
     // Keyed per calendar + title, matching how a session row identifies itself.
     const expected = {};
     groups.forEach(group => {
@@ -7813,6 +8150,7 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
       for (let r = 0; r < zone.count; r++) {
         const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
         if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
+        if (pendingKeys.has(key)) continue; // waiting to be written TO the calendar
         const want = expected[key];
         // Compared through isFlagColumnValue(), so a row still carrying the
         // word "Club" from an older version counts as already ticked in
@@ -7974,10 +8312,17 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
   const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
   if (!sheetMap['Form_Response_Link'] || !sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
 
+  // Same rule as reconcileProgramFlagColumns(): a program whose No_Registration
+  // tick has not reached the calendar yet is not something the calendar gets to
+  // have an opinion about, so its link cells are left as they are until it has.
+  const pendingKeys = pendingProgramKeysFor('No_Registration');
+
   const wantsNoRegistration = {};
   groups.forEach(group => {
     group.sessions.forEach(session => {
-      wantsNoRegistration[`${session.calendarId}|${group.cleanTitle}`] = !!group.noRegistration;
+      const key = `${session.calendarId}|${group.cleanTitle}`;
+      if (pendingKeys.has(key)) return;
+      wantsNoRegistration[key] = !!group.noRegistration;
     });
   });
 
@@ -13192,7 +13537,10 @@ function getMergeTargets() {
  * source data, so merging into them would fight refreshMemoryTabs()).
  */
 function getProtectedTabNames() {
-  return Object.values(SHEET_NAMES);
+  // Plus the hidden queue behind the flag checkboxes: it is small, oddly
+  // shaped and machine-written, which is exactly the profile the legacy-tab
+  // scanner is built to notice.
+  return Object.values(SHEET_NAMES).concat([PENDING_FLAG_SHEET_NAME]);
 }
 
 /** A legacy tab must have at least this many of a target's columns, and this share of ITS OWN columns recognized. */

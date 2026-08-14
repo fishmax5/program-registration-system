@@ -338,18 +338,37 @@ calendar event of that program (`stampProgramFlagOnCalendar()`), and
 `[No Registration]` additionally strips the registration link off those events
 and calls `setAcceptingResponses(false)` on the program's form. Worth naming:
 
-- **A tick can be confirmed and not delivered.** The write happens on the
-  `onEdit` path, which in many workbooks has no authorization to touch
-  CalendarApp at all (see #1). The tick stays on the sheet, the toast says so,
-  and **🔁 Apply Type / Club / No-Reg Changes to Calendar** is the recovery —
-  the same shape as `Type_Tag`, with the same failure mode: nobody reads the
-  toast, and the next sync puts the calendar's answer back.
+- **A tick cannot be written by the trigger that sees it.** The simple `onEdit`
+  has no authorization for CalendarApp (see #1), and the first version of this
+  feature tried to write from there anyway: the tick failed silently, and then
+  any calendar activity at all — `onCalendarChange` fires a full
+  `syncCalendars()` — recomputed the column from a description that had never
+  heard of the tick and unticked the box, destroying the only record that
+  anybody had asked for anything. **FIXED**, in two parts: every tick is queued
+  on a hidden `_Pending_Tag_Changes` tab (a plain spreadsheet write, which a
+  simple trigger *can* do) and is exempt from reconciliation until a calendar
+  accepts it; and an INSTALLABLE `onEdit` trigger
+  (`onProgramFlagEditInstallable`, installed by Check Triggers) does the
+  authorized write seconds later. Remaining risk: a workbook whose owner has
+  never run Check Triggers has no such trigger, so ticks wait for the next sync.
+  Trigger Status names it when it is missing.
+- **The queue is a tab, and tabs can be edited.** `_Pending_Tag_Changes` is
+  hidden, not protected. A row deleted from it by hand is an instruction
+  dropped — the box stays ticked and the calendar never learns. It is also the
+  first place to look when a tick has not landed: rows there are, by
+  definition, changes that no calendar has accepted.
 - **Closing a form is remembered in Script Properties**
   (`NO_REGISTRATION_CLOSED_FORMS_V1`), and only forms recorded there are ever
   re-opened. If that property is cleared, a form closed by this feature stays
   closed after the tag comes off, and nothing says why. The symptom is
   "registration is on again but the form still refuses responses"; the fix is
   one click in the Forms editor.
+- **The menu action deliberately does NOT read the checkboxes.** It pushes the
+  QUEUE plus `Type_Tag`. Stamping whatever the boxes currently show would mean
+  an unticked box — indistinguishable from one nobody has ever touched — could
+  march through the calendar deleting hand-typed `[Club]` tags on a workbook
+  whose dashboard had gone stale for any reason. Only what a person actually
+  did is replayed.
 - **`[Drop-In]` reads as no-registration.** That is intended — it is what staff
   would type — but it is the loosest of the tag spellings, and a description
   that says "drop-in welcome" *inside brackets* will turn a program's form off.
@@ -488,11 +507,18 @@ order of what would change your plans:
 15. **Check one lunch dashboard row's buffers** against Config. They should
    match, including on an upcoming date nobody has registered for yet — that
    was the symptom the buffer change fixes.
-16. **Tick `No_Registration` on one program**, say yes, then run Sync Cal.
+16. **Tick `Club` on one program and watch it.** Every other row of that
+   program should tick itself immediately, and within a few seconds the
+   `[Club]` tag should appear in its calendar events. Then force the case that
+   used to break it: tick the box and, before anything else, edit an unrelated
+   event on one of the watched calendars (that fires a full sync). The box must
+   stay ticked. If `_Pending_Tag_Changes` still holds the row afterwards, the
+   edit trigger is missing — run Check Triggers.
+17. **Tick `No_Registration` on one program**, then run Sync Cal.
    Check: no form link on its dashboard rows, no "📝 Register for…" line left in
    its calendar events, its old form no longer accepting responses — and its
    room notes and other brackets untouched. Then untick it and confirm all
    three come back.
-17. **Delete one test registration** (🗑️ Delete Registrations…). Confirm the
+18. **Delete one test registration** (🗑️ Delete Registrations…). Confirm the
    rows go, the lunch dashboard number drops, and — with the responses tick
    left off — the response is still in the form.
