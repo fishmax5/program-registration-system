@@ -1875,8 +1875,21 @@ script may need to be re-authorized from the Apps Script editor.
 
 **The same event seems to trigger a sync twice, or you see far more
 `onCalendarChange` activity than editing one event should cause**
-This is almost always more than one Google account having independently set
-up this project's triggers. **Check Triggers** now fully resets the calendar
+First, the case that isn't your fault: **anything this system writes into a
+calendar description is itself a calendar edit**, so without care a menu action
+that tags forty events would set off forty change notifications, each one
+starting a full sync that reacts to nothing but the previous one's work. Every
+action that writes descriptions now runs inside a *quiet window* — the
+calendar-edit triggers are taken down, the work is done, each calendar's sync
+position is advanced past our own edits, and only then are the triggers put
+back. That covers Sync Cal, ticking `Club` / `No_Registration`,
+**🔁 Apply Type / Club / No-Reg Changes to Calendar**,
+**🔗 Link Program Across Locations…**, **🔗 Rewrite Event Links** and
+**💣 Destroy & Rebuild Forms…**. If you saw a burst of syncs after one of
+those, it should be gone.
+
+Otherwise it is almost always more than one Google account having independently
+set up this project's triggers. **Check Triggers** now fully resets the calendar
 and sync triggers every time it's pressed — however many exist, all get
 removed and exactly the right number get recreated — so this fixes it
 **for whichever account presses it**. But an installable trigger belongs to

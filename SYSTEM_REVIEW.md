@@ -352,6 +352,18 @@ and calls `setAcceptingResponses(false)` on the program's form. Worth naming:
   authorized write seconds later. Remaining risk: a workbook whose owner has
   never run Check Triggers has no such trigger, so ticks wait for the next sync.
   Trigger Status names it when it is missing.
+- **Writing a calendar is itself a calendar event.** Ticking a box tags every
+  event of the program, and each of those tags is a change the
+  `onCalendarChange` triggers would deliver back as news — one tick becoming a
+  run of full syncs reacting to their own predecessor's edits. **FIXED**: every
+  path that writes descriptions now runs inside
+  `withCalendarChangeTriggersPaused()` (triggers down, work, sync tokens
+  advanced past our own edits, triggers restored), which also carries the
+  restore-only rule that keeps a non-owner from minting a second, invisible
+  trigger set. The rule this leaves standing: triggers held by ANOTHER account
+  cannot be seen or paused from here, so on a workbook where two accounts have
+  set up triggers, the other account's copies still fire on every edit this
+  makes. Trigger Status is where that shows up.
 - **The queue is a tab, and tabs can be edited.** `_Pending_Tag_Changes` is
   hidden, not protected. A row deleted from it by hand is an instruction
   dropped — the box stays ticked and the calendar never learns. It is also the

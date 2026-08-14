@@ -5975,6 +5975,82 @@ function removeCalendarChangeTriggers() {
 }
 
 /**
+ * THE QUIET WINDOW. Everything in this project that edits calendar
+ * descriptions has to run inside one of these, and this is the one place that
+ * knows how.
+ *
+ * WHY. A calendar edit is a calendar edit whoever made it, so the
+ * onCalendarChange triggers cannot tell "somebody moved Tai Chi" from "this
+ * script just wrote [Club] into forty descriptions." Left running, every
+ * description this script writes fires a trigger, and each firing whose delta
+ * contains a tracked event runs a FULL syncCalendars() — so one menu click, or
+ * one ticked checkbox, becomes a storm of syncs reacting to nothing but their
+ * own predecessor's edits.
+ *
+ * THE THREE STEPS, in this order and for these reasons:
+ *   1. remove the triggers, so nothing fires while we write;
+ *   2. do the work;
+ *   3. advance each calendar's sync token PAST our own edits
+ *      (primeCalendarSyncTokens) and only THEN put the triggers back — a
+ *      trigger restored before the token moved would immediately deliver the
+ *      changes we just made as news.
+ *
+ * RESTORE-ONLY, NEVER CREATE. An account that held no calendar triggers before
+ * the work ends with none. This rule is not a detail: syncCalendars() and
+ * several menu items are reachable by any editor, and unconditionally
+ * rebuilding here is what used to hand every one of them a complete, private,
+ * invisible-to-the-owner second set of triggers (see writeTriggers()). The
+ * recorded trigger owner rebuilds normally, because an owner holding none is
+ * a workbook that has simply not been set up yet.
+ *
+ * Re-entrant: nested calls (the pending-flag drain inside a sync, say) run
+ * their work directly rather than restoring the triggers halfway through the
+ * outer job.
+ */
+let calendarQuietWindowDepth = 0;
+
+function withCalendarChangeTriggersPaused(reason, work) {
+  if (calendarQuietWindowDepth > 0) return work(); // already inside one
+
+  const held = removeCalendarChangeTriggers();
+  if (held === 0) {
+    // Either there genuinely are none, or they belong to ANOTHER Google
+    // account — this one cannot see or delete those, and they will fire on
+    // every description written below. Worth saying, since it is exactly the
+    // case where a storm happens despite the precaution.
+    log(`ℹ️ ${reason}: no calendar-edit triggers to pause under this account. If another account holds ` +
+      `them, its triggers will still fire on the edits this makes.`);
+  }
+
+  calendarQuietWindowDepth++;
+  try {
+    return work();
+  } finally {
+    calendarQuietWindowDepth--;
+    try {
+      primeCalendarSyncTokens(reason);
+    } catch (err) {
+      log(`ℹ️ ${reason}: could not prime the calendar sync tokens (${err}).`);
+    }
+    try {
+      // No force: writeCalendarChangeTriggers() declines during a bootstrap
+      // import or a forms-rebuild sweep, which pause these on purpose and
+      // restore them themselves.
+      if (held > 0 || isTriggerOwnerAccount()) writeCalendarChangeTriggers();
+      else {
+        log(`${reason}: calendar-edit triggers not restored — this account held none beforehand and is not ` +
+          `the recorded trigger owner. Creating them here would add a second, invisible set.`);
+      }
+    } catch (err) {
+      // The loudest failure available: silent automation is how "the calendar
+      // stopped syncing" becomes a mystery a fortnight later.
+      log(`⚠️ ${reason}: FAILED to restore the calendar-edit triggers (${err}). Run Admin → Check Triggers.`);
+      toastIfPossible(`⚠️ Calendar-edit triggers could not be restored — run 🔧 Admin ▸ Check Triggers.`);
+    }
+  }
+}
+
+/**
  * Dispatches to a per-sheet handler for tabs that carry a Manual_Override
  * column (Registrants, Lunch Dashboard) plus the Lunch_Schedule edit hook.
  * Master_Program_Dashboard's session table no longer has a Manual_Override
@@ -6359,6 +6435,17 @@ function applyPendingProgramFlags() {
   const entries = readPendingProgramFlags();
   if (entries.length === 0) return result;
 
+  // Every delivery below writes a calendar description, so it runs inside a
+  // quiet window: otherwise one ticked checkbox fires the calendar-edit
+  // triggers on every event of the program and each firing runs a full
+  // syncCalendars(). Nested inside a sync (which drains the queue as its first
+  // act) this is a no-op — see withCalendarChangeTriggersPaused().
+  withCalendarChangeTriggersPaused('checkbox change', () => drainPendingProgramFlags(entries, result));
+  return result;
+}
+
+/** The delivery loop itself. Always called inside a calendar quiet window. */
+function drainPendingProgramFlags(entries, result) {
   const delivered = [];
   entries.forEach(entry => {
     const flag = getProgramFlagByColumn(entry.column);
@@ -6523,8 +6610,6 @@ function applyProgramTagChangesToCalendar() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
-  const pending = applyPendingProgramFlags();
-
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const byProgram = {};
@@ -6539,12 +6624,23 @@ function applyProgramTagChangesToCalendar() {
     byProgram[`${title}|${calendarId}`] = { title, calendarId, tag };
   });
 
-  let stampedEvents = pending.stampedEvents;
-  let changedPrograms = pending.applied;
-  Object.keys(byProgram).forEach(k => {
-    const p = byProgram[k];
-    const n = stampTypeTagOnCalendar(p.title, p.calendarId, p.tag);
-    if (n > 0) { stampedEvents += n; changedPrograms++; }
+  // ONE quiet window around the whole job, drain included. Both halves write
+  // descriptions, and the calendar-edit triggers must not come back between
+  // them — see withCalendarChangeTriggersPaused(). This is the click that used
+  // to produce a run of onCalendarChange firings, each one a full sync
+  // reacting to the edits of the one before it.
+  let stampedEvents = 0;
+  let changedPrograms = 0;
+  let pending = { applied: 0, failed: 0, stampedEvents: 0 };
+  withCalendarChangeTriggersPaused('Apply Type / Club / No-Reg Changes', () => {
+    pending = applyPendingProgramFlags();
+    stampedEvents = pending.stampedEvents;
+    changedPrograms = pending.applied;
+    Object.keys(byProgram).forEach(k => {
+      const p = byProgram[k];
+      const n = stampTypeTagOnCalendar(p.title, p.calendarId, p.tag);
+      if (n > 0) { stampedEvents += n; changedPrograms++; }
+    });
   });
 
   const stillQueued = pending.failed > 0
@@ -6872,9 +6968,16 @@ function linkProgramAcrossLocations() {
     return null;
   }
   try {
-    const stamped = stampSharedTagOnCalendars(matches.events, linking);
+    // Tagging every event of a program, then rewriting the registration link
+    // on each one, is a lot of description writes — all of which the
+    // calendar-edit triggers would otherwise deliver straight back as a run of
+    // full syncs. See withCalendarChangeTriggersPaused().
+    let stamped = 0;
     let repointed = { moved: 0, survivors: [] };
-    if (linking) repointed = repointProgramSessionsToOneForm(registrySheet, title);
+    withCalendarChangeTriggersPaused('Link Program Across Locations', () => {
+      stamped = stampSharedTagOnCalendars(matches.events, linking);
+      if (linking) repointed = repointProgramSessionsToOneForm(registrySheet, title);
+    });
 
     const summary = linking
       ? `"${title}" linked across locations ✅ — ${stamped} event(s) tagged, ` +
@@ -7853,52 +7956,31 @@ function syncCalendars() {
 }
 
 function syncCalendarsInternal() {
-  // How many THIS account had, which decides whether the finally below is
-  // allowed to put any back. See the restore comment there — this is the
-  // path that actually manufactured most of the duplicate calendar triggers.
-  const calendarTriggersHeld = removeCalendarChangeTriggers();
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
+  // The quiet window — take the calendar watchers down, do the work, advance
+  // the sync tokens past our own description edits, put the watchers back
+  // (restore-only). All four steps, and the reasons for each, live in
+  // withCalendarChangeTriggersPaused(); this was the path that manufactured
+  // most of the duplicate calendar triggers before that rule existed.
+  withCalendarChangeTriggersPaused('sync', () => {
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
 
-    if (findProgramSessionHeaderRows(registrySheet).length === 0) {
+      if (findProgramSessionHeaderRows(registrySheet).length === 0) {
+        renderProgramDashboard();
+      }
+
+      const summary = importCalendarGroups(registrySheet);
       renderProgramDashboard();
+
+      SpreadsheetApp.getActiveSpreadsheet().toast(
+        `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
+    } finally {
+      // Inside the window, so both still happen before the triggers return.
+      flushPersistentRegistries(); // never strand a form-label fingerprint written during this run
+      flushAdminDigest('Calendar sync');
     }
-
-    const summary = importCalendarGroups(registrySheet);
-    renderProgramDashboard();
-
-    SpreadsheetApp.getActiveSpreadsheet().toast(
-      `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
-  } finally {
-    flushPersistentRegistries(); // never strand a form-label fingerprint written during this run
-    flushAdminDigest('Calendar sync');
-    // Order matters: swallow our own description edits BEFORE the triggers
-    // that would otherwise react to them come back on.
-    primeCalendarSyncTokens('sync');
-
-    // RESTORE ONLY — never create from scratch. This used to call
-    // writeCalendarChangeTriggers() unconditionally, and that was the widest
-    // route to the duplicate-trigger problem by far: syncCalendars() is
-    // deliberately ungated (anyone with edit access can click "Sync Cal",
-    // and it's the first item on the menu), so every such click by a
-    // non-owner removed nothing — they had nothing — and then created a
-    // COMPLETE set of calendar-edit triggers under their own account,
-    // invisible to and undeletable by the owner. Admin-gating "Check
-    // Triggers" never touched this path.
-    //
-    // An account that held none before this sync therefore ends with none.
-    // The owner still rebuilds normally, because it genuinely had them a
-    // moment ago; and an owner that legitimately has none yet (a first sync
-    // before "Check Triggers" was ever run) is covered by the second test.
-    if (calendarTriggersHeld > 0 || isTriggerOwnerAccount()) {
-      writeCalendarChangeTriggers();
-    } else {
-      log('Calendar-edit triggers not restored: this account held none before the sync and is not the ' +
-        'recorded trigger owner. Creating them here would add a second, invisible set — run ' +
-        'Admin → Check Triggers from the owner account if they are genuinely missing.');
-    }
-  }
+  });
 }
 
 /**
@@ -9419,8 +9501,16 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   // first — see this function's header comment — and put them back in the
   // `finally`, so an exception halfway through can't leave the project with no
   // calendar-edit triggers at all.
-  stats.triggersRemoved = removeCalendarChangeTriggers();
-  if (stats.triggersRemoved === 0) {
+  //
+  // UNLESS SOMEBODY ELSE ALREADY DID. This function is also reached from
+  // inside larger jobs that hold their own quiet window (Link Program Across
+  // Locations, Move Sessions to Another Form). Restoring the triggers in the
+  // middle of one of those would re-arm them for the rest of its work, which
+  // is precisely the storm both are avoiding — so when nested, the outer
+  // window owns the removal and the restore.
+  const nestedInQuietWindow = calendarQuietWindowDepth > 0;
+  stats.triggersRemoved = nestedInQuietWindow ? 0 : removeCalendarChangeTriggers();
+  if (stats.triggersRemoved === 0 && !nestedInQuietWindow) {
     // Either there genuinely were none — normal on a workbook where "Check
     // Triggers" hasn't been run — or they belong to a DIFFERENT Google
     // account, in which case this account cannot see or delete them (see
@@ -9482,23 +9572,30 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
       // Order matters, same as syncCalendarsInternal(): swallow this run's own
       // edits BEFORE the watchers come back on, or the first delta check after
       // the restore sees every event we just touched and starts a sync anyway.
-      primeCalendarSyncTokens('link rewrite');
-      // RESTORE ONLY, for the same reason syncCalendarsInternal() is —
-      // rebuilding unconditionally here would CREATE a full set of
-      // calendar-edit triggers under whichever admin ran this, and an admin
-      // is not necessarily the trigger owner. That is how an invisible second
-      // set gets made by someone doing nothing more suspicious than fixing
-      // duplicate links. An account that held none a moment ago ends with
-      // none; the log line above already told them why they might hold none.
       //
-      // force: the bootstrap check happened at the top of the public entry
-      // point, and automation staying off is the one outcome worth avoiding
-      // more than a redundant rebuild.
-      if (stats.triggersRemoved > 0 || isTriggerOwnerAccount()) {
-        stats.triggersRestored = writeCalendarChangeTriggers(true).created;
-      } else {
-        log('Rewrite Event Links: calendar-edit triggers not restored — this account held none before the ' +
-          'run and is not the recorded trigger owner. Creating them here would add a second, invisible set.');
+      // Skipped wholesale when nested: the outer quiet window primes and
+      // restores once, around everything. (An `if`, not an early `return` —
+      // returning from a `finally` would swallow whatever exception put us
+      // here and discard this function's result.)
+      if (!nestedInQuietWindow) {
+        primeCalendarSyncTokens('link rewrite');
+        // RESTORE ONLY, for the same reason syncCalendarsInternal() is —
+        // rebuilding unconditionally here would CREATE a full set of
+        // calendar-edit triggers under whichever admin ran this, and an admin
+        // is not necessarily the trigger owner. That is how an invisible second
+        // set gets made by someone doing nothing more suspicious than fixing
+        // duplicate links. An account that held none a moment ago ends with
+        // none; the log line above already told them why they might hold none.
+        //
+        // force: the bootstrap check happened at the top of the public entry
+        // point, and automation staying off is the one outcome worth avoiding
+        // more than a redundant rebuild.
+        if (stats.triggersRemoved > 0 || isTriggerOwnerAccount()) {
+          stats.triggersRestored = writeCalendarChangeTriggers(true).created;
+        } else {
+          log('Rewrite Event Links: calendar-edit triggers not restored — this account held none before the ' +
+            'run and is not the recorded trigger owner. Creating them here would add a second, invisible set.');
+        }
       }
     } catch (err) {
       // The loudest failure this function has. Silent automation is how "the
