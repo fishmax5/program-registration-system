@@ -92,7 +92,7 @@ Add `Meal_ID` to `Lunch_Schedule`. Derive it deterministically, because
 render and a random ID would not survive:
 
 ```
-M-<YYYYMMDD>-<LOCATION_SLUG>-<TYPE>        e.g.  M-20260916-WALL-HOT
+M-<YYYYMMDD>-<LOCATION_SLUG>-<TYPE>        e.g.  M-20260916-NARB-HOT
 ```
 
 Deterministic derivation means the ID can also be *recomputed* for every
@@ -104,7 +104,7 @@ a `-2` suffix and the schedule needs to allow a second row. Worth asking; see
 
 The subs line needs the same treatment: either a `Type` of `Subs` on
 `Lunch_Schedule` (which gets subs a dish name, a shorthand and a batch date for
-free), or an explicit standing-item batch (`M-STANDING-WALL-SUBS`) if subs
+free), or an explicit standing-item batch (`M-STANDING-NARB-SUBS`) if subs
 genuinely aren't cooked per-date. Recommendation: give subs real schedule rows.
 It is less special-casing everywhere else, and it is the only way "which sub"
 becomes answerable.
@@ -370,3 +370,52 @@ the plain "we served yesterday's food" case recordable. Run it for a month and
 look at how often `Meal_Source` gets filled in. That number decides whether
 Phase 2 is worth a new tab in a workbook that has deliberately stayed flat, and
 answers questions 1, 2 and 4 from live behaviour instead of a meeting.
+
+---
+
+## 10. Worked example — why Phase 1 alone is worth shipping
+
+One ordinary week at Narberth. Illustrative numbers; the mechanism is real.
+
+**What happened.** Wed Sep 16, Hot — Chicken Parmesan, 40 ordered. 34
+registered, 28 fed: 22 dined in, 6 taken out. Twelve portions go back in the
+walk-in. Thu Sep 17 has a program but no delivery — `Lunch_Schedule` says
+`Not Serving`. The kitchen portions out Wednesday's chicken at the counter and
+8 people take one home. The remaining 4 are binned Friday.
+
+**What the workbook says today.** Staff tick Thursday's 8 rows with
+`Day1_Taken_Out = 1`. There is nowhere else for those counts to go — the only
+join is the shared date key, so they land on the 17th, which has no meal. Two
+numbers come out wrong, in opposite directions:
+
+| | `Actual_Ordered` | `Total_Consumed` | `Discrepancy` | Dish |
+|---|---|---|---|---|
+| Wed Sep 16 | 40 | 28 | **12** | Chicken Parm |
+| Thu Sep 17 | 0 | **8** | **−8** | *(blank)* |
+
+Wednesday reads as a third of the order wasted, so the obvious correction is to
+cut next Wednesday to 28 — and run short. Thursday reads as phantom demand:
+`buildDashboardRollup()` has no schedule row to key against, so it creates an
+`unplanned` bucket with 8 takeaway meals and no dish, on a day nothing was
+ordered.
+
+**What Phase 1 changes.** `Lunch_Schedule` gains a derived `Meal_ID`
+(`M-20260916-NARB-HOT`). Thursday's 8 rows get `Meal_Source` set to it — one
+dropdown, once. Every other row in the workbook stays blank, blank still means
+"today's meal", and so **no existing number moves**.
+
+| | Today | With `Meal_Source` |
+|---|---|---|
+| Eaten on the day | 28 | 28 |
+| Eaten the next day | not recorded anywhere | 8, carried over |
+| `Total_Consumed` for the batch | 28 | **36** |
+| Actually thrown away | reported as 12 unaccounted | **4** |
+| Thu Sep 17 dashboard row | phantom: 8 takeaway, no dish | 8 served from Wed 9/16 |
+| What to order next Wednesday | looks like 28 | 36, and 4 is the real trim |
+
+**What this example deliberately does not show,** because Phase 1 cannot do it:
+a row that draws on two batches at once (Joe ate Thursday's cold meal *and*
+carried out a Wednesday leftover — the row names one or the other); the moment a
+fridge meal is collected, so the fridge still never draws down; and per-person
+history, since these are still row counts rather than events. All three are §3
+Option B's job. None of them is why the Wednesday number was wrong.
