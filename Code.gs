@@ -1000,9 +1000,13 @@ function isFlagColumnValue(value, wordsRegex) {
  * Club" / "book club " must not become two rosters.
  */
 function computeClubKey(cleanTitle, location, isShared) {
-  const title = String(cleanTitle || '').trim().toLowerCase();
+  // Same whitespace collapsing as normalizeNameKey(), for the same reason: a
+  // calendar title that gained a double space is otherwise a DIFFERENT club,
+  // and a club whose key changes loses its whole standing roster.
+  const norm = value => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const title = norm(cleanTitle);
   if (!title) return '';
-  const scope = isShared ? SHARED_LOCATION_SCOPE : String(location || '').trim().toLowerCase();
+  const scope = isShared ? SHARED_LOCATION_SCOPE : norm(location);
   return `${scope}::${title}`;
 }
 
@@ -2729,12 +2733,61 @@ function computeStatus(activeCount, maxCapacity) {
  */
 const CAPACITY_HINT_SUFFIX = ' (FULL - Waitlist)';
 
+/** What formatDateLabelWithMeal() puts between a session label and its menu hint. */
+const MEAL_HINT_SEPARATOR = ' — ';
+
 /** Strips the CAPACITY_HINT_SUFFIX and/or the " — <shorthand/description>" menu hint appended by formatDateLabelWithMeal(), returning the plain date label. */
 function stripMealHint(label) {
   let s = String(label);
   if (s.endsWith(CAPACITY_HINT_SUFFIX)) s = s.slice(0, -CAPACITY_HINT_SUFFIX.length);
-  const idx = s.indexOf(' — ');
+  const idx = s.indexOf(MEAL_HINT_SEPARATOR);
   return idx === -1 ? s : s.substring(0, idx);
+}
+
+/**
+ * Every plain session label a decorated form label could be hiding, LONGEST
+ * FIRST — the capacity suffix off, then each " — " cut away from the right.
+ *
+ * WHY THIS ISN'T JUST stripMealHint(). That function cuts at the FIRST " — ",
+ * which is right only when the separator appears exactly once. It can appear
+ * more than once from either side:
+ *
+ *   a PROGRAM NAME with an em dash in it ("Tech Help — Drop In"), which
+ *     formatSessionLabel() puts INTO the plain label on a combined form — so
+ *     cutting at the first separator truncates the label to "…· Tech Help",
+ *     which matches no session and silently drops every registration for that
+ *     program (registryIndex is keyed on the plain label);
+ *   a MEAL SHORTHAND with one ("Chicken — house made"), which just adds a
+ *     second separator after the first.
+ *
+ * Trying the longest candidate first means a real label always wins over a
+ * shorter prefix of itself, so a form carrying both "· Tech Help" and
+ * "· Tech Help — Drop In" still resolves each to its own session.
+ */
+function sessionLabelCandidates(label) {
+  let s = String(label);
+  if (s.endsWith(CAPACITY_HINT_SUFFIX)) s = s.slice(0, -CAPACITY_HINT_SUFFIX.length);
+  const out = [];
+  for (let cursor = s; ;) {
+    out.push(cursor);
+    const idx = cursor.lastIndexOf(MEAL_HINT_SEPARATOR);
+    if (idx === -1) return out;
+    cursor = cursor.substring(0, idx);
+  }
+}
+
+/**
+ * The plain session label a form grid row refers to — the one that answers in
+ * `registryIndex` — recovered from the decorated label the respondent saw.
+ * Returns '' when no candidate matches, which is the caller's cue that this
+ * row belongs to no session it knows about.
+ */
+function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
+  const candidates = sessionLabelCandidates(decoratedLabel);
+  for (let i = 0; i < candidates.length; i++) {
+    if (registryIndex[`${formId}|${candidates[i]}`]) return candidates[i];
+  }
+  return '';
 }
 
 /** Tints an Event_Date column's cells by month — the direct replacement for the old separate Month column everywhere. */
@@ -2809,8 +2862,18 @@ function getMealInfoIndex() {
       if (!rowDate) return;
       const dateKey = formatDateKey(rowDate);
       const location = String(row[map['Location']] || '').trim();
+      // CANONICALIZED, not read raw. The Type column has a strict dropdown,
+      // but a paste carries its own validation over the top of the cell's, so
+      // a hand-typed "not serving" does reach this tab — and read raw it is
+      // not equal to 'Not Serving', which silently defeats EVERY not-serving
+      // safeguard at once: isExplicitlyNotServing() says no, isLunchOfferedOn()
+      // says lunch is on, the form keeps offering it, and nobody is warned.
+      // Failing safe here costs nothing; anything canonicalizeLunchType()
+      // doesn't recognize is kept verbatim, exactly as before.
+      const rawType = row[map['Type']] || '';
+      const type = canonicalizeLunchType(rawType) || String(rawType).trim();
       const info = {
-        type: row[map['Type']] || '',
+        type,
         description: row[map['Meal_Description']] || '',
         shorthand: row[map['Meal_Shorthand']] || '',
         // Where this meal came from, carried on the info object so a lookup by
@@ -2818,7 +2881,7 @@ function getMealInfoIndex() {
         // a second pass over the tab.
         dateKey,
         location,
-        mealId: deriveMealId(rowDate, location, row[map['Type']])
+        mealId: deriveMealId(rowDate, location, type)
       };
       const locatedKey = `${dateKey}|${location}`;
       if (index[locatedKey] === undefined) index[locatedKey] = info;
@@ -4022,16 +4085,44 @@ function coerceMenuDate(value) {
   if (!text) return null;
 
   const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  if (iso) return plausibleMenuDate(new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
 
   const us = text.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
   if (us) {
     let year = Number(us[3]);
     if (year < 100) year += 2000;
-    return new Date(year, Number(us[1]) - 1, Number(us[2]));
+    return plausibleMenuDate(new Date(year, Number(us[1]) - 1, Number(us[2])));
   }
 
-  return coerceDate(text);
+  return plausibleMenuDate(coerceDate(text));
+}
+
+/** How far either side of today a pasted menu date is believable. */
+const MENU_DATE_MAX_YEARS_BACK = 2;
+const MENU_DATE_MAX_YEARS_AHEAD = 3;
+
+/**
+ * A menu date, or null when the year says the input wasn't a date at all.
+ *
+ * The fallback `new Date(text)` accepts a great deal that is not a menu:
+ * "9/16" (no year) becomes September 2001, and a spreadsheet SERIAL NUMBER —
+ * what a date column looks like the moment its formatting is lost, which is a
+ * normal thing to have happen to a pasted month — becomes the year 45000.
+ * Both landed on Lunch_Schedule as real rows, silently, dated somewhere nobody
+ * will ever scroll to.
+ *
+ * Rejecting them instead puts the row in parseLunchMenuGrid()'s rejects list,
+ * which is shown to whoever pasted it, while the paste was still on screen.
+ * The window is generous on both sides: a menu is typed a month or two ahead
+ * and corrected weeks late, never years either way.
+ */
+function plausibleMenuDate(date) {
+  if (!date || isNaN(date)) return null;
+  const thisYear = new Date().getFullYear();
+  const year = date.getFullYear();
+  if (year < thisYear - MENU_DATE_MAX_YEARS_BACK) return null;
+  if (year > thisYear + MENU_DATE_MAX_YEARS_AHEAD) return null;
+  return date;
 }
 
 /** Snaps free text onto a CALENDAR_MAP location name, or '' if it matches none. */
@@ -6577,6 +6668,13 @@ function onProgramFlagEditInstallable(e) {
       result = applyPendingProgramFlags();
     } finally {
       lock.releaseLock();
+      // This trigger is installable, so it CAN send mail — and it is the one
+      // path that delivers a tick to the calendar without a sync wrapped
+      // around it. Without a flush, anything stampProgramFlagOnCalendar()
+      // needed to tell somebody (a tag it could not remove without deleting
+      // their note) would be assembled and then thrown away with the
+      // execution.
+      flushAdminDigest('Program flag change');
     }
     if (result.applied === 0 && result.failed === 0) return;
 
@@ -6947,6 +7045,7 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
   }
 
   let stamped = 0;
+  let stuck = 0;
   Object.keys(CALENDAR_MAP).forEach(otherCalendarId => {
     const events = eventsByCalendar[otherCalendarId];
     if (!events) return;
@@ -6960,6 +7059,11 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
         !(parseSettingsBrackets(existing).isShared || parsed.legacyIsShared)) return;
 
       const updated = setFlagBracketInDescription(existing, flag.regex, flag.tag, on);
+      // Untagging that couldn't finish — the word is inside somebody's own
+      // bracketed note ("[Book Club]"), which is left intact on purpose.
+      // The next sync will read the tag straight back off the calendar and
+      // re-tick the box, so this has to reach a person.
+      if (!on && descriptionStillCarriesFlag(updated, flag.regex)) stuck++;
       if (updated === existing) return;
       ev.setDescription(updated);
       stamped++;
@@ -6970,7 +7074,15 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
     invalidateCalendarEventsCache(); // descriptions just changed under the cache
     log(`${on ? 'Added' : 'Removed'} [${flag.tag}] on ${stamped} calendar event(s) for "${title}".`);
   }
-  return { stamped, ok: true };
+  if (stuck > 0) {
+    const message = `Unticking ${flag.column} for "${title}" left ${stuck} calendar event(s) still reading as ` +
+      `[${flag.tag}] — the word is part of a bracketed note somebody wrote (something like "[Book ${flag.tag}]"), ` +
+      `and removing it would have deleted their note. Edit those event descriptions by hand, or the next sync ` +
+      `will tick the box again.`;
+    log(`⚠️ ${message}`);
+    noteForAdmin(`${flag.column} could not be removed from the calendar`, message);
+  }
+  return { stamped, ok: true, stuck };
 }
 
 /**
@@ -6998,7 +7110,9 @@ function setGroupingBracketInDescription(description, newTag) {
     return whole;
   });
 
-  if (!replaced) out = raw ? `${raw.replace(/\s*$/, '')}\n[${newTag}]` : `[${newTag}]`;
+  // raw.trim(), not raw — an all-whitespace description has no content to sit
+  // under, and treating it as content left the tag behind a blank first line.
+  if (!replaced) out = raw.trim() ? `${raw.replace(/\s*$/, '')}\n[${newTag}]` : `[${newTag}]`;
   return out;
 }
 
@@ -7029,27 +7143,59 @@ function setSharedBracketInDescription(description, shared) {
  *     rest, so [Cap: 12, Club] becomes [Cap: 12] rather than disappearing.
  *   - a bracket left empty is dropped, and the hole it leaves is closed up by
  *     tidyDescriptionWhitespace().
+ *
+ * REMOVAL IS EXACT, and that is the careful part. A comma-separated part is
+ * taken out only when the part IS the tag — "Club", "Members Only" — never
+ * when it merely contains the word. "[Book Club]" and "[Drop-In room 4]" are
+ * somebody's note about the program, not this system's tag, and the earlier
+ * contains-match deleted them outright: an unticked checkbox silently erasing
+ * a line from a calendar event that attendees can see. A tag that survives
+ * that rule is reported rather than fought over — descriptionStillCarriesFlag()
+ * finds it and stampProgramFlagOnCalendar() tells somebody — because a
+ * checkbox that won't stick is a thing a person can fix in thirty seconds and
+ * a deleted note is not.
  */
 function setFlagBracketInDescription(description, wordsRegex, tagWord, on) {
   const raw = String(description || '');
+  const isJustTheTag = part => {
+    const trimmed = String(part).trim();
+    if (!trimmed) return false;
+    const match = wordsRegex.exec(trimmed);
+    return !!match && match[0].length === trimmed.length;
+  };
   let sawTag = false;
 
   let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
     if (!wordsRegex.test(content)) return whole;
     sawTag = true;
     if (on) return whole; // already tagged — leave the author's spelling alone
-    const kept = content
-      .split(',')
-      .map(part => part.trim())
-      .filter(part => part && !wordsRegex.test(part));
+    const parts = content.split(',').map(part => part.trim()).filter(Boolean);
+    const kept = parts.filter(part => !isJustTheTag(part));
+    if (kept.length === parts.length) return whole; // nothing here was the tag
     return kept.length > 0 ? `[${kept.join(', ')}]` : '';
   });
 
   if (on && !sawTag) {
-    out = raw ? `${raw.replace(/\s*$/, '')}\n[${tagWord}]` : `[${tagWord}]`;
+    // `raw.trim()`, not `raw`: an all-whitespace description is empty for this
+    // purpose, and treating it as content prefixed the tag with a blank line.
+    out = raw.trim() ? `${raw.replace(/\s*$/, '')}\n[${tagWord}]` : `[${tagWord}]`;
   }
   if (!on && sawTag) out = tidyDescriptionWhitespace(out);
   return out;
+}
+
+/**
+ * True when `description` still reads as carrying `wordsRegex`'s tag inside a
+ * bracket — what setFlagBracketInDescription(…, false) could not remove
+ * without destroying somebody's own words. See stampProgramFlagOnCalendar().
+ */
+function descriptionStillCarriesFlag(description, wordsRegex) {
+  BRACKET_GROUP_REGEX.lastIndex = 0;
+  let match;
+  while ((match = BRACKET_GROUP_REGEX.exec(String(description || ''))) !== null) {
+    if (wordsRegex.test(match[1] || '')) { BRACKET_GROUP_REGEX.lastIndex = 0; return true; }
+  }
+  return false;
 }
 
 /**
@@ -7997,6 +8143,13 @@ function parseSettingsBrackets(text) {
   let isClub = false;
   let noRegistration = false;
   let sawAny = false;
+  // '' | 'Grouped' | 'Monthly' — what the text SAYS about grouping, as opposed
+  // to what isFixed resolves to. The difference matters only to
+  // resolveEventSettings(), and only for the one setting that has a spelling
+  // for "off": an explicit [Monthly] has to be able to override a legacy
+  // [Grouped] left behind in the title, and `isFixed === false` cannot tell
+  // "it says Monthly" apart from "it says nothing".
+  let explicitGrouping = '';
 
   BRACKET_GROUP_REGEX.lastIndex = 0; // the /g regex is module-level; never trust its cursor
   let match;
@@ -8017,10 +8170,16 @@ function parseSettingsBrackets(text) {
     // "one form for the whole series." An explicit [Monthly]/[Regular] is
     // recognized too, purely so it counts as sawAny (a deliberate statement
     // of the default) rather than reading as an unrecognized note.
-    if (/\b(Grouped|Fixed)\b/i.test(content)) { isFixed = true; sawAny = true; }
-    if (/\b(Monthly|Regular)\b/i.test(content)) { sawAny = true; }
+    if (/\b(Grouped|Fixed)\b/i.test(content)) { isFixed = true; sawAny = true; explicitGrouping = EVENT_TYPES.GROUPED; }
+    if (/\b(Monthly|Regular)\b/i.test(content)) {
+      sawAny = true;
+      // Only when nothing has already said Grouped: "[Grouped] [Monthly]" on
+      // one event is a contradiction, and the more specific instruction
+      // (share one form) is the safer reading of it.
+      if (!explicitGrouping) explicitGrouping = EVENT_TYPES.MONTHLY;
+    }
   }
-  return { capacity, isFixed, isShared, isClub, noRegistration, sawAny };
+  return { capacity, isFixed, isShared, isClub, noRegistration, sawAny, explicitGrouping };
 }
 
 /**
@@ -8085,7 +8244,15 @@ function resolveEventSettings(event, parsedTitle) {
   const fromDescription = parseSettingsBrackets(description);
 
   const capacity = fromDescription.capacity || parsedTitle.legacyCapacity || 0;
-  const isFixed = fromDescription.isFixed || parsedTitle.legacyIsFixed || false;
+  // Grouping is the ONE setting with a spelling for "off", so it is the one
+  // the description can actively contradict rather than merely not mention:
+  // an explicit [Monthly] here beats a [Grouped] still sitting in the title.
+  // Without this, moving a program to Monthly in the description does nothing
+  // at all until someone also finds and deletes the legacy title bracket —
+  // the "I changed it and it changed itself back" failure, one layer down.
+  const isFixed = fromDescription.explicitGrouping
+    ? fromDescription.explicitGrouping === EVENT_TYPES.GROUPED
+    : (parsedTitle.legacyIsFixed || false);
   const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
   const isClub = fromDescription.isClub || parsedTitle.legacyIsClub || false;
   const noRegistration = fromDescription.noRegistration || parsedTitle.legacyNoRegistration || false;
@@ -10369,9 +10536,18 @@ function buildRegistryIndex(registrySheet, sessionRows) {
  * protection / the "sign up for all dates" registry) — "Jane Smith" and
  * "jane smith " are the same person. Display values (the Name column
  * itself) always keep the original, as-typed casing/spacing.
+ *
+ * INTERNAL runs of whitespace collapse too, which is not fussiness: these
+ * names are typed by the public into a form and by staff into Quick Mark, and
+ * "Jane  Smith" with a stray second space is the single most common way one
+ * person becomes two. Two rows on Member_Roll, Times_Seen split across them,
+ * a club membership that doesn't match the registration, and a Quick Mark
+ * dropdown offering the same person twice — all from a keystroke nobody can
+ * see. A tab or a newline pasted mid-name does the same thing, so \s+ rather
+ * than just the space.
  */
 function normalizeNameKey(name) {
-  return String(name || '').trim().toLowerCase();
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /** Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited OR Manually Added. */
@@ -10549,16 +10725,25 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
   if (!attendanceGrid) return [];
 
   const rows = [];
+  const formId = form.getId();
   attendanceGrid.rows.forEach((dateLabel, rowIdx) => {
-    const plainDateLabel = stripMealHint(dateLabel);
-    const registryEntry = registryIndex[`${form.getId()}|${plainDateLabel}`];
+    // Resolved against the registry rather than cut at the first " — ", so a
+    // program whose NAME contains that separator still finds its session
+    // instead of losing the whole submission — see sessionLabelCandidates().
+    const plainDateLabel = resolveSessionLabelForForm(registryIndex, formId, dateLabel);
+    const registryEntry = plainDateLabel ? registryIndex[`${formId}|${plainDateLabel}`] : null;
     if (!registryEntry) {
-      log(`⚠️ No Master_Program_Dashboard match for form ${form.getId()} / ${plainDateLabel}`);
+      const message = `No Master_Program_Dashboard match for form ${formId} / "${stripMealHint(dateLabel)}"` +
+        ` (grid row "${dateLabel}") — anyone who ticked that row has NOT been imported.`;
+      log(`⚠️ ${message}`);
+      noteForAdmin('Form row matches no session', message);
       return;
     }
 
     const attendingCols = attendanceGrid.values[rowIdx] || [];
-    const lunchRowIdx = lunchGrid ? lunchGrid.rows.findIndex(r => stripMealHint(r) === plainDateLabel) : -1;
+    const lunchRowIdx = lunchGrid
+      ? lunchGrid.rows.findIndex(r => resolveSessionLabelForForm(registryIndex, formId, r) === plainDateLabel)
+      : -1;
     const lunchCols = (lunchGrid && lunchRowIdx >= 0) ? (lunchGrid.values[lunchRowIdx] || []) : [];
 
     people.forEach(person => {
@@ -12930,6 +13115,16 @@ function stampMealIds(rows) {
   const map = getIndexMap(HEADERS.Lunch_Schedule);
   if (map['Meal_ID'] === undefined) return rows || [];
   (rows || []).forEach(row => {
+    // The Type cell is canonicalized in passing, on the one pass that already
+    // rewrites every row. A value that arrived past the dropdown (a paste
+    // brings its own validation) is otherwise compared verbatim everywhere
+    // downstream, and "not serving" is not 'Not Serving' — see
+    // getMealInfoIndex(). Fixing the cell means it only has to be got right
+    // once, instead of at every reader.
+    if (map['Type'] !== undefined) {
+      const canonical = canonicalizeLunchType(row[map['Type']]);
+      if (canonical) row[map['Type']] = canonical;
+    }
     row[map['Meal_ID']] = deriveMealId(row[map['Event_Date']], row[map['Location']], row[map['Type']]);
   });
   return rows || [];
@@ -14729,6 +14924,8 @@ function buildDashboardRollup(registrantRows) {
   // silently dropped.
   const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
+  /** date|location -> the catered Type already seen there, for the clash check below. */
+  const cateredTypeSeen = {};
   (menuSheet ? readLunchScheduleRows(menuSheet) : []).forEach(row => {
     const d = coerceDate(row[menuMap['Event_Date']]);
     const location = String(row[menuMap['Location']] || '').trim();
@@ -14737,6 +14934,32 @@ function buildDashboardRollup(registrantRows) {
     if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return; // "Not Serving", or blank
     const dateKey = formatDateKey(d);
     if (dateKey < todayKey) return; // past dates are never seeded — see below
+
+    // ONE CATERED BATCH PER DATE+LOCATION is an assumption this whole tab
+    // rests on: the rollup is keyed date|location, getMealInfoForDate() takes
+    // the FIRST matching row, and resolveRegistrantLunchType() hands everyone
+    // that row's type. A second catered row for the same day and place is
+    // therefore not a second order — it is a row that quietly does nothing,
+    // while deriveMealId() still mints it a distinct Meal_ID and
+    // getRecentMealIdOptions() still offers that ID in the Meal_Source
+    // dropdown. Somebody pointing at it would see their meals counted against
+    // the OTHER batch's row.
+    //
+    // Supporting Hot and Cold side by side properly means re-keying this tab,
+    // the dashboard and the registrant Lunch_Type together — see
+    // STRESS_TEST.md. Until then the clash is at least never silent.
+    const clashKey = `${dateKey}|${location}`;
+    if (cateredTypeSeen[clashKey] !== undefined) {
+      if (cateredTypeSeen[clashKey] !== type) {
+        noteForAdmin('Two catered menus for one date and location',
+          `Lunch_Schedule has both a ${cateredTypeSeen[clashKey]} and a ${type} row for ${location} on ` +
+          `${formatDateLabel(d)}. Only the ${cateredTypeSeen[clashKey]} one is being counted, ordered or shown ` +
+          `on the form — this tab holds ONE meal per location per day. Merge them into a single row, or ` +
+          `split the day across two locations.`);
+      }
+      return;
+    }
+    cateredTypeSeen[clashKey] = type;
 
     if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) {
       noteForAdmin('Menu set at a Never-catering location',
@@ -14778,7 +15001,30 @@ function buildDashboardRollup(registrantRows) {
         // LUNCH_ONLY_EVENT_ID_PREFIX). Those never have a session, and their
         // meal is exactly as real as anyone else's, so they take their date and
         // location from the row itself.
-        if (!isLunchOnlyEventId(eventId)) return;
+        if (!isLunchOnlyEventId(eventId)) {
+          // ...but a row like that can be carrying REAL MEALS — a served tick,
+          // a count of portions handed over — and dropping those on the floor
+          // is the same mistake an orphan Meal_Source must never make. It is
+          // not always a deleted event either: re-pointing CALENDAR_MAP
+          // re-keys every Event_ID and strands every existing registrant row
+          // behind the old ones (see SYSTEM_REVIEW.md §5), and triage
+          // deliberately leaves those alone. So say so rather than subtract
+          // food from the record in silence.
+          const strandedMeals = readRegistrantMealCounts(row, lrMap).total;
+          const strandedServed = isTruthyCheckbox(row[lrMap['Lunch_Served']]);
+          if (strandedMeals > 0 || strandedServed) {
+            const when = coerceDate(row[lrMap['Event_Date']]);
+            noteForAdmin('Served meals on a row with no session',
+              `${String(row[lrMap['Name']] || '').trim() || '(unnamed)'} at ` +
+              `${String(row[lrMap['Location']] || '').trim() || 'an unnamed location'} on ` +
+              `${when ? formatDateLabel(when) : 'an unreadable date'} has ` +
+              `${strandedServed ? 'Lunch_Served ticked' : ''}${strandedServed && strandedMeals > 0 ? ' and ' : ''}` +
+              `${strandedMeals > 0 ? `${strandedMeals} meal(s) counted` : ''}, but their Event_ID ` +
+              `"${eventId}" is on no session — so none of it reaches Master_Lunch_Dashboard. Either restore ` +
+              `the session or re-point the row's Event_ID.`);
+          }
+          return;
+        }
         const d = coerceDate(row[lrMap['Event_Date']]);
         const loc = String(row[lrMap['Location']] || '').trim();
         if (!d || !loc) return;

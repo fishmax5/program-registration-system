@@ -60,3 +60,5 @@ no trigger changes, and nothing can be removed. See
   registrants see, old months, and troubleshooting.
 - [`SYSTEM_REVIEW.md`](./SYSTEM_REVIEW.md) — known failure modes, short and
   long term, and what to verify in a live workbook.
+- [`STRESS_TEST.md`](./STRESS_TEST.md) — what came back when the logic was run
+  against adversarial inputs: what was fixed, and what is known and left.
