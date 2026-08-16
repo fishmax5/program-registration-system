@@ -16305,13 +16305,36 @@ function createCombinedRegistrationForm(sessionRows, map, requestedTitle) {
 function createFormFromSpec(spec, formTitle, context) {
   const sessions = (spec.sessions || []).filter(s => s.date);
   if (sessions.length === 0) return null;
-  const locations = spec.locations || locationsOfSessions(sessions);
 
+  // The Drive copy happens exactly ONCE, outside any retry. Only the
+  // configuration below — all of it re-runnable against the same form ID —
+  // is retried on a transient Forms error. Retrying the copy itself was the
+  // bug: withFormRetry used to wrap this whole function, so a "please wait
+  // and try again" thrown by any one of the configuration calls re-ran
+  // createFormFromSpec() from the top and copied the template again,
+  // leaving an orphaned form in Drive for every attempt beyond the first.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
   const form = FormApp.openById(copiedFile.getId());
-  form.setTitle(formTitle);
 
+  try {
+    withFormRetry(`configuring "${formTitle}"`, () => configureFormFromSpec(form, spec, sessions, formTitle, context));
+  } catch (err) {
+    // Configuration never finished — this form is not a usable replacement.
+    // Trash it here rather than leaving it to whoever notices later; the
+    // caller's plan still has the old form to fall back on.
+    try { DriveApp.getFileById(form.getId()).setTrashed(true); } catch (trashErr) { /* best effort */ }
+    throw err;
+  }
+
+  return { formId: form.getId(), formTitle };
+}
+
+/** The re-runnable half of createFormFromSpec(): every call is safe to repeat against the same form. */
+function configureFormFromSpec(form, spec, sessions, formTitle, context) {
+  const locations = spec.locations || locationsOfSessions(sessions);
+
+  form.setTitle(formTitle);
   try {
     form.setAcceptingResponses(true);
   } catch (err) {
@@ -16339,8 +16362,6 @@ function createFormFromSpec(spec, formTitle, context) {
   applyFormFooterNote(form, buildFooterNoteForLocations(locations));
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
   flushPersistentRegistries();
-
-  return { formId: form.getId(), formTitle };
 }
 
 /**
@@ -17356,28 +17377,50 @@ function cancelFormRebuildSweep() {
  * sheet is repointed BEFORE anything is trashed, so every failure mode leaves
  * a working form somewhere: fail while building and nothing has changed; fail
  * after building and the sessions are on a good new form with the old one
- * still sitting there harmlessly. The only thing a crash can leave behind is
- * an unused form in the Drive folder, which is noise, not damage.
+ * still sitting there harmlessly.
+ *
+ * A crash that kills the WHOLE EXECUTION (not caught by anything in-process,
+ * e.g. hitting the 6-minute ceiling) can still leave an unused form sitting
+ * in the Drive folder, since there is no way to run cleanup code after that.
+ * Every failure this function can catch itself — a thrown error, or a form
+ * built but never wired to any session — trashes the new form before
+ * returning, so it never lingers as an unlinked duplicate.
  */
 function replaceOneForm(registrySheet, item) {
   const context = item.context;
   const formTitle = readFormTitleOrDerive(item.oldFormId, context);
 
-  const created = withFormRetry(`building the replacement for ${item.describe}`,
-    () => createFormFromSpec(context, formTitle, 'destroy and rebuild'));
+  // createFormFromSpec() retries its OWN configuration internally, on the ONE
+  // form it copies — no retry wrapper here, so a transient error partway
+  // through can never cause a second copy to be made (see its comment).
+  const created = createFormFromSpec(context, formTitle, 'destroy and rebuild');
   if (!created) {
     log(`⚠️ Rebuild skipped for ${item.describe}: no usable sessions to put on a form.`);
     return false;
   }
 
-  const moved = writeFormIdOntoSessions(registrySheet, item.eventIds, created.formId);
-  if (moved === 0) {
-    log(`⚠️ Rebuild for ${item.describe} built form ${created.formId} but moved no session rows onto it — ` +
-      `the old form has been left in place. Check the dashboard's Form_ID column.`);
-    return false;
+  // From here on, the new form is a going concern only once it is actually
+  // repointed onto sessions and its registries are carried across. Any
+  // failure in between — including one thrown out of this function entirely
+  // — leaves an orphan unless it's cleaned up right here, so this whole
+  // stretch is wrapped: the new form is trashed on any path that doesn't end
+  // in a completed swap, and the underlying error is re-thrown so the caller
+  // still sees and logs it exactly as before.
+  try {
+    const moved = writeFormIdOntoSessions(registrySheet, item.eventIds, created.formId);
+    if (moved === 0) {
+      log(`⚠️ Rebuild for ${item.describe} built form ${created.formId} but moved no session rows onto it — ` +
+        `the old form has been left in place. Check the dashboard's Form_ID column.`);
+      try { DriveApp.getFileById(created.formId).setTrashed(true); } catch (trashErr) { /* best effort */ }
+      return false;
+    }
+
+    remapFormRegistries(item.oldFormId, created.formId);
+  } catch (err) {
+    try { DriveApp.getFileById(created.formId).setTrashed(true); } catch (trashErr) { /* best effort */ }
+    throw err;
   }
 
-  remapFormRegistries(item.oldFormId, created.formId);
   trashReplacedForm(item.oldFormId, item.describe);
 
   log(`Rebuilt ${item.describe}: ${moved} session(s) moved from form ${item.oldFormId} to ${created.formId}.`);
