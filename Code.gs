@@ -5629,13 +5629,27 @@ function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {
  * TWO MENUS, NOT ONE.
  *
  * Everyone gets the day-to-day items: the two syncs, the lunch-menu tools,
- * and Resize All Sheets (safe to click at any time — it only touches column
- * widths). Nothing on that list can restructure the workbook or delete
- * anything.
+ * the sign-in sheet, the per-program tools (link across locations, move
+ * sessions to another form, delete registrations) and Resize All Sheets.
+ * These are open to anyone who can edit the workbook, on purpose — they are
+ * the things a person running a program needs on the day, and the desk cannot
+ * wait for an admin to come and press a button.
+ *
+ * TWO OF THEM DO REAL DAMAGE IF MIS-CLICKED, and are open anyway:
+ * "🗑️ Delete Registrations…" removes registrant rows and can take the form
+ * responses with them, and "📄 Move Sessions to Another Form…" moves live
+ * sessions onto a different form. What protects those is not who is signed
+ * in — it is the dialog: both name every session and every headcount they are
+ * about to touch, and the delete path additionally requires a confirmation
+ * word to be TYPED before it will run. That is the guard that has to be kept
+ * correct now (see DELETE_REGISTRATIONS_CONFIRM_WORD), because it is the only
+ * one left on that path.
  *
  * Accounts in AUTHORIZED_ADMIN_EMAILS additionally get an "🔧 Admin"
  * submenu holding the structural entries: trigger repair, the first-run
- * import, and the READ-ONLY leftover-tab report.
+ * import, the form rebuild, and the READ-ONLY leftover-tab report. Those stay
+ * gated — they restructure the workbook or rewrite every form at once, and
+ * none of them is something a normal day needs.
  *
  * DELIBERATELY NOT IN ANY MENU:
  *   • mergeLegacyTabs()      — it deletes tabs after folding them in. There
@@ -5652,9 +5666,11 @@ function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {
  *
  * A HIDDEN MENU IS NOT A PERMISSION. Anyone with edit access to the
  * spreadsheet can open the script editor and run any function in this file
- * by name. The menu split is ergonomics — it keeps destructive things out of
- * reach of a normal day. requireAuthorizedAdmin() inside each of those
- * functions is the actual gate, and it is what must be kept correct.
+ * by name — which is the reason the split was never a security boundary in
+ * the first place, and part of why the day-to-day half is no longer gated:
+ * it was stopping the desk from working while stopping nobody who meant harm.
+ * requireAuthorizedAdmin() inside each ADMIN function is still the actual
+ * gate for that half, and it is what must be kept correct.
  */
 function onOpen() {
   buildAppMenu(SpreadsheetApp.getUi(), isAuthorizedAdmin());
@@ -7222,8 +7238,6 @@ function descriptionStillCarriesFlag(description, wordsRegex) {
  * registrations actually came in on, and that is the record.
  */
 function linkProgramAcrossLocations() {
-  if (!requireAuthorizedAdmin('Link Program Across Locations')) return null;
-
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return null;
@@ -16164,7 +16178,6 @@ function getOrCreateSignInSheetFolder() {
 
 /** MENU ENTRY: pick sessions, pick a destination form. */
 function showRepointSessionsDialog() {
-  if (!requireAuthorizedAdmin('Move Sessions to Another Form')) return;
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return;
@@ -16334,7 +16347,6 @@ function buildRepointSessionsHtml(sessions, forms) {
  * Returns a human-readable summary for the dialog to show.
  */
 function repointSessionsToForm(eventIds, target) {
-  if (!requireAuthorizedAdmin('Move Sessions to Another Form')) return '⚠️ Not permitted.';
   const wanted = new Set((eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
   if (wanted.size === 0) return '⚠️ No sessions were selected.';
 
@@ -16681,7 +16693,6 @@ const DELETE_REGISTRATIONS_WINDOW_FORWARD_DAYS = 180;
 
 /** MENU ENTRY: pick the sessions whose registrations should be deleted. */
 function showDeleteRegistrationsDialog() {
-  if (!requireAuthorizedAdmin('Delete Registrations')) return;
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return;
@@ -16866,7 +16877,6 @@ ${clubNote}
  * Returns a human-readable summary for the dialog to show.
  */
 function deleteRegistrationsForSessions(eventIds, options) {
-  if (!requireAuthorizedAdmin('Delete Registrations')) return '⚠️ Not permitted.';
   options = options || {};
   if (String(options.confirm || '').trim().toUpperCase() !== DELETE_REGISTRATIONS_CONFIRM_WORD) {
     return `⚠️ Type ${DELETE_REGISTRATIONS_CONFIRM_WORD} to confirm.`;

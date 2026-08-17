@@ -1029,9 +1029,9 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
 | **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Monthly tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
-| **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. **Admin accounts only** |
-| **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. **Admin accounts only** — see [Moving sessions between forms](#moving-sessions-between-forms) |
-| **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). **Admin accounts only** |
+| **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
+| **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
+| **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
@@ -1239,7 +1239,7 @@ into.
 
 ## Moving sessions between forms
 
-**📄 Move Sessions to Another Form…** on the menu (admin accounts only). Tick
+**📄 Move Sessions to Another Form…** on the menu. Tick
 any sessions you like, then pick where they go:
 
 **Build a new combined form.** For the one-off that the grouping tags can't
@@ -1277,7 +1277,7 @@ the new form.
 
 ## Deleting registrations
 
-**🗓️ Calendar & Form Manager ▸ 🗑️ Delete Registrations…** (admin accounts only)
+**🗓️ Calendar & Form Manager ▸ 🗑️ Delete Registrations…**
 
 Everything else in this system **cancels**. Someone who drops out is marked
 `Cancelled` and stays on the tab; a session whose calendar event disappears
@@ -1547,13 +1547,17 @@ the code:
 - `admin@newhorizonsseniorcenter.org`
 - `maxfishman@newhorizonsseniorcenter.org`
 
-**Gated:** Rebuild Layout, Rewrite Event Links, Trigger Status, Check
-Triggers, Take Over Trigger Ownership, Release My Triggers, Import
-Everything (First Run), Find Leftover Tabs, Archive Old Months (report),
-`mergeLegacyTabs()`, `initSheet()`,
+**Gated:** Rebuild Layout, Rewrite Event Links, Destroy & Rebuild Forms,
+Trigger Status, Check Triggers, Take Over Trigger Ownership, Release My
+Triggers, Import Everything (First Run), Find Leftover Tabs, Archive Old
+Months (report), `mergeLegacyTabs()`, `initSheet()`,
 `initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
 `restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
 `cleanupNeverPolicyForms()`.
+
+Everything on that list is under the **🔧 Admin** submenu or has no menu entry
+at all. The rule now is simply: **if it's on the main menu, anyone who can edit
+the workbook can run it.**
 
 **A second, narrower gate on top of that: trigger ownership.** Being an admin
 is no longer enough to *build* triggers — two admins is exactly enough people
@@ -1565,11 +1569,30 @@ message naming the owner. If that account is genuinely gone, use **Take Over
 Trigger Ownership**, which explains up front that it *cannot* delete the old
 owner's triggers — only the Apps Script editor's Triggers page can do that.
 
-**Not gated, by design:** Sync Cal, Sync Registrations, the two lunch-menu
-items, Apply Type / Club / No-Reg Changes to Calendar, Show All Past Rows,
-Resize All Sheets,
-and everyone's ability to register, edit rows, and view every dashboard.
-Ordinary day-to-day use needs no special account.
+**Not gated, by design:** everything on the main menu — Sync Cal, Sync
+Registrations, the two lunch-menu items, Print Sign-In Sheet, Invite
+Registrants to Calendar Events, Apply Type / Club / No-Reg Changes to
+Calendar, 🔗 Link Program Across Locations…, 📄 Move Sessions to Another
+Form…, 🗑️ Delete Registrations…, Show All Past Rows, Resize All Sheets — plus
+everyone's ability to register, edit rows, and view every dashboard. Ordinary
+day-to-day use needs no special account, and the desk should never have to
+wait for an admin to come and press a button.
+
+> **Two of those can lose data, and are open anyway.** 🗑️ **Delete
+> Registrations…** permanently removes registrant rows and can delete the form
+> responses behind them; 📄 **Move Sessions to Another Form…** moves live
+> sessions onto a different form. What protects them is no longer *who is
+> signed in* — it's the dialog. Both list every session and every headcount
+> they are about to touch before anything happens, and the delete path also
+> makes you type `DELETE` before the button will work (checked again on the
+> server, not just in the dialog). Read the list. Nothing else is going to
+> stop you.
+>
+> If you need these back behind an account check, add
+> `if (!requireAuthorizedAdmin('Delete Registrations')) return;` as the first
+> line of `showDeleteRegistrationsDialog()` **and**
+> `deleteRegistrationsForSessions()` — both, since the dialog calls the second
+> one directly.
 
 > **The menu split is convenience, not security.** Admin items are hidden from
 > the menu for non-admins, but anyone with edit access to the spreadsheet can
