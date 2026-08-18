@@ -23,13 +23,20 @@ It also:
   one of its calendar events for you, seconds later — with the tick queued and
   protected in the meantime, so a sync can't undo it before it lands;
 - can **delete registrations** outright — test runs and duplicates, by session,
-  behind a typed confirmation, optionally taking the form responses with them;
+  behind a typed confirmation, optionally taking the form responses with them,
+  and they **stay** deleted: neither the sign-up-for-every-date registry, the
+  club rosters, nor a re-import puts them back, while a genuinely new
+  submission from the same person still comes through;
+- marks people off at the desk from a **Quick Mark dialog** — location,
+  session, name, then Attended and/or Lunch, with Lunch on its own recording a
+  meal collected by somebody who never came in;
 - records **several different meals per person** on one day (ate the day-1
   meal here, took two subs home), attached to whoever took them — and **which
   lunch** they were, so serving Wednesday's leftovers on Thursday stops
   reporting one batch of food as both waste and phantom demand;
 - prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;
-- **invites registrants to the calendar event** they signed up for, and
+- **invites registrants to the calendar event** they signed up for — every
+  session on the hourly pass, or a session you pick from the menu — and
   un-invites them if they cancel.
 
 This repo was split out of `fishmax5.github.io`, where it had been

@@ -11,12 +11,12 @@ the spreadsheet fills itself in.
 1. You create an event on one of the program calendars.
 2. The system builds a registration form for it and pastes the link into the
    calendar event's description.
-3. People register. Their answers land on the **Lunch_and_Event_Registrants**
+3. People register. Their answers land on the **Registrant_Dash**
    tab, one row per person per session.
 4. **Master_Lunch_Dashboard** adds up who needs lunch each day so you know what
    to order.
 5. On the day, print a **sign-in sheet** to mark up by hand, or use
-   **⚡ Quick Mark** at the top of the Registrants tab.
+   **⚡ Quick Mark** on the menu.
 
 Everything runs on a schedule. You rarely need to press anything.
 
@@ -41,14 +41,14 @@ calendar, so no settings go there.
 | *(nothing)* | A program with **no capacity limit**, grouped by month |
 | `[Cap: 12]` | Capped at **12 people**; #13 is waitlisted automatically |
 | `[Grouped]` | One continuous series — **one form** for the whole run |
-| `[Monthly]` | A **separate form per calendar month** (the default) |
+| `[Regular]` | A **separate form per calendar month** (the default) |
 | `[Cap: 12, Grouped]` | Both. `[Cap: 12] [Grouped]` on separate lines works too. |
 | `[All Locations]` | This program's sessions at **every** location share **one** form |
 | `[Club]` | People **join once and stay joined** — see [Clubs](#clubs) |
 | `[No Registration]` | **No sign-ups at all** — no form is built — see [No registration](#no-registration) |
 
 You can write anything else you like in the description around them — only
-brackets containing `Cap:`, `Grouped`, `Monthly`, `All Locations`, `Club` or
+brackets containing `Cap:`, `Grouped`, `Regular`, `All Locations`, `Club` or
 `No Registration` are read.
 
 **You don't have to type `[Club]` or `[No Registration]` by hand.** Both are
@@ -56,18 +56,20 @@ also **checkboxes** on the Master_Program_Dashboard — tick one and the tag is
 written onto the program's calendar events for you. See
 [The two checkboxes](#the-two-checkboxes-club-and-no_registration).
 
-**Grouped vs Monthly** — this is just "how many forms?":
+**Grouped vs Regular** — this is just "how many forms?":
 
 - **Grouped** — one form for the whole run. Use it for something like a 6-week
   course, where one registration should cover every session.
-- **Monthly** — a new form each calendar month. Right for a drop-in weekly
+- **Regular** — a new form each calendar month. Right for a drop-in weekly
   thing, so January's sign-ups don't pile up with December's. This is what you
   get if you say nothing.
 
-> **These used to be called `Fixed` and `Regular`.** Both old words still work
+> **These used to be called `Fixed` and `Monthly`.** Both old words still work
 > everywhere — in descriptions and in the `Type_Tag` column — so there is
 > nothing to go back and change. "Fixed" wasn't fixed in any sense you'd guess,
-> and "Regular" described both cases equally badly.
+> and "Monthly" read as a claim about how often the program *meets*, which it
+> never was: a `Regular` program can meet three times a week. The tag only ever
+> said how often a **new form** is handed out.
 
 **You can also change it from the spreadsheet.** Edit the `Type_Tag` column on
 **Master_Program_Dashboard** (it's yellow, because it's yours to change). You'll
@@ -82,7 +84,7 @@ Say no and the cell goes straight back to what it was.
 
 ### One form across several locations
 
-`[Grouped]` and `[Monthly]` answer *"how many forms over time?"*. `[All
+`[Grouped]` and `[Regular]` answer *"how many forms over time?"*. `[All
 Locations]` answers the other question: *"how many forms across places?"*
 
 Normally the same program at Narberth and at Ashbridge gets **two** forms —
@@ -93,7 +95,7 @@ roster, wherever it meets. It combines with the other tags:
 | In the description | It means |
 |---|---|
 | `[Grouped, All Locations]` | One form for the whole series, at every location |
-| `[Monthly, All Locations]` | One form per month, covering every location |
+| `[Regular, All Locations]` | One form per month, covering every location |
 | `[Cap: 12, All Locations]` | Shared form — and the cap still applies **per session**, not across them |
 
 `[Shared]`, `[All Sites]`, `[Combined]` and `[Multi-Site]` all mean the same
@@ -124,7 +126,7 @@ running. Run the same menu item again on a linked program to unlink it.
 
 ### Clubs
 
-`[Grouped]`/`[Monthly]` answer *"how many forms?"*. `[All Locations]` answers
+`[Grouped]`/`[Regular]` answer *"how many forms?"*. `[All Locations]` answers
 *"how many places?"*. `[Club]` answers a third question entirely: **does
 signing up once keep you signed up?**
 
@@ -151,7 +153,7 @@ It composes with everything else, which is the point of making it its own tag:
 `[Membership]` and `[Members Only]` read as the same tag.
 
 **A club's roster follows the PROGRAM, not the form.** That's what makes a
-`[Club, Monthly]` work: January's form and February's form are different forms,
+`[Club, Regular]` work: January's form and February's form are different forms,
 and the same people are on both without anyone re-registering.
 
 **Adding `[Club]` to a program that already has dates works.** The next
@@ -304,7 +306,7 @@ sticks. `Type_Tag` is a dropdown; `Club` and `No_Registration` are checkboxes;
 each has an "are you sure?" behind it rather than a yellow cell, because each
 always already holds a real value and marking them as blanks-to-fill-in would
 have read as columns of problems. See
-[Grouped vs Monthly](#setting-up-your-calendar-events),
+[Grouped vs Regular](#setting-up-your-calendar-events),
 [The two checkboxes](#the-two-checkboxes-club-and-no_registration), and
 **🔁 Apply Type / Club / No-Reg Changes to Calendar** if a change doesn't stick.
 
@@ -370,7 +372,7 @@ registered.
 `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` ·
 `In_Fridge` are **not typed here any more** — they're totaled automatically
 from the five per-person meal counts on the Registrants tab (see
-[Lunch_and_Event_Registrants](#3-lunch_and_event_registrants) below), the same
+[Registrant_Dash](#3-registrant_dash) below), the same
 way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only updates once
 the Registrants tab actually reports a meal for that date+location — it never
 gets blanked back out, so a number typed here before this existed (or on a date
@@ -384,7 +386,7 @@ an addition to them: a row reading *40 ordered · 14 takeaway · 8 carried over*
 means eight of that fourteen left the building on a later day. It fills in by
 itself from `Meal_Source` on the Registrants tab, and stays blank on every
 ordinary day — see
-[Lunch_and_Event_Registrants](#3-lunch_and_event_registrants).
+[Registrant_Dash](#3-registrant_dash).
 
 **`Standard_Buffer` and `Tester_Buffer` aren't typed here either.** They're
 **read from Config** on every render, for that row's location and Hot/Cold type.
@@ -414,77 +416,105 @@ the row is left plain so the numbers read as numbers. `Event_Date` keeps its
 month tint, `Lunch_Type` goes grey on `Not Serving`, the ✍️ columns keep their
 yellow, and a hand-edited row's `Manual_Override` cell goes purple.
 
-### 3. Lunch_and_Event_Registrants
+### 3. Registrant_Dash
 One row **per person, per session** — guests get their own rows, not a note on
 someone else's.
 
+> **This tab used to be called `Lunch_and_Event_Registrants`.** It is renamed
+> automatically the first time this version opens the workbook — the same tab,
+> with every row, every column, all its formatting and all its history intact.
+> Nothing to do, and nothing to move. The old name said what lands on the tab;
+> the new one says what the tab is *for*, which is where you go to see and mark
+> people.
+
 #### ⚡ Quick Mark — the fast way to mark people off
 
-The panel at the **top of this tab** is how you tick people in on the day,
-without hunting for their row:
+**🗓️ Calendar & Form Manager ▸ ⚡ Quick Mark Attendance / Lunch…** — the first
+item on the menu, because on a serving day it's the only one you need.
 
 1. **Location** — pick from the dropdown.
-2. **Program + Date** — one entry per **session**, each naming its date,
-   **nearest first**: *"Chair Yoga · Wed, Sep 16"*. Every program at that
-   location is offered, past and present, not just the ones somebody has
-   already registered for. The list also includes **🥡 Lunch Only (no
-   program)** for each catered day, for someone who came in only for the meal.
+2. **Session** — one entry per session, each naming its date, grouped into
+   **Upcoming** (soonest first) and **Past** (most recent first): *"Chair Yoga
+   · Wed, Sep 16"*. Every program at that location is offered, past and
+   present, not just the ones somebody has already registered for. The list
+   also includes **🥡 Lunch Only (no program)** for each catered day, for
+   someone who came in only for the meal.
 3. **Name** — the people registered for **that session** first, then
-   **everyone else on Member_Roll**. You can also just **type a name** that
-   isn't on either list.
-4. Tick **✓ Attended**, **✓ Lunch**, or **🥡 Lunch Only**.
+   **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
+   a name that's on neither.
+4. Tick **Attended**, **Lunch**, or both, and press **Mark**.
 
-> **Why the dates.** The dropdown used to hold bare program names, so a tick
-> meant "the nearest session" and nothing else — fine for marking somebody who
-> is standing in front of you, useless for correcting last Thursday or marking
+The dialog stays open on the same session and clears just the name and the
+ticks, so a queue of thirty people is one pick and one click each. Every mark
+is listed underneath as it happens, so you can see what you've done.
+
+> **It used to be a band of cells at the top of this tab.** Every part of that
+> was a fight with Sheets rather than with the job: the dropdowns were data
+> validations rebuilt cell by cell, the feedback was one overflowing cell, the
+> state lived in cells anyone could paste over, and a stray paste on row 3
+> could fire a mark. The tables now start at **row 1**.
+
+> **Why the dates.** The session list used to hold bare program names, so a
+> tick meant "the nearest session" and nothing else — fine for marking somebody
+> standing in front of you, useless for correcting last Thursday or marking
 > someone off for a session two weeks out. Pick a dated entry and it marks
 > exactly that session. Programs whose sessions have aged off the dashboard
-> entirely still appear undated, and fall back to the old nearest-session rule.
+> entirely still appear under **Any date (program only)**, and fall back to the
+> nearest-session rule.
 
-That's it. The system finds that person's row wherever it is, ticks it, tells
-you what it did on the line underneath, and clears itself for the next person.
-The **Clear** box resets it if you pick wrong. Guests brought by another
-registrant show up in the Program/Date/Name dropdowns exactly like anyone
-else — there's no separate step for them.
+**What the two ticks mean.** This is the whole vocabulary:
 
-- **Attended and Lunch are independent — ticking Lunch does *not* also tick
-  Attended.** A member can pick up a **take-out** meal without ever coming
-  in, so being fed no longer implies being present. For a normal dine-in
-  mark, tick both boxes.
-- **🥡 Lunch Only** is the one-tick way to record take-out: it marks
-  `Lunch_Served` **and clears `Attended`**, even if Attended was already
-  ticked — useful both for a walk-up take-out pickup and for correcting
-  someone wrongly marked present.
-- If someone's registered for **several dates** of the same program, it marks
-  the nearest one (today first, then the next upcoming) and says so, e.g.
-  *"Marked attendance for Marion Webb — Tue, Aug 5 (2 sessions matched — marked
-  the nearest)."* If that's the wrong one, tick the right row directly.
+| Ticked | What it records |
+|---|---|
+| **Attended** | They were here. `Lunch_Served` is left alone. |
+| **Lunch** *(alone)* | They got a meal but were **not** here — take-out. `Attended` is **cleared**. |
+| **Attended + Lunch** | Here, and fed. Both are set. |
+
+> **There used to be a third box, 🥡 Lunch Only.** It did exactly what a Lunch
+> tick with Attended left clear does, and two ways to say one thing is two ways
+> to get it wrong. Ticking Lunch on its own now clears `Attended`, which makes
+> it a **correction** as well as a record — the "I marked her present, she only
+> collected a meal" case.
+
+Guests brought by another registrant appear in the name list exactly like
+anyone else — there's no separate step for them.
+
+If someone's registered for **several dates** of the same program and you
+picked an undated entry, it marks the nearest one (today first, then the next
+upcoming) and says so, e.g. *"Marion Webb — attended, Tue, Aug 5 (2 sessions
+matched — marked the nearest)."* If that's the wrong one, tick the right row
+directly.
 
 **Walk-ins.** If the person you picked has **no registration** for that
-program, ticking a box offers to add them:
+session, marking offers to add them:
 
-> *Add Marion Webb as a walk-in?*
-> A new row will be added for Chair Yoga — Tue, Aug 5 (Narberth), marked
-> lunch served (take-out — not marked attended) and flagged "Manually Added".
+> *Marion Webb has no registration for Chair Yoga.*
+> *Add a new row for Chair Yoga — Tue, Aug 5 (Narberth), marked lunch
+> (collected, not attending) and flagged "Manually Added"?*
 
 Say yes and the row appears, already marked. It's flagged **Manually Added**,
 which means no future sync will touch or remove it. Say no and nothing
-happens. You need a **program** picked in box 2 for this — the system won't
-guess which one they walked into. A walk-in only comes in marked **Attended**
-if you triggered it with the ✓ Attended box — a Lunch or Lunch Only walk-in is
-fed without being recorded as present, same as it would be for an existing
-registrant.
+happens. You need a **session** picked in box 2 for this — the system won't
+guess which one they walked into. A walk-in comes in marked **Attended** only
+if you ticked Attended; a Lunch-only walk-in is fed without being recorded as
+present, same as for an existing registrant.
 
 You can always tick `Attended` / `Lunch_Served` **directly on a row** instead;
-the panel is just faster when you're standing at a sign-in desk. The same rule
+Quick Mark is just faster when you're standing at a sign-in desk. The same rule
 applies there too — ticking `Lunch_Served` on a row does not tick `Attended`
 for you.
 
 #### The columns
 
-`Event_Date`, `Location` and `Event` lead the row, then **`Name`, `Attended`,
-`Lunch_Served`** and the five meal counts — so who-they-are, did-they-come, and
-what-they-ate sit together with no scrolling.
+`Event_Date`, `Location`, `Event` and `Event_Time` lead the row, then
+**`Name`, `Attended`, `Lunch_Served`** and the five meal counts — so
+which-session, who-they-are, did-they-come, and what-they-ate sit together with
+no scrolling.
+
+`Event_Time` is the session's **time range** — *"10:00 AM – 11:30 AM"* — taken
+from the calendar event, so a row says when to expect somebody without a trip
+to the dashboard. It fills itself in: rows created before the column existed
+are backfilled from the session table the next time this tab is drawn.
 
 | Column | What it tells you |
 |---|---|
@@ -860,8 +890,17 @@ and asks before you turn it on. Three rules keep it from being a nuisance:
   the same guests and Google would notify them each time.
 
 It runs at the end of every registration sync, and on demand from
-**📧 Invite Registrants to Calendar Events**. At most 40 events are updated per
-run; anything left over goes out on the next one.
+**📧 Invite Registrants to Calendar Events…**, which **asks which sessions** —
+it lists only the ones with somebody still to invite or remove, with the counts,
+and you tick the ones to send for. At most 40 events are updated per run;
+anything left over goes out on the next one.
+
+> **The manual run used to sweep everything at once**, which is not something
+> anybody presses a menu item to do on purpose. The reasons for running it by
+> hand are narrow — one program's invitations need to go out before the hourly
+> sync gets to them, or one event was fixed and its guests need re-adding — and
+> both are a couple of ticks. The hourly pass is unchanged: it still keeps
+> every event's guest list in line on its own.
 
 > Registrants who didn't give an email address (walk-ins, club members added by
 > hand) are simply skipped. Nothing else about them changes.
@@ -997,7 +1036,7 @@ row is marked `Superseded`.
 > Every registration sync now checks each live form and rebuilds any that are
 > still on an older layout, **keeping the same link**, so calendar invites,
 > dashboard links and edit links all keep working. Nothing on
-> Lunch_and_Event_Registrants changes. No more than five forms are rebuilt per
+> Registrant_Dash changes. No more than five forms are rebuilt per
 > sync, so a big backlog drains itself over a few hours rather than blowing the
 > execution budget in one go.
 
@@ -1025,13 +1064,13 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
-| **📧 Invite Registrants to Calendar Events** | Sends the calendar invitations now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day — location, session, name, then Attended and/or Lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **📧 Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
-| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Monthly tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
-| **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
@@ -1041,6 +1080,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 |---|---|
 | **🧱 Rebuild Layout (no calendar sync)** | Redraws every tab from the rows already in the workbook — see [Updating to a new version](#updating-to-a-new-version) |
 | **🔗 Rewrite Event Links (fix duplicates)** | Strips every registration link off upcoming events and writes back one — see [Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions) |
+| **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
 | **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
@@ -1098,7 +1138,7 @@ say no:
 | Press **🗑️ Delete Registrations…** | It **permanently deletes** registrant rows, and can delete the form responses behind them. It also makes you type `DELETE` |
 | Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
-| Add a **walk-in** from the Quick Mark panel | It writes a person into the record, and into the catering count |
+| Add a **walk-in** from the Quick Mark dialog | It writes a person into the record, and into the catering count |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
 | `mergeLegacyTabs()` (editor only) | It deletes tabs (after moving their rows to safety) |
 
@@ -1165,7 +1205,7 @@ back in as the zero it is. A line under the header says so on the sheet itself.
 - One page unless the roster doesn't fit, then as many as it needs.
 
 The last four columns line up **one-for-one** with the meal counts on
-Lunch_and_Event_Registrants, so typing a finished sheet back in is
+Registrant_Dash, so typing a finished sheet back in is
 column-for-column with nothing to reinterpret.
 
 You can print for a **lunch-only day** (a meal with no programming behind it) —
@@ -1210,7 +1250,7 @@ tying you to the broken object.
 system controls is updated for you. A link in an email somebody sent last week,
 or on a printed flyer, points at a trashed form.
 
-**What survives:** all registrations. Rows on Lunch_and_Event_Registrants are
+**What survives:** all registrations. Rows on Registrant_Dash are
 untouched, club memberships are untouched, and "sign up for every date"
 registrants are carried across to the new form so they keep being booked onto
 dates the series gains later.
@@ -1277,7 +1317,12 @@ the new form.
 
 ## Deleting registrations
 
-**🗓️ Calendar & Form Manager ▸ 🗑️ Delete Registrations…**
+**🗓️ Calendar & Form Manager ▸ 🔧 Admin ▸ 🗑️ Delete Registrations…**
+
+> **This moved into the Admin submenu.** It is permanent and irreversible,
+> which is what it has in common with the rest of that submenu — and it was
+> sitting one slot away from menu items that are ordinary day-to-day
+> corrections.
 
 Everything else in this system **cancels**. Someone who drops out is marked
 `Cancelled` and stays on the tab; a session whose calendar event disappears
@@ -1304,8 +1349,25 @@ This is the exception, for rows that aren't history at all:
 The registrant rows go, and the catering numbers and the dashboard counts are
 recalculated straight away.
 
+**And they stay gone.** Deleting used to look like it hadn't worked: the rows
+vanished, and the next sync quietly put them back. Three different things did
+that, each doing exactly what it was built to do — the *"sign up for every
+date"* registry re-books its people onto every date of a form forever, a club
+roster re-books every active member into every upcoming meeting, and a form
+response left in place gets re-imported the moment anything moves the sync
+clock backwards. None of them had any way to know a human had deliberately
+removed a row.
+
+Now deleting records that decision, per person per session, and all three paths
+check it. What it does **not** do is block the person: they can register for
+other dates, be added as a walk-in, or be restored from triage, and **a
+genuinely new form submission for the same person and session comes straight
+through** — signing up again is them saying they're coming after all, and a
+past deletion has no business overruling that. Re-reading the *same* response
+the deletion was aimed at stays blocked, however many times it comes round.
+
 > **To record that somebody isn't coming, don't use this.** Set their
-> `Program_Status` to `Cancelled` on **Lunch_and_Event_Registrants** — the row
+> `Program_Status` to `Cancelled` on **Registrant_Dash** — the row
 > and the history stay, and the catering counts drop them either way.
 
 **About deleting the form responses.** Deleting the rows doesn't touch the
@@ -1319,11 +1381,12 @@ because it's the one part that can't be undone from inside the workbook.
 > The rows for the other dates are left alone (they're the record), but the
 > response behind them is gone.
 
-**Clubs are the one thing it can't undo.** Membership lives on `Club_Members`,
-and every sync re-books active members into upcoming sessions — so deleting a
-club member's row for a *future* session just puts it back on the next sync. To
-take somebody off a club, untick **Active** on `Club_Members` instead. The
-dialog flags the sessions where this applies.
+**Clubs still need unticking.** Deleting a club member's row for a future
+meeting now sticks — that meeting won't be re-booked. But membership itself
+lives on `Club_Members`, so they are still booked into every *other* upcoming
+meeting, and into new ones as they appear. To take somebody off a club, untick
+**Active** on `Club_Members`. The dialog flags the sessions where this
+applies.
 
 ---
 
@@ -1424,7 +1487,7 @@ one of them in the current layout.
 | Rebuilt from what's already here | Left completely alone |
 |---|---|
 | Master_Program_Dashboard | Your **calendars** — not read, not written |
-| Lunch_and_Event_Registrants (+ Quick Mark panel) | Your **registration forms** — none opened or changed |
+| Registrant_Dash | Your **registration forms** — none opened or changed |
 | Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
 | Master_Lunch_Dashboard (hand-entered columns kept) | |
 | Deleted_Event_Triage | |
@@ -1569,29 +1632,33 @@ message naming the owner. If that account is genuinely gone, use **Take Over
 Trigger Ownership**, which explains up front that it *cannot* delete the old
 owner's triggers — only the Apps Script editor's Triggers page can do that.
 
-**Not gated, by design:** everything on the main menu — Sync Cal, Sync
-Registrations, the two lunch-menu items, Print Sign-In Sheet, Invite
+**Not gated, by design:** everything on the main menu — ⚡ Quick Mark, Sync
+Cal, Sync Registrations, the two lunch-menu items, Print Sign-In Sheet, Invite
 Registrants to Calendar Events, Apply Type / Club / No-Reg Changes to
 Calendar, 🔗 Link Program Across Locations…, 📄 Move Sessions to Another
-Form…, 🗑️ Delete Registrations…, Show All Past Rows, Resize All Sheets — plus
-everyone's ability to register, edit rows, and view every dashboard. Ordinary
-day-to-day use needs no special account, and the desk should never have to
-wait for an admin to come and press a button.
+Form…, Show All Past Rows, Resize All Sheets — plus everyone's ability to
+register, edit rows, and view every dashboard. Ordinary day-to-day use needs no
+special account, and the desk should never have to wait for an admin to come
+and press a button.
 
-> **Two of those can lose data, and are open anyway.** 🗑️ **Delete
-> Registrations…** permanently removes registrant rows and can delete the form
-> responses behind them; 📄 **Move Sessions to Another Form…** moves live
-> sessions onto a different form. What protects them is no longer *who is
-> signed in* — it's the dialog. Both list every session and every headcount
-> they are about to touch before anything happens, and the delete path also
-> makes you type `DELETE` before the button will work (checked again on the
-> server, not just in the dialog). Read the list. Nothing else is going to
+> **🗑️ Delete Registrations… is gated, and is why it moved.** It permanently
+> removes registrant rows and can delete the form responses behind them, which
+> is not an ordinary correction — so it now lives in the **🔧 Admin** submenu
+> and checks the signed-in account, in both `showDeleteRegistrationsDialog()`
+> **and** `deleteRegistrationsForSessions()` (both, since the dialog calls the
+> second directly and a submenu that merely doesn't *appear* stops nobody).
+>
+> **One open action can still lose data.** 📄 **Move Sessions to Another
+> Form…** moves live sessions onto a different form, and is open because
+> fixing a wrong form link is a real day-to-day job. What protects it is the
+> dialog: it lists every session and every headcount it is about to touch
+> before anything happens. Read the list. Nothing else is going to
 > stop you.
 >
-> If you need these back behind an account check, add
-> `if (!requireAuthorizedAdmin('Delete Registrations')) return;` as the first
-> line of `showDeleteRegistrationsDialog()` **and**
-> `deleteRegistrationsForSessions()` — both, since the dialog calls the second
+> If you need that one behind an account check too, add
+> `if (!requireAuthorizedAdmin('Move Sessions')) return;` as the first
+> line of `showRepointSessionsDialog()` **and**
+> `repointSessionsToForm()` — both, since the dialog calls the second
 > one directly.
 
 > **The menu split is convenience, not security.** Admin items are hidden from
@@ -1625,7 +1692,7 @@ address on it; an empty list locks everyone out, including you.
 ## Old months
 
 Every date-sorted tab grows in one direction forever. A year in, the **Past**
-section of Lunch_and_Event_Registrants is thousands of rows nobody scrolls
+section of Registrant_Dash is thousands of rows nobody scrolls
 through.
 
 **What happens now.** Past rows older than **this month and last month** are
@@ -1714,14 +1781,23 @@ Rename that one event so its title starts with `*` — `*NO Tai Chi`. It stays o
 the calendar for everyone to see, and the system skips it: no form, no
 dashboard row, no lunch counted for that date.
 
+**Rename a program**
+Change the title on the calendar events and run **Sync Cal**. The program keeps
+its **existing form** — the registration link in each event's description is
+how the system finds it again — and the form is **renamed to match**, so
+respondents stop seeing the old name. Every link already handed out keeps
+working. The sessions themselves are re-keyed off the new title, so their old
+rows go to `Deleted_Event_Triage` (see
+[Deleted_Event_Triage](#8-deleted_event_triage)) if anybody had already signed
+up.
+
 **Mark people in on the day**
-Use the **⚡ Quick Mark** panel at the top of
-**Lunch_and_Event_Registrants** — location, program, optionally a date, then
-name, then tick Attended, Lunch, or Lunch Only. See
-[that tab's section](#3-lunch_and_event_registrants).
+**🗓️ Calendar & Form Manager ▸ ⚡ Quick Mark Attendance / Lunch…** — location,
+session, name, then tick Attended and/or Lunch. See
+[Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off).
 
 **Mark a take-out lunch for someone who isn't attending**
-Same **⚡ Quick Mark** panel — pick their name, tick **🥡 Lunch Only**. It marks
+Same dialog — pick their name and tick **Lunch** on its own. It marks
 `Lunch_Served` without marking `Attended` (and clears `Attended` if it was
 already ticked by mistake).
 
@@ -1734,7 +1810,7 @@ Put it in `Usual_Guests` on **Member_Roll**. It stays there forever — nothing
 overwrites your columns on that tab.
 
 **Cancel one person's registration**
-On **Lunch_and_Event_Registrants**, set their `Program_Status` to `Cancelled`.
+On **Registrant_Dash**, set their `Program_Status` to `Cancelled`.
 The `Manual_Override` cell turns purple and the row is protected from being
 overwritten — and the **lunch numbers update immediately**, with a toast
 telling you the new count:
@@ -1746,9 +1822,10 @@ and fill or paste `Cancelled` down them; it recalculates once, for every date
 you touched.
 
 **Add a walk-in who never filled out the form**
-Use **⚡ Quick Mark**: pick the location and program, pick or **type** their
-name, tick Attended, Lunch, or Lunch Only. It offers to add them, then does
-it — the row is flagged `Manually Added` and never overwritten. (You can
+Use **⚡ Quick Mark**: pick the location and session, choose **➕ Someone not on
+this list…** and type their name, then tick Attended and/or Lunch. It offers to
+add them, then does it — the row is flagged `Manually Added` and never
+overwritten. (You can
 still add the row by
 hand and set `Manual_Override` to `Manually Added` yourself if you prefer.)
 
@@ -1776,7 +1853,7 @@ same person, so a person doesn't get double-counted or double-catered.
 Today blocks are regenerated from scratch each sync. Only the pencil columns on
 Master_Lunch_Dashboard and manually-marked registrant rows survive.
 
-**`Type_Tag` lives on the calendar, not the sheet.** The Grouped/Monthly cell
+**`Type_Tag` lives on the calendar, not the sheet.** The Grouped/Regular cell
 on the program dashboard is a view of what the calendar event's description
 says. Changing it writes the new value back onto every one of that program's
 calendar events — that's what makes it stick. If it can't reach the calendar
@@ -1824,7 +1901,7 @@ it's missing something. A row moves up into the schedule once it has a
 **date, a location and a type** — anything else it couldn't read stays in the
 box with a note saying why.
 
-**I changed Grouped/Monthly and it changed itself back**
+**I changed Grouped/Regular and it changed itself back**
 `Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
 can't always reach the calendar. Press **🔁 Apply Type / Club / No-Reg Changes
 to Calendar**, then **Sync Cal**.
@@ -1925,7 +2002,7 @@ If sessions did disappear (from an older version), get them back with:
    the forms already linked in the calendar events.
 2. Ask your developer to run `restoreTriagedRegistrants()` from the Apps
    Script editor — that moves people back from **Deleted_Event_Triage** onto
-   **Lunch_and_Event_Registrants** for every session that's back. This is
+   **Registrant_Dash** for every session that's back. This is
    worth doing before anything else touches those rows: registrations that
    were already imported *only* exist on those tabs, so re-syncing the forms
    will not bring them back.

@@ -20,11 +20,12 @@
  *      location (LOCATION_COLOR_MAP / buildLocationRowTintRules()) — except
  *      the month-tinted Event_Date cell and the yellow hand-entry columns,
  *      which keep their own meaning.
- *    - Lunch_and_Event_Registrants : one row per person per session, split
+ *    - Registrant_Dash          : one row per person per session, split
  *      into "Upcoming Registrants" / "Past Registrants" sub-tables. Leads
- *      with Event_Date (like every other date-bearing tab), then Location
- *      and Event so staff never scroll to see which program a row belongs
- *      to, keeps Manual_Override and Order_Ahead_Flag, and trails with
+ *      with Event_Date (like every other date-bearing tab), then Location,
+ *      Event and Event_Time so staff never scroll to see which session a row
+ *      belongs to or when it runs, keeps Manual_Override and
+ *      Order_Ahead_Flag, and trails with
  *      Party_ID (an internal grouping key — see Party_ID/Party_Size below)
  *      as the very last column. Re-ordering a HEADERS array no longer
  *      scrambles data already on the tab: readAllSectionedRows() re-aligns
@@ -43,7 +44,7 @@
  *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
- *      first-column/month-tint treatment as Lunch_and_Event_Registrants.
+ *      first-column/month-tint treatment as Registrant_Dash.
  *
  *  Notable behaviors:
  *    - All-day calendar events are skipped entirely.
@@ -65,20 +66,20 @@
  *        Title "Yoga Basics"           + description "[Cap: 12]"  -> capped at 12
  *        Title "Yoga Basics"           + description "[Grouped]"  -> one continuous
  *          series with ONE form, instead of a separate form per month
- *        Title "Yoga Basics"           + description "[Monthly]"  -> a form per
+ *        Title "Yoga Basics"           + description "[Regular]"  -> a form per
  *          calendar month (the default, so this is only ever explicit intent)
  *        description "[Cap: 12, Grouped]" or "[Cap: 12] [Grouped]" -> both
  *        description "[All Locations]"  -> this event's sessions share ONE
  *          form with the same-titled sessions on EVERY other calendar,
  *          instead of one form per location. Composes with the above:
  *          "[Grouped, All Locations]" is one form for the whole series
- *          everywhere; "[Monthly, All Locations]" is one form per month
+ *          everywhere; "[Regular, All Locations]" is one form per month
  *          everywhere. Also spelled [Shared] / [All Sites] / [Combined] /
  *          [Multi-Site]. See SHARED_LOCATION_SCOPE, and the menu action
  *          "🔗 Link Program Across Locations…" which tags every location's
  *          events and moves the sessions already on the dashboard onto one
  *          form in a single step.
- *      [Fixed] and [Regular] are still read as [Grouped] / [Monthly], so no
+ *      [Fixed] and [Monthly] are still read as [Grouped] / [Regular], so no
  *      existing calendar description needs editing — see EVENT_TYPES.
  *      A title is what attendees read on a shared calendar, so scheduling
  *      jargon does not belong there. Brackets left in a TITLE are still
@@ -137,7 +138,7 @@
  *      sync covering only things needing a human — waitlisted registrants,
  *      forms that couldn't be opened, events sent to triage. A sync with
  *      nothing to report sends nothing. Blank address = disabled.
- *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Monthly
+ *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:
  *        "Everyone, every date"          -> one checkbox of who eats, applied
@@ -265,7 +266,7 @@
  *    - The template calls setCollectEmail(true) and
  *      setAllowResponseEdits(true) — a submitter's email becomes a real
  *      identity key, Google auto-sends a receipt with an edit link, and
- *      Form_Source on Lunch_and_Event_Registrants links straight to that
+ *      Form_Source on Registrant_Dash links straight to that
  *      person's own submission (response.getEditResponseUrl()) instead of
  *      to the shared form editor.
  *    - Allergies / dietary needs is its own required-free text field,
@@ -276,7 +277,7 @@
  *    - Party_ID (= the Google Form response ID) and Party_Size (headcount
  *      including the registrant) are stamped on every row from the same
  *      submission, so staff can see "party of 3, one no-show" at a glance
- *      on Lunch_and_Event_Registrants.
+ *      on Registrant_Dash.
  *    - Name-based identity (dedup / manual-edit protection / the "sign up
  *      for all dates" registry) is matched case/whitespace-insensitively
  *      via normalizeNameKey() — "Jane Smith" and "jane smith " are the same
@@ -306,6 +307,22 @@
  *      structure changes so existing cached forms don't silently drift out
  *      of sync with the parser.
  *    - Form descriptions list dates one-per-line.
+ *
+ *    - A DELETED REGISTRATION STAYS DELETED. Three separate paths used to put
+ *      one back — the all-dates registry, the club roster, and a re-imported
+ *      form response — so deleting rows looked like it simply did not work.
+ *      Deleting now records a TOMBSTONE per person per session, and
+ *      buildRegistrantRow() (the single funnel all three paths build rows
+ *      through) refuses a tombstoned key. A genuinely new submission lifts it;
+ *      re-reading the response the deletion was aimed at does not. See section
+ *      5c.
+ *    - QUICK MARK IS A DIALOG, not a band of cells above the tables. See
+ *      section 6d for what that fixed. Registrant_Dash's tables start at row 1.
+ *    - RENAMING A PROGRAM KEEPS ITS FORM. The group key contains the title, so
+ *      a rename orphans the registry entry — but the registration link in the
+ *      event descriptions still names the form, findExistingFormIdFromEvents()
+ *      recovers it, and renameFormForGroup() now retitles it to match. Links
+ *      already handed out keep working and stop advertising the old name.
  *
  *  PERFORMANCE / CACHING CONTRACT (see section 1c):
  *    Everything expensive in a sync is a REMOTE call — a Sheets read, a
@@ -644,7 +661,7 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration
  * link staff actually hand out — while Edit_Form_Link and the bare Form_ID are
  * for troubleshooting only.
  */
-const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?'];
+const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End'];
 const MANUAL_ENTRY_HEADER_COLOR = '#FFF2CC';
 const MANUAL_ENTRY_CELL_TINT = '#FFFCF0';
 /**
@@ -669,43 +686,48 @@ const LUNCH_STATUS_OPTIONS = ['Needed', 'No Lunch', 'Waitlisted', 'Cancelled', '
  *
  *   GROUPED  every session of the series shares a single form, however many
  *            months it spans. Was called "Fixed".
- *   MONTHLY  sessions are bundled per calendar month — a new month means a
- *            new form. Was called "Regular".
+ *   REGULAR  the ordinary case: sessions are bundled per calendar month, so a
+ *            new month means a new form. Was called "Monthly".
  *
- * The old words said nothing about what actually differs (both are "regular"
- * in plain English, and a "Fixed" series isn't fixed in any sense a user
- * would guess). The mechanism is unchanged — only the vocabulary.
+ * WHY "REGULAR" AND NOT "MONTHLY". "Monthly" reads as a statement about how
+ * often the program MEETS — and it is not one. A program tagged this way can
+ * meet twice a week; what the tag actually says is "nothing special, hand out
+ * a fresh form each month", which is the default every program gets unless
+ * somebody asks for otherwise. Staff read the column as a schedule and were
+ * routinely wrong about it. "Regular" says the same thing about the form
+ * without claiming anything about the calendar.
  *
- * BOTH SPELLINGS ARE READ EVERYWHERE, forever: normalizeTypeTag() maps
- * Fixed->Grouped and Regular->Monthly, so session rows written by earlier
- * versions, and `[Fixed]` still sitting in a calendar description, keep
- * working with no migration step. Only what this script WRITES changes.
+ * EVERY SPELLING IS READ EVERYWHERE, forever: normalizeTypeTag() maps
+ * Fixed->Grouped and Monthly->Regular, so session rows written by earlier
+ * versions, and `[Fixed]` or `[Monthly]` still sitting in a calendar
+ * description, keep working with no migration step. Only what this script
+ * WRITES changes.
  */
 const EVENT_TYPES = {
   GROUPED: 'Grouped',
-  MONTHLY: 'Monthly'
+  REGULAR: 'Regular'
 };
-const EVENT_TYPE_OPTIONS = [EVENT_TYPES.GROUPED, EVENT_TYPES.MONTHLY];
+const EVENT_TYPE_OPTIONS = [EVENT_TYPES.GROUPED, EVENT_TYPES.REGULAR];
 
 /** Legacy Type_Tag spellings -> current ones. */
 const LEGACY_EVENT_TYPE_ALIASES = {
   fixed: EVENT_TYPES.GROUPED,
-  regular: EVENT_TYPES.MONTHLY
+  monthly: EVENT_TYPES.REGULAR
 };
 
 /**
  * Canonical Type_Tag for a value read from a sheet, a description, or
- * anywhere else. Unrecognized input falls back to MONTHLY — the narrower
+ * anywhere else. Unrecognized input falls back to REGULAR — the narrower
  * grouping, so a typo can never silently merge unrelated months onto one
  * form.
  */
 function normalizeTypeTag(value) {
   const raw = String(value || '').trim();
-  if (!raw) return EVENT_TYPES.MONTHLY;
+  if (!raw) return EVENT_TYPES.REGULAR;
   const lower = raw.toLowerCase();
   if (LEGACY_EVENT_TYPE_ALIASES[lower]) return LEGACY_EVENT_TYPE_ALIASES[lower];
   const match = EVENT_TYPE_OPTIONS.filter(t => t.toLowerCase() === lower)[0];
-  return match || EVENT_TYPES.MONTHLY;
+  return match || EVENT_TYPES.REGULAR;
 }
 
 /** True when this Type_Tag means "one form for the whole series" (either spelling). */
@@ -717,7 +739,7 @@ function isGroupedTypeTag(value) {
  * CROSS-LOCATION PROGRAMS — the [All Locations] tag.
  *
  * Grouping has always had two dimensions, but only one of them was sayable:
- * WHEN sessions share a form ([Grouped] = the whole series, [Monthly] = a
+ * WHEN sessions share a form ([Grouped] = the whole series, [Regular] = a
  * month at a time). WHERE was fixed — the group key started with the calendar
  * ID, so the same program running at Narberth and at Ashbridge always got two
  * separate forms, even when it is one program with one roster that simply
@@ -729,7 +751,7 @@ function isGroupedTypeTag(value) {
  * than replacing them —
  *
  *   [Grouped, All Locations]  one form for the whole series, everywhere
- *   [Monthly, All Locations]  one form per calendar month, everywhere
+ *   [Regular, All Locations]  one form per calendar month, everywhere
  *   [Cap: 12, All Locations]  ...and the cap still applies PER SESSION
  *
  * — because it only changes the SCOPE half of the group key
@@ -790,18 +812,18 @@ function describeLocations(locations) {
  * are expected at every meeting from then on, indefinitely — including
  * meetings whose calendar events do not exist yet.
  *
- * WHY IT IS A THIRD, SEPARATE TAG. [Grouped]/[Monthly] answer "which sessions
+ * WHY IT IS A THIRD, SEPARATE TAG. [Grouped]/[Regular] answer "which sessions
  * share ONE FORM", and [All Locations] answers "which locations share it".
  * Neither can express "and the people who signed up stay signed up." Making
  * Club a value of Type_Tag would have forced a choice between them, which is
- * exactly wrong — a club can perfectly well be Monthly (a fresh form each
+ * exactly wrong — a club can perfectly well be Regular (a fresh form each
  * month, so the menu and dates stay current) while its roster carries across
  * every one of those forms. So it composes, the same way [All Locations]
  * does:
  *
  *   [Club]                  a club, one form per month (the default span)
  *   [Club, Grouped]         a club, one form for the whole series
- *   [Club, Monthly]         spelled out; same as [Club]
+ *   [Club, Regular]         spelled out; same as [Club]
  *   [Club, Cap: 12]         a club with a per-session cap
  *   [Club, All Locations]   one club meeting at several sites, one form
  *
@@ -819,7 +841,7 @@ function describeLocations(locations) {
  *     one-way consequence of a form submission nobody can undo.
  *
  * A club's identity is the PROGRAM (title + where it runs), not the form —
- * see computeClubKey(). A Monthly club gets a new form every month and must
+ * see computeClubKey(). A Regular club gets a new form every month and must
  * keep the same roster across all of them, so keying membership by form would
  * lose the entire point.
  */
@@ -1034,7 +1056,7 @@ const LOCATION_COLOR_MAP = {
 const SHEET_NAMES = {
   CONFIG: 'Config',
   PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
-  LUNCH_EVENT_REGISTRANTS: 'Lunch_and_Event_Registrants',
+  REGISTRANT_DASH: 'Registrant_Dash',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
   LUNCH_SCHEDULE: 'Lunch_Schedule',
   TRIAGE: 'Deleted_Event_Triage',
@@ -1044,6 +1066,23 @@ const SHEET_NAMES = {
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
+
+/**
+ * Tabs this workbook used to call something else -> what they are called now.
+ *
+ * A tab rename is not cosmetic to a workbook that already holds data: the code
+ * asks for a sheet BY NAME, and a workbook whose registrant history sits on a
+ * tab nobody asks for any more would answer "no rows" — quietly, and on every
+ * path at once. getOrCreateSheet() therefore renames the old tab in place
+ * BEFORE it would create an empty new one, which keeps the data, its
+ * formatting, and every reference to it intact.
+ *
+ * Only ever applied when the new name is absent: a workbook that somehow has
+ * both is left exactly as it is rather than having one of them clobbered.
+ */
+const LEGACY_SHEET_RENAMES = {
+  'Registrant_Dash': 'Lunch_and_Event_Registrants'
+};
 
 /**
  * Column layouts. Every date-bearing sheet now leads with Event_Date (its
@@ -1078,11 +1117,19 @@ const HEADERS = {
   // checkboxes: ticking one asks, then writes its tag into the program's
   // calendar event descriptions, which is what makes the tick stick instead of
   // being wiped by the next render (see handleProgramDashboardEdit()).
+  //
+  // Event_Time reads as a RANGE ("10:00 AM – 11:30 AM"), which needs an end
+  // time to exist somewhere. Event_Date has only ever carried the START, so
+  // Event_End is stored alongside the other machine columns at the end of the
+  // row and hidden: nobody reads a raw datetime, but Event_Time and the
+  // registrant rows are both built from it. A row written before this column
+  // existed simply has none, and Event_Time falls back to the start time
+  // alone rather than inventing an end.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
-    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source'
+    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
@@ -1153,8 +1200,8 @@ const HEADERS = {
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
-  Lunch_and_Event_Registrants: [
-    'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+  Registrant_Dash: [
+    'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
@@ -1168,7 +1215,7 @@ const HEADERS = {
   //
   // The consumption columns are no longer hand-typed here (see
   // LUNCH_DASHBOARD_MANUAL_COLUMNS): they're tallied by buildDashboardRollup()
-  // from the five per-person meal counts on Lunch_and_Event_Registrants, the
+  // from the five per-person meal counts on Registrant_Dash, the
   // same way Served_Confirmed is tallied from Lunch_Served.
   // updateMasterLunchDashboard() only overwrites a cell when the tally is
   // greater than zero, so a value typed here before that wiring existed is
@@ -1193,7 +1240,7 @@ const HEADERS = {
   // different day from the one the row is dated — portions of this batch that
   // went out later, attributed here because this is the row with the
   // Actual_Ordered to reconcile them against (see Meal_Source on
-  // Lunch_and_Event_Registrants). It is always a subset of the consumption
+  // Registrant_Dash). It is always a subset of the consumption
   // columns beside it, never an addition to them: it explains part of those
   // numbers rather than adding to the total. A row reading 40 ordered, 14
   // takeaway, 8 carried over means eight of that fourteen left the building
@@ -1212,7 +1259,7 @@ const HEADERS = {
   // handed over. Everything else on this tab describes a date; this is the one
   // column that describes a thing that can outlive its date, which is what
   // makes "we served yesterday's chicken today" recordable at all (see
-  // Meal_Source on Lunch_and_Event_Registrants).
+  // Meal_Source on Registrant_Dash).
   //
   // DERIVED, never typed: deriveMealId() computes it from the row's own date,
   // location and type, and renderLunchScheduleSheet() re-stamps every row on
@@ -1224,13 +1271,13 @@ const HEADERS = {
   // Last on the row because nobody reads it — it is a join key that happens to
   // be visible, and the menu is what staff come to this tab for.
   Lunch_Schedule: ['Event_Date', 'Location', 'Type', 'Meal_Description', 'Meal_Shorthand', 'Meal_ID'],
-  // A superset of Lunch_and_Event_Registrants' own array (same columns, same
+  // A superset of Registrant_Dash' own array (same columns, same
   // order) plus 4 triage-only columns — moveRegistrantsToTriage() copies by
   // HEADER NAME, so keeping this a true prefix-plus-extra of the Registrants
   // array is what keeps every registrant column (Location/Event included)
   // landing in triage rows automatically, with no per-column wiring.
   Deleted_Event_Triage: [
-    'Event_Date', 'Location', 'Event', 'Name', 'Attended', 'Lunch_Served',
+    'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
@@ -1272,7 +1319,7 @@ const HEADERS = {
    * undo, and this is it.
    *
    * Club_Key is the machine key (computeClubKey()) — hidden, and the thing
-   * that keeps a Monthly club's roster attached across a new form every month.
+   * that keeps a Regular club's roster attached across a new form every month.
    */
   Club_Members: [
     'Club', 'Location', 'Name', 'Person_Type', 'Primary_Registrant',
@@ -1313,7 +1360,7 @@ const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
  * PERSON accounted for. All five are independent: one row can carry a dined-in
  * day-1 meal and two taken-out subs at once, which is the case the old single
  * "was this takeaway?" checkbox could not express (see
- * HEADERS.Lunch_and_Event_Registrants).
+ * HEADERS.Registrant_Dash).
  */
 const REGISTRANT_MEAL_COUNT_COLUMNS = [
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge'
@@ -1465,7 +1512,7 @@ const MEAL_SOURCE_LOOKAHEAD_DAYS = 7;
 const MEAL_SOURCE_MAX_OPTIONS = 40;
 /** Full set of Type choices offered on Lunch_Schedule / Master_Lunch_Dashboard. */
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
-/** Lunch_and_Event_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
+/** Registrant_Dash' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
 
 /**
@@ -1709,7 +1756,7 @@ const LEGACY_FOOTER_ITEM_TITLE = 'Footer Note';
  * said only "most people want the first option," which tells someone which box
  * to tick without ever telling them what either box does.
  *
- * TWO SPELLINGS OF EACH, and it matters which a given form gets: a [Monthly]
+ * TWO SPELLINGS OF EACH, and it matters which a given form gets: a [Regular]
  * form genuinely covers one calendar month, so "all events this month" is
  * exactly right and is what people asked to read. A [Grouped] series runs
  * across however many months it runs across, and telling someone they are
@@ -2430,11 +2477,51 @@ function findProgramSessionHeaderRows(sheet) {
 
 function getOrCreateSheet(ss, name) {
   let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    log(`Created missing tab: ${name}`);
-  }
+  if (sheet) return sheet;
+
+  // Before creating anything: is this tab already here under the name an
+  // earlier version of this script gave it? See LEGACY_SHEET_RENAMES.
+  const renamed = getOrCreateSheetRenameOnly(ss, name);
+  if (renamed) return renamed;
+
+  sheet = ss.insertSheet(name);
+  log(`Created missing tab: ${name}`);
   return sheet;
+}
+
+/**
+ * Applies every LEGACY_SHEET_RENAMES entry that still needs applying.
+ *
+ * getOrCreateSheet() already does this lazily, but plenty of code reads a tab
+ * with a plain getSheetByName() and treats "not there" as "no rows" — which is
+ * the wrong answer for a workbook whose data is sitting under the old name. So
+ * the rename is also done eagerly, at the points where a workbook first comes
+ * under this script's hands in a session: opening it, setting it up, and each
+ * sync. Cheap and idempotent — once the tabs carry their current names this is
+ * one getSheetByName() per entry and nothing else.
+ */
+function migrateLegacySheetNames(ss) {
+  const book = ss || SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(LEGACY_SHEET_RENAMES).forEach(currentName => {
+    if (book.getSheetByName(currentName)) return;
+    getOrCreateSheetRenameOnly(book, currentName);
+  });
+}
+
+/** The rename half of getOrCreateSheet(), without the "create it if it isn't there" half. */
+function getOrCreateSheetRenameOnly(ss, name) {
+  const formerName = LEGACY_SHEET_RENAMES[name];
+  if (!formerName) return null;
+  const former = ss.getSheetByName(formerName);
+  if (!former) return null;
+  try {
+    former.setName(name);
+    log(`Renamed the "${formerName}" tab to "${name}" — its rows, formatting and history are unchanged.`);
+    return former;
+  } catch (err) {
+    log(`⚠️ Could not rename "${formerName}" to "${name}" (${err}).`);
+    return null;
+  }
 }
 
 /**
@@ -4408,6 +4495,7 @@ function refreshFormsForChangedLunchDate(changedDate, location) {
 function initSheet() {
   if (!requireAuthorizedAdmin('Initialize sheet setup')) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  migrateLegacySheetNames(ss);
 
   // NOT deleted here any more. This used to drop Active_Programs outright,
   // discarding whatever was on it — the log line even claimed its data "now
@@ -4464,7 +4552,7 @@ function initSheet() {
  *   REBUILT (from the rows already on each tab)
  *     Config (older layouts are backed up, current ones kept as-is)
  *     Master_Program_Dashboard    — with triage OFF
- *     Lunch_and_Event_Registrants — including the Quick Mark panel
+ *     Registrant_Dash             — the tables only; Quick Mark is a dialog
  *     Deleted_Event_Triage
  *     Lunch_Schedule              — including the new ADD block
  *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
@@ -4489,6 +4577,7 @@ function initSheet() {
 function rebuildLayoutFromSheet() {
   if (!requireAuthorizedAdmin('Rebuild Layout (from sheet)')) return null;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  migrateLegacySheetNames(ss);
 
   const read = (name, headers, marker) => {
     const sheet = ss.getSheetByName(name);
@@ -4504,7 +4593,7 @@ function rebuildLayoutFromSheet() {
   };
 
   const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = read(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+  const registrantRows = read(SHEET_NAMES.REGISTRANT_DASH, HEADERS.Registrant_Dash, 'Event_ID');
   const triageRows = read(SHEET_NAMES.TRIAGE, HEADERS.Deleted_Event_Triage, 'Event_ID');
   const menuRows = read(SHEET_NAMES.LUNCH_SCHEDULE, HEADERS.Lunch_Schedule, 'Event_Date');
 
@@ -4548,7 +4637,7 @@ function rebuildLayoutFromSheet() {
   //    invalidates that cache);
   //  - the memory tabs are derived from both of the tabs above them.
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (registrySheet && registrantsSheet) {
     recomputeEventRegistryCounts(registrySheet, registrantsSheet, registrantRows);
   }
@@ -4589,7 +4678,7 @@ function reorderTabs(ss) {
   const order = [
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_DASHBOARD,
-    SHEET_NAMES.LUNCH_EVENT_REGISTRANTS,
+    SHEET_NAMES.REGISTRANT_DASH,
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
@@ -5277,13 +5366,13 @@ function isExplicitlyNotServing(date, locationName) {
  * spreadsheet read and is safe to call from an onEdit (see onEdit()).
  */
 function findRegistrantsExpectingLunch(dateKey, location, registrantRows) {
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
 
   let rows = registrantRows;
   if (!rows) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS) : null;
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
     if (!sheet) return [];
     try {
       rows = readAllSectionedRows(sheet, headers, 'Event_ID');
@@ -5673,6 +5762,11 @@ function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {
  * gate for that half, and it is what must be kept correct.
  */
 function onOpen() {
+  try {
+    migrateLegacySheetNames(SpreadsheetApp.getActiveSpreadsheet());
+  } catch (err) {
+    log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
+  }
   buildAppMenu(SpreadsheetApp.getUi(), isAuthorizedAdmin());
 }
 
@@ -5684,18 +5778,21 @@ function onOpen() {
  */
 function buildAppMenu(ui, includeAdmin) {
   const menu = ui.createMenu(APP_MENU_NAME)
+    // First, because it is the thing staff open this workbook to do on a
+    // serving day — see section 6d.
+    .addItem('⚡ Quick Mark Attendance / Lunch…', 'showQuickMarkDialog')
+    .addSeparator()
     .addItem('Sync Cal', 'syncCalendars')
     .addItem('Sync Registrations', 'syncRegistrations')
     .addSeparator()
     .addItem('🖨️ Print Sign-In Sheet (PDF)…', 'showSignInSheetDialog')
-    .addItem('📧 Invite Registrants to Calendar Events', 'inviteRegistrantsNow')
+    .addItem('📧 Invite Registrants to Calendar Events…', 'showCalendarInviteDialog')
     .addSeparator()
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
     .addItem('🔁 Apply Type / Club / No-Reg Changes to Calendar', 'applyProgramTagChangesToCalendar')
     .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
     .addItem('📄 Move Sessions to Another Form…', 'showRepointSessionsDialog')
-    .addItem('🗑️ Delete Registrations…', 'showDeleteRegistrationsDialog')
     .addSeparator()
     .addItem('🕓 Show All Past Rows', 'showAllPastRows')
     .addItem('Resize All Sheets', 'resizeAllSheets');
@@ -5704,6 +5801,11 @@ function buildAppMenu(ui, includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
       .addItem('🧱 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
       .addItem('🔗 Rewrite Event Links (fix duplicates)', 'rewriteEventRegistrationLinks')
+      // Destructive and irreversible, which is what it has in common with the
+      // rest of this submenu — deleting a session's registrations is not a
+      // day-to-day correction, and it was sitting one slot away from the
+      // menu items that are.
+      .addItem('🗑️ Delete Registrations…', 'showDeleteRegistrationsDialog')
       .addItem('💣 Destroy & Rebuild Forms…', 'destroyAndRebuildAllForms')
       .addSeparator()
       .addItem('Trigger Status', 'showTriggerStatus')
@@ -6372,7 +6474,7 @@ function onEdit(e) {
   try {
     const sheet = e.range.getSheet();
     const name = sheet.getName();
-    if (name === SHEET_NAMES.LUNCH_EVENT_REGISTRANTS) {
+    if (name === SHEET_NAMES.REGISTRANT_DASH) {
       handleRegistrantsEdit(e, sheet);
     } else if (name === SHEET_NAMES.LUNCH_DASHBOARD) {
       handleLunchDashboardEdit(e, sheet);
@@ -6401,8 +6503,8 @@ function onEdit(e) {
  * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,
  * outward-facing decisions.
  *
- * Changing Grouped <-> Monthly re-partitions a program's sessions across
- * forms: Monthly means one form per calendar month, Grouped means one form for
+ * Changing Grouped <-> Regular re-partitions a program's sessions across
+ * forms: Regular means one form per calendar month, Grouped means one form for
  * the whole series. Applying that means the next sync builds different forms
  * and injects different links into the calendar — so it asks first, reverts
  * the cell on "no", and on "yes" writes the tag back into the calendar
@@ -6458,7 +6560,7 @@ function handleProgramDashboardEdit(e, sheet) {
     const row = editedRow + r;
     if (!isRowInAnyDataZone(zones, row)) continue;
     const tag = normalizeTypeTag(sheet.getRange(row, typeCol + 1).getValue());
-    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) continue;
+    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.REGULAR) continue;
     const title = String(sheet.getRange(row, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
     if (!title) continue;
     if (targets.some(t => t.title === title && t.tag === tag)) continue; // one stamp per program
@@ -6914,7 +7016,7 @@ function applyProgramTagChangesToCalendar() {
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
     const tag = normalizeTypeTag(row[map['Type_Tag']]);
     if (!title || !calendarId) return;
-    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.MONTHLY) return;
+    if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.REGULAR) return;
     // Last row wins per program — they should all agree, and if they don't,
     // the most recently written one is the intent.
     byProgram[`${title}|${calendarId}`] = { title, calendarId, tag };
@@ -6961,14 +7063,14 @@ function applyTypeTagChangesToCalendar() {
 }
 
 /**
- * Writes [Grouped]/[Monthly] into the DESCRIPTION of every calendar event
+ * Writes [Grouped]/[Regular] into the DESCRIPTION of every calendar event
  * belonging to the same program as `editedRow`, replacing whichever grouping
  * bracket was there.
  *
  * The description is where resolveEventSettings() reads this from, so this is
  * what makes a Type_Tag edit stick. Without it the cell would read "Grouped"
  * until the next render recomputed it from the calendar and quietly put
- * "Monthly" back — the classic "my change didn't save" bug.
+ * "Regular" back — the classic "my change didn't save" bug.
  *
  * Scope is program + location (every session sharing Clean_Title and
  * Calendar_Source), not just the edited row: grouping is a property of the
@@ -7000,7 +7102,7 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
   // Every calendar is walked, but only this program's own calendar is stamped
   // unconditionally. The exception is a session tagged [All Locations]: it
   // shares ONE form with the other locations, so leaving them on a different
-  // Grouped/Monthly tag would split that shared program back into two forms —
+  // Grouped/Regular tag would split that shared program back into two forms —
   // one keyed ::FIXED and one keyed by month. Grouping is a property of a
   // program, and a linked program's program spans locations.
   Object.keys(CALENDAR_MAP).forEach(otherCalendarId => {
@@ -7102,7 +7204,7 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
 }
 
 /**
- * Returns `description` with any grouping bracket ([Grouped]/[Monthly], or the
+ * Returns `description` with any grouping bracket ([Grouped]/[Regular], or the
  * legacy [Fixed]/[Regular]) replaced by [newTag] — preserving [Cap: N] and any
  * unrelated bracketed notes, and appending the tag if none was present.
  */
@@ -7134,7 +7236,7 @@ function setGroupingBracketInDescription(description, newTag) {
 
 /**
  * Returns `description` with the [All Locations] tag added or removed,
- * preserving [Cap: N], [Grouped]/[Monthly] and any unrelated bracketed notes.
+ * preserving [Cap: N], [Grouped]/[Regular] and any unrelated bracketed notes.
  * Removing it empties a bracket that held nothing else, which is why the
  * result goes through tidyDescriptionWhitespace().
  */
@@ -7289,7 +7391,7 @@ function linkProgramAcrossLocations() {
     ? `"${title}" — ${matches.total} event(s) across ${Object.keys(matches.byLocation).length} location(s):\n` +
       `${locationSummary}\n\n` +
       `They will all be tagged [${SHARED_LOCATION_TAG}], and their UPCOMING sessions re-pointed onto one shared ` +
-      `form — one for the whole series if this program is Grouped, one per month if it is Monthly, in each case ` +
+      `form — one for the whole series if this program is Grouped, one per month if it is Regular, in each case ` +
       `whichever existing form already carries the most of those sessions. Its dates will be relabelled to name ` +
       `their location — "Mon, Jan 5, 2026${LOCATION_LABEL_SEPARATOR}Narberth" — and every upcoming event's ` +
       `registration link rewritten to point at it.\n\n` +
@@ -7390,7 +7492,7 @@ function stampSharedTagOnCalendars(matchedEvents, shared) {
 /**
  * Moves the UPCOMING sessions of `title` onto one form PER SPAN — one form
  * for the whole series if the program is [Grouped], one per calendar month if
- * it is [Monthly]. That mirrors exactly what a fresh import would build, so a
+ * it is [Regular]. That mirrors exactly what a fresh import would build, so a
  * program linked here and a program linked before its dates existed end up in
  * the same shape.
  *
@@ -7647,23 +7749,16 @@ function autoFlipManualOverride(sheet, headerMap0Based, editedRow, editedCol1Bas
   }
 }
 
-/** Lunch_and_Event_Registrants: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
+/** Registrant_Dash: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
 function handleRegistrantsEdit(e, sheet) {
   const editedRow = e.range.getRow();
   const editedCol = e.range.getColumn();
-
-  // The Quick Mark panel sits ABOVE the data zones, so it has to be handled
-  // before the zone check below discards everything outside them.
-  if (editedRow === QUICK_MARK.inputRow) {
-    handleQuickMarkEdit(e, sheet, editedCol);
-    return;
-  }
 
   const zones = getSectionZones(sheet, 'Event_ID');
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Lunch_and_Event_Registrants);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Registrant_Dash);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
   // Computed from the RANGE, not just its top-left cell, so a fill-down or a
@@ -7679,7 +7774,7 @@ function handleRegistrantsEdit(e, sheet) {
     const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
 
     // Lunch_Served no longer implies Attended, on a direct edit any more than
-    // through the Quick Mark panel — one rule, wherever the tick happens. A
+    // through the Quick Mark dialog — one rule, wherever the tick happens. A
     // member can get a take-out meal without ever attending the session, so
     // ticking Lunch here marks lunch only; tick Attended separately for a
     // normal dine-in mark.
@@ -7744,7 +7839,7 @@ function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrantRows = readAllSectionedRows(sheet, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+    const registrantRows = readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
 
     const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (registrySheet) {
@@ -7799,54 +7894,6 @@ function describeRecalculatedCounts(touched) {
   });
   const more = touched.length > 3 ? ` (+${touched.length - 3} more date(s))` : '';
   return `✅ Catering numbers updated: ${parts.join(' · ')}${more}`;
-}
-
-/**
- * The Quick Mark panel's own edits: cascade the dropdowns as the selection
- * narrows, and apply a tick to the real registrant row.
- */
-function handleQuickMarkEdit(e, sheet, editedCol) {
-  if (editedCol === QUICK_MARK.LOCATION_COL) {
-    // A new location invalidates whatever program/name was chosen under the
-    // previous one — clearing them is what keeps an impossible combination
-    // from being submitted.
-    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL, 1, 2).clearContent();
-    const lists = refreshQuickMarkDropdowns(sheet, null);
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.programList.length} session(s) at this location, nearest date first — pick one (or "${LUNCH_ONLY_PROGRAM_LABEL}" ` +
-      `for a meal with no program), or go straight to a name.`);
-    return;
-  }
-
-  if (editedCol === QUICK_MARK.EVENT_COL) {
-    sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).clearContent();
-    const lists = refreshQuickMarkDropdowns(sheet, null);
-    const others = lists.nameList.length - lists.registeredCount;
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `${lists.registeredCount} registered` +
-      (others > 0 ? `, plus ${others} other known member(s)` : '') +
-      ` — pick a name (or type a new one), then tick Attended, Lunch, or Lunch Only.`);
-    return;
-  }
-
-  if (editedCol === QUICK_MARK.NAME_COL) {
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length,
-      `Ready — tick Attended, Lunch, or Lunch Only to mark ${e.value || 'them'}.`);
-    return;
-  }
-
-  if (editedCol === QUICK_MARK.CLEAR_COL) {
-    clearQuickMarkInputs(sheet);
-    refreshQuickMarkDropdowns(sheet, null);
-    setQuickMarkStatus(sheet, HEADERS.Lunch_and_Event_Registrants.length, 'Cleared — choose a location to begin.');
-    return;
-  }
-
-  if (editedCol === QUICK_MARK.ATTENDED_COL || editedCol === QUICK_MARK.LUNCH_COL ||
-    editedCol === QUICK_MARK.LUNCH_ONLY_COL) {
-    if (!isTruthyCheckbox(e.value)) return; // un-ticking the panel box marks nothing
-    applyQuickMark(sheet, editedCol);
-  }
 }
 
 /** Master_Lunch_Dashboard: only the Full Schedule table (Upcoming/Past zones, marker 'Standard_Buffer') is real, editable data. */
@@ -8131,7 +8178,7 @@ const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
  * in a blob of text:
  *   [Cap: 12]            -> capacity 12
  *   [Grouped]            -> one form for the whole series (see EVENT_TYPES)
- *   [Monthly]            -> one form per calendar month (the default anyway)
+ *   [Regular]            -> one form per calendar month (the default anyway)
  *   [Cap: 12, Grouped]   -> both, one bracket
  *   [All Locations]      -> this event's sessions pool with the same-titled
  *                           sessions on every other calendar, onto ONE form
@@ -8142,7 +8189,7 @@ const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
  *                           Composes with all of the above:
  *                           [Club, Grouped], [Club, Cap: 12, All Locations]…
  *
- * [Fixed] is still read as [Grouped] and [Regular] as [Monthly], so
+ * [Fixed] is still read as [Grouped] and [Monthly] as [Regular], so
  * descriptions written before the rename keep working untouched — there is
  * nothing to go back and edit.
  *
@@ -8157,12 +8204,12 @@ function parseSettingsBrackets(text) {
   let isClub = false;
   let noRegistration = false;
   let sawAny = false;
-  // '' | 'Grouped' | 'Monthly' — what the text SAYS about grouping, as opposed
+  // '' | 'Grouped' | 'Regular' — what the text SAYS about grouping, as opposed
   // to what isFixed resolves to. The difference matters only to
   // resolveEventSettings(), and only for the one setting that has a spelling
-  // for "off": an explicit [Monthly] has to be able to override a legacy
+  // for "off": an explicit [Regular] has to be able to override a legacy
   // [Grouped] left behind in the title, and `isFixed === false` cannot tell
-  // "it says Monthly" apart from "it says nothing".
+  // "it says Regular" apart from "it says nothing".
   let explicitGrouping = '';
 
   BRACKET_GROUP_REGEX.lastIndex = 0; // the /g regex is module-level; never trust its cursor
@@ -8171,7 +8218,7 @@ function parseSettingsBrackets(text) {
     const content = match[1] || '';
     const capMatch = /Cap:\s*(\d+)/i.exec(content);
     if (capMatch) { capacity = parseInt(capMatch[1], 10); sawAny = true; }
-    // The WHERE half of grouping, orthogonal to Grouped/Monthly above — see
+    // The WHERE half of grouping, orthogonal to Grouped/Regular above — see
     // SHARED_LOCATION_SCOPE.
     if (SHARED_LOCATION_WORDS_REGEX.test(content)) { isShared = true; sawAny = true; }
     // Orthogonal to BOTH of the above — see CLUB_TAG. Read from the same
@@ -8181,16 +8228,16 @@ function parseSettingsBrackets(text) {
     // see NO_REGISTRATION_TAG. There is no form to group, cap or share.
     if (NO_REGISTRATION_WORDS_REGEX.test(content)) { noRegistration = true; sawAny = true; }
     // "Grouped" is the current word, "Fixed" the one it replaced — both mean
-    // "one form for the whole series." An explicit [Monthly]/[Regular] is
+    // "one form for the whole series." An explicit [Regular]/[Monthly] is
     // recognized too, purely so it counts as sawAny (a deliberate statement
     // of the default) rather than reading as an unrecognized note.
     if (/\b(Grouped|Fixed)\b/i.test(content)) { isFixed = true; sawAny = true; explicitGrouping = EVENT_TYPES.GROUPED; }
     if (/\b(Monthly|Regular)\b/i.test(content)) {
       sawAny = true;
-      // Only when nothing has already said Grouped: "[Grouped] [Monthly]" on
+      // Only when nothing has already said Grouped: "[Grouped] [Regular]" on
       // one event is a contradiction, and the more specific instruction
       // (share one form) is the safer reading of it.
-      if (!explicitGrouping) explicitGrouping = EVENT_TYPES.MONTHLY;
+      if (!explicitGrouping) explicitGrouping = EVENT_TYPES.REGULAR;
     }
   }
   return { capacity, isFixed, isShared, isClub, noRegistration, sawAny, explicitGrouping };
@@ -8202,7 +8249,7 @@ function parseSettingsBrackets(text) {
  *   "Yoga Basics"    -> a program
  *   "*Yoga Basics"   -> the same program, TENTATIVE (see below)
  *
- * BOTH capacity and Grouped-vs-Monthly now live in the event DESCRIPTION —
+ * BOTH capacity and Grouped-vs-Regular now live in the event DESCRIPTION —
  * see parseSettingsBrackets() / resolveEventSettings(). The title is what
  * attendees read on a shared calendar, and "[Cap: 12, Fixed]" there is
  * internal scheduling jargon. Brackets left in a title are still read as a
@@ -8260,8 +8307,8 @@ function resolveEventSettings(event, parsedTitle) {
   const capacity = fromDescription.capacity || parsedTitle.legacyCapacity || 0;
   // Grouping is the ONE setting with a spelling for "off", so it is the one
   // the description can actively contradict rather than merely not mention:
-  // an explicit [Monthly] here beats a [Grouped] still sitting in the title.
-  // Without this, moving a program to Monthly in the description does nothing
+  // an explicit [Regular] here beats a [Grouped] still sitting in the title.
+  // Without this, moving a program to Regular in the description does nothing
   // at all until someone also finds and deletes the legacy title bracket —
   // the "I changed it and it changed itself back" failure, one layer down.
   const isFixed = fromDescription.explicitGrouping
@@ -8327,6 +8374,7 @@ function syncCalendarsInternal() {
   withCalendarChangeTriggersPaused('sync', () => {
     try {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
+      migrateLegacySheetNames(ss);
       const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
 
       if (findProgramSessionHeaderRows(registrySheet).length === 0) {
@@ -8978,7 +9026,7 @@ function buildEventGroups(parsedSessions) {
   parsedSessions.forEach(({ event, parsed, calendarId, locationName }) => {
     const startTime = event.getStartTime();
     const monthLabel = getMonthLabel(startTime);
-    const typeTag = parsed.isFixed ? EVENT_TYPES.GROUPED : EVENT_TYPES.MONTHLY;
+    const typeTag = parsed.isFixed ? EVENT_TYPES.GROUPED : EVENT_TYPES.REGULAR;
 
     const scope = parsed.isShared ? SHARED_LOCATION_SCOPE : calendarId;
     const span = parsed.isFixed ? 'FIXED' : monthLabel;
@@ -10015,6 +10063,11 @@ function getFormInfoForLink(formId, cache) {
  */
 function refreshFormForNewDates(formId, group, configInfo) {
   const form = FormApp.openById(formId);
+  // FIRST, before anything else this function refreshes: a program renamed on
+  // the calendar keeps its form (recovered from the event descriptions — see
+  // renameFormForGroup()), and the form has to stop advertising the old name.
+  renameFormForGroup(form, group);
+
   const sessions = sessionsOfGroup(group);
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
@@ -10047,17 +10100,76 @@ function refreshFormForNewDates(formId, group, configInfo) {
   };
 }
 
-/** Creates a new per-group registration form by COPYING the one shared template. */
-function createRegistrationForm(group, configInfo) {
+/**
+ * What a group's registration form is CALLED. One function, because the name
+ * is now asserted on every refresh as well as at creation — see
+ * renameFormForGroup().
+ */
+function buildFormTitleForGroup(group) {
   const baseTitle = group.isFixed
     ? `${group.cleanTitle} — Registration`
     : `${group.cleanTitle} - ${group.monthLabel}`;
   // A cross-location form sits in the same Drive folder as the per-location
   // ones and would otherwise be indistinguishable from them by name.
-  const formTitle = group.isShared ? `${baseTitle} (${SHARED_LOCATION_TAG})` : baseTitle;
+  return group.isShared ? `${baseTitle} (${SHARED_LOCATION_TAG})` : baseTitle;
+}
+
+/**
+ * Renames `form` to match what its group is now called, if it doesn't already.
+ *
+ * WHY A RENAME AND NOT A NEW FORM. Renaming a program on the calendar changes
+ * its group key (`<scope>::<title>::<span>`), so nothing in the persistent
+ * registry points at its form any more. What saves it is the registration link
+ * this system injects into every one of the program's calendar event
+ * descriptions: findExistingFormIdFromEvents() recovers the Form ID from there
+ * and processCalendarGroup() reuses that form — which is right, and is what
+ * keeps every link already handed out working.
+ *
+ * What did NOT happen was the rename. The form kept the old program's name in
+ * its title forever: respondents opened "Chair Yoga - September" to sign up
+ * for a program the calendar, the dashboard and the printed sheets all called
+ * something else, and the only way to fix it was by hand in Drive. The date
+ * labels, description and questions were all being refreshed; the one thing a
+ * person actually reads first was not.
+ *
+ * The Drive FILE is renamed alongside the form: they are the same object, but
+ * a form's title and its file name are separate fields and Drive's is what
+ * every folder listing and search result shows.
+ */
+function renameFormForGroup(form, group) {
+  const wanted = buildFormTitleForGroup(group);
+  let current;
+  try {
+    current = form.getTitle();
+  } catch (err) {
+    log(`ℹ️ Could not read the title of form ${form.getId()} to check it (${err}).`);
+    return false;
+  }
+  if (current === wanted) return false;
+
+  try {
+    form.setTitle(wanted);
+  } catch (err) {
+    log(`⚠️ Could not rename form ${form.getId()} from "${current}" to "${wanted}" (${err}).`);
+    return false;
+  }
+  try {
+    DriveApp.getFileById(form.getId()).setName(wanted);
+  } catch (err) {
+    // The form itself is renamed, which is what respondents see; a stale Drive
+    // file name is untidy rather than wrong.
+    log(`ℹ️ Renamed form ${form.getId()} but could not rename its Drive file (${err}).`);
+  }
+  log(`Renamed form ${form.getId()} from "${current}" to "${wanted}" — the program was renamed on the calendar.`);
+  return true;
+}
+
+/** Creates a new per-group registration form by COPYING the one shared template. */
+function createRegistrationForm(group, configInfo) {
+  const formTitle = buildFormTitleForGroup(group);
 
   // One template for everything now — the Attendance Mode fast path is on
-  // every form, so Grouped and Monthly groups no longer need separate bases.
+  // every form, so Grouped and Regular groups no longer need separate bases.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
   const form = FormApp.openById(copiedFile.getId());
@@ -10148,13 +10260,18 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     const eventId = computeEventId(session.calendarId, group.cleanTitle, dateKey);
     const row = new Array(headers.length).fill('');
 
+    const endTime = ev.getEndTime();
+
     row[map['Event_Date']] = startTime;
     row[map['Location']] = session.locationName;
     row[map['Clean_Title']] = group.cleanTitle;
+    // The end time is stored so Event_Time can show a RANGE — see
+    // HEADERS.Master_Program_Dashboard and setEventTimeFormulas().
+    row[map['Event_End']] = endTime || '';
     // Fallback only — renderProgramDashboard() always overwrites this with
-    // a =TEXT(Event_Date,...) formula (see that function for why a formula
-    // is required rather than a written time-like string).
-    row[map['Event_Time']] = Utilities.formatDate(startTime, TIMEZONE, 'h:mm a');
+    // a =TEXT(...) formula (see that function for why a formula is required
+    // rather than a written time-like string).
+    row[map['Event_Time']] = formatTimeRange(startTime, endTime);
     row[map['Type_Tag']] = group.typeTag;
     // Real checkbox columns: a boolean either way, never a blank. A blank cell
     // under a checkbox reads as "this row has no box", which is not what an
@@ -10186,9 +10303,9 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
   }
 }
 
-/** Moves any Lunch_and_Event_Registrants rows tied to a deleted event into the Triage tab. */
+/** Moves any Registrant_Dash rows tied to a deleted event into the Triage tab. */
 function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const allRows = readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
@@ -10230,7 +10347,7 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
 
 /**
  * The inverse of moveRegistrantsToTriage(): puts triaged rows back on
- * Lunch_and_Event_Registrants for every session that is on the dashboard
+ * Registrant_Dash for every session that is on the dashboard
  * again.
  *
  * Needed because a triage sweep is not recoverable from the forms. The import
@@ -10253,7 +10370,7 @@ function restoreTriagedRegistrants() {
   }
 
   const triageHeaders = HEADERS.Deleted_Event_Triage;
-  const regHeaders = HEADERS.Lunch_and_Event_Registrants;
+  const regHeaders = HEADERS.Registrant_Dash;
   const tMap = getIndexMap(triageHeaders);
   const rMap = getIndexMap(regHeaders);
 
@@ -10265,7 +10382,7 @@ function restoreTriagedRegistrants() {
     return 0;
   }
 
-  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const registrantRows = readAllSectionedRows(registrantsSheet, regHeaders, 'Event_ID');
   const present = new Set(registrantRows.map(row =>
     `${row[rMap['Event_ID']]}|${normalizeNameKey(row[rMap['Name']])}|${row[rMap['Person_Type']]}`));
@@ -10294,6 +10411,13 @@ function restoreTriagedRegistrants() {
     restored.push(restoredRow);
   });
 
+  // A restore is somebody deliberately putting a row back. If that same
+  // person-on-that-session had been deleted at some point, the tombstone would
+  // silently block every later re-import of them — so lift it here, where the
+  // intent is unambiguous. See section 5c.
+  clearRegistrantTombstones(restored.map(row =>
+    registrantTombstoneKey(row[rMap['Event_ID']], row[rMap['Name']], row[rMap['Person_Type']])));
+
   if (restored.length === 0) {
     log('restoreTriagedRegistrants: nothing in triage belongs to a session that is back.');
     return 0;
@@ -10301,7 +10425,7 @@ function restoreTriagedRegistrants() {
 
   renderRegistrantsSheet(false, registrantRows.concat(restored));
   renderTriageSheet(false, stayInTriage);
-  log(`restoreTriagedRegistrants: put ${restored.length} row(s) back on "${SHEET_NAMES.LUNCH_EVENT_REGISTRANTS}"; ` +
+  log(`restoreTriagedRegistrants: put ${restored.length} row(s) back on "${SHEET_NAMES.REGISTRANT_DASH}"; ` +
     `${stayInTriage.length} row(s) stay in triage (their session is still missing).`);
   toastIfPossible(`Restored ${restored.length} registrant row(s) from triage ✅`);
   return restored.length;
@@ -10397,8 +10521,9 @@ function syncRegistrations() {
 
 function syncRegistrationsInternal() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  migrateLegacySheetNames(ss);
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
 
   const lastSync = getLastSyncTime();
   const syncStartedAt = new Date();
@@ -10408,7 +10533,7 @@ function syncRegistrationsInternal() {
   // are built from the same rows rather than scanning the sheet twice.
   const sessionRows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
   const registryIndex = buildRegistryIndex(registrySheet, sessionRows);
-  const existingRows = readAllSectionedRows(registrantsSheet, HEADERS.Lunch_and_Event_Registrants, 'Event_ID');
+  const existingRows = readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
   const existingRowIndex = getExistingRegistrantIndex(existingRows);
 
@@ -10534,6 +10659,9 @@ function buildRegistryIndex(registrySheet, sessionRows) {
       eventId: row[map['Event_ID']],
       maxCapacity: Number(row[map['Max_Capacity']]) || 0,
       eventDate,
+      // What the session's clock time reads as on the registrant rows built
+      // from this entry — see formatTimeRange().
+      eventTime: formatTimeRange(eventDate, map['Event_End'] === undefined ? '' : row[map['Event_End']]),
       location,
       cleanTitle,
       isClub,
@@ -10564,9 +10692,173 @@ function normalizeNameKey(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+// ============================================================================
+// 5c. DELETION TOMBSTONES  (why a deleted registration stays deleted)
+// ============================================================================
+//
+// Deleting rows from the registrants tab did not delete anything for long. The
+// rows went, and then the next sync put them straight back — which read as the
+// delete tool being broken, and was in fact three separate paths each doing
+// exactly what they were built to do:
+//
+//   1. THE ALL-DATES REGISTRY. Somebody who answered "sign up for every date"
+//      is recorded once, per form, and applyAllDatesCatchup() re-books them
+//      onto every session that form covers, on every sync, forever. Deleting
+//      the ROWS never touched the registry entry that produces them.
+//   2. THE CLUB ROSTER. Same shape: an active Club_Members row means
+//      applyClubRosterCatchup() books that person into every upcoming session
+//      of the club. Deleting a booking is not resigning from the club.
+//   3. THE FORM RESPONSE. Left in place unless the dialog was told otherwise —
+//      deliberately, since it is the only copy of what somebody actually
+//      said — and re-imported the moment anything moves LAST_FORM_SYNC_TIME
+//      backwards (a restore, a re-run, a form migration).
+//
+// None of those is wrong on its own. What was missing is a record that a human
+// deliberately removed a registration, which is what a tombstone is: the key
+// (Event_ID|name|Person_Type) of a row somebody deleted on purpose.
+// buildRegistrantRow() is the single funnel every path builds rows through —
+// the import, both catch-ups — and it refuses to build a row whose key is
+// tombstoned, so all three paths are closed by one check.
+//
+// A TOMBSTONE IS NOT FOREVER. It is scoped to one person on one session, so it
+// blocks a re-import, not the person: they can register again for a different
+// date, be added as a walk-in, or be booked into the same session by hand.
+// Re-registering for THAT session with a genuinely new submission is the one
+// case a tombstone should stand down for, and it does — see
+// clearRegistrantTombstones(), called whenever a row for that key is written
+// deliberately rather than re-derived.
+//
+// They also expire: a session's tombstones are dropped once the session is
+// well past (TOMBSTONE_RETENTION_DAYS), because nothing re-imports a session
+// that old and a property that only ever grows is a property that eventually
+// stops being writable.
+// ============================================================================
+
+/**
+ * { "Event_ID|nameKey|Person_Type": { d: "yyyy-MM-dd" session date, p: Party_ID } }.
+ *
+ * The Party_ID is what makes "they registered again" distinguishable from
+ * "the same response came round a second time". A re-import of the response
+ * the deletion was aimed at carries the SAME Party_ID and stays blocked; a
+ * genuinely new submission carries a different one and lifts the tombstone.
+ * Without it, anything that moves LAST_FORM_SYNC_TIME backwards would quietly
+ * resurrect every deleted row.
+ */
+const REGISTRANT_TOMBSTONE_PROP_KEY = 'DELETED_REGISTRANTS_V1';
+
+/** How long after a session's date its tombstones are kept. */
+const TOMBSTONE_RETENTION_DAYS = 400;
+
+let __tombstoneCache = null;
+let __tombstoneDirty = false;
+
+function getRegistrantTombstones() {
+  if (__tombstoneCache) return __tombstoneCache;
+  const raw = PropertiesService.getScriptProperties().getProperty(REGISTRANT_TOMBSTONE_PROP_KEY);
+  try {
+    __tombstoneCache = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    log(`⚠️ The deleted-registration list could not be read (${err}) — starting a fresh one.`);
+    __tombstoneCache = {};
+  }
+  return __tombstoneCache;
+}
+
+function saveRegistrantTombstones() {
+  if (!__tombstoneDirty || !__tombstoneCache) return;
+  PropertiesService.getScriptProperties()
+    .setProperty(REGISTRANT_TOMBSTONE_PROP_KEY, JSON.stringify(__tombstoneCache));
+  __tombstoneDirty = false;
+}
+
+/** The tombstone key for one registrant row. Same shape as getExistingRegistrantIndex()'s keys. */
+function registrantTombstoneKey(eventId, name, personType) {
+  return `${String(eventId || '').trim()}|${normalizeNameKey(name)}|${String(personType || '').trim()}`;
+}
+
+/**
+ * Records that these rows were deliberately deleted, and drops any tombstone
+ * whose session is long enough past to be beyond re-import.
+ */
+function recordRegistrantTombstones(rows, map) {
+  const store = getRegistrantTombstones();
+  let added = 0;
+  (rows || []).forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const name = String(row[map['Name']] || '').trim();
+    if (!eventId || !name) return; // nothing an import could match against anyway
+    const date = coerceDate(row[map['Event_Date']]);
+    const key = registrantTombstoneKey(eventId, name, row[map['Person_Type']]);
+    if (store[key]) return;
+    store[key] = {
+      d: date ? formatDateKey(date) : formatDateKey(new Date()),
+      p: String(row[map['Party_ID']] || '').trim()
+    };
+    added++;
+  });
+
+  const cutoff = formatDateKey(new Date(Date.now() - TOMBSTONE_RETENTION_DAYS * 86400000));
+  let expired = 0;
+  Object.keys(store).forEach(key => {
+    if (tombstoneDateKey(store[key]) < cutoff) { delete store[key]; expired++; }
+  });
+
+  if (added > 0 || expired > 0) {
+    __tombstoneDirty = true;
+    saveRegistrantTombstones();
+    log(`recordRegistrantTombstones: ${added} registration(s) marked deleted, ${expired} expired tombstone(s) dropped.`);
+  }
+  return added;
+}
+
+/**
+ * Lifts the tombstones for these keys — the "they signed up again" case.
+ *
+ * Called wherever a row is written DELIBERATELY rather than re-derived: a
+ * genuinely new form submission, a walk-in typed at the desk, a restore from
+ * triage. Without this a deletion would be permanent for that person on that
+ * session, which is a stronger claim than anybody made by pressing delete.
+ */
+function clearRegistrantTombstones(keys) {
+  const list = Array.isArray(keys) ? keys : [keys];
+  const store = getRegistrantTombstones();
+  let cleared = 0;
+  list.forEach(key => {
+    if (!key || !store[key]) return;
+    delete store[key];
+    cleared++;
+  });
+  if (cleared > 0) {
+    __tombstoneDirty = true;
+    saveRegistrantTombstones();
+  }
+  return cleared;
+}
+
+/**
+ * The tombstone for this exact person-on-this-session, or null.
+ *
+ * Tolerates the bare date string an earlier version stored: an entry with no
+ * recorded Party_ID blocks every re-import of that key, which is the safe
+ * reading — it can still be lifted by a walk-in or a restore, both of which
+ * clear the tombstone outright rather than testing it.
+ */
+function getRegistrantTombstone(eventId, name, personType) {
+  const entry = getRegistrantTombstones()[registrantTombstoneKey(eventId, name, personType)];
+  if (!entry) return null;
+  return typeof entry === 'string' ? { d: entry, p: '' } : entry;
+}
+
+/** The session date on a tombstone, whichever shape it was stored in. */
+function tombstoneDateKey(entry) {
+  if (!entry) return '';
+  return String(typeof entry === 'string' ? entry : (entry.d || ''));
+}
+
+
 /** Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited OR Manually Added. */
 function getProtectedRegistrantKeys(rows) {
-  const map = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
+  const map = getIndexMap(HEADERS.Registrant_Dash);
   const set = new Set();
   rows.forEach(row => {
     const override = String(row[map['Manual_Override']]).trim();
@@ -10586,7 +10878,7 @@ function getProtectedRegistrantKeys(rows) {
  * supersede.
  */
 function getExistingRegistrantIndex(rows) {
-  const map = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
+  const map = getIndexMap(HEADERS.Registrant_Dash);
   const index = new Map();
   rows.forEach(row => index.set(`${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`, row));
   return index;
@@ -10780,6 +11072,9 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
         lunchType: wantsLunch ? 'Yes - Lunch' : 'No Lunch', primaryRegistrant: person.primaryRegistrant,
         adminNotes: notes, formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
         partyId, partySize,
+        // A response being read as it arrives — the one path allowed to lift a
+        // deletion tombstone. See buildRegistrantRow() and section 5c.
+        fromLiveSubmission: true,
         // Contact details belong to the SUBMISSION, so a named guest carries
         // the same ones — they arrived together, and the printed sign-in sheet
         // and any calendar invite need a way to reach each row's party.
@@ -10862,6 +11157,7 @@ function processAllDatesResponse(args) {
         registryEntry, name: person.name, personType: person.personType, lunchType,
         primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '', formEditUrl: responseEditUrl,
         protectedKeys, existingRowIndex, submittedAt, orderAheadDays, partyId, partySize,
+        fromLiveSubmission: true,
         phone, email
       }));
     });
@@ -10990,7 +11286,29 @@ function buildRegistrantRow(args) {
     return null; // never overwrite a manually-edited/added row, resubmission or not
   }
 
-  const map = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
+  // Somebody deleted this exact registration on purpose. The import and both
+  // catch-ups all funnel through here, so this one check is what makes a
+  // deletion stick instead of being undone by the next sync — see section 5c.
+  //
+  // A GENUINELY NEW SUBMISSION lifts it: registering again is the person
+  // saying they are coming after all, and a past deletion has no business
+  // vetoing that. Two conditions, both required. `args.fromLiveSubmission`
+  // marks the paths that are reading a response as it arrives (the import
+  // itself) as opposed to re-deriving rows from standing state — the all-dates
+  // registry and the club roster, which are exactly what kept refilling
+  // deleted rows and must never revive anything on their own. And the
+  // Party_ID must differ from the one the tombstone recorded, so re-reading
+  // the very response that was deleted stays blocked however many times it
+  // comes round.
+  const tombstone = getRegistrantTombstone(registryEntry.eventId, displayName, personType);
+  if (tombstone) {
+    const isNewSubmission = !!args.fromLiveSubmission && !!partyId && partyId !== tombstone.p;
+    if (!isNewSubmission) return null;
+    clearRegistrantTombstones(key);
+    log(`A deleted registration was re-created by a new submission: ${displayName} on ${registryEntry.eventId}.`);
+  }
+
+  const map = getIndexMap(HEADERS.Registrant_Dash);
   const existingRow = existingRowIndex.get(key);
 
   if (existingRow) {
@@ -11007,6 +11325,7 @@ function buildRegistrantRow(args) {
         : (wantsLunch ? 'Needed' : 'No Lunch');
       existingRow[map['Admin_Notes']] = adminNotes || '';
       existingRow[map['Party_Size']] = partySize || '';
+      if (registryEntry.eventTime) existingRow[map['Event_Time']] = registryEntry.eventTime;
       existingRow[map['Order_Ahead_Flag']] = computeOrderAheadFlag(registryEntry.eventDate, submittedAt, orderAheadDays);
       existingRow[map['Form_Source']] = formSource;
       // Contact details are only ever ADDED here, never blanked: a resubmission
@@ -11038,11 +11357,12 @@ function buildRegistrantRow(args) {
 
   registryEntry.activeCountSoFar = (registryEntry.activeCountSoFar || 0) + (programStatus === 'Active' ? 1 : 0);
 
-  const row = new Array(HEADERS.Lunch_and_Event_Registrants.length).fill('');
+  const row = new Array(HEADERS.Registrant_Dash.length).fill('');
 
   row[map['Location']] = registryEntry.location || '';
   row[map['Event']] = registryEntry.cleanTitle || '';
   row[map['Event_Date']] = registryEntry.eventDate;
+  row[map['Event_Time']] = registryEntry.eventTime || '';
   row[map['Manual_Override']] = 'Auto-Synced';
   row[map['Name']] = displayName;
   row[map['Phone']] = phone;
@@ -11083,7 +11403,7 @@ function recomputeEventRegistryCounts(registrySheet, registrantsSheet, registran
 
 function buildEventCountsFromRegistrants(registrantsSheet, registrantRows) {
   const counts = {};
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const rows = registrantRows || readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
@@ -11132,7 +11452,7 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
  * is what turns silent waitlisting into a signal a respondent can actually
  * see before they submit. Forms with no capped sessions at all are skipped
  * entirely (nothing on them can ever go full), so this stays cheap on the
- * common case of unlimited/"Monthly" programs.
+ * common case of unlimited/"Regular" programs.
  */
 function refreshFormCapacityLabelsForAllForms(registrySheet) {
   const headers = HEADERS.Master_Program_Dashboard;
@@ -11211,7 +11531,7 @@ function isFormOnCurrentTemplate(form) {
  * cost is that responses already collected against the OLD questions lose
  * their per-question answers when those questions are deleted — which is why
  * this runs from syncRegistrations() only AFTER that run has imported
- * everything new. Rows already on Lunch_and_Event_Registrants are the record
+ * everything new. Rows already on Registrant_Dash are the record
  * of those registrations and are untouched.
  */
 function rebuildFormFromCurrentTemplate(form, context) {
@@ -11552,14 +11872,45 @@ function saveCalendarInviteLedger() {
 const MAX_INVITE_EVENTS_PER_RUN = 40;
 
 /**
- * Brings every upcoming session's calendar guest list into line with its
+ * Splits registrant rows into the emails that SHOULD be on each session's
+ * guest list and the ones that should not.
+ *
+ * A person appearing in both (two rows, one cancelled and one active) counts
+ * as wanted — the active row wins. Shared by the pass that actually sends and
+ * by the dialog that reports what sending would do, so the two can never
+ * disagree about a session having work outstanding.
+ */
+function partitionInviteEmails(rows, lrMap, sessionByEventId) {
+  const wanted = {};
+  const unwanted = {};
+  (rows || []).forEach(row => {
+    const eventId = String(row[lrMap['Event_ID']] || '').trim();
+    if (!sessionByEventId[eventId]) return;
+    const email = String(row[lrMap['Email']] || '').trim().toLowerCase();
+    if (!isPlausibleEmail(email)) return;
+    const status = String(row[lrMap['Program_Status']] || '').trim();
+    const bucket = status === 'Active' ? wanted : unwanted;
+    if (!bucket[eventId]) bucket[eventId] = new Set();
+    bucket[eventId].add(email);
+  });
+  return { wanted, unwanted };
+}
+
+/**
+ * Brings upcoming sessions' calendar guest lists into line with their
  * registrants. Returns { invited, removed, eventsTouched, deferred }.
  *
- * Safe to call on every sync and safe to call by hand from the menu: it
- * computes the difference against the ledger and does nothing when there is
- * none.
+ * Every upcoming session by default — that is the hourly sync's job. Pass
+ * `options.onlyEventIds` (a Set) to confine the pass to named sessions, which
+ * is what the menu's picker does: a manual run is nearly always about one
+ * program, and sweeping everything is not something to do by accident. See
+ * showCalendarInviteDialog().
+ *
+ * Safe to call on every sync and safe to call by hand: it computes the
+ * difference against the ledger and does nothing when there is none.
  */
-function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows) {
+function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options) {
+  const onlyEventIds = (options && options.onlyEventIds) || null;
   const result = { invited: 0, removed: 0, eventsTouched: 0, deferred: 0, skipped: false };
   if (!shouldInviteRegistrants()) {
     result.skipped = true;
@@ -11581,6 +11932,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows) {
     const calendarId = String(row[regMap['Calendar_Source']] || '').trim();
     if (!eventId || !date || !calendarId) return;
     if (formatDateKey(date) < todayKey) return; // upcoming only
+    if (onlyEventIds && !onlyEventIds.has(eventId)) return;
     sessionByEventId[eventId] = {
       eventId, date, calendarId,
       title: String(row[regMap['Clean_Title']] || '').trim(),
@@ -11589,28 +11941,13 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows) {
   });
   if (Object.keys(sessionByEventId).length === 0) return result;
 
-  const lrHeaders = HEADERS.Lunch_and_Event_Registrants;
+  const lrHeaders = HEADERS.Registrant_Dash;
   const lrMap = getIndexMap(lrHeaders);
-  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const rows = registrantRows ||
     (registrantsSheet ? readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : []);
 
-  // wanted = should be on the guest list; unwanted = should NOT be, and gets
-  // removed if we ever put them there. A person appearing in both (two rows,
-  // one cancelled and one active) counts as wanted — the active row wins.
-  const wanted = {};
-  const unwanted = {};
-  rows.forEach(row => {
-    const eventId = String(row[lrMap['Event_ID']] || '').trim();
-    if (!sessionByEventId[eventId]) return;
-    const email = String(row[lrMap['Email']] || '').trim().toLowerCase();
-    if (!isPlausibleEmail(email)) return;
-    const status = String(row[lrMap['Program_Status']] || '').trim();
-    const bucket = status === 'Active' ? wanted : unwanted;
-    if (!bucket[eventId]) bucket[eventId] = new Set();
-    bucket[eventId].add(email);
-  });
-
+  const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessionByEventId);
   const ledger = getCalendarInviteLedger();
   const eventIds = Object.keys(sessionByEventId);
 
@@ -11721,31 +12058,185 @@ function findCalendarEventForSession(session) {
 }
 
 /**
- * MENU ENTRY. Runs the invitation pass on demand — after turning the Config
- * switch on for the first time, or when somebody wants the invitations out now
- * rather than at the top of the hour.
+ * MENU ENTRY. Opens the picker for a manual invitation run.
+ *
+ * IT ASKS WHICH EVENTS, which the old one-click version did not: it swept
+ * every upcoming session at once, and "send mail to everyone signed up for
+ * anything in the next three months" is not a thing anybody presses a menu
+ * item to do deliberately. The common reasons for running this by hand are
+ * narrow — one program's guest list needs to go out before the hourly sync
+ * gets to it, or one event was fixed and its guests need re-adding — and both
+ * of them are a couple of ticks in this dialog.
+ *
+ * The hourly pass (inviteRegistrantsToCalendarEvents() with no filter, from
+ * syncRegistrationsInternal()) is unchanged: it still keeps every event's
+ * guest list in line on its own, and this only decides where a MANUAL run
+ * points.
  */
-function inviteRegistrantsNow() {
+function showCalendarInviteDialog() {
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return;
+  }
   if (!shouldInviteRegistrants()) {
     toastIfPossible(`Calendar invitations are switched off — set "Invite_Registrants" to ` +
       `"${CALENDAR_INVITE_OPTIONS.INVITE}" on the ${SHEET_NAMES.CONFIG} tab first.`);
-    return null;
+    return;
   }
-  if (!confirmConsequentialAction('Send calendar invitations now?',
-    'Everyone actively registered for an UPCOMING session, who gave an email address, will be added as a ' +
-    'guest on that session\'s Google Calendar event. Google emails each of them an invitation.\n\n' +
-    'Anyone whose registration has since been cancelled is removed from the guest list, which Google also ' +
-    'emails them about. People already invited are left alone.', false)) {
-    return null;
+  const sessions = listInvitableSessions();
+  if (sessions.length === 0) {
+    toastIfPossible('No upcoming sessions have anybody to invite or remove right now.');
+    return;
   }
+  const html = HtmlService.createHtmlOutput(buildCalendarInviteHtml(sessions))
+    .setWidth(640)
+    .setHeight(620);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Invite Registrants to Calendar Events');
+}
 
-  const result = inviteRegistrantsToCalendarEvents(null, null);
+/**
+ * Every UPCOMING session with invitation work outstanding, soonest first —
+ * somebody to add, or somebody previously invited who should now come off.
+ *
+ * Computed against the same ledger the send itself uses, so the counts in the
+ * dialog are what would actually happen rather than an estimate. A session
+ * already fully in line is left off the list entirely: offering it would be
+ * offering a no-op.
+ */
+function listInvitableSessions() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regMap = getIndexMap(regHeaders);
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return [];
+
+  const todayKey = formatDateKey(new Date());
+  const sessions = {};
+  readAllSectionedRows(registrySheet, regHeaders, 'Event_ID').forEach(row => {
+    const eventId = String(row[regMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[regMap['Event_Date']]);
+    const calendarId = String(row[regMap['Calendar_Source']] || '').trim();
+    if (!eventId || !date || !calendarId) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < todayKey) return;
+    sessions[eventId] = {
+      eventId, date, dateKey,
+      title: String(row[regMap['Clean_Title']] || '').trim(),
+      location: String(row[regMap['Location']] || '').trim()
+    };
+  });
+  if (Object.keys(sessions).length === 0) return [];
+
+  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrMap = getIndexMap(lrHeaders);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  const rows = registrantsSheet ? readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : [];
+
+  const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessions);
+  const ledger = getCalendarInviteLedger();
+
+  return Object.keys(sessions)
+    .map(eventId => {
+      const already = new Set(ledger[eventId] || []);
+      const want = wanted[eventId] || new Set();
+      const drop = unwanted[eventId] || new Set();
+      const toAdd = Array.from(want).filter(email => !already.has(email)).length;
+      const toRemove = Array.from(drop).filter(email => already.has(email) && !want.has(email)).length;
+      return { session: sessions[eventId], toAdd, toRemove };
+    })
+    .filter(item => item.toAdd > 0 || item.toRemove > 0)
+    .sort((a, b) => (a.session.dateKey < b.session.dateKey ? -1
+      : (a.session.dateKey > b.session.dateKey ? 1 : a.session.title.localeCompare(b.session.title))))
+    .map(item => ({
+      value: item.session.eventId,
+      label: `${formatDateLabel(item.session.date)} — ${item.session.title || '(untitled)'} ` +
+        `(${item.session.location}) — ${item.toAdd} to invite` +
+        (item.toRemove > 0 ? `, ${item.toRemove} to remove` : ''),
+      toAdd: item.toAdd,
+      toRemove: item.toRemove
+    }));
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildCalendarInviteHtml(sessions) {
+  const totalAdd = sessions.reduce((n, s) => n + s.toAdd, 0);
+  const totalRemove = sessions.reduce((n, s) => n + s.toRemove, 0);
+  const sessionTags = sessions.map(s =>
+    `<label class="row"><input type="checkbox" name="session" value="${escapeHtmlForDialog(s.value)}"> ` +
+    `${escapeHtmlForDialog(s.label)}</label>`).join('\n');
+
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  #sessions { border: 1px solid #ccc; border-radius: 4px; padding: 8px; height: 280px; overflow-y: auto; }
+  label.row { display: block; padding: 2px 0; }
+  .actions { margin: 8px 0 0 0; }
+  .actions a { color: #1A73E8; cursor: pointer; text-decoration: underline; margin-right: 12px; font-size: 12px; }
+  button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 9px 18px;
+           font-size: 13px; cursor: pointer; margin-top: 14px; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 12px; min-height: 18px; font-weight: bold; line-height: 1.5; }
+  .ok { color: #188038; } .err { color: #C5221F; } .busy { color: #666; font-weight: normal; }
+</style>
+<h3>Invite registrants to calendar events</h3>
+<p class="hint">
+  Tick the sessions to send for. Everyone actively registered who gave an email address is added as a
+  guest on that session's Google Calendar event, and <b>Google emails each of them an invitation</b>.
+  Anyone whose registration has since been cancelled is removed from the guest list, which Google also
+  emails them about. People already invited are left alone.
+</p>
+<p class="hint">
+  Only sessions with something outstanding are listed — ${totalAdd} person(s) to invite${totalRemove > 0
+    ? ` and ${totalRemove} to remove` : ''} in total. The hourly sync does all of this on its own; this
+  is for getting one session's invitations out now.
+</p>
+<div id="sessions">${sessionTags}</div>
+<div class="actions"><a onclick="pick(true)">Select all</a><a onclick="pick(false)">Select none</a></div>
+
+<button id="go" onclick="submit()">Send invitations</button>
+<div id="status"></div>
+<script>
+  function boxes() { return [].slice.call(document.querySelectorAll('input[name=session]')); }
+  function pick(on) { boxes().forEach(function (b) { b.checked = on; }); }
+  function say(msg, cls) { var el = document.getElementById('status'); el.textContent = msg; el.className = cls || ''; }
+  function submit() {
+    var picked = boxes().filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+    if (picked.length === 0) { say('Tick at least one session first.', 'err'); return; }
+    document.getElementById('go').disabled = true;
+    say('Sending… this can take a moment.', 'busy');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        document.getElementById('go').disabled = false;
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('go').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      })
+      .inviteRegistrantsForSessions(picked);
+  }
+</script>`;
+}
+
+/**
+ * Called from the dialog. Runs the invitation pass over the chosen sessions
+ * only, and returns a human-readable summary.
+ */
+function inviteRegistrantsForSessions(eventIds) {
+  if (!shouldInviteRegistrants()) {
+    return `⚠️ Calendar invitations are switched off on the ${SHEET_NAMES.CONFIG} tab.`;
+  }
+  const wanted = new Set((eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
+  if (wanted.size === 0) return '⚠️ No sessions were selected.';
+
+  const result = inviteRegistrantsToCalendarEvents(null, null, { onlyEventIds: wanted });
   const summary = `Calendar invitations ✅ — ${result.invited} invited, ${result.removed} removed, ` +
     `${result.eventsTouched} event(s) updated` +
-    (result.deferred > 0 ? ` (${result.deferred} more will go out on the next sync).` : '.');
-  toastIfPossible(summary);
-  log(`inviteRegistrantsNow: ${summary}`);
-  return result;
+    (result.deferred > 0 ? ` (${result.deferred} left over — run it again for those).` : '.');
+  log(`inviteRegistrantsForSessions: ${summary}`);
+  return summary;
 }
 
 
@@ -11762,7 +12253,7 @@ function inviteRegistrantsNow() {
 // tinting. Master_Program_Dashboard and Master_Lunch_Dashboard call the
 // lower-level writeUpcomingPastSections() directly (since they have their
 // own extra Today/Metrics sections above); the three flat, single-table
-// tabs (Lunch_and_Event_Registrants, Deleted_Event_Triage, Lunch_Schedule)
+// tabs (Registrant_Dash, Deleted_Event_Triage, Lunch_Schedule)
 // use the renderFlatDateSheet() wrapper instead.
 // ============================================================================
 
@@ -11919,7 +12410,7 @@ function partitionByDate(rows, dateColIdx, todayKey) {
 // ============================================================================
 //
 // Every date-sorted tab in this workbook grows in one direction forever. A
-// year in, the Past section of Lunch_and_Event_Registrants is thousands of
+// year in, the Past section of Registrant_Dash is thousands of
 // rows that nobody scrolls through and every render rewrites.
 //
 // THE CHEAP HALF OF THE PROBLEM — that it is in the way — is solved here, by
@@ -12014,7 +12505,7 @@ function showAllRows(sheet) {
 function showAllPastRows() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const names = [
-    SHEET_NAMES.LUNCH_EVENT_REGISTRANTS,
+    SHEET_NAMES.REGISTRANT_DASH,
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.LUNCH_DASHBOARD,
@@ -12042,7 +12533,7 @@ function reportArchivableMonths() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cutoff = getVisibleMonthCutoffKey();
   const tabs = [
-    { name: SHEET_NAMES.LUNCH_EVENT_REGISTRANTS, headers: HEADERS.Lunch_and_Event_Registrants, marker: 'Event_ID' },
+    { name: SHEET_NAMES.REGISTRANT_DASH, headers: HEADERS.Registrant_Dash, marker: 'Event_ID' },
     { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.Master_Program_Dashboard, marker: 'Event_ID' },
     { name: SHEET_NAMES.TRIAGE, headers: HEADERS.Deleted_Event_Triage, marker: 'Event_ID' },
     { name: SHEET_NAMES.LUNCH_SCHEDULE, headers: HEADERS.Lunch_Schedule, marker: 'Event_Date' }
@@ -12166,7 +12657,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
 /**
  * Fully rebuilds a "flat" (single logical table) sheet into Upcoming/Past
  * sub-tables, driven entirely by each row's Event_Date. Used for
- * Lunch_and_Event_Registrants, Deleted_Event_Triage, and Lunch_Schedule.
+ * Registrant_Dash, Deleted_Event_Triage, and Lunch_Schedule.
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
@@ -12187,8 +12678,10 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   const dateColIdx = headers.indexOf('Event_Date');
   const { upcoming, past } = partitionByDate(allRows, dateColIdx, todayKey);
 
-  // opts.startRow leaves room above the tables for a fixed block (the
-  // Registrants tab's Quick Mark panel), written by the caller afterwards.
+  // opts.startRow leaves room above the tables for a fixed block written by
+  // the caller afterwards. Nothing uses it today — the Registrants tab's Quick
+  // Mark panel did, and is now a dialog (section 6d) — but the parameter is
+  // what keeps that an option rather than a rewrite.
   const result = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
   sheet.setFrozenRows(result.upcomingHeaderRow);
 
@@ -12205,23 +12698,69 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
 
 function renderRegistrantsSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
+  const headers = HEADERS.Registrant_Dash;
   const rows = allRows || readAllSectionedRows(sheet, headers, 'Event_ID');
-  const result = renderFlatDateSheet(sheet, headers, rows, {
+  backfillRegistrantEventTimes(ss, headers, rows);
+  return renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',
     force,
-    startRow: QUICK_MARK.rowCount + 1,
     afterWrite: applyRegistrantsFormatting
   });
-  writeQuickMarkPanel(sheet, headers, rows);
-  return result;
+}
+
+/**
+ * Fills Event_Time in on any row that hasn't got one, from the session table.
+ *
+ * New rows are stamped at build time (buildRegistrantRow()), so this only ever
+ * has work to do for rows written before the column existed — and for those it
+ * is the difference between a column that fills in over months and one that is
+ * simply right the first time anyone looks at it. Reads the session table only
+ * when at least one row actually needs it, and never fails the render: a
+ * missing time is cosmetic, and the tab is not.
+ */
+function backfillRegistrantEventTimes(ss, headers, rows) {
+  const map = getIndexMap(headers);
+  if (map['Event_Time'] === undefined) return;
+  const needy = rows.filter(row =>
+    !String(row[map['Event_Time']] || '').trim() && String(row[map['Event_ID']] || '').trim());
+  if (needy.length === 0) return;
+
+  let timeByEventId;
+  try {
+    timeByEventId = buildEventTimeByEventId(ss);
+  } catch (err) {
+    log(`ℹ️ Could not read session times to fill in Event_Time (${err}) — the column stays blank on older rows.`);
+    return;
+  }
+  needy.forEach(row => {
+    const time = timeByEventId[String(row[map['Event_ID']] || '').trim()];
+    if (time) row[map['Event_Time']] = time;
+  });
+}
+
+/** { Event_ID: "10:00 AM – 11:30 AM" } from the session table. */
+function buildEventTimeByEventId(ss) {
+  const book = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = book.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const out = {};
+  if (!sheet) return out;
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    if (!eventId) return;
+    const time = formatTimeRange(row[map['Event_Date']],
+      map['Event_End'] === undefined ? '' : row[map['Event_End']]);
+    if (time) out[eventId] = time;
+  });
+  return out;
 }
 
 
 // ============================================================================
-// 6d. QUICK MARK  (the top-of-Registrants panel)
+// 6d. QUICK MARK  (the sign-in desk tool, on the menu)
 // ============================================================================
 //
 // Marking people off on a serving day is the highest-frequency job in this
@@ -12229,110 +12768,340 @@ function renderRegistrantsSheet(force, allRows) {
 // scroll right, tick two boxes, don't lose your place. The tab is sorted by
 // date, so a given program's people aren't even contiguous.
 //
-// The Quick Mark panel puts that on cells at the top of the tab: Location ->
-// Program -> Name, each a dropdown narrowed by the one before it, then
-// Attended / Lunch / Lunch Only checkboxes. Tick one and the matching
-// registrant row is updated in place, wherever it happens to be, and the
-// panel reports what it did and clears itself for the next person.
+// Quick Mark is a dialog off the menu: Location -> Session -> Name, each list
+// narrowed by the one before it, then Attended and/or Lunch. Pick, mark, and
+// the matching registrant row is updated in place wherever it happens to be —
+// the dialog stays open and resets to the same session, because the real job
+// is thirty people in a row, not one.
 //
-// Attended and Lunch are independent: a member can pick up a take-out meal
-// without ever attending the session, so ticking Lunch marks Lunch_Served
-// only — it does not also mark Attended. Lunch Only exists for exactly that
-// case: it marks Lunch_Served and explicitly clears Attended, so a walk-in
-// take-out pickup (or a correction to one wrongly marked present) is one tick
-// instead of two.
+// IT USED TO LIVE ON THE SHEET, as a band of cells frozen above the tables,
+// and every part of that was a fight with Sheets rather than with the problem:
+// the panel had to be written and re-written on every render, its dropdowns
+// rebuilt cell by cell through data validations, its feedback squeezed into
+// one overflowing cell, its state carried in cells anybody could type over,
+// and its every keystroke routed through onEdit — which also meant a stray
+// paste over row 3 ran a marking action. A dialog has real controls, real
+// lists, real feedback, and no ability to be clobbered by a paste. The panel
+// rows are gone; the tables now start at row 1.
 //
-// The dropdowns are rebuilt on every edit of the cell to their left, because a
-// static list of every name in the workbook is not a usable dropdown once
-// there are hundreds — narrowing is the entire value.
+// ATTENDED AND LUNCH ARE INDEPENDENT, and that is the whole vocabulary. A
+// member can pick up a take-out meal without ever attending, so Lunch on its
+// own means exactly that: lunch served, not present. There is no separate
+// "Lunch Only" option any more — it said the same thing as a Lunch tick with
+// Attended left clear, and two ways to say one thing is two ways to get it
+// wrong. Ticking Lunch alone now also CLEARS Attended, which is what makes it
+// a correction as well as a record ("I marked her present, she only collected
+// a meal").
+//
+// The lists are rebuilt from the current selection on every step, because a
+// static list of every name in the workbook is not a usable list once there
+// are hundreds — narrowing is the entire value.
 // ============================================================================
 
-const QUICK_MARK = {
-  bannerRow: 1,
-  labelRow: 2,
-  inputRow: 3,
-  statusRow: 4,
-  rowCount: 5, // 4 used + 1 spacer before the tables begin
-  // 1-based columns within the panel.
-  LOCATION_COL: 1,
-  EVENT_COL: 2,
-  NAME_COL: 3,
-  ATTENDED_COL: 4,
-  LUNCH_COL: 5,
-  // Take-out: a member can pick up a meal without attending the session at
-  // all, so "they got lunch" can no longer be read as "they were here" (see
-  // LUNCH_COL below). This is the explicit way to record that — Lunch_Served
-  // ticked, Attended left alone (or cleared, if it was already set) — instead
-  // of forcing staff to reason about it via two separate ticks every time.
-  LUNCH_ONLY_COL: 6,
-  CLEAR_COL: 7
-};
+/** Menu entry: opens the Quick Mark dialog. */
+function showQuickMarkDialog() {
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return;
+  }
+  const html = HtmlService.createHtmlOutput(buildQuickMarkHtml())
+    .setWidth(560)
+    .setHeight(600);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Quick Mark');
+}
 
-const QUICK_MARK_LABELS =
-  ['1. Location', '2. Program + Date', '3. Name', '✓ Attended', '✓ Lunch', '🥡 Lunch Only', 'Clear'];
+/**
+ * The dialog's markup. Inline, so this project stays a single .gs file.
+ *
+ * The lists are fetched rather than baked in: the session list depends on the
+ * chosen location and the name list on the chosen session, and a dialog that
+ * shipped all three cross-products would be most of the workbook.
+ */
+function buildQuickMarkHtml() {
+  const locations = Object.values(CALENDAR_MAP)
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .map(loc => `<option value="${escapeHtmlForDialog(loc)}">${escapeHtmlForDialog(loc)}</option>`)
+    .join('');
 
-/** Writes (or rewrites) the Quick Mark panel and seeds its Location dropdown. */
-function writeQuickMarkPanel(sheet, headers, rows) {
-  const numCols = Math.max(headers.length, QUICK_MARK_LABELS.length);
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 4px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 12px 0; line-height: 1.4; }
+  label.field { display: block; font-weight: bold; margin: 10px 0 3px 0; }
+  select, input[type=text] { width: 100%; padding: 6px; font-size: 13px; box-sizing: border-box; }
+  select[disabled], input[disabled] { background: #F1F3F4; color: #80868B; }
+  fieldset { border: 1px solid #ddd; border-radius: 4px; margin: 14px 0 0 0; padding: 8px 10px; }
+  legend { font-weight: bold; padding: 0 4px; }
+  label.tick { display: block; padding: 3px 0; }
+  label.tick span.note { color: #666; font-weight: normal; }
+  button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 9px 18px;
+           font-size: 13px; cursor: pointer; margin-top: 14px; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 12px; min-height: 18px; font-weight: bold; line-height: 1.5; }
+  .ok { color: #188038; } .err { color: #C5221F; } .busy { color: #666; font-weight: normal; }
+  #log { margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; color: #444; font-size: 12px; }
+  #log div { padding: 1px 0; }
+</style>
+<h3>Quick Mark</h3>
+<p class="hint">
+  Pick a location, then the session, then a person. Tick <b>Attended</b> for someone who came in;
+  tick <b>Lunch</b> on its own for a meal collected without attending. The dialog stays open on the
+  same session, so a queue of people is one pick and one click each.
+</p>
 
-  writeSectionBanner(sheet, QUICK_MARK.bannerRow, numCols,
-    '⚡ QUICK MARK — pick a location, then the program AND DATE, then a name, then tick Attended / Lunch / Lunch Only',
-    { hero: true });
+<label class="field" for="location">1. Location</label>
+<select id="location" onchange="locationChanged()">
+  <option value="">— choose a location —</option>
+  ${locations}
+</select>
 
-  sheet.getRange(QUICK_MARK.labelRow, 1, 1, QUICK_MARK_LABELS.length)
-    .setValues([QUICK_MARK_LABELS])
-    .setFontSize(TYPO.HERO_LABEL.size)
-    .setFontWeight('bold')
-    .setFontColor(TYPO.HERO_LABEL.color)
-    .setBackground('#EFEFEF')
-    .setHorizontalAlignment('center');
+<label class="field" for="session">2. Session (soonest first)</label>
+<select id="session" onchange="sessionChanged()" disabled>
+  <option value="">— choose a location first —</option>
+</select>
 
-  // The input row itself: yellow, like every other "this is yours" cell.
-  const inputRange = sheet.getRange(QUICK_MARK.inputRow, 1, 1, QUICK_MARK_LABELS.length);
-  inputRange
-    .setBackground(MANUAL_ENTRY_CELL_TINT)
-    .setFontSize(TYPO.HERO_LABEL.size)
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle')
-    .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
-  try { sheet.setRowHeight(QUICK_MARK.inputRow, ROW_HEIGHTS.HERO_DATA); } catch (err) { /* row absent */ }
+<label class="field" for="name">3. Name</label>
+<select id="name" onchange="nameChanged()" disabled>
+  <option value="">— choose a session first —</option>
+</select>
+<label class="field" for="newName" id="newNameLabel" style="display:none">Name of the walk-in</label>
+<input type="text" id="newName" placeholder="Type their name" style="display:none" autocomplete="off"
+       oninput="refreshButton()">
 
-  applyValueListValidationBounded(sheet, QUICK_MARK.LOCATION_COL, Object.values(CALENDAR_MAP), QUICK_MARK.inputRow, 1);
-  [QUICK_MARK.ATTENDED_COL, QUICK_MARK.LUNCH_COL, QUICK_MARK.LUNCH_ONLY_COL, QUICK_MARK.CLEAR_COL].forEach(col => {
-    sheet.getRange(QUICK_MARK.inputRow, col)
-      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+<fieldset>
+  <legend>Mark</legend>
+  <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
+  <label class="tick"><input type="checkbox" id="lunch" onchange="refreshButton()"> Lunch
+    <span class="note">— on its own means a meal collected, not present</span></label>
+</fieldset>
+
+<button id="go" onclick="submit(false)" disabled>Mark</button>
+<div id="status"></div>
+<div id="log"></div>
+
+<script>
+  var WALK_IN = '__WALK_IN__';
+
+  function el(id) { return document.getElementById(id); }
+  function say(msg, cls) { var s = el('status'); s.textContent = msg; s.className = cls || ''; }
+
+  function fill(select, options, placeholder) {
+    select.innerHTML = '';
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = placeholder;
+    select.appendChild(blank);
+    var group = null;
+    options.forEach(function (opt) {
+      if (opt.group && (!group || group.label !== opt.group)) {
+        group = document.createElement('optgroup');
+        group.label = opt.group;
+        select.appendChild(group);
+      }
+      var o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      (opt.group ? group : select).appendChild(o);
+    });
+    select.disabled = false;
+  }
+
+  function locationChanged() {
+    var loc = el('location').value;
+    el('session').disabled = true;
+    el('name').disabled = true;
+    el('name').innerHTML = '<option value="">— choose a session first —</option>';
+    showWalkIn(false);
+    refreshButton();
+    if (!loc) { el('session').innerHTML = '<option value="">— choose a location first —</option>'; return; }
+    say('Loading sessions…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (sessions) {
+        fill(el('session'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
+        say(sessions.length + ' session(s) at ' + loc + '.', '');
+      })
+      .withFailureHandler(function (err) { say('Could not load sessions: ' + err.message, 'err'); })
+      .listQuickMarkSessions(loc);
+  }
+
+  function sessionChanged() {
+    var loc = el('location').value;
+    var session = el('session').value;
+    showWalkIn(false);
+    refreshButton();
+    if (!session) { el('name').disabled = true; return; }
+    say('Loading names…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        fill(el('name'), res.names, '— choose a name —');
+        var walkIn = document.createElement('option');
+        walkIn.value = WALK_IN;
+        walkIn.textContent = '➕ Someone not on this list…';
+        el('name').appendChild(walkIn);
+        say(res.registeredCount + ' registered' +
+          (res.otherCount ? ', plus ' + res.otherCount + ' other known member(s)' : '') + '.', '');
+      })
+      .withFailureHandler(function (err) { say('Could not load names: ' + err.message, 'err'); })
+      .listQuickMarkNames(loc, session);
+  }
+
+  function nameChanged() {
+    showWalkIn(el('name').value === WALK_IN);
+    refreshButton();
+  }
+
+  function showWalkIn(on) {
+    el('newNameLabel').style.display = on ? 'block' : 'none';
+    el('newName').style.display = on ? 'block' : 'none';
+    if (!on) el('newName').value = '';
+  }
+
+  function chosenName() {
+    var picked = el('name').value;
+    if (picked === WALK_IN) return el('newName').value.trim();
+    return picked;
+  }
+
+  function refreshButton() {
+    var ready = !!el('session').value && !!chosenName() &&
+      (el('attended').checked || el('lunch').checked);
+    el('go').disabled = !ready;
+  }
+
+  function submit(confirmWalkIn) {
+    el('go').disabled = true;
+    say('Marking…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        // A walk-in needs a yes first, and the dialog has to be the one that
+        // asks: Apps Script will not show an alert over an open modal.
+        if (res.needsConfirm) {
+          refreshButton();
+          if (window.confirm(res.question)) { submit(true); }
+          else { say('Nothing added — ' + res.message, ''); }
+          return;
+        }
+        say(res.message, res.ok ? 'ok' : 'err');
+        if (res.ok) {
+          var line = document.createElement('div');
+          line.textContent = '• ' + res.message;
+          el('log').insertBefore(line, el('log').firstChild);
+          // Same session, next person: clear the name and the ticks only.
+          el('name').value = '';
+          showWalkIn(false);
+          el('attended').checked = false;
+          el('lunch').checked = false;
+          if (res.namesChanged) sessionChanged();
+        }
+        refreshButton();
+      })
+      .withFailureHandler(function (err) { say('Failed: ' + err.message, 'err'); refreshButton(); })
+      .applyQuickMarkFromDialog({
+        location: el('location').value,
+        session: el('session').value,
+        name: chosenName(),
+        attended: el('attended').checked,
+        lunch: el('lunch').checked,
+        confirmWalkIn: !!confirmWalkIn
+      });
+  }
+</script>`;
+}
+
+/**
+ * Called from the dialog. The sessions offered at `location`, BY DATE:
+ * upcoming soonest-first, then past most-recent-first — the same order every
+ * date-bearing tab in this workbook is sorted in, so "the next one" and "the
+ * one that just happened" are both at the top where a sign-in desk needs them.
+ *
+ * Each option's value is the label collectKnownProgramChoices() built, which
+ * parseQuickMarkProgramChoice() can turn back into a program and a date.
+ */
+function listQuickMarkSessions(location) {
+  const todayKey = formatDateKey(new Date());
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  // Registrant rows are one of the four sources collectKnownProgramChoices()
+  // unions, and the only one that knows about a session somebody typed onto
+  // the tab by hand — worth the read.
+  const registrantRows = sheet
+    ? readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID')
+    : [];
+  const choices = collectKnownProgramChoices(location, registrantRows);
+  const upcoming = [];
+  const past = [];
+  const undated = [];
+  choices.forEach(choice => {
+    if (!choice.dateKey) undated.push(choice);
+    else if (choice.dateKey >= todayKey) upcoming.push(choice);
+    else past.push(choice);
+  });
+  upcoming.sort((a, b) => (a.dateKey < b.dateKey ? -1 : (a.dateKey > b.dateKey ? 1 : a.label.localeCompare(b.label))));
+  past.sort((a, b) => (a.dateKey > b.dateKey ? -1 : (a.dateKey < b.dateKey ? 1 : a.label.localeCompare(b.label))));
+  undated.sort((a, b) => a.label.localeCompare(b.label));
+
+  const out = [];
+  const push = (list, group) => list.forEach(choice =>
+    out.push({ value: choice.label, label: choice.label, group }));
+  push(upcoming, 'Upcoming');
+  push(past, 'Past');
+  push(undated, 'Any date (program only)');
+  return out.slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
+}
+
+/**
+ * Called from the dialog. The names offered for one session: the people
+ * already registered for it first (the common case — you are ticking someone
+ * off a list), then everyone else on Member_Roll.
+ *
+ * The roll matters as much as the registrations: a known member who did not
+ * sign up for this particular session is exactly the walk-in this tool is for,
+ * and sourcing names from registrant rows alone made them unpickable.
+ */
+function listQuickMarkNames(location, sessionValue) {
+  const selection = parseQuickMarkProgramChoice(sessionValue);
+  const headers = HEADERS.Registrant_Dash;
+  const map = getIndexMap(headers);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  const registrantRows = sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : [];
+
+  const registered = [];
+  const seen = {};
+  registrantRows.forEach(row => {
+    const rowName = String(row[map['Name']] || '').trim();
+    if (!rowName) return;
+    if (location && String(row[map['Location']] || '').trim() !== location) return;
+    if (selection.title && String(row[map['Event']] || '').trim() !== selection.title) return;
+    if (selection.dateKey) {
+      const d = coerceDate(row[map['Event_Date']]);
+      if (!d || formatDateKey(d) !== selection.dateKey) return;
+    }
+    const key = normalizeNameKey(rowName);
+    if (seen[key]) return;
+    seen[key] = true;
+    registered.push(rowName);
   });
 
-  // Program/Name start empty and are filled in by the cascade as soon as a
-  // location is chosen — see refreshQuickMarkDropdowns().
-  refreshQuickMarkDropdowns(sheet, rows);
+  const others = [];
+  collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
+    const key = normalizeNameKey(name);
+    if (seen[key]) return;
+    seen[key] = true;
+    others.push(name);
+  });
 
-  setQuickMarkStatus(sheet, numCols, 'Ready — choose a location to begin.');
+  const names = registered.map(n => ({ value: n, label: n, group: 'Registered for this session' }))
+    .concat(others.map(n => ({ value: n, label: n, group: 'Other known members' })))
+    .slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
+
+  return { names, registeredCount: registered.length, otherCount: others.length };
 }
 
-/**
- * The one-line feedback cell under the panel's inputs. Unmerged and
- * overflowing, for the same reason as writeSectionBanner(): a merge here would
- * block setFrozenColumns() on this tab.
- */
-function setQuickMarkStatus(sheet, numCols, message) {
-  const width = Math.max(numCols || QUICK_MARK_LABELS.length, QUICK_MARK_LABELS.length);
-  try {
-    sheet.getRange(QUICK_MARK.statusRow, 1, 1, Math.max(sheet.getMaxColumns(), width)).breakApart();
-  } catch (err) { /* nothing merged here */ }
-
-  sheet.getRange(QUICK_MARK.statusRow, 1, 1, width).setBackground('#FFFFFF');
-  sheet.getRange(QUICK_MARK.statusRow, 1)
-    .setValue(message)
-    .setFontSize(TYPO.MUTED.size + 1)
-    .setFontColor('#0B5394')
-    .setFontWeight('bold')
-    .setHorizontalAlignment('left')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
-}
 
 /**
- * What the Quick Mark "Program" dropdown offers at `location` (or everywhere,
+ * What the Quick Mark session list offers at `location` (or everywhere,
  * if `location` is blank), NEAREST TO TODAY FIRST.
  *
  * ONE ENTRY PER SESSION, NOT PER PROGRAM, and each one carries its date:
@@ -12417,7 +13186,7 @@ function collectKnownProgramChoices(location, registrantRows) {
     log(`ℹ️ Quick Mark could not read Program_Options for its program list (${err}).`);
   }
 
-  const lrMap = getIndexMap(HEADERS.Lunch_and_Event_Registrants);
+  const lrMap = getIndexMap(HEADERS.Registrant_Dash);
   (registrantRows || []).forEach(row => {
     note(row[lrMap['Event']], row[lrMap['Location']], row[lrMap['Event_Date']]);
   });
@@ -12508,114 +13277,51 @@ function collectKnownMembers() {
     return [];
   }
 }
-
 /**
- * A Sheets dropdown built from a list this long stops being a dropdown. Cap
- * it — the ordering above guarantees the cut falls on the least relevant end.
+ * A dropdown built from a list this long stops being a dropdown. Cap it — the
+ * ordering above guarantees the cut falls on the least relevant end.
  */
 const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
 
 /**
- * Rebuilds the Program and Name dropdowns from whatever Location/Program is
- * currently selected, narrowing each list to what's actually possible.
+ * Called from the dialog. Applies one mark to the real registrant row, and
+ * says in plain words what it did.
  *
- * PROGRAMS: one entry per SESSION, each naming its date, nearest first, plus a
- * lunch-only option per catered day — see collectKnownProgramChoices().
- *
- * NAMES: the people already registered for the chosen program first (the
- * common case — you are ticking someone off a list), then everyone else on
- * Member_Roll. The SAME BUG the program list had applied here: sourcing names
- * from registrant rows alone meant a known member who had not registered for
- * this particular session could not be selected, which is exactly the walk-in
- * this panel is for. applyQuickMark() adds a row for them.
- */
-function refreshQuickMarkDropdowns(sheet, rows) {
-  const headers = HEADERS.Lunch_and_Event_Registrants;
-  const map = getIndexMap(headers);
-  const registrantRows = rows || readAllSectionedRows(sheet, headers, 'Event_ID');
-
-  const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
-  const programChoice = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
-  const selection = parseQuickMarkProgramChoice(programChoice);
-
-  const programList = collectKnownProgramChoices(location, registrantRows)
-    .slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS)
-    .map(choice => choice.label);
-
-  // Registered-for-this-selection names, in the order the rows themselves are
-  // in (the tab is date-sorted, so that is nearest-session-first already).
-  // Narrowed by the chosen DATE as well as the program when the choice carried
-  // one, which is the point of dated choices: on a date this program runs
-  // twice a week, the list is the people expected on THAT day.
-  const registered = [];
-  const registeredSeen = {};
-  registrantRows.forEach(row => {
-    const rowLocation = String(row[map['Location']] || '').trim();
-    const rowEvent = String(row[map['Event']] || '').trim();
-    const rowName = String(row[map['Name']] || '').trim();
-    if (!rowName) return;
-    if (location && rowLocation !== location) return;
-    if (selection.title && rowEvent !== selection.title) return;
-    if (selection.dateKey) {
-      const d = coerceDate(row[map['Event_Date']]);
-      if (!d || formatDateKey(d) !== selection.dateKey) return;
-    }
-    const key = normalizeNameKey(rowName);
-    if (registeredSeen[key]) return;
-    registeredSeen[key] = true;
-    registered.push(rowName);
-  });
-
-  const others = [];
-  collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
-    const key = normalizeNameKey(name);
-    if (registeredSeen[key]) return;
-    registeredSeen[key] = true;
-    others.push(name);
-  });
-
-  const nameList = registered.concat(others).slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
-
-  applyValueListValidationBounded(sheet, QUICK_MARK.EVENT_COL, programList.length ? programList : ['(no programs yet)'],
-    QUICK_MARK.inputRow, 1);
-  // allowInvalid on the NAME cell: a first-time walk-in has no row and is on
-  // no roll, so their name has to be typeable rather than only selectable.
-  applyOpenValueListValidationBounded(sheet, QUICK_MARK.NAME_COL,
-    nameList.length ? nameList : ['(type a name)'], QUICK_MARK.inputRow, 1);
-  return { programList, nameList, registeredCount: registered.length };
-}
-
-/** Blanks the panel's inputs, ready for the next person. */
-function clearQuickMarkInputs(sheet) {
-  sheet.getRange(QUICK_MARK.inputRow, 1, 1, QUICK_MARK_LABELS.length).clearContent();
-}
-
-/**
- * Applies a Quick Mark tick to the real registrant row(s).
+ * WHAT THE TWO TICKS MEAN, in one place:
+ *   Attended            they were here. Lunch_Served untouched.
+ *   Lunch               they got a meal. Attended is CLEARED — a lunch tick on
+ *                       its own is the take-out case, and is also how somebody
+ *                       wrongly marked present gets corrected.
+ *   Attended + Lunch    here, and fed. Both set.
  *
  * Matches on Location + Event + Name. A name legitimately appears on several
  * rows — the same person registered for several dates of the same program — so
- * this marks the one for the NEAREST session (today first, then the next
- * upcoming, then the most recent past), which is what someone standing at a
- * sign-in desk means. The status line always says which date it marked, so a
- * wrong guess is visible immediately rather than silent.
+ * a session chosen WITH a date means that session and no other; only the
+ * dateless "program only" choice falls back to marking the nearest session,
+ * and the message says which date it landed on either way.
+ *
+ * Returns { ok, message, namesChanged } for the dialog to render. Never
+ * throws for an ordinary miss: "nobody by that name is registered" is an
+ * answer, not a failure.
  */
-function applyQuickMark(sheet, column) {
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+function applyQuickMarkFromDialog(args) {
+  args = args || {};
+  const location = String(args.location || '').trim();
+  const name = String(args.name || '').trim();
+  const attended = !!args.attended;
+  const lunch = !!args.lunch;
+  const selection = parseQuickMarkProgramChoice(args.session);
+
+  if (!name) return { ok: false, message: '⚠️ Pick a name first — nothing was marked.' };
+  if (!attended && !lunch) return { ok: false, message: '⚠️ Tick Attended, Lunch, or both.' };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  if (!sheet) return { ok: false, message: '⚠️ There is no registrants tab yet — run Sync Registrations once.' };
+
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
-
-  const location = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.LOCATION_COL).getValue() || '').trim();
-  const programChoice = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.EVENT_COL).getValue() || '').trim();
-  const selection = parseQuickMarkProgramChoice(programChoice);
-  const name = String(sheet.getRange(QUICK_MARK.inputRow, QUICK_MARK.NAME_COL).getValue() || '').trim();
   const numCols = headers.length;
-
-  if (!name) {
-    setQuickMarkStatus(sheet, numCols, '⚠️ Pick a name first — nothing was marked.');
-    sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
-    return;
-  }
-
   const zones = getSectionZones(sheet, 'Event_ID');
   const nameKey = normalizeNameKey(name);
   const todayKey = formatDateKey(new Date());
@@ -12631,7 +13337,7 @@ function applyQuickMark(sheet, column) {
       if (selection.title && String(row[map['Event']] || '').trim() !== selection.title) return;
       const d = coerceDate(row[map['Event_Date']]);
       // A dated choice means THAT session and no other — the whole reason the
-      // dropdown names dates. Only an undated choice falls back to the
+      // session list names dates. Only an undated choice falls back to the
       // nearest-session guess below.
       if (selection.dateKey && (!d || formatDateKey(d) !== selection.dateKey)) return;
       candidates.push({ sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '' });
@@ -12639,13 +13345,10 @@ function applyQuickMark(sheet, column) {
   });
 
   if (candidates.length === 0) {
-    // Nobody registered under that name for that program. Now that the
-    // dropdowns offer every program and every known member, this is no longer
-    // a dead end — it is the walk-in case, and it is the reason the lists were
-    // widened in the first place.
-    sheet.getRange(QUICK_MARK.inputRow, column).setValue(false);
-    addQuickMarkWalkIn(sheet, { name, selection, location, column, numCols });
-    return;
+    // Nobody registered under that name for that session. Since the lists
+    // offer every known member and not just the registered ones, this is the
+    // walk-in case rather than a dead end.
+    return addQuickMarkWalkIn(sheet, { name, selection, location, attended, lunch, confirmed: !!args.confirmWalkIn });
   }
 
   // Today, else the soonest future date, else the most recent past one.
@@ -12657,24 +13360,19 @@ function applyQuickMark(sheet, column) {
   });
   const target = candidates[0];
 
-  const isLunchOnly = column === QUICK_MARK.LUNCH_ONLY_COL;
-  const isLunch = column === QUICK_MARK.LUNCH_COL || isLunchOnly;
-  const columnName = isLunch ? 'Lunch_Served' : 'Attended';
-  if (map[columnName] === undefined) {
-    setQuickMarkStatus(sheet, numCols, `⚠️ This tab has no "${columnName}" column yet — run Sync Registrations once.`);
-    return;
+  if (map['Attended'] === undefined || map['Lunch_Served'] === undefined) {
+    return { ok: false, message: '⚠️ This tab has no Attended/Lunch_Served columns yet — run Sync Registrations once.' };
   }
 
-  sheet.getRange(target.sheetRow, map[columnName] + 1).setValue(true);
-  // Lunch no longer implies attendance in either direction: a member can pick
-  // up a meal without ever coming in (take-out), so a Lunch tick alone leaves
-  // Attended exactly as it was — tick Attended too for a normal dine-in mark.
-  // Lunch Only goes one step further and CLEARS Attended, because it exists
-  // specifically to say "fed, not present" even when Attended was already
-  // ticked (e.g. correcting an earlier mistaken mark).
-  if (isLunchOnly && map['Attended'] !== undefined) {
-    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
+  if (attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+  if (lunch) {
+    sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
+    // Lunch without Attended is the take-out case, and saying so has to be
+    // able to UNDO an earlier mistaken attendance mark — otherwise the one
+    // correction staff actually need is the one thing they cannot make here.
+    if (!attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
   }
+
   // Hand-marking is a manual edit — say so, the same as any other.
   if (map['Manual_Override'] !== undefined) {
     const overrideCell = sheet.getRange(target.sheetRow, map['Manual_Override'] + 1);
@@ -12684,38 +13382,40 @@ function applyQuickMark(sheet, column) {
 
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
   const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
-  const what = isLunchOnly ? 'lunch (take-out, not attending)' : (isLunch ? 'lunch' : 'attendance');
-  setQuickMarkStatus(sheet, numCols, `✅ Marked ${what} for ${name} — ${dateLabel}${extra}.`);
-  toastIfPossible(`✅ ${name}: ${what} marked for ${dateLabel}.`);
+  const what = describeQuickMark(attended, lunch);
+  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.`;
+  toastIfPossible(message);
+  log(`applyQuickMarkFromDialog: ${message}`);
+  return { ok: true, message, namesChanged: false };
+}
 
-  clearQuickMarkInputs(sheet);
-  refreshQuickMarkDropdowns(sheet, null);
+/** "attended", "lunch (not attending)", or "attended + lunch" — one phrasing, used everywhere. */
+function describeQuickMark(attended, lunch) {
+  if (attended && lunch) return 'attended + lunch';
+  if (lunch) return 'lunch (collected, not attending)';
+  return 'attended';
 }
 
 /**
  * The walk-in path: someone is standing there, they are not on the list for
- * this program, and marking them has to be possible without a form
- * submission.
+ * this session, and marking them has to be possible without a form submission.
  *
- * Creates a "Manually Added" registrant row against the NEAREST session of
- * the chosen program (today first, then the next upcoming, then the most
- * recent past — the same rule applyQuickMark() uses to pick among existing
- * rows), then marks it. Manually Added is a protected state: see
- * getProtectedRegistrantKeys(), which is what stops the next registration
- * sync from overwriting or removing the row.
+ * Creates a "Manually Added" registrant row against the chosen session (or,
+ * for a dateless choice, the nearest one — today first, then the next
+ * upcoming, then the most recent past) and marks it. Manually Added is a
+ * protected state: see getProtectedRegistrantKeys(), which is what stops the
+ * next registration sync from overwriting or removing the row.
  *
  * Asks first. It writes a person into the record and, if the row is for a
- * lunch-serving date, into the catering count — small, but not something to
- * do because a checkbox was clicked by accident.
+ * lunch-serving date, into the catering count — small, but not something to do
+ * because a button was clicked by accident.
  */
 function addQuickMarkWalkIn(sheet, args) {
-  const { name, selection, location, column, numCols } = args;
+  const { name, selection, location, attended, lunch } = args;
   const program = selection ? selection.title : '';
 
   if (!program) {
-    setQuickMarkStatus(sheet, numCols,
-      `⚠️ "${name}" has no registration yet. Pick a program in box 2 and tick again to add them as a walk-in.`);
-    return;
+    return { ok: false, message: `⚠️ "${name}" has no registration yet. Pick a session and mark again to add them as a walk-in.` };
   }
 
   const session = selection.lunchOnly
@@ -12723,67 +13423,75 @@ function addQuickMarkWalkIn(sheet, args) {
     : findNearestSessionForProgram(program, location, selection.dateKey);
   if (!session) {
     const when = selection.dateKey ? ` on ${formatDateLabel(parseDateKey(selection.dateKey))}` : '';
-    setQuickMarkStatus(sheet, numCols,
-      `⚠️ Couldn't find any session of "${program}"${location ? ` at ${location}` : ''}${when} to add "${name}" to. ` +
-      `Run Sync Cal if the program is new.`);
-    return;
+    return {
+      ok: false,
+      message: `⚠️ Couldn't find any session of "${program}"${location ? ` at ${location}` : ''}${when} ` +
+        `to add "${name}" to. Run Sync Cal if the program is new.`
+    };
   }
 
-  const isAttendedCol = column === QUICK_MARK.ATTENDED_COL;
-  const isLunchOnly = column === QUICK_MARK.LUNCH_ONLY_COL;
-  const isLunch = column === QUICK_MARK.LUNCH_COL || isLunchOnly;
   const lunchOffered = isLunchOfferedOn(session.date, session.location);
   const dateLabel = formatDateLabel(session.date);
-  // A walk-in takes its Attended value from WHICH box triggered it, the same
-  // as an existing row does in applyQuickMark(): the Attended tick is the
-  // only one that marks attendance, so a brand-new Lunch or Lunch Only
-  // walk-in is fed without being recorded as present — a take-out pickup can
-  // add someone to the record for the first time too.
-  const marksAttended = isAttendedCol;
+  const what = describeQuickMark(attended, lunch);
 
-  if (!confirmConsequentialAction(`Add ${name} as a walk-in?`,
-    `"${name}" has no registration for ${program}.\n\n` +
-    `A new row will be added for ${program} — ${dateLabel} (${session.location}), marked ` +
-    `${isLunchOnly ? 'lunch served (take-out — not marked attended)' : (isLunch ? 'lunch served' : 'attended')} ` +
-    `and flagged "Manually Added".` +
-    (isLunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : ''),
-    false)) {
-    setQuickMarkStatus(sheet, numCols, `Nothing added. "${name}" is still not registered for ${program}.`);
-    return;
+  // THE CONFIRMATION IS THE DIALOG'S, not a ui.alert(). Apps Script will not
+  // put an alert up while a modal dialog is already open, so asking from here
+  // — which is exactly where this runs, inside a google.script.run call from
+  // Quick Mark — is a question nobody ever sees. Instead the first call
+  // returns the question and the dialog asks it, then calls back with
+  // confirmed:true. Same guard, somewhere it can actually be answered.
+  if (!args.confirmed) {
+    return {
+      ok: false,
+      needsConfirm: true,
+      message: `"${name}" has no registration for ${program}.`,
+      question: `"${name}" has no registration for ${program}.\n\n` +
+        `Add a new row for ${program} — ${dateLabel} (${session.location}), marked ${what} and ` +
+        `flagged "Manually Added"?` +
+        (lunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : '')
+    };
   }
 
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
   const row = new Array(headers.length).fill('');
   row[map['Event_Date']] = session.date;
+  row[map['Event_Time']] = session.eventTime || '';
   row[map['Location']] = session.location;
   row[map['Event']] = session.title;
   row[map['Name']] = name;
-  row[map['Attended']] = marksAttended;
-  row[map['Lunch_Served']] = isLunch;
+  // A walk-in takes its marks from the same two ticks an existing row does:
+  // Lunch on its own feeds somebody without recording them as present, which
+  // is how a take-out pickup can add a person to the record for the first time.
+  row[map['Attended']] = attended;
+  row[map['Lunch_Served']] = lunch;
   row[map['Person_Type']] = 'Attendee';
-  row[map['Lunch_Type']] = isLunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
-  row[map['Lunch_Status']] = isLunch && lunchOffered ? 'Needed' : 'No Lunch';
+  row[map['Lunch_Type']] = lunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
+  row[map['Lunch_Status']] = lunch && lunchOffered ? 'Needed' : 'No Lunch';
   row[map['Program_Status']] = 'Active';
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
-  row[map['Admin_Notes']] = isLunchOnly
+  row[map['Admin_Notes']] = lunch && !attended
     ? `Take-out walk-in added at the desk on ${formatDateLabel(new Date())}.`
     : `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
   row[map['Manual_Override']] = 'Manually Added';
   row[map['Form_Source']] = 'Walk-in (no form)';
   row[map['Event_ID']] = session.eventId;
 
+  // Somebody standing at the desk outranks a past deletion of the same person
+  // on the same session — lift the tombstone rather than leave the next sync
+  // arguing with the row just typed in. See section 5c.
+  clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, 'Attendee'));
+
   const existing = readAllSectionedRows(sheet, headers, 'Event_ID');
   existing.push(row);
   renderRegistrantsSheet(false, existing);
 
-  const what = isLunchOnly ? 'lunch (take-out, not attending)' : (isLunch ? 'lunch' : 'attendance');
-  toastIfPossible(`✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what} marked.`);
-  setQuickMarkStatus(sheet, numCols,
-    `✅ Added ${name} to ${program} — ${dateLabel} (walk-in), ${what} marked.`);
-  clearQuickMarkInputs(sheet);
-  refreshQuickMarkDropdowns(sheet, null);
+  const message = `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`;
+  toastIfPossible(message);
+  log(`addQuickMarkWalkIn: ${message}`);
+  // The name list for this session has a new entry on it now.
+  return { ok: true, message, namesChanged: true };
 }
 
 /**
@@ -12803,6 +13511,8 @@ function buildLunchOnlySession(dateKey, location) {
     location: loc,
     title: LUNCH_ONLY_PROGRAM_LABEL,
     eventId: makeLunchOnlyEventId(key, loc),
+    // No calendar event behind it, so no clock time to show.
+    eventTime: '',
     lunchType: ''
   };
 }
@@ -12838,6 +13548,7 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
       location: rowLocation,
       title: String(row[map['Clean_Title']] || '').trim(),
       eventId: String(row[map['Event_ID']] || '').trim(),
+      eventTime: formatTimeRange(date, map['Event_End'] === undefined ? '' : row[map['Event_End']]),
       lunchType: ''
     });
   });
@@ -12850,6 +13561,23 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
     return a.date - b.date;                    // future: soonest first
   });
   return matches[0];
+}
+
+/**
+ * A session's time as staff say it out loud: "10:00 AM – 11:30 AM".
+ *
+ * Falls back to the start time alone when there is no end — a row written
+ * before Event_End existed, or a calendar event with no duration. Returns ''
+ * for no start at all, so a blank cell stays blank rather than becoming a
+ * confident-looking wrong answer.
+ */
+function formatTimeRange(start, end) {
+  const from = coerceDate(start);
+  if (!from) return '';
+  const label = Utilities.formatDate(from, TIMEZONE, 'h:mm a');
+  const to = coerceDate(end);
+  if (!to || to <= from) return label;
+  return `${label} – ${Utilities.formatDate(to, TIMEZONE, 'h:mm a')}`;
 }
 
 /** Hot/Cold for a walk-in's meal, taken from that day's menu; 'Hot' if the menu says nothing. */
@@ -12873,7 +13601,7 @@ function renderTriageSheet(force, allRows) {
 }
 
 /**
- * Shared formatting for Lunch_and_Event_Registrants AND Deleted_Event_Triage
+ * Shared formatting for Registrant_Dash AND Deleted_Event_Triage
  * — both carry the same Manual_Override / Program_Status / Lunch_Status /
  * Order_Ahead_Flag / Event_Date columns, just with Triage adding a few
  * extra trailing columns that don't need special styling beyond zebra.
@@ -13022,7 +13750,7 @@ function applyRegistrantsFormatting(sheet, headers, result) {
   // Event_Date or Name doesn't move the registration, it just gets overwritten
   // and loses the row's link to its session.
   protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Location', 'Event', 'Name', 'Person_Type', 'Primary_Registrant',
+    ['Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Person_Type', 'Primary_Registrant',
       'Party_Size', 'Order_Ahead_Flag', 'Event_ID', 'Party_ID'],
     zones);
 
@@ -13246,7 +13974,7 @@ function writeLunchAddBlock(sheet, startRow) {
 //           and spacing drift that "Jane Smith" vs "jane smith " produces
 //           across separate form submissions.
 //
-// This is also what the Quick Mark dropdowns are built from — the unique
+// This is also what the Quick Mark lists are built from — the unique
 // people and programs, deduplicated once here rather than re-derived on every
 // keystroke.
 // ============================================================================
@@ -13286,10 +14014,10 @@ function refreshMemberRoll(ss, registrantRows) {
     if (key) existingByKey[key] = row;
   });
 
-  const lrHeaders = HEADERS.Lunch_and_Event_Registrants;
+  const lrHeaders = HEADERS.Registrant_Dash;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS), lrHeaders, 'Event_ID');
+    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
   const people = {};
   rows.forEach(row => {
@@ -13898,10 +14626,10 @@ function handleClubMembersEdit(e, sheet) {
 function cancelUpcomingClubRegistrations(args) {
   const { clubKey, club, name, personType } = args;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return 0;
 
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
   const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
   const todayKey = formatDateKey(new Date());
@@ -14051,8 +14779,8 @@ function getMergeTargets() {
       render: rows => renderProgramDashboardFromRows(rows)
     },
     {
-      sheetName: SHEET_NAMES.LUNCH_EVENT_REGISTRANTS,
-      headers: HEADERS.Lunch_and_Event_Registrants,
+      sheetName: SHEET_NAMES.REGISTRANT_DASH,
+      headers: HEADERS.Registrant_Dash,
       marker: 'Event_ID',
       identity: (row, map) => {
         const eventId = String(row[map['Event_ID']] || '').trim();
@@ -14103,7 +14831,12 @@ function getProtectedTabNames() {
   // Plus the hidden queue behind the flag checkboxes: it is small, oddly
   // shaped and machine-written, which is exactly the profile the legacy-tab
   // scanner is built to notice.
-  return Object.values(SHEET_NAMES).concat([PENDING_FLAG_SHEET_NAME]);
+  // Plus every name a canonical tab used to carry: a workbook mid-migration
+  // still has its data under the old name, and the scanner would otherwise
+  // offer to merge a tab that is about to simply be renamed into place.
+  return Object.values(SHEET_NAMES)
+    .concat(Object.keys(LEGACY_SHEET_RENAMES).map(k => LEGACY_SHEET_RENAMES[k]))
+    .concat([PENDING_FLAG_SHEET_NAME]);
 }
 
 /** A legacy tab must have at least this many of a target's columns, and this share of ITS OWN columns recognized. */
@@ -14396,7 +15129,7 @@ function renderProgramDashboardFromRows(rows) {
 // ============================================================================
 
 /**
- * options.registrantRows — already-in-memory Lunch_and_Event_Registrants
+ * options.registrantRows — already-in-memory Registrant_Dash
  * rows, to skip re-reading that tab. Honored only when this render's own
  * triage pass didn't rewrite the tab underneath them (see registrantsMoved).
  * Returns { registrantsMoved } so a caller holding those rows knows whether
@@ -14415,7 +15148,7 @@ function renderProgramDashboard(force, options) {
   options = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
 
@@ -14619,10 +15352,10 @@ function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
   flushPersistentRegistries();
 }
 
-/** One pass over Lunch_and_Event_Registrants powering BOTH the Today block and the participation metrics. */
+/** One pass over Registrant_Dash powering BOTH the Today block and the participation metrics. */
 function scanRegistrants(registrantsSheet, registrantRows) {
   const result = { countsByEventId: {}, activeNamesByEventId: {} };
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const rows = registrantRows || readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
@@ -14707,10 +15440,26 @@ function computeProgramMetrics(sessionRows, map, registrantScan) {
   };
 }
 
+/**
+ * Writes Event_Time as a formula reading "10:00 AM – 11:30 AM" off the row's
+ * own start and end cells.
+ *
+ * A FORMULA rather than a written string because Sheets coerces a cell that
+ * merely LOOKS like a time into one, at which point the tab's own formatting
+ * decides how it reads and the range half is lost. The IF handles a row
+ * written before Event_End existed: no end, no dash, just the start time.
+ */
 function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
   if (count < 1) return;
+  const endColLetter = map['Event_End'] === undefined ? '' : columnToLetter(map['Event_End'] + 1);
   const formulas = [];
-  for (let i = 0; i < count; i++) formulas.push([`=TEXT(${dateColLetter}${dataStart + i},"h:mm AM/PM")`]);
+  for (let i = 0; i < count; i++) {
+    const r = dataStart + i;
+    const start = `TEXT(${dateColLetter}${r},"h:mm AM/PM")`;
+    formulas.push([endColLetter
+      ? `=IF(${endColLetter}${r}="",${start},${start}&" – "&TEXT(${endColLetter}${r},"h:mm AM/PM"))`
+      : `=${start}`]);
+  }
   sheet.getRange(dataStart, map['Event_Time'] + 1, count, 1).setFormulas(formulas);
 }
 
@@ -14827,7 +15576,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // behind it (see handleProgramDashboardEdit) — the prompt is the affordance,
   // not the color. Everything else keeps its warning protection.
   protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Clean_Title', 'Event_Time', 'Active_Count', 'Waitlist_Count',
+    ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source'],
     zones);
 
@@ -14872,7 +15621,7 @@ function getDashboardRowPlan() {
 }
 
 /**
- * Aggregates Master_Program_Dashboard's session table + Lunch_and_Event_Registrants
+ * Aggregates Master_Program_Dashboard's session table + Registrant_Dash
  * into one row per (date, location): how many people need lunch, plus that
  * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
  * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed
@@ -14890,7 +15639,7 @@ function getDashboardRowPlan() {
 function buildDashboardRollup(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
 
   // No early return on a missing/empty session table any more: the menu is now
   // a source of dashboard rows in its own right (see SEED 1), so a catered day
@@ -15001,7 +15750,7 @@ function buildDashboardRollup(registrantRows) {
   });
 
   if (registrantsSheet || registrantRows) {
-    const lrHeaders = HEADERS.Lunch_and_Event_Registrants;
+    const lrHeaders = HEADERS.Registrant_Dash;
     const lrRows = registrantRows || readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID');
     const lrMap = getIndexMap(lrHeaders);
     lrRows.forEach(row => {
@@ -15011,7 +15760,7 @@ function buildDashboardRollup(registrantRows) {
         // A row with no session behind it is normally a stale Event_ID whose
         // event has been deleted, and is triaged rather than counted. The one
         // exception is a LUNCH-ONLY row — somebody who came in for the meal on
-        // a day with no program, added from the Quick Mark panel (see
+        // a day with no program, added from the Quick Mark dialog (see
         // LUNCH_ONLY_EVENT_ID_PREFIX). Those never have a session, and their
         // meal is exactly as real as anyone else's, so they take their date and
         // location from the row itself.
@@ -15118,7 +15867,7 @@ function buildDashboardRollup(registrantRows) {
         noteForAdmin('Lunch needed at a Never-catering location',
           `${row[lrMap['Name']]} is marked Lunch_Status=Needed for ${meta.location} on ` +
           `${formatDateLabel(parseDateKey(meta.dateKey))}, but that location's policy is "Never." ` +
-          `Probably a stale form answer — fix their Lunch_Status on Lunch_and_Event_Registrants.`);
+          `Probably a stale form answer — fix their Lunch_Status on Registrant_Dash.`);
         return;
       }
 
@@ -15857,9 +16606,9 @@ function createSignInSheetPdf(sessionValue, include) {
 function collectSignInSheetData(dateKey, location, includeEveryone) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const date = parseDateKey(dateKey);
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
-  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const registrantRows = sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : [];
 
   const programs = [];
@@ -16149,7 +16898,7 @@ function getOrCreateSignInSheetFolder() {
 // ============================================================================
 //
 // Which form a session belongs to is decided by grouping rules — [Grouped] vs
-// [Monthly], [All Locations] — and those rules cover the shapes a program
+// [Regular], [All Locations] — and those rules cover the shapes a program
 // USUALLY takes. They cannot express the one-off:
 //
 //   "These four different programs are one Tuesday afternoon event this month;
@@ -16693,6 +17442,12 @@ const DELETE_REGISTRATIONS_WINDOW_FORWARD_DAYS = 180;
 
 /** MENU ENTRY: pick the sessions whose registrations should be deleted. */
 function showDeleteRegistrationsDialog() {
+  // Admin-gated along with its move into the Admin submenu: a submenu that
+  // only APPEARS for admins is not a check — every menu function is callable
+  // by name — and this is the one day-to-day-looking action that permanently
+  // destroys records. Checked here AND in deleteRegistrationsForSessions()
+  // below, because the dialog calls that second function directly.
+  if (!requireAuthorizedAdmin('Delete Registrations')) return;
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return;
@@ -16715,10 +17470,10 @@ function showDeleteRegistrationsDialog() {
  */
 function listSessionsWithRegistrations() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!registrantsSheet) return [];
 
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const backKey = formatDateKey(new Date(Date.now() - DELETE_REGISTRATIONS_WINDOW_BACK_DAYS * 86400000));
@@ -16783,9 +17538,10 @@ function buildDeleteRegistrationsHtml(sessions) {
     `${escapeHtmlForDialog(s.label)}</label>`).join('\n');
   const anyClub = sessions.some(s => s.isClub);
   const clubNote = anyClub
-    ? `<p class="warn">Sessions marked <b>club</b> are upcoming meetings of a club. Deleting those rows removes
-       them until the next sync, which re-books every active member. To take somebody off a club for good,
-       untick them on the <b>Club_Members</b> tab instead.</p>`
+    ? `<p class="warn">Sessions marked <b>club</b> are upcoming meetings of a club. Deleting those rows now
+       sticks — the roster will not re-book the same people into the same meetings. It does <b>not</b> take
+       anybody off the club, though: they are still booked into every FUTURE meeting. To take somebody off a
+       club for good, untick them on the <b>Club_Members</b> tab instead.</p>`
     : '';
 
   return `
@@ -16809,9 +17565,14 @@ function buildDeleteRegistrationsHtml(sessions) {
 <h3>Delete registrations</h3>
 <p class="hint">
   Tick the sessions whose registrations should be <b>permanently deleted</b> from
-  Lunch_and_Event_Registrants. This is for test runs and duplicates — to record that somebody is no
+  Registrant_Dash. This is for test runs and duplicates — to record that somebody is no
   longer coming, set their Program_Status to <b>Cancelled</b> instead, which keeps the row and the
   history. The catering numbers are recalculated afterwards.
+</p>
+<p class="hint">
+  Deleted rows stay deleted: the next sync will not re-import them, and neither the &quot;sign up for every
+  date&quot; registry nor a club roster will re-book them into the same session. A genuinely new form
+  submission from the same person for the same session still comes through.
 </p>
 ${clubNote}
 <div id="sessions">${sessionTags}</div>
@@ -16878,6 +17639,9 @@ ${clubNote}
  */
 function deleteRegistrationsForSessions(eventIds, options) {
   options = options || {};
+  if (!isAuthorizedAdmin()) {
+    return '⚠️ Deleting registrations is an admin action — ask an admin to run it.';
+  }
   if (String(options.confirm || '').trim().toUpperCase() !== DELETE_REGISTRATIONS_CONFIRM_WORD) {
     return `⚠️ Type ${DELETE_REGISTRATIONS_CONFIRM_WORD} to confirm.`;
   }
@@ -16897,10 +17661,10 @@ function deleteRegistrationsForSessions(eventIds, options) {
 
 function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_EVENT_REGISTRANTS);
+  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return '⚠️ There is no registrants tab yet.';
 
-  const headers = HEADERS.Lunch_and_Event_Registrants;
+  const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
   const allRows = readAllSectionedRows(sheet, headers, 'Event_ID');
 
@@ -16911,6 +17675,12 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
     (wanted.has(eventId) ? doomedRows : keepRows).push(row);
   });
   if (doomedRows.length === 0) return '⚠️ Those sessions have no registrations to delete.';
+
+  // BEFORE anything is written: record that these were deleted deliberately.
+  // Without this the rows come straight back — the all-dates registry and the
+  // club roster both re-book from standing state, and the form responses are
+  // still there to be re-imported. See section 5c.
+  recordRegistrantTombstones(doomedRows, map);
 
   // The responses go FIRST, while the rows that name them are still readable.
   // A failure here must not cost the deletion — it is reported and the rows go
@@ -16938,7 +17708,9 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
   const message = `Deleted ${doomedRows.length} registration(s) across ${wanted.size} session(s).` +
     (alsoDeleteResponses
       ? ` ${responsesDeleted} form response(s) deleted${responseFailures > 0 ? `, ${responseFailures} could not be` : ''}.`
-      : ' The form responses behind them were left in place.');
+      : ' The form responses behind them were left in place.') +
+    ' They will not be re-imported by the next sync; a genuinely new submission for the same person and session' +
+    ' still comes through as normal.';
   log(`deleteRegistrationsForSessions: ${message}`);
   return message;
 }
@@ -17046,7 +17818,7 @@ function buildFormIdByEventId() {
 // a printed flyer, is not.
 //
 // WHAT IT DOES NOT COST: registrations. Responses already imported are rows on
-// Lunch_and_Event_Registrants and are untouched. Responses NOT yet imported
+// Registrant_Dash and are untouched. Responses NOT yet imported
 // would be destroyed with the form, so this imports them first and refuses to
 // go on if that import fails — losing a registration to a maintenance action
 // is the one outcome that would make this tool not worth having.
@@ -17135,7 +17907,7 @@ function destroyAndRebuildAllForms() {
     `printed flyer — leads to a dead form. Calendar event descriptions and the dashboard's links are ` +
     `rewritten here, so those stay right.\n\n` +
     `Registrations are NOT lost: outstanding responses are imported first, and rows already on ` +
-    `${SHEET_NAMES.LUNCH_EVENT_REGISTRANTS} are untouched.\n\n` +
+    `${SHEET_NAMES.REGISTRANT_DASH} are untouched.\n\n` +
     `If a form is merely out of date, you do not want this — the hourly sync already rebuilds forms ` +
     `IN PLACE, keeping their links. This is for a form that is broken beyond that.`, false)) {
     return null;

@@ -5,7 +5,7 @@ This is a design for how the workbook could answer *"which lunch did this
 person get?"* rather than only *"how many meals went out that day?"*
 
 What shipped: `Meal_ID` on `Lunch_Schedule` (derived, never typed),
-`Meal_Source` on `Lunch_and_Event_Registrants` (blank = today's meal), the
+`Meal_Source` on `Registrant_Dash` (blank = today's meal), the
 rollup attributing meals to the batch they name, and `Carried_Over` on
 `Master_Lunch_Dashboard`. The worked example in §10 is what it does. What did
 NOT ship from Phase 1: giving subs their own `Lunch_Schedule` rows — that one
@@ -202,16 +202,23 @@ ledger will fill with defaults that mean nothing.
 
 ### Quick Mark, adapted
 
-The panel (`Code.gs:11869`) is `Location → Program+Date → Name → ☑Attended
-☑Lunch 🥡Lunch Only`. Add **one** cell:
+> **Written against the old in-sheet panel.** Quick Mark is now a dialog off
+> the menu (`showQuickMarkDialog()`), and the third checkbox is gone: the two
+> ticks are `☑Attended` and `☑Lunch`, with Lunch on its own meaning "collected,
+> not present". The shape of this proposal is unchanged — one more control,
+> defaulted so the common path stays one action — but it is now a `<select>` in
+> the dialog rather than a cell, which is strictly easier.
+
+Quick Mark is `Location → Session → Name → ☑Attended ☑Lunch`. Add **one**
+control:
 
 ```
-1. Location   2. Program + Date   3. Name   4. Meal   ☑Attended  ☑Lunch  🥡Lunch Only  Clear
+1. Location   2. Session   3. Name   4. Meal   ☑Attended  ☑Lunch
 ```
 
 `4. Meal` is a dropdown that **pre-fills with today's batch at that location**
-and is cascaded from the location the same way the others already are
-(`refreshQuickMarkDropdowns()`). Its list, nearest-first:
+and is refreshed from the location the same way the others already are
+(`listQuickMarkSessions()` / `listQuickMarkNames()`). Its list, nearest-first:
 
 ```
 Today — Hot: Chicken Parm                    (default)
@@ -225,9 +232,9 @@ Leave it alone and behaviour is **identical to today**: one tick writes
 food isn't today's — which is the exception, and which is exactly when someone
 is already thinking about it.
 
-Disposition comes from the checkbox that was ticked, so it costs nothing:
-`☑Lunch` → `Dined_In`, `🥡Lunch Only` → `Taken_Out`. A `🧊 To Fridge` checkbox
-is the one genuinely new tick. Choosing a `🧊 From the fridge` entry in the meal
+Disposition comes from the ticks, so it costs nothing: `☑Attended ☑Lunch` →
+`Dined_In`, `☑Lunch` alone → `Taken_Out`. A `🧊 To Fridge` checkbox is the one
+genuinely new tick. Choosing a `🧊 From the fridge` entry in the meal
 dropdown implies `Collected` and closes that balance.
 
 ### The printed sign-in sheet
