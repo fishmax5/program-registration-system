@@ -8449,15 +8449,17 @@ function importCalendarGroups(registrySheet, options) {
   // new name here means the rest of this run — and the render that follows
   // it — simply sees a program that was always called this. See section 4e.
   const renames = detectRenamedPrograms(registrySheet, groups, existingState, eventsByCalendar);
+  const renamedGroupKeys = new Set();
   if (renames.length > 0) {
     applyProgramRenames(registrySheet, renames);
+    renames.forEach(rename => renamedGroupKeys.add(rename.groupKey));
     // The rows just changed underneath it: Event_IDs, titles and therefore
     // group keys are all different now.
     existingState = getExistingRegistryState(registrySheet);
     invalidateRecoveredFormIds();
   }
 
-  const work = collectCalendarWork(groups, existingState);
+  const work = collectCalendarWork(groups, existingState, renamedGroupKeys);
 
   // Before the per-group loop, and independently of it: a group whose dates
   // are all already on the sheet is skipped below as "up to date", which is
@@ -8588,7 +8590,8 @@ function buildGroupsForWindow(eventsByCalendar) {
  * calendar writes happen here, so a caller can safely build the whole list up
  * front and then process as much of it as it has time for.
  */
-function collectCalendarWork(groups, existingState) {
+function collectCalendarWork(groups, existingState, renamedGroupKeys) {
+  const renamed = renamedGroupKeys || new Set();
   const work = [];
   groups.forEach(group => {
     const newSessions = group.sessions.filter(s => {
@@ -8605,12 +8608,22 @@ function collectCalendarWork(groups, existingState) {
       existingState.blockedPrograms &&
       existingState.blockedPrograms.has(`${s.calendarId}|${group.cleanTitle}`));
 
-    if (newSessions.length === 0 && !needsUnblocking) {
+    // A group whose rows were just moved onto a new name (section 4e) also has
+    // nothing NEW to add — the remap saw to that — and would be skipped here
+    // for exactly the same reason. But its form is still called whatever the
+    // program used to be called, and refreshFormForNewDates() is the only
+    // thing that retitles it. Skipping it would leave respondents opening
+    // "Chair Yoga - September" to sign up for Gentle Yoga.
+    const wasRenamed = renamed.has(group.groupKey);
+
+    if (newSessions.length === 0 && !needsUnblocking && !wasRenamed) {
       log(`No new dates for "${group.groupKey}" — already up to date, skipping.`);
       return;
     }
     if (newSessions.length === 0) {
-      log(`No new dates for "${group.groupKey}", but it is coming back off [${NO_REGISTRATION_TAG}] — restoring its form and links.`);
+      log(`No new dates for "${group.groupKey}", but it ` +
+        (wasRenamed ? 'was just renamed — refreshing its form so the form is renamed too.'
+          : `is coming back off [${NO_REGISTRATION_TAG}] — restoring its form and links.`));
     }
     work.push({
       group,
@@ -8747,7 +8760,7 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
     }
 
     seenForms[formId] = (seenForms[formId] || 0) + 1;
-    candidates.push({ formId, oldTitle, newTitle: group.cleanTitle, rows: info.rows });
+    candidates.push({ formId, oldTitle, newTitle: group.cleanTitle, groupKey: group.groupKey, rows: info.rows });
   });
 
   // Two new groups pointing at one form: at most one can be its rename, and
@@ -8764,6 +8777,10 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
       formId: candidate.formId,
       oldTitle: candidate.oldTitle,
       newTitle: candidate.newTitle,
+      // Carried so collectCalendarWork() can force this group through the
+      // import even though the remap has left it with no new dates — that
+      // pass is what renames the FORM. See collectCalendarWork().
+      groupKey: candidate.groupKey,
       idMap,
       rowCount: Object.keys(idMap).length
     });
@@ -8976,6 +8993,7 @@ function renameSessionTableRows(registrySheet, renames) {
     if (!touched) return;
     idRange.setValues(ids);
     titleRange.setValues(titles);
+    invalidateEventTimeIndex(); // those Event_IDs are the index's keys
   });
 }
 
@@ -10909,6 +10927,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
 
   if (rows.length > 0) {
     registrySheet.getRange(registrySheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    invalidateEventTimeIndex(); // new sessions, and therefore new times to look up
   }
 }
 
@@ -13349,8 +13368,25 @@ function backfillRegistrantEventTimes(ss, headers, rows) {
   });
 }
 
-/** { Event_ID: "10:00 AM – 11:30 AM" } from the session table. */
+/**
+ * { Event_ID: "10:00 AM – 11:30 AM" } from the session table, memoized for the
+ * execution.
+ *
+ * The memo is what keeps the backfill from costing anything on a settled
+ * workbook. renderRegistrantsSheet() runs several times in one sync, and rows
+ * whose session has aged off the dashboard NEVER get a time — so without this,
+ * every one of those renders paid for a full re-read of the session table to
+ * fill in nothing. Dropped by whatever rewrites the session table; see the
+ * caching contract at the top of this file.
+ */
+let __eventTimeByEventIdCache = null;
+
+function invalidateEventTimeIndex() {
+  __eventTimeByEventIdCache = null;
+}
+
 function buildEventTimeByEventId(ss) {
+  if (__eventTimeByEventIdCache) return __eventTimeByEventIdCache;
   const book = ss || SpreadsheetApp.getActiveSpreadsheet();
   const sheet = book.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const out = {};
@@ -13364,6 +13400,7 @@ function buildEventTimeByEventId(ss) {
       map['Event_End'] === undefined ? '' : row[map['Event_End']]);
     if (time) out[eventId] = time;
   });
+  __eventTimeByEventIdCache = out;
   return out;
 }
 
@@ -16069,6 +16106,7 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
 
 /** Clears the sheet and redraws all sections in order, then applies all formatting. */
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
+  invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   sheet.clear();
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()

@@ -1632,7 +1632,7 @@ description is the thing that's wrong, so it can't also be the source of truth.
   Triggers**.
   - It only ever puts back triggers **your account already had**. If you
     weren't holding any and you're not the recorded
-    [Trigger_Owner](#-automation--trigger-ownership), it rebuilds nothing
+    [Trigger_Owner](#6-config), it rebuilds nothing
     rather than creating a fresh set under you — that set would be invisible
     to the owner and would double every sync from then on.
 - It **won't run during "Import Everything"** — that import has the same

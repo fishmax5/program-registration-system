@@ -101,6 +101,13 @@ what that does, because none of it is loud:
 part of the key, so the *same program on the same day* under a new calendar ID
 is a **different session** as far as this system is concerned.
 
+> The **title** half of that same key is now handled — a program renamed on the
+> calendar is detected and its rows are moved onto the new name rather than
+> triaged (see "Renaming a program" in `USER_GUIDE.md`). Nothing equivalent
+> exists for a changed calendar ID, and the evidence a rename relies on (one
+> form, one old title, the old title gone from the calendar) has no analogue
+> here: a repointed calendar changes every program at once.
+
 | | What happens |
 |---|---|
 | Old session rows | Kept. `triageDeletedSessions()` only considers rows whose `Calendar_Source` is a calendar it could read, and the old IDs aren't in `CALENDAR_MAP` any more — so they're skipped, not deleted. **Nothing is lost.** |
@@ -217,16 +224,23 @@ Hiding old months (added here) fixes the human problem, not this one. See
 watch is total cells across the history tabs; ~150,000 is where a full render
 starts eating a meaningful share of the execution budget.
 
-### 10. Quick Mark now reads three tabs per keystroke
+### 10. Quick Mark reads three tabs to build its lists. **REDUCED**
 
-Widening the dropdowns to all programs and all members means
-`refreshQuickMarkDropdowns()` reads `Master_Program_Dashboard`,
-`Program_Options` and `Member_Roll` on every panel edit. Correct, and a few
-hundred milliseconds today.
+Widening the lists to all programs and all members means
+`collectKnownProgramChoices()` reads `Master_Program_Dashboard`,
+`Program_Options`, `Lunch_Schedule` and the registrant rows, and
+`collectKnownMembers()` reads `Member_Roll`.
 
-That latency lands at a sign-in desk with a queue in front of it, and it grows
-with history. If it becomes noticeable: cache the derived lists on a hidden
-tab and rebuild them at the end of each sync, rather than deriving them live.
+This used to happen **on every panel keystroke**, because Quick Mark was a band
+of cells and each edit re-cascaded the dropdowns through `onEdit`. It is now a
+dialog: the lists are fetched once when you pick a location and once when you
+pick a session, and marking twenty people in a row re-fetches nothing. The
+latency that mattered — at a sign-in desk with a queue in front of it — is
+gone.
+
+Still worth watching as history grows, and the fix is unchanged if it ever
+becomes noticeable: cache the derived lists on a hidden tab and rebuild them at
+the end of each sync, rather than deriving them live.
 
 ### 11. `FORMS_FOLDER_ID` is empty
 
@@ -240,10 +254,14 @@ Worth doing now; it costs nothing and removes the ambiguity permanently.
 
 ### 12. Renders from an edit aren't locked
 
-`harvestPastedMenuRows()` and the Quick Mark walk-in both re-render a whole
-tab from `onEdit`, which can collide with a scheduled sync rendering the same
-tab. Narrow window, low stakes (worst case a render is redone), but it is the
-same class of bug as #2 and will be worth a lock if either path grows.
+`harvestPastedMenuRows()` re-renders a whole tab from `onEdit`, which can
+collide with a scheduled sync rendering the same tab. Narrow window, low stakes
+(worst case a render is redone), but it is the same class of bug as #2 and will
+be worth a lock if that path grows.
+
+The Quick Mark walk-in used to be the other half of this. It still re-renders
+the registrants tab, but from a dialog rather than from `onEdit` — so it is no
+longer reachable from a stray paste, and it runs with full authorization.
 
 ---
 
@@ -398,9 +416,18 @@ of the deletion would otherwise write every row straight back). What remains:
   submission can span six dates of a grouped form. Those other rows survive as
   the record, but the response behind them is gone, and a full re-import would
   no longer recreate them.
-- **Club bookings come back.** Deleting a club member's row for an upcoming
-  session is undone by the next `applyClubRosterCatchup()`. The dialog says so;
-  the real off switch is **Active** on `Club_Members` (see #12b).
+- **~~Deleted rows come straight back.~~ FIXED.** Three separate paths used to
+  undo a deletion on the next sync — the all-dates registry re-booking its
+  people onto every date, `applyClubRosterCatchup()` re-booking every active
+  club member, and the surviving form response being re-imported whenever
+  anything moved `LAST_FORM_SYNC_TIME` backwards. Deleting now records a
+  tombstone per person per session, and `buildRegistrantRow()` — the single
+  funnel all three build rows through — refuses a tombstoned key. What remains
+  to know: a tombstone is lifted by a genuinely new submission (a different
+  `Party_ID`), by a walk-in, and by a triage restore, all deliberately; and
+  deleting a club member's booking still does **not** take them off the club,
+  so they are booked into every *other* upcoming meeting. The real off switch
+  is still **Active** on `Club_Members` (see #12b).
 
 ## Long term — architectural, worth knowing before deciding anything big
 
