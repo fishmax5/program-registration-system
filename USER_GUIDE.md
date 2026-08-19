@@ -1315,6 +1315,57 @@ the new form.
 
 ---
 
+## Renaming a program
+
+Change the title on the program's calendar events and run **Sync Cal**. That's
+it — but it's worth knowing what the system does behind that, because it used
+to do considerably less.
+
+**What moves across:** the sessions themselves (and therefore every registrant
+attached to them, past and future), anything already in
+`Deleted_Event_Triage`, the club roster if it's a club, your standing notes on
+`Program_Options`, and the record of who has already been sent a calendar
+invitation. The **form is kept and renamed to match**, so every registration
+link already handed out keeps working and stops advertising the old name.
+
+> **Why this needed doing.** A session's internal ID is built from the calendar,
+> the date, *and the title* — so renaming a program re-keyed every one of its
+> sessions, and to the rest of the system that looked exactly like "twelve
+> sessions were deleted and twelve unrelated ones appeared". You'd get the
+> sessions swept into `Deleted_Event_Triage`, which is at least visible. The
+> other three losses were silent: a renamed **club** stopped booking its
+> standing roster and said nothing, your `Program_Options` notes were stranded
+> under the old name, and the invite ledger forgot who it had already emailed.
+
+**It has to be sure first.** A rename is only distinguishable from "one program
+ended and another started" by evidence, so all four of these must hold before
+anything is moved:
+
+1. The program looks new — nothing already links its name to a form.
+2. It nonetheless resolves to an **existing form**, either from the
+   registration link still in its calendar descriptions or from the form
+   registry.
+3. Every row of that form carries exactly **one** other name. If two programs
+   share a form (which **📄 Move Sessions to Another Form…** can do), which one
+   was renamed isn't answerable.
+4. That other name is **gone from every calendar** it can read. If it's still
+   there, both names exist and this is a split, not a rename.
+
+Anything less and it leaves well alone, behaving exactly as it did before —
+sessions to triage, recoverable by hand. Two renamed-looking programs pointing
+at the same form disqualify each other. Every rename it does act on is logged
+and goes in the admin digest, so you can see it happened.
+
+> **Past sessions are renamed too.** A form spans months, and renaming only the
+> recent half would leave older sessions pointing at IDs their own registrant
+> rows no longer carry. One program, one name.
+
+> **What if you rename only *some* of a program's events?** That's condition 4
+> failing — both names are live, so it's treated as two programs, which is
+> almost certainly what you meant. Rename all of them if you meant a rename.
+
+---
+
 ## Deleting registrations
 
 **🗓️ Calendar & Form Manager ▸ 🔧 Admin ▸ 🗑️ Delete Registrations…**
@@ -1782,14 +1833,9 @@ the calendar for everyone to see, and the system skips it: no form, no
 dashboard row, no lunch counted for that date.
 
 **Rename a program**
-Change the title on the calendar events and run **Sync Cal**. The program keeps
-its **existing form** — the registration link in each event's description is
-how the system finds it again — and the form is **renamed to match**, so
-respondents stop seeing the old name. Every link already handed out keeps
-working. The sessions themselves are re-keyed off the new title, so their old
-rows go to `Deleted_Event_Triage` (see
-[Deleted_Event_Triage](#8-deleted_event_triage)) if anybody had already signed
-up.
+Change the title on the calendar events and run **Sync Cal**. Everything moves
+across with it — sessions, registrants, the club roster, your notes — and the
+form is renamed to match. See [Renaming a program](#renaming-a-program).
 
 **Mark people in on the day**
 **🗓️ Calendar & Form Manager ▸ ⚡ Quick Mark Attendance / Lunch…** — location,

@@ -27,6 +27,10 @@ It also:
   and they **stay** deleted: neither the sign-up-for-every-date registry, the
   club rosters, nor a re-import puts them back, while a genuinely new
   submission from the same person still comes through;
+- follows a program through a **rename** — change the title on the calendar and
+  the sessions, registrants, club roster, staff notes and form all move across
+  with it, instead of the sessions being swept into triage and the club roster
+  silently detaching;
 - marks people off at the desk from a **Quick Mark dialog** — location,
   session, name, then Attended and/or Lunch, with Lunch on its own recording a
   meal collected by somebody who never came in;
