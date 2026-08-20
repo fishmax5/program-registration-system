@@ -38,6 +38,13 @@ It also:
   meal here, took two subs home), attached to whoever took them — and **which
   lunch** they were, so serving Wednesday's leftovers on Thursday stops
   reporting one batch of food as both waste and phantom demand;
+- shares a **live sign-up sheet with an instructor** — a small spreadsheet in
+  Drive holding one program's roster at one location, refreshed on the hourly
+  sync rather than printed, where the instructor ticks who has been
+  **contacted**, **confirmed**, **waitlisted** or has **dropped** and those
+  marks come back into the workbook, cell by cell, without overwriting a
+  correction staff made in the meantime — and with no trigger of its own, so it
+  still works at the sixtieth program;
 - prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;
 - **invites registrants to the calendar event** they signed up for — every
   session on the hourly pass, or a session you pick from the menu — and

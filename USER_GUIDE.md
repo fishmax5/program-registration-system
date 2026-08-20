@@ -534,11 +534,22 @@ are backfilled from the session table the next time this tab is drawn.
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
 | ✍️ `Program_Status` | Active · Waitlisted · Cancelled · Superseded |
+| ✍️ `Contacted` | Tick — this person has been reached out to |
+| ✍️ `Confirmed` | Tick — they said they're coming |
+| ✍️ `Waitlisted` | Tick — the instructor's own waitlist, separate from `Program_Status` above |
+| ✍️ `Dropped` | Tick — they said they're not coming |
+| ✍️ `Instructor_Notes` | Anything else worth knowing about them for this session |
 | `Primary_Registrant` | `Self`, or the name of whoever brought them |
 | `Party_Size` | Headcount on that submission — "party of 3, one no-show" |
 | `Order_Ahead_Flag` | Highlighted when someone registered too late to order for |
 | ✍️ `Admin_Notes` | Allergies/dietary needs, plus anything they typed |
 | `Manual_Override` | Turns purple when a row has been hand-edited, so the sync leaves it alone |
+
+Those last five are the columns an instructor fills in on their own shared copy
+of the roster — see [Instructor sign-up sheets](#instructor-sign-up-sheets).
+They're editable here too, and each hourly sync merges the two **cell by cell**,
+so a correction you make here isn't clobbered by a stale copy open in an
+instructor's browser tab, and theirs isn't clobbered by yours.
 
 **✍️ and yellow means yours to fill in** — the same convention as every other
 tab. Everything without it came from a form or is worked out automatically, and
@@ -774,9 +785,13 @@ the recomputed history shows them attending.
 
 | Recomputed | Yours |
 |---|---|
-| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup`, `Staff_Notes` |
+| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup`, `Instructor_Email`, `Staff_Notes` |
 
 "Needs the big room." "Usually 8 even though it's capped at 12."
+
+`Instructor_Email` is who this program's shared sign-up sheet gets handed to —
+several addresses are fine, separated by commas. See
+[Instructor sign-up sheets](#instructor-sign-up-sheets).
 
 ### 6. Config
 Seven small settings blocks:
@@ -1064,6 +1079,8 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **Sync Cal** | Reads the calendars, creates/updates forms |
 | **Sync Registrations** | Pulls in new form responses, recomputes everything |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
+| **👩‍🏫 Share a Sign-Up Sheet with an Instructor…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its instructor — see [Instructor sign-up sheets](#instructor-sign-up-sheets) |
+| **👩‍🏫 Refresh Instructor Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
 | **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day — location, session, name, then Attended and/or Lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **📧 Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
@@ -1213,6 +1230,98 @@ the date picker marks those *"no program scheduled"*, and days with catering
 say *"lunch served"*.
 
 PDFs are filed in a Drive folder called **Printed Sign-In Sheets**.
+
+---
+
+## Instructor sign-up sheets
+
+**👩‍🏫 Share a Sign-Up Sheet with an Instructor…** on the menu. Pick a
+**location**, then a **program**, and you get a **small spreadsheet in Drive**
+holding nothing but that program's roster at that location — shared with the
+instructor, and **refreshing itself every hour**.
+
+This is the live alternative to a printed sheet. Nobody has to reprint anything
+and nobody has to be given this workbook.
+
+### Why not just share this workbook
+
+Because this workbook holds **every location's registrations**, every phone
+number, the catering order, and a dozen tabs that misbehave if you type in the
+wrong cell. An instructor needs one class list. So they get one file, containing
+one class list, and nothing else.
+
+**The boundary is one program at one location.** Somebody teaching Chair Yoga at
+Narberth gets Narberth's roster. They do not get Ashbridge's.
+
+### What the instructor sees
+
+| Column | |
+|---|---|
+| **Event_Date**, **Event_Time**, **Location** | which session the row is for |
+| **Name**, **Party_Size**, **Phone**, **Email** | who, and how to reach them |
+| **Program_Status** | what *the system* says — Active, Waitlisted, Cancelled |
+| **✍️ Contacted** | tick — I have reached out to this person |
+| **✍️ Confirmed** | tick — they told me they are coming |
+| **✍️ Waitlisted** | tick — no seat for them yet |
+| **✍️ Dropped** | tick — they told me they are not coming |
+| **✍️ Instructor_Notes** | anything else worth knowing |
+
+The five **yellow** columns are the instructor's. Everything else fills in by
+itself, and typing over it gets a warning — a correction typed into `Name` does
+not move the registration, it just gets overwritten at the next refresh.
+
+**Waitlisted is not the same as `Program_Status: Waitlisted`.** They answer
+different questions. `Program_Status` is what the system worked out from
+`Max_Capacity`. The tick is what the instructor decided about somebody they have
+actually spoken to. Ticking one does not move the other — both are on the sheet
+so you can see both.
+
+### The marks come back
+
+Every hourly registration sync reads each shared sheet's five columns back into
+**Registrant_Dash**, where they are five real columns on every registrant row.
+So the instructor's ticks show up in the workbook, and staff can see who has
+been contacted without opening anything.
+
+**Staff and the instructor can both work on the same roster at once.** Each
+refresh remembers exactly what it sent out. On the way back:
+
+- a cell the instructor **changed** wins;
+- a cell they **never touched** leaves the workbook's own value alone.
+
+So a status you fix on Registrant_Dash is not clobbered by a stale copy sitting
+open in somebody's browser tab, and unticking a box works as an undo rather than
+being ignored as "empty".
+
+### Getting the instructor onto it
+
+Fill in **Instructor_Email** on the **Program_Options** tab — the same row that
+already holds `Room_Or_Setup` and your standing notes for that program. When you
+create the sheet, whoever is named there is added as an **editor**. Several
+addresses are fine, separated by commas.
+
+Leave it blank and the sheet is still made; the dialog just hands you the link
+to share yourself.
+
+### Things to know
+
+- **It costs no new trigger.** The refresh rides on the hourly registration sync
+  that already runs. This matters: Google allows twenty triggers per account and
+  this project already spends one per calendar, so a design needing one per
+  program would have quietly stopped working somewhere around the twentieth
+  class.
+- **Sessions from 14 days back to 90 days ahead** are on the sheet. Backwards as
+  well as forwards, because marking up last week's class on a Monday is the
+  normal case.
+- **Pressing the menu item again** for a program that already has a sheet
+  refreshes that one and gives you the same link back. It never makes a second
+  copy.
+- **Superseded rows are left off** — those are registrations a later submission
+  replaced, and showing them would list the same person twice with no way to
+  tell which is real.
+- The files live in a Drive folder called **Instructor Sign-Up Sheets**.
+- **Deleting the file** is how you stop sharing. The next sync will note it
+  couldn't be read; create it again from the menu if that was a mistake.
 
 ---
 
