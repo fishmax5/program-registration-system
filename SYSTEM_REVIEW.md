@@ -504,6 +504,19 @@ order of what would change your plans:
    isn't, that **🔧 Admin Tools (sign-in check)…** brings it back.
 5. **Quick Mark a walk-in**: pick a program nobody has registered for, type a
    new name, tick Attended, confirm the row appears flagged `Manually Added`.
+5a. **Register one test person for lunch on three programs on the same day**
+   (three form submissions, same name, lunch ticked each time). On
+   `Master_Lunch_Dashboard` that date must read `Registered_Count` **1**, not
+   3, and `Lunch_Roster` must show them once with `Requests_Merged` = 2 and
+   all three programs listed. This is the number the kitchen orders from —
+   check it before trusting a month of it.
+5b. **Quick Mark "Sign up for lunch"** on a future catered date. The registrant
+   row should come out `Lunch_Status` = `Needed` with `Lunch_Served` **not**
+   ticked, the person should appear on `Lunch_Roster` under Upcoming with
+   `Registered` ✅ and `Lunch_Served` blank, and `Registered_Count` should go
+   up by one while `Served_Confirmed` stays where it was. Then try the same on
+   a date with no `Hot`/`Cold` menu row and confirm it is refused with a
+   message rather than accepted.
 6. **Check the Past sections** show the hidden-row note, and that
    **🕓 Show All Past Rows** brings them back.
 7. **Mark an upcoming date "Not Serving"** on `Lunch_Schedule` where somebody

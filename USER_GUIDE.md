@@ -353,14 +353,27 @@ The columns you read first are at the **front**:
 
 | Column | What it means |
 |---|---|
-| `Registered_Count` | What the **forms** say — how many asked for lunch |
-| `Served_Confirmed` | What **actually happened** — how many `Lunch_Served` boxes you ticked on the Registrants tab |
+| `Registered_Count` | What the **forms** say — how many **people** asked for lunch |
+| `Served_Confirmed` | What **actually happened** — how many **people** you ticked `Lunch_Served` for on the Registrants tab |
 | `Total_to_Order` | Live formula: `Registered_Count + Standard_Buffer + Tester_Buffer` |
 
 `Served_Confirmed` stays **blank** until something has actually been ticked —
 a real `0` ("nobody came") and "not counted yet" mean very different things, so
 it doesn't claim the first. It counts every tick, including walk-ins who never
 registered.
+
+> **Both numbers count PEOPLE, not form answers.** Somebody who signs up for
+> Chair Yoga, Bingo and the Book Club on the same Tuesday and ticks "yes,
+> lunch" on all three forms — which is the normal thing to do, because each
+> form asks — is **one lunch on the order, not three**. Names are matched the
+> same way they are everywhere else in the workbook, so `Jane Smith`,
+> `jane smith` and `Jane  Smith` are one person. The merge is not silent: the
+> `Requests_Merged` column on [Lunch_Roster](#3-lunch_roster) says how many
+> extra requests each person made, so you can see it happened.
+>
+> A row with **no name on it** is never merged into another — an empty name is
+> a blank guest box, not evidence that two rows are the same person, and
+> guessing wrong there would leave somebody at the counter with no food.
 
 > **Changing a `Program_Status` or `Lunch_Status` on the Registrants tab
 > updates these numbers straight away** — you don't wait for the hourly sync,
@@ -372,7 +385,7 @@ registered.
 `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` ·
 `In_Fridge` are **not typed here any more** — they're totaled automatically
 from the five per-person meal counts on the Registrants tab (see
-[Registrant_Dash](#3-registrant_dash) below), the same
+[Registrant_Dash](#4-registrant_dash) below), the same
 way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only updates once
 the Registrants tab actually reports a meal for that date+location — it never
 gets blanked back out, so a number typed here before this existed (or on a date
@@ -386,7 +399,7 @@ an addition to them: a row reading *40 ordered · 14 takeaway · 8 carried over*
 means eight of that fourteen left the building on a later day. It fills in by
 itself from `Meal_Source` on the Registrants tab, and stays blank on every
 ordinary day — see
-[Registrant_Dash](#3-registrant_dash).
+[Registrant_Dash](#4-registrant_dash).
 
 **`Standard_Buffer` and `Tester_Buffer` aren't typed here either.** They're
 **read from Config** on every render, for that row's location and Hot/Cold type.
@@ -416,7 +429,39 @@ the row is left plain so the numbers read as numbers. `Event_Date` keeps its
 month tint, `Lunch_Type` goes grey on `Not Serving`, the ✍️ columns keep their
 yellow, and a hand-edited row's `Manual_Override` cell goes purple.
 
-### 3. Registrant_Dash
+### 3. Lunch_Roster
+**Who** is eating — one row per person, per date, per location.
+`Master_Lunch_Dashboard` tells you how many meals to order; this tells you
+whose they are. It's the list to hand the meals out against, and the list to
+type into CoPilot afterwards.
+
+| Column | What it means |
+|---|---|
+| `Event_Date` · `Location` | The meal this person is on |
+| `Name` | As typed on the form, or as entered at the desk |
+| `Lunch_Type` | `Hot` or `Cold`, taken from that day's menu row |
+| `Lunch_Served` | ✅ once you've ticked them off (in Quick Mark or on the Registrants tab) |
+| `Registered` | ✅ if they asked in advance; `— walk-in` if they only turned up |
+| `Requests_Merged` | Blank for almost everyone. `2` means they asked for lunch on **three** different program forms for this one day and are being ordered **one** meal |
+| `Programs` | Everything they signed up for that day, so a merged row shows its working |
+| `Phone` · `Source` | For ringing them, and which form they came in on |
+
+**This tab is rebuilt from scratch on every sync — don't type into it.**
+Anything you write here is gone at the next hourly pass. That's deliberate: a
+second, hand-edited place a lunch registration could live is a second number
+the kitchen can be given, and the first time the two disagreed nobody could say
+which was right. Everything here is derived from the Registrants tab in the
+same pass that produces the dashboard count, so **the names and the number can
+never disagree**.
+
+**To add somebody at the desk**, use **Quick Mark** (🍽️ menu). It writes a
+real registrant row and they appear here on the next render — see
+[Signing someone up for lunch at the desk](#signing-someone-up-for-lunch-at-the-desk).
+
+Only people appear here. A catered day nobody has signed up for yet contributes
+no rows — its `0` is on the dashboard, where a zero means something.
+
+### 4. Registrant_Dash
 One row **per person, per session** — guests get their own rows, not a note on
 someone else's.
 
@@ -442,7 +487,8 @@ item on the menu, because on a serving day it's the only one you need.
 3. **Name** — the people registered for **that session** first, then
    **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
    a name that's on neither.
-4. Tick **Attended**, **Lunch**, or both, and press **Mark**.
+4. Tick **Attended**, **Lunch**, **Sign up for lunch**, or a combination, and
+   press the button.
 
 The dialog stays open on the same session and clears just the name and the
 ticks, so a queue of thirty people is one pick and one click each. Every mark
@@ -462,13 +508,42 @@ is listed underneath as it happens, so you can see what you've done.
 > entirely still appear under **Any date (program only)**, and fall back to the
 > nearest-session rule.
 
-**What the two ticks mean.** This is the whole vocabulary:
+**What the ticks mean.** This is the whole vocabulary:
 
 | Ticked | What it records |
 |---|---|
 | **Attended** | They were here. `Lunch_Served` is left alone. |
 | **Lunch** *(alone)* | They got a meal but were **not** here — take-out. `Attended` is **cleared**. |
 | **Attended + Lunch** | Here, and fed. Both are set. |
+| **Sign up for lunch** | They **want** a meal on that date. Nothing is recorded as served, and `Attended` is left exactly as it is. |
+
+**Lunch** and **Sign up for lunch** are the same fact at two different times —
+already handed over, versus expected — so ticking one clears the other.
+
+#### Signing someone up for lunch at the desk
+
+Somebody comes to the front desk on Monday and wants lunch a week Thursday.
+Pick the location, pick **that Thursday's** session (or **🥡 Lunch Only (no
+program)** if nothing else is running), pick or type their name, tick **Sign up
+for lunch**, press **Sign up**.
+
+They're now on the order for that day: `Lunch_Status` = `Needed`,
+`Lunch_Type` taken from that day's menu, and **nothing marked served**. They
+appear on [Lunch_Roster](#3-lunch_roster) on the next render, and in
+`Registered_Count` on the lunch dashboard.
+
+Someone pre-registering for a **month** of lunches is the same thing once per
+date — pick the next date, same name, tick, press. The dialog keeps the
+location and clears only the name and the ticks, so it's a few seconds each.
+
+> **The date must have a `Hot` or `Cold` row on Lunch_Schedule.** If it
+> doesn't, the sign-up is refused with a message saying so, rather than
+> accepted into a day nothing is being cooked on. Add the menu row first.
+
+> **Why this isn't just the Lunch tick.** Ticking **Lunch** writes
+> `Lunch_Served`, which means *the meal has already been handed over*. Using it
+> to book a future meal puts a served lunch on a date that hasn't happened,
+> and `Served_Confirmed` then disagrees with reality on both days.
 
 > **There used to be a third box, 🥡 Lunch Only.** It did exactly what a Lunch
 > tick with Attended left clear does, and two ways to say one thing is two ways
@@ -627,7 +702,7 @@ that get *ordered*. `Served_Confirmed` is separate — see below.
 version. It's kept on purpose so you can see the change happened — it's excluded
 from all counts automatically.
 
-### 4. Lunch_Schedule
+### 5. Lunch_Schedule
 **You own this tab.** It's the menu, one row per **date per location**.
 
 | Column | Notes |
@@ -759,7 +834,7 @@ change out to the forms**, exactly like hand-editing a row does.
 Neither needs an authorized admin account — adding a menu row this way is the
 same capability as hand-editing the tab, just faster.
 
-### 5. Member_Roll and Program_Options — your own notes
+### 6. Member_Roll and Program_Options — your own notes
 
 These two tabs are the only ones holding knowledge the system can't work out for
 itself. Each is split down the middle:
@@ -793,7 +868,7 @@ the recomputed history shows them attending.
 several addresses are fine, separated by commas. See
 [Instructor sign-up sheets](#instructor-sign-up-sheets).
 
-### 6. Config
+### 7. Config
 Seven small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold. **This is
@@ -920,7 +995,7 @@ anything left over goes out on the next one.
 > Registrants who didn't give an email address (walk-ins, club members added by
 > hand) are simply skipped. Nothing else about them changes.
 
-### 7. Club_Members
+### 8. Club_Members
 The standing roster for every `[Club]` program — one row per person per club.
 See [Clubs](#clubs) for how people get here and how to take them off.
 
@@ -936,7 +1011,7 @@ contact details). The **yellow** ones are yours:
 `Club_Key` is hidden — it's the machine key that keeps a roster attached to its
 program across a new form every month.
 
-### 8. Deleted_Event_Triage
+### 9. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
 their rows are moved here instead of being deleted, with a note. Follow up with
 those people, then clear the rows.
@@ -1081,9 +1156,9 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **👩‍🏫 Share a Sign-Up Sheet with an Instructor…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its instructor — see [Instructor sign-up sheets](#instructor-sign-up-sheets) |
 | **👩‍🏫 Refresh Instructor Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
-| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day — location, session, name, then Attended and/or Lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, or sign somebody up for a future lunch — location, session, name, then Attended / Lunch / Sign up for lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **📧 Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
-| **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#4-lunch_schedule) |
+| **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
 | **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
@@ -1741,7 +1816,7 @@ description is the thing that's wrong, so it can't also be the source of truth.
   Triggers**.
   - It only ever puts back triggers **your account already had**. If you
     weren't holding any and you're not the recorded
-    [Trigger_Owner](#6-config), it rebuilds nothing
+    [Trigger_Owner](#7-config), it rebuilds nothing
     rather than creating a fresh set under you — that set would be invisible
     to the owner and would double every sync from then on.
 - It **won't run during "Import Everything"** — that import has the same
@@ -1956,9 +2031,22 @@ Same dialog — pick their name and tick **Lunch** on its own. It marks
 `Lunch_Served` without marking `Attended` (and clears `Attended` if it was
 already ticked by mistake).
 
+**Sign someone up for a future lunch at the front desk**
+Same dialog — pick the location, pick **that day's** session (or **🥡 Lunch
+Only (no program)**), pick or type their name, tick **Sign up for lunch**. See
+[Signing someone up for lunch at the desk](#signing-someone-up-for-lunch-at-the-desk).
+For a month of lunches, repeat once per date; the dialog keeps the location.
+
+**See exactly who is eating on a given day**
+**Lunch_Roster** — one row per person per date and location, with the programs
+they signed up for, whether they've been served, and their phone number. That's
+the list to hand meals out against and to type into CoPilot. See
+[Lunch_Roster](#3-lunch_roster).
+
 **Check how many lunches actually went out**
 Compare `Registered_Count` (what the forms said) with `Served_Confirmed` (what
-you ticked) on **Master_Lunch_Dashboard**.
+you ticked) on **Master_Lunch_Dashboard**. Both count **people**, so somebody
+who asked for lunch on three of the day's forms is one of each.
 
 **Note that someone always brings a guest**
 Put it in `Usual_Guests` on **Member_Roll**. It stays there forever — nothing
@@ -2002,7 +2090,9 @@ what keeps your corrections from being wiped — but it also means a protected r
 won't pick up later form changes.
 
 **Names are matched loosely.** "Jane Smith" and "jane smith " are treated as the
-same person, so a person doesn't get double-counted or double-catered.
+same person, so a person doesn't get double-counted or double-catered — including
+across several programs on the same day, which is what stops three lunch
+requests from one person becoming three meals on the order.
 
 **The dashboards are rebuilt, not patched.** Master_Program_Dashboard and the
 Today blocks are regenerated from scratch each sync. Only the pencil columns on
@@ -2213,7 +2303,7 @@ that isn't the account you intend to use going forward.
 Going forward, **only ever run setup and trigger actions from one Google
 account** — ideally whoever owns the spreadsheet. This is now enforced rather
 than left to memory: see **Trigger_Owner** under
-[Config](#6-config). Everyone else can register, view dashboards, and
+[Config](#7-config). Everyone else can register, view dashboards, and
 hand-edit rows freely.
 
 **Start with Admin → Trigger Status.** It tells you, in one dialog, whether

@@ -31,9 +31,19 @@ It also:
   the sessions, registrants, club roster, staff notes and form all move across
   with it, instead of the sessions being swept into triage and the club roster
   silently detaching;
+- counts a lunch **once per person per day**, however many of that day's
+  programs they ticked the lunch box on — three sign-ups from one person is one
+  meal on the order, not three, with a `Requests_Merged` column showing where a
+  merge happened so the number stays auditable;
+- lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
+  per person per date and location, with their programs, phone, `Hot`/`Cold`
+  and whether they've been handed their meal — built from the same pass as the
+  order count, so the names and the number cannot disagree;
 - marks people off at the desk from a **Quick Mark dialog** — location,
   session, name, then Attended and/or Lunch, with Lunch on its own recording a
-  meal collected by somebody who never came in;
+  meal collected by somebody who never came in — and **signs somebody up for a
+  future lunch** from the same dialog, recording the demand without claiming a
+  meal was served;
 - records **several different meals per person** on one day (ate the day-1
   meal here, took two subs home), attached to whoever took them — and **which
   lunch** they were, so serving Wednesday's leftovers on Thursday stops

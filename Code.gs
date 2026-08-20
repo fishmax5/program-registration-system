@@ -1066,6 +1066,7 @@ const SHEET_NAMES = {
   PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
   REGISTRANT_DASH: 'Registrant_Dash',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
+  LUNCH_ROSTER: 'Lunch_Roster',
   LUNCH_SCHEDULE: 'Lunch_Schedule',
   TRIAGE: 'Deleted_Event_Triage',
   MEMBER_ROLL: 'Member_Roll',
@@ -1261,6 +1262,32 @@ const HEADERS = {
     'Carried_Over',
     'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
     'Standard_Buffer', 'Tester_Buffer'
+  ],
+  /**
+   * Lunch_Roster - WHO is eating, one row per PERSON per date+location.
+   *
+   * Master_Lunch_Dashboard answers "how many lunches do we order"; it is a
+   * count and nothing but a count. This tab answers the other half of the same
+   * question - "which people are those" - which is what the desk needs to hand
+   * the meals out against, and what gets typed into CoPilot afterwards.
+   * Registrant_Dash has the names but it is every registration for every
+   * program, so finding the day's eaters in it means reading past the eleven
+   * people who signed up for Chair Yoga and never asked for food.
+   *
+   * DERIVED AND REBUILT ON EVERY SYNC, never hand-edited: every row here comes
+   * from buildDashboardRollup(), the same pass that produces the number on the
+   * dashboard, so the names and the count can never disagree. To add somebody
+   * at the desk, use Quick Mark - which writes a real registrant row, which
+   * shows up here on the next render.
+   *
+   * Requests_Merged is the column that makes the count auditable: 2 means this
+   * person asked for lunch on three different program forms for this one day
+   * and is being ordered ONE meal. That de-duplication used to be done by hand
+   * every morning; the column is what shows it happened.
+   */
+  Lunch_Roster: [
+    'Event_Date', 'Location', 'Name', 'Lunch_Type', 'Lunch_Served',
+    'Registered', 'Requests_Merged', 'Programs', 'Phone', 'Source'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
   // (see CATERED_LUNCH_TYPES vs LUNCH_TYPE_OPTIONS below).
@@ -4557,6 +4584,7 @@ function initSheet() {
   renderTriageSheet(true);
 
   initPlaceholderSheet(ss, SHEET_NAMES.LUNCH_DASHBOARD, 'Run "Sync Registrations" from the menu to populate this dashboard.');
+  initPlaceholderSheet(ss, SHEET_NAMES.LUNCH_ROSTER, 'Run "Sync Registrations" from the menu to populate the lunch name list.');
 
   renderProgramDashboard(true);
   refreshMemoryTabs(null, null); // builds Member_Roll / Program_Options, empty on a fresh workbook
@@ -4590,6 +4618,7 @@ function initSheet() {
  *     Deleted_Event_Triage
  *     Lunch_Schedule              — including the new ADD block
  *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
+ *     Lunch_Roster                — rebuilt with it, from the same rollup
  *     Member_Roll / Program_Options — staff columns never touched
  *     Tab order, column widths, dropdowns, conditional formatting
  *
@@ -4712,6 +4741,7 @@ function reorderTabs(ss) {
   const order = [
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_DASHBOARD,
+    SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.REGISTRANT_DASH,
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.MEMBER_ROLL,
@@ -13188,6 +13218,7 @@ function showAllPastRows() {
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.LUNCH_DASHBOARD,
+    SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.TRIAGE
   ];
   let done = 0;
@@ -13569,8 +13600,10 @@ function buildQuickMarkHtml() {
 <fieldset>
   <legend>Mark</legend>
   <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
-  <label class="tick"><input type="checkbox" id="lunch" onchange="refreshButton()"> Lunch
+  <label class="tick"><input type="checkbox" id="lunch" onchange="exclusiveLunch('lunch'); refreshButton()"> Lunch
     <span class="note">— on its own means a meal collected, not present</span></label>
+  <label class="tick"><input type="checkbox" id="signup" onchange="exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
+    <span class="note">— they want a meal on this date; nothing has been served yet</span></label>
 </fieldset>
 
 <button id="go" onclick="submit(false)" disabled>Mark</button>
@@ -13660,10 +13693,21 @@ function buildQuickMarkHtml() {
     return picked;
   }
 
+  // "Lunch" and "Sign up for lunch" are the same fact at two different times —
+  // already handed over, versus expected. Ticking both says nothing coherent,
+  // so the later one wins and the other clears itself, rather than the dialog
+  // accepting it and the server quietly picking one.
+  function exclusiveLunch(justTicked) {
+    var other = justTicked === 'lunch' ? 'signup' : 'lunch';
+    if (el(justTicked).checked) el(other).checked = false;
+  }
+
   function refreshButton() {
     var ready = !!el('session').value && !!chosenName() &&
-      (el('attended').checked || el('lunch').checked);
+      (el('attended').checked || el('lunch').checked || el('signup').checked);
     el('go').disabled = !ready;
+    el('go').textContent = (el('signup').checked && !el('attended').checked && !el('lunch').checked)
+      ? 'Sign up' : 'Mark';
   }
 
   function submit(confirmWalkIn) {
@@ -13689,6 +13733,7 @@ function buildQuickMarkHtml() {
           showWalkIn(false);
           el('attended').checked = false;
           el('lunch').checked = false;
+          el('signup').checked = false;
           if (res.namesChanged) sessionChanged();
         }
         refreshButton();
@@ -13700,6 +13745,7 @@ function buildQuickMarkHtml() {
         name: chosenName(),
         attended: el('attended').checked,
         lunch: el('lunch').checked,
+        signup: el('signup').checked,
         confirmWalkIn: !!confirmWalkIn
       });
   }
@@ -14007,10 +14053,20 @@ function applyQuickMarkFromDialog(args) {
   const name = String(args.name || '').trim();
   const attended = !!args.attended;
   const lunch = !!args.lunch;
+  // SIGN UP is the third thing a desk does with a lunch, and until now the
+  // only one it could not do here. "Lunch" writes Lunch_Served, which means
+  // the meal has already been handed over; there was no way to say "Mrs
+  // Kaplan came in on Monday and wants a lunch a week Thursday" without
+  // asserting she had already eaten it — which lands a served meal on a future
+  // date and makes Served_Confirmed disagree with reality on both days.
+  // This records the DEMAND instead: Lunch_Status = Needed, nothing served.
+  const signup = !!args.signup && !lunch;
   const selection = parseQuickMarkProgramChoice(args.session);
 
   if (!name) return { ok: false, message: '⚠️ Pick a name first — nothing was marked.' };
-  if (!attended && !lunch) return { ok: false, message: '⚠️ Tick Attended, Lunch, or both.' };
+  if (!attended && !lunch && !signup) {
+    return { ok: false, message: '⚠️ Tick Attended, Lunch, or Sign up for lunch.' };
+  }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
@@ -14045,7 +14101,7 @@ function applyQuickMarkFromDialog(args) {
     // Nobody registered under that name for that session. Since the lists
     // offer every known member and not just the registered ones, this is the
     // walk-in case rather than a dead end.
-    return addQuickMarkWalkIn(sheet, { name, selection, location, attended, lunch, confirmed: !!args.confirmWalkIn });
+    return addQuickMarkWalkIn(sheet, { name, selection, location, attended, lunch, signup, confirmed: !!args.confirmWalkIn });
   }
 
   // Today, else the soonest future date, else the most recent past one.
@@ -14061,7 +14117,40 @@ function applyQuickMarkFromDialog(args) {
     return { ok: false, message: '⚠️ This tab has no Attended/Lunch_Served columns yet — run Sync Registrations once.' };
   }
 
+  // A lunch sign-up is REFUSED BEFORE ANYTHING IS WRITTEN when there is no
+  // meal on that date to sign up for. Checked here rather than beside the
+  // write below so a rejected sign-up leaves the row untouched instead of
+  // half-marked — "Attended + Sign up for lunch" must not record the
+  // attendance and then bail out of the half the person actually came in for.
+  const signupSession = signup
+    ? {
+      date: target.date,
+      location: location ||
+        String(sheet.getRange(target.sheetRow, map['Location'] + 1).getValue() || '').trim()
+    }
+    : null;
+  if (signup && (!signupSession.date || !isLunchOfferedOn(signupSession.date, signupSession.location))) {
+    return {
+      ok: false,
+      message: `⚠️ No lunch is scheduled at ${signupSession.location || 'that location'} on ` +
+        `${signupSession.date ? formatDateLabel(signupSession.date) : 'that date'} — add a Hot or Cold row on ` +
+        `${SHEET_NAMES.LUNCH_SCHEDULE} first, or nothing would be ordered for them. Nothing was marked.`
+    };
+  }
+
   if (attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+  // Signing an existing registration up for lunch changes only the two lunch
+  // columns. Attended is deliberately left exactly as it is: whether they were
+  // here is a separate fact from whether they want feeding, and a sign-up made
+  // days ahead knows nothing about it either way.
+  if (signup) {
+    if (map['Lunch_Status'] !== undefined) {
+      sheet.getRange(target.sheetRow, map['Lunch_Status'] + 1).setValue('Needed');
+    }
+    if (map['Lunch_Type'] !== undefined) {
+      sheet.getRange(target.sheetRow, map['Lunch_Type'] + 1).setValue(resolveWalkInLunchType(signupSession));
+    }
+  }
   if (lunch) {
     sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
     // Lunch without Attended is the take-out case, and saying so has to be
@@ -14079,17 +14168,35 @@ function applyQuickMarkFromDialog(args) {
 
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
   const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
-  const what = describeQuickMark(attended, lunch);
+  const what = describeQuickMark(attended, lunch, signup);
+  // A SIGN-UP CHANGES THE ORDER, so the dashboard is rebuilt straight away —
+  // the same rule Lunch_Status edits on the tab itself follow, and for the
+  // same reason. Lunch_Served ticks deliberately do NOT (see
+  // recalculateCateringCounts()), because they happen dozens of times an hour
+  // at a desk and don't move the number anybody orders against. A sign-up is
+  // the opposite on both counts: rare, and it is the number.
+  if (signup) recalculateCateringCounts(sheet, map, target.sheetRow, 1);
+
   const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.`;
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
   return { ok: true, message, namesChanged: false };
 }
 
-/** "attended", "lunch (not attending)", or "attended + lunch" — one phrasing, used everywhere. */
-function describeQuickMark(attended, lunch) {
+/**
+ * One phrasing for what a Quick Mark did, used in the toast, the log, the
+ * walk-in confirmation and the row's own Admin_Notes — so the desk reads the
+ * same words in all four places.
+ *
+ * `signup` and `lunch` are mutually exclusive by the time they get here (see
+ * applyQuickMarkFromDialog()): one is a meal expected, the other a meal
+ * already handed over.
+ */
+function describeQuickMark(attended, lunch, signup) {
   if (attended && lunch) return 'attended + lunch';
+  if (attended && signup) return 'attended + signed up for lunch';
   if (lunch) return 'lunch (collected, not attending)';
+  if (signup) return 'signed up for lunch (not served yet)';
   return 'attended';
 }
 
@@ -14108,7 +14215,7 @@ function describeQuickMark(attended, lunch) {
  * because a button was clicked by accident.
  */
 function addQuickMarkWalkIn(sheet, args) {
-  const { name, selection, location, attended, lunch } = args;
+  const { name, selection, location, attended, lunch, signup } = args;
   const program = selection ? selection.title : '';
 
   if (!program) {
@@ -14129,7 +14236,20 @@ function addQuickMarkWalkIn(sheet, args) {
 
   const lunchOffered = isLunchOfferedOn(session.date, session.location);
   const dateLabel = formatDateLabel(session.date);
-  const what = describeQuickMark(attended, lunch);
+  const what = describeQuickMark(attended, lunch, signup);
+
+  // A sign-up for a date with no meal on it is the one case worth refusing
+  // outright rather than warning about. The row would carry Lunch_Status =
+  // Needed, the dashboard would raise "lunch needed with no menu set", and the
+  // person at the desk would walk away believing a meal was booked. Whoever is
+  // standing there can be told now, while it can still be fixed.
+  if (signup && !lunchOffered) {
+    return {
+      ok: false,
+      message: `⚠️ No lunch is scheduled at ${session.location} on ${dateLabel}, so "${name}" can't be ` +
+        `signed up for one. Add a Hot or Cold row for that date on ${SHEET_NAMES.LUNCH_SCHEDULE} first.`
+    };
+  }
 
   // THE CONFIRMATION IS THE DIALOG'S, not a ui.alert(). Apps Script will not
   // put an alert up while a modal dialog is already open, so asking from here
@@ -14163,16 +14283,19 @@ function addQuickMarkWalkIn(sheet, args) {
   row[map['Attended']] = attended;
   row[map['Lunch_Served']] = lunch;
   row[map['Person_Type']] = 'Attendee';
-  row[map['Lunch_Type']] = lunch && lunchOffered ? resolveWalkInLunchType(session) : 'No Lunch';
-  row[map['Lunch_Status']] = lunch && lunchOffered ? 'Needed' : 'No Lunch';
+  // Wants a meal, whether it has been handed over yet (lunch) or not (signup):
+  // both are Lunch_Status = Needed, and Lunch_Served above is the only thing
+  // that separates them.
+  const wantsLunch = (lunch || signup) && lunchOffered;
+  row[map['Lunch_Type']] = wantsLunch ? resolveWalkInLunchType(session) : 'No Lunch';
+  row[map['Lunch_Status']] = wantsLunch ? 'Needed' : 'No Lunch';
   row[map['Program_Status']] = 'Active';
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
-  row[map['Admin_Notes']] = lunch && !attended
-    ? `Take-out walk-in added at the desk on ${formatDateLabel(new Date())}.`
-    : `Walk-in added at the desk on ${formatDateLabel(new Date())}.`;
+  row[map['Admin_Notes']] = `${signup ? 'Lunch sign-up' : (lunch && !attended ? 'Take-out walk-in' : 'Walk-in')} ` +
+    `added at the desk on ${formatDateLabel(new Date())}.`;
   row[map['Manual_Override']] = 'Manually Added';
-  row[map['Form_Source']] = 'Walk-in (no form)';
+  row[map['Form_Source']] = signup ? 'Front desk sign-up (no form)' : 'Walk-in (no form)';
   row[map['Event_ID']] = session.eventId;
 
   // Somebody standing at the desk outranks a past deletion of the same person
@@ -14184,7 +14307,15 @@ function addQuickMarkWalkIn(sheet, args) {
   existing.push(row);
   renderRegistrantsSheet(false, existing);
 
-  const message = `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`;
+  // Same rule as the existing-row path above: a sign-up is a meal that now has
+  // to be ordered, so the dashboard and the roster are rebuilt now rather than
+  // at the next hourly sync. Rebuilt from `existing`, which already carries
+  // the row just added, so no re-read is needed.
+  if (signup) updateMasterLunchDashboard(existing);
+
+  const message = signup
+    ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
+    : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`;
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
   // The name list for this session has a new entry on it now.
@@ -16329,6 +16460,75 @@ function getDashboardRowPlan() {
  * date is exactly the thing worth surfacing. Past dates are never seeded —
  * that would backfill a wall of empty history.
  */
+/**
+ * The person-level record behind one date+location's lunch numbers.
+ *
+ * WHY THIS EXISTS AT ALL. Both lunch numbers used to be `count++` per
+ * REGISTRANT ROW, and a registrant row is one person on one PROGRAM. Somebody
+ * who signs up for Chair Yoga, Bingo and the Book Club on the same Tuesday and
+ * ticks "yes, lunch" on all three forms - which is the normal thing to do,
+ * because each form asks - is three rows, and was therefore three lunches on
+ * the order. They eat one. On a busy day that gap was the difference between
+ * ordering 30 meals and ordering the 23 that get eaten, and the only thing
+ * standing between the kitchen and that over-order was somebody reading down
+ * the sheet each morning deleting the repeats by hand.
+ *
+ * So the tally is now keyed on the PERSON, via normalizeNameKey() - the same
+ * identity rule the club rosters, the "sign up for all dates" registry and
+ * Quick Mark already use, so "Jane Smith" and "jane  smith " have always been
+ * one person everywhere else in this file and are one person here too.
+ *
+ * A ROW WITH NO NAME NEVER COLLAPSES. An empty Name is not evidence that two
+ * rows are the same person; it is evidence that somebody left a guest-name box
+ * blank. Merging those would UNDER-order, and under-ordering is the one
+ * direction this whole change must never go - a duplicate meal is waste, a
+ * missing meal is a person at the counter with nothing to eat. Each unnamed
+ * row therefore keeps its own slot.
+ *
+ * The entry doubles as the source row for Lunch_Roster, which is why it
+ * carries names, programs and phone rather than only a flag: the count and the
+ * list of who is in it are built in one pass and cannot drift apart.
+ */
+function lunchPersonEntry(bucket, row, lrMap) {
+  const people = bucket.people || (bucket.people = {});
+  const displayName = String(row[lrMap['Name']] || '').trim();
+  const key = normalizeNameKey(displayName);
+  const slot = key || `\u0000unnamed:${(bucket.unnamedSeen = (bucket.unnamedSeen || 0) + 1)}`;
+
+  if (!people[slot]) {
+    people[slot] = {
+      name: displayName,
+      registered: false,
+      served: false,
+      // How many EXTRA lunch requests this person made for this one day, i.e.
+      // how many rows were merged away. 0 on the overwhelming majority.
+      mergedRequests: 0,
+      lunchType: '',
+      programs: [],
+      phone: '',
+      source: ''
+    };
+  }
+  const entry = people[slot];
+
+  // Later rows fill in anything the first one left blank rather than
+  // overwriting it: the three rows being merged are the same person and
+  // between them usually know the phone number even when one doesn't.
+  if (!entry.phone) entry.phone = String(row[lrMap['Phone']] || '').trim();
+  if (!entry.lunchType) entry.lunchType = String(row[lrMap['Lunch_Type']] || '').trim();
+  if (!entry.source) entry.source = String(row[lrMap['Form_Source']] || '').trim();
+  const program = String(row[lrMap['Event']] || '').trim();
+  if (program && entry.programs.indexOf(program) === -1) entry.programs.push(program);
+
+  return entry;
+}
+
+/** Distinct people on a rollup bucket for whom `flag` is true. */
+function countLunchPeople(bucket, flag) {
+  const people = bucket.people || {};
+  return Object.keys(people).reduce((n, k) => n + (people[k][flag] ? 1 : 0), 0);
+}
+
 function buildDashboardRollup(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -16492,6 +16692,13 @@ function buildDashboardRollup(registrantRows) {
       // whose Lunch_Served box is checked counts here even if they never
       // requested lunch on the form (walk-ins happen), which is why this is
       // tallied before the Program_Status/Lunch_Status filter below.
+      //
+      // Counted PER PERSON, not per row, for the same reason the registration
+      // count below is (see lunchPersonEntry()): the duplicate-registration
+      // case puts the same person on three rows for one day, staff tick the
+      // one they happen to land on - or all three - and "how many people got
+      // their lunch" has to stay comparable with "how many people asked for
+      // one" or the two columns beside each other stop meaning anything.
       if (isTruthyCheckbox(row[lrMap['Lunch_Served']])) {
         const servedKey = `${meta.dateKey}|${meta.location}`;
         if (!rollup[servedKey]) {
@@ -16500,7 +16707,7 @@ function buildDashboardRollup(registrantRows) {
             registeredCount: 0, servedConfirmed: 0, unplanned: true
           };
         }
-        rollup[servedKey].servedConfirmed = (rollup[servedKey].servedConfirmed || 0) + 1;
+        lunchPersonEntry(rollup[servedKey], row, lrMap).served = true;
       }
 
       // THE MEAL COUNTS feed Master_Lunch_Dashboard's consumption columns the
@@ -16578,7 +16785,15 @@ function buildDashboardRollup(registrantRows) {
         if (!notServingWithSignups[nsKey]) {
           notServingWithSignups[nsKey] = { dateKey: meta.dateKey, location: meta.location, people: [] };
         }
-        notServingWithSignups[nsKey].people.push(String(row[lrMap['Name']] || '').trim() || '(unnamed)');
+        // Deduped for the same reason the counts are (see lunchPersonEntry()):
+        // this warning is read by a person who then goes and rings everyone on
+        // it, and one name listed three times reads as three calls to make.
+        // An unnamed row is still a person to account for, so it is never
+        // merged into another - same rule as the counts.
+        const nsName = String(row[lrMap['Name']] || '').trim();
+        if (!nsName || notServingWithSignups[nsKey].people.indexOf(nsName) === -1) {
+          notServingWithSignups[nsKey].people.push(nsName || '(unnamed)');
+        }
         return;
       }
 
@@ -16594,9 +16809,25 @@ function buildDashboardRollup(registrantRows) {
           registeredCount: 0, servedConfirmed: 0, unplanned: true
         };
       }
-      rollup[key].registeredCount++;
+      // ONE PERSON, ONE MEAL - however many of the day's forms they ticked
+      // the lunch box on. See lunchPersonEntry() for why, and for why an
+      // unnamed row is never merged into another.
+      const entry = lunchPersonEntry(rollup[key], row, lrMap);
+      if (entry.registered) entry.mergedRequests++;
+      entry.registered = true;
     });
   }
+
+  // The counts are now READ OFF the person records rather than accumulated as
+  // the rows go past, so there is exactly one definition of each number and
+  // Lunch_Roster is guaranteed to list the very people the dashboard counted.
+  Object.keys(rollup).forEach(key => {
+    const r = rollup[key];
+    r.registeredCount = countLunchPeople(r, 'registered');
+    r.servedConfirmed = countLunchPeople(r, 'served');
+    r.mergedRequests = Object.keys(r.people || {})
+      .reduce((n, k) => n + r.people[k].mergedRequests, 0);
+  });
 
   // Anything that only exists because someone registered for it, on a date
   // with no catered menu behind it, is worth telling a human about.
@@ -16707,6 +16938,114 @@ function updateMasterLunchDashboard(registrantRows) {
 
   writeMasterLunchDashboardSheet(sheet, plan, headers,
     dropNotServingRows(existingTable, map, rollup), rollup);
+
+  // Same rollup, the other half of the same question: the dashboard says how
+  // many meals, this says whose. Rendered from the same object in the same
+  // call so the two can never be out of step with each other.
+  renderLunchRosterSheet(rollup);
+}
+
+/**
+ * Writes Lunch_Roster - one row per person per catered date+location.
+ *
+ * WHOLLY DERIVED. The tab is cleared and rebuilt from `rollup` on every render,
+ * so nothing typed into it survives and nothing here needs an upsert, a
+ * Manual_Override column or a protected-row rule. That is a deliberate
+ * trade: the alternative - a hand-editable roster - would be a second place a
+ * lunch registration can live, and the first time the two disagreed the
+ * kitchen would get a number nobody could account for. The place to add a
+ * person is Quick Mark, which writes a real registrant row; it lands here on
+ * the next sync with everything else.
+ *
+ * Only people are listed, not every catered day: a date with a menu and no
+ * takers contributes no rows. The count for such a day is on the dashboard,
+ * where a zero is meaningful; a blank name row here would just be noise.
+ */
+function renderLunchRosterSheet(rollup) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_ROSTER);
+  const headers = HEADERS.Lunch_Roster;
+  const map = getIndexMap(headers);
+
+  const rows = [];
+  (rollup || []).forEach(bucket => {
+    const people = bucket.people || {};
+    Object.keys(people).forEach(slot => {
+      const person = people[slot];
+      // Somebody who neither asked for lunch nor was given one is on this
+      // bucket only because a meal count or a served tick put them there via
+      // another path; nothing to serve, nothing to list.
+      if (!person.registered && !person.served) return;
+      const row = new Array(headers.length).fill('');
+      row[map['Event_Date']] = parseDateKey(bucket.dateKey);
+      row[map['Location']] = bucket.location;
+      row[map['Name']] = person.name || '(name not given)';
+      // The day's menu wins over whatever the person's own row says: one
+      // batch is cooked per date and location, and that is what they get.
+      row[map['Lunch_Type']] = bucket.mealType || person.lunchType || '';
+      row[map['Lunch_Served']] = person.served ? '✅' : '';
+      row[map['Registered']] = person.registered ? '✅' : '— walk-in';
+      row[map['Requests_Merged']] = person.mergedRequests > 0 ? person.mergedRequests : '';
+      row[map['Programs']] = person.programs.join(', ');
+      row[map['Phone']] = person.phone;
+      row[map['Source']] = person.source;
+      rows.push(row);
+    });
+  });
+
+  rows.sort((a, b) => {
+    if (a[map['Location']] !== b[map['Location']]) {
+      return String(a[map['Location']]).localeCompare(String(b[map['Location']]));
+    }
+    return String(a[map['Name']]).localeCompare(String(b[map['Name']]));
+  });
+
+  return renderFlatDateSheet(sheet, headers, rows, {
+    upcomingLabel: '⏳ Upcoming Lunches (who is expecting a meal)',
+    pastLabel: '🕓 Past Lunches (who was served)',
+    force: true,
+    afterWrite: applyLunchRosterFormatting
+  });
+}
+
+/**
+ * Lunch_Roster's afterWrite hook: location tinting like every other tab, and a
+ * typing warning on the columns anybody would reach for.
+ *
+ * The warning is the important half. This is the one tab in the workbook that
+ * looks exactly like somewhere you would add a name — it is a list of names,
+ * on the lunch side of the workbook, and adding a name to the lunch list is a
+ * thing staff do every day. It just isn't done here. Sheets says so at the
+ * moment of typing, which is the only moment the message is any use.
+ */
+function applyLunchRosterFormatting(sheet, headers, result) {
+  const map = getIndexMap(headers);
+  const zones = [
+    { start: result.upcomingDataStart, count: result.upcomingCount },
+    { start: result.pastDataStart, count: result.pastCount }
+  ];
+  const activeZones = zones.filter(z => z.count > 0);
+
+  sheet.setConditionalFormatRules(
+    buildLocationColorRules(activeZones.map(z => sheet.getRange(z.start, map['Location'] + 1, z.count, 1))));
+
+  activeZones.forEach(z => {
+    sheet.getRange(z.start, map['Lunch_Served'] + 1, z.count, 1).setHorizontalAlignment('center');
+    sheet.getRange(z.start, map['Registered'] + 1, z.count, 1).setHorizontalAlignment('center');
+    sheet.getRange(z.start, map['Requests_Merged'] + 1, z.count, 1).setHorizontalAlignment('center');
+  });
+
+  // Nothing is ever hidden here, but visibility survives clear() — so it has
+  // to be re-asserted rather than inherited from whatever the tab was before.
+  applyColumnVisibility(sheet, headers, []);
+  freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, headers.length));
+
+  // Only the columns somebody would plausibly type into, rather than all ten:
+  // each name costs a protection object per zone on every render, and a
+  // warning on Source is a warning nobody was ever going to trip.
+  protectDerivedColumns(sheet, headers, ['Name', 'Lunch_Served', 'Requests_Merged'], zones);
+
+  // No autosize here: renderFlatDateSheet() does it immediately after.
 }
 
 /**

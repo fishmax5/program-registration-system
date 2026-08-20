@@ -277,8 +277,16 @@ replacement both carrying a served tick double-counts one lunch.
 `supersedeRegistrantRow()` rewrites both statuses and leaves the day-of columns
 alone, which is correct for its own purpose (a superseded row is a record of
 what was submitted). Reaching one row's `Lunch_Served` from another row's
-supersede is a rule with more edges than the double-count it prevents. Worth
-watching, and easy to spot: `Served_Confirmed` higher than the headcount.
+supersede is a rule with more edges than the double-count it prevents.
+
+**Now fixed as a side effect of the per-person lunch tally.** Both
+`Registered_Count` and `Served_Confirmed` count *people*, keyed on
+`normalizeNameKey()`, rather than rows — see `lunchPersonEntry()`. A superseded
+row and its replacement are the same name on the same date and location, so
+they are one entry and one meal, whichever of them carries the tick. The
+change was made for the duplicate-registration case (one person, three
+programs, one Tuesday, three lunch requests, one lunch) and this falls out of
+it for free.
 
 ### F. `[Cap: 99999999999999999999]` is accepted as written
 
