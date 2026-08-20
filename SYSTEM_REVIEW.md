@@ -517,6 +517,18 @@ order of what would change your plans:
    up by one while `Served_Confirmed` stays where it was. Then try the same on
    a date with no `Hot`/`Cold` menu row and confirm it is refused with a
    message rather than accepted.
+5c. **Submit the lunch-only form once for a whole month** ("I want lunch on
+   every date listed"). Check: one registrant row per date reading
+   `🥡 Lunch Only (no program)` with `Lunch_Status` = `Needed`, the person on
+   `Lunch_Roster` under every one of those dates, and `Registered_Count` up by
+   one on each. Then submit it again for a date they have ALSO signed up for
+   through a programme's form, and confirm that date still counts them once.
+5d. **Check the lunch-only session rows on `Master_Program_Dashboard`.** Their
+   `Calendar_Source` must be BLANK — that is the only thing keeping triage off
+   them, and if it is ever populated the whole lunch programme goes to
+   `Deleted_Event_Triage` on the next sync. Then try editing `Type_Tag` on one
+   and confirm it is refused with a message rather than accepted and quietly
+   reverted.
 6. **Check the Past sections** show the hidden-row note, and that
    **🕓 Show All Past Rows** brings them back.
 7. **Mark an upcoming date "Not Serving"** on `Lunch_Schedule` where somebody

@@ -288,7 +288,27 @@ change was made for the duplicate-registration case (one person, three
 programs, one Tuesday, three lunch requests, one lunch) and this falls out of
 it for free.
 
-### F. `[Cap: 99999999999999999999]` is accepted as written
+### F. A lunch-only form whose whole month is cancelled stays open
+
+The lunch-only sign-up forms are generated from `Lunch_Schedule`, one per
+location per calendar month, and `syncLunchOnlySessions()` works from the set
+of dates that are *currently* catered. A single date flipped to `Not Serving`
+therefore leaves the form on the next refresh, which is right and is tested.
+
+If **every** date in a location's month is flipped, that location/month leaves
+the map altogether: its form is not refreshed, and its link stops being pinned
+to `Master_Lunch_Dashboard`. The form itself stays open and still lists the
+dates it had, so a link already handed out still accepts submissions — which
+land as registrations for meals nobody is cooking. `buildDashboardRollup()`
+does email the names on a Not-Serving date with sign-ups, so it is not silent.
+
+Left as is on purpose. Closing the form automatically means re-opening it
+automatically when the menu comes back, and a form that opens and shuts itself
+on the strength of a menu edit fails in ways nobody can predict from the
+outside. Doing it by hand is one click on a form that, in practice, is
+cancelled outright about never.
+
+### G. `[Cap: 99999999999999999999]` is accepted as written
 
 Capacity is `parseInt` with no ceiling, so a typo in a calendar description
 propagates as `1e20` into `Remaining_Seats` and the status calculation.

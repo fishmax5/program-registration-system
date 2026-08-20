@@ -320,8 +320,35 @@ internal plumbing, kept after the capacity columns at the far right. The "View
 Live Form" link you actually hand out stays visible.
 
 ### 2. Master_Lunch_Dashboard
-What to order. **Today's Lunch Needs** sits at the top and always stays visible.
-Below it is the full schedule, split upcoming/past.
+What to order. Three blocks stacked top to bottom, and the first two stay
+frozen on screen while you scroll:
+
+1. **🥡 Lunch Sign-Up Forms** — the links to hand out (see below).
+2. **Today's Lunch Needs**.
+3. The full schedule, split upcoming/past.
+
+#### The pinned sign-up links
+The very top of the tab is the **lunch-only sign-up form** for each location
+and month: `Location · Month · Lunch_Dates · Sign_Up_Link · Edit_Form`.
+Right-click the link, copy it, paste it into an email or the website. It's at
+the top of this tab because this is the tab whose subject is lunch, and "can
+you send me the lunch link" is a thing staff get asked at the desk and on the
+phone.
+
+You don't create these. Put a `Hot` or `Cold` row on
+[Lunch_Schedule](#5-lunch_schedule) and the form for that month builds itself
+on the next **Sync Cal** — or immediately, via
+**🥡 Build / Refresh Lunch Sign-Up Forms** on the menu. Until there's a catered
+date the block says so rather than sitting empty.
+
+Only the **four soonest** location/month forms are pinned, with a line saying
+how many more there are. Everything above the schedule is frozen, so each
+pinned row is a row of screen the schedule doesn't get; the later months are
+on **Master_Program_Dashboard** like every other form, on any
+`🥡 Lunch Only (no program)` row.
+
+See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) for what
+registrants see and how it reaches the counts.
 
 **What appears here.** Every **upcoming** date and location where lunch is on
 the table, **even with zero registrants**, so you can plan ahead and enter
@@ -1119,6 +1146,65 @@ A few things worth knowing:
 If someone changes their mind and submits again, the new answers win and the old
 row is marked `Superseded`.
 
+### The lunch-only sign-up form
+
+Plenty of people come in for the meal and nothing else, and a good number of
+them like to book a whole month of lunches in one go. There's a form for
+exactly that, one per **location per calendar month**, called
+*"Lunch Sign-Up — Narberth, September 2026"*. Its links are pinned to the top
+of [Master_Lunch_Dashboard](#2-master_lunch_dashboard).
+
+**You don't build it.** It builds itself from
+[Lunch_Schedule](#5-lunch_schedule): every `Hot` or `Cold` row from today
+forward becomes a date on the form. Add a month of menu rows, run
+**🥡 Build / Refresh Lunch Sign-Up Forms** (or wait for the next hourly
+**Sync Cal**), and the form and its link exist. Locations set to
+**Never** cater in Config never get one.
+
+**It is the ordinary form with the attendance question taken out.** On a form
+whose entire subject is the meal, "which dates are you coming" and "which dates
+do you want lunch" are the same question, and asking both is how you get
+somebody ticking the lunch row, leaving the attendance row blank, and the
+import having to guess. So there's one grid:
+
+```
+Who Needs Lunch on Each Date?
+                 You   Guest 1   Guest 2   Guest 3
+  Mon Sep 14      ☑       ☑         ☐         ☐
+  Tue Sep 15      ☑       ☐         ☐         ☐
+```
+
+The fork at the top reads in lunch terms too — *"I want lunch on every date
+listed on this form"* books a meal on every date in one page, which is the
+month-at-a-time case this form exists for. The description says outright, in
+its first line, that this books a meal and **not** a programme.
+
+**Where the registrations land.** Exactly where every other registration
+lands: rows on **Registrant_Dash**, a name on
+[Lunch_Roster](#3-lunch_roster), and a number in `Registered_Count` on the
+lunch dashboard. The `Event` column reads `🥡 Lunch Only (no program)`.
+
+A few things worth knowing:
+
+- **Signing up here and on a programme's form for the same day is one meal,
+  not two** — the counts are per person (see
+  [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
+  row shows both under `Programs` with `Requests_Merged` = 1.
+- The dates appear on **Master_Program_Dashboard** as sessions like any other,
+  under `🥡 Lunch Only (no program)`, with a blank `Calendar_Source` — because
+  there is no calendar event behind them. That blank is what stops them being
+  swept into triage.
+- For the same reason, **`Type_Tag`, `Club` and `No_Registration` can't be
+  edited on those rows.** They're instructions to a calendar event that doesn't
+  exist. The workbook tells you so and puts the cell back; change the date on
+  `Lunch_Schedule` instead.
+- **Nobody is invited to a calendar event** for a lunch-only date, since there
+  isn't one. Programme invitations are unaffected.
+- If a form for a month **can't be opened** — trashed, permissions changed —
+  that month is left alone and reported by email rather than being silently
+  moved onto a replacement form, which would strand every response already on
+  it and every link already handed out.
+
 > **Forms already out in the world get updated too.** A program's form is
 > created once and reused for as long as that program runs, so a change to the
 > question layout used to reach only *new* forms — which is how an existing
@@ -1159,6 +1245,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, or sign somebody up for a future lunch — location, session, name, then Attended / Lunch / Sign up for lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **📧 Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
+| **🥡 Build / Refresh Lunch Sign-Up Forms** | Builds (or updates) the lunch-only sign-up form for every location serving food, and pins the links to the top of Master_Lunch_Dashboard. Sync Cal does this hourly anyway; this is for when you want the link now. See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
 | **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
@@ -2030,6 +2117,17 @@ session, name, then tick Attended and/or Lunch. See
 Same dialog — pick their name and tick **Lunch** on its own. It marks
 `Lunch_Served` without marking `Attended` (and clears `Attended` if it was
 already ticked by mistake).
+
+**Give somebody the link to sign up for lunch online**
+Top of **Master_Lunch_Dashboard** — right-click the `Sign_Up_Link` for their
+location and month, copy, paste. See
+[The lunch-only sign-up form](#the-lunch-only-sign-up-form).
+
+**Let people register for a month of lunches without coming to a programme**
+Put the month's `Hot`/`Cold` rows on **Lunch_Schedule**, then run
+**🥡 Build / Refresh Lunch Sign-Up Forms**. The form and its link appear at the
+top of the lunch dashboard; on it, *"I want lunch on every date listed"* books
+the whole month in one page.
 
 **Sign someone up for a future lunch at the front desk**
 Same dialog — pick the location, pick **that day's** session (or **🥡 Lunch

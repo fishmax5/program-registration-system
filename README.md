@@ -35,6 +35,12 @@ It also:
   programs they ticked the lunch box on — three sign-ups from one person is one
   meal on the order, not three, with a `Requests_Merged` column showing where a
   merge happened so the number stays auditable;
+- takes registrations for **lunch on its own**, with no programme attached — a
+  self-building sign-up form per location per month, generated from the lunch
+  menu rather than the calendar, on which "I want lunch on every date listed"
+  books a whole month of meals in one page; its links are **pinned to the top
+  of the lunch dashboard**, which is where staff are standing when somebody
+  asks for them;
 - lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
   per person per date and location, with their programs, phone, `Hot`/`Cold`
   and whether they've been handed their meal — built from the same pass as the

@@ -1792,8 +1792,32 @@ const TEMPLATE_ITEM_TITLES = {
   ALLERGIES: 'Allergies / Dietary Needs',
   ADDITIONAL_NOTES: 'Anything Else?',
   ATTENDANCE_MODE: 'How would you like to sign up?',
-  ALL_DATES_LUNCH_PEOPLE: 'Who Needs Lunch? (Applies to Every Date)'
+  ALL_DATES_LUNCH_PEOPLE: 'Who Needs Lunch? (Applies to Every Date)',
+  /**
+   * What the ATTENDANCE_GRID is RETITLED TO on a lunch-only form, where
+   * "which dates are you coming" and "which dates do you want lunch" are the
+   * same question and asking both would be asking twice.
+   *
+   * A retitle rather than a second item, because one grid is the honest shape
+   * of that form — but it does mean the grid can arrive under either of two
+   * titles, and every lookup of it has to accept both. There are exactly two
+   * (findRosterGridItems() writes the rows, findRosterGridResponse() reads the
+   * answers) and they are the reason this is a named constant rather than a
+   * string in the retitle.
+   */
+  LUNCH_ONLY_GRID: 'Who Needs Lunch on Each Date?'
 };
+
+/** Both titles the per-date roster grid can carry — see LUNCH_ONLY_GRID. */
+const ROSTER_GRID_TITLES = [
+  TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID,
+  TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID
+];
+
+/** The roster-grid items on `form`, under whichever title they carry. */
+function findRosterGridItems(items) {
+  return (items || []).filter(it => ROSTER_GRID_TITLES.indexOf(it.getTitle()) !== -1);
+}
 
 /**
  * The title the per-location footer note used to occupy as a SectionHeaderItem
@@ -1829,7 +1853,14 @@ const ATTENDANCE_MODE_CHOICES = {
   ALL_DATES: 'I want to sign up for all events this month.',
   ALL_DATES_SERIES: 'I want to sign up for every date listed on this form.',
   INDIVIDUAL: 'I want to choose specific days this month to attend.',
-  INDIVIDUAL_SERIES: 'I want to choose specific dates from the list to attend.'
+  INDIVIDUAL_SERIES: 'I want to choose specific dates from the list to attend.',
+  // The lunch-only form's pair. Nothing is being "attended" on it — the whole
+  // form is one question about food — so borrowing the attendance wording
+  // would have somebody signing up to "attend" a meal. The all-dates option
+  // is the one this form exists for: a month of lunches booked in one pass,
+  // which is exactly what people ring up asking to do.
+  ALL_DATES_LUNCH: 'I want lunch on every date listed on this form.',
+  INDIVIDUAL_LUNCH: 'I want to pick which days I am having lunch.'
 };
 
 /** Pre-v4 wording, still read so responses submitted against an older form keep importing correctly. */
@@ -1876,6 +1907,17 @@ function isClubModeAnswer(value) {
 function buildAttendanceModeChoiceSet(options) {
   options = options || {};
   const isSeries = !!options.isFixed;
+  // A lunch-only form is never a club and never a series — it is one month of
+  // meals at one location — so its wording is picked first and the other two
+  // flags cannot reach it.
+  if (options.isLunchOnly) {
+    return {
+      allDates: ATTENDANCE_MODE_CHOICES.ALL_DATES_LUNCH,
+      individual: ATTENDANCE_MODE_CHOICES.INDIVIDUAL_LUNCH,
+      club: null,
+      isLunchOnly: true
+    };
+  }
   return {
     allDates: isSeries ? ATTENDANCE_MODE_CHOICES.ALL_DATES_SERIES : ATTENDANCE_MODE_CHOICES.ALL_DATES,
     individual: isSeries ? ATTENDANCE_MODE_CHOICES.INDIVIDUAL_SERIES : ATTENDANCE_MODE_CHOICES.INDIVIDUAL,
@@ -1890,6 +1932,12 @@ function buildAttendanceModeChoiceSet(options) {
  * about a choice.
  */
 function buildAttendanceModeHelpText(choiceSet) {
+  if (choiceSet.isLunchOnly) {
+    return [
+      `• "${choiceSet.allDates}" — one quick page. We put you (and any guests) down for a meal on every date listed on this form.`,
+      `• "${choiceSet.individual}" — a grid of the dates, so you can tick exactly which meals each person wants.`
+    ].join('\n');
+  }
   const lines = [
     `• "${choiceSet.allDates}" — one quick page. We book you (and any guests) for every date listed on this form, and you tell us once who is eating.`,
     `• "${choiceSet.individual}" — a grid of the dates, so you can tick exactly which ones each person is coming to.`
@@ -2328,6 +2376,17 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     ? `Locations: ${list.join(', ')}\n(This program runs at more than one location — each date below says where.)`
     : `Location: ${list[0] || ''}`;
   let description = `${heading}\n\nDates:\n${dateList}\n\nPlease register below.`;
+  if (options.isLunchOnly) {
+    // Said FIRST and said plainly, because this form looks like every other
+    // registration form and is not one: there is no programme behind these
+    // dates, only a meal, and somebody who signs up expecting an activity has
+    // been misled by a page they had every reason to trust.
+    description = `${heading}\n\nThis form is for LUNCH ONLY — it books you a meal, not a programme. ` +
+      `To sign up for a class or an activity, use that programme's own form.\n\n` +
+      `Lunch is served on:\n${dateList}\n\nPlease sign up below.` +
+      `\n\n${FORM_ASSISTANCE_TAGLINE}`;
+    return description;
+  }
   if (hasLunchDates === false) {
     // Nothing on this form is catered, so the form isn't asking about lunch
     // at all (see syncLunchQuestionsOnForm()) — say so rather than leaving
@@ -3459,6 +3518,13 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
     // to be offered for the club's own dates to be joinable at all.
     isClub: formRows.some(row => isClubColumnValue(row[map['Club']])),
     isFixed: formRows.some(row => isGroupedTypeTag(row[map['Type_Tag']])),
+    // EVERY row, not some: a form mixing lunch-only sessions with real
+    // programs is not a lunch-only form, and shaping it as one would strip the
+    // attendance question off a program that needs it. syncLunchOnlySessions()
+    // never builds such a form, but a hand-edited Form_ID could, and the
+    // conservative reading is the one that leaves the ordinary form alone.
+    isLunchOnly: formRows.length > 0 &&
+      formRows.every(row => isLunchOnlyEventId(row[map['Event_ID']])),
     programTitle: titles.length === 1 ? titles[0] : '',
     capacityHints: buildCapacityHintsFromRegistryRows(formRows, map)
   };
@@ -3576,8 +3642,9 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
   try {
     const form = options.form || FormApp.openById(formId);
     const items = form.getItems();
-    items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID)
-      .forEach(it => it.asCheckboxGridItem().setRows(attendanceLabels));
+    // Found by either title: on a lunch-only form this same grid is the lunch
+    // question and has been renamed to say so. See LUNCH_ONLY_GRID.
+    findRosterGridItems(items).forEach(it => it.asCheckboxGridItem().setRows(attendanceLabels));
     if (lunchLabels && lunchLabels.length > 0) {
       items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID)
         .forEach(it => it.asCheckboxGridItem().setRows(lunchLabels));
@@ -3785,8 +3852,16 @@ function restoreLunchQuestionsOnForm(form) {
  * the date-label write that has to follow a restore (a restored grid still
  * holds the template's placeholder row).
  */
-function syncLunchQuestionsOnForm(form, locations, hasLunchDates) {
+function syncLunchQuestionsOnForm(form, locations, hasLunchDates, options) {
   const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
+  // A LUNCH-ONLY FORM IS SHAPED SEPARATELY, and takes precedence over both
+  // branches below. It cannot go down the "no lunch here" path (a form whose
+  // only subject is lunch, with its lunch questions stripped, is an empty
+  // form) and it must not go down the restore path either, which would put
+  // back the very second grid makeFormLunchOnly() exists to remove — a
+  // tug-of-war fought fresh on every hourly sync.
+  if (options && options.isLunchOnly) return makeFormLunchOnly(form);
+
   const catersSomewhere = list.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER);
   if (!catersSomewhere) {
     return removeLunchQuestionsFromForm(form, list);
@@ -3795,6 +3870,61 @@ function syncLunchQuestionsOnForm(form, locations, hasLunchDates) {
     return removeLunchQuestionsFromForm(form, list, 'no date on this form serves lunch');
   }
   return restoreLunchQuestionsOnForm(form);
+}
+
+/**
+ * Turns a copy of the standard template into THE LUNCH-ONLY FORM: one grid,
+ * one question, no attendance.
+ *
+ * The standard template asks two per-date questions — who is coming, and who
+ * is eating. On a form whose entire subject is the meal those are the same
+ * question, and asking both produces the failure mode staff already know from
+ * the paper sheets: somebody ticks the lunch row, leaves the attendance row
+ * blank, and the import has to guess (processFormResponse() reconciles it with
+ * a warning). So the LUNCH_GRID is deleted and the ATTENDANCE_GRID is renamed
+ * to be the lunch question — the one that stays is the one every existing
+ * lookup already finds, by index and by both titles, which is why this is a
+ * rename rather than a swap.
+ *
+ * processFormResponse() reads a tick on that grid as "wants lunch" whenever
+ * the session behind it is a lunch-only one, so nothing downstream has to know
+ * which of the two titles the grid happened to carry.
+ *
+ * The all-dates branch is left exactly as it is: its question is already
+ * ALL_DATES_LUNCH_PEOPLE ("Who Needs Lunch?"), which is the right question on
+ * this form without any change at all.
+ *
+ * Idempotent — it runs on every sync for every lunch-only form, and after the
+ * first pass finds nothing to remove and nothing to rename.
+ */
+function makeFormLunchOnly(form) {
+  let changed = 0;
+
+  const removed = deleteFormItems(form,
+    form.getItems().filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID),
+    `the lunch-only form ${form.getId()}`);
+  changed += removed;
+
+  // Re-read: a deletion above shifted every later item's index.
+  form.getItems()
+    .filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID)
+    .forEach(it => {
+      try {
+        it.asCheckboxGridItem()
+          .setTitle(TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID)
+          .setHelpText('Tick a box for each person on each date they want lunch.\n\n' +
+            NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER);
+        changed++;
+      } catch (err) {
+        log(`⚠️ Could not retitle the roster grid on lunch-only form ${form.getId()} (${err}).`);
+      }
+    });
+
+  if (changed > 0) {
+    log(`Shaped form ${form.getId()} as lunch-only: ${removed} duplicate lunch grid(s) removed, roster grid renamed.`);
+    invalidateFormItemIndex(form.getId());
+  }
+  return changed;
 }
 
 
@@ -4463,6 +4593,50 @@ function pushLunchMenuToForms() {
  * re-reads the whole dashboard on every call, which was fine for the single
  * date an onEdit produced and quadratic for a pasted month.
  */
+/**
+ * Menu action: build or bring up to date the lunch-only sign-up form for every
+ * location serving food in the window, and pin the links to the top of
+ * Master_Lunch_Dashboard.
+ *
+ * The hourly Sync Cal does this anyway. This exists for the moment right after
+ * a month of menu rows has been pasted in, when somebody wants the link NOW to
+ * put in a newsletter rather than in an hour.
+ */
+function refreshLunchSignUpForms() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('⚠️ No session table yet — run "Sync Cal" once first.');
+    return 0;
+  }
+
+  toastIfPossible('Building the lunch sign-up forms…');
+  let links;
+  try {
+    links = syncLunchOnlySessions(registrySheet);
+  } catch (err) {
+    log(`⚠️ refreshLunchSignUpForms failed (${err}).`);
+    toastIfPossible(`⚠️ Could not build the lunch sign-up forms (${err}).`);
+    return 0;
+  }
+  flushPersistentRegistries();
+
+  const months = buildLunchSignUpRows(links);
+  if (months.length === 0) {
+    toastIfPossible(`No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} in the window — nothing to build. ` +
+      'Add a Hot or Cold row and run this again.');
+    return 0;
+  }
+
+  // The dashboard is rewritten so the new links are pinned to the top of it
+  // straight away, which is the whole reason somebody ran this by hand.
+  updateMasterLunchDashboard(null);
+  flushAdminDigest('Lunch sign-up forms');
+  toastIfPossible(`Lunch sign-up forms ready ✅ — ${months.length} location/month form(s). ` +
+    `The links are pinned at the top of ${SHEET_NAMES.LUNCH_DASHBOARD}.`);
+  return months.length;
+}
+
 function refreshFormsForLunchDates(pairs) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -4518,7 +4692,7 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   let questionsChanged = 0;
   try {
     form = FormApp.openById(formId);
-    questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0);
+    questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0, formContext);
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);
     return false;
@@ -4737,6 +4911,346 @@ function initLunchScheduleSheet(ss) {
 }
 
 /** Puts tabs in a logical, at-a-glance order. */
+// ============================================================================
+// 1f. THE LUNCH-ONLY SIGN-UP FORM
+// ============================================================================
+//
+// WHAT IT IS FOR. Plenty of people come in for the meal and nothing else, and
+// a good number of them like to book a whole month of lunches in one go. Until
+// now the only way onto the catering count was through a PROGRAM's form —
+// which meant registering for a class you were not attending in order to get
+// fed, or ringing the office and having somebody add you by hand.
+//
+// WHY IT IS BUILT FROM Lunch_Schedule AND NOT THE CALENDAR. Every other form
+// in this system is generated from calendar events, because every other form
+// is for a programme and a programme is a thing on the calendar. A lunch is
+// not. The record of which days food is served on is Lunch_Schedule, it is
+// already maintained (staff type the month's menu into it), and requiring a
+// duplicate calendar entry per catered day would mean two places to keep in
+// step and one of them silently authoritative.
+//
+// HOW IT REJOINS THE REST OF THE SYSTEM. Each catered date becomes an ordinary
+// row on the session table, with two differences that do all the work:
+//
+//   Event_ID   is a LUNCHONLY: id (makeLunchOnlyEventId()) rather than a
+//              calendar hash. Everything downstream already knew about these —
+//              buildDashboardRollup() has counted them since Quick Mark could
+//              record a walk-in meal — and it is what tells the form layer,
+//              the importer and the roster that this row is a meal and not a
+//              class.
+//
+//   Calendar_Source is BLANK, which is what keeps triage away from it:
+//              triageDeletedSessions() only removes a row it can attribute to
+//              a calendar it just read, so a session with no calendar behind it
+//              is never mistaken for a deleted one. Without this the entire
+//              lunch programme would be swept into Deleted_Event_Triage on the
+//              first sync after it was written.
+//
+// Everything else — the form, the date labels, the import, the counts, the
+// roster, the sign-in sheet, Quick Mark — then works on it unchanged, because
+// all of it is driven by session rows.
+//
+// ONE FORM PER LOCATION PER CALENDAR MONTH, which is what Type_Tag 'Regular'
+// means everywhere else in this file. A month is the unit people think in
+// ("can I sign up for October's lunches?"), and it keeps a form's date list
+// short enough to read.
+// ============================================================================
+
+/** Type_Tag for the generated lunch sessions — 'Regular' = one form per calendar month. */
+const LUNCH_ONLY_TYPE_TAG = EVENT_TYPES.REGULAR;
+
+/** Group key for a lunch-only form, in the persistent groupKey -> Form_ID registry. */
+function lunchOnlyGroupKey(location, monthLabel) {
+  return `LUNCHONLY::${location}::${monthLabel}`;
+}
+
+/**
+ * The hour a generated lunch session is dated at. Noon, so that the date reads
+ * sensibly wherever a time is shown and so that a row can never land on the
+ * wrong calendar day through a daylight-saving shift at midnight.
+ */
+const LUNCH_ONLY_SESSION_HOUR = 12;
+
+/**
+ * Builds (or brings up to date) the lunch-only sign-up form for every location
+ * that is serving food in the sync window, and writes its dates onto the
+ * session table.
+ *
+ * Returns { location: {formId, publishedUrl, editUrl, dates} } for the
+ * locations that have one — which is what pins the links to the top of
+ * Master_Lunch_Dashboard.
+ *
+ * SAFE TO RUN ON EVERY SYNC. A date already on the session table is skipped, a
+ * form already built is reused and merely refreshed, and a location with no
+ * catered dates left produces nothing at all rather than an empty form.
+ */
+function syncLunchOnlySessions(registrySheet) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+  if (!menuSheet) return {};
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
+  const { end } = computeSyncDateRange();
+  const todayKey = formatDateKey(new Date());
+
+  // WHICH DATES. Catered (Hot/Cold) rows only, from today forward, inside the
+  // window the rest of the sync works in — and never at a location whose
+  // Config policy is "Never", which is a standing statement that no food is
+  // served there and outranks a menu row somebody typed by mistake (the same
+  // rule buildDashboardRollup() applies, and it reports the contradiction).
+  const wanted = {};
+  readLunchScheduleRows(menuSheet).forEach(row => {
+    const d = coerceDate(row[menuMap['Event_Date']]);
+    const location = String(row[menuMap['Location']] || '').trim();
+    const type = String(row[menuMap['Type']] || '').trim();
+    if (!d || !location) return;
+    if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey || d > end) return;
+    if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) return;
+
+    const monthLabel = getMonthLabel(d);
+    const groupKey = lunchOnlyGroupKey(location, monthLabel);
+    if (!wanted[groupKey]) wanted[groupKey] = { location, monthLabel, dateKeys: [] };
+    if (wanted[groupKey].dateKeys.indexOf(dateKey) === -1) wanted[groupKey].dateKeys.push(dateKey);
+  });
+
+  // A DATE FLIPPED TO "Not Serving" DROPS OUT HERE, and that is how it leaves
+  // the form: `wanted` is what the date labels are built from, so the next
+  // refresh simply stops offering it. The session ROW stays on the dashboard —
+  // deleting it would take the anchor out from under anybody already signed up
+  // for that meal, who buildDashboardRollup() is meanwhile emailing somebody
+  // about by name.
+  //
+  // THE ONE LOOSE END, and it is deliberate: a location/month whose dates ALL
+  // become Not Serving disappears from this map entirely, so its form is not
+  // refreshed and its link stops being pinned — but the form itself stays open
+  // and still lists the dates it had. Closing it automatically would mean
+  // re-opening it automatically too, and a form that opens and closes itself
+  // on the strength of a menu edit is a worse failure than a stale link. Close
+  // it by hand if that ever happens; see STRESS_TEST.md.
+  if (Object.keys(wanted).length === 0) {
+    // Cleared rather than left as they were. Nothing is catered in the window,
+    // so every stored link points at a month that is over — and a pinned link
+    // to last month's lunch form is worse than an empty block saying there are
+    // no catered dates yet, which is the true and actionable statement.
+    saveLunchOnlyFormLinks({});
+    return {};
+  }
+
+  const existingRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rowByEventId = {};
+  existingRows.forEach(row => {
+    const id = String(row[map['Event_ID']] || '').trim();
+    if (id) rowByEventId[id] = row;
+  });
+
+  const previousLinks = getLunchOnlyFormLinks();
+  const links = {};
+  const newRows = [];
+  // Whether any EXISTING row was re-stamped. Together with newRows.length this
+  // is what decides whether the session table is rewritten at all — see the
+  // render call at the end.
+  let touchedExisting = 0;
+
+  Object.keys(wanted).sort().forEach(groupKey => {
+    const entry = wanted[groupKey];
+    entry.dateKeys.sort();
+
+    // The form for this location+month: whichever one its existing rows
+    // already point at, else the persistent registry, else a new one. Reading
+    // the rows FIRST matters — the registry is Script Properties, which a
+    // workbook can lose, and the rows are the thing that outlives it.
+    const eventIds = entry.dateKeys.map(k => makeLunchOnlyEventId(k, entry.location));
+    let formId = '';
+    let missingRows = 0;
+    let formIdsSeen = 0;
+    eventIds.forEach(id => {
+      const row = rowByEventId[id];
+      if (!row) { missingRows++; return; }
+      const rowFormId = String(row[map['Form_ID']] || '').trim();
+      if (!rowFormId) return;
+      formIdsSeen++;
+      if (!formId) formId = rowFormId;
+    });
+    if (!formId) formId = getPersistentFormRegistry()[groupKey] || '';
+
+    // NOTHING TO DO THIS RUN — the common case, and worth detecting, because
+    // this function runs hourly and a "refresh" is half a dozen round trips to
+    // the Forms API plus a new revision on a form nobody changed. The
+    // calendar-driven half of the system gets this for free (collectCalendarWork()
+    // skips a group with no new dates); this is the same short-circuit.
+    //
+    // Everything has to line up: every date already has a row, every one of
+    // those rows names the same form, and the stored link entry describes that
+    // form with that many dates. Any disagreement and the refresh runs.
+    const stored = previousLinks[groupKey];
+    if (missingRows === 0 && formId && formIdsSeen === eventIds.length &&
+      stored && stored.formId === formId && stored.dateCount === entry.dateKeys.length) {
+      links[groupKey] = stored;
+      return;
+    }
+
+    const sessions = entry.dateKeys.map(dateKey => ({
+      date: lunchOnlySessionDate(dateKey),
+      location: entry.location,
+      title: LUNCH_ONLY_PROGRAM_LABEL
+    }));
+
+    // A synthetic group, shaped exactly like the ones processCalendarGroup()
+    // hands the form layer — minus `sessions[].event`, which is why
+    // sessionsOfGroup() has a branch for `lunchOnlySessions`.
+    const group = {
+      cleanTitle: LUNCH_ONLY_PROGRAM_LABEL,
+      monthLabel: entry.monthLabel,
+      locations: [entry.location],
+      isFixed: false,
+      isShared: false,
+      isClub: false,
+      isLunchOnly: true,
+      lunchOnlySessions: sessions
+    };
+    const configInfo = { footerNote: buildFooterNoteForLocations(group.locations) };
+
+    let formInfo = null;
+    try {
+      formInfo = formId
+        ? refreshFormForNewDates(formId, group, configInfo)
+        : createRegistrationForm(group, configInfo);
+    } catch (err) {
+      if (!formId) {
+        log(`⚠️ Could not build the lunch sign-up form for ${entry.location}, ${entry.monthLabel} (${err}).`);
+        noteForAdmin('Lunch sign-up form could not be built',
+          `${entry.location}, ${entry.monthLabel} — ${err}. Those dates have no lunch-only form, so nobody can ` +
+          `sign up for a meal online at that location this month. The programme forms are unaffected.`);
+        return;
+      }
+      // A form we already had and can no longer open. Replacing it silently
+      // would strand every link already handed out AND every response on it,
+      // so it is reported and this month is left alone until somebody looks.
+      log(`⚠️ Could not reopen lunch sign-up form ${formId} for ${entry.location}, ${entry.monthLabel} (${err}).`);
+      noteForAdmin('Lunch sign-up form could not be opened',
+        `${formId} (${entry.location}, ${entry.monthLabel}) — ${err}. Its dates were left as they are rather than ` +
+        `being moved onto a replacement form, which would strand the responses already on it.`);
+      return;
+    }
+
+    savePersistentFormRegistryEntry(groupKey, formInfo.formId);
+    flushPersistentRegistries(); // see processCalendarGroup(): never leave a new form unreferenced
+
+    links[groupKey] = {
+      location: entry.location,
+      monthLabel: entry.monthLabel,
+      // "2026-09", taken straight off the first date this form covers — see
+      // buildLunchSignUpRows() for why the label alone is not enough.
+      monthKey: entry.dateKeys[0].slice(0, 7),
+      formId: formInfo.formId,
+      publishedUrl: formInfo.publishedUrl,
+      editUrl: formInfo.editUrl,
+      dateCount: entry.dateKeys.length
+    };
+
+    entry.dateKeys.forEach((dateKey, i) => {
+      const eventId = eventIds[i];
+      const existing = rowByEventId[eventId];
+      if (existing) {
+        // Already on the table. The one thing worth re-asserting is the form
+        // it points at — a month whose form was rebuilt would otherwise keep
+        // sending people to the old one.
+        existing[map['Form_ID']] = formInfo.formId;
+        existing[map['Form_Response_Link']] = makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form');
+        existing[map['Edit_Form_Link']] = makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings');
+        touchedExisting++;
+        return;
+      }
+      newRows.push(buildLunchOnlySessionRow(headers, map, dateKey, entry.location, formInfo));
+    });
+  });
+
+  // ONLY WHEN SOMETHING ACTUALLY MOVED. This runs hourly, and a dashboard
+  // render rewrites the whole tab; on the overwhelming majority of runs every
+  // month is unchanged, short-circuited above, and there is nothing to write.
+  //
+  // Written through the normal render rather than appended raw, so the rows
+  // land in the right Upcoming/Past section and pick up the tab's formatting.
+  // existingRows already carries the in-place Form_ID edits above.
+  //
+  // skipTriage, and it matters: this render is spreadsheet-only, and a lunch
+  // pass must never be a path that can decide a programme was cancelled on the
+  // strength of a calendar read it did not need to make.
+  if (newRows.length > 0 || touchedExisting > 0) {
+    renderProgramDashboard(true, { sessionRows: existingRows.concat(newRows), skipTriage: true });
+    log(`Lunch sign-up: ${newRows.length} new lunch date(s), ${touchedExisting} existing row(s) re-pointed.`);
+  }
+
+  saveLunchOnlyFormLinks(links);
+  return links;
+}
+
+/** Noon on `dateKey` — see LUNCH_ONLY_SESSION_HOUR. */
+function lunchOnlySessionDate(dateKey) {
+  const d = parseDateKey(dateKey);
+  d.setHours(LUNCH_ONLY_SESSION_HOUR, 0, 0, 0);
+  return d;
+}
+
+/** One session-table row for one catered date at one location. */
+function buildLunchOnlySessionRow(headers, map, dateKey, location, formInfo) {
+  const row = new Array(headers.length).fill('');
+  row[map['Event_Date']] = lunchOnlySessionDate(dateKey);
+  row[map['Location']] = location;
+  row[map['Clean_Title']] = LUNCH_ONLY_PROGRAM_LABEL;
+  row[map['Type_Tag']] = LUNCH_ONLY_TYPE_TAG;
+  row[map['Active_Count']] = 0;
+  row[map['Form_Response_Link']] = makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form');
+  row[map['Edit_Form_Link']] = makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings');
+  row[map['Form_ID']] = formInfo.formId;
+  row[map['Event_ID']] = makeLunchOnlyEventId(dateKey, location);
+  // BLANK ON PURPOSE, and load-bearing: it is what keeps triage off this row.
+  // See the section comment above.
+  row[map['Calendar_Source']] = '';
+  // There is no calendar event to have synced, and claiming otherwise would
+  // make the column mean two different things on two kinds of row.
+  row[map['Calendar_Synced?']] = false;
+  return row;
+}
+
+/**
+ * Where the lunch-only form links live between syncs, so the lunch dashboard
+ * can pin them without rebuilding every form to find out what they are.
+ *
+ * Keyed by lunchOnlyGroupKey() — one entry per location per month, the same
+ * unit a form covers. That is also what lets syncLunchOnlySessions() carry an
+ * unchanged month forward without touching its form at all.
+ *
+ * In Script Properties rather than on a tab because they are derived state
+ * with exactly one reader, and a tab would be one more thing a person could
+ * edit into disagreeing with the forms it names.
+ */
+const LUNCH_ONLY_LINKS_PROP_KEY = 'LUNCH_ONLY_FORM_LINKS_V1';
+
+function saveLunchOnlyFormLinks(links) {
+  try {
+    PropertiesService.getScriptProperties()
+      .setProperty(LUNCH_ONLY_LINKS_PROP_KEY, JSON.stringify(links || {}));
+  } catch (err) {
+    log(`ℹ️ Could not store the lunch sign-up form links (${err}) — the dashboard will show them next sync.`);
+  }
+}
+
+function getLunchOnlyFormLinks() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(LUNCH_ONLY_LINKS_PROP_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    log(`ℹ️ Could not read the lunch sign-up form links (${err}).`);
+    return {};
+  }
+}
+
+
 function reorderTabs(ss) {
   const order = [
     SHEET_NAMES.PROGRAM_DASHBOARD,
@@ -5856,6 +6370,7 @@ function buildAppMenu(ui, includeAdmin) {
     .addSeparator()
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
+    .addItem('🥡 Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms')
     .addItem('🔁 Apply Type / Club / No-Reg Changes to Calendar', 'applyProgramTagChangesToCalendar')
     .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
     .addItem('📄 Move Sessions to Another Form…', 'showRepointSessionsDialog')
@@ -6587,6 +7102,26 @@ function handleProgramDashboardEdit(e, sheet) {
   if (!zone) return;
 
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+
+  // A LUNCH-ONLY ROW HAS NO CALENDAR EVENT BEHIND IT, and everything below
+  // this line works by writing a tag into an event description. Type_Tag,
+  // [Club] and [No Registration] are all instructions to the calendar, and
+  // there is no calendar here — the row was generated from Lunch_Schedule (see
+  // syncLunchOnlySessions()). Left unguarded the edit would be accepted on
+  // screen, fail to reach anything, and be silently undone by the next render:
+  // the "my change didn't save" bug, which is exactly what these paths exist
+  // to prevent. So it is refused at the point of typing, with the place the
+  // change actually belongs.
+  const editedEventId = headerMap['Event_ID'] === undefined ? ''
+    : String(sheet.getRange(editedRow, headerMap['Event_ID'] + 1).getValue() || '').trim();
+  if (isLunchOnlyEventId(editedEventId)) {
+    if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1) {
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+    }
+    toastIfPossible(`⚠️ That is a lunch date, not a programme — it has no calendar event to change. ` +
+      `Edit it on ${SHEET_NAMES.LUNCH_SCHEDULE} instead.`);
+    return;
+  }
 
   // The flag checkboxes first: an edit lands in exactly one column, and
   // handleProgramFlagEdit() reports whether that column was one of theirs.
@@ -8450,6 +8985,18 @@ function syncCalendarsInternal() {
       const summary = importCalendarGroups(registrySheet);
       renderProgramDashboard();
 
+      // AFTER the calendar render, not before: that render owns the triage
+      // pass, and the lunch pass adds rows it should not have to re-examine.
+      // Guarded on its own — a lunch form that will not build must not be able
+      // to fail a calendar sync that has already done its work.
+      try {
+        syncLunchOnlySessions(registrySheet);
+      } catch (err) {
+        log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the programme forms are unaffected.`);
+        noteForAdmin('Lunch sign-up forms not refreshed',
+          `${err}. The lunch-only sign-up forms were not built or updated this run; everything else synced normally.`);
+      }
+
       SpreadsheetApp.getActiveSpreadsheet().toast(
         `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
     } finally {
@@ -9767,6 +10314,10 @@ function buildEventGroups(parsedSessions) {
 
 /** The [{date, location, title}] sessions of a group, in the shape the form layer wants. */
 function sessionsOfGroup(group) {
+  // A lunch-only group has no calendar events to take its dates from — its
+  // sessions come from Lunch_Schedule and arrive already in this shape. See
+  // syncLunchOnlySessions().
+  if (group.lunchOnlySessions) return group.lunchOnlySessions;
   return group.sessions.map(s => ({
     date: s.event.getStartTime(),
     location: s.locationName,
@@ -10757,18 +11308,19 @@ function refreshFormForNewDates(formId, group, configInfo) {
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
-    { isClub: group.isClub, programTitle: group.cleanTitle }));
+    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly }));
   // Re-asserted on every refresh, not only at creation: [Club] can be added to
   // (or taken off) a program's calendar events at any time, and the sign-up
   // options are the only place a respondent can act on that.
-  applyAttendanceModeChoices(form, { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle });
+  applyAttendanceModeChoices(form,
+    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly });
 
   // Catches a form that predates this location's policy being set to Never,
   // or predates the policy feature entirely, and re-checks whether the dates
   // now on the form serve lunch at all. Both directions are handled and both
   // are no-ops once the form already matches, so this is cheap on every
   // subsequent call.
-  const questionsChanged = syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0);
+  const questionsChanged = syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0, group);
 
   // Only ROWS are refreshed here — grid COLUMNS (the person labels) are the
   // same on every form and are set once at template-build time.
@@ -10791,6 +11343,13 @@ function refreshFormForNewDates(formId, group, configInfo) {
  * renameFormForGroup().
  */
 function buildFormTitleForGroup(group) {
+  // The lunch-only form is named for what it does, not for the internal label
+  // its sessions carry: "🥡 Lunch Only (no program) - September 2026" is a
+  // sentence about this workbook's data model, and it would be the first thing
+  // a registrant read.
+  if (group.isLunchOnly) {
+    return `Lunch Sign-Up — ${group.locations[0] || ''}, ${group.monthLabel}`;
+  }
   const baseTitle = group.isFixed
     ? `${group.cleanTitle} — Registration`
     : `${group.cleanTitle} - ${group.monthLabel}`;
@@ -10875,12 +11434,13 @@ function createRegistrationForm(group, configInfo) {
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
-    { isClub: group.isClub, programTitle: group.cleanTitle }));
-  applyAttendanceModeChoices(form, { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle });
+    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly }));
+  applyAttendanceModeChoices(form,
+    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly });
 
   // A form whose locations never cater — or none of whose dates serve lunch —
   // shouldn't be asking about lunch at all.
-  syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0);
+  syncLunchQuestionsOnForm(form, group.locations, lunchDateLabels.length > 0, group);
 
   // Only ROWS are set here — grid COLUMNS (the person labels) were already
   // baked into the template. force:true because a fresh copy still carries
@@ -11735,7 +12295,13 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
   // Specific-dates path. Two roster grids: ATTENDANCE_GRID's rows are every
   // date on the form, LUNCH_GRID's rows are only the lunch-eligible ("not
   // Not-Serving") subset — see buildDateLabelSets().
-  const attendanceGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID);
+  //
+  // A LUNCH-ONLY FORM HAS ONE GRID, carrying the other title (see
+  // makeFormLunchOnly()), and no lunch grid at all — because on that form the
+  // roster grid IS the lunch question. So it is looked up under both titles,
+  // and a tick on it is read as lunch further down.
+  const attendanceGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID) ||
+    getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID);
   const lunchGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_GRID);
   if (!attendanceGrid) return [];
 
@@ -11761,13 +12327,24 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
       : -1;
     const lunchCols = (lunchGrid && lunchRowIdx >= 0) ? (lunchGrid.values[lunchRowIdx] || []) : [];
 
+    // On a lunch-only session there is nothing to attend, so a tick means the
+    // meal — the one and only reading of that grid on such a form. Decided
+    // per SESSION rather than per form because that is where the fact lives:
+    // the Event_ID says outright that this row is a lunch with no programme
+    // behind it (see makeLunchOnlyEventId()).
+    const lunchOnlySession = isLunchOnlyEventId(registryEntry.eventId);
+
     people.forEach(person => {
       const isAttending = attendingCols.indexOf(person.columnLabel) !== -1;
-      const wantsLunch = lunchCols.indexOf(person.columnLabel) !== -1;
+      const wantsLunch = lunchCols.indexOf(person.columnLabel) !== -1 || (lunchOnlySession && isAttending);
       if (!isAttending && !wantsLunch) return; // this person didn't check anything for this date — no row
 
       let notes = person.baseNotes || '';
-      if (!isAttending && wantsLunch) {
+      // The reconcile warning below is for a real inconsistency — lunch ticked
+      // on a date the person didn't say they were coming to. On a lunch-only
+      // session the two are the same tick by construction, so there is nothing
+      // to reconcile and nothing to warn about.
+      if (!isAttending && wantsLunch && !lunchOnlySession) {
         // Reconcile rather than silently drop: a checked lunch box implies
         // attendance even if that same date wasn't also checked in the
         // attendance grid. Flag it for staff instead of guessing quietly.
@@ -11832,9 +12409,21 @@ function processAllDatesResponse(args) {
     });
   }
 
+  // THE MONTH-OF-LUNCHES PATH. On a lunch-only form every session on it is a
+  // meal and nothing else, so a submission that ticks nobody in the "Who Needs
+  // Lunch?" box has asked for nothing at all — which is never what somebody
+  // filling in a lunch form meant. Left as-is it produced a party of rows all
+  // reading "No Lunch", i.e. a registration for an event that does not exist.
+  // So on this form alone, an empty answer means everybody in the party eats,
+  // which is both the obvious reading and the one a person can correct at the
+  // desk; the opposite mistake is a meal nobody ordered.
+  const lunchOnlyForm = matchingEntries.length > 0 &&
+    matchingEntries.every(entry => isLunchOnlyEventId(entry.eventId));
+  const everybodyEats = lunchOnlyForm && eaterSet.size === 0;
+
   const rows = [];
   people.forEach(person => {
-    const lunchType = eaterSet.has(person.columnLabel) ? 'Yes - Lunch' : 'No Lunch';
+    const lunchType = (everybodyEats || eaterSet.has(person.columnLabel)) ? 'Yes - Lunch' : 'No Lunch';
     saveAllDatesRegistryEntry(formId, {
       name: person.name, personType: person.personType, lunchType,
       primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '',
@@ -12253,7 +12842,7 @@ function rebuildFormFromCurrentTemplate(form, context) {
 
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
   form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0,
-    { isClub: context.isClub, programTitle: context.programTitle }));
+    { isClub: context.isClub, programTitle: context.programTitle, isLunchOnly: context.isLunchOnly }));
 
   // THE DATE LABELS ARE THE ONE STEP THAT CANNOT BE SKIPPED. A rebuilt form's
   // grids hold the template's placeholder row until they are written, so a
@@ -12266,14 +12855,15 @@ function rebuildFormFromCurrentTemplate(form, context) {
   // "(dates will be filled in automatically)".)
   try {
     applyAttendanceModeChoices(form,
-      { isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle });
+      { isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle,
+        isLunchOnly: context.isLunchOnly });
   } catch (err) {
     log(`⚠️ Rebuilt form ${form.getId()} but could not set its sign-up options (${err}) — ` +
       `it carries the template's default wording.`);
     noteForAdmin('Forms rebuilt with default sign-up wording',
       `${form.getId()} (${describeLocations(context.locations)}) — its options could not be customized: ${err}`);
   }
-  syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0);
+  syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0, context);
   // force: a rebuilt form's grids are back to the template placeholder row,
   // and its fingerprint on file still describes the labels it had before.
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'template migration' });
@@ -16433,33 +17023,101 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
 // survive every sync.
 // ============================================================================
 
-function getDashboardRowPlan() {
+function getDashboardRowPlan(signUpRowCount) {
+  // The overflow line is a row of the block too — see LUNCH_SIGNUP_PINNED_LIMIT.
+  signUpRowCount = Math.min(signUpRowCount || 0, LUNCH_SIGNUP_PINNED_LIMIT) +
+    ((signUpRowCount || 0) > LUNCH_SIGNUP_PINNED_LIMIT ? 1 : 0);
   const numLocations = Math.max(Object.keys(CALENDAR_MAP).length, 1);
-  const todayBannerRow = 1;
-  const todayHeaderRow = 2;
-  const todayDataStart = 3;
+  // THE SIGN-UP BLOCK IS PINNED ABOVE EVERYTHING, including Today.
+  //
+  // It is not a number and it does not change day to day, which is normally an
+  // argument for putting something further down — but it is the one thing on
+  // this tab that is meant to leave the building. Staff are asked for "the
+  // lunch link" at the desk, on the phone and by email, and every other home
+  // for it (a Drive folder of sixty forms, a session row buried in the
+  // programme dashboard, an email from three weeks ago) is somewhere it has to
+  // be hunted for. Top of the tab whose whole subject is lunch is where
+  // somebody looks without being told.
+  //
+  // At least one row always, so the block never collapses to a bare banner:
+  // with no forms yet it carries the line saying why.
+  const signUpRows = Math.max(signUpRowCount || 0, 1);
+  const signUpBannerRow = 1;
+  const signUpHeaderRow = 2;
+  const signUpDataStart = 3;
+  const signUpDataEnd = signUpDataStart + signUpRows - 1;
+  const signUpSpacerRow = signUpDataEnd + 1;
+
+  const todayBannerRow = signUpSpacerRow + 1;
+  const todayHeaderRow = todayBannerRow + 1;
+  const todayDataStart = todayHeaderRow + 1;
   const todayDataEnd = todayDataStart + numLocations - 1;
   const spacerRow = todayDataEnd + 1;
   const scheduleStartRow = spacerRow + 1;
-  return { numLocations, todayBannerRow, todayHeaderRow, todayDataStart, todayDataEnd, spacerRow, scheduleStartRow };
+  return {
+    numLocations, signUpRows, signUpBannerRow, signUpHeaderRow, signUpDataStart, signUpDataEnd,
+    signUpSpacerRow, todayBannerRow, todayHeaderRow, todayDataStart, todayDataEnd, spacerRow, scheduleStartRow
+  };
 }
 
+/** The pinned block's own header row — narrower than the schedule beneath it. */
+const LUNCH_SIGNUP_HEADERS = ['Location', 'Month', 'Lunch_Dates', 'Sign_Up_Link', 'Edit_Form'];
+
 /**
- * Aggregates Master_Program_Dashboard's session table + Registrant_Dash
- * into one row per (date, location): how many people need lunch, plus that
- * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
- * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed
- * count toward catering.
+ * How many sign-up rows the pinned block shows.
  *
- * Every UPCOMING session date+location is seeded at count 0 whether or not
- * anyone has registered yet, so the catering schedule shows what is coming
- * instead of materializing a date only once its first registrant appears —
- * staff need the empty rows to plan against (and to hand-enter buffers on).
- * Dates explicitly marked "Not Serving" for their location are left out;
- * a date with no Lunch_Schedule row at all IS seeded, since an unconfigured
- * date is exactly the thing worth surfacing. Past dates are never seeded —
- * that would backfill a wall of empty history.
+ * It is capped because everything above the schedule's header is FROZEN (see
+ * writeMasterLunchDashboardSheet()) — that is what "pinned" buys, and it is
+ * also what it costs: every row added here is a row of the screen the schedule
+ * no longer gets. Two locations across a three-month sync window is six rows,
+ * on top of the eight the Today block and the headers already take, which
+ * leaves a laptop looking at a frozen pane and four dates.
+ *
+ * Four is the current month and the next at both locations — which is the
+ * whole of what anybody is handing out a link for. The rest are one row down
+ * on Master_Program_Dashboard like every other form, and the block says so
+ * rather than pretending they don't exist.
  */
+const LUNCH_SIGNUP_PINNED_LIMIT = 4;
+
+/**
+ * Flattens getLunchOnlyFormLinks() into the rows the pinned block shows: one
+ * per location per month, soonest month first.
+ *
+ * SORTED ON monthKey ("2026-09"), WHICH IS STORED, not on the month's NAME.
+ * "April" before "September" is not an ordering anybody wants on a lunch
+ * calendar, and re-deriving the order from the label means parsing
+ * "September 2026" back into a date — which is the kind of round trip that
+ * looks free and is not: `new Date("September 2026 1")` lands on midnight in
+ * one zone and is then read back in another, putting September's form under
+ * an August heading; and it does not fail loudly on rubbish either, since that
+ * same parser reads a blank label as a real date rather than as NaN. So the
+ * key is written down at the point the dates are actually in hand
+ * (syncLunchOnlySessions()) and simply read here.
+ *
+ * A stored entry with no monthKey — written by a version before this — sorts
+ * last rather than first, so it lands under the months it cannot be placed
+ * among instead of above them.
+ */
+function buildLunchSignUpRows(links) {
+  const rows = [];
+  Object.keys(links || {}).forEach(groupKey => {
+    const m = links[groupKey] || {};
+    if (!m.publishedUrl) return; // an entry with no link is nothing to pin
+    rows.push({
+      location: m.location || '',
+      monthLabel: m.monthLabel || '',
+      monthKey: m.monthKey || '9999-99',
+      dateCount: m.dateCount || 0,
+      publishedUrl: m.publishedUrl,
+      editUrl: m.editUrl || m.publishedUrl
+    });
+  });
+  return rows.sort((a, b) => (a.monthKey === b.monthKey
+    ? String(a.location).localeCompare(String(b.location))
+    : (a.monthKey < b.monthKey ? -1 : 1)));
+}
+
 /**
  * The person-level record behind one date+location's lunch numbers.
  *
@@ -16529,6 +17187,22 @@ function countLunchPeople(bucket, flag) {
   return Object.keys(people).reduce((n, k) => n + (people[k][flag] ? 1 : 0), 0);
 }
 
+/**
+ * Aggregates Master_Program_Dashboard's session table + Registrant_Dash
+ * into one row per (date, location): how many people need lunch, plus that
+ * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
+ * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed
+ * count toward catering.
+ *
+ * Every UPCOMING session date+location is seeded at count 0 whether or not
+ * anyone has registered yet, so the catering schedule shows what is coming
+ * instead of materializing a date only once its first registrant appears —
+ * staff need the empty rows to plan against (and to hand-enter buffers on).
+ * Dates explicitly marked "Not Serving" for their location are left out;
+ * a date with no Lunch_Schedule row at all IS seeded, since an unconfigured
+ * date is exactly the thing worth surfacing. Past dates are never seeded —
+ * that would backfill a wall of empty history.
+ */
 function buildDashboardRollup(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -16872,7 +17546,8 @@ function updateMasterLunchDashboard(registrantRows) {
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_DASHBOARD);
   const headers = HEADERS.Master_Lunch_Dashboard;
   const map = getIndexMap(headers);
-  const plan = getDashboardRowPlan();
+  const signUpRows = buildLunchSignUpRows(getLunchOnlyFormLinks());
+  const plan = getDashboardRowPlan(signUpRows.length);
   const rollup = buildDashboardRollup(registrantRows);
 
   // 'Standard_Buffer' is unique to the Full Schedule headers (not present
@@ -16937,7 +17612,7 @@ function updateMasterLunchDashboard(registrantRows) {
   });
 
   writeMasterLunchDashboardSheet(sheet, plan, headers,
-    dropNotServingRows(existingTable, map, rollup), rollup);
+    dropNotServingRows(existingTable, map, rollup), rollup, signUpRows);
 
   // Same rollup, the other half of the same question: the dashboard says how
   // many meals, this says whose. Rendered from the same object in the same
@@ -17109,7 +17784,67 @@ function dropNotServingRows(tableRows, map, rollup) {
   return kept;
 }
 
-function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rollup) {
+/**
+ * The pinned block at the very top of Master_Lunch_Dashboard: the lunch-only
+ * sign-up form for each location and month, as a link somebody can copy.
+ *
+ * WHY A LINK COLUMN AND NOT A URL. The published URL of a Google Form is 90-odd
+ * characters of no meaning, and five of them stacked in a column is a wall.
+ * makeHyperlinkFormula() shows the words and keeps the address behind them —
+ * right-click, copy link, paste into an email, same as every other link in this
+ * workbook. The Edit_Form link is there because "can you add a note to the
+ * form" is the request that follows "can you send me the link".
+ *
+ * WITH NO FORMS YET the block still draws, carrying the reason instead of a
+ * row. An empty block would read as a feature that is broken; a sentence
+ * saying "no catered dates on Lunch_Schedule yet" reads as a step not done,
+ * which is what it is.
+ */
+function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
+  const rows = signUpRows || [];
+  writeSectionBanner(sheet, plan.signUpBannerRow, numCols,
+    '🥡 LUNCH SIGN-UP FORMS — for people who come for the meal, not a programme', { hero: true });
+  writeSectionHeader(sheet, plan.signUpHeaderRow, LUNCH_SIGNUP_HEADERS.length, LUNCH_SIGNUP_HEADERS);
+
+  if (rows.length === 0) {
+    sheet.getRange(plan.signUpDataStart, 1, 1, LUNCH_SIGNUP_HEADERS.length).setValues([[
+      '—', '—', 0,
+      `No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} yet — add a Hot or Cold row and the form builds itself on the next sync.`,
+      ''
+    ]]);
+    sheet.getRange(plan.signUpDataStart, 1, 1, LUNCH_SIGNUP_HEADERS.length)
+      .setFontStyle('italic').setFontColor('#666666').setVerticalAlignment('middle');
+    sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
+    return;
+  }
+
+  const shown = rows.slice(0, LUNCH_SIGNUP_PINNED_LIMIT);
+  const values = shown.map(r => [
+    r.location,
+    r.monthLabel,
+    r.dateCount,
+    makeHyperlinkFormula(r.publishedUrl, `Sign up for lunch — ${r.location}, ${r.monthLabel}`),
+    makeHyperlinkFormula(r.editUrl, 'Edit Form')
+  ]);
+  if (rows.length > shown.length) {
+    values.push(['…', '…', '',
+      `+ ${rows.length - shown.length} later month(s) — their links are on ${SHEET_NAMES.PROGRAM_DASHBOARD}, ` +
+      `on any "${LUNCH_ONLY_PROGRAM_LABEL}" row.`, '']);
+  }
+  const range = sheet.getRange(plan.signUpDataStart, 1, values.length, LUNCH_SIGNUP_HEADERS.length);
+  range.setValues(values).setVerticalAlignment('middle');
+  sheet.getRange(plan.signUpDataStart, 1, shown.length, 1)
+    .setFontSize(TYPO.HERO_LABEL.size).setFontWeight('bold');
+  sheet.getRange(plan.signUpDataStart, 3, values.length, 1).setHorizontalAlignment('center');
+  if (values.length > shown.length) {
+    sheet.getRange(plan.signUpDataStart + shown.length, 1, 1, LUNCH_SIGNUP_HEADERS.length)
+      .setFontStyle('italic').setFontColor('#666666');
+  }
+  applyZebraStripingManualBounded(sheet, plan.signUpDataStart, values.length, LUNCH_SIGNUP_HEADERS.length);
+  sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
+}
+
+function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rollup, signUpRows) {
   const map = getIndexMap(headers);
   const numCols = headers.length;
 
@@ -17118,6 +17853,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+
+  writeLunchSignUpBlock(sheet, plan, numCols, signUpRows);
 
   writeSectionBanner(sheet, plan.todayBannerRow, numCols,
     `📋 TODAY'S LUNCH — ${Utilities.formatDate(new Date(), TIMEZONE, 'EEEE, MMM d, yyyy')}`,
@@ -19236,10 +19973,10 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
   });
 
   form.setDescription(buildFormDescription(locations, allDateLabels, spec.isFixed, lunchDateLabels.length > 0,
-    { isClub: spec.isClub, programTitle: spec.programTitle }));
+    { isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly }));
   applyAttendanceModeChoices(form,
-    { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle });
-  syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0);
+    { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly });
+  syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0, spec);
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels,
     { form, force: true, context: context || 'new form' });
   applyFormFooterNote(form, buildFooterNoteForLocations(locations));
@@ -19260,7 +19997,8 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
     applyAttendanceModeChoices(FormApp.openById(formId), {
       isFixed: context.isFixed || context.showTitle, // a combined form is a fixed list of dates
       isClub: context.isClub,
-      programTitle: context.programTitle
+      programTitle: context.programTitle,
+      isLunchOnly: context.isLunchOnly
     });
   } catch (err) {
     log(`⚠️ Could not update the sign-up options on form ${formId} (${err}).`);
