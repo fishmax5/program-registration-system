@@ -179,5 +179,83 @@ check('each one keyed by the id its session row actually carries',
   ctx.sessions[0].eventId, sandbox.makeLunchOnlyEventId('2026-11-04', 'Narberth'));
 check('and its location', ctx.sessions[0].location, 'Narberth');
 
+// --- the mode question's page targets --------------------------------------
+// ListItem.createChoice(value, navigationItem) takes a PageBreakItem and
+// nothing else. form.getItems() hands back generic Items, so a form whose mode
+// labels have to be REWRITTEN — every lunch-only form, every [Club] form,
+// every [Grouped] series — died on
+//   "The parameters (String,FormApp.Item) don't match the method signature
+//    for FormApp.ListItem.createChoice."
+// A plain monthly form never hit it: its labels already match the copied
+// template, so the skip-if-unchanged branch returns first.
+sandbox.FormApp.ItemType.PAGE_BREAK = 'PAGE_BREAK';
+sandbox.FormApp.ItemType.LIST = 'LIST';
+
+function fakePage(title) {
+  const page = { __pageBreak: true, getTitle: () => title, getType: () => 'PAGE_BREAK' };
+  // What getItems() actually returns: a generic Item that can BECOME a page.
+  return { getTitle: () => title, getType: () => 'PAGE_BREAK', asPageBreakItem: () => page, __page: page };
+}
+
+function fakeForm(currentLabels) {
+  const navTargets = [];
+  const list = {
+    getChoices: () => currentLabels.map(v => ({ getValue: () => v })),
+    getHelpText: () => '',
+    setHelpText: () => list,
+    setChoices: () => list,
+    createChoice: (value, navigationItem) => {
+      // Apps Script's own type check, in the words it uses.
+      if (!navigationItem || !navigationItem.__pageBreak) {
+        throw new Error("The parameters (String,FormApp.Item) don't match the " +
+          'method signature for FormApp.ListItem.createChoice.');
+      }
+      navTargets.push(`${value} -> ${navigationItem.getTitle()}`);
+      return { value };
+    }
+  };
+  const modeItem = {
+    getTitle: () => 'How would you like to sign up?',
+    getType: () => 'LIST',
+    asListItem: () => list
+  };
+  const allDates = fakePage('Sign Me Up for Every Date');
+  const specific = fakePage('Pick Your Dates');
+  return {
+    navTargets,
+    getId: () => 'form-under-test',
+    getItems: () => [modeItem, allDates, specific]
+  };
+}
+
+// The real page titles, so the lookup finds them.
+const pageTitles = vm.runInContext('[TEMPLATE_PAGE_TITLES.ALL_DATES, TEMPLATE_PAGE_TITLES.SPECIFIC_DATES]', sandbox);
+function fakeFormWithRealTitles(currentLabels) {
+  const form = fakeForm(currentLabels);
+  const items = form.getItems();
+  const allDates = fakePage(pageTitles[0]);
+  const specific = fakePage(pageTitles[1]);
+  form.getItems = () => [items[0], allDates, specific];
+  return form;
+}
+
+sandbox.invalidateFormItemIndex = () => {};
+const lunchForm = fakeFormWithRealTitles(['I am coming to every date', 'Let me pick my dates']);
+let threw = null;
+try {
+  sandbox.applyAttendanceModeChoices(lunchForm, { isLunchOnly: true });
+} catch (err) { threw = String(err); }
+check('a lunch form\'s mode choices are written, not thrown at', threw, null);
+check('and each choice navigates to a real page break', lunchForm.navTargets.length, 2);
+
+// The path that always worked, so the guard has not broken it: labels that
+// already match are left alone without a single Forms write.
+const unchanged = fakeFormWithRealTitles(
+  vm.runInContext('[ATTENDANCE_MODE_CHOICES.ALL_DATES, ATTENDANCE_MODE_CHOICES.INDIVIDUAL]', sandbox));
+unchanged.getItems()[0].asListItem().getHelpText = () =>
+  vm.runInContext('buildAttendanceModeHelpText(buildAttendanceModeChoiceSet({}))', sandbox);
+sandbox.applyAttendanceModeChoices(unchanged, {});
+check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

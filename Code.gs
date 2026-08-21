@@ -2560,8 +2560,24 @@ function applyAttendanceModeChoices(form, options, refs) {
   // sync, about a question whose absence is the intended state.
   if (options && options.isAssistance) return null;
   const items = refs.modeItem ? null : form.getItems();
-  const findPage = title => (items || []).filter(it =>
-    it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null;
+  // AS A PAGE BREAK, NOT AS AN ITEM. form.getItems() hands back generic Items,
+  // and ListItem.createChoice(value, navigationItem) will not take one: it
+  // throws "The parameters (String,FormApp.Item) don't match the method
+  // signature for FormApp.ListItem.createChoice."
+  //
+  // That is the exception every lunch sign-up form died on. It never showed up
+  // on the template build, because addTemplateItemsToForm() passes the real
+  // PageBreakItems it just created through `refs` — and it never showed up on
+  // an ordinary monthly form either, because a copy of the template already
+  // carries the standard mode labels, so the "skip if nothing changed" branch
+  // below returned before reaching createChoice. It struck exactly the forms
+  // whose labels DIFFER from the template's: every lunch-only form, every
+  // [Club] form and every [Grouped] series. Those were the forms that had to
+  // write their choices, and writing them was what failed — so no lunch form
+  // was ever built, and with no form there was no link to pin.
+  const asPage = item => (item && typeof item.asPageBreakItem === 'function' ? item.asPageBreakItem() : item);
+  const findPage = title => asPage((items || []).filter(it =>
+    it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null);
 
   // Type-guarded as well as titled: a PAGE_BREAK can never be the question,
   // and a title collision between a page and a question must fail visibly at
@@ -2570,8 +2586,11 @@ function applyAttendanceModeChoices(form, options, refs) {
     ((items || []).filter(it =>
       it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE &&
       it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null);
-  const allDatesPage = refs.allDatesPage || findPage(TEMPLATE_PAGE_TITLES.ALL_DATES);
-  const specificPage = refs.specificPage || findPage(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
+  // asPage() on the refs too — they arrive as real PageBreakItems from
+  // addTemplateItemsToForm() and pass straight through, but nothing about the
+  // signature says a future caller has to hand them over that way.
+  const allDatesPage = asPage(refs.allDatesPage) || findPage(TEMPLATE_PAGE_TITLES.ALL_DATES);
+  const specificPage = asPage(refs.specificPage) || findPage(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   if (!modeItem || !allDatesPage || !specificPage) {
     log(`ℹ️ Could not set the sign-up options on form ${form.getId()} — its mode question or branch pages are missing.`);
     return null;
@@ -12571,16 +12590,50 @@ function createRegistrationForm(group, configInfo) {
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
   const form = FormApp.openById(copiedFile.getId());
+
+  // EVERYTHING PAST THE COPY IS GUARDED, and the copy is thrown away if any of
+  // it fails. A half-configured form is not a usable registration form, and
+  // leaving it in Drive means the folder fills with one abandoned copy per
+  // failed attempt — an hourly sync against a fault that does not fix itself
+  // produces a drift of identically-named forms, and the first job of whoever
+  // finds them is working out which (if any) is the real one. createFormFromSpec()
+  // has cleaned up after itself for this exact reason; this path did not, and
+  // the createChoice() fault above ran it every sync for as long as it stood.
+  try {
+    return configureCopiedRegistrationForm(form, group, configInfo, formTitle);
+  } catch (err) {
+    try { DriveApp.getFileById(form.getId()).setTrashed(true); } catch (trashErr) { /* best effort */ }
+    throw err;
+  }
+}
+
+/**
+ * The re-runnable half of createRegistrationForm(): everything done to the
+ * copy once it exists. Split out so the caller can trash the copy if any of it
+ * throws — see the comment there.
+ */
+function configureCopiedRegistrationForm(form, group, configInfo, formTitle) {
   form.setTitle(formTitle);
 
-  // Live now, or built closed until registration opens — see
-  // applyRegistrationHorizonToNewForm().
-  applyRegistrationHorizonToNewForm(form, sessionsOfGroup(group), formTitle);
+  // PUBLISHED FIRST, THEN OPENED OR CLOSED — and the order is the whole point.
+  //
+  // Google split "is this form published" from "is it accepting responses",
+  // and a copy of a form now arrives UNPUBLISHED. setAcceptingResponses() on
+  // an unpublished form does not quietly do nothing; it throws "Operation not
+  // supported on unpublished form", which is what every newly copied form was
+  // logging. It was only ever a warning, so the form still got built — but it
+  // was built with whatever liveness the copy came with rather than the one
+  // the registration horizon asked for, which means a form meant to stay shut
+  // until registration opens could be taking responses, and vice versa.
   try {
     if (typeof form.setPublished === 'function') form.setPublished(true);
   } catch (err) {
     log(`⚠️ Could not explicitly publish copied form "${formTitle}" (${err}) — copies are published by default in most accounts.`);
   }
+
+  // Live now, or built closed until registration opens — see
+  // applyRegistrationHorizonToNewForm().
+  applyRegistrationHorizonToNewForm(form, sessionsOfGroup(group), formTitle);
 
   const sessions = sessionsOfGroup(group);
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
@@ -21341,12 +21394,14 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
   const locations = spec.locations || locationsOfSessions(sessions);
 
   form.setTitle(formTitle);
-  applyRegistrationHorizonToNewForm(form, sessions, formTitle);
+  // Published BEFORE the horizon decides whether it accepts responses — see
+  // createRegistrationForm(), which had the same two calls the wrong way round.
   try {
     if (typeof form.setPublished === 'function') form.setPublished(true);
   } catch (err) {
     log(`⚠️ Could not explicitly publish "${formTitle}" (${err}).`);
   }
+  applyRegistrationHorizonToNewForm(form, sessions, formTitle);
 
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, {
     showLocation: spec.showLocation,
