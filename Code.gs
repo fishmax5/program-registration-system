@@ -5376,13 +5376,28 @@ function syncLunchOnlySessions(registrySheet) {
   // re-opening it automatically too, and a form that opens and closes itself
   // on the strength of a menu edit is a worse failure than a stale link. Close
   // it by hand if that ever happens; see STRESS_TEST.md.
+  // WHAT WAS PINNED BEFORE, minus the months that are actually over. Read
+  // here, above the empty-`wanted` branch, because that branch needs it too.
+  const previousLinks = pruneLunchOnlyFormLinks(getLunchOnlyFormLinks());
+
   if (Object.keys(wanted).length === 0) {
-    // Cleared rather than left as they were. Nothing is catered in the window,
-    // so every stored link points at a month that is over — and a pinned link
-    // to last month's lunch form is worse than an empty block saying there are
-    // no catered dates yet, which is the true and actionable statement.
-    saveLunchOnlyFormLinks({});
-    return {};
+    // NOT cleared. This used to write an empty map, on the reasoning that
+    // nothing catered in the window means every stored link points at a month
+    // that is over — which is true only if the window is the whole story, and
+    // it is not. The state this actually describes, most of the time, is
+    // "next month's menu has not been typed in yet": the form for the month
+    // we are IN exists, is open, and is the link somebody is being asked for
+    // at the desk right now. Deleting the only record of it made the block
+    // read "no catered dates yet" about a form that was taking responses, and
+    // made the recovery circular — you could not get the link back until you
+    // had entered the menu, and the reason you wanted the link was to know
+    // which form the menu belonged to.
+    //
+    // So the pruning above is the whole of the rule: a month that has ENDED
+    // stops being pinned; a month that has not, stays, whatever the menu
+    // currently says.
+    saveLunchOnlyFormLinks(previousLinks);
+    return previousLinks;
   }
 
   const existingRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
@@ -5392,8 +5407,15 @@ function syncLunchOnlySessions(registrySheet) {
     if (id) rowByEventId[id] = row;
   });
 
-  const previousLinks = getLunchOnlyFormLinks();
-  const links = {};
+  // Started from what was already pinned rather than from nothing, for the
+  // reason above and for one more: `links` is what gets SAVED at the end, so a
+  // location/month this run does not reach — all its dates flipped to "Not
+  // Serving", its form momentarily unopenable, its menu rows deleted by
+  // accident — used to be dropped from the pin silently while its form went on
+  // accepting responses. That was the documented "one loose end" of this
+  // function; it is not one any more. Only a month that has ended is dropped,
+  // and every group this run does reach overwrites its entry below.
+  const links = Object.assign({}, previousLinks);
   const newRows = [];
   // Whether any EXISTING row was re-stamped. Together with newRows.length this
   // is what decides whether the session table is rewritten at all — see the
@@ -5585,6 +5607,30 @@ function saveLunchOnlyFormLinks(links) {
   }
 }
 
+/**
+ * The stored pins, minus every month that has ENDED — the one condition under
+ * which a lunch sign-up link stops being worth showing.
+ *
+ * Deliberately not "minus every month with no catered date in the sync
+ * window": those are different statements, and conflating them is what made
+ * the block go blank in the gap between one month's menu running out and the
+ * next one being typed in. An entry with no monthKey (written by a version
+ * before that was stored) is KEPT — it cannot be judged, and dropping what you
+ * cannot judge is how a link disappears for no reason anybody can reconstruct.
+ */
+function pruneLunchOnlyFormLinks(links) {
+  const thisMonthKey = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM');
+  const kept = {};
+  Object.keys(links || {}).forEach(groupKey => {
+    const entry = links[groupKey] || {};
+    if (!entry.publishedUrl) return;
+    const monthKey = String(entry.monthKey || '').trim();
+    if (monthKey && monthKey < thisMonthKey) return;
+    kept[groupKey] = entry;
+  });
+  return kept;
+}
+
 function getLunchOnlyFormLinks() {
   try {
     const raw = PropertiesService.getScriptProperties().getProperty(LUNCH_ONLY_LINKS_PROP_KEY);
@@ -5668,7 +5714,12 @@ const TYPO = {
 const ROW_HEIGHTS = {
   BANNER: 28,
   BANNER_HERO: 40,
-  HERO_DATA: 34
+  HERO_DATA: 34,
+  /**
+   * Sheets' own default. Named because a render has to be able to put a row
+   * BACK to it — see resetRowHeights().
+   */
+  DEFAULT: 21
 };
 
 /**
@@ -14885,6 +14936,31 @@ function collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx) {
  * render: sheet.clear() does NOT reset row visibility, so yesterday's hidden
  * range would otherwise still be hidden today, over completely different rows.
  */
+/**
+ * Puts a band of rows back to the default height.
+ *
+ * THE SAME CLASS OF LEFTOVER AS A HIDDEN ROW, and it outlives clear() for the
+ * same reason: a row height is a property of the ROW, not of what is in it, so
+ * clearing the sheet leaves every height exactly as the last render set it.
+ *
+ * On a tab whose top blocks change SIZE between renders that is visible
+ * damage, not untidiness. Master_Lunch_Dashboard's pinned sign-up block is one
+ * row tall with no forms and five with four months of them, and its banner
+ * rows are 40px against a 21px default — so a render that shrank the block
+ * left a run of fat empty rows sitting above the Today block, and one that
+ * grew it left a squashed banner. The tab reads as broken because, in the only
+ * sense that matters to somebody looking at it, it is.
+ */
+function resetRowHeights(sheet, fromRow, toRow) {
+  const last = Math.min(toRow, sheet.getMaxRows());
+  if (!fromRow || last < fromRow) return;
+  try {
+    sheet.setRowHeights(fromRow, last - fromRow + 1, ROW_HEIGHTS.DEFAULT);
+  } catch (err) {
+    log(`ℹ️ Could not reset row heights on "${sheet.getName()}" (${err}).`);
+  }
+}
+
 function showAllRows(sheet) {
   try {
     sheet.showRows(1, sheet.getMaxRows());
@@ -18158,8 +18234,20 @@ function getDashboardRowPlan(signUpRowCount) {
   };
 }
 
-/** The pinned block's own header row — narrower than the schedule beneath it. */
-const LUNCH_SIGNUP_HEADERS = ['Location', 'Month', 'Lunch_Dates', 'Sign_Up_Link', 'Edit_Form'];
+/**
+ * The pinned block's own header row — narrower than the schedule beneath it.
+ *
+ * SIGN_UP_LINK IS LAST, AND THAT IS THE WHOLE POINT OF THE ORDER. This block
+ * sits on top of a twenty-column table and shares its column widths, and those
+ * widths are sized for the schedule: column D is as wide as "Chx Parm" because
+ * that is what Meal_Shorthand holds. A cell only spills into the cells to its
+ * right while they are EMPTY, so with the link in D and "Edit Form" in E, the
+ * one piece of text this block exists to show — "Sign up for lunch —
+ * Narberth, September 2026" — was cut off mid-word by the cell beside it.
+ * Putting it last leaves fifteen empty columns to run into, and OVERFLOW (set
+ * in writeLunchSignUpBlock()) lets it use them.
+ */
+const LUNCH_SIGNUP_HEADERS = ['Location', 'Month', 'Lunch_Dates', 'Edit_Form', 'Sign_Up_Link'];
 
 /**
  * How many sign-up rows the pinned block shows.
@@ -18199,9 +18287,12 @@ const LUNCH_SIGNUP_PINNED_LIMIT = 4;
  */
 function buildLunchSignUpRows(links) {
   const rows = [];
-  Object.keys(links || {}).forEach(groupKey => {
-    const m = links[groupKey] || {};
-    if (!m.publishedUrl) return; // an entry with no link is nothing to pin
+  // Pruned on the way out as well as on the way in: the dashboard renders far
+  // more often than the lunch sync runs, and a month that ended overnight
+  // must stop being pinned on the next render rather than on the next sync.
+  const live = pruneLunchOnlyFormLinks(links);
+  Object.keys(live).forEach(groupKey => {
+    const m = live[groupKey];
     rows.push({
       location: m.location || '',
       monthLabel: m.monthLabel || '',
@@ -18902,16 +18993,27 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
   const rows = signUpRows || [];
   writeSectionBanner(sheet, plan.signUpBannerRow, numCols,
     '🥡 LUNCH SIGN-UP FORMS — for people who come for the meal, not a programme', { hero: true });
-  writeSectionHeader(sheet, plan.signUpHeaderRow, LUNCH_SIGNUP_HEADERS.length, LUNCH_SIGNUP_HEADERS);
+  // Padded to the tab's full width so the header BAND spans the sheet like
+  // every other header row on it. Stopping at column E left five grey cells
+  // floating in a twenty-column row, which reads as a half-drawn table rather
+  // than as a section of one.
+  const headerRow = LUNCH_SIGNUP_HEADERS.concat(
+    new Array(Math.max(0, numCols - LUNCH_SIGNUP_HEADERS.length)).fill(''));
+  writeSectionHeader(sheet, plan.signUpHeaderRow, headerRow.length, headerRow);
+
+  // The link column is the last one used, so it may spill across the empty
+  // columns to its right instead of being clipped — see LUNCH_SIGNUP_HEADERS.
+  const linkCol = LUNCH_SIGNUP_HEADERS.indexOf('Sign_Up_Link') + 1;
 
   if (rows.length === 0) {
     sheet.getRange(plan.signUpDataStart, 1, 1, LUNCH_SIGNUP_HEADERS.length).setValues([[
-      '—', '—', 0,
-      `No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} yet — add a Hot or Cold row and the form builds itself on the next sync.`,
-      ''
+      '—', '—', 0, '',
+      `No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} yet — add a Hot or Cold row and the form builds itself on the next sync.`
     ]]);
     sheet.getRange(plan.signUpDataStart, 1, 1, LUNCH_SIGNUP_HEADERS.length)
       .setFontStyle('italic').setFontColor('#666666').setVerticalAlignment('middle');
+    sheet.getRange(plan.signUpDataStart, linkCol, 1, 1)
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
     sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
     return;
   }
@@ -18921,24 +19023,29 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
     r.location,
     r.monthLabel,
     r.dateCount,
-    makeHyperlinkFormula(r.publishedUrl, `Sign up for lunch — ${r.location}, ${r.monthLabel}`),
-    makeHyperlinkFormula(r.editUrl, 'Edit Form')
+    makeHyperlinkFormula(r.editUrl, 'Edit Form'),
+    makeHyperlinkFormula(r.publishedUrl, `Sign up for lunch — ${r.location}, ${r.monthLabel}`)
   ]);
   if (rows.length > shown.length) {
-    values.push(['…', '…', '',
+    values.push(['…', '…', '', '',
       `+ ${rows.length - shown.length} later month(s) — their links are on ${SHEET_NAMES.PROGRAM_DASHBOARD}, ` +
-      `on any "${LUNCH_ONLY_PROGRAM_LABEL}" row.`, '']);
+      `on any "${LUNCH_ONLY_PROGRAM_LABEL}" row.`]);
   }
   const range = sheet.getRange(plan.signUpDataStart, 1, values.length, LUNCH_SIGNUP_HEADERS.length);
   range.setValues(values).setVerticalAlignment('middle');
   sheet.getRange(plan.signUpDataStart, 1, shown.length, 1)
     .setFontSize(TYPO.HERO_LABEL.size).setFontWeight('bold');
   sheet.getRange(plan.signUpDataStart, 3, values.length, 1).setHorizontalAlignment('center');
+  sheet.getRange(plan.signUpDataStart, linkCol, values.length, 1)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
   if (values.length > shown.length) {
     sheet.getRange(plan.signUpDataStart + shown.length, 1, 1, LUNCH_SIGNUP_HEADERS.length)
       .setFontStyle('italic').setFontColor('#666666');
   }
-  applyZebraStripingManualBounded(sheet, plan.signUpDataStart, values.length, LUNCH_SIGNUP_HEADERS.length);
+  // Striped across the WHOLE width, not just the five columns in use: the link
+  // spills into the empty columns beside it, and a stripe that stopped at
+  // column E would cut the text it is meant to sit behind in half.
+  applyZebraStripingManualBounded(sheet, plan.signUpDataStart, values.length, numCols);
   sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
 }
 
@@ -18949,6 +19056,10 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   sheet.clear();
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
+  // ...and so do row heights. Everything above the schedule is re-measured
+  // from scratch every render and changes size when the pinned block does, so
+  // it starts flat and the writers below make tall only what they use.
+  resetRowHeights(sheet, 1, plan.scheduleStartRow + 1);
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 

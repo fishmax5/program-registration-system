@@ -126,4 +126,5 @@ spreadsheet:
 
 ```
 node tests/assistance_and_questions.test.js
+node tests/lunch_signup_links.test.js
 ```
