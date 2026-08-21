@@ -54,7 +54,9 @@ It also:
   menu rather than the calendar, on which "I want lunch on every date listed"
   books a whole month of meals in one page; its links are **pinned to the top
   of the lunch dashboard**, which is where staff are standing when somebody
-  asks for them;
+  asks for them, and a menu typed **up to six months ahead** gets its form and
+  its link straight away, so the link exists before the newsletter advertising
+  it does;
 - lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
   per person per date and location, with their programs, phone, `Hot`/`Cold`
   and whether they've been handed their meal — built from the same pass as the

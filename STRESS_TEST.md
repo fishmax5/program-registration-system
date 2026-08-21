@@ -308,6 +308,16 @@ on the strength of a menu edit fails in ways nobody can predict from the
 outside. Doing it by hand is one click on a form that, in practice, is
 cancelled outright about never.
 
+The window those forms are built in is `LUNCH_SIGNUP_LOOKAHEAD_MONTHS` (six),
+and it is deliberately *not* the calendar import's 60-day lookahead. It used to
+be, and that broke the one case the feature exists for: a menu is typed in
+blocks by somebody working ahead, so in late August a November menu sat past
+the 60-day line and every one of its dates was dropped — no form, no pinned
+link, and a menu action reporting "no catered dates on Lunch_Schedule" to
+somebody looking straight at the rows. Anything further out than six months is
+still skipped, but it is now counted and reported in the admin digest rather
+than dropped in silence, and it builds itself as it comes inside the horizon.
+
 ### G. `[Cap: 99999999999999999999]` is accepted as written
 
 Capacity is `parseInt` with no ceiling, so a typo in a calendar description

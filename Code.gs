@@ -4958,19 +4958,61 @@ function refreshLunchSignUpForms() {
   flushPersistentRegistries();
 
   const months = buildLunchSignUpRows(links);
+
+  // THE DASHBOARD IS REWRITTEN WHATEVER THE ANSWER TURNED OUT TO BE, which is
+  // the whole reason somebody ran this by hand — and it used to be skipped on
+  // exactly the runs that most needed it. The early return sat above this
+  // call, so a workbook whose block was stale, or blank, or still carrying a
+  // pin for a month that has since ended, was left showing precisely that
+  // while the toast said there was nothing to build. A render is what turns
+  // "nothing to build" into a block that SAYS so.
+  updateMasterLunchDashboard(null);
+  flushAdminDigest('Lunch sign-up forms');
+
   if (months.length === 0) {
-    toastIfPossible(`No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} in the window — nothing to build. ` +
-      'Add a Hot or Cold row and run this again.');
+    toastIfPossible(`No lunch sign-up links to pin — ${describeWhyNoLunchSignUpForms()}`);
     return 0;
   }
 
-  // The dashboard is rewritten so the new links are pinned to the top of it
-  // straight away, which is the whole reason somebody ran this by hand.
-  updateMasterLunchDashboard(null);
-  flushAdminDigest('Lunch sign-up forms');
   toastIfPossible(`Lunch sign-up forms ready ✅ — ${months.length} location/month form(s). ` +
-    `The links are pinned at the top of ${SHEET_NAMES.LUNCH_DASHBOARD}.`);
+    `The links are pinned at the top of ${SHEET_NAMES.LUNCH_DASHBOARD}.` +
+    (getLastLunchSignUpRunStats().formsFailed > 0
+      ? ` ⚠️ ${getLastLunchSignUpRunStats().formsFailed} other form(s) could not be built — see the log.`
+      : ''));
   return months.length;
+}
+
+/**
+ * Why the pinned block has nothing in it, in the words of whichever of the
+ * four quite different situations actually happened.
+ *
+ * "No catered dates on Lunch_Schedule" was the old answer to all four, and it
+ * is a flat contradiction of what somebody is looking at in three of them —
+ * the rows ARE there; they are past, or further out than the forms are built,
+ * or their forms failed to open. Being told to "add a Hot or Cold row" in
+ * front of a tab full of Hot and Cold rows is how a working feature reads as
+ * broken.
+ */
+function describeWhyNoLunchSignUpForms() {
+  const s = getLastLunchSignUpRunStats();
+  if (s.formsFailed > 0) {
+    return `${s.formsFailed} form(s) could not be built or reopened this run. The reason is in the log and ` +
+      'in the admin email; the dates and any responses already collected are untouched.';
+  }
+  if (s.upcomingDates === 0 && s.beyondHorizon > 0) {
+    return `every catered date on ${SHEET_NAMES.LUNCH_SCHEDULE} is more than ${LUNCH_SIGNUP_LOOKAHEAD_MONTHS} ` +
+      'months out. The menu is fine as typed — those months build their own form automatically as they ' +
+      'come closer.';
+  }
+  if (s.upcomingDates === 0 && s.pastDates > 0) {
+    return `every catered date on ${SHEET_NAMES.LUNCH_SCHEDULE} has already passed. Add next month's ` +
+      'Hot/Cold rows and run this again.';
+  }
+  if (s.cateredRows === 0) {
+    return `there are no Hot or Cold rows on ${SHEET_NAMES.LUNCH_SCHEDULE} at a location that caters. ` +
+      'Add one and run this again.';
+  }
+  return `nothing on ${SHEET_NAMES.LUNCH_SCHEDULE} produced a form this run — see the log.`;
 }
 
 function refreshFormsForLunchDates(pairs) {
@@ -5317,6 +5359,84 @@ function lunchOnlyGroupKey(location, monthLabel) {
 const LUNCH_ONLY_SESSION_HOUR = 12;
 
 /**
+ * HOW FAR AHEAD A LUNCH SIGN-UP FORM IS BUILT — and why it is not the
+ * calendar's window.
+ *
+ * This used to read computeSyncDateRange(), the 60-day lookahead the calendar
+ * import works in, and that was wrong for a reason worth writing down: the two
+ * windows are answering different questions. The calendar's window bounds how
+ * far ahead we go LOOKING for events, and 60 days is generous for that,
+ * because a programme two months out has usually not been put on the calendar
+ * yet. The menu is the opposite. It is TYPED, in blocks, by somebody working
+ * ahead — and the whole reason "Build / Refresh Lunch Sign-Up Forms" is on the
+ * menu at all is the moment right after a month of it has been pasted in and
+ * the link is wanted NOW, for a newsletter that goes out weeks before the
+ * month it is advertising.
+ *
+ * So the exact case the feature exists for was the case it failed: in late
+ * August, a November menu is past the 60-day line, every one of its dates was
+ * dropped, no form was built, no link was pinned — and the menu action said
+ * "No catered dates on Lunch_Schedule in the window — add a Hot or Cold row
+ * and run this again" to somebody looking straight at the rows it could not
+ * see. Nothing about that told them the rows were real and merely too far off.
+ *
+ * Six months is the whole of any lead time anybody types a menu on, and it is
+ * still bounded: a year pasted in one go builds six months of forms, not
+ * twelve, and the six it will not build are REPORTED (see the digest note in
+ * syncLunchOnlySessions()) rather than silently dropped as they were before.
+ */
+const LUNCH_SIGNUP_LOOKAHEAD_MONTHS = 6;
+
+/**
+ * The window the lunch-only sync works in: from the first of this month to the
+ * last day of the month LUNCH_SIGNUP_LOOKAHEAD_MONTHS after it.
+ *
+ * Whole months on both ends on purpose — a form covers a calendar month, so a
+ * horizon that fell mid-month would build a form offering the first half of
+ * March and silently omit the rest.
+ */
+function computeLunchSignUpDateRange() {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0);
+  const end = new Date(today.getFullYear(), today.getMonth() + LUNCH_SIGNUP_LOOKAHEAD_MONTHS + 1, 0, 23, 59, 59);
+  return { start, end };
+}
+
+/**
+ * What the last syncLunchOnlySessions() in this execution actually did.
+ *
+ * Read by refreshLunchSignUpForms() so the toast can say which of the several
+ * quite different reasons for "no links" it is looking at. They used to be one
+ * sentence — "no catered dates on Lunch_Schedule" — which is a true statement
+ * about only one of them and a misleading one about the other three, and the
+ * misleading readings are the ones somebody is standing there needing an
+ * answer to.
+ */
+let __lastLunchSignUpRun = null;
+
+/**
+ * The last run's counts, or a zeroed set when nothing has run in this
+ * execution. Every reader goes through this rather than the variable, so
+ * "no run yet" is one shape rather than a null check at each call site.
+ */
+function getLastLunchSignUpRunStats() {
+  return __lastLunchSignUpRun || blankLunchSignUpRunStats();
+}
+
+function blankLunchSignUpRunStats() {
+  return {
+    cateredRows: 0,      // Hot/Cold rows on the tab at a catering location, whenever they fall
+    upcomingDates: 0,    // ...of those, the ones inside the window (i.e. buildable)
+    pastDates: 0,        // ...already gone by
+    beyondHorizon: 0,    // ...further out than LUNCH_SIGNUP_LOOKAHEAD_MONTHS
+    formsBuilt: 0,
+    formsRefreshed: 0,
+    formsUnchanged: 0,
+    formsFailed: 0
+  };
+}
+
+/**
  * Builds (or brings up to date) the lunch-only sign-up form for every location
  * that is serving food in the sync window, and writes its dates onto the
  * session table.
@@ -5330,6 +5450,7 @@ const LUNCH_ONLY_SESSION_HOUR = 12;
  * catered dates left produces nothing at all rather than an empty form.
  */
 function syncLunchOnlySessions(registrySheet) {
+  const stats = __lastLunchSignUpRun = blankLunchSignUpRunStats();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   if (!menuSheet) return {};
@@ -5337,24 +5458,43 @@ function syncLunchOnlySessions(registrySheet) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
-  const { end } = computeSyncDateRange();
+  // NOT the calendar's 60-day window — see LUNCH_SIGNUP_LOOKAHEAD_MONTHS.
+  const { end } = computeLunchSignUpDateRange();
   const todayKey = formatDateKey(new Date());
 
   // WHICH DATES. Catered (Hot/Cold) rows only, from today forward, inside the
-  // window the rest of the sync works in — and never at a location whose
+  // sign-up horizon (LUNCH_SIGNUP_LOOKAHEAD_MONTHS — NOT the calendar import's
+  // shorter one, which is a different question) — and never at a location whose
   // Config policy is "Never", which is a standing statement that no food is
   // served there and outranks a menu row somebody typed by mistake (the same
   // rule buildDashboardRollup() applies, and it reports the contradiction).
   const wanted = {};
+  /** Location -> the furthest-out catered month it has rows for past the horizon. */
+  const beyondHorizonBy = {};
   readLunchScheduleRows(menuSheet).forEach(row => {
     const d = coerceDate(row[menuMap['Event_Date']]);
     const location = String(row[menuMap['Location']] || '').trim();
     const type = String(row[menuMap['Type']] || '').trim();
     if (!d || !location) return;
     if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
-    const dateKey = formatDateKey(d);
-    if (dateKey < todayKey || d > end) return;
     if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) return;
+    stats.cateredRows++;
+
+    // COUNTED, not just skipped. A date outside the window is the difference
+    // between "there is no menu" and "there is a menu and it is further out
+    // than this runs" — two states that produced the same silence, and only
+    // one of which is anybody's mistake.
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey) { stats.pastDates++; return; }
+    if (d > end) {
+      stats.beyondHorizon++;
+      const label = getMonthLabel(d);
+      if (!beyondHorizonBy[location] || beyondHorizonBy[location].key < formatDateKey(d)) {
+        beyondHorizonBy[location] = { key: formatDateKey(d), label };
+      }
+      return;
+    }
+    stats.upcomingDates++;
 
     const monthLabel = getMonthLabel(d);
     const groupKey = lunchOnlyGroupKey(location, monthLabel);
@@ -5376,6 +5516,23 @@ function syncLunchOnlySessions(registrySheet) {
   // re-opening it automatically too, and a form that opens and closes itself
   // on the strength of a menu edit is a worse failure than a stale link. Close
   // it by hand if that ever happens; see STRESS_TEST.md.
+
+  // TYPED, REAL, AND TOO FAR OFF TO BUILD YET — and reported only where that
+  // is the WHOLE of what a location has, which is the case where the silence
+  // misleads. A location with October dates and March ones needs no telling:
+  // it has a form, it has a pinned link, and March's will appear by itself. A
+  // location whose only catered dates are past the horizon has nothing on
+  // screen at all, and used to have no way to find out why.
+  Object.keys(beyondHorizonBy).forEach(location => {
+    const hasBuildableDates = Object.keys(wanted).some(k => wanted[k].location === location);
+    if (hasBuildableDates) return;
+    noteForAdmin('Lunch menu further ahead than the sign-up forms go',
+      `${SHEET_NAMES.LUNCH_SCHEDULE} has catered dates for ${location} out to ${beyondHorizonBy[location].label} ` +
+      `and none nearer, and that is past the ${LUNCH_SIGNUP_LOOKAHEAD_MONTHS}-month horizon the lunch sign-up ` +
+      `forms are built in — so ${location} has no sign-up form or pinned link yet. The menu is fine as typed: ` +
+      `nothing needs re-entering, and the form builds itself as those dates come inside the horizon.`);
+  });
+
   // WHAT WAS PINNED BEFORE, minus the months that are actually over. Read
   // here, above the empty-`wanted` branch, because that branch needs it too.
   const previousLinks = pruneLunchOnlyFormLinks(getLunchOnlyFormLinks());
@@ -5457,6 +5614,7 @@ function syncLunchOnlySessions(registrySheet) {
     if (missingRows === 0 && formId && formIdsSeen === eventIds.length &&
       stored && stored.formId === formId && stored.dateCount === entry.dateKeys.length) {
       links[groupKey] = stored;
+      stats.formsUnchanged++;
       return;
     }
 
@@ -5486,7 +5644,9 @@ function syncLunchOnlySessions(registrySheet) {
       formInfo = formId
         ? refreshFormForNewDates(formId, group, configInfo)
         : createRegistrationForm(group, configInfo);
+      if (formId) stats.formsRefreshed++; else stats.formsBuilt++;
     } catch (err) {
+      stats.formsFailed++;
       if (!formId) {
         log(`⚠️ Could not build the lunch sign-up form for ${entry.location}, ${entry.monthLabel} (${err}).`);
         noteForAdmin('Lunch sign-up form could not be built',
@@ -5518,6 +5678,14 @@ function syncLunchOnlySessions(registrySheet) {
       editUrl: formInfo.editUrl,
       dateCount: entry.dateKeys.length
     };
+    // SAVED AS WE GO, not only at the end. Building a month of forms is the
+    // slowest thing this file does, and a run that hits the execution limit
+    // half way through used to lose every pin it had earned — the FORMS
+    // survived (savePersistentFormRegistryEntry() above), so the next run
+    // rebuilt nothing, but the links they were built for were gone and the
+    // block went back to saying there were no catered dates. One property
+    // write per changed month, and only for months that changed.
+    saveLunchOnlyFormLinks(links);
 
     entry.dateKeys.forEach((dateKey, i) => {
       const eventId = eventIds[i];
@@ -9589,7 +9757,16 @@ function syncCalendarsInternal() {
       // Guarded on its own — a lunch form that will not build must not be able
       // to fail a calendar sync that has already done its work.
       try {
-        syncLunchOnlySessions(registrySheet);
+        // The pins are DERIVED from what this returns, and nothing else in
+        // this sync draws them. Without the render below, a month whose menu
+        // was typed this morning got its form here and its link nowhere: the
+        // block went on showing yesterday's answer until the next hourly
+        // registration sync happened to redraw the tab. Rendering only when
+        // the map actually moved keeps that off the ordinary run, where every
+        // month short-circuits and there is nothing new to pin.
+        const before = JSON.stringify(pruneLunchOnlyFormLinks(getLunchOnlyFormLinks()));
+        const after = JSON.stringify(syncLunchOnlySessions(registrySheet));
+        if (after !== before) updateMasterLunchDashboard(null);
       } catch (err) {
         log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the programme forms are unaffected.`);
         noteForAdmin('Lunch sign-up forms not refreshed',
@@ -23079,15 +23256,29 @@ function applyProgramFormExtensions(form, context, options) {
  * shape means the appointment and question logic is written once.
  */
 function formContextFromGroup(group, formId) {
-  const sessions = (group.sessions || []).map(s => {
+  // A LUNCH-ONLY GROUP KEEPS ITS DATES SOMEWHERE ELSE — in lunchOnlySessions,
+  // because it has no calendar events to take them from (see
+  // syncLunchOnlySessions(), and sessionsOfGroup(), which has the same
+  // branch). Reading only `group.sessions` handed the extension layer an
+  // EMPTY session list for every lunch sign-up form, so any Program_Questions
+  // rule scoped to a date or a location saw a form with no dates and no
+  // locations to match against.
+  const rawSessions = group.sessions || group.lunchOnlySessions || [];
+  const sessions = rawSessions.map(s => {
     const start = coerceDate(s.event ? s.event.getStartTime() : s.date);
     if (!start) return null;
+    const location = s.locationName || s.location || '';
     return {
       date: start,
       end: s.event ? s.event.getEndTime() : (s.end || null),
-      eventId: computeEventId(s.calendarId, group.cleanTitle, formatDateKey(start)),
+      // A lunch session's id is the LUNCHONLY: one the session table carries.
+      // Hashing it as a calendar event would mint an id matching no row at
+      // all, since there is no calendarId behind it to hash.
+      eventId: group.isLunchOnly
+        ? makeLunchOnlyEventId(formatDateKey(start), location)
+        : computeEventId(s.calendarId, group.cleanTitle, formatDateKey(start)),
       slotMinutes: group.slotMinutes || 0,
-      location: s.locationName || s.location || '',
+      location,
       title: group.cleanTitle
     };
   }).filter(Boolean);
