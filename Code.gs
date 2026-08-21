@@ -17987,8 +17987,23 @@ function renderProgramDashboard(force, options) {
 
   const reusableRegistrantRows = triageResult.registrantsMoved ? null : options.registrantRows;
   const registrantScan = scanRegistrants(registrantsSheet, reusableRegistrantRows);
-  const todayData = buildTodayAtLocations(sessionRows, map, registrantScan);
-  const metrics = computeProgramMetrics(sessionRows, map, registrantScan);
+
+  // THE HEADLINE NUMBERS COUNT PROGRAMMES, AND A MEAL IS NOT ONE. The
+  // generated lunch sessions still go to the table writer below — they are
+  // written and then hidden (hideLunchOnlySessionRows()) — but they are kept
+  // out of both summaries, for the same reason they are kept off the view and
+  // one more: a hidden row that still counts makes the table disagree with its
+  // own totals, and somebody counting rows to check a number would get a
+  // different answer from the tab than the tab gives itself.
+  //
+  // It also fixes a sentence that read as a bug. The Today block names the
+  // programmes running at each location, and on any catered day the first one
+  // in the list was "🥡 Lunch Only (no program)" — a tab announcing "no
+  // program" as the thing on today. The day's meal is on the lunch dashboard,
+  // which is where somebody looks for it.
+  const programSessionRows = sessionRows.filter(row => !isLunchOnlyEventId(row[map['Event_ID']]));
+  const todayData = buildTodayAtLocations(programSessionRows, map, registrantScan);
+  const metrics = computeProgramMetrics(programSessionRows, map, registrantScan);
 
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
   return { registrantsMoved: triageResult.registrantsMoved };
@@ -18281,6 +18296,62 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
 }
 
 /** Clears the sheet and redraws all sections in order, then applies all formatting. */
+/**
+ * Takes the generated lunch-only sessions off Master_Program_Dashboard's VIEW.
+ *
+ * WHY THEY ARE HIDDEN AND NOT DELETED, which is the only question that matters
+ * here. "🥡 Lunch Only (no program)" is not a programme and does not belong on
+ * the tab staff read to see what is running — a month of Tuesdays at two
+ * locations is thirty rows of noise between them and the classes. But the row
+ * is not decoration: it is the ANCHOR the whole lunch sign-up path hangs off.
+ * buildRegistryIndex() reads this table to turn a form response back into
+ * dates, so a lunch form whose sessions are not here cannot be imported at
+ * all — every meal somebody ordered online would land nowhere. The
+ * registration-horizon pass reads it for the same reason (it is the only place
+ * that knows which dates a lunch form covers), and syncLunchOnlySessions()
+ * reads the rows' Form_ID to find the form it already built, which is what
+ * survives a workbook losing its Script Properties.
+ *
+ * So the rows stay exactly where they are and stop being LOOKED at, which is
+ * the same trade collapseOldPastMonths() makes one section below: hidden, not
+ * gone, still read by every getValues() in this file, still searchable, and
+ * back on screen with "Show All Past Rows". The banner says so, because a run
+ * of skipped row numbers with no explanation reads as lost data.
+ *
+ * Hidden in RUNS rather than one row at a time — a month of lunches is one
+ * hideRows() call per unbroken stretch, not thirty.
+ */
+function hideLunchOnlySessionRows(sheet, map, upcoming, past, result) {
+  const bands = [];
+  const collect = (rows, startRow) => {
+    let runStart = -1;
+    rows.forEach((row, i) => {
+      if (isLunchOnlyEventId(row[map['Event_ID']])) {
+        if (runStart === -1) runStart = i;
+        return;
+      }
+      if (runStart !== -1) {
+        bands.push({ start: startRow + runStart, count: i - runStart });
+        runStart = -1;
+      }
+    });
+    if (runStart !== -1) bands.push({ start: startRow + runStart, count: rows.length - runStart });
+  };
+  collect(upcoming, result.upcomingDataStart);
+  collect(past, result.pastDataStart);
+
+  let hidden = 0;
+  bands.forEach(band => {
+    try {
+      sheet.hideRows(band.start, band.count);
+      hidden += band.count;
+    } catch (err) {
+      log(`ℹ️ Could not hide ${band.count} lunch-only row(s) at row ${band.start} (${err}).`);
+    }
+  });
+  return hidden;
+}
+
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   sheet.clear();
@@ -18347,6 +18418,16 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   const dateColLetter = columnToLetter(map['Event_Date'] + 1);
   setEventTimeFormulas(sheet, result.upcomingDataStart, upcoming.length, map, dateColLetter);
   setEventTimeFormulas(sheet, result.pastDataStart, past.length, map, dateColLetter);
+
+  // THE LUNCH SIGN-UP ROWS COME OFF THE VIEW, and only off the view — see
+  // hideLunchOnlySessionRows().
+  const hiddenLunchRows = hideLunchOnlySessionRows(sheet, map, upcoming, past, result);
+  if (hiddenLunchRows > 0) {
+    sheet.getRange(result.upcomingHeaderRow - 1, 1).setValue(
+      `${'🔜 Upcoming Sessions'}  —  ${hiddenLunchRows} ${LUNCH_ONLY_PROGRAM_LABEL} row(s) are hidden ` +
+      `(a meal is not a programme; they're still here, and the sign-up links are pinned at the top of ` +
+      `${SHEET_NAMES.LUNCH_DASHBOARD}. "Show All Past Rows" on the menu brings them back)`);
+  }
 
   const zones = [
     { start: result.upcomingDataStart, count: upcoming.length },

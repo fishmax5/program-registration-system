@@ -257,5 +257,50 @@ unchanged.getItems()[0].asListItem().getHelpText = () =>
 sandbox.applyAttendanceModeChoices(unchanged, {});
 check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
 
+// --- lunch rows come off the programme dashboard's view ---------------------
+// Hidden, never deleted: buildRegistryIndex() reads these rows to turn a lunch
+// form response back into dates, so a lunch form with no session rows cannot
+// be imported at all.
+const progMap = vm.runInContext('getIndexMap(HEADERS.Master_Program_Dashboard)', sandbox);
+const sessionRow = (eventId, title) => {
+  const row = new Array(vm.runInContext('HEADERS.Master_Program_Dashboard.length', sandbox)).fill('');
+  row[progMap['Event_ID']] = eventId;
+  row[progMap['Clean_Title']] = title;
+  row[progMap['Location']] = 'Narberth';
+  return row;
+};
+const lunchId = k => sandbox.makeLunchOnlyEventId(k, 'Narberth');
+
+const hidden = [];
+const fakeSheet = {
+  getName: () => 'Master_Program_Dashboard',
+  hideRows: (start, count) => hidden.push(`${start}+${count}`)
+};
+
+// Two separate runs of lunch dates with a class between them, and one in Past.
+const upcomingRows = [
+  sessionRow(lunchId('2026-09-01'), '🥡 Lunch Only (no program)'),
+  sessionRow(lunchId('2026-09-02'), '🥡 Lunch Only (no program)'),
+  sessionRow('cal-hash-1', 'Chair Yoga'),
+  sessionRow(lunchId('2026-09-08'), '🥡 Lunch Only (no program)')
+];
+const pastRows = [
+  sessionRow('cal-hash-2', 'Bingo'),
+  sessionRow(lunchId('2026-08-04'), '🥡 Lunch Only (no program)')
+];
+const count = sandbox.hideLunchOnlySessionRows(fakeSheet, progMap, upcomingRows, pastRows,
+  { upcomingDataStart: 10, pastDataStart: 100 });
+check('every lunch row is hidden and no class is', count, 4);
+check('and consecutive ones go in one call, not one each', hidden, ['10+2', '13+1', '101+1']);
+
+// The summaries count programmes only — a hidden row that still counted would
+// make the table disagree with its own totals.
+const scan = { countsByEventId: {}, activeNamesByEventId: {} };
+const programOnly = upcomingRows.filter(r => !sandbox.isLunchOnlyEventId(r[progMap['Event_ID']]));
+check('a lunch date is not a programme session',
+  sandbox.computeProgramMetrics(programOnly, progMap, scan).totalSessions, 1);
+check('and never gets listed as what is on today',
+  sandbox.computeProgramMetrics(programOnly, progMap, scan).totalPrograms, 1);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
