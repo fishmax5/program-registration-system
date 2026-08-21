@@ -206,10 +206,143 @@ closed by hand in the Forms editor stays closed.
 stops new sign-ups; it doesn't erase the people who already signed up. To remove
 those, use [🗑️ Delete Registrations…](#deleting-registrations).
 
-### The two checkboxes: `Club` and `No_Registration`
+### Personalized assistance (appointments)
 
-Both tags are also **tick boxes** on the Master_Program_Dashboard, and ticking
-one is exactly the same as typing the tag by hand — because that's what it does.
+Some programs aren't a room full of people at one time — they're one visitor
+sitting with one provider for twenty or thirty minutes, and then the next one.
+Computer Help with Gerry or with Kathy, Low-Cost Wills with Heather, Medicare
+counseling. A "12:30–3:30 Low-Cost Wills" event isn't one session for twelve
+people; it's six appointments.
+
+Tag those programs `[Personalized Assistance]` in the event **description**.
+
+```
+[Personalized Assistance]
+[Personalized Assistance, Slots: 20]
+[Personalized Assistance, Slots: 20, Max Per Month: 1]
+```
+
+`[By Appointment]`, `[Appointments]`, `[1-on-1]` and `[One on One]` read as the
+same tag. So does `[Slots: N]` on its own — asking for slots says the program is
+appointment-based.
+
+**What changes:**
+
+| | Ordinary program | `[Personalized Assistance]` |
+|---|---|---|
+| What you register for | a **date** | a **time on a date** |
+| The form asks | which dates, who's coming, who eats | which appointment time |
+| Capacity | `[Cap: N]`, or unlimited | however many slots fit in the event, unless `[Cap: N]` says otherwise |
+| Lunch | asked, if the date serves it | never asked |
+| Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
+| Guest questions | yes | **yes** — "individual or couple" is a real answer for a will |
+
+**Slots are back-to-back.** The event's start-to-end span is cut into
+appointments of `[Slots: N]` minutes (30 if you don't say), with no gaps. A time
+somebody has booked **disappears from the form**, and the remaining times are
+offered earliest first — so the afternoon fills from the front on its own, which
+is what stops a provider being handed a schedule with holes in it. A partial
+slot at the end is never offered.
+
+**Nobody can book the same time twice.** In the rare case where two people
+submit inside the same few minutes, neither is dropped: the second one is
+booked and flagged in `Admin_Notes` — *"Double-booked: … already holds …"* — and
+named in the admin digest so somebody moves one of them.
+
+**"None of these times work."** Every appointment form ends its time list with
+that choice. Picking it books nothing and files the person on the
+**Assistance_Requests** tab instead, with their name, phone, email and answers.
+That's how a counselor who comes in *when there's demand* gets their demand,
+months before a date exists — and how you register somebody without inventing a
+calendar event to attach them to. Work the tab, and when you've agreed a time,
+put the event on the calendar and add them the normal way (or by hand on
+Registrant_Dash).
+
+**`[Max Per Month: 1]`** — for a provider who won't see the same person twice in
+a month. A second booking is **flagged, not refused**: the row is created and
+says so in `Admin_Notes`, and it's in the admin digest. A form can't be certain
+two Jane Smiths are the same person, and staff sometimes make the exception on
+purpose, so the system tells you rather than silently throwing a registration
+away.
+
+**Sending the provider their list.** **🗓️ Personalized Assistance Schedule…**
+in the menu shows every upcoming appointment — by program, by day, in time
+order, with names, phone numbers, emails and each person's answers. Select it
+and paste it into the email. That's the whole point of the tag: Heather and the
+Medicare counselors need names against times a week ahead.
+
+**It's reversible.** Untick the box (or remove the tag) and the next sync
+rebuilds the form as an ordinary date-based one. Appointments already booked
+keep their times on Registrant_Dash.
+
+### Extra questions on one program's form
+
+Every registration form is built from one template, which is what keeps the
+system able to read the answers. That used to mean a program that needed to ask
+something of its own — a zip code, whether somebody's a member, which document
+they need drawn up — had nowhere to put it. Typing the question onto the live
+form worked until the next update rebuilt that form and **deleted it, along with
+the answers**.
+
+So extra questions live on the **Program_Questions** tab, one row per question,
+and the system puts them back on the form every time. Add a row:
+
+| Column | What to put |
+|---|---|
+| `Program` | the program's name **exactly as the calendar spells it**. Blank or `*` = every form in the workbook |
+| `Location` | blank = everywhere; otherwise only forms covering that location |
+| `Question` | the question as the registrant will read it |
+| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes` or `Multiple choice` |
+| `Choices` | the options, **one per line** (or separated by `\|`). Only for the last three types |
+| `Help_Text` | the small grey line under the question. Optional |
+| `Required` | tick to make it compulsory |
+| `Sort` | the order the questions appear in. Optional |
+| `Active` | untick to take the question off the form without deleting the row |
+
+Then press **❓ Update Program Questions on Forms**, or wait for the next
+**Sync Cal**.
+
+**Where the answers go.** Into one column, `Form_Answers`, on Registrant_Dash,
+as `Question: answer | Question: answer`. Deliberately one column and not one
+per question: a table whose columns changed every time somebody added a question
+to any program is exactly the thing that breaks. It's also what the assistance
+schedule shows the provider in its "Details" column.
+
+**What it will refuse.** A question can't be given the same wording as one of
+the form's own questions (`Name`, `Phone Number`, `Anything Else?`, `Guest 1
+Name`…). Re-using one would make the answers to both unreadable, so the row is
+skipped, a line goes in the log, and it's named in the admin digest. Re-word it
+and it goes on. A dropdown with nothing in `Choices` is skipped the same way.
+
+**Deleting the row, or unticking `Active`,** takes the question off the form on
+the next update. Answers already collected stay on the rows they were collected
+on. Only questions **this system** added are ever removed — anything you added
+to a form by hand is left alone (and will still be lost the next time that form
+is rebuilt, which is the reason to use this tab instead).
+
+**Renaming a question is adding a new one.** The wording *is* its identity, so
+changing it retires the old question and adds a new one; answers already given
+to the old wording stay where they are.
+
+For Caroline's four assistance programs the tab reads something like:
+
+| Program | Question | Type | Choices | Required |
+|---|---|---|---|---|
+| Computer Help with Gerry | Zip Code | Short answer | | ✔ |
+| Computer Help with Gerry | Are you a member? | Multiple choice | Yes / No / Not sure | ✔ |
+| Computer Help with Gerry | What do you need help with? | Paragraph | | ✔ |
+| Computer Help with Gerry | Virtual or in person? | Multiple choice | In person / Virtual | ✔ |
+| Low-Cost Wills | Individual or couple? | Multiple choice | Individual / Couple | ✔ |
+| Low-Cost Wills | Which document do you need? | Dropdown | New Will / Update Will / New Power of Attorney / … | ✔ |
+| Medicare Counseling | Is there a specific issue you need help with? | Paragraph | | |
+
+(one option per line in the real `Choices` cell)
+
+### The three checkboxes: `Club`, `No_Registration` and `Personalized_Assistance`
+
+All three tags are also **tick boxes** on the Master_Program_Dashboard, and
+ticking one is exactly the same as typing the tag by hand — because that's what
+it does.
 **Ticking the box is the only step.**
 
 1. You tick the box on any one of the program's rows.
@@ -220,7 +353,8 @@ one is exactly the same as typing the tag by hand — because that's what it doe
    calendar event** of that program, which is where the system reads it back
    from.
 4. The next **Sync Cal** applies the consequences: the form gains its club
-   option, or the program stops taking registrations.
+   option, the program stops taking registrations, or the form starts asking
+   for an appointment time instead of a date.
 
 Untick to reverse, on the same terms. There's no "are you sure?" — a checkbox
 is already the question and the undo — and the toast says what happened.
@@ -236,8 +370,8 @@ stay ticked while the write is on its way.
 > **🔧 Admin ▸ Check Triggers** once on a workbook to install it (it's part of
 > the normal trigger set, and **Trigger Status** tells you if it's missing).
 > Without it nothing is lost — the tick sits in the queue and the next
-> **Sync Cal** delivers it. **🔁 Apply Type / Club / No-Reg Changes to
-> Calendar** pushes the queue through by hand at any time.
+> **Sync Cal** delivers it. **🔁 Apply Type / Club / No-Reg / Assistance
+> Changes to Calendar** pushes the queue through by hand at any time.
 
 **Tentative events** — start the **title** with `*`:
 
@@ -1100,7 +1234,31 @@ contact details). The **yellow** ones are yours:
 `Club_Key` is hidden — it's the machine key that keeps a roster attached to its
 program across a new form every month.
 
-### 9. Deleted_Event_Triage
+### 9. Program_Questions
+The extra questions each program's form asks, one row per question — see
+[Extra questions on one program's form](#extra-questions-on-one-programs-form)
+for the columns and what each type does. Everything on this tab is yours to
+type; nothing on it is ever overwritten. Press **❓ Update Program Questions on
+Forms** when you're done, or leave it for the next **Sync Cal**.
+
+### 10. Assistance_Requests
+People who want a `[Personalized Assistance]` appointment at a time we haven't
+scheduled — they picked *"None of these work"* on the form. One row per request,
+newest first.
+
+The columns on the **left** come from their submission (when, which program,
+name, phone, email, their answers). The **yellow** ones are yours:
+
+| Column | What it's for |
+|---|---|
+| **Status** | `New` → `Contacted` → `Scheduled` → `Closed` |
+| **Scheduled_For** | The date you agreed with them, once you have one |
+| **Staff_Notes** | Anything you want to remember |
+
+Nothing on this tab books anybody. When you've agreed a time, put the event on
+the calendar and register them the normal way, then close the row.
+
+### 11. Deleted_Event_Triage
 Safety net. If a calendar event disappears but people had registered for it,
 their rows are moved here instead of being deleted, with a note. Follow up with
 those people, then clear the rows.
@@ -1309,7 +1467,9 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
 | **🥡 Build / Refresh Lunch Sign-Up Forms** | Builds (or updates) the lunch-only sign-up form for every location serving food, and pins the links to the top of Master_Lunch_Dashboard. Sync Cal does this hourly anyway; this is for when you want the link now. See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) |
 | **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
-| **🔁 Apply Type / Club / No-Reg Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **🔁 Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **❓ Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
+| **🗓️ Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
 | **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
 | **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
@@ -1324,7 +1484,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 | **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
-| **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
+| **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` / `Personalized_Assistance` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
 | **Take Over Trigger Ownership** | Moves ownership to your account, if the recorded owner is gone. Warns you that it can't delete their triggers |
 | **Release My Triggers** | Deletes the triggers *your* account created. The one useful thing a non-owner can do about a duplicate set they're responsible for |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run). **Trigger-owner account only** |

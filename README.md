@@ -18,7 +18,21 @@ It also:
 - supports programs that take **no registration at all** (`[No Registration]`)
   — a drop-in coffee hour still shows on the dashboard, but gets no form and no
   "register here" link on its calendar events;
-- puts both of those on the dashboard as **checkboxes**: tick one and every
+- registers **one-to-one appointments** by TIME rather than by date — programs
+  tagged `[Personalized Assistance]` (computer help, low-cost wills, Medicare
+  counseling) have each event cut into back-to-back slots, and their form asks
+  which slot you want, with taken times removed and the day packing from the
+  front so a provider never gets a schedule with gaps in it. Anybody the offered
+  times don't suit lands on an `Assistance_Requests` tab instead of being booked
+  onto a date they never chose, and one menu item prints the whole day's list —
+  names against times, with contact details — to send the provider a week ahead;
+- lets a single program **ask its own extra questions** (zip code, membership,
+  which document you need drawn up) from a `Program_Questions` tab, applied to
+  its form and re-applied after every template rebuild — so a question survives
+  the updates that used to silently delete it, can never collide with a question
+  the system reads by name, and lands in one `Form_Answers` column rather than
+  changing the shape of the registrants table;
+- puts all three tags on the dashboard as **checkboxes**: tick one and every
   other row of that program ticks to match, and the tag is written onto every
   one of its calendar events for you, seconds later — with the tick queued and
   protected in the meantime, so a sync can't undo it before it lands;
@@ -102,3 +116,14 @@ no trigger changes, and nothing can be removed. See
   long term, and what to verify in a live workbook.
 - [`STRESS_TEST.md`](./STRESS_TEST.md) — what came back when the logic was run
   against adversarial inputs: what was fixed, and what is known and left.
+
+## Tests
+
+The Apps Script services are stubbed and `Code.gs` is loaded into a Node `vm`
+context, so the pure helpers — appointment-slot arithmetic, the tag brackets,
+the Program_Questions parser and its refusals — can be exercised without a
+spreadsheet:
+
+```
+node tests/assistance_and_questions.test.js
+```

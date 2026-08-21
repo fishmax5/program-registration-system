@@ -97,6 +97,28 @@
  *          event named "*NO Tai Chi" stays visible on the calendar for
  *          staff and attendees while generating no form and no dashboard
  *          row.
+ *        description "[Personalized Assistance]" -> this program is booked by
+ *          TIME, not by date: each event is cut into back-to-back appointment
+ *          slots ("[Slots: 20]" for a length other than the default), its form
+ *          asks which slot rather than showing the roster grids, and a booked
+ *          slot disappears from the form. "[Max Per Month: 1]" flags a repeat
+ *          booking by the same person in one month. Also spelled
+ *          [By Appointment] / [Appointments] / [1-on-1]. See ASSISTANCE_TAG,
+ *          section 6g, and the Assistance_Requests tab — where somebody who
+ *          can use none of the offered times is filed instead of being booked
+ *          onto a date they did not choose.
+ *    - A PROGRAM CAN ASK ITS OWN QUESTIONS. Program_Questions (section 6g) is
+ *      one row per extra question — zip code, membership, which document —
+ *      applied to the forms it names and RE-APPLIED after every template
+ *      rebuild, which is what a question typed onto a live form by hand never
+ *      survived. Three rules keep it additive: a custom question may not take a
+ *      title the template reads by name (refused, with a note), its answers go
+ *      into ONE Registrant_Dash column (Form_Answers) so the table's shape
+ *      never depends on another tab, and it is added to both branch pages
+ *      before "Anything Else?" without touching a page break or a template
+ *      item. getAdminNotesResponse() reads "Anything Else?" BY TITLE for the
+ *      same reason — it used to take the first paragraph item with an answer,
+ *      which a custom paragraph question would have hijacked.
  *    - THE REGISTRATION LINK injected into each event description is an
  *      HTML ANCHOR, not a raw URL, and carries no visible Form ID. The ID
  *      rides in the href's #fragment — invisible to the reader, ignored by
@@ -677,7 +699,7 @@ const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
 // Spelled out rather than derived from PROGRAM_FLAG_COLUMNS: that list is
 // declared further down this file, and a top-level const cannot read another
 // one that has not been evaluated yet.
-const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration'];
+const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration', 'Personalized_Assistance'];
 
 /**
  * Internal plumbing on the program dashboard: the raw IDs and the duplicate
@@ -685,7 +707,7 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration
  * link staff actually hand out — while Edit_Form_Link and the bare Form_ID are
  * for troubleshooting only.
  */
-const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End'];
+const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month'];
 const MANUAL_ENTRY_HEADER_COLOR = '#FFF2CC';
 const MANUAL_ENTRY_CELL_TINT = '#FFFCF0';
 /**
@@ -930,6 +952,94 @@ const NO_REGISTRATION_COLUMN_VALUE = true;
 const NO_REGISTRATION_LINK_LABEL = '— no registration —';
 
 /**
+ * PERSONALIZED ASSISTANCE — the [Personalized Assistance] tag.
+ *
+ * Every other program on the calendar is a ROOM full of people at one time:
+ * you say you are coming, and the only question is how many chairs. The
+ * center also runs a second, entirely different shape of program — Computer
+ * Help with Gerry or with Kathy, Low-Cost Wills with Heather, Medicare
+ * counseling — where one visitor sits with one provider for twenty or thirty
+ * minutes, and the next one sits down when they get up. A "12:30–3:30 Low-Cost
+ * Wills" event is not one session for twelve people; it is six appointments.
+ *
+ * Registering for the DAY is therefore the wrong answer for these, and it was
+ * the only answer this system could give. What the visitor has to choose is a
+ * TIME, and what the provider has to receive, a week ahead, is a list of names
+ * against times.
+ *
+ * WHAT THE TAG CHANGES:
+ *   - THE SESSION BECOMES SLOTS. Each event's start-to-end span is cut into
+ *     back-to-back appointments of APPOINTMENT_SLOT_MINUTES (override per
+ *     program with "[Slots: 20]"), and the session's capacity, unless [Cap: N]
+ *     says otherwise, is simply how many slots fit. Back-to-back is not a
+ *     nicety — Heather Turner will not sit through gaps — so the choices are
+ *     offered EARLIEST FIRST and a booked one disappears from the form, which
+ *     packs the day from the front on its own.
+ *   - THE FORM ASKS FOR A TIME, not a date. The roster grids, the "everyone,
+ *     every date" branch and the club option all come off (an appointment is
+ *     not something a party of four attends every week), and one required
+ *     "Which appointment time?" question takes their place — see
+ *     syncAssistanceQuestionsOnForm(). The guest questions STAY: "individual
+ *     or couple" is a real answer for a will.
+ *   - LUNCH COMES OFF. A counseling appointment is not a meal, and asking
+ *     invites a lunch nobody is catering for.
+ *   - A REQUEST NEEDS NO DATE. The last choice on the time question is always
+ *     "None of these work — please contact me", which files the person on the
+ *     Assistance_Requests tab instead of booking them onto a date they never
+ *     picked. That is how a Medicare counselor who visits "when there is
+ *     demand" gets their demand, months before a date exists. See
+ *     ASSISTANCE_NO_TIME_CHOICE.
+ *   - ONE APPOINTMENT PER MONTH, where a provider asks for it:
+ *     "[Max Per Month: 1]" flags a second booking by the same person in the
+ *     same calendar month rather than quietly taking it.
+ *
+ * It composes with the other tags the way [Club] does, and it is the tag that
+ * decides the FORM's shape, so where it disagrees with [Club] it wins — except
+ * with [No Registration], which still wins over everything by having no form
+ * at all.
+ */
+const ASSISTANCE_TAG = 'Personalized Assistance';
+
+/**
+ * What gets READ as the assistance tag — as permissive as the club and
+ * shared-location ones, and for the same reason: staff type it by hand into a
+ * calendar description and will spell it however it comes to them. "1-on-1",
+ * "By Appointment" and "Appointments" are what this office actually writes.
+ */
+const ASSISTANCE_WORDS_REGEX =
+  /\b(Personali[sz]ed\s+Assistance|By\s+Appointment|Appointments?|1\s*[-:]?\s*(?:on|to)\s*[-:]?\s*1|One\s*[-\s]?(?:on|to)[-\s]?\s*One)\b/i;
+
+/** Written into the Personalized_Assistance checkbox column for an appointment-based program. */
+const ASSISTANCE_COLUMN_VALUE = true;
+
+/**
+ * How long one appointment lasts when the calendar event does not say. Twenty
+ * to thirty minutes is what every one of these programs actually runs at; 30
+ * is the safer default because it under-books rather than over-books a
+ * provider's afternoon. Override per program with "[Slots: 20]".
+ */
+const APPOINTMENT_SLOT_MINUTES = 30;
+
+/** Sanity bounds on "[Slots: N]" — a 2-minute or 7-hour appointment is a typo, not an instruction. */
+const MIN_APPOINTMENT_SLOT_MINUTES = 5;
+const MAX_APPOINTMENT_SLOT_MINUTES = 240;
+
+/** Between a session's date label and its appointment time on the form's time question. */
+const APPOINTMENT_TIME_SEPARATOR = ' @ ';
+
+/**
+ * The last choice on every assistance form's time question. It is not a time,
+ * and it deliberately books nothing: it files an Assistance_Requests row for
+ * staff to schedule by hand. See processAppointmentResponse().
+ */
+const ASSISTANCE_NO_TIME_CHOICE = 'None of these work — please contact me about another time';
+
+/** True when a Master_Program_Dashboard row's Personalized_Assistance cell marks it appointment-based. */
+function isAssistanceColumnValue(value) {
+  return isFlagColumnValue(value, ASSISTANCE_WORDS_REGEX);
+}
+
+/**
  * The two TICKABLE tag columns on Master_Program_Dashboard, and everything
  * that differs between them, in one place.
  *
@@ -976,6 +1086,24 @@ const PROGRAM_FLAG_COLUMNS = [
       `"${title}" will take sign-ups again: the next sync builds (or re-opens) its registration form ` +
       `and puts the link back on its calendar events.\n\n[${NO_REGISTRATION_TAG}] is removed from ` +
       `its calendar events.`
+  },
+  {
+    column: 'Personalized_Assistance',
+    tag: ASSISTANCE_TAG,
+    regex: ASSISTANCE_WORDS_REGEX,
+    groupKey: 'isAssistance',
+    onQuestion: title => `Make "${title}" an appointment program?`,
+    onDetail: title =>
+      `"${title}" will be registered for by APPOINTMENT rather than by date. Each of its calendar ` +
+      `events is cut into back-to-back ${APPOINTMENT_SLOT_MINUTES}-minute slots (say "[Slots: 20]" in the ` +
+      `description for a different length), and its form asks for a time instead of showing the ` +
+      `attendance and lunch grids.\n\nAnybody who cannot use the times offered is filed on ` +
+      `"${SHEET_NAMES.ASSISTANCE_REQUESTS}" for you to schedule by hand.\n\n[${ASSISTANCE_TAG}] is ` +
+      `written onto its calendar events.`,
+    offDetail: title =>
+      `"${title}" goes back to ordinary date-based registration: its form gets the attendance and ` +
+      `lunch grids back and stops asking for a time. Appointments already booked keep their times on ` +
+      `the Registrants tab.\n\n[${ASSISTANCE_TAG}] is removed from its calendar events.`
   }
 ];
 
@@ -1087,7 +1215,11 @@ const SHEET_NAMES = {
   TRIAGE: 'Deleted_Event_Triage',
   MEMBER_ROLL: 'Member_Roll',
   PROGRAM_OPTIONS: 'Program_Options',
-  CLUB_MEMBERS: 'Club_Members'
+  CLUB_MEMBERS: 'Club_Members',
+  // The two tabs behind [Personalized Assistance] and the per-program extra
+  // questions — see ASSISTANCE_TAG and section 6g.
+  PROGRAM_QUESTIONS: 'Program_Questions',
+  ASSISTANCE_REQUESTS: 'Assistance_Requests'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -1150,11 +1282,20 @@ const HEADERS = {
   // registrant rows are both built from it. A row written before this column
   // existed simply has none, and Event_Time falls back to the start time
   // alone rather than inventing an end.
+  //
+  // Personalized_Assistance is the third flag, beside the other two and for
+  // the same reason: it is what decides how the program is registered for at
+  // all (by a time, not by a date — see ASSISTANCE_TAG). Slot_Minutes rides
+  // with the hidden machine columns because it is an input to the slot
+  // arithmetic rather than something staff read: it is how the form layer
+  // rebuilds a session's appointment times without going back to the calendar.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
+    'Personalized_Assistance',
     'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
-    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End'
+    'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
+    'Max_Per_Month'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
@@ -1232,7 +1373,7 @@ const HEADERS = {
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
-    'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
+    'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
   // Registered_Count (what the forms say) and Served_Confirmed (what was
@@ -1335,7 +1476,7 @@ const HEADERS = {
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
-    'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes',
+    'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
     'Deleted_Event_Title', 'Deleted_Event_Location', 'Flagged_Date', 'Triage_Notes'
   ],
@@ -1386,8 +1527,78 @@ const HEADERS = {
   Program_Options: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
     'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Instructor_Email', 'Staff_Notes'
+  ],
+  /**
+   * Program_Questions — THE TAB THAT MAKES A FORM ASK SOMETHING EXTRA.
+   *
+   * Every registration form is built from one template, which is what keeps
+   * the parser honest: it knows every question by title. The cost of that was
+   * that a program needing to ask something of its own — a zip code, whether
+   * you are a member, which document you need drawn up — had nowhere to put
+   * it. Typing the question straight onto the live form worked until the next
+   * template migration rebuilt that form from scratch and silently deleted it,
+   * along with a month of answers.
+   *
+   * So extra questions live HERE, as rows, and are re-applied to the form on
+   * every sync and after every rebuild. They are additive by construction:
+   *
+   *   - a question may never take a title the template already uses
+   *     (RESERVED_QUESTION_TITLES) — that is the one way an added question
+   *     could change what an existing answer means, so it is refused with a
+   *     note rather than applied;
+   *   - the answers are recorded in ONE column, Form_Answers, as
+   *     "Question: answer" pairs. Adding a question therefore never changes
+   *     the shape of Registrant_Dash, so nothing downstream — counts, lunch
+   *     rollups, instructor sheets — has to learn about it;
+   *   - a question is added to BOTH branch pages of the form, so it is asked
+   *     whichever way somebody signs up, and read back by title exactly like
+   *     every template question (getResponseValueByTitle() already handles a
+   *     title appearing on several pages);
+   *   - deleting the row, or unticking Active, takes the question off the form
+   *     on the next sync. Answers already collected stay on the rows they were
+   *     collected onto.
+   *
+   *   Program     the program's name as the calendar spells it. Blank or "*"
+   *               means every form in the workbook.
+   *   Location    blank means every location; otherwise only forms covering it.
+   *   Question    the question text, and its identity. Renaming it is adding a
+   *               new question and retiring the old one.
+   *   Type        Short answer / Paragraph / Dropdown / Checkboxes /
+   *               Multiple choice.
+   *   Choices     one per line (or separated by "|"), for the three choice
+   *               types. Ignored by the text types.
+   *   Sort        the order they appear in. Ties fall back to the row order.
+   */
+  Program_Questions: [
+    'Program', 'Location', 'Question', 'Type', 'Choices', 'Help_Text', 'Required', 'Sort', 'Active'
+  ],
+  /**
+   * Assistance_Requests — people who want a personalized-assistance
+   * appointment that no calendar date can currently offer them.
+   *
+   * A Medicare counselor comes in when there is demand; the demand exists
+   * months before the date does. Before this tab the only way to record that
+   * was to invent a calendar event to register them against, which puts a
+   * fictional appointment in front of a real person. A request is not a
+   * booking, so it is kept somewhere that is not the booking table, and
+   * Status is what staff move it through by hand.
+   */
+  Assistance_Requests: [
+    'Received', 'Program', 'Location', 'Name', 'Phone', 'Email', 'Answers',
+    'Status', 'Scheduled_For', 'Staff_Notes', 'Request_ID'
   ]
 };
+
+/** Assistance_Requests columns the importer must never overwrite — the staff's own follow-up. */
+const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Notes'];
+
+/** Program_Questions columns staff type into — which is all of them. */
+const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
+  'Program', 'Location', 'Question', 'Type', 'Choices', 'Help_Text', 'Required', 'Sort', 'Active'
+];
+
+/** What a request's Status can say. New until somebody looks at it. */
+const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 
 /** Member_Roll columns the refresh must never overwrite — the staff's own knowledge. */
 const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
@@ -1858,6 +2069,14 @@ const TEMPLATE_ITEM_TITLES = {
   ADDITIONAL_NOTES: 'Anything Else?',
   ATTENDANCE_MODE: 'How would you like to sign up?',
   ALL_DATES_LUNCH_PEOPLE: 'Who Needs Lunch? (Applies to Every Date)',
+  /**
+   * The one question an appointment form asks instead of the roster grids —
+   * see ASSISTANCE_TAG. It is NOT built by the template (the template belongs
+   * to no program and cannot know the times), only by
+   * syncAssistanceQuestionsOnForm(), which is also what its absence means:
+   * a form without it is an ordinary date-based form.
+   */
+  APPOINTMENT: 'Which appointment time would you like?',
   /**
    * What the ATTENDANCE_GRID is RETITLED TO on a lunch-only form, where
    * "which dates are you coming" and "which dates do you want lunch" are the
@@ -2333,6 +2552,13 @@ function guestPageTitle(guestCount) {
  */
 function applyAttendanceModeChoices(form, options, refs) {
   refs = refs || {};
+  // AN APPOINTMENT FORM HAS NO MODE QUESTION — syncAssistanceQuestionsOnForm()
+  // removes it, because "everyone, every date" and "join the club" are not
+  // things you can do with a thirty-minute slot in somebody's diary. Returning
+  // early is not merely an optimization: without it this would log a "could
+  // not set the sign-up options" warning for every assistance form on every
+  // sync, about a question whose absence is the intended state.
+  if (options && options.isAssistance) return null;
   const items = refs.modeItem ? null : form.getItems();
   const findPage = title => (items || []).filter(it =>
     it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null;
@@ -2450,6 +2676,17 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
       `To sign up for a class or an activity, use that programme's own form.\n\n` +
       `Lunch is served on:\n${dateList}\n\nPlease sign up below.` +
       `\n\n${FORM_ASSISTANCE_TAGLINE}`;
+    return description;
+  }
+  if (options.isAssistance) {
+    // Said early and said plainly, for the same reason the lunch-only note is:
+    // this form looks like every other registration form and asks something
+    // different. Somebody who reads "Dates" and stops has not yet been told
+    // that they are booking one time slot within one of those days.
+    description = `${heading}\n\nThis is a one-to-one appointment — you book a TIME, not a day. ` +
+      `Appointments are offered on:\n${dateList}\n\nPick a time on the next page. Times already ` +
+      `taken are not shown; if none of the times work for you, say so and we will call you to ` +
+      `arrange another.\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
   }
   if (hasLunchDates === false) {
@@ -3315,7 +3552,13 @@ function getFormItemIndex(form) {
     byTitle[title].push(item);
     if (item.getType() === FormApp.ItemType.PARAGRAPH_TEXT) paragraphItems.push(item);
   });
-  const index = { form, formId, items, byTitle, paragraphItems };
+  // The custom questions THIS SCRIPT put on the form (see
+  // syncCustomQuestionsOnForm). Carried on the index because both readers of
+  // it — the admin-notes fallback and the Form_Answers collector — need the
+  // same list, and it costs one Script Properties read per form rather than
+  // one per response.
+  const customTitles = appliedCustomQuestionTitles(formId);
+  const index = { form, formId, items, byTitle, paragraphItems, customTitles };
   __formItemIndexCache[formId] = index;
   return index;
 }
@@ -3566,6 +3809,13 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   const sessions = formRows
     .map(row => ({
       date: coerceDate(row[map['Event_Date']]),
+      // The END is carried alongside the start for one reason: an appointment
+      // program's slots are cut out of the span between them, and every
+      // "refresh a live form from the sheet" path has to be able to do that
+      // arithmetic without going back to the calendar.
+      end: map['Event_End'] === undefined ? null : coerceDate(row[map['Event_End']]),
+      eventId: String(row[map['Event_ID']] || '').trim(),
+      slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0),
       location: String(row[map['Location']] || '').trim(),
       title: String(row[map['Clean_Title']] || '').trim()
     }))
@@ -3587,6 +3837,14 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
     // to be offered for the club's own dates to be joinable at all.
     isClub: formRows.some(row => isClubColumnValue(row[map['Club']])),
     isFixed: formRows.some(row => isGroupedTypeTag(row[map['Type_Tag']])),
+    // SOME, not every, matching isClub above: an appointment program's form
+    // has a fundamentally different shape, and a single assistance session on
+    // it means the time question has to be there for that session to be
+    // bookable at all. syncAssistanceQuestionsOnForm() offers times for the
+    // assistance sessions only, so an ordinary session sharing the form is
+    // not misrepresented as an appointment.
+    isAssistance: map['Personalized_Assistance'] !== undefined &&
+      formRows.some(row => isAssistanceColumnValue(row[map['Personalized_Assistance']])),
     // EVERY row, not some: a form mixing lunch-only sessions with real
     // programs is not a lunch-only form, and shaping it as one would strip the
     // attendance question off a program that needs it. syncLunchOnlySessions()
@@ -3930,6 +4188,15 @@ function syncLunchQuestionsOnForm(form, locations, hasLunchDates, options) {
   // back the very second grid makeFormLunchOnly() exists to remove — a
   // tug-of-war fought fresh on every hourly sync.
   if (options && options.isLunchOnly) return makeFormLunchOnly(form);
+
+  // AN APPOINTMENT PROGRAM NEVER ASKS ABOUT LUNCH (see ASSISTANCE_TAG), and it
+  // has to be said HERE rather than only in the assistance pass: this function
+  // runs first on every sync, and would otherwise restore the two lunch
+  // questions that pass then deletes again — two Forms writes an hour, forever,
+  // and a form whose shape depends on which of the two ran last.
+  if (options && options.isAssistance) {
+    return removeLunchQuestionsFromForm(form, list, 'this program is booked by appointment');
+  }
 
   const catersSomewhere = list.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER);
   if (!catersSomewhere) {
@@ -4832,6 +5099,11 @@ function initSheet() {
   renderProgramDashboard(true);
   refreshMemoryTabs(null, null); // builds Member_Roll / Program_Options, empty on a fresh workbook
   renderClubMembersSheet([]);   // and the (empty) club roster, so its columns exist from day one
+  // Both empty on a fresh workbook, and both need their columns and dropdowns
+  // to exist before anybody can use them — a tab staff are told to type into
+  // has to be there before they are told.
+  renderProgramQuestionsSheet([]);
+  renderAssistanceRequestsSheet([]);
 
   writeTriggers();
   reorderTabs(ss);
@@ -4952,6 +5224,10 @@ function rebuildLayoutFromSheet() {
   // Redrawn from its own rows, exactly like every other tab here — the roster
   // is data staff own, so a layout rebuild must preserve it verbatim.
   renderClubMembersSheet(refreshClubMemberLabels(sessionRows));
+  // Same treatment, same reason: both are tabs staff type into, so a layout
+  // rebuild re-draws them from their own rows and changes nothing in them.
+  renderProgramQuestionsSheet();
+  renderAssistanceRequestsSheet();
 
   reorderTabs(ss);
 
@@ -5330,6 +5606,8 @@ function reorderTabs(ss) {
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
     SHEET_NAMES.PROGRAM_OPTIONS,
+    SHEET_NAMES.PROGRAM_QUESTIONS,
+    SHEET_NAMES.ASSISTANCE_REQUESTS,
     SHEET_NAMES.CONFIG,
     SHEET_NAMES.TRIAGE
   ];
@@ -6561,7 +6839,9 @@ function buildAppMenu(ui, includeAdmin) {
     .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
     .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
     .addItem('🥡 Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms')
-    .addItem('🔁 Apply Type / Club / No-Reg Changes to Calendar', 'applyProgramTagChangesToCalendar')
+    .addItem('🔁 Apply Type / Club / No-Reg / Assistance Changes to Calendar', 'applyProgramTagChangesToCalendar')
+    .addItem('❓ Update Program Questions on Forms', 'pushProgramQuestionsToForms')
+    .addItem('🗓️ Personalized Assistance Schedule…', 'showAssistanceScheduleDialog')
     .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
     .addItem('📄 Move Sessions to Another Form…', 'showRepointSessionsDialog')
     .addSeparator()
@@ -9037,6 +9317,12 @@ function parseSettingsBrackets(text) {
   let isShared = false;
   let isClub = false;
   let noRegistration = false;
+  let isAssistance = false;
+  // 0 = "not stated"; the caller falls back to APPOINTMENT_SLOT_MINUTES.
+  let slotMinutes = 0;
+  // 0 = "no limit". See ASSISTANCE_TAG — Gerry will not see the same person
+  // twice in a month, and that is a fact about the program, not about a form.
+  let maxPerMonth = 0;
   let sawAny = false;
   // '' | 'Grouped' | 'Regular' — what the text SAYS about grouping, as opposed
   // to what isFixed resolves to. The difference matters only to
@@ -9061,6 +9347,28 @@ function parseSettingsBrackets(text) {
     // Orthogonal to everything above, and the one that overrides them all —
     // see NO_REGISTRATION_TAG. There is no form to group, cap or share.
     if (NO_REGISTRATION_WORDS_REGEX.test(content)) { noRegistration = true; sawAny = true; }
+    // Orthogonal to everything above except [No Registration] — see
+    // ASSISTANCE_TAG. Read BEFORE the slot length, because "[Slots: 20]" on
+    // its own is a statement about appointments and therefore says the
+    // program is one, whether or not the word was typed.
+    if (ASSISTANCE_WORDS_REGEX.test(content)) { isAssistance = true; sawAny = true; }
+    const slotMatch = /Slots?:\s*(\d+)/i.exec(content);
+    if (slotMatch) {
+      const minutes = parseInt(slotMatch[1], 10);
+      sawAny = true;
+      isAssistance = true;
+      // Out-of-range is a typo ("[Slots: 3]" for a three-o-clock start), and
+      // silently honoring it would cut an afternoon into a hundred pieces.
+      if (minutes >= MIN_APPOINTMENT_SLOT_MINUTES && minutes <= MAX_APPOINTMENT_SLOT_MINUTES) {
+        slotMinutes = minutes;
+      } else {
+        log(`\u26a0\ufe0f Ignoring "[Slots: ${minutes}]" — an appointment must be between ` +
+          `${MIN_APPOINTMENT_SLOT_MINUTES} and ${MAX_APPOINTMENT_SLOT_MINUTES} minutes. ` +
+          `Using ${APPOINTMENT_SLOT_MINUTES}.`);
+      }
+    }
+    const perMonthMatch = /Max\s*Per\s*Month:\s*(\d+)/i.exec(content);
+    if (perMonthMatch) { maxPerMonth = parseInt(perMonthMatch[1], 10); sawAny = true; }
     // "Grouped" is the current word, "Fixed" the one it replaced — both mean
     // "one form for the whole series." An explicit [Regular]/[Monthly] is
     // recognized too, purely so it counts as sawAny (a deliberate statement
@@ -9074,7 +9382,8 @@ function parseSettingsBrackets(text) {
       if (!explicitGrouping) explicitGrouping = EVENT_TYPES.REGULAR;
     }
   }
-  return { capacity, isFixed, isShared, isClub, noRegistration, sawAny, explicitGrouping };
+  return { capacity, isFixed, isShared, isClub, noRegistration, isAssistance, slotMinutes,
+    maxPerMonth, sawAny, explicitGrouping };
 }
 
 /**
@@ -9122,6 +9431,9 @@ function parseEventTitle(title) {
     legacyIsShared: legacy.isShared,
     legacyIsClub: legacy.isClub,
     legacyNoRegistration: legacy.noRegistration,
+    legacyIsAssistance: legacy.isAssistance,
+    legacySlotMinutes: legacy.slotMinutes,
+    legacyMaxPerMonth: legacy.maxPerMonth,
     hasLegacyBrackets: legacy.sawAny
   };
 }
@@ -9151,12 +9463,15 @@ function resolveEventSettings(event, parsedTitle) {
   const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
   const isClub = fromDescription.isClub || parsedTitle.legacyIsClub || false;
   const noRegistration = fromDescription.noRegistration || parsedTitle.legacyNoRegistration || false;
+  const isAssistance = fromDescription.isAssistance || parsedTitle.legacyIsAssistance || false;
+  const slotMinutes = fromDescription.slotMinutes || parsedTitle.legacySlotMinutes || 0;
+  const maxPerMonth = fromDescription.maxPerMonth || parsedTitle.legacyMaxPerMonth || 0;
 
   if (parsedTitle.hasLegacyBrackets && !fromDescription.sawAny) {
     log(`ℹ️ "${parsedTitle.cleanTitle}" still carries its settings in the TITLE. That still works, but the supported ` +
       `place is now the event DESCRIPTION — move "[Cap: N]" / "[Grouped]" / "[Club]" there and drop them from the title.`);
   }
-  return { capacity, isFixed, isShared, isClub, noRegistration };
+  return { capacity, isFixed, isShared, isClub, noRegistration, isAssistance, slotMinutes, maxPerMonth };
 }
 
 /** Public entry point: acquires a script lock so overlapping executions can't race each other. */
@@ -10823,6 +11138,9 @@ function buildEventGroups(parsedSessions) {
         isFixed: parsed.isFixed,
         isClub: !!parsed.isClub,
         noRegistration: !!parsed.noRegistration,
+        isAssistance: !!parsed.isAssistance,
+        slotMinutes: parsed.slotMinutes || 0,
+        maxPerMonth: parsed.maxPerMonth || 0,
         typeTag,
         monthLabel: parsed.isFixed ? null : monthLabel,
         sessions: []
@@ -10841,6 +11159,14 @@ function buildEventGroups(parsedSessions) {
     // somebody says the program takes no sign-ups, and a missing tag on
     // another of its events is an omission rather than a contradiction.
     if (parsed.noRegistration) groups[key].noRegistration = true;
+    // And again for [Personalized Assistance] and the two numbers that only
+    // mean anything alongside it: tagging one event of a program is how
+    // somebody says the whole program works that way. Never un-set, for the
+    // same reason as the two above — a missing tag on the January event is an
+    // omission, not a decision to start booking Wills by the day.
+    if (parsed.isAssistance) groups[key].isAssistance = true;
+    if (!groups[key].slotMinutes && parsed.slotMinutes) groups[key].slotMinutes = parsed.slotMinutes;
+    if (!groups[key].maxPerMonth && parsed.maxPerMonth) groups[key].maxPerMonth = parsed.maxPerMonth;
     groups[key].sessions.push({ event, calendarId, locationName });
   });
 
@@ -11899,12 +12225,14 @@ function refreshFormForNewDates(formId, group, configInfo) {
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
-    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly }));
+    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
+      isAssistance: group.isAssistance }));
   // Re-asserted on every refresh, not only at creation: [Club] can be added to
   // (or taken off) a program's calendar events at any time, and the sign-up
   // options are the only place a respondent can act on that.
   applyAttendanceModeChoices(form,
-    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly });
+    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle,
+      isLunchOnly: group.isLunchOnly, isAssistance: group.isAssistance });
 
   // Catches a form that predates this location's policy being set to Never,
   // or predates the policy feature entirely, and re-checks whether the dates
@@ -11917,6 +12245,13 @@ function refreshFormForNewDates(formId, group, configInfo) {
   // same on every form and are set once at template-build time.
   applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
     { form, force: questionsChanged > 0, context: 'new dates on an existing form' });
+
+  // LAST, after the dates and the lunch questions have settled: the
+  // appointment shaping deletes the very grids the call above just filled in
+  // (on an assistance form those grids are the wrong question), and the extra
+  // questions are positioned relative to items that must already exist. See
+  // applyProgramFormExtensions().
+  applyProgramFormExtensions(form, formContextFromGroup(group, formId));
 
   return {
     formId: form.getId(),
@@ -12023,9 +12358,11 @@ function createRegistrationForm(group, configInfo) {
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
-    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly }));
+    { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
+      isAssistance: group.isAssistance }));
   applyAttendanceModeChoices(form,
-    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly });
+    { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle,
+      isLunchOnly: group.isLunchOnly, isAssistance: group.isAssistance });
 
   // A form whose locations never cater — or none of whose dates serve lunch —
   // shouldn't be asking about lunch at all.
@@ -12037,6 +12374,11 @@ function createRegistrationForm(group, configInfo) {
   // no fingerprint on file yet.
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'new form' });
   applyFormFooterNote(form, configInfo.footerNote);
+  // A COPY OF THE TEMPLATE CARRIES NO CUSTOM QUESTIONS AND NO SHAPE OF ITS
+  // OWN — both are re-applied here, with force so the brand-new form ID (which
+  // has no record on file yet, but may inherit the template's) is written
+  // rather than skipped as unchanged.
+  applyProgramFormExtensions(form, formContextFromGroup(group, form.getId()), { force: true });
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
 
   return {
@@ -12085,7 +12427,12 @@ function applyFormFooterNote(form, footerNote) {
 function writeEventRegistryRows(registrySheet, group, formInfo) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const isUncapped = !group.capacity || group.capacity <= 0;
+  // An appointment program's capacity is arithmetic, not a decision: however
+  // many slots fit between the event's start and end IS how many people can be
+  // seen. An explicit [Cap: N] still wins — a provider who wants to keep the
+  // last half hour free says so — which is why this is resolved per session
+  // rather than folded into group.capacity.
+  const slotMinutes = resolveSlotMinutes(group);
 
   const rows = group.sessions.map(session => {
     const ev = session.event;
@@ -12112,12 +12459,23 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     // untagged program means — it means the box is there and unticked.
     row[map['Club']] = group.isClub ? CLUB_COLUMN_VALUE : false;
     row[map['No_Registration']] = group.noRegistration ? NO_REGISTRATION_COLUMN_VALUE : false;
+    row[map['Personalized_Assistance']] = group.isAssistance ? ASSISTANCE_COLUMN_VALUE : false;
+    row[map['Slot_Minutes']] = group.isAssistance ? slotMinutes : '';
+    row[map['Max_Per_Month']] = group.maxPerMonth || '';
 
-    row[map['Max_Capacity']] = isUncapped ? '' : group.capacity;
+    // Capacity, per session: what the group says, or — on an appointment
+    // program that named no cap — how many slots this particular event holds.
+    const slotCount = group.isAssistance
+      ? buildAppointmentSlots(startTime, endTime, slotMinutes).length
+      : 0;
+    const capacity = group.capacity || slotCount;
+    const isUncapped = !capacity || capacity <= 0;
+
+    row[map['Max_Capacity']] = isUncapped ? '' : capacity;
     row[map['Active_Count']] = 0;
     row[map['Waitlist_Count']] = isUncapped ? '' : 0;
-    row[map['Remaining_Seats']] = isUncapped ? '' : group.capacity;
-    row[map['Status']] = isUncapped ? '🟢 Unlimited' : computeStatus(0, group.capacity);
+    row[map['Remaining_Seats']] = isUncapped ? '' : capacity;
+    row[map['Status']] = isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity);
 
     // formInfo is null for a [No Registration] group — there is no form to
     // link to, and the link columns say so in words rather than sitting empty.
@@ -12408,7 +12766,11 @@ function syncRegistrationsInternal() {
   // Club joins are gathered across every response and written to the roster
   // ONCE, below — a tab rewrite per submission would be both slow and, on a
   // busy sync, a lot of re-reads of a tab we are in the middle of changing.
-  const collectors = { clubJoins: [] };
+  // Two things gathered across every response and written ONCE, below: club
+  // joins, and the appointment requests nobody could book a time for (see
+  // ASSISTANCE_NO_TIME_CHOICE). A tab rewrite per submission would be both
+  // slow and, on a busy sync, a lot of re-reads of a tab being changed.
+  const collectors = { clubJoins: [], assistanceRequests: [] };
 
   formIds.forEach(formId => {
     let form;
@@ -12438,6 +12800,17 @@ function syncRegistrationsInternal() {
   // joined a club in this very sync is booked into its sessions on the same
   // run rather than waiting an hour for the next one.
   upsertClubMembers(collectors.clubJoins);
+
+  // Guarded on its own: somebody asking for an appointment we cannot offer is
+  // worth recording, and is never worth failing an import over.
+  try {
+    recordAssistanceRequests(collectors.assistanceRequests);
+  } catch (err) {
+    log(`⚠️ Could not file this run's appointment requests (${err}) — the registrations themselves are fine.`);
+    noteForAdmin('Appointment requests needing a date',
+      `${collectors.assistanceRequests.length} request(s) could not be written to ` +
+      `"${SHEET_NAMES.ASSISTANCE_REQUESTS}": ${err}`);
+  }
 
   // Deliberately AFTER the import loop above: bringing a form built on an
   // older template up to date replaces its questions, and a response that
@@ -12474,6 +12847,12 @@ function syncRegistrationsInternal() {
   // reports back via registrantsMoved.
   recomputeEventRegistryCounts(registrySheet, registrantsSheet, combinedRegistrantRows);
   refreshFormCapacityLabelsForAllForms(registrySheet);
+  // The appointment half of the same idea: capacity labels tell a date-based
+  // form which dates are full, and this tells an appointment form which TIMES
+  // are gone. Both run here, on fresh counts, for the same reason — a form
+  // still offering a slot somebody took an hour ago is how two people end up
+  // in one chair.
+  refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, combinedRegistrantRows);
 
   const dashboardResult = renderProgramDashboard(false, { registrantRows: combinedRegistrantRows });
   const reusableRows = dashboardResult.registrantsMoved ? null : combinedRegistrantRows;
@@ -12551,6 +12930,15 @@ function buildRegistryIndex(registrySheet, sessionRows) {
       // What the session's clock time reads as on the registrant rows built
       // from this entry — see formatTimeRange().
       eventTime: formatTimeRange(eventDate, map['Event_End'] === undefined ? '' : row[map['Event_End']]),
+      // The three facts an APPOINTMENT booking needs and a date booking never
+      // asks for: where the session ends (so its slots can be re-derived), how
+      // long one slot is, and whether the program limits repeat visits. All
+      // three are '' / 0 on every ordinary session — see ASSISTANCE_TAG.
+      eventEnd: map['Event_End'] === undefined ? null : coerceDate(row[map['Event_End']]),
+      slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0),
+      maxPerMonth: map['Max_Per_Month'] === undefined ? 0 : (Number(row[map['Max_Per_Month']]) || 0),
+      isAssistance: map['Personalized_Assistance'] !== undefined &&
+        isAssistanceColumnValue(row[map['Personalized_Assistance']]),
       location,
       cleanTitle,
       isClub,
@@ -12846,17 +13234,58 @@ function getGridResponseByTitle(formIndex, response, title) {
 function getAdminNotesResponse(formIndex, response) {
   const allergies = String(getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ALLERGIES) || '').trim();
 
-  let notes = '';
-  for (const item of formIndex.paragraphItems) {
-    const itemResponse = response.getResponseForItem(item);
-    if (!itemResponse) continue;
-    const val = String(itemResponse.getResponse() || '').trim();
-    if (val) { notes = val; break; }
+  // BY TITLE FIRST, and only then by shape. This used to take the first
+  // PARAGRAPH item on the form that had an answer, which was safe only while
+  // "Anything Else?" was the only paragraph question there could ever be. A
+  // program that adds a paragraph question of its own (see
+  // HEADERS.Program_Questions) breaks that assumption outright — its answer
+  // would land in Admin_Notes and the respondent's actual note would vanish.
+  // The fallback scan is kept for forms built before the titles settled, with
+  // every custom question excluded from it.
+  let notes = String(getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES) || '').trim();
+  if (!notes) {
+    const custom = new Set(formIndex.customTitles || []);
+    for (const item of formIndex.paragraphItems) {
+      if (custom.has(item.getTitle())) continue;
+      const itemResponse = response.getResponseForItem(item);
+      if (!itemResponse) continue;
+      const val = String(itemResponse.getResponse() || '').trim();
+      if (val) { notes = val; break; }
+    }
   }
 
   const parts = [];
   if (allergies) parts.push(`Allergies/Dietary: ${allergies}`);
   if (notes) parts.push(notes);
+  return parts.join(' | ');
+}
+
+/**
+ * Every extra question this program asked, as "Question: answer" pairs in one
+ * string — the whole of what an added question contributes to a row.
+ *
+ * ONE COLUMN, NOT ONE PER QUESTION. A column per question would mean
+ * Registrant_Dash's shape changing every time somebody adds a question to any
+ * program, which is precisely the "adding a question breaks things" this
+ * feature exists to avoid: every render, every projection, every downstream
+ * consumer would have to cope with a table whose columns depend on a different
+ * tab's contents. A single Form_Answers column is readable by a person, ignored
+ * by everything that does not want it, and cannot collide with anything.
+ *
+ * Unanswered questions are left out entirely rather than written as blanks —
+ * "Zip Code: " tells a reader nothing they did not already know.
+ */
+function getCustomAnswersResponse(formIndex, response) {
+  const titles = formIndex.customTitles || [];
+  if (titles.length === 0) return '';
+  const parts = [];
+  titles.forEach(title => {
+    const value = getResponseValueByTitle(formIndex, response, title);
+    // A checkbox question answers with an array; ", " is how a person would
+    // read the several boxes they ticked.
+    const text = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value || '').trim();
+    if (text) parts.push(`${title}: ${text}`);
+  });
   return parts.join(' | ');
 }
 
@@ -12901,6 +13330,24 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
 
   const people = resolvePeopleOnResponse(formIndex, response, name, adminNotes);
   const partySize = people.length;
+  // Every extra question this program asked, in one string. Collected here so
+  // both paths below carry it, and kept OUT of Admin_Notes so a staff note and
+  // a form answer never turn into each other.
+  const customAnswers = getCustomAnswersResponse(formIndex, response);
+
+  // AN APPOINTMENT FORM IS RECOGNIZED BY ITS OWN SHAPE, not by a flag passed
+  // in: a form carrying the time question is one, and nothing else is. That
+  // means a response submitted while the tag was on is still read correctly
+  // after it comes off (the question is still there until the form is
+  // rebuilt), and a mis-set checkbox can never make the parser look for a grid
+  // that isn't there. See ASSISTANCE_TAG.
+  if ((formIndex.byTitle[TEMPLATE_ITEM_TITLES.APPOINTMENT] || []).length > 0) {
+    return processAppointmentResponse({
+      formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
+      people, adminNotes, responseEditUrl, submittedAt, partyId, partySize, phone, email,
+      customAnswers, collectors
+    });
+  }
 
   const attendanceMode = getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE);
   const joiningClub = isClubModeAnswer(attendanceMode);
@@ -12908,7 +13355,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     return processAllDatesResponse({
       formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
       name, people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-      phone, email, joiningClub, collectors
+      phone, email, joiningClub, collectors, customAnswers
     });
   }
 
@@ -12978,6 +13425,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
         lunchType: wantsLunch ? 'Yes - Lunch' : 'No Lunch', primaryRegistrant: person.primaryRegistrant,
         adminNotes: notes, formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
         partyId, partySize,
+        formAnswers: person.personType === 'Attendee' ? customAnswers : '',
         // A response being read as it arrives — the one path allowed to lift a
         // deletion tombstone. See buildRegistrantRow() and section 5c.
         fromLiveSubmission: true,
@@ -13004,7 +13452,7 @@ function processAllDatesResponse(args) {
   const {
     formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
     people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-    phone, email, joiningClub, collectors
+    phone, email, joiningClub, collectors, customAnswers
   } = args;
 
   // A single checkbox of PERSON_COLUMN_LABELS: who eats, applied to every
@@ -13076,6 +13524,7 @@ function processAllDatesResponse(args) {
         primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '', formEditUrl: responseEditUrl,
         protectedKeys, existingRowIndex, submittedAt, orderAheadDays, partyId, partySize,
         fromLiveSubmission: true,
+        formAnswers: person.personType === 'Attendee' ? (customAnswers || '') : '',
         phone, email
       }));
     });
@@ -13243,7 +13692,14 @@ function buildRegistrantRow(args) {
         : (wantsLunch ? 'Needed' : 'No Lunch');
       existingRow[map['Admin_Notes']] = adminNotes || '';
       existingRow[map['Party_Size']] = partySize || '';
-      if (registryEntry.eventTime) existingRow[map['Event_Time']] = registryEntry.eventTime;
+      if (map['Form_Answers'] !== undefined && args.formAnswers !== undefined) {
+        existingRow[map['Form_Answers']] = args.formAnswers || '';
+      }
+      // An APPOINTMENT's time is the registrant's own answer, not the
+      // session's span — so a re-submission that moved the appointment moves
+      // this row's time with it. See processAppointmentResponse().
+      const refreshedTime = args.eventTimeOverride || registryEntry.eventTime;
+      if (refreshedTime) existingRow[map['Event_Time']] = refreshedTime;
       existingRow[map['Order_Ahead_Flag']] = computeOrderAheadFlag(registryEntry.eventDate, submittedAt, orderAheadDays);
       existingRow[map['Form_Source']] = formSource;
       // Contact details are only ever ADDED here, never blanked: a resubmission
@@ -13280,8 +13736,9 @@ function buildRegistrantRow(args) {
   row[map['Location']] = registryEntry.location || '';
   row[map['Event']] = registryEntry.cleanTitle || '';
   row[map['Event_Date']] = registryEntry.eventDate;
-  row[map['Event_Time']] = registryEntry.eventTime || '';
+  row[map['Event_Time']] = args.eventTimeOverride || registryEntry.eventTime || '';
   row[map['Manual_Override']] = 'Auto-Synced';
+  if (map['Form_Answers'] !== undefined) row[map['Form_Answers']] = args.formAnswers || '';
   row[map['Name']] = displayName;
   row[map['Phone']] = phone;
   row[map['Email']] = email;
@@ -13427,7 +13884,20 @@ function isFormOnCurrentTemplate(form) {
   const titles = items.map(it => it.getTitle());
   if (titles.indexOf(LEGACY_GUEST_COUNT_TITLE) !== -1) return false;
   if (titles.indexOf(LEGACY_FOOTER_ITEM_TITLE) !== -1) return false;
-  const required = [
+  // AN APPOINTMENT FORM IS A CURRENT FORM. syncAssistanceQuestionsOnForm()
+  // deliberately removes the mode question and both roster grids and puts the
+  // time question in their place, so judging it by the date-based checklist
+  // would mark it stale on every single sync — and the rebuild that followed
+  // would put the grids back, only for the next sync to strip them again.
+  // Carrying the time question is the positive statement that this shape is
+  // intended. Everything a rebuild WOULD have fixed is re-applied by
+  // applyProgramFormExtensions() anyway.
+  const isAppointmentForm = titles.indexOf(TEMPLATE_ITEM_TITLES.APPOINTMENT) !== -1;
+  const required = isAppointmentForm ? [
+    TEMPLATE_ITEM_TITLES.NAME,
+    TEMPLATE_ITEM_TITLES.PHONE,
+    TEMPLATE_ITEM_TITLES.GUEST_COUNT
+  ] : [
     TEMPLATE_ITEM_TITLES.NAME,
     TEMPLATE_ITEM_TITLES.PHONE,
     TEMPLATE_ITEM_TITLES.GUEST_COUNT,
@@ -13462,7 +13932,8 @@ function rebuildFormFromCurrentTemplate(form, context) {
 
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
   form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0,
-    { isClub: context.isClub, programTitle: context.programTitle, isLunchOnly: context.isLunchOnly }));
+    { isClub: context.isClub, programTitle: context.programTitle, isLunchOnly: context.isLunchOnly,
+      isAssistance: context.isAssistance }));
 
   // THE DATE LABELS ARE THE ONE STEP THAT CANNOT BE SKIPPED. A rebuilt form's
   // grids hold the template's placeholder row until they are written, so a
@@ -13476,7 +13947,7 @@ function rebuildFormFromCurrentTemplate(form, context) {
   try {
     applyAttendanceModeChoices(form,
       { isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle,
-        isLunchOnly: context.isLunchOnly });
+        isLunchOnly: context.isLunchOnly, isAssistance: context.isAssistance });
   } catch (err) {
     log(`⚠️ Rebuilt form ${form.getId()} but could not set its sign-up options (${err}) — ` +
       `it carries the template's default wording.`);
@@ -13492,6 +13963,13 @@ function rebuildFormFromCurrentTemplate(form, context) {
   } catch (err) {
     log(`ℹ️ Rebuilt form ${form.getId()} but could not attach its footer note (${err}).`);
   }
+  // A REBUILD DELETED EVERY ITEM ON THIS FORM, including the questions this
+  // system added from Program_Questions — which is exactly the failure that
+  // made hand-editing a live form pointless. Forget what we think is on it,
+  // then put it all back: the appointment shape if its sessions call for one,
+  // and the program's own questions.
+  forgetAppliedCustomQuestions(form.getId());
+  applyProgramFormExtensions(form, context, { force: true });
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
 }
 
@@ -21781,4 +22259,1315 @@ function trashReplacedForm(oldFormId, describe) {
     log(`ℹ️ Rebuilt ${describe}, but the old form ${oldFormId} could not be trashed (${err}) — ` +
       `nothing points at it any more; delete it by hand if you want it gone.`);
   }
+}
+
+
+// ============================================================================
+// 6g. PERSONALIZED ASSISTANCE + PER-PROGRAM QUESTIONS
+// ============================================================================
+//
+// Two features that arrived together because they are the same complaint from
+// two directions: the one registration template cannot describe every program
+// this center runs.
+//
+//   [Personalized Assistance]  a program registered for by TIME, not by date —
+//                              see ASSISTANCE_TAG for what the tag changes.
+//   Program_Questions          extra questions a single program needs asked,
+//                              added to its form without the parser, the
+//                              template migration, or Registrant_Dash's shape
+//                              having to change — see HEADERS.Program_Questions.
+//
+// THE RULE BOTH OBEY: nothing here may make an EXISTING answer mean something
+// different. Extra questions get a title of their own (refused if it collides
+// with a template one), a column of their own (Form_Answers, one string of
+// "Question: answer" pairs), and a page position that no lookup depends on.
+// The appointment question replaces the roster grids only on forms whose
+// sessions actually say Personalized_Assistance, and processFormResponse()
+// decides which of the two shapes it is reading from the FORM ITSELF rather
+// than from a flag it has to be told — a form carrying the time question is an
+// appointment form, and nothing else is.
+// ============================================================================
+
+/** Minutes per appointment for a group or a form context, with the bracket and the default reconciled. */
+function resolveSlotMinutes(source) {
+  const stated = Number((source && source.slotMinutes) || 0);
+  if (stated >= MIN_APPOINTMENT_SLOT_MINUTES && stated <= MAX_APPOINTMENT_SLOT_MINUTES) return stated;
+  return APPOINTMENT_SLOT_MINUTES;
+}
+
+/**
+ * Cuts one event's span into back-to-back appointments of `minutes` each:
+ * [{ start, end, startLabel, rangeLabel }], earliest first.
+ *
+ * BACK-TO-BACK IS THE WHOLE POINT (see ASSISTANCE_TAG): the slots tile the
+ * span with no gaps, the form offers them in this order, and a booked one is
+ * simply dropped — so the day fills from the front without anybody having to
+ * police it.
+ *
+ * A partial slot at the end is NOT offered. Half an appointment is not an
+ * appointment, and offering one books somebody into fifteen minutes of a
+ * thirty-minute consultation.
+ *
+ * An event with no usable end time yields ONE slot at its start: that is what
+ * a calendar event with no duration means, and it keeps such a program
+ * bookable (as a single appointment) instead of silently offering nothing.
+ */
+function buildAppointmentSlots(startTime, endTime, minutes) {
+  const start = coerceDate(startTime);
+  if (!start) return [];
+  const slotMs = Math.max(MIN_APPOINTMENT_SLOT_MINUTES, Number(minutes) || APPOINTMENT_SLOT_MINUTES) * 60 * 1000;
+  const end = coerceDate(endTime);
+
+  const slots = [];
+  const push = (from, to) => slots.push({
+    start: from,
+    end: to,
+    startLabel: Utilities.formatDate(from, TIMEZONE, 'h:mm a'),
+    rangeLabel: formatTimeRange(from, to)
+  });
+
+  if (!end || end <= start) {
+    push(start, new Date(start.getTime() + slotMs));
+    return slots;
+  }
+
+  // Bounded for the same reason "[Slots: 3]" is rejected: an all-day event
+  // that slipped through, or a wildly wrong slot length, must not produce a
+  // list of two hundred choices on a public form.
+  const MAX_SLOTS_PER_SESSION = 48;
+  let cursor = start.getTime();
+  while (cursor + slotMs <= end.getTime() && slots.length < MAX_SLOTS_PER_SESSION) {
+    push(new Date(cursor), new Date(cursor + slotMs));
+    cursor += slotMs;
+  }
+  // A span shorter than one slot is still one appointment — a 20-minute event
+  // with 30-minute slots is somebody's calendar being approximate, not a
+  // program with no capacity.
+  if (slots.length === 0) push(start, end);
+  return slots;
+}
+
+/** "Mon, Oct 13, 2026 · Narberth @ 10:30 AM" — one choice on the time question. */
+function appointmentChoiceLabel(sessionLabel, slotStartLabel) {
+  return `${sessionLabel}${APPOINTMENT_TIME_SEPARATOR}${slotStartLabel}`;
+}
+
+/**
+ * The inverse: { sessionLabel, slotStartLabel } for a chosen value, or null
+ * for ASSISTANCE_NO_TIME_CHOICE and anything else unparseable.
+ *
+ * Split on the LAST separator, not the first — a program called "Coffee @ 10"
+ * is not impossible, and the time is always what comes after the final one.
+ */
+function parseAppointmentChoice(value) {
+  const text = String(value || '').trim();
+  if (!text || text === ASSISTANCE_NO_TIME_CHOICE) return null;
+  const at = text.lastIndexOf(APPOINTMENT_TIME_SEPARATOR);
+  if (at <= 0) return null;
+  return {
+    sessionLabel: text.substring(0, at).trim(),
+    slotStartLabel: text.substring(at + APPOINTMENT_TIME_SEPARATOR.length).trim()
+  };
+}
+
+/**
+ * The start time out of an Event_Time cell ("10:30 AM – 11:00 AM" -> "10:30 AM"),
+ * which is what a booked slot is matched on. The range is what staff read; the
+ * start is what identifies the slot.
+ */
+function appointmentStartLabelOf(eventTime) {
+  const text = String(eventTime || '').trim();
+  if (!text) return '';
+  return text.split('–')[0].split(' - ')[0].trim();
+}
+
+/**
+ * { Event_ID: Set(slot start label) } for every appointment already held by a
+ * LIVE registration. Cancelled and Superseded rows release their slot, which
+ * is the only sensible reading: staff cancel a row precisely so somebody else
+ * can have that time.
+ */
+function readBookedAppointmentTimes(registrantRows) {
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const booked = {};
+  (registrantRows || []).forEach(row => {
+    const status = String(row[map['Program_Status']] || '').trim();
+    if (status === 'Cancelled' || status === 'Superseded') return;
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const startLabel = appointmentStartLabelOf(row[map['Event_Time']]);
+    if (!eventId || !startLabel) return;
+    if (!booked[eventId]) booked[eventId] = new Set();
+    booked[eventId].add(startLabel);
+  });
+  return booked;
+}
+
+/**
+ * The choices for one form's time question: every FREE slot on every upcoming
+ * assistance session it covers, earliest first, with the "no time works" escape
+ * hatch last.
+ *
+ * PAST SESSIONS ARE LEFT OUT for the same reason a full one is: offering a
+ * time nobody can take is how a form collects registrations staff then have to
+ * unpick by hand.
+ */
+function buildAppointmentChoicesForContext(context, booked) {
+  const choices = [];
+  const now = new Date();
+  const taken = booked || {};
+  (context.sessions || []).forEach(session => {
+    if (!session.date || session.date < now) return;
+    const label = formatSessionLabel(session.date, session.location, context.showLocation,
+      session.title, context.showTitle);
+    const used = taken[session.eventId] || new Set();
+    buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session)).forEach(slot => {
+      if (used.has(slot.startLabel)) return;
+      choices.push(appointmentChoiceLabel(label, slot.startLabel));
+    });
+  });
+  // Always offered, even when every slot is taken — especially then. See
+  // ASSISTANCE_NO_TIME_CHOICE.
+  choices.push(ASSISTANCE_NO_TIME_CHOICE);
+  return choices;
+}
+
+/** The page break an appointment form's time question lives on, under either title. */
+function findAppointmentPage(form) {
+  return form.getItems().filter(it => it.getType() === FormApp.ItemType.PAGE_BREAK &&
+    (it.getTitle() === APPOINTMENT_PAGE_TITLE || it.getTitle() === TEMPLATE_PAGE_TITLES.MODE))[0] || null;
+}
+
+/** What the mode page is retitled to on an appointment form — it no longer asks about modes. */
+const APPOINTMENT_PAGE_TITLE = 'Choose Your Appointment';
+
+/**
+ * Reshapes a live form into (or keeps it as) an APPOINTMENT form: the roster
+ * grids, the all-dates lunch question and the sign-up-mode question come off,
+ * one required time question goes on, and the mode page is re-pointed straight
+ * at the closing questions.
+ *
+ * Returns the number of structural changes made, so a caller knows whether the
+ * date-label fingerprint needs forcing.
+ *
+ * IDEMPOTENT: it runs on every sync for every assistance form, and after the
+ * first pass finds nothing to delete, nothing to re-point, and — unless the
+ * free slots actually changed — nothing to write to the time question either.
+ *
+ * TAKING THE TAG OFF IS NOT HANDLED HERE. A form left without its grids is not
+ * on the current template by isFormOnCurrentTemplate()'s reckoning, so the
+ * ordinary migration sweep rebuilds it back into a date-based form on the next
+ * sync. One reversal path, already tested, rather than a second inverse of
+ * this function that would have to be kept in step with it forever.
+ */
+function syncAssistanceQuestionsOnForm(form, context, choices) {
+  let changed = 0;
+  const items = form.getItems();
+  const byTitle = title => items.filter(it => it.getTitle() === title &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK);
+  const pageOf = title => items.filter(it =>
+    it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null;
+
+  // 1. The date-based questions, which an appointment form has no use for.
+  //    Lunch is included: a counseling appointment is not a meal, and asking
+  //    orders one.
+  const doomed = findRosterGridItems(items)
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.LUNCH_GRID))
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE))
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.ALLERGIES))
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE));
+  changed += deleteFormItems(form, doomed, `the appointment form ${form.getId()}`);
+
+  // 2. The mode page now holds the time question and nothing else, so it says
+  //    so — and flows straight into the closing questions rather than through
+  //    the (now empty) every-date branch.
+  const modePage = pageOf(TEMPLATE_PAGE_TITLES.MODE) || pageOf(APPOINTMENT_PAGE_TITLE);
+  const specificPage = pageOf(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
+  if (modePage) {
+    if (modePage.getTitle() !== APPOINTMENT_PAGE_TITLE) {
+      modePage.asPageBreakItem().setTitle(APPOINTMENT_PAGE_TITLE);
+      changed++;
+    }
+    if (specificPage) {
+      try {
+        // Only when it is not already pointed there. This runs on every sync
+        // for every assistance form, and re-asserting the same navigation
+        // would be one Forms write (and one new form revision) an hour for a
+        // change that never happened.
+        const current = modePage.asPageBreakItem().getGoToPage();
+        if (!current || current.getId() !== specificPage.getId()) {
+          modePage.asPageBreakItem().setGoToPage(specificPage.asPageBreakItem());
+          changed++;
+        }
+      } catch (err) {
+        log(`Could not re-point the appointment page of form ${form.getId()} (${err}).`);
+      }
+    }
+  }
+
+  // 3. The time question itself, created on the appointment page if it isn't
+  //    there yet and re-stocked with whatever is still free.
+  changed += applyAppointmentChoices(form, context, choices, modePage);
+  if (changed > 0) invalidateFormItemIndex(form.getId());
+  return changed;
+}
+
+/**
+ * Writes the free-slot choices onto the time question, creating it (directly
+ * after the appointment page break) if the form hasn't got one.
+ *
+ * SKIPS AN IDENTICAL WRITE, exactly like applyAttendanceModeChoices(): this
+ * runs on every registration sync for every assistance form, and a Forms write
+ * is a remote round trip AND a new revision in the form's history. The common
+ * case — nobody booked anything in the last hour — costs one comparison.
+ */
+function applyAppointmentChoices(form, context, choices, modePage) {
+  const wanted = (choices && choices.length > 0) ? choices : [ASSISTANCE_NO_TIME_CHOICE];
+  const existing = form.getItems().filter(it =>
+    it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null;
+
+  const helpText = wanted.length > 1
+    ? 'Appointments are one person at a time. Times already taken are not listed — pick any time shown. ' +
+      'If none of them work, choose the last option and we will call you.'
+    : 'Every appointment on this form is taken. Choose the option below and we will contact you ' +
+      'about another time.';
+
+  if (existing) {
+    const list = existing.asListItem();
+    try {
+      const current = list.getChoices().map(c => c.getValue());
+      const same = current.length === wanted.length && current.every((v, i) => v === wanted[i]) &&
+        String(list.getHelpText() || '') === helpText;
+      if (same) return 0;
+    } catch (err) {
+      // Unreadable choices — fall through and write them fresh.
+    }
+    list.setChoiceValues(wanted);
+    list.setHelpText(helpText);
+    list.setRequired(true);
+    return 1;
+  }
+
+  const item = form.addListItem()
+    .setTitle(TEMPLATE_ITEM_TITLES.APPOINTMENT)
+    .setHelpText(helpText)
+    .setChoiceValues(wanted)
+    .setRequired(true);
+  // Created at the end of the form; it belongs on the appointment page, which
+  // is the section a respondent reaches after naming their guests.
+  if (modePage) {
+    try {
+      form.moveItem(item.getIndex(), modePage.getIndex() + 1);
+    } catch (err) {
+      log(`Added the time question to form ${form.getId()} but could not move it onto the ` +
+        `appointment page (${err}) — it is still asked, at the end.`);
+    }
+  }
+  return 1;
+}
+
+
+// ---------------------------------------------------------------------------
+// PER-PROGRAM QUESTIONS  (Program_Questions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Titles a custom question may NEVER take. This is the single guard that makes
+ * "add a question" safe: every template question is read back BY TITLE, so a
+ * custom question wearing one of these names would be answered by the wrong
+ * person's data — silently, and only visibly wrong weeks later.
+ *
+ * Refused rather than renamed: a question staff wrote and cannot find on the
+ * form is a bug they will report; one that was quietly re-titled is a bug they
+ * will not.
+ */
+function reservedQuestionTitles() {
+  const titles = Object.keys(TEMPLATE_ITEM_TITLES).map(k => TEMPLATE_ITEM_TITLES[k])
+    .concat(Object.keys(TEMPLATE_PAGE_TITLES).map(k => TEMPLATE_PAGE_TITLES[k]))
+    .concat([LEGACY_FOOTER_ITEM_TITLE, LEGACY_GUEST_COUNT_TITLE, APPOINTMENT_PAGE_TITLE]);
+  for (let g = 1; g <= MAX_GUESTS; g++) titles.push(`Guest ${g} Name`);
+  return new Set(titles.filter(Boolean).map(t => String(t).trim().toLowerCase()));
+}
+
+/** The question types staff can ask for, and what each one builds. */
+const PROGRAM_QUESTION_TYPES = {
+  'short answer': 'TEXT',
+  'short': 'TEXT',
+  'text': 'TEXT',
+  'paragraph': 'PARAGRAPH',
+  'long answer': 'PARAGRAPH',
+  'dropdown': 'LIST',
+  'list': 'LIST',
+  'checkboxes': 'CHECKBOX',
+  'checkbox': 'CHECKBOX',
+  'check all that apply': 'CHECKBOX',
+  'multiple choice': 'MULTIPLE_CHOICE',
+  'radio': 'MULTIPLE_CHOICE'
+};
+
+/** What the Type column offers as a dropdown — the canonical spelling of each shape. */
+const PROGRAM_QUESTION_TYPE_OPTIONS = [
+  'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice'
+];
+
+/** True for the three types that need a Choices cell to mean anything. */
+function questionTypeNeedsChoices(kind) {
+  return kind === 'LIST' || kind === 'CHECKBOX' || kind === 'MULTIPLE_CHOICE';
+}
+
+/**
+ * Splits a Choices cell into options. Newlines first, then "|", then commas —
+ * in that order and never combined, because "New Power of Attn, Update Power
+ * of Attn" is one option per LINE and two options per COMMA, and only the
+ * person who typed it knows which they meant. Whichever separator they
+ * actually used is the one that produces more than one option.
+ */
+function parseQuestionChoices(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return [];
+  const trySplit = sep => text.split(sep).map(v => v.trim()).filter(Boolean);
+  const byLine = trySplit(/\r?\n/);
+  if (byLine.length > 1) return byLine;
+  const byPipe = trySplit('|');
+  if (byPipe.length > 1) return byPipe;
+  const byComma = trySplit(',');
+  if (byComma.length > 1) return byComma;
+  return [text];
+}
+
+/**
+ * The question specs for THIS EXECUTION, read once.
+ *
+ * applyProgramFormExtensions() runs per form, and a sync touches every form —
+ * so without this the tab would be read from the spreadsheet once per program,
+ * every sync, to answer a question whose answer cannot change mid-run. Per the
+ * caching contract in the file header: one cache, one invalidator, and it dies
+ * with the execution so there is no staleness to reason about.
+ */
+let __programQuestionSpecsCache = null;
+
+function getProgramQuestionSpecs() {
+  if (!__programQuestionSpecsCache) {
+    __programQuestionSpecsCache = buildProgramQuestionSpecs(readProgramQuestionRows(null));
+  }
+  return __programQuestionSpecsCache;
+}
+
+/** Dropped by whatever rewrites the tab — see renderProgramQuestionsSheet(). */
+function invalidateProgramQuestionSpecs() {
+  __programQuestionSpecsCache = null;
+}
+
+/** Reads the Program_Questions tab (banner + header + rows, like the other memory tabs). */
+function readProgramQuestionRows(sheet) {
+  const target = sheet || SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_QUESTIONS);
+  if (!target) return [];
+  try {
+    return readSimpleTable(target, HEADERS.Program_Questions);
+  } catch (err) {
+    log(`Could not read "${SHEET_NAMES.PROGRAM_QUESTIONS}" (${err}) — treating it as empty.`);
+    return [];
+  }
+}
+
+/**
+ * Every usable question on the tab, as
+ * { program, location, title, kind, choices, help, required, sort }.
+ *
+ * A row that cannot be used is DROPPED WITH A REASON — an unrecognized type, a
+ * reserved title, a choice question with no choices. Silently skipping it
+ * would leave staff staring at a form that refuses to grow the question they
+ * typed, with nothing anywhere saying why.
+ */
+function buildProgramQuestionSpecs(rows) {
+  const map = getIndexMap(HEADERS.Program_Questions);
+  const reserved = reservedQuestionTitles();
+  const specs = [];
+  const seen = new Set();
+
+  (rows || []).forEach((row, i) => {
+    const title = String(row[map['Question']] || '').trim();
+    if (!title) return;
+    const active = row[map['Active']];
+    // Blank means ACTIVE. A row somebody typed is a question they want asked;
+    // making them also tick a box to mean it is a trap, and the tab is
+    // rendered with the box ticked anyway.
+    if (active === false || /^(no|false|off)$/i.test(String(active || '').trim())) return;
+
+    const reject = reason => {
+      log(`${SHEET_NAMES.PROGRAM_QUESTIONS}: skipping "${title}" — ${reason}.`);
+      noteForAdmin('Program questions not added',
+        `"${title}" on "${SHEET_NAMES.PROGRAM_QUESTIONS}" was skipped — ${reason}.`);
+    };
+
+    if (reserved.has(title.toLowerCase())) {
+      reject('that is one of the registration form\'s own question titles, and re-using it would ' +
+        'make the answers to both unreadable. Give it a different wording');
+      return;
+    }
+    const rawType = String(row[map['Type']] || '').trim().toLowerCase();
+    const kind = rawType ? (PROGRAM_QUESTION_TYPES[rawType] || null) : 'TEXT';
+    if (!kind) {
+      reject(`"${row[map['Type']]}" is not a question type. Use one of: ` +
+        PROGRAM_QUESTION_TYPE_OPTIONS.join(', '));
+      return;
+    }
+    const choices = parseQuestionChoices(row[map['Choices']]);
+    if (questionTypeNeedsChoices(kind) && choices.length === 0) {
+      reject('a dropdown, checkbox or multiple-choice question needs its options in the Choices column');
+      return;
+    }
+
+    const program = String(row[map['Program']] || '').trim();
+    const location = String(row[map['Location']] || '').trim();
+    // Identity is title + program + location: the same question asked of two
+    // programs is two rows, and the same question twice for one program is a
+    // duplicate that would appear on the form twice.
+    const key = `${program.toLowerCase()}|${location.toLowerCase()}|${title.toLowerCase()}`;
+    if (seen.has(key)) {
+      reject('it is already listed for this program');
+      return;
+    }
+    seen.add(key);
+
+    const required = row[map['Required']] === true ||
+      /^(yes|true|required)$/i.test(String(row[map['Required']] || '').trim());
+    const sortRaw = Number(row[map['Sort']]);
+    specs.push({
+      program, location, title, kind, choices,
+      help: String(row[map['Help_Text']] || '').trim(),
+      required,
+      // Row order breaks ties, so a tab with no Sort column filled in still
+      // asks the questions in the order they were typed.
+      sort: isNaN(sortRaw) || String(row[map['Sort']] || '').trim() === '' ? i : sortRaw * 1000 + i
+    });
+  });
+
+  specs.sort((a, b) => a.sort - b.sort);
+  return specs;
+}
+
+/**
+ * The questions that belong on ONE form: those whose Program matches a program
+ * the form covers (or is blank/"*" for every form), and whose Location matches
+ * one the form covers (or is blank for all of them).
+ */
+function questionsForFormContext(specs, context) {
+  const norm = v => String(v || '').trim().toLowerCase();
+  const titles = new Set((context.titles || []).map(norm));
+  const locations = new Set((context.locations || []).map(norm));
+  return (specs || []).filter(spec => {
+    const p = norm(spec.program);
+    if (p && p !== '*' && !titles.has(p)) return false;
+    const l = norm(spec.location);
+    if (l && !locations.has(l)) return false;
+    return true;
+  });
+}
+
+/**
+ * What custom questions this script last put on each form:
+ * { formId: { fingerprint, titles: [...] } }.
+ *
+ * The TITLES half is what makes removal possible at all — an item on a form is
+ * just an item, with nothing marking it as ours, so the only way to know that
+ * "Zip Code" is a question we added (and should now take off, because its row
+ * was deleted) rather than one staff added by hand is to have written down
+ * that we added it. The FINGERPRINT half is what makes the steady state free:
+ * unchanged questions cost one property read and no Forms call at all.
+ */
+const CUSTOM_QUESTIONS_PROP_KEY = 'CUSTOM_FORM_QUESTIONS_V1';
+
+function getAppliedCustomQuestions() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty(CUSTOM_QUESTIONS_PROP_KEY) || '{}');
+  } catch (err) {
+    return {};
+  }
+}
+
+function saveAppliedCustomQuestions(all) {
+  PropertiesService.getScriptProperties().setProperty(CUSTOM_QUESTIONS_PROP_KEY, JSON.stringify(all || {}));
+}
+
+/** Forgets what we applied to one form — called when a rebuild has just deleted every item on it. */
+function forgetAppliedCustomQuestions(formId) {
+  const all = getAppliedCustomQuestions();
+  if (!all[formId]) return;
+  delete all[formId];
+  saveAppliedCustomQuestions(all);
+}
+
+/** Every custom-question title currently applied to one form. Used to keep them out of the notes parser. */
+function appliedCustomQuestionTitles(formId) {
+  const entry = getAppliedCustomQuestions()[formId];
+  return (entry && Array.isArray(entry.titles)) ? entry.titles : [];
+}
+
+/** A cheap hash of exactly what would be written, so an unchanged set costs no Forms calls. */
+function computeCustomQuestionFingerprint(specs) {
+  const payload = (specs || []).map(s =>
+    [s.title, s.kind, s.required ? 1 : 0, s.help, (s.choices || []).join('~')].join('|')).join('||');
+  return Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, payload, Utilities.Charset.UTF_8));
+}
+
+/**
+ * Puts a program's extra questions on its form, takes off the ones that are no
+ * longer asked for, and leaves everything else alone. Returns the number of
+ * items added or removed.
+ *
+ * WHERE THEY GO: immediately before the "Anything Else?" question, on EVERY
+ * page that has one — which is both branch pages of an ordinary form, and the
+ * one reachable branch of an appointment form. A respondent therefore meets
+ * them whichever way they sign up, and getResponseValueByTitle() already knows
+ * how to read a title that appears on several pages (it returns the instance
+ * that was actually part of this respondent's path).
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO: add a page break, renumber anything, or
+ * touch a template item. Those are the three ways an added question could
+ * change how an existing one is read, and none of them is needed to ask
+ * somebody for their zip code.
+ */
+function syncCustomQuestionsOnForm(form, context, specs, options) {
+  options = options || {};
+  const formId = form.getId();
+  const wanted = specs || [];
+  const fingerprint = computeCustomQuestionFingerprint(wanted);
+  const all = getAppliedCustomQuestions();
+  const applied = all[formId] || { fingerprint: '', titles: [] };
+  if (!options.force && applied.fingerprint === fingerprint) return 0;
+
+  const wantedTitles = wanted.map(s => s.title);
+  let changed = 0;
+
+  // 1. Retire what is no longer asked for. Only titles WE recorded are ever
+  //    deleted — a question staff typed onto the form by hand is not ours to
+  //    remove, however much it looks like one of ours.
+  const stale = (applied.titles || []).filter(t => wantedTitles.indexOf(t) === -1);
+  if (stale.length > 0) {
+    const staleSet = new Set(stale);
+    changed += deleteFormItems(form,
+      form.getItems().filter(it => staleSet.has(it.getTitle())),
+      `form ${formId} (question no longer on ${SHEET_NAMES.PROGRAM_QUESTIONS})`);
+  }
+
+  // 2. Add what is missing, in order, before each "Anything Else?".
+  //    The item list is re-read for every insertion: a move renumbers
+  //    everything after it, and a stale index puts a question on the wrong
+  //    page. This only runs when the questions actually changed, so the cost
+  //    is paid once per edit rather than once per sync.
+  wanted.forEach(spec => {
+    const items = form.getItems();
+    const anchors = items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
+    const wantedCopies = Math.max(1, anchors.length);
+    const existing = items.filter(it => it.getTitle() === spec.title);
+    if (existing.length === wantedCopies) return; // already on every page it belongs on
+
+    // ALL OR NOTHING PER QUESTION. A partial set — on one branch page but not
+    // the other — cannot be repaired by adding the difference, because there
+    // is no cheap way to tell WHICH page the existing copy is on, and guessing
+    // wrong leaves two copies on one page and none on the other. Clearing and
+    // re-adding is a handful of extra calls on a path that only runs when the
+    // questions actually changed.
+    if (existing.length > 0) {
+      changed += deleteFormItems(form, existing, `form ${formId} (re-placing "${spec.title}")`);
+    }
+    for (let n = 0; n < wantedCopies; n++) {
+      const item = addCustomQuestionItem(form, spec);
+      if (!item) break;
+      changed++;
+      try {
+        // Re-read: the item just added sits at the end of the form, and moving
+        // it to an anchor's CURRENT index puts it immediately before it.
+        const fresh = form.getItems().filter(it =>
+          it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
+        const at = fresh[n] || fresh[fresh.length - 1];
+        if (at) form.moveItem(item.getIndex(), at.getIndex());
+      } catch (err) {
+        log(`Added "${spec.title}" to form ${formId} but could not position it (${err}) — ` +
+          `it is asked at the end of the form instead.`);
+      }
+    }
+  });
+
+  all[formId] = { fingerprint, titles: wantedTitles };
+  saveAppliedCustomQuestions(all);
+  if (changed > 0) {
+    invalidateFormItemIndex(formId);
+    log(`Program questions: ${changed} item change(s) on form ${formId}.`);
+  }
+  return changed;
+}
+
+/** Builds one custom question item on `form` (appended at the end; the caller positions it). */
+function addCustomQuestionItem(form, spec) {
+  try {
+    let item;
+    if (spec.kind === 'PARAGRAPH') item = form.addParagraphTextItem();
+    else if (spec.kind === 'LIST') item = form.addListItem().setChoiceValues(spec.choices);
+    else if (spec.kind === 'CHECKBOX') item = form.addCheckboxItem().setChoiceValues(spec.choices);
+    else if (spec.kind === 'MULTIPLE_CHOICE') item = form.addMultipleChoiceItem().setChoiceValues(spec.choices);
+    else item = form.addTextItem();
+    item.setTitle(spec.title);
+    if (spec.help) item.setHelpText(spec.help);
+    item.setRequired(!!spec.required);
+    return item;
+  } catch (err) {
+    log(`Could not add the question "${spec.title}" to form ${form.getId()} (${err}).`);
+    noteForAdmin('Program questions not added',
+      `"${spec.title}" could not be added to form ${form.getId()}: ${err}`);
+    return null;
+  }
+}
+
+/**
+ * THE ONE ENTRY POINT every form-building path calls once its dates, wording
+ * and lunch questions are settled: shape the form for [Personalized Assistance]
+ * if its sessions say so, then apply the program's own extra questions.
+ *
+ * Both halves are guarded separately and neither is allowed to fail the caller.
+ * A form that is built and linked but missing a zip-code question is a form
+ * people can still register on; a sync that dies here would leave a program
+ * with no form at all.
+ */
+function applyProgramFormExtensions(form, context, options) {
+  options = options || {};
+  let changed = 0;
+
+  if (context.isAssistance) {
+    try {
+      changed += syncAssistanceQuestionsOnForm(form, context, options.appointmentChoices ||
+        buildAppointmentChoicesForContext(context, options.booked || {}));
+    } catch (err) {
+      log(`Could not shape form ${form.getId()} as an appointment form (${err}).`);
+      noteForAdmin('Appointment forms not updated',
+        `${form.getId()} (${describeLocations(context.locations)}) — its appointment times could not be ` +
+        `set: ${err}. The next sync will try again.`);
+    }
+  }
+
+  try {
+    const specs = options.questionSpecs || getProgramQuestionSpecs();
+    changed += syncCustomQuestionsOnForm(form, context,
+      questionsForFormContext(specs, context), { force: options.force });
+  } catch (err) {
+    log(`Could not apply the extra questions to form ${form.getId()} (${err}).`);
+    noteForAdmin('Program questions not added',
+      `Form ${form.getId()} (${describeLocations(context.locations)}) — ${err}`);
+  }
+  return changed;
+}
+
+/**
+ * A GROUP (fresh from the calendar) in the shape the extension layer wants —
+ * the same shape buildFormSessionContext() produces from the sheet.
+ *
+ * The two callers are the two halves of "when does a form get built": from the
+ * calendar during a sync, and from the dashboard rows during a rebuild. One
+ * shape means the appointment and question logic is written once.
+ */
+function formContextFromGroup(group, formId) {
+  const sessions = (group.sessions || []).map(s => {
+    const start = coerceDate(s.event ? s.event.getStartTime() : s.date);
+    if (!start) return null;
+    return {
+      date: start,
+      end: s.event ? s.event.getEndTime() : (s.end || null),
+      eventId: computeEventId(s.calendarId, group.cleanTitle, formatDateKey(start)),
+      slotMinutes: group.slotMinutes || 0,
+      location: s.locationName || s.location || '',
+      title: group.cleanTitle
+    };
+  }).filter(Boolean);
+
+  return {
+    formId: formId || '',
+    sessions,
+    locations: group.locations || distinctLocations(sessions.map(s => s.location)),
+    titles: [group.cleanTitle].filter(Boolean),
+    showLocation: !!group.isShared,
+    showTitle: false,
+    isClub: !!group.isClub,
+    isFixed: !!group.isFixed,
+    isAssistance: !!group.isAssistance,
+    isLunchOnly: !!group.isLunchOnly,
+    maxPerMonth: group.maxPerMonth || 0,
+    programTitle: group.cleanTitle
+  };
+}
+
+/**
+ * Re-stocks every appointment form's time question with what is still free.
+ *
+ * Runs at the end of each registration sync, beside the capacity-label
+ * refresh and for the same reason: the thing that changed is who has booked
+ * what, and a form still offering a slot somebody took an hour ago is how two
+ * people end up in one chair.
+ */
+function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registrantRows) {
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  if (map['Personalized_Assistance'] === undefined) return 0; // a workbook still on the old layout
+  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  if (rows.length === 0) return 0;
+
+  const byForm = groupRegistryRowsByForm(rows, map);
+  const assistanceFormIds = Object.keys(byForm).filter(formId =>
+    byForm[formId].some(row => isAssistanceColumnValue(row[map['Personalized_Assistance']])));
+  // The overwhelmingly common case in a workbook with no appointment programs:
+  // stop before reading the registrants or opening a single form.
+  if (assistanceFormIds.length === 0) return 0;
+
+  const booked = readBookedAppointmentTimes(registrantRows ||
+    readAllSectionedRows(getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.REGISTRANT_DASH),
+      HEADERS.Registrant_Dash, 'Event_ID'));
+  const sharedFormIds = getSharedFormIdSet();
+  let touched = 0;
+
+  assistanceFormIds.forEach(formId => {
+    const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
+    if (context.sessions.length === 0) return;
+    try {
+      const form = FormApp.openById(formId);
+      touched += applyAppointmentChoices(form, context,
+        buildAppointmentChoicesForContext(context, booked), findAppointmentPage(form));
+    } catch (err) {
+      log(`Could not refresh the appointment times on form ${formId} (${err}).`);
+      noteForAdmin('Appointment forms not updated',
+        `${formId} — its list of free times could not be refreshed: ${err}`);
+    }
+  });
+
+  if (touched > 0) log(`Refreshed the appointment times on ${touched} form(s).`);
+  return touched;
+}
+
+
+// ---------------------------------------------------------------------------
+// READING AN APPOINTMENT SUBMISSION
+// ---------------------------------------------------------------------------
+
+/**
+ * One appointment form response -> registrant rows.
+ *
+ * A respondent picks ONE time, and everybody named on the submission is booked
+ * into it: a couple coming to see Heather about a will is one appointment with
+ * two people in it, not two appointments. That is the opposite of the roster
+ * grid's per-person resolution, and it is right here for the same reason the
+ * grid is right there — an appointment is a slot in somebody's diary.
+ *
+ * "None of these work" books nothing at all and files a request instead — see
+ * ASSISTANCE_NO_TIME_CHOICE.
+ */
+function processAppointmentResponse(args) {
+  const { formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
+    people, adminNotes, responseEditUrl, submittedAt, partyId, partySize, phone, email,
+    customAnswers, collectors } = args;
+  const form = formIndex.form;
+  const formId = form.getId();
+  const chosen = String(getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.APPOINTMENT) || '').trim();
+  const parsed = parseAppointmentChoice(chosen);
+  const registrantName = people[0] ? people[0].name : '';
+
+  if (!parsed) {
+    // Either the escape hatch, or a form whose times changed under a
+    // respondent mid-submission. Both are "a person who wants an appointment
+    // and has not got one", which is exactly what the requests tab is for —
+    // and is a great deal better than dropping the submission.
+    if (collectors && collectors.assistanceRequests) {
+      collectors.assistanceRequests.push({
+        received: submittedAt,
+        program: describeFormPrograms(registryIndex, formId),
+        location: describeFormLocations(registryIndex, formId),
+        name: registrantName,
+        phone, email,
+        answers: [customAnswers, adminNotes].filter(Boolean).join(' | '),
+        requestId: partyId
+      });
+    }
+    log(`Appointment request with no time chosen on form ${formId} — filed on "${SHEET_NAMES.ASSISTANCE_REQUESTS}".`);
+    return [];
+  }
+
+  const plainLabel = resolveSessionLabelForForm(registryIndex, formId, parsed.sessionLabel) || parsed.sessionLabel;
+  const registryEntry = registryIndex[`${formId}|${plainLabel}`];
+  if (!registryEntry) {
+    const message = `No ${SHEET_NAMES.PROGRAM_DASHBOARD} match for form ${formId} / "${parsed.sessionLabel}"` +
+      ` — the appointment chosen by ${registrantName || 'a registrant'} has NOT been imported.`;
+    log(message);
+    noteForAdmin('Form row matches no session', message);
+    return [];
+  }
+
+  // The chosen slot's own times, rather than the session's whole span: the
+  // registrant row's Event_Time IS the appointment, and it is what the
+  // provider's list is built from.
+  const slot = buildAppointmentSlots(registryEntry.eventDate, registryEntry.eventEnd,
+    resolveSlotMinutes(registryEntry)).filter(s => s.startLabel === parsed.slotStartLabel)[0];
+  const eventTime = slot ? slot.rangeLabel : parsed.slotStartLabel;
+
+  // A DOUBLE BOOKING IS FLAGGED, NEVER DROPPED. Taken slots are removed from
+  // the form, so this needs two people submitting inside the same hour — rare,
+  // and precisely the case where losing one of them silently is worst.
+  const clash = existingAppointmentHolder(existingRowIndex, registryEntry.eventId, eventTime,
+    people.map(p => p.name));
+  let notes = adminNotes;
+  if (clash) {
+    const flag = `Double-booked: ${clash} already holds ${eventTime} on this date.`;
+    notes = notes ? `${notes} | ${flag}` : flag;
+    noteForAdmin('Double-booked appointments',
+      `${registrantName || 'A registrant'} and ${clash} both hold ${eventTime} on ` +
+      `${formatDateLabel(registryEntry.eventDate)} for "${registryEntry.cleanTitle}" — one needs moving.`);
+  }
+
+  const repeat = describeRepeatAppointment(registryEntry, registrantName, existingRowIndex,
+    registryEntry.maxPerMonth);
+  if (repeat) {
+    notes = notes ? `${notes} | ${repeat}` : repeat;
+    noteForAdmin('Repeat appointments this month', repeat);
+  }
+
+  const rows = [];
+  people.forEach((person, i) => {
+    rows.push(buildRegistrantRow({
+      registryEntry, name: person.name, personType: person.personType,
+      // An appointment is not a meal. buildRegistrantRow() gates lunch on
+      // isLunchOfferedOn() as well, but saying it here is what makes the
+      // intent legible at the call site.
+      lunchType: 'No Lunch',
+      primaryRegistrant: person.primaryRegistrant,
+      adminNotes: i === 0 ? notes : (person.baseNotes || ''),
+      formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
+      partyId, partySize, fromLiveSubmission: true, phone, email,
+      // THE APPOINTMENT ITSELF. Everything a provider is sent a week ahead —
+      // and everything the day's schedule is built from — is this one value.
+      eventTimeOverride: eventTime,
+      formAnswers: i === 0 ? customAnswers : ''
+    }));
+  });
+  return rows.filter(Boolean);
+}
+
+/** "Low-Cost Wills" — the distinct program titles one form covers, for a request row. */
+function describeFormPrograms(registryIndex, formId) {
+  return describeFormField(registryIndex, formId, 'cleanTitle').join(' / ');
+}
+
+/** "Narberth + Ashbridge" — the distinct locations one form covers, for a request row. */
+function describeFormLocations(registryIndex, formId) {
+  return describeLocations(describeFormField(registryIndex, formId, 'location'));
+}
+
+function describeFormField(registryIndex, formId, field) {
+  const values = [];
+  Object.keys(registryIndex || {}).forEach(key => {
+    const entry = registryIndex[key];
+    if (!entry || entry.formId !== formId) return;
+    const value = String(entry[field] || '').trim();
+    if (value) values.push(value);
+  });
+  return dedupePreservingOrder(values);
+}
+
+/**
+ * The name already holding `eventTime` on `eventId`, if it is somebody else.
+ * Returns '' when the slot is free or is held by one of the people on this
+ * very submission (an edited response re-choosing its own time).
+ */
+function existingAppointmentHolder(existingRowIndex, eventId, eventTime, ownNames) {
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const own = new Set((ownNames || []).map(normalizeNameKey));
+  const wanted = appointmentStartLabelOf(eventTime);
+  let holder = '';
+  existingRowIndex.forEach(row => {
+    if (holder) return;
+    if (String(row[map['Event_ID']] || '') !== eventId) return;
+    const status = String(row[map['Program_Status']] || '').trim();
+    if (status === 'Cancelled' || status === 'Superseded') return;
+    if (appointmentStartLabelOf(row[map['Event_Time']]) !== wanted) return;
+    const name = String(row[map['Name']] || '').trim();
+    if (own.has(normalizeNameKey(name))) return;
+    holder = name;
+  });
+  return holder;
+}
+
+/**
+ * The note for a second appointment in one calendar month, where the program
+ * asked for a limit ("[Max Per Month: 1]" — Gerry's rule). Returns '' when
+ * there is no limit or the limit is not reached.
+ *
+ * FLAGGED, NOT REFUSED. A form cannot know that the person booking a second
+ * session is the same Jane Smith, staff sometimes make the exception
+ * deliberately, and a registration silently thrown away is the one outcome
+ * nobody can recover from. So the row is created and says what it is.
+ */
+function describeRepeatAppointment(registryEntry, name, existingRowIndex, maxPerMonth) {
+  const limit = Number(maxPerMonth || 0);
+  if (!limit || !name) return '';
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const key = normalizeNameKey(name);
+  const month = getMonthLabel(registryEntry.eventDate);
+  const program = String(registryEntry.cleanTitle || '').trim();
+  let count = 0;
+  existingRowIndex.forEach(row => {
+    if (normalizeNameKey(row[map['Name']]) !== key) return;
+    if (String(row[map['Event']] || '').trim() !== program) return;
+    const status = String(row[map['Program_Status']] || '').trim();
+    if (status === 'Cancelled' || status === 'Superseded') return;
+    const d = coerceDate(row[map['Event_Date']]);
+    if (d && getMonthLabel(d) === month) count++;
+  });
+  if (count < limit) return '';
+  return `${name} already has ${count} "${program}" appointment(s) in ${month} — ` +
+    `this program allows ${limit} per month.`;
+}
+
+
+// ---------------------------------------------------------------------------
+// THE TWO TABS
+// ---------------------------------------------------------------------------
+
+/** Writes the Program_Questions tab, keeping whatever is already on it. */
+function renderProgramQuestionsSheet(allRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_QUESTIONS);
+  const headers = HEADERS.Program_Questions;
+  const map = getIndexMap(headers);
+  const rows = allRows || readProgramQuestionRows(sheet);
+  invalidateProgramQuestionSpecs();
+
+  writeMemoryTab(sheet, headers, rows, {
+    banner: 'Program Questions — extra questions added to a program\'s registration form ' +
+      '(one row per question; press "Update Program Questions on Forms" when you are done)',
+    staffColumns: PROGRAM_QUESTIONS_STAFF_COLUMNS,
+    numberColumns: ['Sort']
+  });
+
+  if (rows.length > 0) {
+    applyValueListValidationBounded(sheet, map['Type'] + 1, PROGRAM_QUESTION_TYPE_OPTIONS,
+      MEMORY_TAB_DATA_ROW, rows.length);
+    [map['Required'] + 1, map['Active'] + 1].forEach(col => {
+      sheet.getRange(MEMORY_TAB_DATA_ROW, col, rows.length, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
+    // Choices is one option per line, so the cell has to be able to show them.
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, rows.length, 1).setWrap(true);
+  }
+  return rows.length;
+}
+
+/** Reads the requests tab. */
+function readAssistanceRequestRows(sheet) {
+  const target = sheet || SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.ASSISTANCE_REQUESTS);
+  if (!target) return [];
+  try {
+    return readSimpleTable(target, HEADERS.Assistance_Requests);
+  } catch (err) {
+    log(`Could not read "${SHEET_NAMES.ASSISTANCE_REQUESTS}" (${err}) — treating it as empty.`);
+    return [];
+  }
+}
+
+/**
+ * Files the "no time works" submissions collected during an import, newest
+ * first, skipping any whose Request_ID is already on the tab.
+ *
+ * The staff columns (Status / Scheduled_For / Staff_Notes) are never written
+ * by this — the whole tab exists so somebody can work through it, and a sync
+ * that reset their progress every hour would make it useless.
+ */
+function recordAssistanceRequests(requests) {
+  if (!requests || requests.length === 0) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.ASSISTANCE_REQUESTS);
+  const headers = HEADERS.Assistance_Requests;
+  const map = getIndexMap(headers);
+  const existing = readAssistanceRequestRows(sheet);
+  const seen = new Set(existing.map(row => String(row[map['Request_ID']] || '').trim()).filter(Boolean));
+
+  let added = 0;
+  requests.forEach(req => {
+    const id = String(req.requestId || '').trim();
+    if (id && seen.has(id)) return;
+    if (id) seen.add(id);
+    const row = new Array(headers.length).fill('');
+    row[map['Received']] = req.received || new Date();
+    row[map['Program']] = req.program || '';
+    row[map['Location']] = req.location || '';
+    row[map['Name']] = req.name || '';
+    row[map['Phone']] = req.phone || '';
+    row[map['Email']] = req.email || '';
+    row[map['Answers']] = req.answers || '';
+    row[map['Status']] = ASSISTANCE_REQUEST_STATUSES[0];
+    row[map['Request_ID']] = id;
+    existing.push(row);
+    added++;
+  });
+
+  if (added === 0) return 0;
+  existing.sort((a, b) => {
+    const da = coerceDate(a[map['Received']]);
+    const db = coerceDate(b[map['Received']]);
+    return (db ? db.getTime() : 0) - (da ? da.getTime() : 0);
+  });
+  renderAssistanceRequestsSheet(existing);
+  log(`${SHEET_NAMES.ASSISTANCE_REQUESTS}: filed ${added} new request(s).`);
+  noteForAdmin('Appointment requests needing a date',
+    `${added} person/people asked for a personalized-assistance appointment outside the times offered. ` +
+    `See the "${SHEET_NAMES.ASSISTANCE_REQUESTS}" tab.`);
+  return added;
+}
+
+/** Writes the requests tab: newest first, Status as a dropdown, the response ID hidden. */
+function renderAssistanceRequestsSheet(allRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.ASSISTANCE_REQUESTS);
+  const headers = HEADERS.Assistance_Requests;
+  const map = getIndexMap(headers);
+  const rows = allRows || readAssistanceRequestRows(sheet);
+
+  writeMemoryTab(sheet, headers, rows, {
+    banner: 'Appointment Requests — people who need a personalized-assistance appointment ' +
+      'at a time we have not scheduled yet',
+    staffColumns: ASSISTANCE_REQUEST_STAFF_COLUMNS,
+    dateColumns: ['Received', 'Scheduled_For']
+  });
+
+  if (rows.length > 0) {
+    applyValueListValidationBounded(sheet, map['Status'] + 1, ASSISTANCE_REQUEST_STATUSES,
+      MEMORY_TAB_DATA_ROW, rows.length);
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Answers'] + 1, rows.length, 1).setWrap(true);
+  }
+  applyColumnVisibility(sheet, headers, ['Request_ID']);
+  return rows.length;
+}
+
+
+// ---------------------------------------------------------------------------
+// THE PROVIDER'S LIST  ("who is Heather seeing on the 13th?")
+// ---------------------------------------------------------------------------
+
+/**
+ * Every upcoming personalized-assistance appointment, grouped by date and
+ * program, with the times, names, contact details and each person's answers to
+ * the program's own questions.
+ *
+ * This is the deliverable the tag exists for. Heather Turner and the Medicare
+ * counselors are sent their day's list a week ahead, and assembling it by
+ * filtering the registrants tab by hand — for the right program, on the right
+ * date, in time order, with the zip codes and document types attached — is
+ * both fiddly and easy to get wrong in a way nobody notices until somebody is
+ * missing from a schedule.
+ */
+function getAssistanceScheduleData(daysAhead) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
+  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
+  const sMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const rMap = getIndexMap(HEADERS.Registrant_Dash);
+  if (sMap['Personalized_Assistance'] === undefined) return [];
+
+  const assistanceEventIds = {};
+  readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID').forEach(row => {
+    if (!isAssistanceColumnValue(row[sMap['Personalized_Assistance']])) return;
+    const id = String(row[sMap['Event_ID']] || '').trim();
+    if (id) assistanceEventIds[id] = true;
+  });
+  if (Object.keys(assistanceEventIds).length === 0) return [];
+
+  const horizon = new Date();
+  horizon.setHours(0, 0, 0, 0);
+  const until = new Date(horizon.getTime() + Math.max(1, Number(daysAhead) || 14) * 24 * 60 * 60 * 1000);
+
+  const byDay = {};
+  readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID').forEach(row => {
+    const eventId = String(row[rMap['Event_ID']] || '').trim();
+    if (!assistanceEventIds[eventId]) return;
+    const status = String(row[rMap['Program_Status']] || '').trim();
+    if (status === 'Cancelled' || status === 'Superseded') return;
+    const date = coerceDate(row[rMap['Event_Date']]);
+    if (!date || date < horizon || date > until) return;
+
+    const key = `${formatDateKey(date)}|${row[rMap['Event']]}|${row[rMap['Location']]}`;
+    if (!byDay[key]) {
+      byDay[key] = {
+        dateKey: formatDateKey(date),
+        dateLabel: formatDateLabel(date),
+        program: String(row[rMap['Event']] || ''),
+        location: String(row[rMap['Location']] || ''),
+        people: []
+      };
+    }
+    byDay[key].people.push({
+      time: String(row[rMap['Event_Time']] || ''),
+      name: String(row[rMap['Name']] || ''),
+      personType: String(row[rMap['Person_Type']] || ''),
+      phone: String(row[rMap['Phone']] || ''),
+      email: String(row[rMap['Email']] || ''),
+      answers: String(rMap['Form_Answers'] === undefined ? '' : (row[rMap['Form_Answers']] || '')),
+      notes: String(row[rMap['Admin_Notes']] || '')
+    });
+  });
+
+  return Object.keys(byDay).map(k => byDay[k])
+    .sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.program.localeCompare(b.program))
+    .map(day => {
+      // Time order within the day, which is the only order a provider's list
+      // is any use in. Rows with no time (a hand-added walk-in) sit at the end.
+      day.people.sort((a, b) =>
+        (appointmentSortKey(a.time) - appointmentSortKey(b.time)) || a.name.localeCompare(b.name));
+      return day;
+    });
+}
+
+/** Minutes-since-midnight for "10:30 AM", for sorting. Unparseable times sort last. */
+function appointmentSortKey(eventTime) {
+  const m = /^(\d{1,2}):(\d{2})\s*([AaPp])/.exec(appointmentStartLabelOf(eventTime));
+  if (!m) return 100000;
+  let hour = parseInt(m[1], 10) % 12;
+  if (/[Pp]/.test(m[3])) hour += 12;
+  return hour * 60 + parseInt(m[2], 10);
+}
+
+function showAssistanceScheduleDialog() {
+  const html = HtmlService.createHtmlOutput(buildAssistanceScheduleHtml())
+    .setWidth(680)
+    .setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Personalized Assistance Schedule');
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildAssistanceScheduleHtml() {
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  select, button { font-size: 13px; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 7px 14px; cursor: pointer; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #out { margin-top: 12px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 330px;
+         overflow: auto; background: #fafafa; }
+  .day { margin: 0 0 14px 0; }
+  .day h4 { margin: 0 0 4px 0; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f1f3f4; font-size: 12px; }
+  td.time { white-space: nowrap; font-weight: bold; }
+  .none { color: #666; font-style: italic; }
+</style>
+<h3>Who is booked, and when</h3>
+<p class="hint">
+  Every upcoming appointment on a program tagged <b>[${ASSISTANCE_TAG}]</b>, in time order.
+  Select the list and copy it into the email you send the provider.
+</p>
+<div>
+  <label>Next
+    <select id="days">
+      <option value="7">7 days</option>
+      <option value="14" selected>14 days</option>
+      <option value="30">30 days</option>
+      <option value="60">60 days</option>
+    </select>
+  </label>
+  <button id="go" onclick="load()">Show</button>
+</div>
+<div id="out"><span class="none">Choose a range and press Show.</span></div>
+<script>
+  function load() {
+    document.getElementById('go').disabled = true;
+    document.getElementById('out').innerHTML = '<span class="none">Reading the registrations...</span>';
+    google.script.run
+      .withSuccessHandler(render)
+      .withFailureHandler(function (err) {
+        document.getElementById('go').disabled = false;
+        document.getElementById('out').innerHTML = '<span class="none">Failed: ' + err.message + '</span>';
+      })
+      .getAssistanceScheduleData(Number(document.getElementById('days').value));
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function render(days) {
+    document.getElementById('go').disabled = false;
+    if (!days || days.length === 0) {
+      document.getElementById('out').innerHTML =
+        '<span class="none">No appointments booked in that range.</span>';
+      return;
+    }
+    var html = '';
+    days.forEach(function (d) {
+      html += '<div class="day"><h4>' + esc(d.program) + ' &mdash; ' + esc(d.dateLabel) +
+        ' (' + esc(d.location) + ')</h4><table><tr><th>Time</th><th>Name</th><th>Phone</th>' +
+        '<th>Email</th><th>Details</th></tr>';
+      d.people.forEach(function (p) {
+        var detail = [p.answers, p.notes].filter(function (x) { return x; }).join(' - ');
+        html += '<tr><td class="time">' + esc(p.time) + '</td><td>' + esc(p.name) +
+          (p.personType === 'Guest' ? ' (guest)' : '') + '</td><td>' + esc(p.phone) +
+          '</td><td>' + esc(p.email) + '</td><td>' + esc(detail) + '</td></tr>';
+      });
+      html += '</table></div>';
+    });
+    document.getElementById('out').innerHTML = html;
+  }
+</script>`;
+}
+
+/**
+ * Menu action: push the current Program_Questions tab onto every live form now,
+ * rather than waiting for the next calendar sync.
+ *
+ * The tab is where staff work, and the gap between typing a question and
+ * seeing it on the form is exactly where they conclude it did not work and try
+ * again by hand on the form itself — which is the failure this whole feature
+ * exists to prevent.
+ */
+function pushProgramQuestionsToForms() {
+  if (!confirmConsequentialAction('Update the registration forms now?',
+    `Every question on "${SHEET_NAMES.PROGRAM_QUESTIONS}" is added to the forms it names, and any ` +
+    `question this system added before but which is no longer listed is removed from them.\n\n` +
+    `Answers already collected are never changed.`, true)) {
+    return 0;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const byForm = groupRegistryRowsByForm(rows, map);
+  const sharedFormIds = getSharedFormIdSet();
+  invalidateProgramQuestionSpecs(); // the whole point of this menu item is to re-read the tab
+  const specs = getProgramQuestionSpecs();
+  const applied = getAppliedCustomQuestions();
+
+  let changed = 0;
+  let forms = 0;
+  Object.keys(byForm).forEach(formId => {
+    const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
+    if (context.sessions.length === 0) return;
+    const wanted = questionsForFormContext(specs, context);
+    const before = applied[formId];
+    // Nothing wanted and nothing ever applied: no reason to open the form.
+    if (wanted.length === 0 && (!before || (before.titles || []).length === 0)) return;
+    try {
+      const form = FormApp.openById(formId);
+      const n = syncCustomQuestionsOnForm(form, context, wanted);
+      if (n > 0) { changed += n; forms++; }
+    } catch (err) {
+      log(`Could not update the questions on form ${formId} (${err}).`);
+      noteForAdmin('Program questions not added', `Form ${formId} — ${err}`);
+    }
+  });
+
+  flushAdminDigest('Program questions');
+  const message = changed === 0
+    ? 'The forms already match the question list — nothing to change.'
+    : `Updated ${forms} form(s) — ${changed} question(s) added or removed.`;
+  toastIfPossible(message);
+  log(`pushProgramQuestionsToForms: ${message}`);
+  return changed;
 }
