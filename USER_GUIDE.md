@@ -1410,10 +1410,16 @@ A few things worth knowing:
   not two** — the counts are per person (see
   [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
   row shows both under `Programs` with `Requests_Merged` = 1.
-- The dates appear on **Master_Program_Dashboard** as sessions like any other,
+- The dates are **on** Master_Program_Dashboard as sessions like any other,
   under `🥡 Lunch Only (no program)`, with a blank `Calendar_Source` — because
   there is no calendar event behind them. That blank is what stops them being
-  swept into triage.
+  swept into triage. They are **hidden** there, though, and left out of the
+  Today block and the participation metrics: a meal is not a programme, and a
+  month of them at two locations is thirty rows between you and the classes.
+  The Upcoming banner says how many are hidden, and **🕓 Show All Past Rows**
+  brings them back into view. They are only hidden, never deleted — the import
+  reads those rows to turn a lunch form response back into dates, so a lunch
+  form with no session rows could not be imported at all.
 - For the same reason, **`Type_Tag`, `Club` and `No_Registration` can't be
   edited on those rows.** They're instructions to a calendar event that doesn't
   exist. The workbook tells you so and puts the cell back; change the date on
