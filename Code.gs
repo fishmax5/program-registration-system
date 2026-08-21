@@ -111,6 +111,22 @@
  *      sessions they never read. The "sign up for every date" option covers
  *      that case as an answer somebody actually gives. See
  *      buildRegistrationUrl().
+ *    - THE REGISTRATION HORIZON (Config -> "🚧 Registration Open Through")
+ *      is one date deciding how far ahead the public may sign up, for the
+ *      ordinary case of a season built months before it opens. Sessions
+ *      after that date are still imported, still get rows, still get a form
+ *      and still appear on the calendar — but their event descriptions read
+ *      "🚧 Registration Not Yet Open" instead of carrying a link, and a form
+ *      whose remaining sessions are ALL past the date is built (or held)
+ *      closed, with a closed-form message saying the same thing. Blank means
+ *      no horizon, which is what every workbook had before it existed and
+ *      what an unreadable cell falls back to. Moving the date forward is the
+ *      whole act of opening registration: the next sync writes the links
+ *      back and re-opens the forms. See REGISTRATION_NOT_OPEN_TEXT,
+ *      shouldMarkNotYetOpen() for the per-event decision,
+ *      applyRegistrationHorizonToNewForm() for the per-form one at build
+ *      time, and applyRegistrationHorizonEffects() for the reconciler that
+ *      makes a moved date take effect on programs with no new dates.
  *    - PER-LOCATION CATERING POLICY (Config -> "🍽️ Lunch Service by
  *      Location") is what keeps the lunch dashboard from filling with blank
  *      rows. Before it existed the only way to say "Zoom never serves lunch"
@@ -1502,9 +1518,14 @@ const CONFIG_LAYOUT = {
     title: '📧 Calendar Invitations',
     startCol: 19,
     headers: ['Invite_Registrants']
+  },
+  REGISTRATION_HORIZON: {
+    title: '🚧 Registration Open Through',
+    startCol: 21,
+    headers: ['Registration_Open_Through']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20];
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 
@@ -1550,6 +1571,50 @@ const DEFAULT_LINK_DISPLAY = LINK_DISPLAY_OPTIONS.SHOW;
 const CALENDAR_INVITE_OPTIONS = { INVITE: 'Invite registrants', NONE: 'Do not invite' };
 const CALENDAR_INVITE_OPTION_LIST = Object.values(CALENDAR_INVITE_OPTIONS);
 const DEFAULT_CALENDAR_INVITE = CALENDAR_INVITE_OPTIONS.INVITE;
+
+/**
+ * REGISTRATION HORIZON — the date registration is currently open THROUGH.
+ *
+ * A season's calendar is usually built months ahead of the day sign-ups are
+ * meant to open. Without this, the moment an event lands on a calendar its
+ * form is live and its description is advertising a link, so anybody browsing
+ * the shared calendar can register for a session nobody has announced yet.
+ *
+ * One date cell on Config fixes that. Sessions dated ON OR BEFORE it are open
+ * for registration exactly as they always have been. Sessions dated AFTER it
+ * are NOT YET OPEN, which means three things, all of them reversible by
+ * changing the one cell:
+ *
+ *   1. their calendar event descriptions say "🚧 Registration Not Yet Open"
+ *      instead of carrying a "📝 Register for ..." link;
+ *   2. a form whose remaining sessions are ALL beyond the horizon stops
+ *      accepting responses, and anybody holding its link is told, in those
+ *      same words, that registration is not yet open;
+ *   3. neither is permanent — move the date forward (or clear the cell) and
+ *      the next sync writes the links back and re-opens the forms.
+ *
+ * The rows, the forms, and the calendar events themselves are all still BUILT
+ * ahead of time; this only decides whether the public is invited into them
+ * yet. That is what makes moving the date a one-cell operation rather than a
+ * rebuild.
+ *
+ * BLANK MEANS NO HORIZON — every session is open, which is the behavior every
+ * workbook had before this setting existed and therefore the only safe
+ * default. An unparseable cell reads the same way and says so in the log: the
+ * cost of wrongly having no horizon is that a link goes out early, and the
+ * cost of wrongly having one is that EVERY form in the workbook goes dark on
+ * the strength of a typo.
+ *
+ * Only ever compared date-to-date (never date-to-time): the horizon means "the
+ * end of that day", so a session on the horizon date itself is open.
+ */
+const REGISTRATION_NOT_OPEN_TEXT = 'Registration Not Yet Open';
+/** The line written at the top of a not-yet-open event's description. */
+const REGISTRATION_NOT_OPEN_LINE = `🚧 ${REGISTRATION_NOT_OPEN_TEXT}`;
+/** What somebody holding the link to a not-yet-open form is shown by Google. */
+const REGISTRATION_NOT_OPEN_FORM_MESSAGE =
+  `${REGISTRATION_NOT_OPEN_TEXT} — this program is not taking sign-ups yet. ` +
+  'Please check back closer to the session date.';
 const CONFIG_HEADER_ROW = 2;
 const CONFIG_DATA_START_ROW = 3;
 /** Types that actually need a Meal Buffer Amounts row in Config (a "Not Serving" day never does). */
@@ -3044,6 +3109,9 @@ let __adminNotificationEmailCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
+// { key } — the wrapper is what lets a legitimately EMPTY horizon ('' = none)
+// be cached, instead of being re-read from the sheet on every session.
+let __registrationHorizonCache = null;
 let __automationEnabledCache = null;
 let __triggerOwnerCache = null;
 let __calendarEventsCache = null;
@@ -3220,6 +3288,7 @@ function invalidateConfigCaches() {
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;
+  __registrationHorizonCache = null;
   __automationEnabledCache = null;
   __triggerOwnerCache = null;
   // This one also lives in the CROSS-execution cache, which a plain
@@ -5594,6 +5663,7 @@ function styleConfigSheet(sheet) {
   seedLinkDisplayRow(sheet);
   seedAutomationRow(sheet);
   seedCalendarInviteRow(sheet);
+  seedRegistrationHorizonRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -5728,6 +5798,32 @@ function seedCalendarInviteRow(sheet) {
 }
 
 /**
+ * Leaves the horizon BLANK on purpose — blank means "no horizon", which is
+ * how every workbook behaved before this setting existed. Seeding a date here
+ * would silently take sessions out of registration on a workbook whose owner
+ * never asked for a horizon at all.
+ *
+ * Only the number format and the note are written, and both every time: the
+ * note is the whole explanation of what the cell does, and a Config rebuild
+ * is exactly when somebody is most likely to be reading it.
+ */
+function seedRegistrationHorizonRow(sheet) {
+  const section = CONFIG_LAYOUT.REGISTRATION_HORIZON;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  cell.setNumberFormat('M/d/yyyy');
+  cell.setNote(
+    'Registration is open through this date. Leave BLANK to open everything (the default).\n\n'
+    + 'Sessions on or before this date behave normally. Sessions AFTER it are not open yet:\n'
+    + '  \u2022 their calendar events say "' + REGISTRATION_NOT_OPEN_LINE + '" instead of carrying a register link;\n'
+    + '  \u2022 a form whose remaining sessions are all past this date stops accepting responses, and '
+    + 'anyone opening its link is told registration is not yet open.\n\n'
+    + 'Nothing is deleted and nothing is permanent — the rows, forms and events are all still built ahead '
+    + 'of time. Move this date forward (or clear it) and the next sync puts the links back and re-opens '
+    + 'the forms. Use "\ud83d\udd17 Rewrite Event Links" from the Admin menu to apply a change to existing '
+    + 'events straight away.');
+}
+
+/**
  * The current Calendar Invitations setting. Unlike the link switch this fails
  * CLOSED on anything unrecognized: the cost of wrongly not inviting is that
  * someone has to check the workbook, and the cost of wrongly inviting is mail
@@ -5781,6 +5877,100 @@ function getLinkDisplayMode() {
 /** True when registration links belong in calendar event descriptions. */
 function shouldShowLinkInDescription() {
   return getLinkDisplayMode() !== LINK_DISPLAY_OPTIONS.HIDE;
+}
+
+/**
+ * The Registration Open Through date as a 'yyyy-MM-dd' key, or '' when there
+ * is no horizon at all. See REGISTRATION_NOT_OPEN_TEXT for what it means.
+ *
+ * FAILS OPEN, loudly: a cell that isn't a date reads as "no horizon" and logs
+ * why. One typo must never be able to close every form in the workbook.
+ */
+function getRegistrationHorizonKey() {
+  if (__registrationHorizonCache !== null) return __registrationHorizonCache.key;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  let key = '';
+  if (sheet) {
+    const raw = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol).getValue();
+    if (raw !== '' && raw !== null && raw !== undefined) {
+      const parsed = coerceRegistrationHorizonDate(raw);
+      if (parsed) key = formatDateKey(parsed);
+      else {
+        log(`⚠️ Config's Registration_Open_Through reads "${raw}", which isn't a usable date — ` +
+          'treating it as no horizon, so every session stays open for registration.');
+      }
+    }
+  }
+  __registrationHorizonCache = { key };
+  return key;
+}
+
+/**
+ * A cell value read as a horizon date, or null.
+ *
+ * Stricter than coerceDate() on purpose, because of one specific way of
+ * getting this wrong: typing a bare year. A cell formatted as a date that
+ * receives `2026` holds the number 2026, which Sheets reads back as day 2026
+ * of the epoch — 18 July 1905. That is a perfectly valid Date, it is silently
+ * in the past, and a horizon in the past closes EVERY form in the workbook.
+ * So a horizon has to land in a plausible century to count as one at all;
+ * anything else reads as no horizon, which is the harmless direction.
+ */
+const REGISTRATION_HORIZON_MIN_YEAR = 2000;
+const REGISTRATION_HORIZON_MAX_YEAR = 2100;
+
+function coerceRegistrationHorizonDate(raw) {
+  const parsed = coerceDate(raw);
+  if (!parsed) return null;
+  const year = parsed.getFullYear();
+  if (year < REGISTRATION_HORIZON_MIN_YEAR || year > REGISTRATION_HORIZON_MAX_YEAR) return null;
+  return parsed;
+}
+
+/** True when a horizon is set at all. */
+function hasRegistrationHorizon() {
+  return getRegistrationHorizonKey() !== '';
+}
+
+/** The horizon as a Date (midnight local), or null when there is none. */
+function getRegistrationHorizonDate() {
+  const key = getRegistrationHorizonKey();
+  return key ? parseDateKey(key) : null;
+}
+
+/** How the horizon reads in a dialog, a toast or a log line. */
+function describeRegistrationHorizon() {
+  const date = getRegistrationHorizonDate();
+  return date ? formatDateLabel(date) : 'no horizon (every session open)';
+}
+
+/**
+ * True when this session date sits past the horizon — i.e. registration for
+ * it is not open yet. Compared as date KEYS so a session at 6pm on the
+ * horizon date is still open: the horizon means the end of that day.
+ */
+function isBeyondRegistrationHorizon(date) {
+  const horizonKey = getRegistrationHorizonKey();
+  if (!horizonKey) return false;
+  const d = coerceDate(date);
+  return !!d && formatDateKey(d) > horizonKey;
+}
+
+/**
+ * True when this event should carry the "not yet open" notice instead of a
+ * registration link.
+ *
+ * Past sessions are deliberately excluded even when a horizon has been set
+ * BEHIND today (a legitimate way to say "nothing is open right now"): a
+ * session that has already happened is a record, and rewriting its
+ * description to advertise that sign-ups have not opened would be false.
+ */
+function shouldMarkNotYetOpen(date) {
+  const d = coerceDate(date);
+  if (!d) return false;
+  if (formatDateKey(d) < formatDateKey(new Date())) return false;
+  return isBeyondRegistrationHorizon(d);
 }
 
 /**
@@ -8310,6 +8500,49 @@ function handleConfigEdit(e, sheet) {
       : 'Calendar invitations off — no guests will be added or removed.');
   }
 
+  // The horizon decides what the public can see and sign up for, across every
+  // program at once, so it says out loud what the date about to be typed will
+  // do — including the case that surprises people: a date in the PAST closes
+  // everything.
+  const isHorizonEdit = editedCol === CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isHorizonEdit) {
+    const raw = String(e.value || '').trim();
+    const parsed = raw ? coerceRegistrationHorizonDate(e.range.getValue()) : null;
+
+    if (raw && !parsed) {
+      // Not a date. Refused outright rather than confirmed: left in place it
+      // reads as "no horizon" (see getRegistrationHorizonKey()), so somebody
+      // who typed "September" would believe registration was held back when it
+      // was wide open.
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      invalidateConfigCaches();
+      toastIfPossible(`"${raw}" isn't a usable date — Registration Open Through was left as it was. ` +
+        'Enter a full date like 9/15/2026 (a bare year reads as 1905), or clear the cell.');
+      return;
+    }
+
+    const detail = parsed
+      ? `Registration will be open through ${formatDateLabel(parsed)}.\n\n` +
+        'Sessions on or before that date are unaffected. Sessions AFTER it are not open yet: their ' +
+        `calendar events will say "${REGISTRATION_NOT_OPEN_LINE}" instead of showing a register link, and ` +
+        'any form whose remaining sessions are all past that date will stop accepting responses.\n\n' +
+        'Nothing is deleted — move the date forward or clear the cell and it all comes back on the next ' +
+        'sync. Existing events are updated on the next sync, or straight away with ' +
+        '"🔗 Rewrite Event Links" from the Admin menu.'
+      : 'Clearing this opens registration for EVERY session again: register links go back on their ' +
+        'calendar events, and any form closed only because it was past the horizon re-opens on the ' +
+        'next sync.';
+    if (!confirmCellEditOrRevert(e, parsed ? `Open registration through ${formatDateLabel(parsed)}?` : 'Remove the registration horizon?', detail)) {
+      invalidateConfigCaches(); // reverted — the cache must match the sheet
+      return;
+    }
+    invalidateConfigCaches(); // the horizon just moved; anything read after this must see the new one
+    toastIfPossible(parsed
+      ? `Registration open through ${formatDateLabel(parsed)}. Run Sync Cal, or "🔗 Rewrite Event Links", to apply it now.`
+      : 'Registration horizon cleared — every session is open again from the next sync.');
+  }
+
   // Any Config edit can invalidate a cached read of it, confirmed or not.
   invalidateConfigCaches();
 }
@@ -9111,6 +9344,11 @@ function importCalendarGroups(registrySheet, options) {
   }
 
   flushPersistentRegistries(); // one write covering every group touched above
+
+  // AFTER the loop, on purpose — building a form opens it for responses, so a
+  // horizon applied before this point would be undone by the very run that
+  // applied it. See applyRegistrationHorizonEffects().
+  applyRegistrationHorizonEffects(registrySheet, work.allGroups || [], existingState);
 
   // Once more, now that the loop has built or recovered forms: a program that
   // has just come back off [No Registration] gets its dashboard links back on
@@ -9964,7 +10202,10 @@ function applyNoRegistrationEffects(registrySheet, groups) {
       (group.events || []).forEach(ev => {
         const existing = ev.getDescription() || '';
         const stripped = stripAllRegistrationLines(existing);
-        if (stripped.removed === 0 || stripped.text === existing) return;
+        // Notices count too — a program that has just been tagged
+        // [No Registration] must not be left telling people its registration
+        // opens later. It doesn't open at all.
+        if ((stripped.removed === 0 && stripped.noticesRemoved === 0) || stripped.text === existing) return;
         ev.setDescription(stripped.text);
         touched++;
       });
@@ -10010,6 +10251,311 @@ function applyNoRegistrationEffects(registrySheet, groups) {
       `closed ${closedNow} form(s), re-opened ${reopenedNow}.`);
   }
   return touched;
+}
+
+/** Form_IDs this feature closed, so only its own closures are ever re-opened. */
+const REGISTRATION_HORIZON_CLOSED_FORMS_PROP_KEY = 'REGISTRATION_HORIZON_CLOSED_FORMS_V1';
+
+/** { Form_ID: program title } for every form THIS feature closed. */
+function readRegistrationHorizonClosedForms() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties()
+      .getProperty(REGISTRATION_HORIZON_CLOSED_FORMS_PROP_KEY) || '{}');
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeRegistrationHorizonClosedForms(closedIds) {
+  PropertiesService.getScriptProperties()
+    .setProperty(REGISTRATION_HORIZON_CLOSED_FORMS_PROP_KEY, JSON.stringify(closedIds));
+}
+
+/**
+ * Opens a form for responses, or — when every session it covers is past the
+ * horizon — builds it already closed.
+ *
+ * Called from the ONE line every form builder has: the setAcceptingResponses
+ * (true) that turns a fresh copy of the template into a live form. Doing it
+ * here rather than only in the sheet-driven reconciler is what closes the
+ * window in between. A form built by a path that runs AFTER the reconciler
+ * (the lunch-only forms, a destroy-and-rebuild, a combined form made by "Move
+ * Sessions to Another Form") would otherwise sit live and public until the
+ * next sync came round — which, for a season built three months early, is
+ * exactly the leak this whole setting exists to stop.
+ *
+ * A group with no upcoming sessions at all is opened normally: "not yet" is a
+ * statement about the future, and a form covering only past dates has none.
+ */
+function applyRegistrationHorizonToNewForm(form, sessions, formTitle) {
+  const label = formTitle || form.getId();
+  const closeIt = registrationHorizonClosesSessions(sessions);
+
+  try {
+    if (closeIt) {
+      form.setCustomClosedFormMessage(REGISTRATION_NOT_OPEN_FORM_MESSAGE);
+      form.setAcceptingResponses(false);
+      const closedIds = readRegistrationHorizonClosedForms();
+      closedIds[form.getId()] = label;
+      writeRegistrationHorizonClosedForms(closedIds);
+      log(`"${label}" is entirely past the registration horizon (${describeRegistrationHorizon()}) — ` +
+        `built, but not accepting responses yet.`);
+    } else {
+      form.setAcceptingResponses(true);
+    }
+  } catch (err) {
+    log(`⚠️ Could not confirm "accepting responses" on "${label}" (${err}).`);
+  }
+}
+
+/**
+ * True when a form covering exactly these sessions should not be live yet:
+ * it has upcoming sessions, and every one of them is past the horizon.
+ *
+ * `sessions` is the `[{ date }]` shape both form builders already hold —
+ * sessionsOfGroup() for a calendar or lunch-only group, spec.sessions for a
+ * combined or rebuilt form.
+ */
+function registrationHorizonClosesSessions(sessions) {
+  if (!hasRegistrationHorizon()) return false;
+  const todayKey = formatDateKey(new Date());
+  const upcoming = (sessions || [])
+    .map(session => coerceDate(session && session.date))
+    .filter(date => date && formatDateKey(date) >= todayKey);
+  return upcoming.length > 0 && upcoming.every(date => isBeyondRegistrationHorizon(date));
+}
+
+/**
+ * REGISTRATION HORIZON — makes the Config date mean something to the calendar
+ * and to the forms, every sync, whether or not a program has new dates.
+ *
+ * Two halves, deliberately kept apart because they answer to different
+ * sources of truth:
+ *
+ *   NOTICES work off the calendar groups this run already has in memory. A
+ *   program whose dates are all on the sheet already is skipped by the import
+ *   loop as "up to date", which is right for rows and forms and wrong for a
+ *   horizon somebody moved this morning. The whole point of this setting is
+ *   that changing one cell changes what the calendar says, so it cannot wait
+ *   for a program's next new date.
+ *
+ *   FORM LIVENESS works off the session table, because that is the only place
+ *   that knows every session a form covers — including the lunch-only forms,
+ *   which have rows and a Form_ID but no calendar group of their own.
+ *
+ * Called AFTER the import loop, never before. Building a form opens it for
+ * responses, so a run that closed one first would hand it straight back —
+ * which is also why the builders themselves ask the horizon on the way past
+ * (applyRegistrationHorizonToNewForm). This pass is what catches the
+ * transitions those cannot see: a horizon that MOVED under forms and events
+ * built weeks ago.
+ */
+function applyRegistrationHorizonEffects(registrySheet, groups, existingState) {
+  const notices = reconcileRegistrationHorizonNotices(groups || [], existingState);
+  const forms = reconcileRegistrationHorizonForms(registrySheet);
+  return { notices, forms };
+}
+
+/**
+ * Brings every event's description into line with the horizon — and ONLY the
+ * ones that disagree with it.
+ *
+ * This is not a second copy of backInjectCalendarDescriptions(). That function
+ * owns the link on events it has just imported; this one owns the single
+ * question "does what this description says match whether registration is open
+ * for this date", and it touches nothing else. An event with a correct link
+ * inside the horizon, or a correct notice outside it, is not written to — which
+ * is what keeps a sync of a fully-imported season from generating a calendar
+ * notification per event per day.
+ *
+ * The scan itself is free: the events are already in memory from this run's
+ * one calendar fetch, and every test below is string work. Google only hears
+ * from us where a description is actually wrong.
+ */
+function reconcileRegistrationHorizonNotices(groups, existingState) {
+  const showLinks = shouldShowLinkInDescription();
+  const registry = getPersistentFormRegistry();
+  const groupFormMap = (existingState && existingState.groupFormMap) || {};
+  const formInfoCache = {};
+  let marked = 0;
+  let restored = 0;
+  let cleared = 0;
+
+  groups.forEach(group => {
+    // A [No Registration] program has no registration to be early for, and
+    // applyNoRegistrationEffects() has already stripped its descriptions bare.
+    if (group.noRegistration) return;
+
+    (group.events || []).forEach(ev => {
+      const existing = ev.getDescription() || '';
+      const stripped = stripAllRegistrationLines(existing);
+      const notYetOpen = shouldMarkNotYetOpen(ev.getStartTime());
+
+      if (!showLinks) {
+        // "Hide link" means nothing of ours belongs in these descriptions —
+        // not a link, and not a notice either. Only a leftover from before the
+        // setting changed can be here, so this is almost always a no-op.
+        if (stripped.noticesRemoved > 0 && stripped.text !== existing) {
+          ev.setDescription(stripped.text);
+          cleared++;
+        }
+        return;
+      }
+
+      if (notYetOpen) {
+        // Right already: one notice, at the top, no link underneath it.
+        if (existing.indexOf(REGISTRATION_NOT_OPEN_LINE) === 0 &&
+          stripped.removed === 0 && stripped.noticesRemoved === 1) {
+          return;
+        }
+        const updated = prependRegistrationLine(stripped.text, REGISTRATION_NOT_OPEN_LINE);
+        if (updated === existing) return;
+        ev.setDescription(updated);
+        marked++;
+        return;
+      }
+
+      // Inside the horizon. The only thing this function fixes here is a
+      // notice that has outlived the horizon that wrote it — an event whose
+      // link is simply missing for some other reason is
+      // backInjectCalendarDescriptions()' and "Rewrite Event Links"' business,
+      // not this function's.
+      if (stripped.noticesRemoved === 0) return;
+
+      const formId = groupFormMap[group.groupKey] || registry[group.groupKey] || '';
+      const formInfo = formId ? getFormInfoForLink(formId, formInfoCache) : null;
+      const updated = formInfo
+        ? prependRegistrationLine(stripped.text, buildRegistrationLinkLine(group, formInfo))
+        : stripped.text; // no form to link to yet — the stale notice still comes off
+      if (updated === existing) return;
+      ev.setDescription(updated);
+      if (formInfo) restored++; else cleared++;
+    });
+  });
+
+  if (marked + restored + cleared > 0) {
+    invalidateCalendarEventsCache(); // descriptions just changed under the cache
+    log(`Registration horizon (${describeRegistrationHorizon()}): marked ${marked} event(s) ` +
+      `"${REGISTRATION_NOT_OPEN_TEXT}", put the link back on ${restored}, cleared ${cleared}.`);
+  }
+  return { marked, restored, cleared };
+}
+
+/**
+ * Closes a form whose remaining sessions are ALL past the horizon, and
+ * re-opens it when the horizon reaches them.
+ *
+ * "Not live" is `setAcceptingResponses(false)` plus a closed-form message that
+ * says why, so somebody who has the link from a colleague or a bookmark reads
+ * "Registration Not Yet Open" rather than Google's blank "no longer accepting
+ * responses" — which would read as "you missed it" for a program nobody has
+ * been able to sign up for yet.
+ *
+ * Two rules keep this from being destructive:
+ *
+ *   ONLY FORMS THIS FUNCTION CLOSED ARE EVER RE-OPENED. They are remembered in
+ *   a Script Property, exactly as applyNoRegistrationEffects() remembers its
+ *   own, so a form staff closed by hand in the Forms UI stays closed and a
+ *   form closed by [No Registration] is left to that feature to re-open.
+ *
+ *   A FORM WITH NO UPCOMING SESSIONS IS NOT TOUCHED. Last month's form is
+ *   closed, open, or archived for reasons of its own, and none of them are
+ *   this setting's business.
+ */
+function reconcileRegistrationHorizonForms(registrySheet) {
+  const props = PropertiesService.getScriptProperties();
+  const closedIds = readRegistrationHorizonClosedForms();
+
+  // No horizon and nothing we have ever closed: every sync of every workbook
+  // that does not use this setting stops here, before reading a sheet or
+  // opening a single form.
+  if (!hasRegistrationHorizon() && Object.keys(closedIds).length === 0) return { closed: 0, reopened: 0 };
+  if (!registrySheet) return { closed: 0, reopened: 0 };
+
+  let noRegistrationClosed;
+  try {
+    noRegistrationClosed = JSON.parse(props.getProperty(NO_REGISTRATION_CLOSED_FORMS_PROP_KEY) || '{}');
+  } catch (err) {
+    noRegistrationClosed = {};
+  }
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+
+  // Form_ID -> { open: does it still cover a session inside the horizon,
+  //              upcoming: does it cover any future session at all, title }
+  const byForm = {};
+  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+    const formId = String(row[map['Form_ID']] || '').trim();
+    if (!formId) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date || formatDateKey(date) < todayKey) return;
+    if (!byForm[formId]) {
+      byForm[formId] = { open: false, upcoming: false, title: String(row[map['Clean_Title']] || '').trim() };
+    }
+    byForm[formId].upcoming = true;
+    if (!isBeyondRegistrationHorizon(date)) byForm[formId].open = true;
+  });
+
+  // A form we closed whose sessions have since been deleted outright would
+  // otherwise never be reconsidered — it has no rows left to put it in the map
+  // above, so it could sit closed forever. Add it back as "no upcoming
+  // sessions" and let the loop decide what that means.
+  Object.keys(closedIds).forEach(formId => {
+    if (!byForm[formId]) byForm[formId] = { open: false, upcoming: false, title: closedIds[formId] || '' };
+  });
+
+  let closed = 0;
+  let reopened = 0;
+
+  Object.keys(byForm).forEach(formId => {
+    const state = byForm[formId];
+    // Closed by [No Registration], which is a stronger statement than "not
+    // yet". That feature owns the form until its tag comes off.
+    if (noRegistrationClosed[formId]) return;
+
+    const shouldBeClosed = state.upcoming && !state.open;
+    const weClosedIt = Object.prototype.hasOwnProperty.call(closedIds, formId);
+
+    if (shouldBeClosed) {
+      if (weClosedIt) return; // already ours, already shut
+      try {
+        const form = FormApp.openById(formId);
+        if (form.isAcceptingResponses()) {
+          form.setCustomClosedFormMessage(REGISTRATION_NOT_OPEN_FORM_MESSAGE);
+          form.setAcceptingResponses(false);
+          closed++;
+        }
+        closedIds[formId] = state.title;
+      } catch (err) {
+        log(`ℹ️ Form ${formId} ("${state.title}") is entirely past the registration horizon but could not be closed (${err}).`);
+      }
+      return;
+    }
+
+    if (!weClosedIt) return;
+
+    // Either a session is now inside the horizon, or the form has no upcoming
+    // session left to hold shut. Both mean this function is done with it.
+    try {
+      const form = FormApp.openById(formId);
+      if (!form.isAcceptingResponses()) {
+        form.setAcceptingResponses(true);
+        reopened++;
+      }
+      delete closedIds[formId];
+    } catch (err) {
+      log(`ℹ️ Form ${formId} ("${state.title}") is inside the registration horizon again but could not be re-opened (${err}).`);
+    }
+  });
+
+  writeRegistrationHorizonClosedForms(closedIds);
+  if (closed || reopened) {
+    log(`Registration horizon (${describeRegistrationHorizon()}): closed ${closed} form(s) that are not open yet, ` +
+      `re-opened ${reopened}.`);
+  }
+  return { closed, reopened };
 }
 
 /**
@@ -10950,6 +11496,29 @@ const ANY_FORMS_ANCHOR_REGEX = /<a[^>]*href="[^"]*docs\.google\.com\/forms\/[^"]
 const BARE_FORMS_URL_REGEX = /https?:\/\/docs\.google\.com\/forms\/\S*/gi;
 /** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
 const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
+/**
+ * The "🚧 Registration Not Yet Open" notice, in every shape it survives as.
+ *
+ * Matched with and without the emoji, and tolerant of a `<br>`/`</div>`
+ * trailing it, because a description edited by hand in the Calendar web UI
+ * comes back wrapped in HTML that was never there when we wrote it. A notice
+ * we cannot recognize is a notice that outlives the horizon that caused it —
+ * which is how an event ends up saying registration is not open on the day it
+ * opens.
+ */
+const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
+  // Alone on its line — how this script writes it — however it ends up
+  // indented, quoted, or wrapped in tags by a later edit.
+  new RegExp(`^[\\s>]*(?:<[^>]+>\\s*)*(?:🚧\\s*)?${REGISTRATION_NOT_OPEN_TEXT}\\s*(?:<[^>]+>\\s*)*$`, 'gim'),
+  // Wrapped in one element on a line it now shares with other content: the
+  // Calendar web UI re-flows a whole description into <div>s when somebody
+  // edits any part of it, and our line stops being a line.
+  new RegExp(`<(div|p|span)[^>]*>\\s*(?:🚧\\s*)?${REGISTRATION_NOT_OPEN_TEXT}\\s*</\\1>`, 'gi'),
+  // Bare and mid-line, with nothing around it. Requires the emoji: the words
+  // on their own could plausibly be something a person typed, but "🚧 " in
+  // front of them is this script's stamp.
+  new RegExp(`🚧\\s*${REGISTRATION_NOT_OPEN_TEXT}`, 'gi')
+];
 
 /**
  * Removes every registration link from a description and reports how many
@@ -10970,7 +11539,7 @@ const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
  */
 function stripAllRegistrationLines(description) {
   const original = String(description || '');
-  if (!original) return { text: '', removed: 0 };
+  if (!original) return { text: '', removed: 0, noticesRemoved: 0 };
 
   let removed = 0;
   const countAndClear = (text, regex) => text.replace(regex, () => { removed++; return ''; });
@@ -10984,7 +11553,18 @@ function stripAllRegistrationLines(description) {
   // or an event with a flattened anchor would report two.
   text = text.replace(ORPHAN_REGISTER_LABEL_REGEX, '');
 
-  return { text: tidyDescriptionWhitespace(text), removed };
+  // The horizon notice is this system's line too, and comes off with
+  // everything else so the caller can write back whichever ONE line is right
+  // now. Counted SEPARATELY from links: callers that only act when a link was
+  // found (the "Hide link" sweep, [No Registration]) must still notice a stale
+  // notice sitting on an event, and callers that report "N old links removed"
+  // must not count notices among them.
+  let noticesRemoved = 0;
+  REGISTRATION_NOT_OPEN_NOTICE_PATTERNS.forEach(pattern => {
+    text = text.replace(pattern, () => { noticesRemoved++; return ''; });
+  });
+
+  return { text: tidyDescriptionWhitespace(text), removed, noticesRemoved };
 }
 
 /**
@@ -11081,8 +11661,12 @@ function rewriteEventRegistrationLinks() {
   // Asked BEFORE the lock is taken: holding a script lock open while a modal
   // waits for a human is how a scheduled sync gets skipped for ten minutes
   // because somebody walked away from the dialog.
+  const horizonNote = hasRegistrationHorizon()
+    ? `\n\nRegistration is open through ${describeRegistrationHorizon()}. Events AFTER that date get ` +
+      `"${REGISTRATION_NOT_OPEN_LINE}" instead of a link.`
+    : '';
   if (!confirmConsequentialAction('Rewrite the registration link on every upcoming event?',
-    `Config says "${mode}".\n\n` +
+    `Config says "${mode}".${horizonNote}\n\n` +
     'Every UPCOMING event on all program calendars will have every registration link removed — ' +
     'including duplicates and older formats — and then ' +
     (showLinks
@@ -11141,7 +11725,7 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   const formInfoCache = {};
   const stats = {
     scanned: 0, linksRemoved: 0, rewritten: 0, cleared: 0, unchanged: 0,
-    noForm: 0, calendarsSkipped: 0, triggersRemoved: 0, triggersRestored: 0
+    noForm: 0, notYetOpen: 0, calendarsSkipped: 0, triggersRemoved: 0, triggersRestored: 0
   };
 
   // EVERY description write below is a calendar update. Take the watchers down
@@ -11190,7 +11774,13 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
         stats.linksRemoved += stripped.removed;
 
         let updated = stripped.text;
-        if (showLinks) {
+        if (showLinks && shouldMarkNotYetOpen(startTime)) {
+          // Past the horizon: the notice replaces the link, and no form has to
+          // be opened to write it. Not counted against noForm — there being no
+          // form yet is irrelevant when nothing would be linked either way.
+          updated = prependRegistrationLine(stripped.text, REGISTRATION_NOT_OPEN_LINE);
+          stats.notYetOpen++;
+        } else if (showLinks) {
           const eventId = computeEventId(calendarId, parsed.cleanTitle, formatDateKey(startTime));
           const session = sessionByEventId[eventId];
           const formInfo = session && session.formId ? getFormInfoForLink(session.formId, formInfoCache) : null;
@@ -11259,6 +11849,7 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   const summary = `Event links rewritten ✅ — ${stats.scanned} upcoming event(s) scanned, ` +
     `${stats.linksRemoved} old link(s) removed, ${stats.rewritten} rewritten, ${stats.cleared} left with no link, ` +
     `${stats.unchanged} already correct; ${stats.triggersRestored} calendar-edit trigger(s) rebuilt` +
+    (stats.notYetOpen > 0 ? `, ${stats.notYetOpen} marked "${REGISTRATION_NOT_OPEN_TEXT}"` : '') +
     (stats.noForm > 0 ? `, ⚠️ ${stats.noForm} with no form on the dashboard` : '') +
     (stats.calendarsSkipped > 0 ? `, ⚠️ ${stats.calendarsSkipped} calendar(s) unreadable` : '') + '.';
   log(`rewriteEventRegistrationLinks: ${summary}`);
@@ -11419,11 +12010,9 @@ function createRegistrationForm(group, configInfo) {
   const form = FormApp.openById(copiedFile.getId());
   form.setTitle(formTitle);
 
-  try {
-    form.setAcceptingResponses(true);
-  } catch (err) {
-    log(`⚠️ Could not confirm "accepting responses" on copied form "${formTitle}" (${err}).`);
-  }
+  // Live now, or built closed until registration opens — see
+  // applyRegistrationHorizonToNewForm().
+  applyRegistrationHorizonToNewForm(form, sessionsOfGroup(group), formTitle);
   try {
     if (typeof form.setPublished === 'function') form.setPublished(true);
   } catch (err) {
@@ -11686,7 +12275,9 @@ function backInjectCalendarDescriptions(group, formInfo) {
     group.events.forEach(ev => {
       const existing = ev.getDescription() || '';
       const stripped = stripAllRegistrationLines(existing);
-      if (stripped.removed === 0 || stripped.text === existing) return;
+      // A notice counts as something to clear just as much as a link does:
+      // "Hide link" means these descriptions carry nothing of ours at all.
+      if ((stripped.removed === 0 && stripped.noticesRemoved === 0) || stripped.text === existing) return;
       ev.setDescription(stripped.text);
       cleared++;
     });
@@ -11697,9 +12288,32 @@ function backInjectCalendarDescriptions(group, formInfo) {
   }
 
   const linkLine = buildRegistrationLinkLine(group, formInfo);
+  let notYetOpenCount = 0;
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
+
+    // BEYOND THE HORIZON: the event exists, the form exists, but registration
+    // has not opened for this date yet — so the description says so in words
+    // instead of handing out a link. Decided per EVENT, not per group: a
+    // [Grouped] series can straddle the horizon, and the sessions on the near
+    // side of it stay open.
+    if (shouldMarkNotYetOpen(ev.getStartTime())) {
+      notYetOpenCount++;
+      const stripped = stripAllRegistrationLines(existing);
+      // Already exactly right — one notice, at the top, and no link anywhere
+      // in the description. Same reasoning as the link fast path below: don't
+      // burn a write (and the calendar notification that follows it) on every
+      // sync of a season that was built months ago.
+      if (existing.indexOf(REGISTRATION_NOT_OPEN_LINE) === 0 &&
+        stripped.removed === 0 && stripped.noticesRemoved === 1) {
+        return;
+      }
+      const updated = prependRegistrationLine(stripped.text, REGISTRATION_NOT_OPEN_LINE);
+      if (updated !== existing) ev.setDescription(updated);
+      return;
+    }
+
     const found = findRegistrationLineInDescription(existing);
 
     // Already current, in the current format, and already at the top — leave
@@ -11714,9 +12328,15 @@ function backInjectCalendarDescriptions(group, formInfo) {
     // stripAllRegistrationLines), one back in AT THE TOP. Replacing in place
     // was what let a second, mangled copy sit in a description untouched
     // forever, since the first match was always the one that got corrected.
+    // A stale notice from a horizon that has since moved comes off here too.
     const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text, linkLine);
     if (updated !== existing) ev.setDescription(updated);
   });
+
+  if (notYetOpenCount > 0) {
+    log(`"${group.cleanTitle}": ${notYetOpenCount} event(s) are past the registration horizon ` +
+      `(${describeRegistrationHorizon()}) — they read "${REGISTRATION_NOT_OPEN_TEXT}" instead of a link.`);
+  }
 }
 
 
@@ -19955,11 +20575,7 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
   const locations = spec.locations || locationsOfSessions(sessions);
 
   form.setTitle(formTitle);
-  try {
-    form.setAcceptingResponses(true);
-  } catch (err) {
-    log(`⚠️ Could not confirm "accepting responses" on "${formTitle}" (${err}).`);
-  }
+  applyRegistrationHorizonToNewForm(form, sessions, formTitle);
   try {
     if (typeof form.setPublished === 'function') form.setPublished(true);
   } catch (err) {
@@ -21131,6 +21747,18 @@ function remapFormRegistries(oldFormId, newFormId) {
   if (versions[oldFormId]) {
     delete versions[oldFormId];
     __formTemplateVersionDirty = true;
+  }
+
+  // "We closed this one because registration has not opened for it" has to
+  // follow the sessions onto their new form, or the replacement is left live
+  // for a program nobody can sign up for yet AND the old ID sits in the
+  // property forever, since nothing will ever look it up again. The new form
+  // was built by configureFormFromSpec(), which already asked the horizon the
+  // same question — this only cleans up after the form it replaced.
+  const horizonClosed = readRegistrationHorizonClosedForms();
+  if (Object.prototype.hasOwnProperty.call(horizonClosed, oldFormId)) {
+    delete horizonClosed[oldFormId];
+    writeRegistrationHorizonClosedForms(horizonClosed);
   }
 
   invalidateFormItemIndex(oldFormId);

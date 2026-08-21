@@ -61,6 +61,12 @@ It also:
   marks come back into the workbook, cell by cell, without overwriting a
   correction staff made in the meantime — and with no trigger of its own, so it
   still works at the sixtieth program;
+- holds **registration shut until a date you set** — one `Registration Open
+  Through` cell on Config, so next season's calendar can go up months early
+  without anyone signing up for it: sessions past that date get a calendar
+  event that reads **🚧 Registration Not Yet Open** instead of a register link,
+  and their form is built but not accepting responses. Move the date forward
+  and the links and forms come back on the next sync;
 - prints a **landscape sign-in sheet PDF** for the desk to mark up by hand;
 - **invites registrants to the calendar event** they signed up for — every
   session on the hourly pass, or a session you pick from the menu — and

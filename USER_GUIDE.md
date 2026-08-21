@@ -896,7 +896,7 @@ several addresses are fine, separated by commas. See
 [Instructor sign-up sheets](#instructor-sign-up-sheets).
 
 ### 7. Config
-Seven small settings blocks:
+Eight small settings blocks:
 
 - **🍱 Meal Buffer Amounts** — extra meals per Location × Hot/Cold. **This is
   the only place buffers are set.** Master_Lunch_Dashboard re-reads them here on
@@ -909,6 +909,7 @@ Seven small settings blocks:
 - **🔗 Registration Link in Events** — see below
 - **⚙️ Automation & Trigger Ownership** — see below
 - **📧 Calendar Invitations** — see below
+- **🚧 Registration Open Through** — see below
 
 **Lunch Service by Location** is what keeps the lunch dashboard from filling up
 with empty rows. Each location gets one of three settings:
@@ -1021,6 +1022,67 @@ anything left over goes out on the next one.
 
 > Registrants who didn't give an email address (walk-ins, club members added by
 > hand) are simply skipped. Nothing else about them changes.
+
+#### 🚧 Registration Open Through
+
+**One date that decides how far ahead people can sign up.** Leave it blank —
+the default — and nothing changes: every session is open, exactly as before.
+
+Put a date in it and the workbook draws a line:
+
+| Session date | What happens |
+|---|---|
+| **On or before** the date | Normal. Register link on the calendar event, form taking responses. |
+| **After** the date | Not open yet. The calendar event says **🚧 Registration Not Yet Open** instead of carrying a register link, and a form whose remaining sessions are *all* past the date **stops accepting responses**. |
+
+This is for the ordinary case of building a season three months early. The
+calendar events go up in June; you don't want a member browsing the shared
+calendar in June and registering for November. Set the horizon to the end of
+September and September's programs are live while November's are visible but
+closed.
+
+**Nothing is deleted and nothing is skipped.** The session rows, the forms, and
+the calendar events are all still built ahead of time — the horizon only
+decides whether the public is invited into them yet. That's what makes opening
+registration a **one-cell** operation: move the date forward and the next sync
+puts the links back and re-opens the forms. Clear the cell and everything opens
+at once.
+
+**What people see:**
+
+- On the calendar event: `🚧 Registration Not Yet Open` at the top of the
+  description, where the register link normally sits.
+- On a form somebody already has the link to: Google's closed-form page, saying
+  *"Registration Not Yet Open — this program is not taking sign-ups yet. Please
+  check back closer to the session date."* Not the bare "no longer accepting
+  responses", which reads as *you missed it* for something nobody has been able
+  to sign up for yet.
+
+**A few rules worth knowing:**
+
+- **The horizon date itself is open.** It means *through the end of that day*.
+- **A series that straddles the line keeps its form live.** A `[Grouped]`
+  program running September to December has open sessions, so its form stays
+  open — only its events past the horizon carry the notice. The horizon closes
+  a form only when **every** remaining session on it is past the date.
+- **Past sessions are never touched.** A date behind today is a record of what
+  happened, so it keeps its description even if you set the horizon behind
+  today (which is a legitimate way to say *nothing is open right now* — it
+  closes everything upcoming).
+- **Only forms the horizon closed are re-opened by it.** A form you closed by
+  hand in the Forms UI stays closed, and one closed by `[No Registration]` is
+  left to that checkbox.
+- **A typo can't take the workbook down.** Anything that isn't a date is
+  refused when you type it, and a cell that somehow ends up holding one anyway
+  reads as *no horizon* — everything open — and says so in the log. The
+  dangerous direction is the other one, so it fails that way on purpose.
+- **It doesn't apply to `Hide link`.** If Config's 🔗 Registration Link in
+  Events is set to `Hide link`, event descriptions carry nothing of ours at
+  all — no link and no notice.
+
+Changing the date takes effect on the **next sync**. To apply it to events
+already in the calendar right away, run **🔗 Rewrite Event Links** from the
+Admin menu.
 
 ### 8. Club_Members
 The standing roster for every `[Club]` program — one row per person per club.
@@ -1854,6 +1916,15 @@ numbers and split meal counts:**
 4. **Run Sync Cal once** so the `Club` column fills in for programs you've
    tagged.
 
+**And when you update to the version with the registration horizon:**
+
+1. **Rebuild Layout** adds the **🚧 Registration Open Through** block to Config.
+   It arrives **blank**, which means *no horizon* — every session stays open
+   and nothing about your workbook changes until you put a date in it.
+2. **Nothing to undo.** Leaving it blank forever is a perfectly good answer;
+   the feature costs nothing when it isn't used. See [Registration Open
+   Through](#-registration-open-through).
+
 **And when you update to the version with the two checkboxes:**
 
 1. **Rebuild Layout** adds the `No_Registration` column and turns both it and
@@ -2077,6 +2148,19 @@ Create the calendar event — program name as the title, any `[Cap: N]` / `[Fixe
 settings in the description. Wait for the next sync (or press Sync Cal). The
 registration link appears in the event description and on the dashboard.
 
+**Build next season's calendar without opening sign-ups yet**
+Put the last date registration should be open for in **🚧 Registration Open
+Through** on Config, then build the calendar as far ahead as you like. Anything
+past that date goes up as a normal calendar event, but its description reads
+`🚧 Registration Not Yet Open` and its form doesn't take responses. When you're
+ready, move the date forward — that's the whole operation. See [Registration
+Open Through](#-registration-open-through).
+
+**Open registration for the next block of programs**
+Change the date in **🚧 Registration Open Through** on Config and run **Sync
+Cal** (or **🔗 Rewrite Event Links** to update the calendar immediately). The
+register links go back on and the forms re-open.
+
 **Change a program's capacity**
 Edit `[Cap: N]` in the event description. New sign-ups respect the new number on
 the next sync; already-recorded rows keep the status they were given.
@@ -2232,6 +2316,17 @@ every render.
 Check, in order: does the title start with `*` (tentative)? Is it an all-day
 event (those are skipped)? Is it more than ~60 days out? Is it on one of the
 three configured calendars?
+
+**An event says "🚧 Registration Not Yet Open" and shouldn't**
+Its date is past **🚧 Registration Open Through** on Config. Move that date
+forward (or clear the cell) and run **Sync Cal**, or **🔗 Rewrite Event Links**
+to update the calendar straight away.
+
+**A form says registration isn't open yet and I need it open now**
+Same cell. The horizon closes a form only when *every* remaining session on it
+is past the date, so moving the date past that form's first session re-opens it
+on the next sync. If the form was closed by hand in the Forms UI instead, the
+horizon won't re-open it — open it yourself in Google Forms.
 
 **A form shows the wrong dates or meals**
 Press **🍱 Push Menu Changes to Forms**. Editing `Lunch_Schedule` deliberately
