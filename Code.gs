@@ -5925,26 +5925,70 @@ function getLunchOnlyFormLinks() {
 }
 
 
-function reorderTabs(ss) {
-  const order = [
+/**
+ * THE FOUR KINDS OF TAB, in the order they are worth looking at, and the
+ * colour each one's tab is painted.
+ *
+ * TWELVE TABS IS A LOT TO MEET AT ONCE, and until now they arrived as an
+ * undifferentiated row along the bottom of the window: a tab rebuilt from
+ * scratch every hour sat next to one nobody may type in next to one that is
+ * pure settings, all in the same grey. "Which of these matter today?" and
+ * "may I type in this one?" are the two questions somebody new asks, and the
+ * workbook answered neither.
+ *
+ * Colour answers the first. The second is answered where it has to be —
+ * on the cells, in yellow, at the moment of typing (see MANUAL_ENTRY_PREFIX
+ * and applyLunchRosterFormatting()) — because a tab colour cannot say "these
+ * four columns, but not those".
+ *
+ *   TODAY    green   what a serving day is run from. Open these.
+ *   SET UP   blue    what you fill in ahead of time: the menu, the settings,
+ *                    the extra questions a form should ask.
+ *   LISTS    yellow  standing lists that outlive any one session — who the
+ *                    members are, who is in which club, who is waiting for an
+ *                    appointment.
+ *   ARCHIVE  grey    where things go when they stop being current.
+ */
+const TAB_GROUPS = [
+  { color: '#93C47D', names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_DASHBOARD,
     SHEET_NAMES.LUNCH_ROSTER,
-    SHEET_NAMES.REGISTRANT_DASH,
+    SHEET_NAMES.REGISTRANT_DASH
+  ] },
+  { color: '#6FA8DC', names: [
     SHEET_NAMES.LUNCH_SCHEDULE,
+    SHEET_NAMES.CONFIG,
+    SHEET_NAMES.PROGRAM_QUESTIONS
+  ] },
+  { color: '#FFD966', names: [
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
     SHEET_NAMES.PROGRAM_OPTIONS,
-    SHEET_NAMES.PROGRAM_QUESTIONS,
-    SHEET_NAMES.ASSISTANCE_REQUESTS,
-    SHEET_NAMES.CONFIG,
+    SHEET_NAMES.ASSISTANCE_REQUESTS
+  ] },
+  { color: '#B7B7B7', names: [
     SHEET_NAMES.TRIAGE
-  ];
-  order.forEach((name, i) => {
-    const sheet = ss.getSheetByName(name);
-    if (!sheet) return;
-    ss.setActiveSheet(sheet);
-    ss.moveActiveSheet(i + 1);
+  ] }
+];
+
+function reorderTabs(ss) {
+  let position = 0;
+  TAB_GROUPS.forEach(group => {
+    group.names.forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      if (!sheet) return;
+      position++;
+      ss.setActiveSheet(sheet);
+      ss.moveActiveSheet(position);
+      // Never fatal: a tab colour is the last thing worth failing a layout
+      // rebuild over.
+      try {
+        sheet.setTabColor(group.color);
+      } catch (err) {
+        log(`Could not colour the "${name}" tab (${err}).`);
+      }
+    });
   });
 }
 
