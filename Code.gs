@@ -9526,6 +9526,73 @@ const TENTATIVE_TITLE_PREFIX = '*';
 const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
 
 /**
+ * Every tag/setting this system recognizes, as patterns that can be REMOVED
+ * from a bracket's text. Used only by isTagOnlyBracket() — the parser proper
+ * still reads each setting with its own regex above.
+ *
+ * Order matters only in that a longer form must be stripped before a shorter
+ * one it contains ("Max Per Month: 1" before "Monthly" would match nothing,
+ * but "Cap: 12" must go before a bare number could confuse anything).
+ */
+const RECOGNIZED_TAG_PATTERNS = [
+  /Cap:\s*\d+/i,
+  /Max\s*Per\s*Month:\s*\d+/i,
+  /Slots?:\s*\d+/i,
+  SHARED_LOCATION_WORDS_REGEX,
+  CLUB_WORDS_REGEX,
+  NO_REGISTRATION_WORDS_REGEX,
+  ASSISTANCE_WORDS_REGEX,
+  /\b(Grouped|Fixed)\b/i,
+  /\b(Monthly|Regular)\b/i
+];
+
+/**
+ * Is this bracket's contents ENTIRELY tags this system understands?
+ *
+ * WHY THIS EXISTS. Every tag used to be detected by testing its regex against
+ * the whole bracket, so a bracket only had to CONTAIN one of these words to
+ * switch the setting on. The words are ordinary English — Club, Combined,
+ * Shared, Regular, Appointments, Drop-In — and staff are explicitly told to
+ * put clarifying notes in the event description. The two instructions
+ * collided, silently and in the worst direction:
+ *
+ *   "[Film Club selection: Casablanca]"   -> gave the programme a standing
+ *                                            club roster
+ *   "[Drop-in welcome]"                   -> deleted its registration form
+ *   "[Combined with the JCC]"             -> pooled it onto one form with
+ *                                            every other location
+ *   "[Call the office for an appointment]"-> turned it into 30-minute
+ *                                            appointment slots
+ *
+ * None of those announced themselves; the file's own comment promised the
+ * opposite ("unrecognized bracket contents are ignored"). This is what makes
+ * that promise true.
+ *
+ * THE RULE: strip every recognized tag out of the text. If what is left is
+ * nothing but separators, the bracket was a tag list and is honoured. If any
+ * real words survive, it was a sentence and the WHOLE bracket is left alone —
+ * including the tag-looking word inside it, because "Film Club selection" is
+ * not a request for a club roster and honouring half of it is worse than
+ * honouring none.
+ *
+ * Whole-bracket, not per-word: that is what keeps "[Cap: 12, Grouped]" and
+ * "[Cap: 12 Grouped]" both working while rejecting the prose above.
+ */
+function isTagOnlyBracket(content) {
+  let remaining = String(content || '');
+  if (!remaining.trim()) return false;
+  RECOGNIZED_TAG_PATTERNS.forEach(pattern => {
+    // A fresh non-global copy: several of these constants are shared, and a
+    // /g cursor left behind by another caller would skip matches here.
+    const scan = new RegExp(pattern.source, 'gi');
+    remaining = remaining.replace(scan, ' ');
+  });
+  // Separators are all that may be left: commas, semicolons, slashes, plus
+  // signs, dashes and whitespace are how people join tags together.
+  return !/[^\s,;/+&|-]/.test(remaining);
+}
+
+/**
  * Pulls the settings this system understands out of any bracketed groups
  * in a blob of text:
  *   [Cap: 12]            -> capacity 12
@@ -9574,6 +9641,16 @@ function parseSettingsBrackets(text) {
   let match;
   while ((match = BRACKET_GROUP_REGEX.exec(raw)) !== null) {
     const content = match[1] || '';
+    // A BRACKET IS EITHER ALL TAGS OR ALL PROSE — see isTagOnlyBracket(). Staff
+    // are told to put clarifying notes in the description, and a note that
+    // happens to contain one of these words ("[Film Club selection:
+    // Casablanca]", "[Drop-in welcome]", "[Combined with the JCC]") must not
+    // reconfigure the programme behind their back.
+    if (!isTagOnlyBracket(content)) {
+      log(`ℹ️ Ignoring "[${content}]" — it reads as a note, not a tag. A bracket only sets something ` +
+        `when the WHOLE bracket is tags (e.g. "[Club]", "[Cap: 12, Grouped]"); anything else is left alone.`);
+      continue;
+    }
     const capMatch = /Cap:\s*(\d+)/i.exec(content);
     if (capMatch) { capacity = parseInt(capMatch[1], 10); sawAny = true; }
     // The WHERE half of grouping, orthogonal to Grouped/Regular above — see
@@ -9600,7 +9677,7 @@ function parseSettingsBrackets(text) {
       if (minutes >= MIN_APPOINTMENT_SLOT_MINUTES && minutes <= MAX_APPOINTMENT_SLOT_MINUTES) {
         slotMinutes = minutes;
       } else {
-        log(`\u26a0\ufe0f Ignoring "[Slots: ${minutes}]" — an appointment must be between ` +
+        log(`⚠️ Ignoring "[Slots: ${minutes}]" — an appointment must be between ` +
           `${MIN_APPOINTMENT_SLOT_MINUTES} and ${MAX_APPOINTMENT_SLOT_MINUTES} minutes. ` +
           `Using ${APPOINTMENT_SLOT_MINUTES}.`);
       }
