@@ -466,6 +466,47 @@ const AUTHORIZED_ADMIN_EMAILS = [
 ];
 
 /**
+ * THE OWNER OF THIS SPREADSHEET IS ALWAYS AN ADMIN, whatever the list above
+ * says.
+ *
+ * The list is a hardcoded constant, and a hardcoded constant is exactly the
+ * thing that goes stale: an address that was a shared account once, or was
+ * aspirational, or belongs to somebody who has left. When it does, EVERY
+ * admin action refuses — Rebuild Layout, Delete Registrations, Import
+ * Everything, Check Triggers, Re-check All Forms — and the refusal names an
+ * account nobody can sign in as. The README's own upgrade instructions
+ * ("run Admin ▸ Rebuild Layout") stop working, and there is no way back
+ * except editing the source.
+ *
+ * The owner is the one identity that cannot be wrong: they can already change
+ * this file, delete the tabs, and share the workbook with anyone. Gating them
+ * out protects nothing and strands everything. Failing closed still holds for
+ * everyone else — see requireAuthorizedAdmin().
+ *
+ * Returns '' when the owner can't be read (a shared drive has no single
+ * owner, and getOwner() can come back null), which simply falls through to
+ * the list.
+ */
+function getWorkbookOwnerEmail() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return '';
+    const owner = ss.getOwner();
+    return owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
+  } catch (err) {
+    // A file on a shared drive throws rather than returning null.
+    return '';
+  }
+}
+
+/** Every account that may run an admin action: the list above, plus the owner. */
+function listAuthorizedAdminEmails() {
+  const owner = getWorkbookOwnerEmail();
+  const listed = AUTHORIZED_ADMIN_EMAILS.map(e => String(e || '').trim().toLowerCase()).filter(Boolean);
+  return owner && listed.indexOf(owner) === -1 ? listed.concat([owner]) : listed;
+}
+
+/**
  * The Google account this specific execution is running as. Session.getEffectiveUser()
  * is who the code's side effects are attributed to — for a menu click or a
  * direct editor run, that's whoever is signed in; for an installable trigger
@@ -487,7 +528,7 @@ function getCurrentUserEmail() {
 function isAuthorizedAdmin() {
   const email = getCurrentUserEmail();
   if (!email) return false;
-  return AUTHORIZED_ADMIN_EMAILS.some(allowed => allowed.trim().toLowerCase() === email);
+  return listAuthorizedAdminEmails().indexOf(email) !== -1;
 }
 
 /**
@@ -506,7 +547,7 @@ function requireAuthorizedAdmin(actionName) {
   if (isAuthorizedAdmin()) return true;
   const email = getCurrentUserEmail();
   const whoami = email ? `you're signed in as ${email}` : `your account could not be identified`;
-  const message = `⛔ "${actionName}" is restricted to: ${AUTHORIZED_ADMIN_EMAILS.join(', ')} — ${whoami}. ` +
+  const message = `⛔ "${actionName}" is restricted to: ${listAuthorizedAdminEmails().join(', ')} — ${whoami}. ` +
     `Ask one of those accounts to run it, or switch to one of them.`;
   log(message);
   toastIfPossible(message);
@@ -3348,12 +3389,37 @@ function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
   return '';
 }
 
-/** Tints an Event_Date column's cells by month — the direct replacement for the old separate Month column everywhere. */
+/**
+ * How every Event_Date cell in this workbook reads: "Tue 9/16/2026".
+ *
+ * THE DAY NAME IS THE POINT. Asked for from the desk, in these words: "Any
+ * chance we could have the day of the week on the main event page as well as
+ * the date? It would make it easier to find things like 'Advanced Mah Jongg'
+ * at Ashbridge (Tues) vs 'Advanced Mah Jongg' at Narberth (Mon)." Programmes
+ * here are known by their day as much as by their name, and a bare 9/16/2026
+ * made the one distinguishing fact the reader had to work out for themselves.
+ *
+ * It is still a real date underneath — this is a display format, not a string
+ * — so sorting, coerceDate() and every date comparison are unaffected.
+ */
+const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
+
+/**
+ * Tints an Event_Date column's cells by month — the direct replacement for the
+ * old separate Month column everywhere — and stamps DATE_DISPLAY_FORMAT while
+ * it is there.
+ *
+ * The two belong together: this is called on exactly the Event_Date column of
+ * exactly the tabs that have one, from writeUpcomingPastSections(), so it is
+ * the one place that already knows where every date cell in the workbook is.
+ */
 function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows) {
   if (numRows < 1) return;
-  const values = sheet.getRange(startRow, colIndex1Based, numRows, 1).getValues();
+  const range = sheet.getRange(startRow, colIndex1Based, numRows, 1);
+  const values = range.getValues();
   const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : '#FFFFFF']; });
-  sheet.getRange(startRow, colIndex1Based, numRows, 1).setBackgrounds(backgrounds);
+  range.setBackgrounds(backgrounds);
+  range.setNumberFormat(DATE_DISPLAY_FORMAT);
 }
 
 /** Builds a "text equals" conditional format rule across one or more explicit ranges. */
@@ -6356,7 +6422,7 @@ function seedCalendarInviteRow(sheet) {
 function seedRegistrationHorizonRow(sheet) {
   const section = CONFIG_LAYOUT.REGISTRATION_HORIZON;
   const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
-  cell.setNumberFormat('M/d/yyyy');
+  cell.setNumberFormat(DATE_DISPLAY_FORMAT);
   cell.setNote(
     'Registration is open through this date. Leave BLANK to open everything (the default).\n\n'
     + 'Sessions on or before this date behave normally. Sessions AFTER it are not open yet:\n'
@@ -17271,7 +17337,7 @@ function writeMemoryTab(sheet, headers, rows, options) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1, rows.length, numCols).setValues(rows);
     const map = getIndexMap(headers);
     (options.dateColumns || []).forEach(h => {
-      sheet.getRange(MEMORY_TAB_DATA_ROW, map[h] + 1, rows.length, 1).setNumberFormat('M/d/yyyy');
+      sheet.getRange(MEMORY_TAB_DATA_ROW, map[h] + 1, rows.length, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     });
     (options.numberColumns || []).forEach(h => {
       sheet.getRange(MEMORY_TAB_DATA_ROW, map[h] + 1, rows.length, 1).setNumberFormat('0');
@@ -19633,7 +19699,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
 
   zones.forEach(z => {
     if (z.count < 1) return;
-    sheet.getRange(z.start, map['Event_Date'] + 1, z.count, 1).setNumberFormat('M/d/yyyy');
+    sheet.getRange(z.start, map['Event_Date'] + 1, z.count, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     numericCols.forEach(h => sheet.getRange(z.start, map[h] + 1, z.count, 1).setNumberFormat('0'));
     tintManualEntryColumns(sheet, z.start, z.count, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
   });
@@ -20741,7 +20807,7 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
 
   if (rows.length > 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1, rows.length, numCols).setValues(rows);
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Event_Date'] + 1, rows.length, 1).setNumberFormat('M/d/yyyy');
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Event_Date'] + 1, rows.length, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     sheet.getRange(MEMORY_TAB_DATA_ROW, map['Party_Size'] + 1, rows.length, 1).setNumberFormat('0');
     applyZebraStripingManualBounded(sheet, MEMORY_TAB_DATA_ROW, rows.length, numCols);
     tintManualEntryColumns(sheet, MEMORY_TAB_DATA_ROW, rows.length, headers, INSTRUCTOR_OWNED_COLUMNS);
