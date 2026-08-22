@@ -47,9 +47,29 @@ calendar, so no settings go there.
 | `[Club]` | People **join once and stay joined** — see [Clubs](#clubs) |
 | `[No Registration]` | **No sign-ups at all** — no form is built — see [No registration](#no-registration) |
 
-You can write anything else you like in the description around them — only
-brackets containing `Cap:`, `Grouped`, `Regular`, `All Locations`, `Club` or
-`No Registration` are read.
+**A bracket is either all tags or all note.** You can write anything you like
+in the description, including in brackets — a bracket is only read as settings
+when the system understands **the whole of it**. Anything with ordinary words
+left over is a note and is ignored completely:
+
+| In the description | Read as |
+|---|---|
+| `[Club]` | the Club tag |
+| `[Cap: 12, Grouped]` | both tags |
+| `[Film Club selection: Casablanca]` | **a note.** Ignored — it is not a request for a club |
+| `[Drop-in welcome]` | **a note.** Ignored |
+| `[Combined with the JCC]` | **a note.** Ignored |
+
+This matters because the tag words are ordinary English — *Club*, *Combined*,
+*Shared*, *Regular*, *Appointments*, *Drop-In* — and you are asked to put
+clarifying info in the description. Before this rule, a bracket only had to
+*contain* one of those words: `[Film Club selection: Casablanca]` gave the
+programme a standing club roster, and `[Drop-in welcome]` deleted its
+registration form, both silently.
+
+If you meant a tag and the system decided it was a note, put the tag in a
+bracket of its own: `[Club] [Film selection: Casablanca]`. The ignored bracket
+is written to the log either way, so a mistyped tag doesn't just vanish.
 
 **You don't have to type `[Club]` or `[No Registration]` by hand.** Both are
 also **checkboxes** on the Master_Program_Dashboard — tick one and the tag is
@@ -292,8 +312,8 @@ and the system puts them back on the form every time. Add a row:
 | `Program` | the program's name **exactly as the calendar spells it**. Blank or `*` = every form in the workbook |
 | `Location` | blank = everywhere; otherwise only forms covering that location |
 | `Question` | the question as the registrant will read it |
-| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes` or `Multiple choice` |
-| `Choices` | the options, **one per line** (or separated by `\|`). Only for the last three types |
+| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice` — or `Notice` / `Image`, which show something instead of asking it (see below) |
+| `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For an `Image` row this holds the picture's Google Drive link instead |
 | `Help_Text` | the small grey line under the question. Optional |
 | `Required` | tick to make it compulsory |
 | `Sort` | the order the questions appear in. Optional |
@@ -323,6 +343,36 @@ is rebuilt, which is the reason to use this tab instead).
 **Renaming a question is adding a new one.** The wording *is* its identity, so
 changing it retires the old question and adds a new one; answers already given
 to the old wording stay where they are.
+
+#### Notices and pictures — the two types that ask nothing
+
+Two of the `Type` values put something on the form instead of asking for an
+answer. They exist for the same reason the rest of this tab does: **anything you
+type onto a form by hand disappears the next time that form is rebuilt.** Put it
+here and it comes back every time.
+
+**`Notice`** — a block of words. The `Question` column is the bold heading, and
+`Help_Text` is the wording underneath. This is where a class disclaimer belongs:
+
+| Program | Question | Type | Help_Text |
+|---|---|---|---|
+| T'ai Chi | Please note | Notice | Rosalie sends emails to the class if there's a last-minute and important change, as well as occasional T'ai Chi educational material. They are sent as blind copies so email addresses are not shared. If you have questions or concerns, please contact New Horizons at 610 664-2366 or speak to Rosalie after any T'ai Chi class. |
+
+**`Image`** — a picture: the book, the film, the speaker. Upload it to Google
+Drive, use **Share ▸ Copy link**, and paste that link into `Choices`. The
+`Question` column is its caption.
+
+| Program | Question | Type | Choices |
+|---|---|---|---|
+| Film Club | This month: Casablanca | Image | https://drive.google.com/file/d/1AbC…/view?usp=sharing |
+
+Both need something in `Question` — it is how the system finds its own item on
+the form again, both to leave it alone and to take it off when you delete the
+row. `Required` is ignored for both, since neither collects anything.
+
+If the Drive link can't be read, the row is skipped and says so in the admin
+digest, rather than the form quietly appearing without its picture. Make sure
+the image is shared so that **anyone with the link can view** it.
 
 For Caroline's four assistance programs the tab reads something like:
 
@@ -402,7 +452,26 @@ clickable "📝 Register for …" link. Leave it alone; the system keeps it curr
 
 ## The tabs
 
-They appear in this order, and it's roughly the order you'd use them.
+Twelve tabs is a lot to meet at once, so **the tab colours group them** — in
+the order they are worth looking at, left to right along the bottom of the
+window:
+
+| Colour | Group | Tabs | What they are |
+|---|---|---|---|
+| 🟩 green | **Today** | Master_Program_Dashboard, Master_Lunch_Dashboard, Lunch_Roster, Registrant_Dash | What a serving day is run from. These are the ones to open |
+| 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
+| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who is waiting for an appointment |
+| ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
+
+**Which cells may I type in?** That is a question about *columns*, not tabs, so
+the colour doesn't try to answer it. The workbook answers it on the cells
+themselves: **a yellow column header with a ✍️ in it is yours**, and everything
+else is rebuilt. Type in a rebuilt column and your work is lost at the next
+sync — most tabs will warn you at the moment you try.
+
+The one tab with **no** editable columns at all is **Lunch_Roster**: it is
+rebuilt from scratch every hour, names and all. To add somebody to the lunch
+list, use **⚡ Quick Mark**.
 
 ### 1. Master_Program_Dashboard
 Your at-a-glance view. Three sections stacked top to bottom:
@@ -1457,28 +1526,52 @@ Under **🗓️ Calendar & Form Manager** at the top of the spreadsheet.
 
 **There are two versions of this menu.** Everyone sees the day-to-day items.
 The **🔧 Admin** submenu only appears for the accounts listed in
-`AUTHORIZED_ADMIN_EMAILS` (see [Admin-only actions](#admin-only-actions)).
+`AUTHORIZED_ADMIN_EMAILS`, plus whoever owns this spreadsheet (see
+[Admin-only actions](#admin-only-actions)).
 
-**Everyone:**
+**The three you will actually use** sit at the top, on their own:
 
 | Item | What it does |
 |---|---|
-| **Sync Cal** | Reads the calendars, creates/updates forms |
-| **Sync Registrations** | Pulls in new form responses, recomputes everything |
-| **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
-| **👩‍🏫 Share a Sign-Up Sheet with an Instructor…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its instructor — see [Instructor sign-up sheets](#instructor-sign-up-sheets) |
-| **👩‍🏫 Refresh Instructor Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
 | **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, or sign somebody up for a future lunch — location, session, name, then Attended / Lunch / Sign up for lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
-| **📧 Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
-| **🍱 Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
-| **🥡 Build / Refresh Lunch Sign-Up Forms** | Builds (or updates) the lunch-only sign-up form for every location serving food, and pins the links to the top of Master_Lunch_Dashboard. Sync Cal does this hourly anyway; this is for when you want the link now. See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) |
-| **🍱 Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
-| **🔁 Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
-| **❓ Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
-| **🗓️ Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
-| **🔗 Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
-| **📄 Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
-| **🕓 Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
+| **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
+| **🔄 Update Everything Now** | Catches the workbook up with the calendars *and* the forms, in that order. This is the one to press when you have just changed something and want to see it. It is the same pair of passes the system runs on its own every hour |
+
+Everything else is grouped by the job it belongs to.
+
+**🍱 Lunch**
+
+| Item | What it does |
+|---|---|
+| **Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
+| **Build / Refresh Lunch Sign-Up Forms** | Builds (or updates) the lunch-only sign-up form for every location serving food, and pins the links to the top of Master_Lunch_Dashboard. The hourly pass does this anyway; this is for when you want the link now. See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) |
+| **Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
+
+**👩‍🏫 Rosters & Schedules**
+
+| Item | What it does |
+|---|---|
+| **Share a Sign-Up Sheet with an Instructor…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its instructor — see [Instructor sign-up sheets](#instructor-sign-up-sheets) |
+| **Refresh Instructor Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
+| **Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
+| **Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
+
+**📝 Programmes & Forms**
+
+| Item | What it does |
+|---|---|
+| **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
+| **Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
+| **Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
+
+**⚙️ Settings & Fixes**
+
+| Item | What it does |
+|---|---|
+| **Sync Cal only** | Just the calendar half: reads the calendars, creates/updates forms, writes the registration links into event descriptions. Slower of the two |
+| **Sync Registrations only** | Just the forms half: pulls in new responses and recomputes every count. Use this when you know nothing on the calendar has changed |
+| **Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 
 **🔧 Admin (admin accounts only):**
@@ -1505,6 +1598,12 @@ the Apps Script editor only, by someone who went looking for it:
 `recheckAllRegistrationForms()`, `cleanupNeverPolicyForms()`. They all still
 work and are all still admin-gated. Keeping them off a menu that sits open all
 day is about mis-clicks, not permissions.
+
+> **Where "Sync Cal" went.** It is still there, under **⚙️ Settings & Fixes**,
+> as **Sync Cal only** — and everywhere the rest of this guide says "run Sync
+> Cal", pressing **🔄 Update Everything Now** does that and the registrations
+> pass too, which is what you almost always want. The two are only split out
+> for when you know one half is the half that is behind.
 
 You normally don't need any of this. Automatically:
 
@@ -1712,6 +1811,44 @@ to share yourself.
 - The files live in a Drive folder called **Instructor Sign-Up Sheets**.
 - **Deleting the file** is how you stop sharing. The next sync will note it
   couldn't be read; create it again from the menu if that was a mistake.
+
+---
+
+## Putting a registration link on the website
+
+**The link you want is `Form_Response_Link`** on Master_Program_Dashboard — the
+one that reads **View Live Form**. That is the published form, the same page a
+registrant reaches from the calendar. (`Edit_Form_Link` is the editor, for you,
+and must never go on a website.)
+
+Right-click the cell and copy the link address, or click through and copy the
+address bar.
+
+**These links do not change.** It is worth saying plainly, because the system
+does rebuild forms and "rebuild" sounds like "replace":
+
+- **A form being updated keeps its link.** When the template changes, or dates
+  are added to a series, or a question is added, the form is rewritten **in
+  place** — same form, same ID, same URL. This happens routinely and breaks
+  nothing.
+- **A programme being renamed keeps its link.** The form is retitled, not
+  replaced.
+- **A new month on a `Regular` programme gets a NEW link**, because it is a new
+  form. That is what `Regular` means. A programme whose link must never change
+  wants `[Grouped]` — one form for the whole run, one link forever.
+- **The one thing that does break links is 💣 Destroy & Rebuild Forms**, below.
+  It says so twice before it runs, and it is an admin action nobody presses by
+  accident.
+
+So a button on the website pointing at a `[Grouped]` programme's form is safe
+to set once and leave. For a `Regular` programme, the button needs updating
+when the new month's form appears — which is the same job as updating the
+calendar, and the link is on the dashboard row for the new month's sessions.
+
+> **The lunch sign-up links** work the same way and are **pinned to the top of
+> Master_Lunch_Dashboard**, one per location per month, so you don't have to go
+> looking for them. Those are `Regular` by nature — a month is a month — so
+> they change each month by design.
 
 ---
 
@@ -2163,11 +2300,20 @@ description is the thing that's wrong, so it can't also be the source of truth.
 A handful of actions restructure the workbook or the project's automation
 itself — rebuilding every tab, creating/deleting triggers, running the
 multi-hour first import, or overriding a safety limit. Those are restricted to
-specific Google accounts, listed in `AUTHORIZED_ADMIN_EMAILS` near the top of
-the code:
+specific Google accounts:
 
-- `admin@newhorizonsseniorcenter.org`
-- `maxfishman@newhorizonsseniorcenter.org`
+- **whoever owns this spreadsheet** — always, and this cannot be edited away;
+- plus every address listed in `AUTHORIZED_ADMIN_EMAILS` near the top of the
+  code, currently `admin@newhorizonsseniorcenter.org`.
+
+> **The owner is always on the list on purpose.** `AUTHORIZED_ADMIN_EMAILS` is
+> a hard-coded list, and a hard-coded list of email addresses goes stale: a
+> shared mailbox that was never actually made, or somebody who has left. When
+> that happens *every* admin action refuses and names an account nobody can
+> sign in as — including **Rebuild Layout**, which is how a new version of the
+> code gets installed. That left no way back except editing the source. The
+> owner can already change the code, delete the tabs and reshare the workbook,
+> so gating them out protected nothing.
 
 **Gated:** Rebuild Layout, Rewrite Event Links, Destroy & Rebuild Forms,
 Trigger Status, Check Triggers, Take Over Trigger Ownership, Release My
@@ -2243,8 +2389,9 @@ the cause; see **Troubleshooting**, "The same event seems to trigger a sync
 twice," for the recovery steps if this already happened to you.
 
 **To change who's on the list:** edit `AUTHORIZED_ADMIN_EMAILS` in the Apps
-Script editor and save — no other code needs to change. Keep at least one
-address on it; an empty list locks everyone out, including you.
+Script editor and save — no other code needs to change. Emptying it is safe:
+the spreadsheet's owner is an admin either way, so there is no way to lock
+everybody out.
 
 ---
 
