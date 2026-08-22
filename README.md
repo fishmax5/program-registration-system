@@ -120,6 +120,10 @@ no trigger changes, and nothing can be removed. See
   long term, and what to verify in a live workbook.
 - [`STRESS_TEST.md`](./STRESS_TEST.md) — what came back when the logic was run
   against adversarial inputs: what was fixed, and what is known and left.
+- [`SIMPLIFICATION_REVIEW.md`](./SIMPLIFICATION_REVIEW.md) — a review of the
+  whole system against what it is actually asked to do: where the complexity
+  falls on the person operating it, which tabs and tags could be condensed
+  (and which should not be yet), and the five bugs that review turned up.
 
 ## Tests
 
@@ -129,6 +133,8 @@ the Program_Questions parser and its refusals — can be exercised without a
 spreadsheet:
 
 ```
+node tests/bracket_tags.test.js
 node tests/assistance_and_questions.test.js
 node tests/lunch_signup_links.test.js
+node tests/lunch_signup_horizon.test.js
 ```
