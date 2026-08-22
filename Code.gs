@@ -7156,31 +7156,86 @@ function onOpen() {
  *
  * Split out from onOpen() so showAdminMenu() can re-run it — see below.
  */
+/**
+ * "Update Everything Now" — the calendar pass, then the registrations pass.
+ *
+ * WHY IT IS ONE MENU ITEM. Sync Cal and Sync Registrations are the two halves
+ * of one machine: the first reads the calendars and makes sure every session
+ * has a row and a form, the second reads the forms and makes sure every
+ * response has a registrant. Which of the two you need depends on which half
+ * of the machine is behind, and nobody outside this file should be expected
+ * to work that out — the thing a person actually wants is for the workbook to
+ * catch up with reality. So the default is both, in the order that makes the
+ * second one see the first one's work.
+ *
+ * The pair is exactly what the hourly triggers already run, so this is not a
+ * new combination of work — only a new way to ask for it.
+ *
+ * They stay available separately under "Settings & Fixes" for the times one
+ * of them genuinely is what you want: a calendar sync writes to event
+ * descriptions and takes the longer of the two, so re-importing responses
+ * without it is a real thing to want.
+ *
+ * syncCalendars() asks its own "are you sure" (it edits calendar events, which
+ * people can see), and answering NO stops here rather than going on to import
+ * — a declined confirmation means "not now", not "skip that bit".
+ */
+function syncEverythingNow() {
+  const before = getLastSyncTime();
+  syncCalendars();
+  // Nothing to do with the answer to the confirmation: syncCalendars() returns
+  // quietly whether it ran, was declined, or stood down for a bootstrap. The
+  // import is safe and useful in all three cases, and standing down is
+  // something it decides for itself.
+  syncRegistrations();
+  log(`syncEverythingNow: calendar + registrations pass finished (last import before this run: ${before}).`);
+}
+
 function buildAppMenu(ui, includeAdmin) {
+  // GROUPED BY THE JOB SOMEBODY CAME HERE TO DO, not by what the code does.
+  //
+  // This menu grew to eighteen flat items, which is more than anyone reads:
+  // the two things done every day sat in the same undifferentiated list as
+  // "Move Sessions to Another Form", and finding either meant reading all
+  // eighteen. Four of them now sit at the top because they are the whole of
+  // ordinary use, and the rest are behind three submenus named for the job.
+  //
+  // Nothing was removed. Every function that was on this menu is still on it.
   const menu = ui.createMenu(APP_MENU_NAME)
     // First, because it is the thing staff open this workbook to do on a
     // serving day — see section 6d.
     .addItem('⚡ Quick Mark Attendance / Lunch…', 'showQuickMarkDialog')
-    .addSeparator()
-    .addItem('Sync Cal', 'syncCalendars')
-    .addItem('Sync Registrations', 'syncRegistrations')
-    .addSeparator()
     .addItem('🖨️ Print Sign-In Sheet (PDF)…', 'showSignInSheetDialog')
-    .addItem('👩‍🏫 Share a Sign-Up Sheet with an Instructor…', 'showInstructorSheetDialog')
-    .addItem('👩‍🏫 Refresh Instructor Sheets Now', 'refreshInstructorSignUpSheetsNow')
-    .addItem('📧 Invite Registrants to Calendar Events…', 'showCalendarInviteDialog')
     .addSeparator()
-    .addItem('🍱 Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
-    .addItem('🍱 Push Menu Changes to Forms', 'pushLunchMenuToForms')
-    .addItem('🥡 Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms')
-    .addItem('🔁 Apply Type / Club / No-Reg / Assistance Changes to Calendar', 'applyProgramTagChangesToCalendar')
-    .addItem('❓ Update Program Questions on Forms', 'pushProgramQuestionsToForms')
-    .addItem('🗓️ Personalized Assistance Schedule…', 'showAssistanceScheduleDialog')
-    .addItem('🔗 Link Program Across Locations…', 'linkProgramAcrossLocations')
-    .addItem('📄 Move Sessions to Another Form…', 'showRepointSessionsDialog')
+    // ONE ITEM, NOT TWO. "Sync Cal" and "Sync Registrations" are a distinction
+    // between two halves of one machine, and nobody outside this file should
+    // have to hold it: what a person wants is for the workbook to catch up
+    // with the calendar and the forms. Both still exist on their own under
+    // Settings & Fixes for the times one of them is what you actually want.
+    .addItem('🔄 Update Everything Now', 'syncEverythingNow')
     .addSeparator()
-    .addItem('🕓 Show All Past Rows', 'showAllPastRows')
-    .addItem('Resize All Sheets', 'resizeAllSheets');
+    .addSubMenu(ui.createMenu('🍱 Lunch')
+      .addItem('Add Menu Items (paste/upload CSV)…', 'showLunchMenuImportDialog')
+      .addItem('Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms')
+      .addItem('Push Menu Changes to Forms', 'pushLunchMenuToForms'))
+    .addSubMenu(ui.createMenu('👩‍🏫 Rosters & Schedules')
+      .addItem('Share a Sign-Up Sheet with an Instructor…', 'showInstructorSheetDialog')
+      .addItem('Refresh Instructor Sheets Now', 'refreshInstructorSignUpSheetsNow')
+      .addItem('Personalized Assistance Schedule…', 'showAssistanceScheduleDialog')
+      .addItem('Invite Registrants to Calendar Events…', 'showCalendarInviteDialog'))
+    .addSubMenu(ui.createMenu('📝 Programmes & Forms')
+      .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
+      .addItem('Apply Type / Club / No-Reg / Assistance Changes to Calendar',
+        'applyProgramTagChangesToCalendar')
+      .addItem('Link Program Across Locations…', 'linkProgramAcrossLocations')
+      .addItem('Move Sessions to Another Form…', 'showRepointSessionsDialog'))
+    .addSeparator()
+    .addSubMenu(ui.createMenu('⚙️ Settings & Fixes')
+      .addItem('Sync Cal only', 'syncCalendars')
+      .addItem('Sync Registrations only', 'syncRegistrations')
+      .addSeparator()
+      .addItem('Show All Past Rows', 'showAllPastRows')
+      .addItem('Resize All Sheets', 'resizeAllSheets'));
 
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('🔧 Admin')
