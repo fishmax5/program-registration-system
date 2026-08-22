@@ -2846,6 +2846,36 @@ function flushPersistentRegistries() {
 
 const SYNC_LOCK_WAIT_MS = 10 * 1000;
 
+/**
+ * How long a DESK action waits for the lock before giving up. Shorter than
+ * SYNC_LOCK_WAIT_MS on purpose: somebody is standing at the counter with a
+ * queue behind them, and a dialog that appears to hang for ten seconds reads
+ * as broken. Three seconds is long enough to ride out the gap between two
+ * background operations and short enough to answer "busy, press it again".
+ */
+const DESK_LOCK_WAIT_MS = 3 * 1000;
+
+/**
+ * Runs `fn` holding the script lock, and ALWAYS gives the lock back.
+ *
+ * Returns `fn`'s value, or `onBusy` (default null) if the lock could not be
+ * taken in `waitMs`. The point is the `finally`: every long job in this file
+ * used to open-code this, and the ones that hold the lock across a whole
+ * multi-minute budget are exactly why the sign-in desk found Quick Mark
+ * unavailable "half the time". Wrapping one unit of work at a time lets a
+ * background sweep YIELD between forms instead of owning the workbook for
+ * four and a half minutes at a stretch.
+ */
+function withScriptLock(waitMs, fn, onBusy) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(waitMs)) return onBusy === undefined ? null : onBusy;
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 const TIMEZONE = SpreadsheetApp.getActiveSpreadsheet()
   ? SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone()
   : Session.getScriptTimeZone();
@@ -11730,6 +11760,33 @@ function isBootstrapActive() {
   return isBootstrapImportActive() || isFormRebuildSweepActive();
 }
 
+/**
+ * The narrower question the SIGN-IN DESK has to ask: is a job in flight that
+ * would make marking one person off the list unsafe?
+ *
+ * Only the bootstrap import is. It writes the session table and the registrant
+ * table from scratch across many executions, and a row marked in the middle of
+ * that is a row about to be overwritten. A destroy-and-rebuild sweep is a
+ * different animal: it replaces FORMS. It touches the registrant table only
+ * through the ordinary import at the head of each slice, which Quick Mark
+ * already coexists with every hour of every day.
+ *
+ * The distinction is not academic. A sweep can run for hours, and while one
+ * did, Quick Mark refused to open at all — the tool the desk needs most, gone
+ * for the whole morning, because a maintenance job was rebuilding forms
+ * nobody was standing at. Marking somebody off a list has nothing to do with
+ * rebuilding a form, and it no longer waits for one.
+ */
+function isDeskWorkBlocked() {
+  return isBootstrapImportActive();
+}
+
+/** Why the desk is blocked, for a toast. Only ever the import — see isDeskWorkBlocked(). */
+function deskBusyMessage() {
+  return 'A large-setup import is rewriting the registrations table — try this once it finishes ' +
+    '(it says so in a toast when it does).';
+}
+
 /** Which of the two sliced jobs is blocking, in one line — for toasts/logs that need to say why. */
 function bootstrapBusyMessage() {
   if (isFormRebuildSweepActive()) {
@@ -15599,8 +15656,10 @@ function buildEventTimeByEventId(ss) {
 
 /** Menu entry: opens the Quick Mark dialog. */
 function showQuickMarkDialog() {
-  if (isBootstrapActive()) {
-    toastIfPossible(bootstrapBusyMessage());
+  // isDeskWorkBlocked(), not isBootstrapActive(): a forms sweep is no reason to
+  // shut the sign-in desk. See isDeskWorkBlocked().
+  if (isDeskWorkBlocked()) {
+    toastIfPossible(deskBusyMessage());
     return;
   }
   const html = HtmlService.createHtmlOutput(buildQuickMarkHtml())
@@ -16119,6 +16178,23 @@ const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
  * answer, not a failure.
  */
 function applyQuickMarkFromDialog(args) {
+  // UNDER THE LOCK, all of it. This reads the tab to find the row, then writes
+  // to that row NUMBER — so a render landing in between (a sync, a rebuild
+  // slice, another desk) would send the tick to whichever row had moved into
+  // that position. The window is small and the consequence is silent: somebody
+  // else marked present.
+  //
+  // A short wait, and an honest answer when it expires: the person at the desk
+  // can press the button again in a moment, which is a far better outcome than
+  // either a hang or a mark on the wrong row.
+  return withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), {
+    ok: false,
+    message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
+  });
+}
+
+/** The body of applyQuickMarkFromDialog(), which holds the lock for it. */
+function applyQuickMarkLocked(args) {
   args = args || {};
   const location = String(args.location || '').trim();
   const name = String(args.name || '').trim();
@@ -22419,8 +22495,14 @@ function runFormRebuildSweepSlice() {
   // is what finally clears it.
   armFormRebuildResume(FORM_REBUILD_WATCHDOG_DELAY_MS);
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+  // THE LOCK IS TAKEN AND GIVEN BACK AROUND EACH UNIT OF WORK, not held for
+  // the whole slice. It used to wrap everything below, which meant that while
+  // a sweep ran the workbook was locked for 4.5 minutes out of every 5 — and
+  // the sign-in desk found Quick Mark unavailable, in the words of the person
+  // using it, "half the time". Replacing one form has nothing to do with
+  // marking one person off a list; the lock only ever needed to cover the
+  // steps that read and rewrite whole tabs.
+  if (!withScriptLock(SYNC_LOCK_WAIT_MS, () => true, false)) {
     log('Form-rebuild slice: another execution holds the lock — the next slice will retry.');
     return;
   }
@@ -22455,10 +22537,25 @@ function runFormRebuildSweepSlice() {
     // one step that makes the whole action safe, so a failure here stops the
     // sweep rather than risking a form being destroyed with a response still
     // on it (see runFormRebuildSweep()'s identical reasoning above).
-    try {
-      syncRegistrationsInternal();
-    } catch (err) {
-      finishFormRebuildSweep(state, `stopped — could not import outstanding registrations (${err})`);
+    //
+    // Held under the lock on its own: this rewrites whole tabs, so it must not
+    // interleave with a sync — but it is seconds, not minutes, and the desk
+    // gets the workbook back the moment it is done.
+    const imported = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+      try {
+        syncRegistrationsInternal();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, err };
+      }
+    }, null);
+    if (!imported) {
+      log('Form-rebuild slice: could not take the lock to import registrations — the next slice will retry.');
+      armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS);
+      return;
+    }
+    if (!imported.ok) {
+      finishFormRebuildSweep(state, `stopped — could not import outstanding registrations (${imported.err})`);
       return;
     }
 
@@ -22471,8 +22568,14 @@ function runFormRebuildSweepSlice() {
     // deleted session's row elsewhere), so only the SET of confirmed old
     // Form_IDs is trusted from the original plan — the sessions on each one
     // are taken as they stand right now.
-    const remainingPlan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
-      .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId));
+    const remainingPlan = withScriptLock(SYNC_LOCK_WAIT_MS, () =>
+      planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+        .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId)), null);
+    if (!remainingPlan) {
+      log('Form-rebuild slice: could not take the lock to re-read the plan — the next slice will retry.');
+      armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS);
+      return;
+    }
 
     if (remainingPlan.length === 0) {
       finishFormRebuildSweep(state, null);
@@ -22483,32 +22586,54 @@ function runFormRebuildSweepSlice() {
     let processedThisSlice = 0;
     for (const item of remainingPlan) {
       if (Date.now() >= deadline) break;
-      try {
-        if (replaceOneForm(registrySheet, item)) {
-          state.replaced++;
-        } else {
+      // ONE FORM, ONE LOCK HOLD. This is the loop that used to run for four and
+      // a half minutes inside a single hold. Each form is independent and its
+      // progress is recorded in the state, so taking the lock per form costs
+      // nothing and gives every other execution — above all Quick Mark at the
+      // sign-in desk — a gap to get in between one form and the next.
+      const took = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+        try {
+          if (replaceOneForm(registrySheet, item)) {
+            state.replaced++;
+          } else {
+            state.failed++;
+          }
+        } catch (err) {
           state.failed++;
+          log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
+          noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
         }
-      } catch (err) {
-        state.failed++;
-        log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
-        noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
+        state.done.push(item.oldFormId);
+        saveFormRebuildState(state);
+        return true;
+      }, false);
+      // Somebody else is mid-write. Not an error and not a stall: this form is
+      // still un-done in the state, so the next slice picks it up unchanged.
+      if (!took) {
+        log('Form-rebuild slice: lock busy between forms — leaving the rest to the next slice.');
+        break;
       }
-      state.done.push(item.oldFormId);
       processedThisSlice++;
-      saveFormRebuildState(state);
       // Pacing between forms — see migrateFormsToCurrentTemplate() / the
       // identical sleep in runFormRebuildSweep() above for the same reason.
+      // Outside the lock now, so the pause is a gap other work can use rather
+      // than a second and a half of holding the workbook shut doing nothing.
       if (Date.now() < deadline) Utilities.sleep(1500);
     }
 
     if (processedThisSlice > 0) {
-      SpreadsheetApp.flush();
-      // Every event replaced this slice still carries a link to a form that
-      // is now in the trash.
-      rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
-      renderProgramDashboard(false, { skipTriage: true });
-      flushPersistentRegistries();
+      // Whole-tab work again, so back under the lock — and if it cannot be had,
+      // the next slice redoes it. Both steps are idempotent: the link rewrite
+      // reads what the descriptions currently say, and the render rebuilds the
+      // dashboard from the rows.
+      withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+        SpreadsheetApp.flush();
+        // Every event replaced this slice still carries a link to a form that
+        // is now in the trash.
+        rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+        renderProgramDashboard(false, { skipTriage: true });
+        flushPersistentRegistries();
+      });
     }
 
     const remaining = state.confirmed.length - state.done.length;
@@ -22537,8 +22662,9 @@ function runFormRebuildSweepSlice() {
     noteForAdmin('Destroy and rebuild forms', `The sweep stopped with an error and automation was restored: ${err}`);
     finishFormRebuildSweep(getFormRebuildState() || state, `stopped by an error: ${err}`);
   } finally {
+    // No lock to give back: every hold above is opened and closed around one
+    // unit of work by withScriptLock().
     flushPersistentRegistries(); // a killed slice's forms must never be forgotten
-    lock.releaseLock();
   }
 }
 
