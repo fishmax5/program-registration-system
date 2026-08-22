@@ -23295,17 +23295,68 @@ const PROGRAM_QUESTION_TYPES = {
   'checkbox': 'CHECKBOX',
   'check all that apply': 'CHECKBOX',
   'multiple choice': 'MULTIPLE_CHOICE',
-  'radio': 'MULTIPLE_CHOICE'
+  'radio': 'MULTIPLE_CHOICE',
+  // THE TWO THAT ASK NOTHING. Both were requested in the same breath from the
+  // office: "Any form for T'ai Chi needs to contain the following disclaimer…",
+  // and "Is there a way to add images and small touches to the forms that will
+  // stay? In the old forms, we were able to put headers in and/or images of the
+  // books/films/people."
+  //
+  // The answer to "that will stay" is what makes them belong HERE rather than
+  // on the form. Anything typed onto a live form by hand is deleted the next
+  // time that form is rebuilt from the template — which is exactly the trap
+  // Program_Questions was built to get out of. A notice or an image listed on
+  // this tab is re-applied after every rebuild, like every other row.
+  'notice': 'SECTION_HEADER',
+  'note': 'SECTION_HEADER',
+  'header': 'SECTION_HEADER',
+  'disclaimer': 'SECTION_HEADER',
+  'text': 'SECTION_HEADER',
+  'image': 'IMAGE',
+  'picture': 'IMAGE',
+  'photo': 'IMAGE'
 };
 
 /** What the Type column offers as a dropdown — the canonical spelling of each shape. */
 const PROGRAM_QUESTION_TYPE_OPTIONS = [
-  'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice'
+  'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice', 'Notice', 'Image'
 ];
 
 /** True for the three types that need a Choices cell to mean anything. */
 function questionTypeNeedsChoices(kind) {
   return kind === 'LIST' || kind === 'CHECKBOX' || kind === 'MULTIPLE_CHOICE';
+}
+
+/**
+ * True for the types that DISPLAY something instead of asking it — a notice
+ * and an image. They collect no answer, so Required means nothing to them and
+ * setRequired() does not exist on either item; see addCustomQuestionItem().
+ */
+function questionTypeIsDisplayOnly(kind) {
+  return kind === 'SECTION_HEADER' || kind === 'IMAGE';
+}
+
+/**
+ * The Drive file ID inside whatever somebody pasted into Choices for an image
+ * row — a share link, an open link, or the bare ID.
+ *
+ * Pasting the link out of the browser is what people actually do, and every
+ * one of these shapes is a link Drive itself hands you:
+ *   https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+ *   https://drive.google.com/open?id=FILE_ID
+ *   https://docs.google.com/.../d/FILE_ID/edit
+ *   FILE_ID
+ */
+function parseDriveFileId(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const byPath = /\/d\/([a-zA-Z0-9_-]{10,})/.exec(text);
+  if (byPath) return byPath[1];
+  const byQuery = /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(text);
+  if (byQuery) return byQuery[1];
+  // A bare ID: no slashes, no spaces, and long enough to be one.
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(text)) return text;
+  return '';
 }
 
 /**
@@ -23410,6 +23461,30 @@ function buildProgramQuestionSpecs(rows) {
       reject('a dropdown, checkbox or multiple-choice question needs its options in the Choices column');
       return;
     }
+    // An image row carries a Drive link in Choices instead of options. Checked
+    // HERE rather than when the form is built, because this is where a rejected
+    // row can still say why on a tab somebody is looking at — a link that
+    // failed at form-build time would show up as a form quietly missing its
+    // picture.
+    let imageFileId = '';
+    if (kind === 'IMAGE') {
+      imageFileId = parseDriveFileId(row[map['Choices']]);
+      if (!imageFileId) {
+        reject('an image row needs the picture\'s Google Drive link in the Choices column. Upload the ' +
+          'image to Drive, use Share ▸ Copy link, and paste that here');
+        return;
+      }
+    }
+    // NOTE ON THE QUESTION COLUMN FOR THESE TWO. Every row needs one (the
+    // blank-title check at the top of this loop), because the title is this
+    // question's identity: it is how a duplicate is spotted, how the form is
+    // searched for an existing copy, and how a row that gets deleted from the
+    // tab is found and taken off the form again. So a notice's heading and an
+    // image's caption are not optional — which is no hardship, since a notice
+    // wants a heading and an untitled picture on a form is a puzzle.
+    //
+    // For a notice, the long wording goes in Help_Text and the Question column
+    // is the bold line above it ("Please note", "About this class").
 
     const program = String(row[map['Program']] || '').trim();
     const location = String(row[map['Location']] || '').trim();
@@ -23427,9 +23502,11 @@ function buildProgramQuestionSpecs(rows) {
       /^(yes|true|required)$/i.test(String(row[map['Required']] || '').trim());
     const sortRaw = Number(row[map['Sort']]);
     specs.push({
-      program, location, title, kind, choices,
+      program, location, title, kind, choices, imageFileId,
       help: String(row[map['Help_Text']] || '').trim(),
-      required,
+      // A notice and an image collect nothing, so Required cannot apply to
+      // them however the cell is filled in — see questionTypeIsDisplayOnly().
+      required: required && !questionTypeIsDisplayOnly(kind),
       // Row order breaks ties, so a tab with no Sort column filled in still
       // asks the questions in the order they were typed.
       sort: isNaN(sortRaw) || String(row[map['Sort']] || '').trim() === '' ? i : sortRaw * 1000 + i
@@ -23500,7 +23577,8 @@ function appliedCustomQuestionTitles(formId) {
 /** A cheap hash of exactly what would be written, so an unchanged set costs no Forms calls. */
 function computeCustomQuestionFingerprint(specs) {
   const payload = (specs || []).map(s =>
-    [s.title, s.kind, s.required ? 1 : 0, s.help, (s.choices || []).join('~')].join('|')).join('||');
+    [s.title, s.kind, s.required ? 1 : 0, s.help, (s.choices || []).join('~'),
+      s.imageFileId || ''].join('|')).join('||');
   return Utilities.base64EncodeWebSafe(
     Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, payload, Utilities.Charset.UTF_8));
 }
@@ -23601,10 +23679,18 @@ function addCustomQuestionItem(form, spec) {
     else if (spec.kind === 'LIST') item = form.addListItem().setChoiceValues(spec.choices);
     else if (spec.kind === 'CHECKBOX') item = form.addCheckboxItem().setChoiceValues(spec.choices);
     else if (spec.kind === 'MULTIPLE_CHOICE') item = form.addMultipleChoiceItem().setChoiceValues(spec.choices);
-    else item = form.addTextItem();
+    else if (spec.kind === 'SECTION_HEADER') item = form.addSectionHeaderItem();
+    else if (spec.kind === 'IMAGE') {
+      // The blob is fetched per form. A picture on ten forms is ten uploads,
+      // which is why this only ever runs when the questions actually changed
+      // (see syncCustomQuestionsOnForm()'s fingerprint).
+      item = form.addImageItem().setImage(DriveApp.getFileById(spec.imageFileId).getBlob());
+    } else item = form.addTextItem();
     item.setTitle(spec.title);
     if (spec.help) item.setHelpText(spec.help);
-    item.setRequired(!!spec.required);
+    // A notice and an image have no setRequired() at all — calling it throws,
+    // and throwing here would cost the form every question after this one.
+    if (!questionTypeIsDisplayOnly(spec.kind)) item.setRequired(!!spec.required);
     return item;
   } catch (err) {
     log(`Could not add the question "${spec.title}" to form ${form.getId()} (${err}).`);
@@ -23963,6 +24049,40 @@ function renderProgramQuestionsSheet(allRows) {
     // Choices is one option per line, so the cell has to be able to show them.
     sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, rows.length, 1).setWrap(true);
   }
+
+  // THE NOTES ARE ON THE HEADERS, not the rows: a note on the header is there
+  // on an empty tab, which is exactly when somebody needs telling what the
+  // column is for. Rewritten every render so they cannot drift from the code.
+  const headerNote = (column, text) => {
+    if (map[column] === undefined) return;
+    sheet.getRange(MEMORY_TAB_HEADER_ROW, map[column] + 1).setNote(text);
+  };
+  headerNote('Type',
+    'What kind of thing this row puts on the form.\n\n' +
+    'ASKS A QUESTION:\n' +
+    '  Short answer / Paragraph — free text\n' +
+    '  Dropdown / Checkboxes / Multiple choice — needs its options in Choices\n\n' +
+    'SHOWS SOMETHING (asks nothing, so Required does not apply):\n' +
+    '  Notice — a block of words. The heading goes in Question and the wording\n' +
+    '           in Help_Text. This is where a class disclaimer belongs.\n' +
+    '  Image  — a picture. Put its Google Drive link in Choices.\n\n' +
+    'Anything here survives a form being rebuilt. Anything you type onto the\n' +
+    'form itself does not.');
+  headerNote('Question',
+    'The wording of the question — and its NAME, which is how this row is\n' +
+    'matched to what is already on the form. Renaming it retires the old one\n' +
+    'and adds a new one; answers already collected stay where they are.\n\n' +
+    'For a Notice this is the bold heading above the wording ("Please note").\n' +
+    'For an Image it is the caption. Both need one.');
+  headerNote('Choices',
+    'One option per line, for Dropdown / Checkboxes / Multiple choice.\n\n' +
+    'For an Image row this holds the picture instead: upload it to Google\n' +
+    'Drive, use Share \u25b8 Copy link, and paste the link here.\n\n' +
+    'Ignored by the text types and by Notice.');
+  headerNote('Program',
+    'The programme name, spelled exactly as the Google Calendar spells it.\n' +
+    'Blank (or "*") means every form in the workbook.');
+  headerNote('Location', 'Blank means every location. Otherwise only forms covering that location.');
   return rows.length;
 }
 
