@@ -7292,6 +7292,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
       .addItem('Apply Type / Club / No-Reg / Assistance Changes to Calendar',
         'applyProgramTagChangesToCalendar')
+      // Next to it because it is the other half of the same job: that item
+      // pushes the ticks OUT to the calendar, this one shows what the ticks
+      // are currently doing to the forms — and fixes any form the hourly sync
+      // has not caught up with yet.
+      .addItem('Rebuild Appointment Forms + Report…', 'rebuildAssistanceFormsNow')
       .addItem('Link Program Across Locations…', 'linkProgramAcrossLocations')
       .addItem('Move Sessions to Another Form…', 'showRepointSessionsDialog'))
     .addSeparator()
@@ -13549,7 +13554,15 @@ function buildRegistryIndex(registrySheet, sessionRows) {
       isClub,
       // A club's roster is keyed by the PROGRAM, which is why this is computed
       // per session rather than per form — see computeClubKey().
-      clubKey: isClub ? computeClubKey(cleanTitle, location, sharedFormIds.has(formId)) : ''
+      clubKey: isClub ? computeClubKey(cleanTitle, location, sharedFormIds.has(formId)) : '',
+      // THE SAME KEY, COMPUTED FOR EVERY SESSION. A standing place on a
+      // programme is a Club_Members row, and staff can now add one from the
+      // desk to a programme that carries no [Club] tag at all (see
+      // addStandingListMember()) — a Zoom class whose regulars have never
+      // filled in a form is the case this was asked for. So the roster is
+      // matched against this, and `isClub` goes on meaning only what it ever
+      // meant: whether the public FORM offers to join.
+      programKey: computeClubKey(cleanTitle, location, sharedFormIds.has(formId))
     };
   });
   return index;
@@ -16292,8 +16305,10 @@ function buildQuickMarkHtml() {
 <h3>Quick Mark</h3>
 <p class="hint">
   Pick a location, then the session, then a person. Tick <b>Attended</b> for someone who came in;
-  tick <b>Lunch</b> on its own for a meal collected without attending. The dialog stays open on the
-  same session, so a queue of people is one pick and one click each.
+  tick <b>Lunch</b> on its own for a meal collected without attending; tick <b>Register them</b> to
+  put somebody on a session they have not signed up for — over the phone or at the desk, with no
+  form. The dialog stays open on the same session, so a queue of people is one pick and one click
+  each.
 </p>
 
 <label class="field" for="location">1. Location</label>
@@ -16315,6 +16330,14 @@ function buildQuickMarkHtml() {
 <input type="text" id="newName" placeholder="Type their name" style="display:none" autocomplete="off"
        oninput="refreshButton()">
 
+<label class="field" for="apptTime" id="apptTimeLabel" style="display:none">4. Appointment time</label>
+<select id="apptTime" onchange="refreshButton()" style="display:none">
+  <option value="">— choose a time —</option>
+</select>
+<p class="hint" id="apptNote" style="display:none">
+  This programme is booked by appointment. Times already taken are not listed.
+</p>
+
 <fieldset>
   <legend>Mark</legend>
   <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
@@ -16322,6 +16345,11 @@ function buildQuickMarkHtml() {
     <span class="note">— on its own means a meal collected, not present</span></label>
   <label class="tick"><input type="checkbox" id="signup" onchange="exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
     <span class="note">— they want a meal on this date; nothing has been served yet</span></label>
+  <label class="tick"><input type="checkbox" id="register" onchange="registerChanged()"> Register them for this session
+    <span class="note">— no form needed; nothing is marked attended</span></label>
+  <label class="tick" id="standingLabel" style="display:none">
+    <input type="checkbox" id="standing" onchange="refreshButton()"> …and every future session of it
+    <span class="note">— a standing place on the list, until staff untick them on Club_Members</span></label>
 </fieldset>
 
 <button id="go" onclick="submit(false)" disabled>Mark</button>
@@ -16393,7 +16421,10 @@ function buildQuickMarkHtml() {
     el('name').disabled = true;
     el('name').innerHTML = '<option value="">— choose a session first —</option>';
     showWalkIn(false);
-    refreshButton();
+    // The session dropdown is about to be rebuilt, so no session is chosen —
+    // which means no appointment times and no standing tick until one is.
+    showAppointmentTimes();
+    registerChanged();
     if (!INDEX) return;
     if (!loc) {
       el('session').innerHTML = '<option value="">— choose a location first —</option>';
@@ -16422,11 +16453,56 @@ function buildQuickMarkHtml() {
     return { options: out, registeredCount: bucket.names.length, otherCount: out.length - bucket.names.length };
   }
 
+  // The chosen session's own entry in the index — where its appointment times
+  // (if it has any) live.
+  function chosenSession() {
+    var loc = el('location').value;
+    var label = el('session').value;
+    if (!INDEX || !label) return null;
+    return INDEX.sessions.filter(function (s) {
+      return s.location === loc && s.value === label;
+    })[0] || null;
+  }
+
+  // A session with times is an appointment session, and picking a person on
+  // one is not enough — the desk has to say WHICH chair, exactly as the public
+  // form makes them. A session with none never shows the dropdown at all.
+  function showAppointmentTimes() {
+    var session = chosenSession();
+    var times = (session && session.times) || [];
+    var on = !!(session && session.byAppointment);
+    el('apptTimeLabel').style.display = on ? 'block' : 'none';
+    el('apptTime').style.display = on ? 'block' : 'none';
+    el('apptNote').style.display = on ? 'block' : 'none';
+    el('apptNote').textContent = times.length
+      ? 'This programme is booked by appointment. Times already taken are not listed.'
+      : 'Every appointment on this date is taken — nobody else can be booked onto it.';
+    el('apptTime').innerHTML = '';
+    if (!times.length) { el('apptTime').value = ''; return; }
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = '— choose a time —';
+    el('apptTime').appendChild(blank);
+    times.forEach(function (t) {
+      var o = document.createElement('option');
+      o.value = t.value;
+      o.textContent = t.label;
+      el('apptTime').appendChild(o);
+    });
+  }
+
+  /** True when a booking on the chosen session has to name an appointment time. */
+  function appointmentSession() {
+    var session = chosenSession();
+    return !!(session && session.byAppointment);
+  }
+
   function sessionChanged() {
     var loc = el('location').value;
     var session = el('session').value;
     showWalkIn(false);
-    refreshButton();
+    showAppointmentTimes();
+    registerChanged();
     if (!session || !INDEX) { el('name').disabled = true; return; }
     var res = namesFor(loc, session);
     fill(el('name'), res.options, '— choose a name —');
@@ -16476,12 +16552,26 @@ function buildQuickMarkHtml() {
     if (el(justTicked).checked) el(other).checked = false;
   }
 
+  // "Every future session" is a rider on registering, not a mark of its own:
+  // it only means anything once somebody is being put on the list.
+  function registerChanged() {
+    // Not offered on an appointment session: an appointment is booked one at a
+    // time, so "every future one" is not a thing anybody can be put down for.
+    var on = el('register').checked && !appointmentSession();
+    el('standingLabel').style.display = on ? 'block' : 'none';
+    if (!on) el('standing').checked = false;
+    refreshButton();
+  }
+
   function refreshButton() {
+    var registering = el('register').checked;
     var ready = !!el('session').value && !!chosenName() &&
-      (el('attended').checked || el('lunch').checked || el('signup').checked);
+      (el('attended').checked || el('lunch').checked || el('signup').checked || registering) &&
+      // An appointment session cannot be booked without naming the slot.
+      !(appointmentSession() && registering && !el('apptTime').value);
     el('go').disabled = !ready;
-    el('go').textContent = (el('signup').checked && !el('attended').checked && !el('lunch').checked)
-      ? 'Sign up' : 'Mark';
+    var onlySignup = el('signup').checked && !el('attended').checked && !el('lunch').checked;
+    el('go').textContent = (registering || onlySignup) ? 'Sign up' : 'Mark';
   }
 
   function submit(confirmWalkIn) {
@@ -16508,6 +16598,18 @@ function buildQuickMarkHtml() {
           el('attended').checked = false;
           el('lunch').checked = false;
           el('signup').checked = false;
+          el('register').checked = false;
+          el('standing').checked = false;
+          registerChanged();
+          // A slot just booked is gone for the next person in the queue, and
+          // the dialog holds the only copy of that list until it is reloaded.
+          if (res.bookedTime) {
+            var session = chosenSession();
+            if (session && session.times) {
+              session.times = session.times.filter(function (t) { return t.value !== res.bookedTime; });
+            }
+            showAppointmentTimes();
+          }
           if (res.namesChanged) {
             rememberWalkIn(el('location').value, el('session').value, res.addedName, res.addedNameKey);
             sessionChanged();
@@ -16523,6 +16625,9 @@ function buildQuickMarkHtml() {
         attended: el('attended').checked,
         lunch: el('lunch').checked,
         signup: el('signup').checked,
+        register: el('register').checked,
+        standing: el('standing').checked,
+        appointmentTime: el('apptTime').value,
         confirmWalkIn: !!confirmWalkIn
       });
   }
@@ -16570,13 +16675,27 @@ function buildQuickMarkIndex() {
   /** sessionKey -> { names, keys } — keys are normalized, so the browser can subtract them from the roll. */
   const namesBySession = {};
 
+  // Which appointment times are already gone, for the assistance sessions
+  // below. Read once from the same rows: the free slots on twelve sessions are
+  // twelve subtractions from one map, not twelve reads.
+  const bookedTimes = readBookedAppointmentTimes(registrantRows);
+
   orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
     const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
     if (namesBySession[sessionKey]) return;
     const bucket = { names: [], keys: [] };
     namesBySession[sessionKey] = bucket;
     byLookup[`${choice.location}\u0000${choice.title}\u0000${choice.dateKey}`] = bucket;
-    sessions.push({ value: choice.label, label: choice.label, group: choice.group, location: choice.location });
+    sessions.push({
+      value: choice.label, label: choice.label, group: choice.group, location: choice.location,
+      // Whether a booking on this session needs a TIME, and which times are
+      // left. The two are separate facts because a fully-booked appointment
+      // session has no free times and is still an appointment session — the
+      // dialog has to say "every slot has gone" rather than quietly letting a
+      // desk book somebody into no slot at all.
+      byAppointment: !!(choice.appointment && choice.dateKey),
+      times: freeAppointmentTimesForChoice(choice, bookedTimes)
+    });
   });
 
   registrantRows.forEach(row => {
@@ -16620,6 +16739,32 @@ function buildQuickMarkIndex() {
 }
 
 /**
+ * The appointment times a desk can still book on one Quick Mark session:
+ * [{ value: '10:30 AM', label: '10:30 AM – 11:00 AM' }], earliest first.
+ *
+ * Empty for every session that is not [Personalized Assistance], which is what
+ * the dialog keys its time dropdown off — and empty for a past one, since an
+ * appointment nobody can keep is not a booking to offer.
+ *
+ * THE SAME SLOTS THE FORM OFFERS, from the same two functions
+ * (buildAppointmentSlots() minus readBookedAppointmentTimes()), so a desk and
+ * the public are never offered the same chair. `value` is the START label
+ * because that is what a registrant row's Event_Time is matched on
+ * (appointmentStartLabelOf()); the range is what a person reads.
+ */
+function freeAppointmentTimesForChoice(choice, bookedTimes) {
+  const appointment = choice && choice.appointment;
+  if (!appointment || !choice.dateKey) return [];
+  if (choice.dateKey < formatDateKey(new Date())) return [];
+  const start = coerceDate(appointment.start);
+  if (!start) return [];
+  const taken = (bookedTimes && bookedTimes[appointment.eventId]) || new Set();
+  return buildAppointmentSlots(start, appointment.end, resolveSlotMinutes(appointment))
+    .filter(slot => !taken.has(slot.startLabel))
+    .map(slot => ({ value: slot.startLabel, label: slot.rangeLabel }));
+}
+
+/**
  * The session choices in the order a desk reads them: upcoming soonest-first,
  * then past most-recent-first, then the dateless "program only" fallbacks —
  * the same order every date-bearing tab in this workbook is sorted in, so "the
@@ -16650,7 +16795,7 @@ function orderQuickMarkChoices(choices) {
     perLocation[choice.location] = used + 1;
     out.push({
       label: choice.label, title: choice.title, dateKey: choice.dateKey,
-      location: choice.location, group
+      location: choice.location, appointment: choice.appointment || null, group
     });
   });
   push(upcoming, 'Upcoming');
@@ -16717,6 +16862,19 @@ function collectKnownProgramChoices(location, registrantRows) {
       dateKey,
       location: rowLocation,
       lunchOnly: !!(options && options.lunchOnly),
+      // { eventId, end, slotMinutes } for a [Personalized Assistance] session,
+      // null for every other one. It is what lets the dialog offer the free
+      // APPOINTMENT TIMES on that session — a desk booking one of these has to
+      // name a slot, exactly as the form makes the public name one, or the row
+      // it writes takes no time out of the provider's afternoon. Only the
+      // session table carries the three facts, which is why it is read here
+      // and not re-derived later.
+      // `start` is the row's own Event_Date, clock time included — the slots
+      // are cut forward from it, and a date key alone would put every
+      // appointment at midnight.
+      appointment: (options && options.appointment)
+        ? Object.assign({ start: d }, options.appointment)
+        : null,
       // Undated entries sort last; a real session sorts by how far off it is.
       distance: d ? Math.abs(d - todayMidnight) : Infinity,
       future: d ? dateKey >= todayKey : false
@@ -16729,7 +16887,15 @@ function collectKnownProgramChoices(location, registrantRows) {
       const headers = HEADERS.Master_Program_Dashboard;
       const map = getIndexMap(headers);
       readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
-        note(row[map['Clean_Title']], row[map['Location']], row[map['Event_Date']]);
+        const isAssistance = map['Personalized_Assistance'] !== undefined &&
+          isAssistanceColumnValue(row[map['Personalized_Assistance']]);
+        note(row[map['Clean_Title']], row[map['Location']], row[map['Event_Date']], {
+          appointment: isAssistance ? {
+            eventId: String(row[map['Event_ID']] || '').trim(),
+            end: map['Event_End'] === undefined ? null : coerceDate(row[map['Event_End']]),
+            slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0)
+          } : null
+        });
       });
     }
   } catch (err) {
@@ -16900,11 +17066,28 @@ function applyQuickMarkLocked(args) {
   // date and makes Served_Confirmed disagree with reality on both days.
   // This records the DEMAND instead: Lunch_Status = Needed, nothing served.
   const signup = !!args.signup && !lunch;
+  // REGISTER is the fourth thing a desk does, and the one Caroline could not
+  // do here at all: put somebody on a session they have not signed up for.
+  // People ring up, or stop at the desk on their way out of one appointment to
+  // make the next — and until now the only answer was "let me open the form
+  // and fill it in as you". It marks nothing: a registration says where
+  // somebody is expected, and Attended is a separate fact recorded on the day.
+  const register = !!args.register;
+  // A standing place — every future session of this programme, not just this
+  // one. It is the Club_Members list, which is exactly this promise already
+  // (see CLUB_TAG); the only thing that has changed is that a desk can add
+  // somebody to it, for any programme, without waiting for them to tick a box
+  // on a form they have never once filled in.
+  // Never on an appointment programme — see applyClubRosterCatchup(), which
+  // would otherwise book one person into every slot the programme ever runs.
+  // Refused below, once the session is known, rather than silently dropped.
+  const standing = register && !!args.standing;
+  const appointmentTime = String(args.appointmentTime || '').trim();
   const selection = parseQuickMarkProgramChoice(args.session);
 
   if (!name) return { ok: false, message: '⚠️ Pick a name first — nothing was marked.' };
-  if (!attended && !lunch && !signup) {
-    return { ok: false, message: '⚠️ Tick Attended, Lunch, or Sign up for lunch.' };
+  if (!attended && !lunch && !signup && !register) {
+    return { ok: false, message: '⚠️ Tick Attended, Lunch, Sign up for lunch, or Register them.' };
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -16940,7 +17123,10 @@ function applyQuickMarkLocked(args) {
     // Nobody registered under that name for that session. Since the lists
     // offer every known member and not just the registered ones, this is the
     // walk-in case rather than a dead end.
-    return addQuickMarkWalkIn(sheet, { name, selection, location, attended, lunch, signup, confirmed: !!args.confirmWalkIn });
+    return addQuickMarkWalkIn(sheet, {
+      name, selection, location, attended, lunch, signup, register, standing, appointmentTime,
+      confirmed: !!args.confirmWalkIn
+    });
   }
 
   // Today, else the soonest future date, else the most recent past one.
@@ -17005,6 +17191,22 @@ function applyQuickMarkLocked(args) {
     if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
   }
 
+  // ALREADY REGISTERED. A tick on Register for somebody who has a row for this
+  // session is not an error and not a second registration — it is somebody at
+  // the desk who could not tell from the dropdown that the name was already
+  // there. Say so, and still honour the standing tick beside it: "put her on
+  // this one, and every one after it" is a perfectly ordinary thing to ask on
+  // a day she happens to be booked for already.
+  const standingNote = standing
+    ? addStandingListMember({ title: selection.title, location, date: target.date }, name)
+    : '';
+  if (register && !attended && !lunch && !signup) {
+    const already = `✅ ${name} is already registered for ${selection.title || 'that programme'} on ` +
+      `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.${standingNote}`;
+    toastIfPossible(already);
+    return { ok: true, message: already, namesChanged: false };
+  }
+
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
   const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
   const what = describeQuickMark(attended, lunch, signup);
@@ -17016,7 +17218,7 @@ function applyQuickMarkLocked(args) {
   // the opposite on both counts: rare, and it is the number.
   if (signup) recalculateCateringCounts(sheet, map, target.sheetRow, 1);
 
-  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.`;
+  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${standingNote}`;
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
   return { ok: true, message, namesChanged: false };
@@ -17031,11 +17233,15 @@ function applyQuickMarkLocked(args) {
  * applyQuickMarkFromDialog()): one is a meal expected, the other a meal
  * already handed over.
  */
-function describeQuickMark(attended, lunch, signup) {
+function describeQuickMark(attended, lunch, signup, register) {
   if (attended && lunch) return 'attended + lunch';
   if (attended && signup) return 'attended + signed up for lunch';
   if (lunch) return 'lunch (collected, not attending)';
   if (signup) return 'signed up for lunch (not served yet)';
+  if (attended) return 'attended';
+  // Register on its own: on the list, nothing marked. Last, because every
+  // combination above says something more specific about the same row.
+  if (register) return 'registered (nothing marked yet)';
   return 'attended';
 }
 
@@ -17054,7 +17260,8 @@ function describeQuickMark(attended, lunch, signup) {
  * because a button was clicked by accident.
  */
 function addQuickMarkWalkIn(sheet, args) {
-  const { name, selection, location, attended, lunch, signup } = args;
+  const { name, selection, location, attended, lunch, signup, register, standing } = args;
+  const appointmentTime = String(args.appointmentTime || '').trim();
   const program = selection ? selection.title : '';
 
   if (!program) {
@@ -17075,7 +17282,43 @@ function addQuickMarkWalkIn(sheet, args) {
 
   const lunchOffered = isLunchOfferedOn(session.date, session.location);
   const dateLabel = formatDateLabel(session.date);
-  const what = describeQuickMark(attended, lunch, signup);
+  const what = describeQuickMark(attended, lunch, signup, register);
+
+  // AN APPOINTMENT IS A CHAIR AT A TIME, not a place in a room (see
+  // ASSISTANCE_TAG), so a desk booking one has to name the slot exactly as the
+  // public form makes a registrant name it — and the slot has to still be
+  // free, checked HERE under the lock rather than trusted from the dialog's
+  // snapshot. Two people in one chair is the failure this whole tag exists to
+  // prevent, and the desk is now a second way to cause it.
+  let slot = null;
+  if (session.isAssistance && standing) {
+    return {
+      ok: false,
+      message: `⚠️ "${program}" is booked by appointment, so nobody can be put on a standing list for it — ` +
+        `each appointment is booked one at a time. Untick "every future session" and mark again.`
+    };
+  }
+  if (session.isAssistance) {
+    const taken = readBookedAppointmentTimes(readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID'));
+    const free = buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session))
+      .filter(s => !(taken[session.eventId] || new Set()).has(s.startLabel));
+    if (!appointmentTime) {
+      return {
+        ok: false,
+        message: free.length
+          ? `⚠️ "${program}" is booked by appointment — pick a time as well (${free.length} free on ${dateLabel}).`
+          : `⚠️ Every appointment for "${program}" on ${dateLabel} is taken. Nothing was added.`
+      };
+    }
+    slot = free.filter(s => s.startLabel === appointmentTime)[0] || null;
+    if (!slot) {
+      return {
+        ok: false,
+        message: `⚠️ The ${appointmentTime} appointment on ${dateLabel} has just been taken — reload the ` +
+          `lists (↻) and pick another time. Nothing was added.`
+      };
+    }
+  }
 
   // A sign-up for a date with no meal on it is the one case worth refusing
   // outright rather than warning about. The row would carry Lunch_Status =
@@ -17102,8 +17345,9 @@ function addQuickMarkWalkIn(sheet, args) {
       needsConfirm: true,
       message: `"${name}" has no registration for ${program}.`,
       question: `"${name}" has no registration for ${program}.\n\n` +
-        `Add a new row for ${program} — ${dateLabel} (${session.location}), marked ${what} and ` +
-        `flagged "Manually Added"?` +
+        `Add a new row for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''} ` +
+        `(${session.location}), marked ${what} and flagged "Manually Added"?` +
+        (standing ? `\n\nThey will also be kept on the list for every future ${program}.` : '') +
         (lunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : '')
     };
   }
@@ -17112,7 +17356,11 @@ function addQuickMarkWalkIn(sheet, args) {
   const map = getIndexMap(headers);
   const row = new Array(headers.length).fill('');
   row[map['Event_Date']] = session.date;
-  row[map['Event_Time']] = session.eventTime || '';
+  // The SLOT's own times on an appointment booking, the session's span on
+  // everything else. The registrant row's Event_Time IS the appointment: it is
+  // what the provider's list is built from, and what stops the form offering
+  // that time to the next person (readBookedAppointmentTimes()).
+  row[map['Event_Time']] = slot ? slot.rangeLabel : (session.eventTime || '');
   row[map['Location']] = session.location;
   row[map['Event']] = session.title;
   row[map['Name']] = name;
@@ -17131,10 +17379,14 @@ function addQuickMarkWalkIn(sheet, args) {
   row[map['Program_Status']] = 'Active';
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
-  row[map['Admin_Notes']] = `${signup ? 'Lunch sign-up' : (lunch && !attended ? 'Take-out walk-in' : 'Walk-in')} ` +
-    `added at the desk on ${formatDateLabel(new Date())}.`;
+  const how = signup ? 'Lunch sign-up'
+    : (lunch && !attended ? 'Take-out walk-in'
+      : (register && !attended ? (slot ? 'Appointment booked at the desk' : 'Registered at the desk') : 'Walk-in'));
+  row[map['Admin_Notes']] = `${how} added at the desk on ${formatDateLabel(new Date())}.`;
   row[map['Manual_Override']] = 'Manually Added';
-  row[map['Form_Source']] = signup ? 'Front desk sign-up (no form)' : 'Walk-in (no form)';
+  row[map['Form_Source']] = (register && !attended && !lunch)
+    ? 'Front desk registration (no form)'
+    : (signup ? 'Front desk sign-up (no form)' : 'Walk-in (no form)');
   row[map['Event_ID']] = session.eventId;
 
   // Somebody standing at the desk outranks a past deletion of the same person
@@ -17152,16 +17404,92 @@ function addQuickMarkWalkIn(sheet, args) {
   // the row just added, so no re-read is needed.
   if (signup) updateMasterLunchDashboard(existing);
 
-  const message = signup
+  const standingNote = standing ? addStandingListMember(session, name) : '';
+  const message = (signup
     ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
-    : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`;
+    : (register && !attended && !lunch
+      ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.`
+      : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`)) + standingNote;
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
   // The name list for this session has a new entry on it now. The normalized
   // key travels with it so the dialog can add the name to the list it is
   // already holding, under the same identity rule this file uses everywhere,
   // instead of re-fetching the list or guessing at the rule in browser JS.
-  return { ok: true, message, namesChanged: true, addedName: name, addedNameKey: normalizeNameKey(name) };
+  return {
+    ok: true, message, namesChanged: true, addedName: name, addedNameKey: normalizeNameKey(name),
+    // So the dialog can take the slot out of its own list without re-fetching
+    // it — the next person in the queue must not be offered the chair that was
+    // just filled.
+    bookedTime: slot ? slot.startLabel : ''
+  };
+}
+
+/**
+ * Puts one person on a programme's STANDING LIST from the desk, and says in
+ * one short clause what happened — appended to whatever message the mark
+ * itself produced, because it is a rider on that action rather than an action
+ * of its own.
+ *
+ * WHY THIS EXISTS. Plenty of people have come to the same class every week
+ * since 2015 and have never filled in a registration form in their lives; the
+ * instructors who email them need the list to be right anyway. The form's club
+ * option (see CLUB_TAG) already promises exactly this — "sign up once and stay
+ * on the list" — so the answer is not a second mechanism but the same one,
+ * reachable by staff: a Club_Members row, which applyClubRosterCatchup() books
+ * into every future session of the programme, and which staff take somebody
+ * off by unticking Active.
+ *
+ * IT DOES NOT NEED THE PROGRAMME TO BE TAGGED [Club]. That tag decides whether
+ * the public FORM offers to join; a standing place added at the desk is a
+ * decision staff have already made, and refusing it because a calendar
+ * description lacks a word would leave the Zoom classes — the whole reason
+ * this was asked for — unable to have one.
+ *
+ * Failure is reported, never thrown: the registration this rides on has
+ * already been written, and losing it to a roster problem would be a much
+ * worse outcome than a message saying the standing part did not take.
+ */
+function addStandingListMember(session, name) {
+  try {
+    const title = String((session && session.title) || '').trim();
+    const location = String((session && session.location) || '').trim();
+    if (!title) return ' (no programme name, so no standing place was added)';
+
+    // An [All Locations] programme's roster is one list, not one per room, so
+    // the key has to be scoped the same way the form's own club joins scope it
+    // — which is decided by the form the sessions share.
+    let formId = String((session && session.formId) || '').trim();
+    if (!formId) {
+      const found = findNearestSessionForProgram(title, location, '');
+      // The walk-in path refuses this before it gets here; this is the other
+      // caller, where the person already had a registration and the programme
+      // was never looked up. Same rule, same reason — see
+      // applyClubRosterCatchup().
+      if (found && found.isAssistance) {
+        return ` (${title} is booked by appointment, so there is no standing list for it.)`;
+      }
+      formId = found ? found.formId : '';
+    }
+    const clubKey = computeClubKey(title, location, formId ? getSharedFormIdSet().has(formId) : false);
+    if (!clubKey) return ' (no standing place was added)';
+
+    const result = upsertClubMembers([{
+      clubKey,
+      club: title,
+      location,
+      name,
+      personType: 'Attendee',
+      primaryRegistrant: 'Self',
+      source: 'Added at the front desk'
+    }]);
+    if (result.added > 0) return ` They are now on the standing list for every future ${title}.`;
+    if (result.reactivated > 0) return ` They are back on the standing list for every future ${title}.`;
+    return ` They were already on the standing list for ${title}.`;
+  } catch (err) {
+    log(`addStandingListMember: could not add "${name}" to a standing list (${err}).`);
+    return ` (their registration is saved, but the standing list could not be updated — ${err})`;
+  }
 }
 
 /**
@@ -17219,6 +17547,16 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
       title: String(row[map['Clean_Title']] || '').trim(),
       eventId: String(row[map['Event_ID']] || '').trim(),
       eventTime: formatTimeRange(date, map['Event_End'] === undefined ? '' : row[map['Event_End']]),
+      // The four facts a DESK booking needs beyond a walk-in's: where the
+      // session ends and how long one slot is (to cut its appointments),
+      // whether it is booked by appointment at all, and which form covers it
+      // — the last because a standing place is filed under a key that is
+      // scoped differently for an [All Locations] programme (computeClubKey()).
+      end: map['Event_End'] === undefined ? null : coerceDate(row[map['Event_End']]),
+      slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0),
+      isAssistance: map['Personalized_Assistance'] !== undefined &&
+        isAssistanceColumnValue(row[map['Personalized_Assistance']]),
+      formId: String(row[map['Form_ID']] || '').trim(),
       lunchType: ''
     });
   });
@@ -18088,8 +18426,8 @@ function upsertClubMembers(entries) {
         if (entry.lunchType) existing[map['Lunch']] = entry.lunchType;
         result.reactivated++;
         noteForAdmin('Club members who re-joined',
-          `${name} was marked inactive on "${entry.club || clubKey}" but has just chosen the club option on a ` +
-          `registration form, so they are back on the list. Untick Active on ` +
+          `${name} was marked inactive on "${entry.club || clubKey}" but has just been put back on it ` +
+          `(${entry.source || 'a registration form'}), so they are on the list again. Untick Active on ` +
           `"${SHEET_NAMES.CLUB_MEMBERS}" if that is wrong.`);
       } else {
         result.unchanged++;
@@ -18181,13 +18519,24 @@ function applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, 
   const members = readClubMemberRows(sheet).filter(row => isTruthyCheckbox(row[map['Active']]));
   if (members.length === 0) return 0;
 
-  // Club sessions only, grouped by the club they belong to.
+  // Every session, grouped by the programme it belongs to — not clubs only.
+  // A roster row is a standing place on a PROGRAMME, and one added at the desk
+  // (addStandingListMember()) is attached to programmes the public form never
+  // offered to join. Nothing widens as a result: a person is still booked only
+  // into programmes somebody deliberately put them on.
   const sessionsByClub = {};
   Object.keys(registryIndex).forEach(k => {
     const entry = registryIndex[k];
-    if (!entry.isClub || !entry.clubKey) return;
-    if (!sessionsByClub[entry.clubKey]) sessionsByClub[entry.clubKey] = [];
-    sessionsByClub[entry.clubKey].push(entry);
+    // NEVER AN APPOINTMENT SESSION. A standing place means "book me into every
+    // one of these"; on a [Personalized Assistance] programme that would hand
+    // one person a slot in every Wills afternoon for the rest of the year and
+    // take those chairs off the form. An appointment is booked one at a time,
+    // by whoever wants it — from the form, or from Quick Mark.
+    if (entry.isAssistance) return;
+    const key = entry.programKey || entry.clubKey;
+    if (!key) return;
+    if (!sessionsByClub[key]) sessionsByClub[key] = [];
+    sessionsByClub[key].push(entry);
   });
   if (Object.keys(sessionsByClub).length === 0) return 0;
 
@@ -18219,7 +18568,7 @@ function applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, 
         phone: String(member[map['Phone']] || ''),
         email: String(member[map['Email']] || ''),
         formEditUrl: '',
-        formSourceText: 'Club member (standing list)',
+        formSourceText: 'Standing list',
         protectedKeys,
         existingRowIndex,
         submittedAt: joinedOn,
@@ -22384,7 +22733,10 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
       isFixed: context.isFixed || context.showTitle, // a combined form is a fixed list of dates
       isClub: context.isClub,
       programTitle: context.programTitle,
-      isLunchOnly: context.isLunchOnly
+      isLunchOnly: context.isLunchOnly,
+      // An appointment form HAS no mode question — passing this is what stops
+      // it logging a warning about the absence on every session change.
+      isAssistance: context.isAssistance
     });
   } catch (err) {
     log(`⚠️ Could not update the sign-up options on form ${formId} (${err}).`);
@@ -23786,12 +24138,6 @@ function buildAppointmentChoicesForContext(context, booked) {
   return choices;
 }
 
-/** The page break an appointment form's time question lives on, under either title. */
-function findAppointmentPage(form) {
-  return form.getItems().filter(it => it.getType() === FormApp.ItemType.PAGE_BREAK &&
-    (it.getTitle() === APPOINTMENT_PAGE_TITLE || it.getTitle() === TEMPLATE_PAGE_TITLES.MODE))[0] || null;
-}
-
 /** What the mode page is retitled to on an appointment form — it no longer asks about modes. */
 const APPOINTMENT_PAGE_TITLE = 'Choose Your Appointment';
 
@@ -24453,12 +24799,26 @@ function formContextFromGroup(group, formId) {
 }
 
 /**
- * Re-stocks every appointment form's time question with what is still free.
+ * Re-shapes every appointment form and re-stocks its time question with what
+ * is still free.
  *
  * Runs at the end of each registration sync, beside the capacity-label
  * refresh and for the same reason: the thing that changed is who has booked
  * what, and a form still offering a slot somebody took an hour ago is how two
  * people end up in one chair.
+ *
+ * THE WHOLE SHAPE, NOT JUST THE TIMES. This used to call
+ * applyAppointmentChoices() on its own, which ADDS the time question and
+ * removes nothing — fine for a form that was already built as an appointment
+ * form, and wrong for the case that actually happens: staff tick
+ * Personalized_Assistance on a program whose form already exists. That form
+ * then carried BOTH shapes at once. Worse than untidy: the mode question's
+ * "I want to sign up for all events this month" branches straight to the
+ * every-date page and submits, so the times sitting on the other branch were
+ * never reached — the form offered a whole month of appointments and, for
+ * anyone taking the first option, no time at all. Reshaping here is the same
+ * idempotent call every other path makes, and after the first pass it finds
+ * nothing to delete and nothing to write.
  */
 function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registrantRows) {
   const headers = HEADERS.Master_Program_Dashboard;
@@ -24485,8 +24845,8 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
     if (context.sessions.length === 0) return;
     try {
       const form = FormApp.openById(formId);
-      touched += applyAppointmentChoices(form, context,
-        buildAppointmentChoicesForContext(context, booked), findAppointmentPage(form));
+      touched += syncAssistanceQuestionsOnForm(form, context,
+        buildAppointmentChoicesForContext(context, booked));
     } catch (err) {
       log(`Could not refresh the appointment times on form ${formId} (${err}).`);
       noteForAdmin('Appointment forms not updated',
@@ -24494,10 +24854,158 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
     }
   });
 
-  if (touched > 0) log(`Refreshed the appointment times on ${touched} form(s).`);
+  if (touched > 0) log(`Reshaped / refreshed the appointment times on ${touched} form(s).`);
   return touched;
 }
 
+
+/**
+ * MENU: reshape every [Personalized Assistance] form NOW, and say exactly what
+ * was identified as one.
+ *
+ * The hourly sync does this already (refreshAppointmentSlotsForAllForms()),
+ * which is precisely the problem when something looks wrong: the answer to
+ * "why has this form still got the wrong questions on it" is an hour away, and
+ * when it arrives it is silent. This runs the same reshape on demand and
+ * reports what it saw, per programme:
+ *
+ *   - which sessions the workbook thinks are appointments (the
+ *     Personalized_Assistance tick on Master_Program_Dashboard, which is what
+ *     every other part of this feature reads);
+ *   - how many free slots each form is offering, and out of how many;
+ *   - what changed on the form, or that nothing needed to;
+ *   - and the two things that produce a form with NO times on it — every
+ *     session in the past, and every slot already booked — named as such
+ *     rather than left to look like a failure.
+ *
+ * It is read-mostly and re-runnable: the only writes are the same idempotent
+ * form edits the sync makes.
+ */
+function rebuildAssistanceFormsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!dash) {
+    toastIfPossible('⚠️ There is no programme dashboard yet — run Sync Cal once.');
+    return;
+  }
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(dash, headers, 'Event_ID');
+  const lines = [];
+  const todayKey = formatDateKey(new Date());
+
+  if (map['Personalized_Assistance'] === undefined) {
+    const stale = 'This workbook\'s dashboard has no Personalized_Assistance column yet — ' +
+      'run Admin → Rebuild Layout, then Sync Cal.';
+    log(`rebuildAssistanceFormsNow: ${stale}`);
+    try { SpreadsheetApp.getUi().alert('Appointment Forms', stale, SpreadsheetApp.getUi().ButtonSet.OK); } catch (err) { /* no UI */ }
+    return;
+  }
+
+  // WHAT IS AN APPOINTMENT, PROGRAMME BY PROGRAMME. Reported for every
+  // programme on the dashboard, not just the ticked ones: "Low-Cost Wills —
+  // not marked" is the answer to the commonest version of this question, and
+  // it cannot be given by listing only the programmes that ARE marked.
+  const byProgram = {};
+  rows.forEach(row => {
+    const title = String(row[map['Clean_Title']] || '').trim();
+    if (!title) return;
+    const key = `${title}\u0000${String(row[map['Location']] || '').trim()}`;
+    if (!byProgram[key]) {
+      byProgram[key] = {
+        title, location: String(row[map['Location']] || '').trim(),
+        marked: 0, total: 0, upcoming: 0, formIds: {}
+      };
+    }
+    const entry = byProgram[key];
+    entry.total++;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (date && formatDateKey(date) >= todayKey) entry.upcoming++;
+    if (isAssistanceColumnValue(row[map['Personalized_Assistance']])) {
+      entry.marked++;
+      const formId = String(row[map['Form_ID']] || '').trim();
+      if (formId) entry.formIds[formId] = true;
+    }
+  });
+
+  lines.push('IDENTIFIED AS PERSONALIZED ASSISTANCE');
+  const programs = Object.keys(byProgram).map(k => byProgram[k])
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const marked = programs.filter(p => p.marked > 0);
+  if (marked.length === 0) {
+    lines.push('  (nothing — no session on the dashboard has its Personalized_Assistance box ticked)');
+    lines.push('  Tick it on Master_Program_Dashboard, or put [Personalized Assistance] in the');
+    lines.push('  calendar event\'s description, then run Sync Cal.');
+  }
+  marked.forEach(p => {
+    lines.push(`  ✅ ${p.title} (${p.location}) — ${p.marked} of ${p.total} session(s) marked, ` +
+      `${p.upcoming} still upcoming`);
+    if (p.marked < p.total) {
+      lines.push(`     ⚠️ ${p.total - p.marked} session(s) of this programme are NOT marked — those dates ` +
+        `are offered as ordinary sign-ups.`);
+    }
+  });
+  const unmarked = programs.filter(p => p.marked === 0);
+  if (unmarked.length > 0) {
+    lines.push('');
+    lines.push(`NOT MARKED (${unmarked.length} programme(s)) — ordinary date-based sign-up:`);
+    unmarked.slice(0, ASSISTANCE_REPORT_MAX_UNMARKED).forEach(p =>
+      lines.push(`  – ${p.title} (${p.location})`));
+    if (unmarked.length > ASSISTANCE_REPORT_MAX_UNMARKED) {
+      lines.push(`  …and ${unmarked.length - ASSISTANCE_REPORT_MAX_UNMARKED} more.`);
+    }
+  }
+
+  // THE RESHAPE ITSELF, form by form.
+  const byForm = groupRegistryRowsByForm(rows, map);
+  const assistanceFormIds = Object.keys(byForm).filter(formId =>
+    byForm[formId].some(row => isAssistanceColumnValue(row[map['Personalized_Assistance']])));
+
+  lines.push('');
+  lines.push(`FORMS RESHAPED (${assistanceFormIds.length})`);
+  if (assistanceFormIds.length === 0) {
+    lines.push('  (none to do)');
+  } else {
+    const booked = readBookedAppointmentTimes(readAllSectionedRows(
+      getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID'));
+    const sharedFormIds = getSharedFormIdSet();
+    assistanceFormIds.forEach(formId => {
+      const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
+      const name = context.programTitle || describeLocations(context.locations) || formId;
+      const upcoming = context.sessions.filter(s => s.date && formatDateKey(s.date) >= todayKey);
+      try {
+        const choices = buildAppointmentChoicesForContext(context, booked);
+        // The escape hatch is always the last choice and is never a time — see
+        // ASSISTANCE_NO_TIME_CHOICE. Counting it as one is how a form with
+        // nothing free reads as "1 time available".
+        const free = choices.filter(c => c !== ASSISTANCE_NO_TIME_CHOICE).length;
+        const changed = syncAssistanceQuestionsOnForm(FormApp.openById(formId), context, choices);
+        lines.push(`  ${name} — ${free} free appointment time(s) across ${upcoming.length} upcoming ` +
+          `session(s); ${changed > 0 ? `${changed} change(s) written` : 'already correct'}`);
+        if (free === 0) {
+          lines.push(upcoming.length === 0
+            ? `     ⚠️ No UPCOMING sessions — a past date is never offered, so this form can only take ` +
+              `"${ASSISTANCE_NO_TIME_CHOICE}". Add the next dates to the calendar and run Sync Cal.`
+            : `     ⚠️ Every slot on those sessions is already booked. Cancel a registrant row to free one.`);
+        }
+      } catch (err) {
+        lines.push(`  ${name} — ⚠️ could not be reshaped: ${err}`);
+        log(`rebuildAssistanceFormsNow: ${formId} failed (${err}).`);
+      }
+    });
+  }
+
+  const report = lines.join('\n');
+  log(`rebuildAssistanceFormsNow:\n${report}`);
+  try {
+    SpreadsheetApp.getUi().alert('Appointment Forms', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    // No UI (editor or trigger run) — the log above is the output.
+  }
+}
+
+/** How many ordinary programmes the report above lists before summarizing the rest. */
+const ASSISTANCE_REPORT_MAX_UNMARKED = 12;
 
 // ---------------------------------------------------------------------------
 // READING AN APPOINTMENT SUBMISSION

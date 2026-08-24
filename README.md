@@ -137,4 +137,8 @@ node tests/bracket_tags.test.js
 node tests/assistance_and_questions.test.js
 node tests/lunch_signup_links.test.js
 node tests/lunch_signup_horizon.test.js
+node tests/quick_mark_index.test.js
+node tests/quick_mark_signup.test.js
+node tests/lunch_demand.test.js
+node tests/form_rebuild.test.js
 ```

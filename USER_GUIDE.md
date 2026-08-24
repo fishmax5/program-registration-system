@@ -291,9 +291,41 @@ order, with names, phone numbers, emails and each person's answers. Select it
 and paste it into the email. That's the whole point of the tag: Heather and the
 Medicare counselors need names against times a week ahead.
 
+**Booking one yourself.** People ring up for these far more often than they
+fill in the form, so the front desk can book a chair directly: **⚡ Quick Mark**,
+pick the session, pick the **Appointment time**, tick **Register them for this
+session**. The time comes off the live form immediately. See [Booking an
+appointment at the desk](#booking-an-appointment-at-the-desk).
+
 **It's reversible.** Untick the box (or remove the tag) and the next sync
 rebuilds the form as an ordinary date-based one. Appointments already booked
 keep their times on Registrant_Dash.
+
+**If a form doesn't look right** — no times on it, or it still offers *"I want
+to sign up for all events this month"* — run **📝 Programmes & Forms ▸ Rebuild
+Appointment Forms + Report…**. It reshapes every appointment form on the spot
+instead of waiting for the hourly pass, and reports:
+
+- every program the workbook currently treats as an appointment program, and
+  how many of its sessions are marked (a program with only *some* sessions
+  marked is called out — the rest are offered as ordinary sign-ups);
+- every program that is **not** marked, so you can see at a glance whether the
+  tick actually landed;
+- how many free times each form is offering, out of how many upcoming
+  sessions, and whether the form needed changing.
+
+The two reasons a form offers no times are named as such by that report: every
+session on it is in the **past** (add the next dates to the calendar and run
+Sync Cal), or every slot is **booked** (cancel a row to free one). Neither is a
+failure of the form.
+
+> **What changed here.** The hourly pass used to *add* the appointment question
+> to a form without taking the date-based questions off it. A program that
+> became `[Personalized Assistance]` *after* its form was built therefore ended
+> up carrying both shapes: the old "all events this month" option was still the
+> first thing people saw, and picking it jumped straight to the end of the form
+> — so the appointment times, sitting on the other branch, were never reached.
+> The hourly pass now reshapes the whole form, exactly as a rebuild does.
 
 ### Extra questions on one program's form
 
@@ -717,8 +749,13 @@ item on the menu, because on a serving day it's the only one you need.
 3. **Name** — the people registered for **that session** first, then
    **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
    a name that's on neither.
-4. Tick **Attended**, **Lunch**, **Sign up for lunch**, or a combination, and
-   press the button.
+4. Tick **Attended**, **Lunch**, **Sign up for lunch**, **Register them for
+   this session**, or a combination, and press the button.
+
+   On a `[Personalized Assistance]` session a fourth box appears between the
+   name and the ticks — **Appointment time** — listing the chairs that are
+   still free. See [Booking an appointment at the
+   desk](#booking-an-appointment-at-the-desk).
 
 The dialog stays open on the same session and clears just the name and the
 ticks, so a queue of thirty people is one pick and one click each. Every mark
@@ -759,9 +796,86 @@ is listed underneath as it happens, so you can see what you've done.
 | **Lunch** *(alone)* | They got a meal but were **not** here — take-out. `Attended` is **cleared**. |
 | **Attended + Lunch** | Here, and fed. Both are set. |
 | **Sign up for lunch** | They **want** a meal on that date. Nothing is recorded as served, and `Attended` is left exactly as it is. |
+| **Register them for this session** | They are **on the list** for that session. Nothing is marked — not attendance, not lunch. This is the phone call and the front-desk sign-up, with no form involved. |
+| **…and every future session of it** | The same, plus a **standing place** on that program: they are booked into every future session of it automatically. See [Standing lists](#standing-lists--somebody-who-comes-to-everything). |
 
 **Lunch** and **Sign up for lunch** are the same fact at two different times —
 already handed over, versus expected — so ticking one clears the other.
+
+#### Registering somebody at the desk or over the phone
+
+Somebody rings up, or stops at the front desk, and asks to be put down for
+Chair Yoga a week Thursday. You don't need to open the form and fill it in as
+them:
+
+Pick the location, pick **that Thursday's** session, pick or type their name,
+tick **Register them for this session**, press **Sign up**.
+
+That writes an ordinary registration — `Program_Status` = `Active`, nothing
+marked attended, nothing ordered for lunch — flagged **Manually Added**, so no
+future sync touches or removes it. They appear on the sign-in sheet, in the
+session's count, and in the Quick Mark name list from then on.
+
+- **Already on the list?** You're told so and nothing is written twice.
+- **Want lunch too?** Tick **Sign up for lunch** as well; the date still needs
+  a `Hot` or `Cold` row on Lunch_Schedule.
+- **They're standing in front of you right now?** Tick **Attended** instead —
+  that both registers them and marks them in, which is what a walk-in is.
+
+#### Booking an appointment at the desk
+
+`[Personalized Assistance]` programs — Computer Help, Low-Cost Wills, Medicare
+counseling — are booked by **time**, not by date (see [Personalized
+assistance](#personalized-assistance-appointments)), and people much prefer to
+ring up or book the next one on their way out of this one.
+
+Pick the session and an **Appointment time** box appears, listing the free
+chairs earliest first — *"12:30 PM – 1:00 PM"*. Pick a name, pick a time, tick
+**Register them for this session**, press **Sign up**.
+
+- **The times already taken are not listed**, whether they were taken on the
+  form or at the desk. It's the same list the form offers, built from the same
+  two facts, so the desk and the public can never be handed the same chair.
+- **The slot is checked again when you press the button.** If somebody took it
+  online while the dialog was open, you're told so and asked to pick another —
+  nothing is written.
+- **A time just booked disappears from the dropdown**, so a queue of people is
+  one pick each without reloading.
+- **"Every appointment on this date is taken"** means exactly that. Free one by
+  cancelling a row, or add another date to the calendar.
+- **Filling a schedule you already keep on paper** is this, once per person:
+  each booking takes that time off the live form, which is how you get an
+  already-full October onto the system before the link goes out.
+
+> **There is no standing list for an appointment program**, and the box isn't
+> offered on one. "Book me into every one of these" would hand one person a
+> chair in every Wills afternoon for the rest of the year and take those times
+> off the form. Appointments are booked one at a time, by whoever wants them.
+
+#### Standing lists — somebody who comes to everything
+
+Plenty of people have come to the same class every week for years and have
+never filled in a form in their lives. The instructor still needs their name
+and their email.
+
+Tick **Register them for this session** and then **…and every future session of
+it**. They go on the **[Club_Members](#8-club_members)** tab, and from the next
+sync they are booked into **every upcoming session of that program**, on
+whatever form currently covers it — forever, until somebody unticks them.
+
+- **It doesn't need the `[Club]` tag.** That tag decides whether the public
+  *form* offers people the "sign up for all future meetings" option. A standing
+  place added at the desk is a decision staff have already made, so any program
+  can have one — the Zoom classes above all.
+- **To take somebody off**, untick **Active** on their `Club_Members` row. You
+  are asked, on the spot, whether to cancel the upcoming rows that membership
+  already created. See [Club_Members](#8-club_members).
+- **Existing rows are never overwritten.** A session they already have a row
+  for — registered normally, added as a walk-in, or cancelled for that one date
+  — is left exactly as it is. A standing place fills gaps; it does not
+  re-assert itself over decisions somebody made about individual dates.
+- **Past dates are never filled in.** A standing place says where somebody is
+  expected, not where they were.
 
 #### Signing someone up for lunch at the desk
 
@@ -1307,15 +1421,28 @@ already in the calendar right away, run **🔗 Rewrite Event Links** from the
 Admin menu.
 
 ### 8. Club_Members
-The standing roster for every `[Club]` program — one row per person per club.
-See [Clubs](#clubs) for how people get here and how to take them off.
+The standing roster: **who is booked into every future session of a program
+without ever signing up again**. One row per person per program.
+
+Two things put somebody here, and they behave identically once the row exists:
+
+- they chose *"I want to sign up for all future … meetings"* on a `[Club]`
+  program's form — see [Clubs](#clubs);
+- staff put them there from Quick Mark, with **Register them for this session**
+  and **…and every future session of it** — see [Standing
+  lists](#standing-lists--somebody-who-comes-to-everything). This works for
+  **any** program, tagged `[Club]` or not, which is how the long-standing Zoom
+  and exercise regulars get onto the list they have never once filled a form
+  in for.
+
+Taking somebody off is the same in both cases: untick **Active**.
 
 The columns on the **left** are refreshed automatically (which club, where,
 contact details). The **yellow** ones are yours:
 
 | Column | What it's for |
 |---|---|
-| **Lunch** | Whether this member wants lunch at club meetings. Applied to every session booked for them. |
+| **Lunch** | Whether this member wants lunch at that program. Applied to every session booked for them. |
 | **Active** | The on/off switch. Untick to stop booking them; you'll be asked whether to cancel bookings already made. |
 | **Staff_Notes** | Anything you want to remember |
 
@@ -1552,7 +1679,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 
 | Item | What it does |
 |---|---|
-| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, or sign somebody up for a future lunch — location, session, name, then Attended / Lunch / Sign up for lunch. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, or register them for a program (an appointment time included) with no form — location, session, name, then Attended / Lunch / Sign up for lunch / Register them. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **🔄 Update Everything Now** | Catches the workbook up with the calendars *and* the forms, in that order. This is the one to press when you have just changed something and want to see it. It is the same pair of passes the system runs on its own every hour |
 
@@ -1581,6 +1708,7 @@ Everything else is grouped by the job it belongs to.
 |---|---|
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
 | **Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
 
