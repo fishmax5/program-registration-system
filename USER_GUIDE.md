@@ -1908,9 +1908,14 @@ cost the hourly repair already carries.
 **Forms with no upcoming sessions are left alone**, for the same reason as
 below: closed business, and nobody's route to anything.
 
-It asks once, with the list of forms it would rewrite. If there are more forms
-than one run's six minutes allows, it does as many as it can, tells you how
-many are left, and picks up where it stopped the next time you run it.
+It asks once, with the list of forms it would rewrite, and then **finishes the
+whole list on its own**. One run is capped at six minutes, which is a few
+forms; the rest continue in the background, a batch at a time, until every form
+is done. You do not click it again. A toast reports progress as it goes
+("4 done, 11 to go"), and the last one tells you it has finished.
+
+> If you ever need to stop it mid-way, run `cancelInPlaceFormRebuild()` from
+> the Apps Script editor. Whatever has been rebuilt stays rebuilt.
 
 ---
 
@@ -2387,7 +2392,7 @@ Triggers, Import Everything (First Run), Find Leftover Tabs, Archive Old
 Months (report), `mergeLegacyTabs()`, `initSheet()`,
 `initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
 `restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
-`cleanupNeverPolicyForms()`.
+`cancelInPlaceFormRebuild()`, `cleanupNeverPolicyForms()`.
 
 Everything on that list is under the **🔧 Admin** submenu or has no menu entry
 at all. The rule now is simply: **if it's on the main menu, anyone who can edit
