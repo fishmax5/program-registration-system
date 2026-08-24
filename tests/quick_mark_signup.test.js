@@ -56,6 +56,10 @@ vm.runInContext(src + `
 this.freeAppointmentTimesForChoice = freeAppointmentTimesForChoice;
 this.readBookedAppointmentTimes = readBookedAppointmentTimes;
 this.describeQuickMark = describeQuickMark;
+this.readEarlierAppointmentAnswer = readEarlierAppointmentAnswer;
+this.wantsEarlierAppointment = wantsEarlierAppointment;
+this.EARLIER_APPOINTMENT_CHOICES = EARLIER_APPOINTMENT_CHOICES;
+this.EARLIER_APPOINTMENT_VALUES = EARLIER_APPOINTMENT_VALUES;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -164,6 +168,29 @@ check('registering somebody who then turns up is just attendance',
 check('and the lunch phrasings are unchanged',
   [sandbox.describeQuickMark(false, true, false, false), sandbox.describeQuickMark(false, false, true, false)],
   ['lunch (collected, not attending)', 'signed up for lunch (not served yet)']);
+
+// "Would you take an earlier one?" — the fact Caroline was keeping by hand in
+// the old form's "Confirmed Date/Time?" column. Blank has to mean NO: nobody
+// who skipped an optional question has agreed to be telephoned about moving
+// their appointment.
+check('yes is recorded as the call-me value',
+  sandbox.readEarlierAppointmentAnswer(sandbox.EARLIER_APPOINTMENT_CHOICES.YES),
+  sandbox.EARLIER_APPOINTMENT_VALUES.YES);
+check('no is recorded as its own answer, not as blank',
+  sandbox.readEarlierAppointmentAnswer(sandbox.EARLIER_APPOINTMENT_CHOICES.NO),
+  sandbox.EARLIER_APPOINTMENT_VALUES.NO);
+check('an unanswered question records nothing',
+  [sandbox.readEarlierAppointmentAnswer(''), sandbox.readEarlierAppointmentAnswer(null)], ['', '']);
+
+check('and only the yes value reads as "ring them"',
+  [sandbox.EARLIER_APPOINTMENT_VALUES.YES, sandbox.EARLIER_APPOINTMENT_VALUES.NO, '', 'anything else']
+    .map(sandbox.wantsEarlierAppointment),
+  [true, false, false, false]);
+// Staff type into this column by hand far more often than anybody answers the
+// form question, and what they type is "yes".
+check('a staff "yes" typed into the column counts',
+  ['yes', 'Yes please', 'call her', 'no', 'not this one'].map(sandbox.wantsEarlierAppointment),
+  [true, true, true, false, false]);
 
 console.log(failures === 0 ? '\nAll Quick Mark sign-up checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

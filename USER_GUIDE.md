@@ -251,7 +251,7 @@ appointment-based.
 | | Ordinary program | `[Personalized Assistance]` |
 |---|---|---|
 | What you register for | a **date** | a **time on a date** |
-| The form asks | which dates, who's coming, who eats | which appointment time |
+| The form asks | which dates, who's coming, who eats | which appointment time, and whether they'd take an earlier one |
 | Capacity | `[Cap: N]`, or unlimited | however many slots fit in the event, unless `[Cap: N]` says otherwise |
 | Lunch | asked, if the date serves it | never asked |
 | Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
@@ -285,6 +285,37 @@ two Jane Smiths are the same person, and staff sometimes make the exception on
 purpose, so the system tells you rather than silently throwing a registration
 away.
 
+**"If an earlier appointment opens up, may we call you?"** Every appointment
+form asks this, directly under the time question. These bookings run months
+ahead, and two people who both pick November want opposite things: one is
+holding out for November because that's when her daughter visits, the other
+took the first date on the list and would drop everything for next week.
+Without the answer, filling a cancellation means ringing down the list asking
+everybody.
+
+- **It's optional, and blank means no.** Somebody who skipped the question has
+  not agreed to be telephoned. Only a *yes* puts them on the call list.
+- **The answer lands in `Earlier_Appointment` on Registrant_Dash**, which is
+  **yours to edit** — a yellow column with a dropdown. That's the common case:
+  people say it on the phone, not on a form. Type it in whenever you hear it.
+- **At the desk**, the Quick Mark tick **☎️ Call them if an earlier appointment
+  opens up** appears beside the appointment time. Ask while you have them on
+  the phone.
+- **When something falls through**, open **🗓️ Personalized Assistance
+  Schedule…**. Under the provider's list is **☎ Would take an earlier
+  appointment** — everyone who said yes, with their phone number, **furthest-out
+  booking first**, since they have the most to gain from the slot that just
+  opened. The same ☎ marker appears beside their name on the provider's list,
+  because the provider is often the one who hears about a cancellation first.
+- **Moving somebody** is still done by hand: book them into the free time (Quick
+  Mark, or edit the row) and cancel the old one. Nothing moves anybody
+  automatically — an appointment is an arrangement with a person, and it changes
+  only after they've said yes on the telephone.
+
+> **This used to live in the old form's "Confirmed Date/Time?" column**, as a
+> note typed in beside the confirmation. It's a column of its own now so it can
+> be sorted, filtered, and turned into a call list.
+
 **Sending the provider their list.** **🗓️ Personalized Assistance Schedule…**
 in the menu shows every upcoming appointment — by program, by day, in time
 order, with names, phone numbers, emails and each person's answers. Select it
@@ -294,8 +325,9 @@ Medicare counselors need names against times a week ahead.
 **Booking one yourself.** People ring up for these far more often than they
 fill in the form, so the front desk can book a chair directly: **⚡ Quick Mark**,
 pick the session, pick the **Appointment time**, tick **Register them for this
-session**. The time comes off the live form immediately. See [Booking an
-appointment at the desk](#booking-an-appointment-at-the-desk).
+session** (and **☎️ Call them if an earlier appointment opens up**, if they say
+so). The time comes off the live form immediately. See [Booking an appointment
+at the desk](#booking-an-appointment-at-the-desk).
 
 **It's reversible.** Untick the box (or remove the tag) and the next sync
 rebuilds the form as an ordinary date-based one. Appointments already booked
@@ -846,6 +878,11 @@ chairs earliest first — *"12:30 PM – 1:00 PM"*. Pick a name, pick a time, ti
 - **Filling a schedule you already keep on paper** is this, once per person:
   each booking takes that time off the live form, which is how you get an
   already-full October onto the system before the link goes out.
+- **☎️ Call them if an earlier appointment opens up** sits under the time box.
+  Tick it if they say they'd move — it puts them on the call list in the
+  [assistance schedule](#personalized-assistance-appointments). If they've
+  already got a booking and ring back to change their mind, pick them and tick
+  it on its own; the flag lands on the row they already have.
 
 > **There is no standing list for an appointment program**, and the box isn't
 > offered on one. "Book me into every one of these" would hand one person a
@@ -966,6 +1003,7 @@ are backfilled from the session table the next time this tab is drawn.
 | ✍️ `Lunch_Type` | `Hot`, `Cold`, or `No Lunch` — the actual dish category, not just yes/no |
 | ✍️ `Lunch_Status` | Needed · No Lunch · Waitlisted · Cancelled · Superseded |
 | ✍️ `Program_Status` | Active · Waitlisted · Cancelled · Superseded |
+| ✍️ `Earlier_Appointment` | **Appointment programs only.** `☎️ Call if earlier` · `Keeping this time` · blank. From the form's own question, or type it in when they tell you on the phone — it's what the [call list](#personalized-assistance-appointments) is built from. Blank means **no**: nobody unasked gets rung about moving their appointment |
 | ✍️ `Contacted` | Tick — this person has been reached out to |
 | ✍️ `Confirmed` | Tick — they said they're coming |
 | ✍️ `Waitlisted` | Tick — the instructor's own waitlist, separate from `Program_Status` above |

@@ -1024,6 +1024,15 @@ const NO_REGISTRATION_LINK_LABEL = '— no registration —';
  *     or couple" is a real answer for a will.
  *   - LUNCH COMES OFF. A counseling appointment is not a meal, and asking
  *     invites a lunch nobody is catering for.
+ *   - IT ASKS WHETHER THEY WOULD COME SOONER. Under the time question, one
+ *     optional question — "if an earlier appointment opens up, may we call
+ *     you?" — because these bookings run months ahead and the person who took
+ *     the first free November slot and the person who WANTS November are
+ *     otherwise indistinguishable on the sheet. The answer lands in
+ *     Registrant_Dash's Earlier_Appointment column, which staff can also set
+ *     themselves (most people say it on the telephone), and the assistance
+ *     schedule turns it into a call list the moment something falls through.
+ *     See EARLIER_APPOINTMENT_CHOICES.
  *   - A REQUEST NEEDS NO DATE. The last choice on the time question is always
  *     "None of these work — please contact me", which files the person on the
  *     Assistance_Requests tab instead of booking them onto a date they never
@@ -1074,6 +1083,70 @@ const APPOINTMENT_TIME_SEPARATOR = ' @ ';
  * staff to schedule by hand. See processAppointmentResponse().
  */
 const ASSISTANCE_NO_TIME_CHOICE = 'None of these work — please contact me about another time';
+
+/**
+ * WOULD THEY TAKE AN EARLIER APPOINTMENT? — the second question every
+ * assistance form asks, and the fact staff have been keeping by hand.
+ *
+ * Booking a will or a Medicare consultation runs months out, and the two
+ * people who book November want opposite things: one is holding out for
+ * November because that is when their daughter visits, the other took the
+ * first date on the form and would drop everything for a slot next week.
+ * Until now they were indistinguishable on the sheet — the difference lived in
+ * a note typed into the old form's "Confirmed Date/Time?" column — so when
+ * somebody cancelled, filling the hole meant ringing down the list and asking
+ * everyone.
+ *
+ * NOT REQUIRED, and blank means NO. Nobody who skipped the question has agreed
+ * to be telephoned, and a cold call moving somebody's appointment is exactly
+ * the wrong way to discover you guessed. The question is asked on the form,
+ * and the column is staff-editable on Registrant_Dash for the far commoner
+ * case: they said it on the phone.
+ */
+const EARLIER_APPOINTMENT_CHOICES = {
+  YES: 'Yes — please call me if an earlier appointment opens up',
+  NO: 'No — the time I picked is the one I want'
+};
+
+/**
+ * What those answers are STORED as, in Registrant_Dash's Earlier_Appointment
+ * column. Short, because it is read at a glance down a column beside twenty
+ * other columns — and deliberately not "Yes"/"No", which says nothing at all
+ * on a sheet where the question is not on screen.
+ */
+const EARLIER_APPOINTMENT_VALUES = {
+  YES: '☎️ Call if earlier',
+  NO: 'Keeping this time'
+};
+
+/** The dropdown offered on the sheet itself: the two answers, plus blank for "not asked". */
+const EARLIER_APPOINTMENT_OPTIONS = ['', EARLIER_APPOINTMENT_VALUES.YES, EARLIER_APPOINTMENT_VALUES.NO];
+
+/**
+ * One form answer -> what goes in the column. Matched on the LEADING WORD
+ * rather than the whole sentence, so re-wording either choice later does not
+ * orphan the answers already collected against the old wording.
+ */
+function readEarlierAppointmentAnswer(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^y/i.test(text)) return EARLIER_APPOINTMENT_VALUES.YES;
+  if (/^n/i.test(text)) return EARLIER_APPOINTMENT_VALUES.NO;
+  return '';
+}
+
+/**
+ * True when this row's Earlier_Appointment cell says "ring me". Reads the
+ * stored value AND a raw form answer, because staff type into that column by
+ * hand and will write "yes" in it.
+ */
+function wantsEarlierAppointment(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (text === EARLIER_APPOINTMENT_VALUES.YES) return true;
+  if (text === EARLIER_APPOINTMENT_VALUES.NO) return false;
+  return /^(☎️\s*)?(y|call)/i.test(text);
+}
 
 /** True when a Master_Program_Dashboard row's Personalized_Assistance cell marks it appointment-based. */
 function isAssistanceColumnValue(value) {
@@ -1412,7 +1485,7 @@ const HEADERS = {
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
-    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
+    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
@@ -1515,7 +1588,7 @@ const HEADERS = {
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
-    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status',
+    'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
@@ -2118,6 +2191,13 @@ const TEMPLATE_ITEM_TITLES = {
    * a form without it is an ordinary date-based form.
    */
   APPOINTMENT: 'Which appointment time would you like?',
+  /**
+   * Asked immediately after it, on the same page, and only on an appointment
+   * form — see EARLIER_APPOINTMENT_CHOICES. Like APPOINTMENT it is not built
+   * by the template, so a form carrying it is a form that was shaped as an
+   * appointment form.
+   */
+  EARLIER_APPOINTMENT: 'If an earlier appointment opens up, may we call you?',
   /**
    * What the ATTENDANCE_GRID is RETITLED TO on a lunch-only form, where
    * "which dates are you coming" and "which dates do you want lunch" are the
@@ -14325,6 +14405,14 @@ function buildRegistrantRow(args) {
       if (map['Form_Answers'] !== undefined && args.formAnswers !== undefined) {
         existingRow[map['Form_Answers']] = args.formAnswers || '';
       }
+      // Somebody who edits their response to say they WOULD now take an
+      // earlier slot has changed their mind, which is exactly what the
+      // question is for. Written only when this submission actually answered
+      // it, so a resubmission that skipped it cannot erase what staff typed
+      // into the column by hand.
+      if (map['Earlier_Appointment'] !== undefined && args.earlierAppointment) {
+        existingRow[map['Earlier_Appointment']] = args.earlierAppointment;
+      }
       // An APPOINTMENT's time is the registrant's own answer, not the
       // session's span — so a re-submission that moved the appointment moves
       // this row's time with it. See processAppointmentResponse().
@@ -14369,6 +14457,7 @@ function buildRegistrantRow(args) {
   row[map['Event_Time']] = args.eventTimeOverride || registryEntry.eventTime || '';
   row[map['Manual_Override']] = 'Auto-Synced';
   if (map['Form_Answers'] !== undefined) row[map['Form_Answers']] = args.formAnswers || '';
+  if (map['Earlier_Appointment'] !== undefined) row[map['Earlier_Appointment']] = args.earlierAppointment || '';
   row[map['Name']] = displayName;
   row[map['Phone']] = phone;
   row[map['Email']] = email;
@@ -16337,6 +16426,9 @@ function buildQuickMarkHtml() {
 <p class="hint" id="apptNote" style="display:none">
   This programme is booked by appointment. Times already taken are not listed.
 </p>
+<label class="tick" id="earlierLabel" style="display:none">
+  <input type="checkbox" id="earlier" onchange="refreshButton()"> ☎️ Call them if an earlier appointment opens up
+  <span class="note">— ask while they are on the phone; it saves ringing round later</span></label>
 
 <fieldset>
   <legend>Mark</legend>
@@ -16474,6 +16566,8 @@ function buildQuickMarkHtml() {
     el('apptTimeLabel').style.display = on ? 'block' : 'none';
     el('apptTime').style.display = on ? 'block' : 'none';
     el('apptNote').style.display = on ? 'block' : 'none';
+    el('earlierLabel').style.display = on ? 'block' : 'none';
+    if (!on) el('earlier').checked = false;
     el('apptNote').textContent = times.length
       ? 'This programme is booked by appointment. Times already taken are not listed.'
       : 'Every appointment on this date is taken — nobody else can be booked onto it.';
@@ -16600,6 +16694,7 @@ function buildQuickMarkHtml() {
           el('signup').checked = false;
           el('register').checked = false;
           el('standing').checked = false;
+          el('earlier').checked = false;
           registerChanged();
           // A slot just booked is gone for the next person in the queue, and
           // the dialog holds the only copy of that list until it is reloaded.
@@ -16628,6 +16723,7 @@ function buildQuickMarkHtml() {
         register: el('register').checked,
         standing: el('standing').checked,
         appointmentTime: el('apptTime').value,
+        earlierAppointment: el('earlier').checked,
         confirmWalkIn: !!confirmWalkIn
       });
   }
@@ -17083,6 +17179,10 @@ function applyQuickMarkLocked(args) {
   // Refused below, once the session is known, rather than silently dropped.
   const standing = register && !!args.standing;
   const appointmentTime = String(args.appointmentTime || '').trim();
+  // Only ever asked beside an appointment time, because that is the only kind
+  // of booking there is anything earlier to move somebody into.
+  const earlierAppointment = (appointmentTime && args.earlierAppointment)
+    ? EARLIER_APPOINTMENT_VALUES.YES : '';
   const selection = parseQuickMarkProgramChoice(args.session);
 
   if (!name) return { ok: false, message: '⚠️ Pick a name first — nothing was marked.' };
@@ -17125,7 +17225,7 @@ function applyQuickMarkLocked(args) {
     // walk-in case rather than a dead end.
     return addQuickMarkWalkIn(sheet, {
       name, selection, location, attended, lunch, signup, register, standing, appointmentTime,
-      confirmed: !!args.confirmWalkIn
+      earlierAppointment, confirmed: !!args.confirmWalkIn
     });
   }
 
@@ -17200,9 +17300,17 @@ function applyQuickMarkLocked(args) {
   const standingNote = standing
     ? addStandingListMember({ title: selection.title, location, date: target.date }, name)
     : '';
+  // "She rang back to say she'd take an earlier slot after all" — recorded on
+  // the row she already has, which is the whole use of a second call.
+  let earlierNote = '';
+  if (earlierAppointment && map['Earlier_Appointment'] !== undefined) {
+    sheet.getRange(target.sheetRow, map['Earlier_Appointment'] + 1).setValue(earlierAppointment);
+    earlierNote = ' Marked to be called if an earlier appointment opens up.';
+  }
   if (register && !attended && !lunch && !signup) {
     const already = `✅ ${name} is already registered for ${selection.title || 'that programme'} on ` +
-      `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.${standingNote}`;
+      `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.` +
+      `${earlierNote}${standingNote}`;
     toastIfPossible(already);
     return { ok: true, message: already, namesChanged: false };
   }
@@ -17218,7 +17326,7 @@ function applyQuickMarkLocked(args) {
   // the opposite on both counts: rare, and it is the number.
   if (signup) recalculateCateringCounts(sheet, map, target.sheetRow, 1);
 
-  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${standingNote}`;
+  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${earlierNote}${standingNote}`;
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
   return { ok: true, message, namesChanged: false };
@@ -17262,6 +17370,7 @@ function describeQuickMark(attended, lunch, signup, register) {
 function addQuickMarkWalkIn(sheet, args) {
   const { name, selection, location, attended, lunch, signup, register, standing } = args;
   const appointmentTime = String(args.appointmentTime || '').trim();
+  const earlierAppointment = String(args.earlierAppointment || '').trim();
   const program = selection ? selection.title : '';
 
   if (!program) {
@@ -17377,6 +17486,11 @@ function addQuickMarkWalkIn(sheet, args) {
   row[map['Lunch_Type']] = wantsLunch ? resolveWalkInLunchType(session) : 'No Lunch';
   row[map['Lunch_Status']] = wantsLunch ? 'Needed' : 'No Lunch';
   row[map['Program_Status']] = 'Active';
+  // "Ring me if something opens up sooner" — the fact staff used to keep in a
+  // note. See EARLIER_APPOINTMENT_CHOICES.
+  if (map['Earlier_Appointment'] !== undefined && earlierAppointment) {
+    row[map['Earlier_Appointment']] = earlierAppointment;
+  }
   row[map['Primary_Registrant']] = 'Self';
   row[map['Party_Size']] = 1;
   const how = signup ? 'Lunch sign-up'
@@ -17408,7 +17522,8 @@ function addQuickMarkWalkIn(sheet, args) {
   const message = (signup
     ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
     : (register && !attended && !lunch
-      ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.`
+      ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.` +
+        (earlierAppointment ? ' They will be called if an earlier appointment opens up.' : '')
       : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`)) + standingNote;
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
@@ -17624,7 +17739,7 @@ const REGISTRANT_EDITABLE_COLUMNS = [
   'Attended', 'Lunch_Served',
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
   'Meal_Source',
-  'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Admin_Notes'
+  'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment', 'Admin_Notes'
 ].concat(INSTRUCTOR_OWNED_COLUMNS);
 
 /**
@@ -17655,6 +17770,12 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     applyValueListValidationBounded(sheet, map['Program_Status'] + 1, PROGRAM_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Status'] + 1, LUNCH_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, REGISTRANT_LUNCH_TYPE_OPTIONS, z.start, z.count);
+    // Staff hear this on the telephone far more often than anybody ticks it on
+    // a form, so the column is theirs to set — see EARLIER_APPOINTMENT_CHOICES.
+    if (map['Earlier_Appointment'] !== undefined) {
+      applyValueListValidationBounded(sheet, map['Earlier_Appointment'] + 1,
+        EARLIER_APPOINTMENT_OPTIONS, z.start, z.count);
+    }
     // Real checkboxes, not free text: a tick is one click and reads back as a
     // boolean, which is what Served_Confirmed counts.
     REGISTRANT_DAYOF_COLUMNS.concat(INSTRUCTOR_FLAG_COLUMNS).forEach(h => {
@@ -24208,8 +24329,71 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   // 3. The time question itself, created on the appointment page if it isn't
   //    there yet and re-stocked with whatever is still free.
   changed += applyAppointmentChoices(form, context, choices, modePage);
+  // 4. And, directly under it, whether they would take an earlier one.
+  changed += applyEarlierAppointmentQuestion(form);
   if (changed > 0) invalidateFormItemIndex(form.getId());
   return changed;
+}
+
+/**
+ * Adds (or leaves alone) the "would you take an earlier appointment?" question,
+ * directly under the time question it qualifies.
+ *
+ * OPTIONAL ON PURPOSE. It is a courtesy question — the form's job is to book
+ * the appointment, and a required extra step between somebody and that booking
+ * is a step some of them will abandon on. An unanswered question means "no",
+ * which is the safe reading: see EARLIER_APPOINTMENT_CHOICES.
+ *
+ * Idempotent, like everything else this file writes to a live form: once the
+ * question is there with the right choices, this costs one comparison and no
+ * Forms write at all.
+ */
+function applyEarlierAppointmentQuestion(form) {
+  const wanted = [EARLIER_APPOINTMENT_CHOICES.YES, EARLIER_APPOINTMENT_CHOICES.NO];
+  const helpText = 'Optional. Answer "yes" and we will telephone you if a cancellation frees up a ' +
+    'sooner appointment — you can always say no when we ring. Leave it blank and we will keep the ' +
+    'time you picked.';
+  const items = form.getItems();
+  const existing = items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.EARLIER_APPOINTMENT &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null;
+
+  if (existing) {
+    try {
+      const list = existing.asMultipleChoiceItem();
+      const current = list.getChoices().map(c => c.getValue());
+      if (current.length === wanted.length && current.every((v, i) => v === wanted[i]) &&
+        String(list.getHelpText() || '') === helpText) {
+        return 0;
+      }
+      list.setChoiceValues(wanted);
+      list.setHelpText(helpText);
+      return 1;
+    } catch (err) {
+      // Unreadable, or somehow the wrong item type — fall through and rebuild
+      // it below rather than leaving a question nobody can answer.
+      try { form.deleteItem(existing); } catch (delErr) { return 0; }
+    }
+  }
+
+  const item = form.addMultipleChoiceItem()
+    .setTitle(TEMPLATE_ITEM_TITLES.EARLIER_APPOINTMENT)
+    .setHelpText(helpText)
+    .setChoiceValues(wanted)
+    .setRequired(false);
+  // UNDER THE TIME QUESTION, which is the only place it makes sense: it is a
+  // qualifier on the answer directly above it. Appended at the end if that
+  // question cannot be found — still asked, just further down.
+  const timeItem = form.getItems().filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null;
+  if (timeItem) {
+    try {
+      form.moveItem(item.getIndex(), timeItem.getIndex() + 1);
+    } catch (err) {
+      log(`Added the earlier-appointment question to form ${form.getId()} but could not move it ` +
+        `under the time question (${err}) — it is still asked, at the end.`);
+    }
+  }
+  return 1;
 }
 
 /**
@@ -24981,7 +25165,8 @@ function rebuildAssistanceFormsNow() {
         const free = choices.filter(c => c !== ASSISTANCE_NO_TIME_CHOICE).length;
         const changed = syncAssistanceQuestionsOnForm(FormApp.openById(formId), context, choices);
         lines.push(`  ${name} — ${free} free appointment time(s) across ${upcoming.length} upcoming ` +
-          `session(s); ${changed > 0 ? `${changed} change(s) written` : 'already correct'}`);
+          `session(s); ${changed > 0 ? `${changed} change(s) written` : 'already correct'}` +
+          `; asks about an earlier appointment`);
         if (free === 0) {
           lines.push(upcoming.length === 0
             ? `     ⚠️ No UPCOMING sessions — a past date is never offered, so this form can only take ` +
@@ -25032,6 +25217,9 @@ function processAppointmentResponse(args) {
   const chosen = String(getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.APPOINTMENT) || '').trim();
   const parsed = parseAppointmentChoice(chosen);
   const registrantName = people[0] ? people[0].name : '';
+  // Optional, and blank means no — see EARLIER_APPOINTMENT_CHOICES.
+  const earlierAppointment = readEarlierAppointmentAnswer(
+    getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.EARLIER_APPOINTMENT));
 
   if (!parsed) {
     // Either the escape hatch, or a form whose times changed under a
@@ -25045,7 +25233,11 @@ function processAppointmentResponse(args) {
         location: describeFormLocations(registryIndex, formId),
         name: registrantName,
         phone, email,
-        answers: [customAnswers, adminNotes].filter(Boolean).join(' | '),
+        // Their answer to the earlier-appointment question rides along with
+        // the rest: somebody asking to be fitted in has by definition said
+        // they will take what opens up, and staff working this tab should not
+        // have to go and look it up on another one.
+        answers: [customAnswers, earlierAppointment, adminNotes].filter(Boolean).join(' | '),
         requestId: partyId
       });
     }
@@ -25106,6 +25298,10 @@ function processAppointmentResponse(args) {
       // THE APPOINTMENT ITSELF. Everything a provider is sent a week ahead —
       // and everything the day's schedule is built from — is this one value.
       eventTimeOverride: eventTime,
+      // On EVERY person in the party, not just the first: a couple seeing
+      // Heather together are moved together or not at all, so the answer has
+      // to be true of both their rows.
+      earlierAppointment,
       formAnswers: i === 0 ? customAnswers : ''
     }));
   });
@@ -25365,7 +25561,7 @@ function getAssistanceScheduleData(daysAhead) {
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const sMap = getIndexMap(HEADERS.Master_Program_Dashboard);
   const rMap = getIndexMap(HEADERS.Registrant_Dash);
-  if (sMap['Personalized_Assistance'] === undefined) return [];
+  if (sMap['Personalized_Assistance'] === undefined) return { days: [], earlier: [] };
 
   const assistanceEventIds = {};
   readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID').forEach(row => {
@@ -25373,13 +25569,14 @@ function getAssistanceScheduleData(daysAhead) {
     const id = String(row[sMap['Event_ID']] || '').trim();
     if (id) assistanceEventIds[id] = true;
   });
-  if (Object.keys(assistanceEventIds).length === 0) return [];
+  if (Object.keys(assistanceEventIds).length === 0) return { days: [], earlier: [] };
 
   const horizon = new Date();
   horizon.setHours(0, 0, 0, 0);
   const until = new Date(horizon.getTime() + Math.max(1, Number(daysAhead) || 14) * 24 * 60 * 60 * 1000);
 
   const byDay = {};
+  const earlierList = [];
   readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID').forEach(row => {
     const eventId = String(row[rMap['Event_ID']] || '').trim();
     if (!assistanceEventIds[eventId]) return;
@@ -25398,6 +25595,8 @@ function getAssistanceScheduleData(daysAhead) {
         people: []
       };
     }
+    const earlier = rMap['Earlier_Appointment'] === undefined
+      ? false : wantsEarlierAppointment(row[rMap['Earlier_Appointment']]);
     byDay[key].people.push({
       time: String(row[rMap['Event_Time']] || ''),
       name: String(row[rMap['Name']] || ''),
@@ -25405,11 +25604,29 @@ function getAssistanceScheduleData(daysAhead) {
       phone: String(row[rMap['Phone']] || ''),
       email: String(row[rMap['Email']] || ''),
       answers: String(rMap['Form_Answers'] === undefined ? '' : (row[rMap['Form_Answers']] || '')),
-      notes: String(row[rMap['Admin_Notes']] || '')
+      notes: String(row[rMap['Admin_Notes']] || ''),
+      earlier
     });
+    // THE CALL LIST. Kept as its own flat list rather than left to be picked
+    // out of the days above, because the moment it is wanted is the moment a
+    // cancellation lands: somebody needs "who would take this, and what is
+    // their number" in one glance, not a scroll through every day looking for
+    // markers.
+    if (earlier) {
+      earlierList.push({
+        dateKey: formatDateKey(date),
+        dateLabel: formatDateLabel(date),
+        time: String(row[rMap['Event_Time']] || ''),
+        program: String(row[rMap['Event']] || ''),
+        location: String(row[rMap['Location']] || ''),
+        name: String(row[rMap['Name']] || ''),
+        phone: String(row[rMap['Phone']] || ''),
+        email: String(row[rMap['Email']] || '')
+      });
+    }
   });
 
-  return Object.keys(byDay).map(k => byDay[k])
+  const days = Object.keys(byDay).map(k => byDay[k])
     .sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.program.localeCompare(b.program))
     .map(day => {
       // Time order within the day, which is the only order a provider's list
@@ -25418,6 +25635,15 @@ function getAssistanceScheduleData(daysAhead) {
         (appointmentSortKey(a.time) - appointmentSortKey(b.time)) || a.name.localeCompare(b.name));
       return day;
     });
+
+  // FURTHEST OUT FIRST. Whoever is booked in November has the most to gain
+  // from a slot that just opened in September, and is the first person to
+  // ring — which is the opposite of the chronological order the provider's
+  // list is in, so it is sorted here rather than shared with it.
+  earlierList.sort((a, b) => b.dateKey.localeCompare(a.dateKey) ||
+    (appointmentSortKey(a.time) - appointmentSortKey(b.time)) || a.name.localeCompare(b.name));
+
+  return { days, earlier: earlierList };
 }
 
 /** Minutes-since-midnight for "10:30 AM", for sorting. Unparseable times sort last. */
@@ -25454,12 +25680,14 @@ function buildAssistanceScheduleHtml() {
   th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
   th { background: #f1f3f4; font-size: 12px; }
   td.time { white-space: nowrap; font-weight: bold; }
+  span.earlier { color: #B06000; font-weight: bold; }
   .none { color: #666; font-style: italic; }
 </style>
 <h3>Who is booked, and when</h3>
 <p class="hint">
   Every upcoming appointment on a program tagged <b>[${ASSISTANCE_TAG}]</b>, in time order.
-  Select the list and copy it into the email you send the provider.
+  Select the list and copy it into the email you send the provider. Underneath it,
+  everyone who asked to be called if an earlier appointment opens up.
 </p>
 <div>
   <label>Next
@@ -25488,9 +25716,11 @@ function buildAssistanceScheduleHtml() {
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
-  function render(days) {
+  function render(data) {
     document.getElementById('go').disabled = false;
-    if (!days || days.length === 0) {
+    var days = (data && data.days) || [];
+    var earlier = (data && data.earlier) || [];
+    if (days.length === 0) {
       document.getElementById('out').innerHTML =
         '<span class="none">No appointments booked in that range.</span>';
       return;
@@ -25503,11 +25733,32 @@ function buildAssistanceScheduleHtml() {
       d.people.forEach(function (p) {
         var detail = [p.answers, p.notes].filter(function (x) { return x; }).join(' - ');
         html += '<tr><td class="time">' + esc(p.time) + '</td><td>' + esc(p.name) +
-          (p.personType === 'Guest' ? ' (guest)' : '') + '</td><td>' + esc(p.phone) +
+          (p.personType === 'Guest' ? ' (guest)' : '') +
+          // The marker is on the provider's list too, because the provider is
+          // often the one who knows first that a slot has fallen through.
+          (p.earlier ? ' <span class="earlier" title="Would take an earlier appointment">&#9742;</span>' : '') +
+          '</td><td>' + esc(p.phone) +
           '</td><td>' + esc(p.email) + '</td><td>' + esc(detail) + '</td></tr>';
       });
       html += '</table></div>';
     });
+
+    html += '<div class="day"><h4>&#9742; Would take an earlier appointment</h4>';
+    if (earlier.length === 0) {
+      html += '<span class="none">Nobody in this range has asked to be called.</span>';
+    } else {
+      html += '<p class="hint">Furthest-out booking first — the person with the most to gain from ' +
+        'a slot that just opened. Ringing is optional for them: they can always say no.</p>' +
+        '<table><tr><th>Booked for</th><th>Time</th><th>Name</th><th>Phone</th><th>Email</th>' +
+        '<th>Program</th></tr>';
+      earlier.forEach(function (p) {
+        html += '<tr><td class="time">' + esc(p.dateLabel) + '</td><td class="time">' + esc(p.time) +
+          '</td><td>' + esc(p.name) + '</td><td>' + esc(p.phone) + '</td><td>' + esc(p.email) +
+          '</td><td>' + esc(p.program) + ' (' + esc(p.location) + ')</td></tr>';
+      });
+      html += '</table>';
+    }
+    html += '</div>';
     document.getElementById('out').innerHTML = html;
   }
 </script>`;
