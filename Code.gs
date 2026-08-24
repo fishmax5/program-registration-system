@@ -22927,6 +22927,12 @@ function replaceOneForm(registrySheet, item) {
     return false;
   }
 
+  // Declared out here on purpose: the success log below the try block reports
+  // it, and a `const` inside the block would leave that line reading a name
+  // that no longer exists — a ReferenceError thrown AFTER the swap had already
+  // completed, which the caller could only report as a failed rebuild.
+  let moved = 0;
+
   // From here on, the new form is a going concern only once it is actually
   // repointed onto sessions and its registries are carried across. Any
   // failure in between — including one thrown out of this function entirely
@@ -22935,7 +22941,7 @@ function replaceOneForm(registrySheet, item) {
   // in a completed swap, and the underlying error is re-thrown so the caller
   // still sees and logs it exactly as before.
   try {
-    const moved = writeFormIdOntoSessions(registrySheet, item.eventIds, created.formId);
+    moved = writeFormIdOntoSessions(registrySheet, item.eventIds, created.formId);
     if (moved === 0) {
       log(`⚠️ Rebuild for ${item.describe} built form ${created.formId} but moved no session rows onto it — ` +
         `the old form has been left in place. Check the dashboard's Form_ID column.`);
