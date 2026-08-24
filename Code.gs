@@ -16230,9 +16230,14 @@ function buildEventTimeByEventId(ss) {
 // a correction as well as a record ("I marked her present, she only collected
 // a meal").
 //
-// The lists are rebuilt from the current selection on every step, because a
-// static list of every name in the workbook is not a usable list once there
-// are hundreds — narrowing is the entire value.
+// The lists narrow with each selection, because a static list of every name in
+// the workbook is not a usable list once there are hundreds — narrowing is the
+// entire value. But the NARROWING IS DONE IN THE BROWSER, over one index
+// fetched when the dialog opens (buildQuickMarkIndex()). It used to be a
+// server call per step, each re-reading whole tabs, which put a wait between
+// every pick — thirty times over at a sign-in desk, which is what made the
+// tool too slow to be worth opening. Only pressing Mark talks to the sheet
+// now.
 // ============================================================================
 
 /** Menu entry: opens the Quick Mark dialog. */
@@ -16257,10 +16262,10 @@ function showQuickMarkDialog() {
  * shipped all three cross-products would be most of the workbook.
  */
 function buildQuickMarkHtml() {
-  const locations = Object.values(CALENDAR_MAP)
-    .filter((v, i, a) => a.indexOf(v) === i)
-    .map(loc => `<option value="${escapeHtmlForDialog(loc)}">${escapeHtmlForDialog(loc)}</option>`)
-    .join('');
+  // The locations are handed over as DATA rather than baked into the markup:
+  // the index that arrives a moment later is what fills the dropdown, and one
+  // list built one way is one list to keep right.
+  const locations = JSON.stringify(Object.values(CALENDAR_MAP).filter((v, i, a) => a.indexOf(v) === i));
 
   return `
 <style>
@@ -16281,6 +16286,8 @@ function buildQuickMarkHtml() {
   .ok { color: #188038; } .err { color: #C5221F; } .busy { color: #666; font-weight: normal; }
   #log { margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; color: #444; font-size: 12px; }
   #log div { padding: 1px 0; }
+  #freshness { color: #666; font-size: 11px; margin-top: 3px; }
+  #freshness a { color: #1A73E8; cursor: pointer; text-decoration: underline; }
 </style>
 <h3>Quick Mark</h3>
 <p class="hint">
@@ -16290,10 +16297,10 @@ function buildQuickMarkHtml() {
 </p>
 
 <label class="field" for="location">1. Location</label>
-<select id="location" onchange="locationChanged()">
-  <option value="">— choose a location —</option>
-  ${locations}
+<select id="location" onchange="locationChanged()" disabled>
+  <option value="">— loading… —</option>
 </select>
+<div id="freshness"></div>
 
 <label class="field" for="session">2. Session (soonest first)</label>
 <select id="session" onchange="sessionChanged()" disabled>
@@ -16323,6 +16330,11 @@ function buildQuickMarkHtml() {
 
 <script>
   var WALK_IN = '__WALK_IN__';
+  var LOCATIONS = ${locations};
+  var SEP = '${QUICK_MARK_SESSION_KEY_SEPARATOR}';
+  // Everything the three dropdowns are built from, fetched once. Null until it
+  // lands — see buildQuickMarkIndex() for why it is one call and not three.
+  var INDEX = null;
 
   function el(id) { return document.getElementById(id); }
   function say(msg, cls) { var s = el('status'); s.textContent = msg; s.className = cls || ''; }
@@ -16348,22 +16360,66 @@ function buildQuickMarkHtml() {
     select.disabled = false;
   }
 
+  // ONE SERVER CALL, at the start. Everything after it — narrowing to a
+  // location, to a session, to the people on it — is a filter over what is
+  // already here, which is what makes each selection instant instead of a
+  // wait. See buildQuickMarkIndex().
+  function loadIndex(again) {
+    el('location').disabled = true;
+    el('session').disabled = true;
+    el('name').disabled = true;
+    say(again ? 'Reloading lists…' : 'Loading the lists…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (ix) {
+        INDEX = ix;
+        var keep = el('location').value;
+        fill(el('location'), LOCATIONS.map(function (loc) { return { value: loc, label: loc }; }),
+          '— choose a location —');
+        if (keep) { el('location').value = keep; }
+        el('freshness').innerHTML = 'Lists read at ' + ix.builtAt +
+          ' · <a onclick="loadIndex(true)">↻ reload</a>';
+        say(again ? 'Lists reloaded.' : 'Ready.', '');
+        locationChanged();
+      })
+      .withFailureHandler(function (err) {
+        say('Could not load the lists: ' + err.message, 'err');
+        el('freshness').innerHTML = '<a onclick="loadIndex(true)">↻ try again</a>';
+      })
+      .buildQuickMarkIndex();
+  }
+
   function locationChanged() {
     var loc = el('location').value;
-    el('session').disabled = true;
     el('name').disabled = true;
     el('name').innerHTML = '<option value="">— choose a session first —</option>';
     showWalkIn(false);
     refreshButton();
-    if (!loc) { el('session').innerHTML = '<option value="">— choose a location first —</option>'; return; }
-    say('Loading sessions…', 'busy');
-    google.script.run
-      .withSuccessHandler(function (sessions) {
-        fill(el('session'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
-        say(sessions.length + ' session(s) at ' + loc + '.', '');
-      })
-      .withFailureHandler(function (err) { say('Could not load sessions: ' + err.message, 'err'); })
-      .listQuickMarkSessions(loc);
+    if (!INDEX) return;
+    if (!loc) {
+      el('session').innerHTML = '<option value="">— choose a location first —</option>';
+      el('session').disabled = true;
+      return;
+    }
+    var sessions = INDEX.sessions.filter(function (s) { return s.location === loc; });
+    fill(el('session'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
+    say(sessions.length + ' session(s) at ' + loc + '.', '');
+  }
+
+  // The names for one session: those registered for it, then everyone else on
+  // the roll. The roll arrives once for the whole dialog, so subtracting this
+  // session's people from it is done here rather than sent per session.
+  function namesFor(loc, session) {
+    var bucket = (INDEX && INDEX.namesBySession[loc + SEP + session]) || { names: [], keys: [] };
+    var taken = {};
+    bucket.keys.forEach(function (k) { taken[k] = true; });
+    var out = bucket.names.map(function (n) {
+      return { value: n, label: n, group: 'Registered for this session' };
+    });
+    INDEX.members.forEach(function (m) {
+      if (taken[m.key]) return;
+      out.push({ value: m.name, label: m.name, group: 'Other known members' });
+    });
+    return { options: out, registeredCount: bucket.names.length, otherCount: out.length - bucket.names.length };
   }
 
   function sessionChanged() {
@@ -16371,20 +16427,27 @@ function buildQuickMarkHtml() {
     var session = el('session').value;
     showWalkIn(false);
     refreshButton();
-    if (!session) { el('name').disabled = true; return; }
-    say('Loading names…', 'busy');
-    google.script.run
-      .withSuccessHandler(function (res) {
-        fill(el('name'), res.names, '— choose a name —');
-        var walkIn = document.createElement('option');
-        walkIn.value = WALK_IN;
-        walkIn.textContent = '➕ Someone not on this list…';
-        el('name').appendChild(walkIn);
-        say(res.registeredCount + ' registered' +
-          (res.otherCount ? ', plus ' + res.otherCount + ' other known member(s)' : '') + '.', '');
-      })
-      .withFailureHandler(function (err) { say('Could not load names: ' + err.message, 'err'); })
-      .listQuickMarkNames(loc, session);
+    if (!session || !INDEX) { el('name').disabled = true; return; }
+    var res = namesFor(loc, session);
+    fill(el('name'), res.options, '— choose a name —');
+    var walkIn = document.createElement('option');
+    walkIn.value = WALK_IN;
+    walkIn.textContent = '➕ Someone not on this list…';
+    el('name').appendChild(walkIn);
+    say(res.registeredCount + ' registered' +
+      (res.otherCount ? ', plus ' + res.otherCount + ' other known member(s)' : '') + '.', '');
+  }
+
+  // A walk-in that was just written is on that session from now on, without
+  // going back to the server for a list we can correct here.
+  function rememberWalkIn(loc, session, name, nameKey) {
+    if (!INDEX || !name || !nameKey) return;
+    var key = loc + SEP + session;
+    var bucket = INDEX.namesBySession[key];
+    if (!bucket) { bucket = { names: [], keys: [] }; INDEX.namesBySession[key] = bucket; }
+    if (bucket.keys.indexOf(nameKey) !== -1) return;
+    bucket.names.push(name);
+    bucket.keys.push(nameKey);
   }
 
   function nameChanged() {
@@ -16445,7 +16508,10 @@ function buildQuickMarkHtml() {
           el('attended').checked = false;
           el('lunch').checked = false;
           el('signup').checked = false;
-          if (res.namesChanged) sessionChanged();
+          if (res.namesChanged) {
+            rememberWalkIn(el('location').value, el('session').value, res.addedName, res.addedNameKey);
+            sessionChanged();
+          }
         }
         refreshButton();
       })
@@ -16460,29 +16526,110 @@ function buildQuickMarkHtml() {
         confirmWalkIn: !!confirmWalkIn
       });
   }
+
+  // Fired as the dialog paints, so the one server call overlaps with the
+  // person reaching for the first dropdown rather than following it.
+  loadIndex(false);
 </script>`;
 }
 
+/** Joins a location and a session label into the key namesBySession is stored under. */
+const QUICK_MARK_SESSION_KEY_SEPARATOR = '|~|';
+
 /**
- * Called from the dialog. The sessions offered at `location`, BY DATE:
- * upcoming soonest-first, then past most-recent-first — the same order every
- * date-bearing tab in this workbook is sorted in, so "the next one" and "the
- * one that just happened" are both at the top where a sign-in desk needs them.
+ * EVERYTHING THE DIALOG NEEDS, IN ONE CALL: the sessions at every location,
+ * the people registered for each one, and the rest of Member_Roll.
  *
- * Each option's value is the label collectKnownProgramChoices() built, which
- * parseQuickMarkProgramChoice() can turn back into a program and a date.
+ * It used to fetch each list as you got to it — one server round trip when you
+ * picked a location, another when you picked a session, and each of those
+ * re-reading whole tabs (the registrants tab twice over, the program
+ * dashboard, Program_Options, Lunch_Schedule, Member_Roll). At a sign-in desk
+ * that is a wait between every single selection, thirty times in a row, and it
+ * is what made the tool "too slow to be useful".
+ *
+ * So the reads happen ONCE, while the person is still reaching for the first
+ * dropdown, and every narrowing after that is done in the browser with no
+ * server call at all. Only pressing Mark talks to the sheet.
+ *
+ * WHAT IT COSTS is a snapshot: someone registering online mid-shift is not in
+ * the lists until they are reloaded (the ↻ button, or reopening the dialog).
+ * That is a fair trade — marking is still checked against the live sheet, so a
+ * stale list can only mean a name is missing from a dropdown, never a mark
+ * landing on the wrong row — and a walk-in covers the case anyway.
  */
-function listQuickMarkSessions(location) {
-  const todayKey = formatDateKey(new Date());
+function buildQuickMarkIndex() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  // Registrant rows are one of the four sources collectKnownProgramChoices()
-  // unions, and the only one that knows about a session somebody typed onto
-  // the tab by hand — worth the read.
-  const registrantRows = sheet
-    ? readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID')
-    : [];
-  const choices = collectKnownProgramChoices(location, registrantRows);
+  const headers = HEADERS.Registrant_Dash;
+  const map = getIndexMap(headers);
+  const registrantRows = sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : [];
+
+  const sessions = [];
+  /** "location \0 title \0 dateKey" -> the bucket of names for that session. */
+  const byLookup = {};
+  /** sessionKey -> { names, keys } — keys are normalized, so the browser can subtract them from the roll. */
+  const namesBySession = {};
+
+  orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
+    const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
+    if (namesBySession[sessionKey]) return;
+    const bucket = { names: [], keys: [] };
+    namesBySession[sessionKey] = bucket;
+    byLookup[`${choice.location}\u0000${choice.title}\u0000${choice.dateKey}`] = bucket;
+    sessions.push({ value: choice.label, label: choice.label, group: choice.group, location: choice.location });
+  });
+
+  registrantRows.forEach(row => {
+    const rowName = String(row[map['Name']] || '').trim();
+    if (!rowName) return;
+    const location = String(row[map['Location']] || '').trim();
+    const title = String(row[map['Event']] || '').trim();
+    const d = coerceDate(row[map['Event_Date']]);
+    const dateKey = d ? formatDateKey(d) : '';
+    const nameKey = normalizeNameKey(rowName);
+
+    // This row belongs to its own session, and also to the dateless "program
+    // only" entry for the same programme — the fallback choice a desk picks
+    // when it doesn't matter which date. Same rule the per-session read used.
+    const lookups = dateKey
+      ? [`${location}\u0000${title}\u0000${dateKey}`, `${location}\u0000${title}\u0000`]
+      : [`${location}\u0000${title}\u0000`];
+    lookups.forEach(lookup => {
+      const bucket = byLookup[lookup];
+      if (!bucket) return;
+      if (bucket.keys.indexOf(nameKey) !== -1) return;
+      if (bucket.names.length >= QUICK_MARK_MAX_DROPDOWN_ITEMS) return;
+      bucket.names.push(rowName);
+      bucket.keys.push(nameKey);
+    });
+  });
+
+  // The roll is sent once for the whole dialog rather than per session: it is
+  // the same list every time, and repeating it under each session is what
+  // would actually make this payload large.
+  const members = [];
+  const seen = {};
+  collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
+    const key = normalizeNameKey(name);
+    if (seen[key]) return;
+    seen[key] = true;
+    members.push({ name, key });
+  });
+
+  return { sessions, namesBySession, members, builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a') };
+}
+
+/**
+ * The session choices in the order a desk reads them: upcoming soonest-first,
+ * then past most-recent-first, then the dateless "program only" fallbacks —
+ * the same order every date-bearing tab in this workbook is sorted in, so "the
+ * next one" and "the one that just happened" are both at the top.
+ *
+ * The cap is applied PER LOCATION, because that is the list a person actually
+ * sees: one location's sessions, narrowed from the whole workbook's.
+ */
+function orderQuickMarkChoices(choices) {
+  const todayKey = formatDateKey(new Date());
   const upcoming = [];
   const past = [];
   const undated = [];
@@ -16495,64 +16642,22 @@ function listQuickMarkSessions(location) {
   past.sort((a, b) => (a.dateKey > b.dateKey ? -1 : (a.dateKey < b.dateKey ? 1 : a.label.localeCompare(b.label))));
   undated.sort((a, b) => a.label.localeCompare(b.label));
 
+  const perLocation = {};
   const out = [];
-  const push = (list, group) => list.forEach(choice =>
-    out.push({ value: choice.label, label: choice.label, group }));
+  const push = (list, group) => list.forEach(choice => {
+    const used = perLocation[choice.location] || 0;
+    if (used >= QUICK_MARK_MAX_DROPDOWN_ITEMS) return;
+    perLocation[choice.location] = used + 1;
+    out.push({
+      label: choice.label, title: choice.title, dateKey: choice.dateKey,
+      location: choice.location, group
+    });
+  });
   push(upcoming, 'Upcoming');
   push(past, 'Past');
   push(undated, 'Any date (program only)');
-  return out.slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
+  return out;
 }
-
-/**
- * Called from the dialog. The names offered for one session: the people
- * already registered for it first (the common case — you are ticking someone
- * off a list), then everyone else on Member_Roll.
- *
- * The roll matters as much as the registrations: a known member who did not
- * sign up for this particular session is exactly the walk-in this tool is for,
- * and sourcing names from registrant rows alone made them unpickable.
- */
-function listQuickMarkNames(location, sessionValue) {
-  const selection = parseQuickMarkProgramChoice(sessionValue);
-  const headers = HEADERS.Registrant_Dash;
-  const map = getIndexMap(headers);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  const registrantRows = sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : [];
-
-  const registered = [];
-  const seen = {};
-  registrantRows.forEach(row => {
-    const rowName = String(row[map['Name']] || '').trim();
-    if (!rowName) return;
-    if (location && String(row[map['Location']] || '').trim() !== location) return;
-    if (selection.title && String(row[map['Event']] || '').trim() !== selection.title) return;
-    if (selection.dateKey) {
-      const d = coerceDate(row[map['Event_Date']]);
-      if (!d || formatDateKey(d) !== selection.dateKey) return;
-    }
-    const key = normalizeNameKey(rowName);
-    if (seen[key]) return;
-    seen[key] = true;
-    registered.push(rowName);
-  });
-
-  const others = [];
-  collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
-    const key = normalizeNameKey(name);
-    if (seen[key]) return;
-    seen[key] = true;
-    others.push(name);
-  });
-
-  const names = registered.map(n => ({ value: n, label: n, group: 'Registered for this session' }))
-    .concat(others.map(n => ({ value: n, label: n, group: 'Other known members' })))
-    .slice(0, QUICK_MARK_MAX_DROPDOWN_ITEMS);
-
-  return { names, registeredCount: registered.length, otherCount: others.length };
-}
-
 
 /**
  * What the Quick Mark session list offers at `location` (or everywhere,
@@ -16599,8 +16704,14 @@ function collectKnownProgramChoices(location, registrantRows) {
     const d = coerceDate(date);
     const dateKey = d ? formatDateKey(d) : '';
     const label = d ? `${name}${LOCATION_LABEL_SEPARATOR}${formatDateLabel(d)}` : name;
-    if (choices[label]) return;
-    choices[label] = {
+    // Keyed by LOCATION AND LABEL, not label alone. The label is
+    // "title · date" with no location in it, so two locations running the same
+    // programme on the same day collapse into one entry — invisible while this
+    // was only ever called with a location to filter by, and wrong the moment
+    // buildQuickMarkIndex() asks for every location at once.
+    const key = `${rowLocation}${QUICK_MARK_SESSION_KEY_SEPARATOR}${label}`;
+    if (choices[key]) return;
+    choices[key] = {
       label,
       title: name,
       dateKey,
@@ -17046,8 +17157,11 @@ function addQuickMarkWalkIn(sheet, args) {
     : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`;
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
-  // The name list for this session has a new entry on it now.
-  return { ok: true, message, namesChanged: true };
+  // The name list for this session has a new entry on it now. The normalized
+  // key travels with it so the dialog can add the name to the list it is
+  // already holding, under the same identity rule this file uses everywhere,
+  // instead of re-fetching the list or guessing at the rule in browser JS.
+  return { ok: true, message, namesChanged: true, addedName: name, addedNameKey: normalizeNameKey(name) };
 }
 
 /**

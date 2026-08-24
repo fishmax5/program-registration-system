@@ -724,6 +724,19 @@ The dialog stays open on the same session and clears just the name and the
 ticks, so a queue of thirty people is one pick and one click each. Every mark
 is listed underneath as it happens, so you can see what you've done.
 
+> **The lists load once.** When the dialog opens it reads the sessions and the
+> names in a single go — you'll see *"Loading the lists…"* for a moment — and
+> after that every dropdown is instant, because the narrowing happens in the
+> dialog rather than by going back to the sheet. It used to fetch a fresh list
+> each time you picked a location and again each time you picked a session,
+> which is a wait between every single selection.
+>
+> The trade is that the lists are a snapshot: somebody registering online while
+> you're standing at the desk won't appear in them until you press the small
+> **↻ reload** under the location box (or close and reopen). That can only ever
+> mean a name is missing from a dropdown — marking is always checked against
+> the live sheet — and **➕ Someone not on this list…** covers them anyway.
+
 > **It used to be a band of cells at the top of this tab.** Every part of that
 > was a fight with Sheets rather than with the job: the dropdowns were data
 > validations rebuilt cell by cell, the feedback was one overflowing cell, the
