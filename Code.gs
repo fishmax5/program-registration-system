@@ -6758,6 +6758,26 @@ function isLunchOfferedOn(date, locationName) {
 }
 
 /**
+ * Is lunch RULED OUT for this date+location — as opposed to merely not
+ * scheduled yet?
+ *
+ * The two answers isLunchOfferedOn() collapses into one, separated. It says
+ * false both for "the kitchen is closed that day" and for "nobody has typed
+ * the menu yet", which is the right question when deciding whether to OFFER
+ * lunch on a form — you cannot promise a meal that has not been planned — and
+ * the wrong one when deciding whether to RECORD a person's request. A request
+ * on a date nobody has got to yet is the demand that makes somebody go and
+ * plan it (see buildDashboardRollup()'s "lunch needed with no menu set").
+ *
+ * Only two things rule it out: a location that serves no food at all, and a
+ * day whose menu row reads "Not Serving". Both have an author.
+ */
+function lunchIsRuledOutOn(date, locationName) {
+  if (getCateringPolicyForLocation(locationName) === CATERING_POLICIES.NEVER) return true;
+  return isExplicitlyNotServing(date, locationName);
+}
+
+/**
  * Is there a Lunch_Schedule row for this date+location that explicitly says
  * "Not Serving"?
  *
@@ -14225,14 +14245,26 @@ function buildRegistrantRow(args) {
   // than from the resolved string means an unresolved Hot/Cold (no menu
   // configured yet) never downgrades a real "Needed" registrant.
   //
-  // Gated on isLunchOfferedOn(): a date that serves no lunch produces no
-  // lunch demand, whatever the form said. The per-date roster grid can't
-  // even offer such a date (buildDateLabelSets() leaves it out), but the
-  // "everyone, every date" branch asks the lunch question ONCE for the whole
-  // form — without this gate, one checkbox would have booked a meal on every
-  // Not-Serving date the form covers.
+  // Gated on what makes lunch IMPOSSIBLE, not on what makes it scheduled.
+  // The gate exists for the "everyone, every date" branch, which asks the
+  // lunch question ONCE for the whole form: without it one checkbox would book
+  // a meal on every Not-Serving date the form covers. That is a decision
+  // somebody made, and it rightly wins.
+  //
+  // It used to be isLunchOfferedOn(), which ALSO answers false for a date that
+  // simply has no Lunch_Schedule row yet — and at a "By exception" location
+  // that is every date until the month's menu is typed. An all-dates
+  // registrant who ticked lunch before the menu existed was written No Lunch,
+  // vanished from Master_Lunch_Dashboard and Lunch_Roster, and stayed gone:
+  // typing the menu afterwards changes nothing a row already says.
+  //
+  // A missing menu row is a GAP, and demand over a gap is exactly what
+  // buildDashboardRollup() means by "demand always wins" — it raises "lunch
+  // needed with no menu set" for precisely this case. So the gap keeps the
+  // demand, and the catch-up pass repairs the rows already written, since it
+  // re-derives every all-dates registrant through here on every sync.
   const intendsLunch = !!lunchType && lunchType !== 'No Lunch';
-  const wantsLunch = intendsLunch && isLunchOfferedOn(registryEntry.eventDate, registryEntry.location);
+  const wantsLunch = intendsLunch && !lunchIsRuledOutOn(registryEntry.eventDate, registryEntry.location);
 
   if (protectedKeys.has(key)) {
     return null; // never overwrite a manually-edited/added row, resubmission or not
@@ -19568,8 +19600,30 @@ function updateMasterLunchDashboard(registrantRows) {
   rollup.forEach(r => {
     const key = `${r.dateKey}|${r.location}`;
     let row = tableByKey[key];
-    const override = row ? row[map['Manual_Override']] : null;
-    if (override === 'Manually Added' || override === 'Manually Edited') return;
+    const override = row ? String(row[map['Manual_Override']] || '').trim() : '';
+
+    // "Manually Added" is a row somebody created outright — a day this pass
+    // knows nothing about — so it stays entirely theirs.
+    if (override === 'Manually Added') return;
+
+    // "Manually Edited", though, is set by autoFlipManualOverride() on ANY
+    // hand-edit anywhere in the row, and the columns this tab invites you to
+    // type in (LUNCH_DASHBOARD_MANUAL_COLUMNS — Actual_Ordered and the
+    // reconciliation numbers beside it) are in that row. So the very act of
+    // recording what was ordered used to freeze Registered_Count at whatever
+    // it read that morning: every registrant who signed up afterwards was
+    // imported, counted in the rollup, listed on Lunch_Roster — and silently
+    // never reached the number the kitchen orders against.
+    //
+    // A flip therefore protects the columns a person OWNS, not the ones this
+    // pass derives. Registered_Count, Served_Confirmed, the meal type and the
+    // buffers are recomputed on a hand-edited row exactly as on any other.
+    const handEdited = override === 'Manually Edited';
+    const put = (column, value) => {
+      if (map[column] === undefined) return;
+      if (handEdited && LUNCH_DASHBOARD_MANUAL_COLUMNS.indexOf(column) !== -1) return;
+      row[map[column]] = value;
+    };
 
     if (!row) {
       row = new Array(headers.length).fill('');
@@ -19585,18 +19639,18 @@ function updateMasterLunchDashboard(registrantRows) {
     // the upcoming dates it was supposed to be padding. There is one source of
     // truth for a buffer and it is the Config tab.
     const bufferConfig = getMealBufferConfigForLocation(r.location, r.mealType || 'Hot');
-    row[map['Standard_Buffer']] = bufferConfig.standardBufferAmount;
-    row[map['Tester_Buffer']] = bufferConfig.testerBufferAmount;
+    put('Standard_Buffer', bufferConfig.standardBufferAmount);
+    put('Tester_Buffer', bufferConfig.testerBufferAmount);
 
-    row[map['Event_Date']] = parseDateKey(r.dateKey);
-    row[map['Location']] = r.location;
-    row[map['Lunch_Type']] = r.mealType || '';
-    row[map['Meal_Shorthand']] = r.mealShorthand || '';
-    row[map['Registered_Count']] = r.registeredCount;
+    put('Event_Date', parseDateKey(r.dateKey));
+    put('Location', r.location);
+    put('Lunch_Type', r.mealType || '');
+    put('Meal_Shorthand', r.mealShorthand || '');
+    put('Registered_Count', r.registeredCount);
     // Blank rather than 0 until someone has actually ticked a box: a real
     // zero ("nobody turned up") and "not counted yet" mean very different
     // things to whoever reconciles this, and 0 would assert the first.
-    row[map['Served_Confirmed']] = r.servedConfirmed > 0 ? r.servedConfirmed : '';
+    put('Served_Confirmed', r.servedConfirmed > 0 ? r.servedConfirmed : '');
 
     // The consumption columns only move when the Registrants tab actually
     // reports a meal for this date+location — a zero tally leaves whatever is
@@ -19605,14 +19659,12 @@ function updateMasterLunchDashboard(registrantRows) {
     // start coming in they take over automatically, same as Served_Confirmed.
     const tallies = r.mealTallies || {};
     Object.keys(tallies).forEach(column => {
-      if (map[column] !== undefined && tallies[column] > 0) row[map[column]] = tallies[column];
+      if (tallies[column] > 0) put(column, tallies[column]);
     });
     // Same "only when there is something to say" rule as the tallies above:
     // a batch nobody carried over leaves the cell alone rather than asserting
     // a zero over it.
-    if (map['Carried_Over'] !== undefined && r.carriedOver > 0) {
-      row[map['Carried_Over']] = r.carriedOver;
-    }
+    if (r.carriedOver > 0) put('Carried_Over', r.carriedOver);
   });
 
   writeMasterLunchDashboardSheet(sheet, plan, headers,

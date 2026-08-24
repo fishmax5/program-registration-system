@@ -976,6 +976,12 @@ above reverses on the next sync.
 > got to it yet — and demand wins there: if someone is signed up for lunch on
 > a date with no menu, the date stays on the dashboard and you get a "lunch
 > needed with no menu set" notice. Only an explicit `Not Serving` cancels.
+>
+> That holds at the moment a registration is **imported**, too. Somebody who
+> ticks "lunch on every date" on a Grouped form before the month's menu has
+> been typed is still recorded as needing a meal on every one of those dates —
+> at a "By exception" location that used to be silently downgraded to
+> `No Lunch`, and typing the menu afterwards never went back for them.
 
 Three things are deliberately **not** removed:
 
@@ -2643,6 +2649,15 @@ any registrants move to **Deleted_Event_Triage** so you can contact them.
 `Manually Edited` (or `Manually Added`) and the system stops touching it. That's
 what keeps your corrections from being wiped — but it also means a protected row
 won't pick up later form changes.
+
+> **One exception, on Master_Lunch_Dashboard.** Typing into that tab's pencil
+> columns — `Actual_Ordered` and the reconciliation numbers beside it — marks
+> the row `Manually Edited` like anywhere else, but the **counted** columns
+> (`Registered_Count`, `Served_Confirmed`, the meal type, the buffers) keep
+> updating. They have to: recording what you ordered at 9am must not stop the
+> row counting the four people who sign up at 11. Your typed numbers are never
+> overwritten. A row you added yourself (`Manually Added`) is still left alone
+> completely.
 
 **Names are matched loosely.** "Jane Smith" and "jane smith " are treated as the
 same person, so a person doesn't get double-counted or double-catered — including
