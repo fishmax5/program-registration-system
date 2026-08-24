@@ -39,6 +39,8 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.replaceOneForm = replaceOneForm;
+this.migrateFormsToCurrentTemplate = migrateFormsToCurrentTemplate;
+this.TEMPLATE_VERSION = TEMPLATE_VERSION;
 `, sandbox, { filename: 'Code.gs' });
 
 let failures = 0;
@@ -85,6 +87,61 @@ check('the count survives to the success log',
 stub(0);
 check('a rebuild that moved nothing returns false', sandbox.replaceOneForm({}, item), false);
 check('the new form is the one trashed', trashed, ['NEW_FORM']);
+
+
+
+// ---------------------------------------------------------------------------
+// migrateFormsToCurrentTemplate() options — the three things
+// rebuildAllFormsInPlace() needs it to do that the hourly sync does not:
+// rebuild a form that already looks current, stay inside the list of forms the
+// person agreed to, and stop when the click's time budget is gone.
+// ---------------------------------------------------------------------------
+
+const rebuiltForms = [];
+// Everything migrateFormsToCurrentTemplate() reaches for, reduced to the one
+// answer these cases need. Both forms below are ALREADY on the current
+// template and stamped as such — the state the hourly sync skips outright.
+function stubMigration() {
+  rebuiltForms.length = 0;
+  sandbox.log = () => {};
+  sandbox.noteForAdmin = () => {};
+  sandbox.groupRegistryRowsByForm = () => ({ FORM_A: [{}], FORM_B: [{}] });
+  sandbox.getFormTemplateVersions = () => ({ FORM_A: sandbox.TEMPLATE_VERSION, FORM_B: sandbox.TEMPLATE_VERSION });
+  sandbox.getSharedFormIdSet = () => new Set();
+  sandbox.FormApp.openById = id => ({ getId: () => id, getTitle: () => id });
+  sandbox.isFormOnCurrentTemplate = () => true;
+  sandbox.buildFormSessionContext = formId => ({ formId, sessions: [{}], locations: ['Narberth'], titles: ['X'] });
+  sandbox.describeLocations = () => 'Narberth';
+  sandbox.withFormRetry = (what, fn) => fn();
+  sandbox.rebuildFormFromCurrentTemplate = form => rebuiltForms.push(form.getId());
+  sandbox.setFormTemplateVersion = () => {};
+  sandbox.buildRegistrationUrl = () => 'https://example.test/form';
+  sandbox.updateRegistryFormLinks = () => {};
+  sandbox.flushPersistentRegistries = () => {};
+}
+
+// The hourly sync's own call: both forms are stamped current, so neither is
+// even opened. This is the skip that makes the steady state free.
+stubMigration();
+check('no options rebuilds nothing already current', sandbox.migrateFormsToCurrentTemplate({}, [{}]), 0);
+
+// force: rebuild them anyway. A form hand-edited within the template's shape
+// looks current to both skips, and is exactly what this reaches.
+stubMigration();
+check('force rebuilds a form that looks current', sandbox.migrateFormsToCurrentTemplate({}, [{}], { force: true }), 2);
+check('force rebuilt both forms', rebuiltForms.sort(), ['FORM_A', 'FORM_B']);
+
+// onlyFormIds: the person confirmed a list, and nothing outside it is touched.
+stubMigration();
+sandbox.migrateFormsToCurrentTemplate({}, [{}], { force: true, onlyFormIds: new Set(['FORM_B']) });
+check('onlyFormIds stays inside the confirmed list', rebuiltForms, ['FORM_B']);
+
+// limit and deadline: one run does what it can and leaves the rest.
+stubMigration();
+check('limit caps one run', sandbox.migrateFormsToCurrentTemplate({}, [{}], { force: true, limit: 1 }), 1);
+stubMigration();
+check('a deadline already past rebuilds nothing',
+  sandbox.migrateFormsToCurrentTemplate({}, [{}], { force: true, deadline: Date.now() - 1 }), 0);
 
 console.log(failures === 0 ? '\nAll form-rebuild checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

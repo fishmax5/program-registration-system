@@ -1581,6 +1581,7 @@ Everything else is grouped by the job it belongs to.
 | **🧱 Rebuild Layout (no calendar sync)** | Redraws every tab from the rows already in the workbook — see [Updating to a new version](#updating-to-a-new-version) |
 | **🔗 Rewrite Event Links (fix duplicates)** | Strips every registration link off upcoming events and writes back one — see [Fixing duplicate links](#fixing-duplicate-links-in-event-descriptions) |
 | **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
+| **🩹 Rebuild Forms In Place (keeps links)…** | Rewrites every live form's questions from the current template, keeping each form's ID. **Every link already handed out goes on working** — see [Rebuild forms in place](#rebuild-forms-in-place) |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
 | **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` / `Personalized_Assistance` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
@@ -1642,6 +1643,7 @@ say no:
 | Press **Sync Cal** | It can create forms, change form dates, and edit calendar descriptions |
 | Change `Type_Tag` on the program dashboard | It re-partitions that program across forms, and writes the tag onto every one of its calendar events |
 | Press **🗑️ Delete Registrations…** | It **permanently deletes** registrant rows, and can delete the form responses behind them. It also makes you type `DELETE` |
+| Press **🩹 Rebuild Forms In Place…** | It rewrites the questions on every live form at once. Links survive, but anyone mid-way through filling one in loses what they typed |
 | Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
 | Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
 | Add a **walk-in** from the Quick Mark dialog | It writes a person into the record, and into the catering count |
@@ -1836,6 +1838,9 @@ does rebuild forms and "rebuild" sounds like "replace":
 - **A new month on a `Regular` programme gets a NEW link**, because it is a new
   form. That is what `Regular` means. A programme whose link must never change
   wants `[Grouped]` — one form for the whole run, one link forever.
+- **🩹 Rebuild Forms In Place keeps every link.** It rewrites the questions on
+  every live form at once, and each form stays the same form — see
+  [Rebuild forms in place](#rebuild-forms-in-place).
 - **The one thing that does break links is 💣 Destroy & Rebuild Forms**, below.
   It says so twice before it runs, and it is an admin action nobody presses by
   accident.
@@ -1852,6 +1857,57 @@ calendar, and the link is on the dashboard row for the new month's sessions.
 
 ---
 
+## Rebuild forms in place
+
+**🔧 Admin ▸ 🩹 Rebuild Forms In Place (keeps links)…** — the one to reach for
+once forms are live and their links are out in the world.
+
+It does what the hourly sync's own repair does — rewrites a form's questions
+from the current template, in the same form, under the same ID and the same URL
+— except that it does it to **every** form covering an upcoming session, on
+demand, and without first asking whether each one looks out of date.
+
+**That last part is the reason it exists.** The automatic repair only touches a
+form it judges *stale*. A form somebody has hand-edited **within** the
+template's shape — a reworded question, a deleted choice, an extra box — does
+not look stale to it, so it is never fixed. This rebuilds every form in the
+list regardless, which is what "put the forms back the way the system wants
+them" has to mean.
+
+**What it does.** For every form covering an **upcoming** session:
+
+1. **Imports outstanding registrations first.** Rebuilding deletes the
+   questions a response's answers hang off, so a response still sitting
+   unimported on a form would lose its detail. If that import fails, **nothing
+   is rebuilt** — you'll get a message saying so.
+2. Empties the form and rebuilds it from the current template: its dates, its
+   sign-up wording, its lunch questions, its programme questions, its
+   appointment times, its notice and picture.
+3. Refreshes the dashboard's **View Live Form** link, whose pre-ticked boxes
+   are keyed to the questions the rebuild just replaced.
+
+**✅ Every registration link keeps working.** The form keeps its ID, so a link
+in an email, on a flyer, or in a calendar invite opens the same form it always
+did. Nothing goes to the trash and no calendar event is touched.
+
+**What survives:** all registrations. Rows on Registrant_Dash are untouched,
+club memberships are untouched, "sign up for every date" registrants are
+untouched — the form they are recorded against still exists.
+
+**The one real cost:** anybody part-way through filling in a form at that exact
+moment has to start again, and the per-question detail of a response that
+somehow arrives between the import and the rebuild is lost. Both are the same
+cost the hourly repair already carries.
+
+**Forms with no upcoming sessions are left alone**, for the same reason as
+below: closed business, and nobody's route to anything.
+
+It asks once, with the list of forms it would rewrite. If there are more forms
+than one run's six minutes allows, it does as many as it can, tells you how
+many are left, and picks up where it stopped the next time you run it.
+
+---
+
 ## Destroy and rebuild forms
 
 **🔧 Admin ▸ 💣 Destroy & Rebuild Forms…** — the last resort, and almost
@@ -1860,8 +1916,11 @@ certainly not what you want.
 **Try the gentler thing first.** Every registration sync already rebuilds
 out-of-date forms **in place, keeping their links** — nobody has to do
 anything, and no link breaks. If you don't want to wait for the next hourly
-run, `recheckAllRegistrationForms()` from the Apps Script editor does the same
-sweep immediately. Between them they fix a form that is merely out of date.
+run, **🩹 Rebuild Forms In Place** one menu item up does the same rewrite on
+every live form immediately (and reaches hand-edited ones the automatic repair
+skips); `recheckAllRegistrationForms()` from the Apps Script editor is the same
+sweep restricted to forms that look stale. Between them they fix a form that is
+merely out of date or hand-edited.
 
 **This is for a form that's broken past that:** hand-edited into a state the
 system can't read, questions deleted, responses corrupt, or one Google won't
@@ -2315,7 +2374,8 @@ specific Google accounts:
 > owner can already change the code, delete the tabs and reshare the workbook,
 > so gating them out protected nothing.
 
-**Gated:** Rebuild Layout, Rewrite Event Links, Destroy & Rebuild Forms,
+**Gated:** Rebuild Layout, Rewrite Event Links, Rebuild Forms In Place,
+Destroy & Rebuild Forms,
 Trigger Status, Check Triggers, Take Over Trigger Ownership, Release My
 Triggers, Import Everything (First Run), Find Leftover Tabs, Archive Old
 Months (report), `mergeLegacyTabs()`, `initSheet()`,

@@ -7160,7 +7160,8 @@ function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {
  *
  * Accounts in AUTHORIZED_ADMIN_EMAILS additionally get an "🔧 Admin"
  * submenu holding the structural entries: trigger repair, the first-run
- * import, the form rebuild, and the READ-ONLY leftover-tab report. Those stay
+ * import, the two form rebuilds (in place, and destroy-and-replace), and the
+ * READ-ONLY leftover-tab report. Those stay
  * gated — they restructure the workbook or rewrite every form at once, and
  * none of them is something a normal day needs.
  *
@@ -7290,6 +7291,10 @@ function buildAppMenu(ui, includeAdmin) {
       // day-to-day correction, and it was sitting one slot away from the
       // menu items that are.
       .addItem('🗑️ Delete Registrations…', 'showDeleteRegistrationsDialog')
+      // Directly above its destructive twin on purpose: this is the one to
+      // pick once links are out in the world, and the pairing is the only
+      // place the difference between them is visible at a glance.
+      .addItem('🩹 Rebuild Forms In Place (keeps links)…', 'rebuildAllFormsInPlace')
       .addItem('💣 Destroy & Rebuild Forms…', 'destroyAndRebuildAllForms')
       .addSeparator()
       .addItem('Trigger Status', 'showTriggerStatus')
@@ -14608,8 +14613,27 @@ function clearFormNavigation(form) {
  *
  * Call AFTER responses have been imported — see rebuildFormFromCurrentTemplate().
  * Returns the number of forms rebuilt.
+ *
+ * OPTIONS, all for rebuildAllFormsInPlace() — the hourly sync passes none and
+ * gets exactly the behaviour described above:
+ *   • onlyFormIds — a Set limiting the sweep to these forms.
+ *   • force       — rebuild even a form that looks current. The two skips this
+ *                   turns off (the version stamp and isFormOnCurrentTemplate())
+ *                   both answer "is this form STALE", and the answer is no for
+ *                   a form somebody has hand-edited within the shape: a
+ *                   reworded question, a deleted choice, an extra item. That is
+ *                   the case a person reaches for this action for.
+ *   • limit       — ceiling on rebuilds this run (default MAX_FORM_REBUILDS_PER_RUN).
+ *   • deadline    — a Date.now() value to stop at, for a caller that knows how
+ *                   much of its six minutes it has already spent.
  */
-function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
+function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
+  options = options || {};
+  const force = options.force === true;
+  const only = options.onlyFormIds || null;
+  const limit = options.limit || MAX_FORM_REBUILDS_PER_RUN;
+  const deadline = options.deadline || 0;
+
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
@@ -14623,8 +14647,9 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
   let deferred = 0;
 
   Object.keys(byForm).forEach(formId => {
-    if (versions[formId] === TEMPLATE_VERSION) return; // already known good — no API call
-    if (rebuilt >= MAX_FORM_REBUILDS_PER_RUN) { deferred++; return; }
+    if (only && !only.has(formId)) return;
+    if (!force && versions[formId] === TEMPLATE_VERSION) return; // already known good — no API call
+    if (rebuilt >= limit || (deadline && Date.now() >= deadline)) { deferred++; return; }
 
     let form;
     try {
@@ -14635,7 +14660,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
       return;
     }
 
-    if (isFormOnCurrentTemplate(form)) {
+    if (!force && isFormOnCurrentTemplate(form)) {
       setFormTemplateVersion(formId, TEMPLATE_VERSION); // first sighting of an already-current form: just record it
       return;
     }
@@ -14661,7 +14686,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
     // running several back to back is precisely what makes Forms start
     // answering "please wait and try again" — the retry above recovers from
     // that, but not provoking it is cheaper than recovering from it.
-    if (rebuilt < MAX_FORM_REBUILDS_PER_RUN) Utilities.sleep(1500);
+    if (rebuilt < limit) Utilities.sleep(1500);
     newUrlByFormId[formId] = buildRegistrationUrl(form);
     // Deliberately says only WHICH version, not what changed in it. This line
     // used to name the v3 change ("the guest-count branch pages are gone") and
@@ -14670,14 +14695,19 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows) {
     // the next one lands, and a stale one is worse than a terse one.
     log(`Rebuilt form ${formId} ("${location}") on template v${TEMPLATE_VERSION}.`);
     noteForAdmin('Registration forms updated',
-      `"${form.getTitle()}" (${location}) was on an older layout and has been rebuilt on the current one ` +
-      `(template v${TEMPLATE_VERSION}). Its link is unchanged; the boxes it pre-checks are re-generated on the ` +
+      `"${form.getTitle()}" (${location}) ` +
+      (force ? 'has been rebuilt from the current template' : 'was on an older layout and has been rebuilt on the current one') +
+      ` (template v${TEMPLATE_VERSION}). Its link is unchanged; the boxes it pre-checks are re-generated on the ` +
       `dashboard's "View Live Form" link, and calendar invites pick the new one up the next time that ` +
       `program's dates change.`);
   });
 
   if (rebuilt > 0) updateRegistryFormLinks(registrySheet, newUrlByFormId);
-  if (deferred > 0) log(`${deferred} more form(s) still on an older template — they'll be rebuilt on the next sync.`);
+  if (deferred > 0) {
+    log(force
+      ? `${deferred} more form(s) left to rebuild this run — run the action again to continue.`
+      : `${deferred} more form(s) still on an older template — they'll be rebuilt on the next sync.`);
+  }
   flushPersistentRegistries();
   return rebuilt;
 }
@@ -14740,6 +14770,162 @@ function recheckAllRegistrationForms() {
   flushAdminDigest('Form re-check');
   log(`recheckAllRegistrationForms: rebuilt ${rebuilt} form(s) on template v${TEMPLATE_VERSION}.`);
   return rebuilt;
+}
+
+/**
+ * Budget for one click of rebuildAllFormsInPlace(), measured from the moment
+ * the click arrives. A menu execution is cut off at six minutes and the
+ * registration import in front of the rebuilds spends an unknown slice of it,
+ * so the loop stops on the clock rather than on a count and reports what is
+ * left. Whatever that is, the next click picks it up: a form rebuilt on this
+ * run is stamped with the current template version and skipped by the next.
+ */
+const IN_PLACE_REBUILD_BUDGET_MS = 4 * 60 * 1000;
+
+/** Belt to the deadline's braces — see IN_PLACE_REBUILD_BUDGET_MS. */
+const MAX_IN_PLACE_REBUILDS_PER_CLICK = 40;
+
+/**
+ * ADMIN MENU ENTRY. Rewrites every live registration form from the current
+ * template IN PLACE — same form, same ID, SAME LINK.
+ *
+ * This is destroyAndRebuildAllForms() minus the destruction, and it is the one
+ * to reach for once forms are live and their links are out in the world. Both
+ * actions end with every form built from the current template; the difference
+ * is only what happens to the link on the flyer:
+ *
+ *   • THIS      — the form is emptied and rebuilt in place. Every link ever
+ *                 handed out still works, because it is still the same form.
+ *   • DESTROY   — a brand-new form replaces it and the old one is trashed.
+ *                 Every link handed out dies. Only worth it when the form
+ *                 itself is broken beyond editing, or Google will not open it.
+ *
+ * It differs from the hourly sync's own migration in one respect, which is
+ * what makes it worth a menu item: the sync only rebuilds a form it judges
+ * STALE, and a form somebody has hand-edited within the template's shape — a
+ * reworded question, a deleted choice — does not look stale to it. This
+ * rebuilds every form in the plan whether or not it looks current
+ * (`force: true`), which is what "put the forms back the way the system wants
+ * them" has to mean.
+ *
+ * WHAT IT COSTS: the per-question answers on responses that have not been
+ * imported yet, since rebuilding deletes the questions those answers hang off.
+ * Which is why the import runs first and a failed import aborts the whole
+ * thing — exactly as in the destroy path, and for exactly the same reason.
+ * Rows already on Registrant_Dash are the record of those registrations and
+ * are untouched either way.
+ *
+ * Returns { rebuilt, remaining, importFailed }, or null if it never started.
+ */
+function rebuildAllFormsInPlace() {
+  const started = Date.now();
+  if (!requireAuthorizedAdmin('Rebuild Forms In Place')) return null;
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return null;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first.');
+    return null;
+  }
+
+  // The same plan the destroy path builds, for the same reason: a form whose
+  // sessions have all happened is nobody's route to anything, and rewriting it
+  // would only disturb the archive.
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map);
+  if (plan.length === 0) {
+    toastIfPossible('Nothing to update — no form on this workbook covers an upcoming session.');
+    return null;
+  }
+
+  const preview = plan.slice(0, 6).map(p => `• ${p.describe}`).join('\n');
+  const more = plan.length > 6 ? `\n…and ${plan.length - 6} more` : '';
+  if (!confirmConsequentialAction('Rebuild every registration form in place?',
+    `${plan.length} form(s) would have their questions rewritten from the current template:\n` +
+    `${preview}${more}\n\n` +
+    `✅ EVERY REGISTRATION LINK KEEPS WORKING. Each form keeps its own ID, so links already handed out — ` +
+    `in an email, on a flyer, in a calendar invite — go on opening the same form.\n\n` +
+    `Registrations are NOT lost: outstanding responses are imported first, and rows already on ` +
+    `${SHEET_NAMES.REGISTRANT_DASH} are untouched. What does go is the per-question detail of any ` +
+    `response still sitting unimported on a form — which is why the import comes first, and why this ` +
+    `stops if that import fails.\n\n` +
+    `Anyone part-way through filling in a form when it is rebuilt will have to start again.`, false)) {
+    return null;
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    toastIfPossible('A sync is already running — try again in a moment.');
+    return null;
+  }
+  try {
+    return runInPlaceFormRebuild(registrySheet, plan, started);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** The work behind rebuildAllFormsInPlace(): import, rebuild, report. */
+function runInPlaceFormRebuild(registrySheet, plan, started) {
+  const result = { rebuilt: 0, remaining: plan.length, importFailed: false };
+
+  // IMPORT BEFORE REBUILDING — see runFormRebuildSweep(), which aborts here
+  // for the same reason. Nothing is trashed on this path, but the questions a
+  // pending response is attached to are deleted just the same.
+  toastIfPossible('Importing outstanding registrations before rebuilding…');
+  try {
+    syncRegistrationsInternal();
+  } catch (err) {
+    result.importFailed = true;
+    const message = `⚠️ Nothing was rebuilt. The registrations on the current forms could not be imported ` +
+      `first (${err}), and rebuilding would have dropped any that had not come across yet. ` +
+      `Fix the import, or run "Sync Registrations" by hand, then try again.`;
+    log(`rebuildAllFormsInPlace: aborted — ${err}`);
+    toastIfPossible(message);
+    try { SpreadsheetApp.getUi().alert(message); } catch (uiErr) { /* no UI */ }
+    return result;
+  }
+
+  // The forms the person agreed to, and only those. The import above re-renders
+  // the dashboard and can move rows, but a Form_ID is a Form_ID either way, so
+  // the plan travels as a set of IDs rather than as its rows — and
+  // migrateFormsToCurrentTemplate() takes each form's sessions fresh.
+  const wanted = new Set(plan.map(item => item.oldFormId));
+  toastIfPossible(`Rebuilding ${plan.length} form(s) in place…`);
+  result.rebuilt = migrateFormsToCurrentTemplate(registrySheet, null, {
+    force: true,
+    onlyFormIds: wanted,
+    limit: MAX_IN_PLACE_REBUILDS_PER_CLICK,
+    deadline: started + IN_PLACE_REBUILD_BUDGET_MS
+  });
+
+  // WHAT IS LEFT, read back off the stamps rather than counted in the loop: a
+  // form is stamped with the current version only when its rebuild finished,
+  // so anything unstamped is genuinely still to do — whether it ran out of
+  // clock or failed. The failures have already been reported individually.
+  const versions = getFormTemplateVersions();
+  result.remaining = plan.filter(item => versions[item.oldFormId] !== TEMPLATE_VERSION).length;
+
+  // No dashboard render: nothing on it changed. Every form kept its ID, so the
+  // dates, the Form_ID column and the calendar descriptions all still say the
+  // right thing, and the one cell a rebuild does invalidate — the prefilled
+  // "View Live Form" link, whose entry.N parameters name item IDs that a
+  // rebuild replaces — was rewritten by updateRegistryFormLinks() inside the
+  // migration itself.
+  flushPersistentRegistries();
+  flushAdminDigest('Rebuild forms in place');
+
+  const summary = `${result.rebuilt} form(s) rebuilt in place on template v${TEMPLATE_VERSION}` +
+    (result.remaining > 0 ? `, ${result.remaining} still to do — run it again to continue` : '') +
+    '. Every registration link is unchanged.';
+  log(`rebuildAllFormsInPlace: ${summary}`);
+  toastIfPossible(`✅ ${summary}`);
+  return result;
 }
 
 /**
@@ -22243,7 +22429,7 @@ function buildFormIdByEventId() {
 // 11. DESTROY AND REBUILD FORMS  (the last resort, on the Admin menu)
 // ============================================================================
 //
-// THREE WAYS TO FIX A FORM, and it is worth knowing which one you want,
+// FOUR WAYS TO FIX A FORM, and it is worth knowing which one you want,
 // because they differ by exactly how much they throw away:
 //
 //   1. The hourly sync's own migration (migrateFormsToCurrentTemplate()) —
@@ -22252,13 +22438,19 @@ function buildFormIdByEventId() {
 //   2. recheckAllRegistrationForms() — the same thing, on demand, for every
 //      form at once. Run it from the Apps Script editor when you don't want to
 //      wait an hour.
-//   3. THIS. Throws each form away and builds a brand-new one in its place.
+//   3. rebuildAllFormsInPlace() — on the Admin menu, and the one to reach for
+//      once forms are live. Same in-place rewrite, but it does not first ask
+//      whether each form looks stale, so it also reaches a form somebody has
+//      hand-edited within the template's shape. Links survive.
+//   4. THIS. Throws each form away and builds a brand-new one in its place.
 //
-// (3) exists for the cases (1) and (2) cannot reach: a form somebody has
+// (4) exists for the cases (1)–(3) cannot reach: a form somebody has
 // hand-edited into a state the parser no longer recognizes, one whose
 // questions were deleted, one whose responses are corrupt, one that Google
 // itself will no longer open. In every one of those the form's ID is not an
-// asset worth keeping — it is the thing tying you to the broken object.
+// asset worth keeping — it is the thing tying you to the broken object. If the
+// ID IS worth keeping — and it is, the moment a link has been handed out — (3)
+// ends with the same current-template form and costs nobody their link.
 //
 // WHAT IT COSTS, stated plainly because the menu item has to say it out loud:
 // every registration link already handed out STOPS WORKING. Old links point at
@@ -22358,8 +22550,9 @@ function destroyAndRebuildAllForms() {
     `rewritten here, so those stay right.\n\n` +
     `Registrations are NOT lost: outstanding responses are imported first, and rows already on ` +
     `${SHEET_NAMES.REGISTRANT_DASH} are untouched.\n\n` +
-    `If a form is merely out of date, you do not want this — the hourly sync already rebuilds forms ` +
-    `IN PLACE, keeping their links. This is for a form that is broken beyond that.`, false)) {
+    `If a form is merely out of date or hand-edited, you do not want this — "Rebuild Forms In Place" one ` +
+    `menu item up does the same rewrite and keeps every link. This is for a form that is broken beyond ` +
+    `that.`, false)) {
     return null;
   }
 
