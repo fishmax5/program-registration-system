@@ -29595,6 +29595,15 @@ function findCollapsibleTimeBlocks(options) {
       // "not confirmed", the sync skips it entirely, and merging one into a
       // run would confirm it on somebody's behalf.
       if (!parsed || parsed.isTentative || !parsed.cleanTitle) return;
+      // AND A RECURRING EVENT IS NEVER MERGED. Merging means extending one
+      // event over the whole span and deleting the others, and neither
+      // operation means what it says on an instance of a series: setTime() on
+      // one occurrence is not something Calendar will do, and deleting one is
+      // an exception to a rule rather than the removal of an event. A weekly
+      // "Computer Help, Tuesdays 10:00 and 10:30" typed as two series is a
+      // real thing to want to fix — and the fix is on the series, by hand, not
+      // here.
+      if (isRecurringCalendarEvent(ev)) return;
       const startTime = ev.getStartTime();
       const key = `${calendarId}|${parsed.cleanTitle}|${formatDateKey(startTime)}`;
       if (!byDayAndTitle[key]) byDayAndTitle[key] = [];
@@ -29676,6 +29685,23 @@ function describeTimeBlockRun(calendarId, key, blocks) {
     doomedIds: blocks.slice(1).map(b => b.event.getId()),
     eventIds: blocks.map(b => b.event.getId())
   };
+}
+
+/**
+ * True when this event is one occurrence of a repeating series.
+ *
+ * A CALL THAT THROWS ANSWERS YES. Refusing to merge something is recoverable
+ * — the events stay exactly as they are and somebody looks at them again — and
+ * extending or deleting an occurrence of somebody's weekly series is not. An
+ * object with no isRecurringEvent() at all is not a Calendar event and is
+ * answered NO, which is what keeps this callable with a plain object.
+ */
+function isRecurringCalendarEvent(event) {
+  try {
+    return typeof event.isRecurringEvent === 'function' ? !!event.isRecurringEvent() : false;
+  } catch (err) {
+    return true;
+  }
 }
 
 /** The commonest value in a list of numbers; the smallest of them on a tie. */
@@ -30308,6 +30334,7 @@ function readCalendarFactsForReview() {
   const byProgramme = {};
   const eventDateKeys = {};
   const unreadable = [];
+  const todayKey = formatDateKey(new Date());
 
   Object.keys(CALENDAR_MAP).forEach(calendarId => {
     const events = eventsByCalendar[calendarId];
@@ -30329,12 +30356,22 @@ function readCalendarFactsForReview() {
           // one tagged event means the programme is tagged — which is right
           // there and useless here.
           taggedClub: 0, taggedNoReg: 0, taggedAssistance: 0, taggedGrouped: 0, taggedRegular: 0,
-          slotMinutes: 0, capacity: 0, maxPerMonth: 0, linkedEvents: 0, linkedFormIds: {}
+          slotMinutes: 0, capacity: 0, maxPerMonth: 0, linkedFormIds: {},
+          // LINKS ARE COUNTED ON UPCOMING EVENTS ONLY. The sync window starts
+          // at the 1st of the current month, so it always holds some days that
+          // have already happened — and a register link is written for dates
+          // people can still sign up for. Counting a fortnight of finished
+          // sessions as "events with no link" would report every programme in
+          // the building as broken on the 20th of the month.
+          upcomingEvents: 0, linkedEvents: 0
         };
       }
       const p = byProgramme[key];
+      const dateKey = formatDateKey(ev.getStartTime());
+      const upcoming = dateKey >= todayKey;
       p.eventCount++;
-      p.dateKeys[formatDateKey(ev.getStartTime())] = true;
+      if (upcoming) p.upcomingEvents++;
+      p.dateKeys[dateKey] = true;
       if (settings.isShared) p.taggedShared++;
       if (settings.isClub) p.taggedClub++;
       if (settings.noRegistration) p.taggedNoReg++;
@@ -30345,10 +30382,10 @@ function readCalendarFactsForReview() {
       if (!p.maxPerMonth && settings.maxPerMonth) p.maxPerMonth = settings.maxPerMonth;
       const linkedFormId = registrationFormIdInDescription(ev.getDescription());
       if (linkedFormId) {
-        p.linkedEvents++;
+        if (upcoming) p.linkedEvents++;
         p.linkedFormIds[linkedFormId] = (p.linkedFormIds[linkedFormId] || 0) + 1;
       }
-      eventDateKeys[`${calendarId}|${parsed.cleanTitle}|${formatDateKey(ev.getStartTime())}`] = true;
+      eventDateKeys[`${calendarId}|${parsed.cleanTitle}|${dateKey}`] = true;
     });
   });
 
@@ -30361,7 +30398,10 @@ function readCalendarFactsForReview() {
     p.isShared = p.taggedShared > 0;
   });
 
-  return { byProgramme, eventDateKeys, unreadable };
+  // The window the calendar was read over, so the assertions can tell "this row
+  // has no event" apart from "this row is older than anything we looked at".
+  return { byProgramme, eventDateKeys, unreadable, windowStartKey: formatDateKey(start),
+    windowEndKey: formatDateKey(end) };
 }
 
 /**
@@ -30418,8 +30458,11 @@ function describeProgrammeForReview(entry, map, calendarFacts, reviewState, toda
     firstDateLabel: facts.firstDateLabel,
     lastDateLabel: facts.lastDateLabel,
     nextDateKey: facts.nextDateKey,
-    dateLabels: facts.dateLabels.slice(0, 12),
-    moreDates: Math.max(0, facts.dateLabels.length - 12),
+    // The UPCOMING dates, soonest first — the ones somebody reviewing this
+    // programme is about to be asked about. A list that opens with last
+    // October pushes next week off the end of it.
+    dateLabels: facts.upcomingDateLabels.slice(0, 12),
+    moreDates: Math.max(0, facts.upcomingDateLabels.length - 12),
     sheetTypeKey: facts.sheetType.key,
     sheetTypeLabel: facts.sheetType.label,
     calendarTypeKey: facts.calendarType.key,
@@ -30475,9 +30518,20 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     isAssistance: sum('taggedAssistance') > 0
   };
 
-  const formIds = dedupePreservingOrder(rows.map(row => String(row[map['Form_ID']] || '').trim())
+  // THE REVIEW IS ABOUT WHAT IS STILL ACTIONABLE, so the form arithmetic reads
+  // the UPCOMING rows only. The dashboard keeps every session a programme ever
+  // had: a programme running since last autumn covers ten months and has ten
+  // forms, and comparing those two numbers says nothing anybody can act on
+  // while burying the one month that is actually wrong. Nobody can re-split
+  // last April.
+  const isUpcomingRow = row => {
+    const date = coerceDate(row[map['Event_Date']]);
+    return !!date && formatDateKey(date) >= todayKey;
+  };
+  const upcomingRows = rows.filter(isUpcomingRow);
+  const formIds = dedupePreservingOrder(upcomingRows.map(row => String(row[map['Form_ID']] || '').trim())
     .filter(Boolean));
-  const monthsCovered = dedupePreservingOrder(dates.map(d => getMonthLabel(d)));
+  const monthsCovered = dedupePreservingOrder(upcoming.map(d => getMonthLabel(d)));
 
   return {
     id: entry.id,
@@ -30491,9 +30545,11 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     map,
     sessionCount: rows.length,
     upcomingCount: upcoming.length,
+    upcomingRows,
     eventCount,
     dates,
     dateLabels: dates.map(d => formatDateLabel(d)),
+    upcomingDateLabels: upcoming.map(d => formatDateLabel(d)),
     monthsCovered,
     firstDateLabel: dates.length > 0 ? formatDateLabel(dates[0]) : '',
     lastDateLabel: dates.length > 0 ? formatDateLabel(dates[dates.length - 1]) : '',
@@ -30506,9 +30562,13 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     calendarType: resolveProgramFormType(calendarState),
     formIds,
     linkedEvents: sum('linkedEvents'),
-    registered: rows.reduce((n, row) => n + (Number(row[map['Active_Count']]) || 0), 0),
-    waitlisted: rows.reduce((n, row) => n + (Number(row[map['Waitlist_Count']]) || 0), 0),
-    capacity: rows.reduce((n, row) => Math.max(n, Number(row[map['Max_Capacity']]) || 0), 0),
+    upcomingEvents: sum('upcomingEvents'),
+    // Upcoming, like the rest of the review: "62 registered" over a year of
+    // history is a number nobody can act on, and it hides the four people
+    // signed up for next week.
+    registered: upcomingRows.reduce((n, row) => n + (Number(row[map['Active_Count']]) || 0), 0),
+    waitlisted: upcomingRows.reduce((n, row) => n + (Number(row[map['Waitlist_Count']]) || 0), 0),
+    capacity: upcomingRows.reduce((n, row) => Math.max(n, Number(row[map['Max_Capacity']]) || 0), 0),
     slotMinutes: rows.reduce((n, row) =>
       n || (map['Slot_Minutes'] === undefined ? 0 : Number(row[map['Slot_Minutes']]) || 0), 0) ||
       calendarParts.reduce((n, p) => n || p.slotMinutes, 0),
@@ -30516,11 +30576,18 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     // Dates where the sheet has a row and the calendar has no event, and the
     // other way round. Computed here so the assertion is a comparison of two
     // lists rather than a third pass.
+    // ONLY ROWS INSIDE THE WINDOW THE CALENDAR WAS READ OVER. That window
+    // starts at the 1st of the current month, and the dashboard holds every
+    // session this programme has ever had — so testing an April row against a
+    // calendar nobody looked at April on reports the whole of last season as
+    // "no calendar event behind it", on every programme, forever.
     rowsWithoutEvents: rows.filter(row => {
       const date = coerceDate(row[map['Event_Date']]);
       const calendarId = String(row[map['Calendar_Source']] || '').trim();
       if (!date || !calendarId) return false;
-      return !calendarFacts.eventDateKeys[`${calendarId}|${entry.title}|${formatDateKey(date)}`];
+      const dateKey = formatDateKey(date);
+      if (dateKey < calendarFacts.windowStartKey || dateKey > calendarFacts.windowEndKey) return false;
+      return !calendarFacts.eventDateKeys[`${calendarId}|${entry.title}|${dateKey}`];
     }).map(row => formatDateLabel(coerceDate(row[map['Event_Date']]))),
     eventsWithoutRows: calendarParts.reduce((out, part) => {
       const known = {};
@@ -30594,9 +30661,21 @@ function assertProgrammeKind(facts, checks) {
     return;
   }
   if (facts.eventCount === 0) {
+    // A PROGRAMME THAT HAS FINISHED IS NOT A BROKEN ONE. The dashboard keeps
+    // every session a programme ever had; the calendar is read from the 1st of
+    // the current month forward. So last season's twelve-week course has rows
+    // and no events, and reporting that as a problem would put every finished
+    // programme in the building at the top of the list — permanently, and
+    // ahead of the ones that are actually wrong.
+    if (facts.upcomingCount === 0) {
+      checks.push(reviewCheck(REVIEW_LEVELS.INFO,
+        `Finished — ${facts.sessionCount} past session(s) on the dashboard and nothing upcoming. ` +
+        `Its rows are history, and there is nothing left to check.`));
+      return;
+    }
     checks.push(reviewCheck(REVIEW_LEVELS.PROBLEM,
-      `No calendar event for "${facts.title}" anywhere in the sync window, but ${facts.sessionCount} ` +
-      `session row(s) are still on the dashboard. Either the events were deleted or the programme was ` +
+      `No calendar event for "${facts.title}" anywhere in the sync window, but ${facts.upcomingCount} ` +
+      `of its session rows are still UPCOMING. Either the events were deleted or the programme was ` +
       `renamed on the calendar and the rows were left behind under the old name.`));
     return;
   }
@@ -30681,19 +30760,23 @@ function assertFormsMatchKind(facts, checks) {
     return;
   }
 
-  const missing = facts.rows.filter(row => !String(row[facts.map['Form_ID']] || '').trim()).length;
+  // Upcoming rows only, like everything else in this check: a session in
+  // February with no form is not something anybody can now do anything about,
+  // and reporting it would bury the March one that is.
+  const upcomingRows = facts.upcomingRows || facts.rows;
+  const missing = upcomingRows.filter(row => !String(row[facts.map['Form_ID']] || '').trim()).length;
   if (missing > 0) {
     checks.push(reviewCheck(REVIEW_LEVELS.PROBLEM,
-      `${missing} of its ${facts.sessionCount} session rows have no form at all — nobody can register ` +
-      `for those dates. Run "Update Everything Now" to build them.`, 'sync'));
+      `${missing} of its ${upcomingRows.length} upcoming session rows have no form at all — nobody can ` +
+      `register for those dates. Run "Update Everything Now" to build them.`, 'sync'));
   }
-  if (forms === 0) return;
+  if (forms === 0 || upcomingRows.length === 0) return;
 
   const expected = (kind === 'SERIES' || kind === 'CLUB_SERIES') ? 1 : facts.monthsCovered.length;
   const expectedWord = expected === 1 ? 'one form' : `${expected} forms`;
   const reason = (kind === 'SERIES' || kind === 'CLUB_SERIES')
     ? 'one form for the whole series'
-    : `one per calendar month, and it runs across ${facts.monthsCovered.length} month(s)`;
+    : `one per calendar month, and it has dates in ${facts.monthsCovered.length} month(s) from here on`;
 
   if (forms === expected) {
     checks.push(reviewCheck(REVIEW_LEVELS.OK, `It has ${expectedWord}, which is ${reason}.`));
@@ -30704,8 +30787,8 @@ function assertFormsMatchKind(facts, checks) {
       `"Move Sessions to Another Form…" puts them back on one.`, 'repoint'));
   } else {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-      `It has ${forms} form(s) covering ${facts.monthsCovered.length} month(s). A monthly programme ` +
-      `normally gets a fresh form each month so its dates and menu stay current.`));
+      `It has ${forms} form(s) covering ${facts.monthsCovered.length} upcoming month(s). A monthly ` +
+      `programme normally gets a fresh form each month so its dates and menu stay current.`));
   }
 }
 
@@ -30718,29 +30801,35 @@ function assertFormsMatchKind(facts, checks) {
  * workbook.
  */
 function assertLinksMatchKind(facts, checks) {
-  if (facts.eventCount === 0) return;
+  // UPCOMING EVENTS ONLY, on both sides of every comparison here. A register
+  // link is for a date somebody can still sign up for, and the sync window
+  // always holds part of a month that has already happened — so counting
+  // finished sessions as unlinked would report every programme in the building
+  // as broken by the 20th.
+  const total = facts.upcomingEvents;
+  if (total === 0) return;
   const kind = facts.sheetType.key;
 
   if (kind === 'DROP_IN') {
     if (facts.linkedEvents === 0) {
-      checks.push(reviewCheck(REVIEW_LEVELS.OK, 'No "register here" link on its calendar events, which is right for a drop-in.'));
+      checks.push(reviewCheck(REVIEW_LEVELS.OK, 'No "register here" link on its upcoming events, which is right for a drop-in.'));
     } else {
       checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-        `${facts.linkedEvents} of its calendar events still carry a "register here" link, which tells ` +
+        `${facts.linkedEvents} of its upcoming events still carry a "register here" link, which tells ` +
         `people to sign up for something nobody is keeping a list for. The next sync removes them.`, 'sync'));
     }
     return;
   }
 
-  if (facts.linkedEvents === facts.eventCount) {
-    checks.push(reviewCheck(REVIEW_LEVELS.OK, `All ${facts.eventCount} of its calendar events carry a register link.`));
+  if (facts.linkedEvents >= total) {
+    checks.push(reviewCheck(REVIEW_LEVELS.OK, `All ${total} of its upcoming events carry a register link.`));
   } else if (facts.linkedEvents === 0) {
     checks.push(reviewCheck(REVIEW_LEVELS.PROBLEM,
-      `None of its ${facts.eventCount} calendar events carries a register link. Anybody looking at the ` +
+      `None of its ${total} upcoming events carries a register link. Anybody looking at the ` +
       `calendar has no way to sign up. Run "Update Everything Now", or 🔧 Admin ▸ Rewrite Event Links.`, 'sync'));
   } else {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-      `${facts.linkedEvents} of its ${facts.eventCount} calendar events carry a register link — the rest ` +
+      `${facts.linkedEvents} of its ${total} upcoming events carry a register link — the rest ` +
       `have none. Run "Update Everything Now" to stamp the others.`, 'sync'));
   }
 }
@@ -30759,7 +30848,10 @@ function assertAppointmentSettings(facts, checks) {
       `${facts.timeBlockDays} of its calendar events sit on a day that already has another event of the ` +
       `same name. A session is identified by its calendar, its name and its DATE — so those events are ` +
       `all the same session, and the dashboard row is showing whichever one the last sync happened to ` +
-      `write. Merging them into one event is what makes the day readable.`, 'merge'));
+      `write. If they run back to back, merging them into one event is what makes the day readable. ` +
+      `If they are genuinely separate — a morning class and an afternoon one — give them different ` +
+      `names on the calendar ("${facts.title} (Morning)"), which is the only way this can tell them ` +
+      `apart.`, 'merge'));
   }
   if (facts.sheetType.key !== 'APPOINTMENTS') return;
 
@@ -30822,8 +30914,12 @@ function assertCalendarAndSheetLineUp(facts, checks) {
       `Run "Update Everything Now".`, 'sync'));
   }
   if (facts.rowsWithoutEvents.length === 0 && facts.eventsWithoutRows.length === 0) {
+    // "Over the window" said out loud, because the two numbers are not
+    // comparable without it: the dashboard holds every session this programme
+    // ever had, and the calendar was read from the 1st of this month forward.
     checks.push(reviewCheck(REVIEW_LEVELS.OK,
-      `Its ${facts.sessionCount} session rows and its ${facts.eventCount} calendar events are the same days.`));
+      `Its ${facts.eventCount} calendar event(s) from this month on all have a session row, and none ` +
+      `of its rows in that stretch has lost its event.`));
   }
 }
 
@@ -30844,19 +30940,22 @@ function assertCapacityIsSane(facts, checks) {
     }
     return;
   }
-  const overfull = facts.rows.filter(row => {
+  // Upcoming rows only. A session that overflowed last November is a fact about
+  // a room somebody has already stood in.
+  const rows = facts.upcomingRows || facts.rows;
+  const overfull = rows.filter(row => {
     const cap = Number(row[facts.map['Max_Capacity']]) || 0;
     const active = Number(row[facts.map['Active_Count']]) || 0;
     return cap > 0 && active > cap;
   }).length;
   if (overfull > 0) {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-      `${overfull} of its sessions have more people registered than the capacity allows. That happens ` +
-      `when a cap is typed down after people had already signed up — nobody is turned away by it, but ` +
-      `the room may not hold them.`));
+      `${overfull} of its upcoming sessions have more people registered than the capacity allows. That ` +
+      `happens when a cap is typed down after people had already signed up — nobody is turned away by ` +
+      `it, but the room may not hold them.`));
   }
   if (facts.waitlisted > 0) {
-    const seatsFree = facts.rows.some(row =>
+    const seatsFree = rows.some(row =>
       (Number(row[facts.map['Remaining_Seats']]) || 0) > 0);
     if (seatsFree) {
       checks.push(reviewCheck(REVIEW_LEVELS.WARN,
@@ -31129,17 +31228,31 @@ function reviewMergeBlocksForProgramme(programId) {
 
 /** Called from the dialog's "sync now" button — the fix for half of the assertions. */
 function reviewSyncEverything() {
+  let ran = false;
   try {
     // syncCalendars() asks its own "are you sure", which is the wrong question
     // inside a dialog somebody opened in order to fix exactly this. The
     // internal pair is what the hourly triggers run.
-    withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+    //
+    // THE LOCK'S ANSWER IS READ, not discarded. withScriptLock() returns its
+    // onBusy value when it cannot get the lock, and ignoring that would have
+    // this report a successful sync on the one occasion nothing ran at all —
+    // sending somebody back to a review whose checks are exactly as stale as
+    // they were, believing they are fresh.
+    ran = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
       syncCalendarsInternal();
       syncRegistrationsInternal();
-    }, null);
+      return true;
+    }, false);
   } catch (err) {
     return JSON.stringify({ message: `⚠️ The sync did not finish (${err}).`, ok: false,
       review: buildProgramReview() });
+  }
+  if (!ran) {
+    return JSON.stringify({
+      message: '⚠️ A sync is already running just now — nothing was re-read. Try again in a moment.',
+      ok: false, review: buildProgramReview()
+    });
   }
   return JSON.stringify({
     message: '✅ Calendar and registrations re-read. The checks below are recomputed.',
@@ -31309,8 +31422,8 @@ function buildProgramReviewHtml(review) {
       '<h3>' + esc(p.title) + ' ' + reviewedNote + '</h3>' +
       '<div class="sub">' + esc(p.locations.join(' + ') || 'no location') +
         (p.isShared ? ' — one shared form across locations' : '') +
-        ' &nbsp;·&nbsp; ' + esc(p.sessionCount) + ' session row(s), ' +
-        esc(p.eventCount) + ' calendar event(s), ' + esc(p.formCount) + ' form(s)' +
+        ' &nbsp;·&nbsp; ' + esc(p.upcomingCount) + ' upcoming session(s) of ' +
+        esc(p.sessionCount) + ', ' + esc(p.formCount) + ' form(s)' +
         ' &nbsp;·&nbsp; ' + esc(p.registered) + ' registered' +
         (p.waitlisted > 0 ? ', ' + esc(p.waitlisted) + ' waitlisted' : '') +
       '</div>' +

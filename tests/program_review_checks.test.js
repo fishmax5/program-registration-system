@@ -58,11 +58,14 @@ function facts(over) {
     locations: ['Narberth'],
     map,
     rows: [['F1', 0, 2, 0, new Date(2026, 2, 2)], ['F1', 0, 2, 0, new Date(2026, 2, 9)]],
+    upcomingRows: [['F1', 0, 2, 0, new Date(2026, 2, 2)], ['F1', 0, 2, 0, new Date(2026, 2, 9)]],
     sessionCount: 2,
+    upcomingCount: 2,
     eventCount: 2,
     monthsCovered: ['March 2026'],
     formIds: ['F1'],
     linkedEvents: 2,
+    upcomingEvents: 2,
     registered: 4,
     waitlisted: 0,
     capacity: 0,
@@ -99,8 +102,20 @@ ok('agreement is a tick', has(run('assertProgrammeKind', facts()), L.OK));
     /Club/.test(text(checks)) && /Monthly/.test(text(checks)), text(checks));
   ok('and offers the kind picker as the fix', checks.some(c => c.fix === 'kind'));
 }
-ok('rows with no calendar event at all is a problem',
-  has(run('assertProgrammeKind', facts({ eventCount: 0, calendarParts: [] })), L.PROBLEM));
+ok('upcoming rows with no calendar event at all is a problem',
+  has(run('assertProgrammeKind',
+    facts({ eventCount: 0, calendarParts: [], upcomingCount: 2 })), L.PROBLEM));
+// A FINISHED PROGRAMME IS NOT A BROKEN ONE. The dashboard keeps every session a
+// programme ever had; the calendar is read from the 1st of this month forward.
+// Last season's course therefore has rows and no events, and calling that a
+// problem would put every finished programme in the building at the top of the
+// list, permanently, ahead of the ones that are actually wrong.
+{
+  const checks = run('assertProgrammeKind',
+    facts({ eventCount: 0, calendarParts: [], upcomingCount: 0 }));
+  ok('a finished programme is not a problem', !has(checks, L.PROBLEM), text(checks));
+  ok('it is just noted as finished', /Finished/.test(text(checks)), text(checks));
+}
 ok('events with no rows at all is a warning',
   has(run('assertProgrammeKind', facts({ sessionCount: 0, rows: [] })), L.WARN));
 ok('an unreadable calendar is reported as unreadable, not as a missing programme',
@@ -130,9 +145,18 @@ ok('one form for one month is a tick', has(run('assertFormsMatchKind', facts()),
 ok('a series on one form is a tick',
   has(run('assertFormsMatchKind', facts({ sheetState: { typeTag: T.GROUPED },
     monthsCovered: ['March 2026', 'April 2026'] })), L.OK));
-ok('a session row with no form at all is a problem',
+ok('an upcoming session row with no form at all is a problem',
   has(run('assertFormsMatchKind', facts({
-    rows: [['F1', 0, 2, 0, new Date()], ['', 0, 0, 0, new Date()]] })), L.PROBLEM));
+    upcomingRows: [['F1', 0, 2, 0, new Date()], ['', 0, 0, 0, new Date()]] })), L.PROBLEM));
+// HISTORY IS NOT ACTIONABLE. Nobody can re-split last April, and comparing ten
+// months of rows against ten forms says nothing while burying the one month
+// that is actually wrong.
+ok('a programme whose dates have all happened is asked nothing about forms',
+  run('assertFormsMatchKind', facts({ upcomingRows: [], monthsCovered: [] })).length === 0);
+ok('and a form missing from a PAST row is not reported',
+  !has(run('assertFormsMatchKind', facts({
+    rows: [['', 0, 0, 0, new Date(2020, 0, 1)]],
+    upcomingRows: [['F1', 0, 2, 0, new Date()]] })), L.PROBLEM));
 ok('a drop-in with no form is a tick',
   has(run('assertFormsMatchKind', facts({ sheetState: { noRegistration: true }, formIds: [] })), L.OK));
 ok('a drop-in still pointing at a form is a warning',
@@ -144,6 +168,16 @@ ok('no event linked at all is a problem',
   has(run('assertLinksMatchKind', facts({ linkedEvents: 0 })), L.PROBLEM));
 ok('some events linked is a warning',
   has(run('assertLinksMatchKind', facts({ linkedEvents: 1 })), L.WARN));
+// PAST EVENTS ARE NOT COUNTED ON EITHER SIDE. The sync window starts at the 1st
+// of the current month, so it always holds days that have already happened, and
+// a link is written for dates people can still sign up for. Counting a
+// fortnight of finished sessions as unlinked would report every programme in
+// the building as broken by the 20th.
+ok('a programme whose events have all happened is asked nothing',
+  run('assertLinksMatchKind', facts({ eventCount: 8, upcomingEvents: 0, linkedEvents: 0 })).length === 0);
+ok('and only the upcoming ones have to carry a link',
+  has(run('assertLinksMatchKind',
+    facts({ eventCount: 8, upcomingEvents: 2, linkedEvents: 2 })), L.OK));
 ok('a drop-in with no links is a tick',
   has(run('assertLinksMatchKind',
     facts({ sheetState: { noRegistration: true }, linkedEvents: 0 })), L.OK));
@@ -189,13 +223,19 @@ ok('no cap with people registered is worth a note',
   has(run('assertCapacityIsSane', facts()), L.INFO));
 ok('more registered than the cap allows is a warning',
   has(run('assertCapacityIsSane', facts({
-    capacity: 2, rows: [['F1', 2, 5, 0, new Date()]] })), L.WARN));
+    capacity: 2, upcomingRows: [['F1', 2, 5, 0, new Date()]] })), L.WARN));
 ok('a waitlist beside empty seats is a warning',
   has(run('assertCapacityIsSane', facts({
-    capacity: 10, waitlisted: 2, rows: [['F1', 10, 3, 7, new Date()]] })), L.WARN));
+    capacity: 10, waitlisted: 2, upcomingRows: [['F1', 10, 3, 7, new Date()]] })), L.WARN));
 ok('a waitlist with every seat taken is not',
   !has(run('assertCapacityIsSane', facts({
-    capacity: 10, waitlisted: 2, rows: [['F1', 10, 10, 0, new Date()]] })), L.WARN));
+    capacity: 10, waitlisted: 2, upcomingRows: [['F1', 10, 10, 0, new Date()]] })), L.WARN));
+// A room that overflowed last November is a fact about a room somebody has
+// already stood in.
+ok('a session that overflowed in the past is not reported',
+  !has(run('assertCapacityIsSane', facts({
+    capacity: 2, rows: [['F1', 2, 5, 0, new Date(2020, 0, 1)]],
+    upcomingRows: [['F1', 2, 1, 1, new Date()]] })), L.WARN));
 
 console.log(failures === 0 ? '\nAll review assertion checks passed.' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

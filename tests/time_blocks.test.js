@@ -185,6 +185,31 @@ check('the mode of nothing is nothing', sandbox.modeOfNumbers([]), 0);
   check('and is reported as already tagged', runs[0].alreadyAssistance, true);
 }
 
+// --- A RECURRING EVENT IS NEVER MERGED --------------------------------------
+// Merging means extending one event over the span and deleting the others, and
+// neither means what it says on an occurrence of a series.
+{
+  const a = ev('Computer Help', 10, 0, 10, 30);
+  const b = ev('Computer Help', 10, 30, 11, 0);
+  a.isRecurringEvent = () => true;
+  b.isRecurringEvent = () => false;
+  check('a recurring occurrence is left out of the run', runsFor([a, b]).length, 0);
+}
+{
+  const a = ev('Computer Help', 10, 0, 10, 30);
+  const b = ev('Computer Help', 10, 30, 11, 0);
+  a.isRecurringEvent = () => { throw new Error('no'); };
+  b.isRecurringEvent = () => false;
+  check('and so is one that cannot answer the question', runsFor([a, b]).length, 0);
+}
+{
+  const a = ev('Computer Help', 10, 0, 10, 30);
+  const b = ev('Computer Help', 10, 30, 11, 0);
+  a.isRecurringEvent = () => false;
+  b.isRecurringEvent = () => false;
+  check('two one-off events are still a run', runsFor([a, b]).length, 1);
+}
+
 // --- an all-day event is never part of one ----------------------------------
 {
   const allDay = ev('Closed', 0, 0, 23, 59);
