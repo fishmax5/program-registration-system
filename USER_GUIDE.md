@@ -369,6 +369,133 @@ failure of the form.
 > — so the appointment times, sitting on the other branch, were never reached.
 > The hourly pass now reshapes the whole form, exactly as a rebuild does.
 
+### Merging half-hour blocks
+
+A provider's afternoon usually gets typed the way a paper diary is written —
+one calendar event per appointment:
+
+```
+12:30–1:00   Low-Cost Wills
+ 1:00–1:30   Low-Cost Wills
+ 1:30–2:00   Low-Cost Wills
+ 2:00–2:30   Low-Cost Wills
+```
+
+**That cannot work, and it will not tell you so.** A session is identified by
+its calendar, its name and its **date** — there is no time in it anywhere. So
+all four of those events are *the same session*: the dashboard shows **one row**
+whose start and end are whichever block the last sync happened to write, the
+capacity is one session's worth rather than four, and the form offers the day
+rather than the times. Three of the four events are invisible to the system,
+quietly fighting the fourth over one row.
+
+The shape that works is the one `[Personalized Assistance]` was built for: **one
+event covering 12:30–2:30**, tagged with how long an appointment is, cut into
+slots by the form.
+
+**📝 Programmes & Forms ▸ ⏱️ Merge Half-Hour Blocks…** converts one into the
+other. It lists every day on the calendar that has two or more back-to-back
+events of the same name, with how many blocks and how long each one is. Tick the
+ones to merge and pick what they are:
+
+| Choice | What you get |
+|---|---|
+| **These are appointments** | One event covering the whole span, tagged `[Personalized Assistance, Slots: N]` with N taken from the blocks themselves. Its form asks for a **time**, drops each one as it is taken, and packs the day from the front |
+| **Just one longer event** | One event of the right length and nothing else — for a three-hour class somebody typed in half-hour pieces |
+
+**Registrations are not affected.** The merged event keeps the same name, date
+and calendar, so anybody already registered stays registered for it — the
+session it points at does not change.
+
+The first block is the one kept; the others are deleted from the calendar. That
+is the only irreversible part, so it happens **last**, after the surviving event
+has successfully grown, and the dialog names every event that will go before
+anything is touched.
+
+**What it refuses to merge**, because none of these is a diary:
+
+- events that **overlap** — two things genuinely running at once, or a duplicate;
+- a gap longer than a comfort break (over 15 minutes) — that is two separate
+  things on one day;
+- blocks longer than 90 minutes — a double session, not an appointment;
+- a **tentative** `*` event — it is not confirmed yet, and merging it would
+  confirm it on your behalf.
+
+Run **🔄 Update Everything Now** afterwards so the forms catch up.
+
+---
+
+### Reviewing your programmes
+
+Every rule in this system is enforced *on the way in* — when a sync runs, when
+you tick a box, when a form is rebuilt. None of them is enforced on the way
+**out**. So after a season of editing — a program renamed, a tag typed by hand,
+a form rebuilt on Tuesday and re-split on Thursday, a day of appointments
+entered as seven half-hour blocks — nothing anywhere tells you which of your
+forty programs are still in the state you think they are.
+
+The workbook looks fine. The dashboard is full of rows. The forms all open.
+
+**📝 Programmes & Forms ▸ 🔍 Review Programmes One by One…** walks them a screen
+at a time and states, for each one, what ought to be true — then says whether it
+is.
+
+| It checks | Because |
+|---|---|
+| The sheet and the calendar **agree about what kind of program this is** | The calendar wins on the next sync. A tick that never reached it is quietly thrown away, and nothing says so |
+| **Every one of its calendar events says the same thing** | One tagged event tags the whole program — so a half-tagged program already behaves as fully tagged while *looking* like a deliberate distinction between its dates |
+| It has **as many forms as its kind implies** | One for a series, one per month for a monthly, none for a drop-in. Extra forms are what a re-split leaves behind, and the symptom is people registering on a link covering half the dates the newsletter advertised |
+| Its calendar events **carry a register link**, or deliberately don't | The link is what the public uses. An event with a form and no link is a program nobody can find |
+| An appointment program has a **slot length**, and its day is **one event** | See [Merging half-hour blocks](#merging-half-hour-blocks) |
+| It is shared across locations **everywhere or nowhere** | A half-shared program has two forms and neither covers all its dates |
+| Every session row has an **event behind it**, and every event has a **row** | A row with no event is a date people can register for that nobody is running; an event with no row is a date nobody can register for at all |
+| The **capacity arithmetic** adds up | People waitlisted while other dates have seats free; more registered than the room holds |
+
+Each answer is a ✅ or a sentence saying what disagrees with what, and where
+there is one, **the fix is on a button** — applied to that program alone.
+
+**Three filters at the top:** *Needs attention* (the default — only the programs
+with a ❌ or a ⚠️), *Not yet reviewed*, and *All*.
+
+**Marking a program reviewed records what was true when you looked at it.** If
+the calendar moves underneath afterwards, the mark says *"reviewed, but it has
+changed since"* rather than going on claiming the program is fine. On a workbook
+several people edit, a mark that can quietly become a lie is worse than no mark
+at all.
+
+> **It is fast because it opens no forms.** The whole review is the dashboard
+> rows plus one pass over the calendar, and the result is handed to the dialog in
+> one go — so *Next* is instant. Only the buttons go back to the server.
+
+#### One kind instead of four checkboxes
+
+`Type_Tag`, `Club`, `No_Registration` and `Personalized_Assistance` are four
+separate controls, and they interact in ways nobody holds in their head:
+appointments make the Grouped/Regular choice irrelevant, no-registration makes
+all three of the others irrelevant, and Club with No_Registration is a
+contradiction the sheet will happily let you enter.
+
+The review asks the question the other way round — **what kind of program is
+this?** — with six answers:
+
+| Kind | What it means |
+|---|---|
+| **Monthly sign-up** | The ordinary case. A fresh form each calendar month, so the dates and menu stay current |
+| **One form for the whole series** | A course that runs to an end. Every date shares one form |
+| **Club — join once, monthly form** | People sign up once and stay signed up. A new form each month; the roster carries across it |
+| **Club — join once, one form for the series** | The same standing membership, on a single form for the whole run |
+| **Appointments — book a time, not a day** | One visitor at a time. Each event is cut into back-to-back slots and the form asks which one |
+| **Drop-in — no registration at all** | Shows on the dashboard, gets no form and no "register here" link |
+
+Each of the six is exactly a setting for all four of the old controls, so
+**nothing underneath changed** — same tags, same calendar stamps, same columns,
+and a workbook you've been editing by hand goes on working. Picking one and
+pressing **Apply** writes all four out to **the calendar first** (which is what
+makes a change stick), then updates the dashboard immediately so you can see it
+took.
+
+---
+
 ### Extra questions on one program's form
 
 Every registration form is built from one template, which is what keeps the
@@ -383,8 +510,8 @@ and the system puts them back on the form every time. Add a row:
 
 | Column | What to put |
 |---|---|
-| `Program` | the program's name **exactly as the calendar spells it**. Blank or `*` = every form in the workbook |
-| `Location` | blank = everywhere; otherwise only forms covering that location |
+| `Program` | **pick from the dropdown** — it lists every program on the dashboard, spelled the way the calendar spells it. `*` (or blank) = every form in the workbook |
+| `Location` | dropdown of your locations. `*` or blank = everywhere |
 | `Question` | the question as the registrant will read it |
 | `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice` — or `Notice` / `Image`, which show something instead of asking it (see below) |
 | `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For an `Image` row this holds the picture's Google Drive link instead |
@@ -395,6 +522,15 @@ and the system puts them back on the form every time. Add a row:
 
 Then press **❓ Update Program Questions on Forms**, or wait for the next
 **Sync Cal**.
+
+> **The dropdowns reach the blank rows too**, so the row you are *about* to type
+> into already has them. They used to stop at the last row that had something on
+> it — which meant the one row that needed them never had them, and on a tab you
+> had not used yet there were none at all.
+
+> **Type the Program from the dropdown, not from memory.** It is matched against
+> the calendar exactly: `Bookclub`, or a trailing space, and the question is
+> asked of no form at all with nothing here to say so.
 
 **Where the answers go.** Into one column, `Form_Answers`, on Registrant_Dash,
 as `Question: answer | Question: answer`. Deliberately one column and not one
@@ -494,8 +630,8 @@ stay ticked while the write is on its way.
 > **🔧 Admin ▸ Check Triggers** once on a workbook to install it (it's part of
 > the normal trigger set, and **Trigger Status** tells you if it's missing).
 > Without it nothing is lost — the tick sits in the queue and the next
-> **Sync Cal** delivers it. **🔁 Apply Type / Club / No-Reg / Assistance
-> Changes to Calendar** pushes the queue through by hand at any time.
+> **Sync Cal** delivers it. **📝 Programmes & Forms ▸ Push Dashboard
+> Ticks to the Calendar** pushes the queue through by hand at any time.
 
 **Tentative events** — start the **title** with `*`:
 
@@ -585,7 +721,7 @@ always already holds a real value and marking them as blanks-to-fill-in would
 have read as columns of problems. See
 [Grouped vs Regular](#setting-up-your-calendar-events),
 [The two checkboxes](#the-two-checkboxes-club-and-no_registration), and
-**🔁 Apply Type / Club / No-Reg Changes to Calendar** if a change doesn't stick.
+**Push Dashboard Ticks to the Calendar** if a change doesn't stick.
 
 | Column | Tick it to |
 |---|---|
@@ -1570,6 +1706,17 @@ for the columns and what each type does. Everything on this tab is yours to
 type; nothing on it is ever overwritten. Press **❓ Update Program Questions on
 Forms** when you're done, or leave it for the next **Sync Cal**.
 
+**Every column with a fixed answer is a dropdown, including on the blank rows
+below.** `Program` lists every program currently on the dashboard, spelled the
+way your calendar spells it; `Location` lists your locations; `Type` lists the
+seven kinds of row; `Required` and `Active` are real tick boxes. Pick **`*`** in
+Program or Location (or leave it blank) for *"every one of them"*.
+
+> **Use the Program dropdown rather than typing.** A program name is matched
+> against the calendar **exactly** — so `Bookclub`, or `Book Club ` with a
+> trailing space, asks its question of no form at all, and nothing on this tab
+> would tell you.
+
 ### 10. Assistance_Requests
 People who want a `[Personalized Assistance]` appointment at a time we haven't
 scheduled — they picked *"None of these work"* on the form. One row per request,
@@ -1631,6 +1778,26 @@ says how many more there are.)
 
 The help text under the question spells out what each option does, rather than
 telling anyone which one to pick.
+
+**A form covering ONE date doesn't ask at all.** A single lecture on the 5th of
+March gets a form built from the same template as a twelve-week series — and
+over a list of one date, *"all events this month"* and *"choose specific days"*
+mean the identical thing, while the roster grid behind the second is a table
+with one row. It is also the first thing on the form, where a required question
+reads as consequential: people stop, read it, pick the second option, and tick
+one box to say the thing they had already said by opening the form.
+
+So on a one-date form the question comes off, and the page it sat on is retitled
+to say **which date this is** — the list underneath it was already there, so the
+page stops being a fork in the road and becomes the confirmation a one-off event
+actually wants. The description says *"Date:"* rather than *"Dates:"* over its
+list of one.
+
+It reverses itself. Add a second session and the question is back on the very
+next sync, on the page it came off. And a **`[Club]` form is never collapsed**,
+however few dates it covers — *"I want to sign up for all future X meetings"* is
+a choice on that same question, and it isn't about dates at all: it is how
+somebody joins the roster.
 
 **Every form that asks about lunch also asks about extra meals**, right under
 the lunch question: **"Extra Meals (Beyond One Each)"** — *None*, or 1 to 6.
@@ -1842,9 +2009,11 @@ Everything else is grouped by the job it belongs to.
 
 | Item | What it does |
 |---|---|
+| **🔍 Review Programmes One by One…** | Walks your programmes a screen at a time and says, for each, what ought to be true and whether it is — see [Reviewing your programmes](#reviewing-your-programmes). Start here when something looks wrong and you don't know where |
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
-| **Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
+| **⏱️ Merge Half-Hour Blocks…** | Finds every day typed as a run of back-to-back events of the same name, and merges each into one event — see [Merging half-hour blocks](#merging-half-hour-blocks) |
 | **🩹 Update One Form (keeps its link)…** | Rebuilds **one** form from the current template while you wait — its dates, its questions, and its appointment times. The form keeps its ID, so **every link already handed out goes on working**. This is the single-form version of 🔧 Admin ▸ Rebuild Forms In Place; reach for it when one form has gone wrong and you don't want to sweep the whole workbook. See [Rebuild forms in place](#rebuild-forms-in-place) |
 | **Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
@@ -2701,8 +2870,7 @@ owner's triggers — only the Apps Script editor's Triggers page can do that.
 
 **Not gated, by design:** everything on the main menu — ⚡ Quick Mark, Sync
 Cal, Sync Registrations, the two lunch-menu items, Print Sign-In Sheet, Invite
-Registrants to Calendar Events, Apply Type / Club / No-Reg Changes to
-Calendar, 🔗 Link Program Across Locations…, 📄 Move Sessions to Another
+Registrants to Calendar Events, Push Dashboard Ticks to the Calendar, 🔗 Link Program Across Locations…, 📄 Move Sessions to Another
 Form…, Show All Past Rows, Resize All Sheets — plus everyone's ability to
 register, edit rows, and view every dashboard. Ordinary day-to-day use needs no
 special account, and the desk should never have to wait for an admin to come
@@ -2968,8 +3136,7 @@ Master_Lunch_Dashboard and manually-marked registrant rows survive.
 on the program dashboard is a view of what the calendar event's description
 says. Changing it writes the new value back onto every one of that program's
 calendar events — that's what makes it stick. If it can't reach the calendar
-at that moment you'll get a warning toast; press **🔁 Apply Type / Club /
-No-Reg Changes to Calendar** and it goes through. Without that, the next sync
+at that moment you'll get a warning toast; press **Push Dashboard Ticks to the Calendar** and it goes through. Without that, the next sync
 quietly puts the old value back.
 
 **`Club` and `No_Registration` live on the calendar too**, in the same way and
@@ -3041,8 +3208,7 @@ box with a note saying why.
 
 **I changed Grouped/Regular and it changed itself back**
 `Type_Tag` is stored on the *calendar event*, not the sheet, and a cell edit
-can't always reach the calendar. Press **🔁 Apply Type / Club / No-Reg Changes
-to Calendar**, then **Sync Cal**.
+can't always reach the calendar. Press **Push Dashboard Ticks to the Calendar**, then **Sync Cal**.
 
 **I ticked `Club` and it unticked itself**
 That was a real bug and it's fixed: ticks are now queued on the hidden
@@ -3050,7 +3216,7 @@ That was a real bug and it's fixed: ticks are now queued on the hidden
 them. If a tick is still sitting in that tab hours later, the calendar can't be
 written — check **🔧 Admin ▸ Trigger Status** (is `onProgramFlagEditInstallable`
 listed?), run **Check Triggers** if it isn't, then
-**🔁 Apply Type / Club / No-Reg Changes to Calendar**.
+**Push Dashboard Ticks to the Calendar**.
 
 **Only some locations ended up on the shared form**
 The `[All Locations]` tag is read per event, so the locations you didn't tag
@@ -3172,7 +3338,7 @@ action that writes descriptions now runs inside a *quiet window* — the
 calendar-edit triggers are taken down, the work is done, each calendar's sync
 position is advanced past our own edits, and only then are the triggers put
 back. That covers Sync Cal, ticking `Club` / `No_Registration`,
-**🔁 Apply Type / Club / No-Reg Changes to Calendar**,
+**Push Dashboard Ticks to the Calendar**,
 **🔗 Link Program Across Locations…**, **🔗 Rewrite Event Links** and
 **💣 Destroy & Rebuild Forms…**. If you saw a burst of syncs after one of
 those, it should be gone.

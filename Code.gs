@@ -8346,8 +8346,13 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('🔍 Review Programmes One by One…', 'showProgramReviewDialog')
       .addSeparator()
       .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
-      .addItem('Apply Type / Club / No-Reg / Assistance Changes to Calendar',
-        'applyProgramTagChangesToCalendar')
+      // NAMED FOR WHAT IT DOES, not for the four columns it happens to read.
+      // "Apply Type / Club / No-Reg / Assistance Changes to Calendar" is a
+      // list of internal column names on a menu somebody reads while trying to
+      // work out which item to press — and the answer to "what does it do" is
+      // one short sentence: the ticks you made on the dashboard have not
+      // reached the calendar yet, and this sends them.
+      .addItem('Push Dashboard Ticks to the Calendar', 'applyProgramTagChangesToCalendar')
       // Next to it because it is the other half of the same job: that item
       // pushes the ticks OUT to the calendar, this one shows what the ticks
       // are currently doing to the forms — and fixes any form the hourly sync
@@ -28637,13 +28642,40 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   const sharedFormIds = getSharedFormIdSet();
   let touched = 0;
 
+  // FINGERPRINTED, like the date labels above it and for the same reason. This
+  // runs on every hourly sync for every appointment form, and its whole job is
+  // to take booked times off the list — so on the many hours when nobody
+  // booked anything it has nothing to do and was finding that out by opening
+  // each form to look, which is a remote round trip apiece. The free-slot list
+  // IS the answer, so hashing it decides the question without opening
+  // anything.
+  //
+  // IT TRACKS WHAT THIS SCRIPT WRITES, exactly as the date-label fingerprint
+  // does — a form edited by hand is not noticed until its times legitimately
+  // change again. The escape hatch is already on the menu and already says so:
+  // "Rebuild Appointment Forms + Report…" calls syncAssistanceQuestionsOnForm()
+  // directly and reshapes every one of them whatever any hash says.
+  const fingerprints = getFormLabelFingerprints();
+  let skipped = 0;
+
   assistanceFormIds.forEach(formId => {
     const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
     if (context.sessions.length === 0) return;
+    const choices = buildAppointmentChoicesForContext(context, booked);
+    // Keyed apart from the date-label fingerprint of the same form: they are
+    // two different writes to two different questions, and one key would have
+    // each of them permanently invalidating the other.
+    const key = `${formId}::appointments`;
+    const fingerprint = computeFormLabelFingerprint(choices, [context.maxPerMonth || 0]);
+    if (fingerprints[key] === fingerprint) { skipped++; return; }
+
     try {
       const form = FormApp.openById(formId);
-      touched += syncAssistanceQuestionsOnForm(form, context,
-        buildAppointmentChoicesForContext(context, booked));
+      touched += syncAssistanceQuestionsOnForm(form, context, choices);
+      // Recorded only after the write succeeded: a form that could not be
+      // opened must be tried again next hour, not marked as done.
+      fingerprints[key] = fingerprint;
+      __formLabelFingerprintDirty = true;
     } catch (err) {
       log(`Could not refresh the appointment times on form ${formId} (${err}).`);
       noteForAdmin('Appointment forms not updated',
@@ -28652,6 +28684,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   });
 
   if (touched > 0) log(`Reshaped / refreshed the appointment times on ${touched} form(s).`);
+  if (skipped > 0) log(`${skipped} appointment form(s) already offered exactly these times — not opened.`);
   return touched;
 }
 
@@ -30894,6 +30927,14 @@ function applyProgramKind(programId, typeKey) {
     return { ok: false, message: `⚠️ Nothing was changed — the calendar could not be read. Try again in a moment.` };
   }
 
+  // A TICK STILL SITTING IN THE QUEUE IS NOW OUT OF DATE, and it would be
+  // delivered later as though it were the newer instruction. The queue exists
+  // because a checkbox cannot reach a calendar on its own (see
+  // PENDING_FLAG_SHEET_NAME); this call HAS reached the calendar, so anything
+  // queued for the same programme has been superseded by it and must not be
+  // stamped back over the top an hour from now.
+  dropPendingFlagsForProgramme(title, calendarIds);
+
   const rowsChanged = writeProgramKindOntoRows(title, calendarIds, settings);
   flushAdminDigest('Programme review');
   const message = `✅ "${title}" is now ${type.label.toLowerCase()}. ` +
@@ -30977,6 +31018,26 @@ function markProgrammeReviewed(programId, fingerprint) {
   };
   saveProgramReviewState(state);
   return true;
+}
+
+/**
+ * Forgets every queued tick for one programme.
+ *
+ * Called when a kind has just been written straight to the calendar, which is
+ * the thing the queue was holding those ticks in order to eventually do. A
+ * queued entry that survives is not a pending instruction any more; it is an
+ * older answer waiting to overwrite a newer one.
+ */
+function dropPendingFlagsForProgramme(title, calendarIds) {
+  const wanted = {};
+  (calendarIds || []).forEach(id => { wanted[id] = true; });
+  const stale = readPendingProgramFlags()
+    .filter(entry => entry.title === title && wanted[entry.calendarId]);
+  if (stale.length === 0) return 0;
+  clearPendingProgramFlags(stale);
+  log(`Dropped ${stale.length} queued tick(s) for "${title}" — the review has just written the ` +
+    `calendar directly, so they are superseded.`);
+  return stale.length;
 }
 
 /** Takes the mark off one programme, or off all of them. */

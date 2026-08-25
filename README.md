@@ -100,6 +100,40 @@ It also:
   session on the hourly pass, or a session you pick from the menu — and
   un-invites them if they cancel.
 
+- **reviews itself, programme by programme** — every rule here is enforced on
+  the way IN, when a sync runs or a box is ticked, and none of them on the way
+  out; so after a season of editing nothing says which of forty programmes are
+  still in the state their author believes they are in. One dialog now walks
+  them a screen at a time and states what ought to be true of each — the sheet
+  and the calendar agreeing about what kind of programme it is, its events all
+  saying the same thing, as many forms as its kind implies, a register link on
+  every event, a slot length on an appointment programme, every row with an
+  event behind it and every event with a row — with the fix on a button beside
+  each answer that isn't a tick. It reads twice and opens no form, so forty
+  programmes take seconds, and marking one reviewed records what was TRUE when
+  you looked, so a calendar that moves underneath says "changed since" rather
+  than going on claiming the programme is fine;
+- asks **what kind of programme is this** in one place instead of spreading it
+  over four checkboxes that interact in ways nobody holds in their head:
+  monthly, series, club, club series, appointments, drop-in. Each of the six is
+  exactly a setting for all four of the old controls — same tags, same calendar
+  stamps, same columns — so a workbook edited by hand goes on working;
+- **merges a day typed one event per appointment into one event**. A session is
+  identified by its calendar, its name and its DATE, with no time in it
+  anywhere, so seven back-to-back "Low-Cost Wills" blocks are all the *same*
+  session — the dashboard shows one row fighting over which block's times to
+  display, and six of the seven events are invisible. Merging gives one event
+  covering the span, tagged with how long an appointment is, which is the shape
+  the times are actually booked from. Registrations are untouched: the survivor
+  keeps the same name, date and calendar, so it is the same session it always
+  was;
+- **stops asking a one-date form which dates you want**. "All events this month"
+  and "choose specific days" mean the identical thing over a list of one, and
+  the grid behind the second is a table with one row — so the question comes off
+  and the page it sat on says which date this is instead. Reversible on the next
+  sync when a second date appears, and never applied to a club form, where that
+  same question is how somebody joins the roster.
+
 This repo was split out of `fishmax5.github.io`, where it had been
 mixed in with an unrelated static site — full development history preserved.
 
