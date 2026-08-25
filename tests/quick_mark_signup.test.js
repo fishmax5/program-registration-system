@@ -108,9 +108,13 @@ const WILLS_END = new RealDate(2026, 9, 13, 14, 0);
 const registrants = [reg('Ruth Kaplan', 'Narberth', 'Low-Cost Wills', WILLS_START, '1:00 PM – 1:30 PM')];
 const sessions = [session('Low-Cost Wills', 'Narberth', WILLS_START, WILLS_END, true)];
 
-sandbox.readAllSectionedRows = (sheet, headers) =>
+const sectioned = (sheet, headers) =>
   (headers === sandbox.HEADERS.Master_Program_Dashboard ? sessions : registrants);
+sandbox.readAllSectionedRows = sectioned;
+// The index reads with the VALUES reader — see readAllSectionedRowValues().
+sandbox.readAllSectionedRowValues = sectioned;
 sandbox.readSimpleTable = () => [];
+sandbox.readSimpleTableValues = () => [];
 sandbox.readLunchScheduleRows = () => [];
 sandbox.collectKnownMembers = () => ['Ruth Kaplan', 'Sam Weber'];
 sandbox.getCateringPolicyForLocation = () => 'Always';

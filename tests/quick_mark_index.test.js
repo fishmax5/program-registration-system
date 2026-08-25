@@ -78,7 +78,11 @@ const rows = [
   reg('Ada Lovelace', 'Ashbridge', 'Chair Yoga', new RealDate(2026, 8, 16)),
   reg('Old Timer', 'Narberth', 'Bingo', new RealDate(2026, 8, 9))          // last week
 ];
+// The index reads with the VALUES reader (one call per tab, no formula
+// preservation) — see readAllSectionedRowValues(). Both are stubbed so this
+// file keeps testing buildQuickMarkIndex() rather than either reader.
 sandbox.readAllSectionedRows = () => rows;
+sandbox.readAllSectionedRowValues = () => rows;
 sandbox.collectKnownMembers = () => ['Mrs Okonkwo', 'Jane Smith'];
 // Program_Options is where the dateless "Chair Yoga, any date" fallback comes
 // from — the choice a desk picks when which date it was does not matter.
@@ -87,6 +91,7 @@ const optionRow = new Array(sandbox.HEADERS.Program_Options.length).fill('');
 optionRow[optMap['Event']] = 'Chair Yoga';
 optionRow[optMap['Location']] = 'Narberth';
 sandbox.readSimpleTable = () => [optionRow];
+sandbox.readSimpleTableValues = () => [optionRow];
 sandbox.readLunchScheduleRows = () => [];
 sandbox.getCateringPolicyForLocation = () => 'Always';
 sandbox.log = () => {};
