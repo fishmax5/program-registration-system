@@ -5359,6 +5359,7 @@ function initSheet() {
   renderProgramQuestionsSheet([]);
   renderAssistanceRequestsSheet([]);
   renderRegularNeedsSheet([]);   // the standing-needs tab, empty but ready to type into
+  warmQuickMarkIndexCache();     // and Quick Mark's lists, so its first open is instant
 
   writeTriggers();
   reorderTabs(ss);
@@ -5484,6 +5485,8 @@ function rebuildLayoutFromSheet() {
   renderProgramQuestionsSheet();
   renderAssistanceRequestsSheet();
   renderRegularNeedsSheet();
+  // Built here so the first Quick Mark after a layout rebuild is the fast one.
+  warmQuickMarkIndexCache();
 
   reorderTabs(ss);
 
@@ -16986,11 +16989,17 @@ function buildEventTimeByEventId(ss) {
 //      them and they are a constant in this file (CALENDAR_MAP) — spending a
 //      five-tab read to find that out was the whole of "it takes twenty
 //      seconds just to load the three locations".
-//   2. The index is SERVED FROM CACHE (getQuickMarkIndex()), and rebuilt in
-//      the background at the end of every registrations sync
+//   2. The lists TRAVEL INSIDE THE DIALOG'S OWN MARKUP. The page paints with
+//      its dropdowns already populated and makes no server call at all until
+//      somebody presses Mark — every google.script.run being a round trip of
+//      its own, and the dialog's whole job on opening having been to make one.
+//   3. What gets inlined is a PRE-BUILT index, kept both in CacheService and
+//      on a hidden tab (QUICK_MARK_INDEX_SHEET_NAME), rebuilt in the
+//      background at the end of every registrations sync
 //      (warmQuickMarkIndexCache()) — so the read is paid for on a trigger with
-//      nobody waiting, not at the desk with a queue.
-//   3. Building it reads each tab ONCE (readAllSectionedRowValues()) instead
+//      nobody waiting, not at the desk with a queue. Opening the dialog is
+//      never allowed to trigger a rebuild (readyQuickMarkIndex()).
+//   4. Building it reads each tab ONCE (readAllSectionedRowValues()) instead
 //      of three times, for the times it does have to be built.
 // ============================================================================
 
@@ -17002,10 +17011,37 @@ function showQuickMarkDialog() {
     toastIfPossible(deskBusyMessage());
     return;
   }
-  const html = HtmlService.createHtmlOutput(buildQuickMarkHtml())
+  // THE LISTS TRAVEL WITH THE PAGE. Every google.script.run costs a round trip
+  // of its own — a second or two before the browser has even asked its
+  // question — and the dialog's whole job on opening is to have the lists.
+  // Handing them over inside the markup removes that call entirely: the
+  // dropdowns are populated in the same paint as the dialog itself.
+  //
+  // Only ever a STORED index, never a fresh build (readyQuickMarkIndex()):
+  // opening the dialog must not be the thing that pays for a rebuild, because
+  // that is a modal with a spinner in front of a queue. A workbook with no
+  // stored index yet gets null here and the dialog fetches as it always did.
+  const html = HtmlService.createHtmlOutput(buildQuickMarkHtml(readyQuickMarkIndex()))
     .setWidth(560)
-    .setHeight(600);
+    .setHeight(620);
   SpreadsheetApp.getUi().showModalDialog(html, 'Quick Mark');
+}
+
+/**
+ * The stored index if there is one to hand, null otherwise — never a build.
+ *
+ * The distinction from getQuickMarkIndex() is the whole point: that one is
+ * allowed to take twenty seconds because something asked it for an answer.
+ * This one is called while a modal is opening, where the honest answer to "is
+ * it ready?" is sometimes no.
+ */
+function readyQuickMarkIndex() {
+  try {
+    return readCachedQuickMarkIndex() || readSheetQuickMarkIndex();
+  } catch (err) {
+    log(`ℹ️ Could not read the stored Quick Mark lists while opening the dialog (${err}).`);
+    return null;
+  }
 }
 
 /**
@@ -17015,7 +17051,7 @@ function showQuickMarkDialog() {
  * chosen location and the name list on the chosen session, and a dialog that
  * shipped all three cross-products would be most of the workbook.
  */
-function buildQuickMarkHtml() {
+function buildQuickMarkHtml(preloadedIndex) {
   // The locations are handed over as DATA rather than baked into the markup:
   // the index that arrives a moment later is what fills the dropdown, and one
   // list built one way is one list to keep right.
@@ -17026,6 +17062,14 @@ function buildQuickMarkHtml() {
   const needPresets = JSON.stringify(REGULAR_NEED_PRESETS);
   const needFrequencies = JSON.stringify(REGULAR_NEED_FREQUENCIES);
   const needWeekdays = JSON.stringify(REGULAR_NEED_WEEKDAYS);
+  // The lists themselves, when there is a stored copy — see
+  // showQuickMarkDialog(). JSON.stringify twice over: once to make the data,
+  // once to make it a STRING LITERAL that cannot break out of the <script>
+  // block. A name with a quote in it, or the two-character sequence that ends
+  // a script tag, would otherwise end the page mid-sentence.
+  const inlineIndex = preloadedIndex
+    ? JSON.stringify(JSON.stringify(preloadedIndex)).replace(/<\//g, '<\\/')
+    : 'null';
 
   return `
 <style>
@@ -17159,9 +17203,11 @@ function buildQuickMarkHtml() {
   var NEED_PRESETS = ${needPresets};
   var NEED_FREQUENCIES = ${needFrequencies};
   var NEED_WEEKDAYS = ${needWeekdays};
-  // Everything the three dropdowns are built from, fetched once. Null until it
-  // lands — see buildQuickMarkIndex() for why it is one call and not three.
-  var INDEX = null;
+  // Everything the three dropdowns are built from. Normally ALREADY HERE,
+  // shipped inside this page — see showQuickMarkDialog(). Null only on a
+  // workbook that has never built its lists, and then the fetch below fills it
+  // in exactly as it used to.
+  var INDEX = ${inlineIndex} ? JSON.parse(${inlineIndex}) : null;
 
   function el(id) { return document.getElementById(id); }
   function say(msg, cls) { var s = el('status'); s.textContent = msg; s.className = cls || ''; }
@@ -17783,7 +17829,18 @@ function buildQuickMarkHtml() {
   // first dropdown rather than blocking it.
   drawLocations();
   drawNeedForm();
-  loadIndex(false);
+  // NOTHING IS FETCHED WHEN THE LISTS CAME WITH THE PAGE, which is the normal
+  // case: the dialog paints with its dropdowns already populated and asks the
+  // server nothing at all until somebody presses Mark. The ↻ link is still
+  // there for the desk that wants this minute's registrations.
+  if (INDEX) {
+    el('freshness').innerHTML = 'Lists read at ' + INDEX.builtAt +
+      ' · <a onclick="loadIndex(true)">↻ reload</a>';
+    say('Ready.', '');
+    locationChanged();
+  } else {
+    loadIndex(false);
+  }
 </script>`;
 }
 
@@ -18354,8 +18411,19 @@ const QUICK_MARK_CACHE_MAX_CHUNKS = 40;
  * after that is a cache read.
  */
 function getQuickMarkIndex() {
+  // Cache, then tab, then build — cheapest first. See
+  // QUICK_MARK_INDEX_SHEET_NAME for why the tab is worth having as well as the
+  // cache: a cache miss is normal and a rebuild is the thing with a queue
+  // behind it.
   const cached = readCachedQuickMarkIndex();
   if (cached) return cached;
+  const stored = readSheetQuickMarkIndex();
+  if (stored) {
+    // Put it back in the cache on the way past, so the NEXT open is the fast
+    // read rather than this one again.
+    writeCachedQuickMarkIndex(stored);
+    return stored;
+  }
   return refreshQuickMarkIndex();
 }
 
@@ -18377,6 +18445,7 @@ function rebuildQuickMarkListsNow() {
 function refreshQuickMarkIndex() {
   const index = buildQuickMarkIndex();
   writeCachedQuickMarkIndex(index);
+  writeSheetQuickMarkIndex(index);
   return index;
 }
 
@@ -18469,6 +18538,90 @@ function writeCachedQuickMarkIndex(index) {
     cache.put(QUICK_MARK_CACHE_KEY, JSON.stringify({ chunks }), QUICK_MARK_CACHE_SECONDS);
   } catch (err) {
     log(`ℹ️ Could not store the Quick Mark lists (${err}) — the dialog will rebuild them when it opens.`);
+  }
+}
+
+/**
+ * The hidden tab the built index is kept on.
+ *
+ * WHY A TAB AND NOT JUST THE CACHE. CacheService is faster but it is a cache:
+ * it expires after six hours, it is dropped when the script is redeployed, and
+ * it is emptied by things nobody at a sign-in desk can see or predict. Every
+ * one of those turns the first Quick Mark of a shift back into the twenty-
+ * second wait this work exists to remove — and the first Quick Mark of a shift
+ * is the one with a queue behind it.
+ *
+ * A tab is a durable copy of exactly the same JSON: one getValues() of one
+ * small hidden tab, slower than the cache and a hundred times faster than
+ * rebuilding from five big ones. So the order is cache, then tab, then build.
+ */
+const QUICK_MARK_INDEX_SHEET_NAME = 'Quick_Mark_Index';
+
+/**
+ * A cell holds 50,000 characters, so the packed index is written down column A
+ * in chunks well inside that. Row 1 is a human-readable banner — somebody who
+ * unhides this tab should find out what it is without asking.
+ */
+const QUICK_MARK_INDEX_CHUNK_CHARS = 40000;
+const QUICK_MARK_INDEX_FIRST_ROW = 3;
+
+/** The stored index from the tab, or null when there isn't a usable one. */
+function readSheetQuickMarkIndex() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(QUICK_MARK_INDEX_SHEET_NAME);
+    if (!sheet) return null;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < QUICK_MARK_INDEX_FIRST_ROW) return null;
+    const packed = sheet
+      .getRange(QUICK_MARK_INDEX_FIRST_ROW, 1, lastRow - QUICK_MARK_INDEX_FIRST_ROW + 1, 1)
+      .getValues()
+      .map(row => String(row[0] || ''))
+      .join('');
+    if (!packed) return null;
+    const index = JSON.parse(unpackCachedText(packed));
+    index.fromSheet = true;
+    return index;
+  } catch (err) {
+    log(`ℹ️ Could not read the stored Quick Mark lists from ${QUICK_MARK_INDEX_SHEET_NAME} (${err}) — rebuilding.`);
+    return null;
+  }
+}
+
+/** Writes `index` onto the hidden tab, creating it if this workbook hasn't got one. */
+function writeSheetQuickMarkIndex(index) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(QUICK_MARK_INDEX_SHEET_NAME);
+    if (!sheet) {
+      const wasActive = ss.getActiveSheet();
+      sheet = ss.insertSheet(QUICK_MARK_INDEX_SHEET_NAME, ss.getNumSheets());
+      try { if (wasActive) ss.setActiveSheet(wasActive); } catch (err) { /* nothing to go back to */ }
+    }
+    const packed = packCachedText(JSON.stringify(index));
+    const chunks = [];
+    for (let i = 0; i < packed.length; i += QUICK_MARK_INDEX_CHUNK_CHARS) {
+      chunks.push([packed.substring(i, i + QUICK_MARK_INDEX_CHUNK_CHARS)]);
+    }
+
+    sheet.clear();
+    sheet.getRange(1, 1).setValue(
+      `⚙️ Quick Mark's lists, pre-built so the dialog opens without a wait. Do not edit — ` +
+      `it is rewritten by every registrations sync. Built ${index.builtAt}.`);
+    sheet.getRange(2, 1).setValue(
+      `${index.sessions.length} session(s), ${index.members.length} name(s), ` +
+      `${(index.needs || []).length} regular need(s).`);
+    if (sheet.getMaxRows() < QUICK_MARK_INDEX_FIRST_ROW + chunks.length) {
+      sheet.insertRowsAfter(sheet.getMaxRows(),
+        QUICK_MARK_INDEX_FIRST_ROW + chunks.length - sheet.getMaxRows());
+    }
+    if (chunks.length > 0) {
+      sheet.getRange(QUICK_MARK_INDEX_FIRST_ROW, 1, chunks.length, 1).setValues(chunks);
+    }
+    // Hidden LAST, and never fatal: a lone or active tab cannot be hidden, and
+    // a visible machine tab is untidy rather than broken.
+    try { sheet.hideSheet(); } catch (err) { /* fine */ }
+  } catch (err) {
+    log(`ℹ️ Could not store the Quick Mark lists on ${QUICK_MARK_INDEX_SHEET_NAME} (${err}).`);
   }
 }
 
