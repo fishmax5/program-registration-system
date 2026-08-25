@@ -2547,6 +2547,20 @@ const TEMPLATE_PAGE_TITLES = {
   // the first time. Every page title here must differ from every item title in
   // TEMPLATE_ITEM_TITLES.
   MODE: 'Choose How to Sign Up',
+  /**
+   * What the MODE page is retitled to on a form covering ONE session — see
+   * collapseFormToSingleSession(). "Choose How to Sign Up" is a heading over
+   * nothing once the choice has been taken off, and it was never true of a
+   * one-off event in the first place: there is one date, and the only thing
+   * left to say about it is which one.
+   *
+   * A retitle rather than a deletion, for the same reason makeFormLunchOnly()
+   * renames a grid instead of swapping it: the page stays exactly where it is
+   * in the form, every navigation already aimed at it still lands, and putting
+   * the mode question back is a retitle in the other direction rather than a
+   * page rebuilt in the right position.
+   */
+  SINGLE_DATE: 'The Date You Are Registering For',
   ALL_DATES: 'Sign Up For Every Date',
   SPECIFIC_DATES: 'Pick Your Dates'
 };
@@ -2839,7 +2853,18 @@ function applyAttendanceModeChoices(form, options, refs) {
   const allDatesPage = asPage(refs.allDatesPage) || findPage(TEMPLATE_PAGE_TITLES.ALL_DATES);
   const specificPage = asPage(refs.specificPage) || findPage(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   if (!modeItem || !allDatesPage || !specificPage) {
-    log(`ℹ️ Could not set the sign-up options on form ${form.getId()} — its mode question or branch pages are missing.`);
+    // A FORM COVERING ONE SESSION HAS NO MODE QUESTION EITHER, and its absence
+    // is the intended state — see section 1g. Recognized by the page it came
+    // off, which collapseFormToSingleSession() retitles precisely so this can
+    // be told apart from a form that has genuinely lost its question. Without
+    // this, every one-off event's form would report a missing question, every
+    // hour, forever, about a question deliberately taken off it — the same
+    // false alarm the isAssistance guard above exists to prevent.
+    const collapsed = (items || []).some(it => it.getType() === FormApp.ItemType.PAGE_BREAK &&
+      it.getTitle() === TEMPLATE_PAGE_TITLES.SINGLE_DATE);
+    if (!collapsed) {
+      log(`ℹ️ Could not set the sign-up options on form ${form.getId()} — its mode question or branch pages are missing.`);
+    }
     return null;
   }
 
@@ -2953,7 +2978,13 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
   const heading = list.length > 1
     ? `Locations: ${list.join(', ')}\n(This program runs at more than one location — each date below says where.)`
     : `Location: ${list[0] || ''}`;
-  let description = `${heading}\n\nDates:\n${dateList}\n\nPlease register below.`;
+  // ONE DATE IS NOT "Dates". A one-off event's form led with a plural heading
+  // over a list of one, which reads as a form that has lost most of its
+  // content — and it is the first thing on the page. See section 1g for the
+  // rest of what a one-date form does differently.
+  const oneDate = dateLabels.length === 1;
+  const dateHeading = oneDate ? 'Date:' : 'Dates:';
+  let description = `${heading}\n\n${dateHeading}\n${dateList}\n\nPlease register below.`;
   if (options.isLunchOnly) {
     // Said FIRST and said plainly, because this form looks like every other
     // registration form and is not one: there is no programme behind these
@@ -2988,7 +3019,10 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     const title = String(options.programTitle || '').trim();
     description += `\n\nThis is a club. You can sign up for ${title ? `all future ${title} meetings` : 'all future meetings'} ` +
       `in one go — you will stay on the list from then on, and will not need to fill this in again each month.`;
-  } else if (isFixed) {
+  } else if (isFixed && !oneDate) {
+    // Not on a one-date form: there is no first sign-up option on it to pick
+    // (section 1g takes the question off), and "coming to every session?" of a
+    // single session is a question with one possible answer.
     description += `\n\nTip: Coming to every session? Pick the first sign-up option and you will only have to ` +
       `tell us your lunch preference once.`;
   }
@@ -4337,10 +4371,18 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
     // Type-guarded as well as titled, for the reason spelled out on
     // TEMPLATE_PAGE_TITLES.MODE: a question and a page break must never be
     // confused for one another by a title lookup.
+    //
+    // FOUND UNDER EITHER TITLE. A form covering one session has this page
+    // retitled (TEMPLATE_PAGE_TITLES.SINGLE_DATE), and on THAT form the date
+    // note is the whole content of the page rather than a preamble to a
+    // question — so it is the one form where failing to write it would leave a
+    // section saying nothing at all. Same reasoning as the roster grid, which
+    // is likewise looked up under both of its titles.
     const modeNote = buildModePageDateNote(attendanceLabels);
     if (modeNote) {
       items.filter(it => it.getType() === FormApp.ItemType.PAGE_BREAK &&
-        it.getTitle() === TEMPLATE_PAGE_TITLES.MODE)
+        (it.getTitle() === TEMPLATE_PAGE_TITLES.MODE ||
+          it.getTitle() === TEMPLATE_PAGE_TITLES.SINGLE_DATE))
         .forEach(it => it.asPageBreakItem().setHelpText(modeNote));
     }
   } catch (err) {
@@ -4688,6 +4730,182 @@ function makeFormLunchOnly(form) {
     log(`Shaped form ${form.getId()} as lunch-only: ${removed} duplicate lunch grid(s) removed, roster grid renamed.`);
     invalidateFormItemIndex(form.getId());
   }
+  return changed;
+}
+
+
+// ---------------------------------------------------------------------------
+// 1g. A FORM COVERING ONE SESSION  (the one-off event)
+// ---------------------------------------------------------------------------
+//
+// A single lecture on the 5th of March gets a form built from the same
+// template as a twelve-week series, and that template's whole spine is a
+// question about WHICH DATES: "I want to sign up for all events this month" or
+// "I want to choose specific days this month to attend", branching to an
+// every-date page or to a roster grid. Over a list of one date, both options
+// mean the identical thing, the grid is a table with one row, and the question
+// is a fork in the road where both branches lead to the same house. People
+// stop and read it, because a required question at the front of a form reads
+// as consequential; several of them pick the second option and then tick a
+// single box to say the thing they had already said by opening the form.
+//
+// So a one-date form does not ask. The mode question comes off, and the page
+// that held it is retitled to say which date this is — the section
+// description underneath it already lists the date, written by
+// applyFormDateLabels(), so the page stops being a fork and becomes the
+// confirmation a one-off event actually wants.
+//
+// REVERSIBLE, which is why the page is retitled rather than deleted. A
+// programme that gains a second date in the same month is not a rare event —
+// it is what "we've added another session" means — and the form must go back
+// to asking on the very next sync, with the question back on the page it came
+// off and every navigation still aimed at it. Deleting the page would have
+// meant rebuilding one in the right position, which is a much less certain
+// thing to do to a form people are registering on.
+//
+// WHAT READS IT BACK. processFormResponse() takes the every-date path when the
+// response carries no mode answer AND the form has no mode question to have
+// answered — the form's own shape, exactly as an appointment form is
+// recognized by carrying the time question. On a one-date form "every date on
+// this form" is that date, which is what was meant.
+// ---------------------------------------------------------------------------
+
+/**
+ * Shapes a form for the number of sessions it actually covers: one, or more
+ * than one. Idempotent in both directions and safe to call on every sync,
+ * which is what it does.
+ *
+ * Returns how many form writes it made — 0 in the steady state.
+ */
+function syncSessionCountShapeOnForm(form, context) {
+  // AN APPOINTMENT FORM HAS ALREADY GIVEN UP ITS MODE QUESTION, for its own
+  // reasons (see syncAssistanceQuestionsOnForm), and one appointment session
+  // is still a page of times to choose between. Leaving it alone here is what
+  // stops the two shapes from taking the question off and putting it back on
+  // alternate syncs.
+  if (context && context.isAssistance) return 0;
+  const sessionCount = (context && context.sessions) ? context.sessions.length : 0;
+  if (sessionCount === 0) return 0; // nothing known about it — change nothing
+
+  // A CLUB FORM KEEPS ITS QUESTION HOWEVER FEW DATES IT COVERS, and this is the
+  // one that would have been a real loss. The club option — "I want to sign up
+  // for all future Book Club meetings" — is a choice on the mode question, and
+  // it is not a choice about dates at all: it is how somebody joins the roster
+  // and stops having to fill the form in every month. A book club that happens
+  // to meet once in March would have had that option deleted along with the
+  // question, leaving its members no way to join from the form the club is
+  // advertised with.
+  //
+  // Written as a condition on the collapse rather than an early return, so the
+  // OTHER direction still runs: a one-date form that was collapsed before
+  // anybody ticked [Club] has to get its question back the moment somebody
+  // does, and an early return would have left it collapsed forever.
+  const shouldCollapse = sessionCount === 1 && !(context && context.isClub);
+  return shouldCollapse
+    ? collapseFormToSingleSession(form, context)
+    : restoreMultiSessionShapeOnForm(form);
+}
+
+/**
+ * Takes the mode question off a form covering one session and retitles the
+ * page it sat on.
+ *
+ * Costs one getItems() and nothing else once it has run: the question is gone,
+ * the page is already titled, and both checks fail on the second pass.
+ */
+function collapseFormToSingleSession(form, context) {
+  const items = form.getItems();
+  let changed = 0;
+
+  // Guarded by the presence of the branch pages, the same way
+  // applyAttendanceModeChoices() guards writing to them: a form that has been
+  // edited into some other shape is left as it is rather than half-converted.
+  const pageOf = title => items.filter(it =>
+    it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === title)[0] || null;
+  const modePage = pageOf(TEMPLATE_PAGE_TITLES.MODE) || pageOf(TEMPLATE_PAGE_TITLES.SINGLE_DATE);
+  const allDatesPage = pageOf(TEMPLATE_PAGE_TITLES.ALL_DATES);
+  if (!modePage || !allDatesPage) return 0;
+
+  const modeQuestion = items.filter(it =>
+    it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK);
+  changed += deleteFormItems(form, modeQuestion, `the one-date form ${form.getId()}`);
+
+  if (modePage.getTitle() !== TEMPLATE_PAGE_TITLES.SINGLE_DATE) {
+    modePage.asPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.SINGLE_DATE);
+    changed++;
+  }
+  // STRAIGHT ON TO THE EVERY-DATE PAGE, said out loud rather than left to
+  // document order. Document order is right on a form built from the template
+  // — but a form that used to be an appointment form has this page pointed at
+  // the roster grid (syncAssistanceQuestionsOnForm sets it there), and the
+  // grid branch is exactly where a form with no mode question must not send
+  // people: nobody ever ticks its one row, so nobody is ever registered.
+  try {
+    const current = modePage.asPageBreakItem().getGoToPage();
+    if (!current || current.getId() !== allDatesPage.getId()) {
+      modePage.asPageBreakItem().setGoToPage(allDatesPage.asPageBreakItem());
+      changed++;
+    }
+  } catch (err) {
+    log(`Could not point the date page of form ${form.getId()} at the sign-up page (${err}).`);
+  }
+
+  if (changed > 0) {
+    const where = context ? describeLocations(context.locations) : '';
+    log(`Shaped form ${form.getId()} for its one session${where ? ` (${where})` : ''}: ` +
+      `the "how would you like to sign up?" question is off, since there is one date to sign up for.`);
+    invalidateFormItemIndex(form.getId());
+  }
+  return changed;
+}
+
+/**
+ * The other direction: a form that covers several sessions again gets its mode
+ * question back, on the page it came off.
+ *
+ * THE CHEAP CASE IS THE COMMON ONE. Nearly every form in the workbook covers
+ * several dates and has never been collapsed, so this finds the page under its
+ * ordinary title, sees the question sitting there, and returns having written
+ * nothing.
+ */
+function restoreMultiSessionShapeOnForm(form) {
+  const items = form.getItems();
+  const singlePage = items.filter(it =>
+    it.getType() === FormApp.ItemType.PAGE_BREAK &&
+    it.getTitle() === TEMPLATE_PAGE_TITLES.SINGLE_DATE)[0] || null;
+  if (!singlePage) return 0; // never collapsed — the overwhelmingly common case
+
+  // A FORM CARRYING THE TIME QUESTION IS AN APPOINTMENT FORM whatever the
+  // context says, and its mode question is meant to be absent. Read off the
+  // form itself for the same reason processFormResponse() does: the shape is
+  // the fact, a checkbox is an opinion about it.
+  const isAppointmentForm = items.some(it =>
+    it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK);
+  if (isAppointmentForm) return 0;
+
+  singlePage.asPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.MODE);
+  let changed = 1;
+
+  const hasMode = items.some(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK);
+  if (!hasMode) {
+    const item = form.addListItem().setTitle(TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE).setRequired(true);
+    // Added items land at the END of the form; it belongs immediately under
+    // the page break it is the only question on.
+    try {
+      form.moveItem(item.getIndex(), singlePage.getIndex() + 1);
+    } catch (err) {
+      log(`Put the sign-up question back on form ${form.getId()} but could not move it onto its page ` +
+        `(${err}) — the form needs "Update One Form" run on it.`);
+    }
+    changed++;
+  }
+
+  log(`Form ${form.getId()} covers several dates again — the "how would you like to sign up?" question is back. ` +
+    `Its choices are set by the caller's applyAttendanceModeChoices().`);
+  invalidateFormItemIndex(form.getId());
   return changed;
 }
 
@@ -15030,7 +15248,19 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
 
   const attendanceMode = getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE);
   const joiningClub = isClubModeAnswer(attendanceMode);
-  if (joiningClub || isAllDatesModeAnswer(attendanceMode)) {
+  // A FORM COVERING ONE SESSION NEVER ASKED — see section 1g. It is recognized
+  // by its own shape, exactly as the appointment form above it is: no mode
+  // question on the form, and no mode answer on the response, so there was
+  // nothing to choose and "every date on this form" is the one date it covers.
+  //
+  // BOTH halves are required, and the response's half is what makes this safe
+  // on an old submission: a response collected while the form still asked
+  // carries its answer, and that answer is honoured even after the question
+  // has come off. Only a response that never met the question falls through to
+  // here — which is the only kind a one-date form produces.
+  const neverAsked = !attendanceMode &&
+    (formIndex.byTitle[TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE] || []).length === 0;
+  if (joiningClub || isAllDatesModeAnswer(attendanceMode) || neverAsked) {
     return processAllDatesResponse({
       formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
       name, people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
@@ -27518,7 +27748,13 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   // 2. The mode page now holds the time question and nothing else, so it says
   //    so — and flows straight into the closing questions rather than through
   //    the (now empty) every-date branch.
-  const modePage = pageOf(TEMPLATE_PAGE_TITLES.MODE) || pageOf(APPOINTMENT_PAGE_TITLE);
+  // Found under all three titles it can be carrying: the template's own, this
+  // function's, and the one a form covering a single session was retitled to
+  // (section 1g). Missing the third would have appended the time question to
+  // the END of a form that used to have one date — past the closing questions,
+  // on whichever branch page happened to be last — instead of onto its page.
+  const modePage = pageOf(TEMPLATE_PAGE_TITLES.MODE) || pageOf(APPOINTMENT_PAGE_TITLE) ||
+    pageOf(TEMPLATE_PAGE_TITLES.SINGLE_DATE);
   const specificPage = pageOf(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   if (modePage) {
     if (modePage.getTitle() !== APPOINTMENT_PAGE_TITLE) {
@@ -28173,6 +28409,29 @@ function applyProgramFormExtensions(form, context, options) {
         `${form.getId()} (${describeLocations(context.locations)}) — its appointment times could not be ` +
         `set: ${err}. The next sync will try again.`);
     }
+  }
+
+  // ONE DATE OR SEVERAL — see section 1g. After the appointment branch, which
+  // takes the mode question off for its own reasons and would otherwise be
+  // fighting this over the same question every hour; and guarded like it, so a
+  // failure here cannot cost the caller its form.
+  try {
+    const shaped = syncSessionCountShapeOnForm(form, context);
+    changed += shaped;
+    // A RESTORED MODE QUESTION HAS NO CHOICES ON IT. applyAttendanceModeChoices()
+    // ran earlier in this same pass, found no question, and said so in the log —
+    // so the question restoreMultiSessionShapeOnForm() has just put back would
+    // sit on the form as an empty required list until the next sync, which is a
+    // form nobody can submit. Setting them here closes that gap inside the one
+    // pass that opened it.
+    if (shaped > 0 && context.sessions.length > 1) {
+      applyAttendanceModeChoices(form, {
+        isFixed: context.isFixed, isClub: context.isClub, programTitle: context.programTitle,
+        isLunchOnly: context.isLunchOnly, isAssistance: context.isAssistance
+      });
+    }
+  } catch (err) {
+    log(`Could not shape form ${form.getId()} for its ${context.sessions.length} session(s) (${err}).`);
   }
 
   try {
