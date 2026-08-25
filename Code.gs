@@ -1333,7 +1333,10 @@ const SHEET_NAMES = {
   // The two tabs behind [Personalized Assistance] and the per-program extra
   // questions — see ASSISTANCE_TAG and section 6g.
   PROGRAM_QUESTIONS: 'Program_Questions',
-  ASSISTANCE_REQUESTS: 'Assistance_Requests'
+  ASSISTANCE_REQUESTS: 'Assistance_Requests',
+  // The standing facts about a person that a sign-in desk would otherwise
+  // have to already know — see section 6e.
+  REGULAR_NEEDS: 'Regular_Needs'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -1632,6 +1635,20 @@ const HEADERS = {
   Club_Members: [
     'Club', 'Location', 'Name', 'Person_Type', 'Primary_Registrant',
     'Phone', 'Email', 'Lunch', 'Joined_On', 'Active', 'Source', 'Staff_Notes', 'Club_Key'
+  ],
+  /**
+   * Regular_Needs — one row per standing fact about a person, plus when it
+   * applies. See section 6e for what the columns mean and why the recurrence
+   * is spread across four of them rather than crammed into one.
+   *
+   * Name leads, because that is what somebody scans this tab for. Everything
+   * from Frequency rightwards is the WHEN, and every one of those columns is
+   * allowed to be blank — a bare "Jane Smith / No milk" is a complete row.
+   */
+  Regular_Needs: [
+    'Name', 'Need', 'Kind', 'Quantity', 'Location', 'Program',
+    'Frequency', 'Weekdays', 'Interval', 'Dates', 'Starts', 'Ends',
+    'Active', 'Auto_Note', 'Last_Applied', 'Added_By', 'Added_On', 'Staff_Notes', 'Need_ID'
   ],
   /**
    * Program_Options — one row per unique PROGRAM (Clean_Title x Location),
@@ -5341,6 +5358,7 @@ function initSheet() {
   // has to be there before they are told.
   renderProgramQuestionsSheet([]);
   renderAssistanceRequestsSheet([]);
+  renderRegularNeedsSheet([]);   // the standing-needs tab, empty but ready to type into
 
   writeTriggers();
   reorderTabs(ss);
@@ -5465,6 +5483,7 @@ function rebuildLayoutFromSheet() {
   // rebuild re-draws them from their own rows and changes nothing in them.
   renderProgramQuestionsSheet();
   renderAssistanceRequestsSheet();
+  renderRegularNeedsSheet();
 
   reorderTabs(ss);
 
@@ -6044,6 +6063,7 @@ const TAB_GROUPS = [
   { color: '#FFD966', names: [
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
+    SHEET_NAMES.REGULAR_NEEDS,
     SHEET_NAMES.PROGRAM_OPTIONS,
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
@@ -7868,6 +7888,10 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms')
       .addItem('Push Menu Changes to Forms', 'pushLunchMenuToForms'))
     .addSubMenu(ui.createMenu('👩‍🏫 Rosters & Schedules')
+      // On this submenu rather than under Settings, because a standing need is
+      // roster work: it is what somebody has to know to serve the person, and
+      // it is edited by the same people who keep the rosters.
+      .addItem('🔔 Regular Needs (standing notes)…', 'openRegularNeedsTab')
       .addItem('Share a Sign-Up Sheet with an Instructor…', 'showInstructorSheetDialog')
       .addItem('Refresh Instructor Sheets Now', 'refreshInstructorSignUpSheetsNow')
       .addItem('Personalized Assistance Schedule…', 'showAssistanceScheduleDialog')
@@ -7933,6 +7957,27 @@ function buildAppMenu(ui, includeAdmin) {
   }
 
   menu.addToUi();
+}
+
+/**
+ * Menu entry: put the Regular_Needs tab in front, building it first if this
+ * workbook predates it.
+ *
+ * A tab is the right editor for these — there are tens of them, they are
+ * edited in batches, and a dialog listing every standing need in the building
+ * would be a worse spreadsheet. Quick Mark's own need form is for the other
+ * case: one need, about the person standing at the desk right now.
+ */
+function openRegularNeedsTab() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_NAMES.REGULAR_NEEDS);
+  if (!sheet || sheet.getLastRow() < MEMORY_TAB_HEADER_ROW) {
+    renderRegularNeedsSheet(sheet ? null : []);
+    sheet = ss.getSheetByName(SHEET_NAMES.REGULAR_NEEDS);
+  }
+  if (!sheet) return;
+  ss.setActiveSheet(sheet);
+  toastIfPossible('🔔 Regular Needs — one row per standing fact. Quick Mark reads it as names are picked.');
 }
 
 const APP_MENU_NAME = '🗓️ Calendar & Form Manager';
@@ -16975,6 +17020,12 @@ function buildQuickMarkHtml() {
   // the index that arrives a moment later is what fills the dropdown, and one
   // list built one way is one list to keep right.
   const locations = JSON.stringify(Object.values(CALENDAR_MAP).filter((v, i, a) => a.indexOf(v) === i));
+  // The shared vocabulary and the recurrence words, handed over as DATA for
+  // the same reason the locations are: one list, defined once, so the dropdown
+  // on the tab and the dropdown in the dialog cannot drift apart.
+  const needPresets = JSON.stringify(REGULAR_NEED_PRESETS);
+  const needFrequencies = JSON.stringify(REGULAR_NEED_FREQUENCIES);
+  const needWeekdays = JSON.stringify(REGULAR_NEED_WEEKDAYS);
 
   return `
 <style>
@@ -16997,6 +17048,14 @@ function buildQuickMarkHtml() {
   #log div { padding: 1px 0; }
   #freshness { color: #666; font-size: 11px; margin-top: 3px; }
   #freshness a { color: #1A73E8; cursor: pointer; text-decoration: underline; }
+  button.secondary { background: #fff; color: #1A73E8; border: 1px solid #DADCE0; }
+  #needs { margin-top: 8px; }
+  #needs .need { background: #FEF7E0; border-left: 3px solid #F9AB00; border-radius: 3px;
+                 padding: 5px 8px; margin: 3px 0; font-size: 12px; line-height: 1.4; }
+  #needs .need b { font-size: 13px; }
+  #needs .need span.when { color: #666; }
+  #needs a.add { color: #1A73E8; cursor: pointer; text-decoration: underline; font-size: 12px; }
+  #needDays label { display: inline-block; margin-right: 8px; font-size: 12px; }
 </style>
 <h3>Quick Mark</h3>
 <p class="hint">
@@ -17040,6 +17099,40 @@ function buildQuickMarkHtml() {
   <input type="checkbox" id="earlier" onchange="refreshButton()"> ☎️ Call them if an earlier appointment opens up
   <span class="note">— ask while they are on the phone; it saves ringing round later</span></label>
 
+<div id="needs"></div>
+
+<fieldset id="needBox" style="display:none">
+  <legend>Regular need</legend>
+  <p class="hint" style="margin:0 0 6px 0">
+    A standing fact about this person — "put her meals in the fridge", "no milk", "one meal every
+    World Affairs day". It shows here every time they are picked, and lands on the row you mark.
+  </p>
+  <label class="field" for="needText">What</label>
+  <input type="text" id="needText" list="needPresets" placeholder="Pick one, or type your own"
+         autocomplete="off" oninput="refreshNeedButton()">
+  <datalist id="needPresets"></datalist>
+
+  <label class="field" for="needWhen">When</label>
+  <select id="needWhen" onchange="needWhenChanged()"></select>
+
+  <label class="field" for="needDays" id="needDaysLabel" style="display:none">On which days</label>
+  <div id="needDays" style="display:none"></div>
+
+  <label class="field" for="needEvery" id="needEveryLabel" style="display:none">Every how many weeks</label>
+  <input type="number" id="needEvery" min="1" max="52" value="2" style="display:none">
+
+  <label class="field" for="needDates" id="needDatesLabel" style="display:none">Which dates</label>
+  <input type="text" id="needDates" placeholder="16 Sep 2026, 23 Sep 2026" style="display:none"
+         autocomplete="off">
+
+  <label class="tick"><input type="checkbox" id="needThisProgram"> Only for this programme
+    <span class="note">— "one meal every World Affairs day"</span></label>
+  <label class="tick"><input type="checkbox" id="needThisLocation"> Only at this location</label>
+
+  <button id="needGo" onclick="saveNeed()" disabled>Save this need</button>
+  <button class="secondary" onclick="toggleNeedBox(false)">Cancel</button>
+</fieldset>
+
 <fieldset>
   <legend>Mark</legend>
   <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
@@ -17063,6 +17156,9 @@ function buildQuickMarkHtml() {
   var LOCATIONS = ${locations};
   var SEP = '${QUICK_MARK_SESSION_KEY_SEPARATOR}';
   var NAME_TIME_SEP = '${QUICK_MARK_NAME_TIME_SEPARATOR}';
+  var NEED_PRESETS = ${needPresets};
+  var NEED_FREQUENCIES = ${needFrequencies};
+  var NEED_WEEKDAYS = ${needWeekdays};
   // Everything the three dropdowns are built from, fetched once. Null until it
   // lands — see buildQuickMarkIndex() for why it is one call and not three.
   var INDEX = null;
@@ -17102,6 +17198,39 @@ function buildQuickMarkHtml() {
     fill(el('location'), LOCATIONS.map(function (loc) { return { value: loc, label: loc }; }),
       '— choose a location —');
     if (keep) { el('location').value = keep; }
+  }
+
+  // The need form's own vocabulary, drawn once. Same reasoning as
+  // drawLocations(): none of it is on the server.
+  function drawNeedForm() {
+    var presets = el('needPresets');
+    presets.innerHTML = '';
+    NEED_PRESETS.forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p.text;
+      o.label = p.group;
+      presets.appendChild(o);
+    });
+    var when = el('needWhen');
+    when.innerHTML = '';
+    NEED_FREQUENCIES.forEach(function (f) {
+      var o = document.createElement('option');
+      o.value = f;
+      o.textContent = f;
+      when.appendChild(o);
+    });
+    var days = el('needDays');
+    days.innerHTML = '';
+    NEED_WEEKDAYS.forEach(function (d) {
+      var label = document.createElement('label');
+      var box = document.createElement('input');
+      box.type = 'checkbox';
+      box.setAttribute('data-day', d);
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(' ' + d));
+      days.appendChild(label);
+    });
+    needWhenChanged();
   }
 
   // ONE SERVER CALL, at the start — and normally a cache read rather than a
@@ -17346,7 +17475,160 @@ function buildQuickMarkHtml() {
     // "move them" is even offered, and what it starts from.
     el('moveTime').checked = false;
     showAppointmentTimes();
+    showNeeds();
+    toggleNeedBox(false);
     refreshButton();
+  }
+
+  // ------------------------------------------------------------------
+  // Regular needs
+  // ------------------------------------------------------------------
+
+  // WHAT THIS PERSON ALWAYS NEEDS, the instant their name is picked — before
+  // the mark, which is the only moment it is any use. Filtered in the browser
+  // over the list the index already carries, so there is no wait in the middle
+  // of the one interaction this tool exists to make fast.
+  function needsForPick() {
+    if (!INDEX || !INDEX.needs) return [];
+    var name = chosenName();
+    if (!name) return [];
+    var key = nameKeyOf(name);
+    var session = chosenSession();
+    var loc = el('location').value;
+    var title = session ? titleOf(session.label) : '';
+    var dateKey = session ? dateKeyOf(session.label) : '';
+    return INDEX.needs.filter(function (need) {
+      if (need.nameKey && need.nameKey !== key) return false;
+      if (need.location && loc && need.location !== loc) return false;
+      if (need.program && title && need.program !== title) return false;
+      if (need.program && !title) return false;
+      return needAppliesOn(need, dateKey);
+    });
+  }
+
+  function showNeeds() {
+    var box = el('needs');
+    var name = chosenName();
+    if (!name) { box.innerHTML = ''; return; }
+    var list = needsForPick();
+    box.innerHTML = '';
+    list.forEach(function (need) {
+      var div = document.createElement('div');
+      div.className = 'need';
+      var strong = document.createElement('b');
+      strong.textContent = '🔔 ' + need.text;
+      var when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = '  — ' + need.when;
+      div.appendChild(strong);
+      div.appendChild(when);
+      box.appendChild(div);
+    });
+    var add = document.createElement('a');
+    add.className = 'add';
+    add.textContent = list.length ? '+ add another regular need' : '+ add a regular need for ' + name;
+    add.onclick = function () { toggleNeedBox(true); };
+    box.appendChild(add);
+  }
+
+  function toggleNeedBox(on) {
+    el('needBox').style.display = on ? 'block' : 'none';
+    if (!on) return;
+    el('needText').value = '';
+    el('needThisProgram').checked = false;
+    el('needThisLocation').checked = false;
+    needWhenChanged();
+    refreshNeedButton();
+    el('needText').focus();
+  }
+
+  function needWhenChanged() {
+    var when = el('needWhen').value;
+    var days = when === 'Weekly' || when === 'Every N weeks' || when === 'Every time';
+    var every = when === 'Every N weeks';
+    var dates = when === 'Specific dates';
+    el('needDaysLabel').style.display = days ? 'block' : 'none';
+    el('needDays').style.display = days ? 'block' : 'none';
+    el('needEveryLabel').style.display = every ? 'block' : 'none';
+    el('needEvery').style.display = every ? 'block' : 'none';
+    el('needDatesLabel').style.display = dates ? 'block' : 'none';
+    el('needDates').style.display = dates ? 'block' : 'none';
+  }
+
+  function refreshNeedButton() {
+    el('needGo').disabled = !el('needText').value.trim() || !chosenName();
+  }
+
+  function chosenWeekdays() {
+    var out = [];
+    var boxes = el('needDays').getElementsByTagName('input');
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].checked) out.push(boxes[i].getAttribute('data-day'));
+    }
+    return out.join(', ');
+  }
+
+  function saveNeed() {
+    var name = chosenName();
+    if (!name) return;
+    el('needGo').disabled = true;
+    say('Saving the need…', 'busy');
+    var session = chosenSession();
+    google.script.run
+      .withSuccessHandler(function (res) {
+        say(res.message, res.ok ? 'ok' : 'err');
+        if (res.ok) {
+          // Added to the copy the dialog is holding, so it shows on this
+          // person straight away rather than at the next reload.
+          if (INDEX && INDEX.needs && res.stored) INDEX.needs.push(res.stored);
+          toggleNeedBox(false);
+          showNeeds();
+        }
+        refreshNeedButton();
+      })
+      .withFailureHandler(function (err) { say('Failed: ' + err.message, 'err'); refreshNeedButton(); })
+      .addRegularNeedFromDialog({
+        name: name,
+        need: el('needText').value.trim(),
+        frequency: el('needWhen').value,
+        weekdays: chosenWeekdays(),
+        interval: el('needEvery').value,
+        dates: el('needDates').value,
+        location: el('needThisLocation').checked ? el('location').value : '',
+        program: el('needThisProgram').checked && session ? titleOf(session.label) : ''
+      });
+  }
+
+  // The three rules the browser has to be able to apply on its own, kept
+  // deliberately in step with regularNeedAppliesOn() on the server — the
+  // server is still the one that decides what gets WRITTEN; this only decides
+  // what is SHOWN.
+  function needAppliesOn(need, dateKey) {
+    if (!dateKey) return need.frequency === 'Every time' || !need.frequency;
+    if (need.startsKey && dateKey < need.startsKey) return false;
+    if (need.endsKey && dateKey > need.endsKey) return false;
+    var day = new Date(dateKey + 'T12:00:00').getDay();
+    if (need.weekdays && need.weekdays.length && need.weekdays.indexOf(day) === -1) return false;
+    if (need.frequency === 'Once') return dateKey === need.startsKey;
+    if (need.frequency === 'Specific dates') return (need.dates || []).indexOf(dateKey) !== -1;
+    return true;
+  }
+
+  // The same loose identity rule normalizeNameKey() uses on the server.
+  function nameKeyOf(name) {
+    return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  // "Chair Yoga · Wed, Sep 16" -> the title, and the date key the index put on
+  // the session. The label is what the dropdown holds; the session entry is
+  // where anything more exact lives.
+  function titleOf(label) {
+    var session = INDEX && INDEX.sessions.filter(function (x) { return x.label === label; })[0];
+    return (session && session.title) || String(label || '').split(' · ')[0];
+  }
+  function dateKeyOf(label) {
+    var session = INDEX && INDEX.sessions.filter(function (x) { return x.label === label; })[0];
+    return (session && session.dateKey) || '';
   }
 
   function showWalkIn(on) {
@@ -17500,8 +17782,528 @@ function buildQuickMarkHtml() {
   // server. Then the fetch, which overlaps with the person reaching for that
   // first dropdown rather than blocking it.
   drawLocations();
+  drawNeedForm();
   loadIndex(false);
 </script>`;
+}
+
+
+// ============================================================================
+// 6e. REGULAR NEEDS  (the standing notes a desk would otherwise have to know)
+// ============================================================================
+//
+// "Put her meals in the fridge." "No milk." "Take-out, she brings her own
+// containers." "One meal every World Affairs day." "Crab cake — she doesn't
+// always come, order it anyway."
+//
+// Every one of those is real, every one of them belongs to a PERSON rather
+// than to a registration, and every one of them was being carried in
+// somebody's head or in a free-text Notes column on a spreadsheet nobody at
+// the sign-in desk has open. When the person who knows is off that day, the
+// meal goes out wrong.
+//
+// A REGULAR NEED IS A STANDING FACT PLUS WHEN IT APPLIES. The fact is a short
+// line of text — deliberately from a shared vocabulary (REGULAR_NEED_PRESETS)
+// so that "No Milk", "no milk" and "NO MILK!" are one thing and not three.
+// The when is a recurrence:
+//
+//     Every time        whenever this person is marked for a matching session
+//     Weekly            on the named weekdays ("Tue, Thu")
+//     Every N weeks     the same, every other week / every third week
+//     Monthly           the same day of the month as Starts
+//     Specific dates    a listed handful
+//     Once              one date and then done
+//
+// narrowed by LOCATION and PROGRAMME, either of which may be blank for "any".
+// A blank programme with "Every time" is the plain standing note ("no milk,
+// ever"); naming a programme is what expresses "one meal every World Affairs
+// day" without anybody having to know which Tuesdays those fall on.
+//
+// A blank NAME is allowed and means the whole session: "everybody on this
+// trip needs a bagged lunch" is the same shape of fact.
+//
+// WHAT IT DOES, in two places and no others:
+//   1. The Quick Mark dialog shows a person's needs the moment their name is
+//      picked — before the mark, which is the only moment the note is any use.
+//   2. A mark that lands stamps the needs that apply onto that row's
+//      Admin_Notes, so the roster, the sign-in sheet and the kitchen list all
+//      carry it without anybody re-typing it.
+//
+// It never changes a count, a status or a meal type. A need is something a
+// person is told, not something the workbook decides.
+// ============================================================================
+
+/**
+ * The shared vocabulary. Offered in the dialog and as an OPEN dropdown on the
+ * tab — anything can still be typed, because the day somebody needs a note
+ * this list has not thought of is the day the feature has to not be in the
+ * way.
+ *
+ * Grouped the way the real notes group, which is what the groups were read
+ * off: how the meal is handled, what is in it, when it is collected, and who
+ * collects it.
+ */
+const REGULAR_NEED_PRESETS = [
+  { group: 'Handling', text: 'Put meals in the fridge' },
+  { group: 'Handling', text: 'Put meals in the freezer' },
+  { group: 'Handling', text: 'If not picked up within 2 days, dispose of the meals' },
+  { group: 'Handling', text: 'Take-out' },
+  { group: 'Handling', text: 'Take-out — brings their own containers' },
+  { group: 'Handling', text: 'Serve at 11:30 AM' },
+  { group: 'Handling', text: 'If there are spare meals, offer 1' },
+  { group: 'Handling', text: 'If there are spare meals, offer 2' },
+  { group: 'Diet', text: 'No milk' },
+  { group: 'Diet', text: 'No pork' },
+  { group: 'Diet', text: 'No meat — vegetarian' },
+  { group: 'Diet', text: 'No eggs / no omelets' },
+  { group: 'Diet', text: 'No fruit cups' },
+  { group: 'Diet', text: 'No roll (bread slices are fine)' },
+  { group: 'Diet', text: 'No cold meals' },
+  { group: 'Diet', text: 'Low fat, low salt' },
+  { group: 'Standing order', text: 'Always order: crab cake' },
+  { group: 'Standing order', text: 'Always order: baked fish' },
+  { group: 'Attendance', text: 'Does not always come — order anyway' },
+  { group: 'Attendance', text: 'Currently on hiatus' },
+  { group: 'Pick-up', text: 'Somebody else collects for them' },
+  { group: 'Pick-up', text: 'They collect for somebody else' }
+];
+
+/** How often a need applies. The vocabulary of the Frequency column. */
+const REGULAR_NEED_FREQUENCIES = [
+  'Every time', 'Weekly', 'Every N weeks', 'Monthly', 'Specific dates', 'Once'
+];
+
+/** Sun-first, matching Date.getDay(). */
+const REGULAR_NEED_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** What a need is ABOUT, so a dozen of them on one tab can be read at a glance. */
+const REGULAR_NEED_KINDS = ['Handling', 'Diet', 'Standing order', 'Attendance', 'Pick-up', 'Note'];
+
+const REGULAR_NEEDS_STAFF_COLUMNS = [
+  'Need', 'Kind', 'Quantity', 'Frequency', 'Weekdays', 'Interval', 'Dates',
+  'Starts', 'Ends', 'Active', 'Auto_Note', 'Staff_Notes'
+];
+
+/**
+ * Parses whatever is in the Weekdays cell into day NUMBERS.
+ *
+ * Deliberately loose, because this column is typed by hand and the real
+ * spreadsheets it comes from say "Every Tues, Thurs", "Tues -- Fri Every
+ * Week", "Thursdays ONLY" and "Mon/Wed/Fri". Anything that starts with the
+ * three letters of a weekday counts, separators are whatever was to hand, and
+ * a RANGE ("Tue - Fri") expands — writing five days out is exactly the sort of
+ * chore that makes somebody stop using the tab.
+ */
+function parseNeedWeekdays(value) {
+  const text = String(value || '').trim();
+  if (!text) return [];
+  const found = [];
+  const push = day => { if (found.indexOf(day) === -1) found.push(day); };
+
+  // The tokens, in order, so a range knows what it is between.
+  const tokens = [];
+  const re = /(sun|mon|tue|wed|thu|fri|sat)[a-z]*|(-{1,2}|–|—|\bto\b|\bthrough\b)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m[1]) tokens.push({ day: REGULAR_NEED_WEEKDAYS.indexOf(m[1][0].toUpperCase() + m[1].substring(1).toLowerCase()) });
+    else tokens.push({ range: true });
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.day === undefined) continue;
+    const prev = tokens[i - 1];
+    const before = tokens[i - 2];
+    if (prev && prev.range && before && before.day !== undefined) {
+      // "Tue - Fri": everything from the day before the dash to this one,
+      // wrapping through the end of the week if it has to.
+      let cursor = before.day;
+      for (let guard = 0; guard < 7; guard++) {
+        cursor = (cursor + 1) % 7;
+        push(cursor);
+        if (cursor === token.day) break;
+      }
+      continue;
+    }
+    push(token.day);
+  }
+  return found.sort((a, b) => a - b);
+}
+
+/** The Dates cell as date keys: "9/16/2026, 2026-09-23" -> ['2026-09-16', '2026-09-23']. */
+function parseNeedDates(value) {
+  return String(value || '')
+    .split(/[,;\n]/)
+    .map(part => coerceDate(part.trim()))
+    .filter(Boolean)
+    .map(formatDateKey);
+}
+
+/**
+ * ONE NEED, ONE DATE: does it apply?
+ *
+ * Pure, and the whole of the recurrence rule — everything else about this
+ * feature is reading rows and writing notes. `need` is the shape
+ * readRegularNeedRows() produces.
+ *
+ * The window (Starts/Ends) is checked FIRST and for every frequency, so
+ * "no milk, until she finishes the course of antibiotics" is expressible
+ * against any of them rather than being its own special case.
+ */
+function regularNeedAppliesOn(need, date) {
+  const when = coerceDate(date);
+  if (!need || !when || need.active === false) return false;
+  const dateKey = formatDateKey(when);
+  if (need.startsKey && dateKey < need.startsKey) return false;
+  if (need.endsKey && dateKey > need.endsKey) return false;
+
+  const frequency = String(need.frequency || '').trim();
+  const weekdays = need.weekdays || [];
+
+  // A weekday list is honoured under EVERY frequency, not only under Weekly.
+  // "Every time, but only on Thursdays" is a thing people write, and refusing
+  // to read it would send a meal out on a Tuesday.
+  if (weekdays.length > 0 && weekdays.indexOf(when.getDay()) === -1) return false;
+
+  switch (frequency) {
+    case 'Once':
+      return !!need.startsKey && dateKey === need.startsKey;
+
+    case 'Specific dates':
+      return (need.dates || []).indexOf(dateKey) !== -1;
+
+    case 'Monthly': {
+      // The same day of the month as it started on. A need that started on the
+      // 31st applies on the last day of a shorter month rather than skipping
+      // it — "the end of the month" is what somebody who picked the 31st meant.
+      const start = need.startsKey ? parseDateKey(need.startsKey) : null;
+      if (!start) return weekdays.length > 0; // no anchor: a weekday list is all there is to go on
+      const last = new Date(when.getFullYear(), when.getMonth() + 1, 0).getDate();
+      return when.getDate() === Math.min(start.getDate(), last);
+    }
+
+    case 'Every N weeks': {
+      const interval = Math.max(1, Math.round(Number(need.interval) || 1));
+      if (interval === 1) return true; // every week, which the weekday list has already narrowed
+      const start = need.startsKey ? parseDateKey(need.startsKey) : null;
+      if (!start) return true; // nothing to count from; every week is the honest reading
+      // Counted in whole weeks from the START OF ITS WEEK, so every day of an
+      // "on" week is on — otherwise "every other Tue and Thu" would put the
+      // Tuesday in one fortnight and the Thursday in the next.
+      const weeksApart = Math.floor((startOfWeek(when) - startOfWeek(start)) / (7 * 24 * 60 * 60 * 1000));
+      return weeksApart >= 0 && weeksApart % interval === 0;
+    }
+
+    case 'Weekly':
+      // Weekly with no weekday named means the weekday it started on.
+      if (weekdays.length > 0) return true;
+      if (!need.startsKey) return true;
+      return parseDateKey(need.startsKey).getDay() === when.getDay();
+
+    case 'Every time':
+    default:
+      return true;
+  }
+}
+
+/** Local midnight on the Sunday of `date`'s week — the anchor "every N weeks" counts from. */
+function startOfWeek(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+/**
+ * Every need that applies to one person on one session.
+ *
+ * A need with no NAME applies to everybody on a matching session; one with no
+ * PROGRAMME or no LOCATION applies at any. Matching on the loose name key
+ * (normalizeNameKey) for the same reason every other name comparison in this
+ * file does: "Jane Smith" and "jane  smith " are one person.
+ */
+function regularNeedsFor(needs, context) {
+  const nameKey = normalizeNameKey((context && context.name) || '');
+  const location = String((context && context.location) || '').trim();
+  const title = String((context && context.title) || '').trim();
+  const date = context && context.date;
+  return (needs || []).filter(need => {
+    if (need.nameKey && need.nameKey !== nameKey) return false;
+    if (need.location && location && need.location !== location) return false;
+    if (need.program && title && need.program !== title) return false;
+    // A need pinned to a programme must not leak onto a session whose
+    // programme we could not name — that is how "one meal every World Affairs
+    // day" becomes a meal every day.
+    if (need.program && !title) return false;
+    return regularNeedAppliesOn(need, date);
+  });
+}
+
+/**
+ * Writes onto `row`'s Admin_Notes every regular need that applies to this
+ * person on this session, and returns the clause to append to the message.
+ *
+ * WHY IT IS WRITTEN AND NOT JUST SHOWN. The dialog shows the needs to the
+ * person doing the marking, which is the only moment they can act on them.
+ * But the meal is packed by somebody else, off a roster printed later, and
+ * that person never saw the dialog — so the fact has to end up ON THE ROW,
+ * where the roster, the sign-in sheet and the kitchen list all read from.
+ *
+ * NEVER DUPLICATED. The same need stamped on every one of thirty marks would
+ * turn Admin_Notes into a wall by Thursday, so a need already in the cell is
+ * left exactly as it is.
+ */
+function stampRegularNeedsOnRow(sheet, map, sheetRow, needs) {
+  const applicable = (needs || []).filter(need => need.autoNote !== false);
+  if (applicable.length === 0 || map['Admin_Notes'] === undefined) return '';
+  const cell = sheet.getRange(sheetRow, map['Admin_Notes'] + 1);
+  const existing = String(cell.getValue() || '').trim();
+  const added = applicable
+    .map(describeRegularNeed)
+    .filter(text => existing.indexOf(text) === -1);
+  if (added.length === 0) return '';
+  cell.setValue([existing, ...added.map(text => `🔔 ${text}`)].filter(Boolean).join(' · '));
+  return ` Noted: ${added.join('; ')}.`;
+}
+
+/** "Put meals in the fridge (×2)" — one need as one short line. */
+function describeRegularNeed(need) {
+  const quantity = Number(need && need.quantity) || 0;
+  return `${need.need}${quantity > 1 ? ` (×${quantity})` : ''}`;
+}
+
+// ----------------------------------------------------------------------------
+// The tab
+// ----------------------------------------------------------------------------
+
+/** Every row on Regular_Needs, parsed into the shape regularNeedAppliesOn() wants. */
+function readRegularNeedRows(sheet) {
+  const target = sheet || SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGULAR_NEEDS);
+  if (!target) return [];
+  try {
+    return readSimpleTableValues(target, HEADERS.Regular_Needs).map(parseRegularNeedRow).filter(Boolean);
+  } catch (err) {
+    log(`⚠️ Could not read "${SHEET_NAMES.REGULAR_NEEDS}" (${err}) — treating it as empty.`);
+    return [];
+  }
+}
+
+/**
+ * One sheet row -> one need. Null for a row with nothing to say.
+ *
+ * The NEED TEXT is what makes a row real, not the name: a need with no name
+ * applies to everybody on the matching session, which is a legitimate row.
+ */
+function parseRegularNeedRow(row) {
+  const map = getIndexMap(HEADERS.Regular_Needs);
+  const need = String(row[map['Need']] || '').trim();
+  if (!need) return null;
+  const name = String(row[map['Name']] || '').trim();
+  const starts = coerceDate(row[map['Starts']]);
+  const ends = coerceDate(row[map['Ends']]);
+  return {
+    name,
+    nameKey: name ? normalizeNameKey(name) : '',
+    need,
+    kind: String(row[map['Kind']] || '').trim(),
+    quantity: Number(row[map['Quantity']]) || 0,
+    location: String(row[map['Location']] || '').trim(),
+    program: String(row[map['Program']] || '').trim(),
+    frequency: String(row[map['Frequency']] || '').trim() || 'Every time',
+    weekdays: parseNeedWeekdays(row[map['Weekdays']]),
+    interval: Number(row[map['Interval']]) || 0,
+    dates: parseNeedDates(row[map['Dates']]),
+    startsKey: starts ? formatDateKey(starts) : '',
+    endsKey: ends ? formatDateKey(ends) : '',
+    // Blank means ACTIVE. A row somebody typed and did not tick is a row they
+    // meant — an opt-in checkbox here would mean every hand-typed need
+    // silently does nothing, which is the one failure this tab cannot have.
+    active: !isRegularNeedOff(row[map['Active']]),
+    autoNote: !isRegularNeedOff(row[map['Auto_Note']]),
+    id: String(row[map['Need_ID']] || '').trim()
+  };
+}
+
+/** Only a deliberate NO turns a need off — see the `active` note above. */
+function isRegularNeedOff(value) {
+  if (value === false) return true;
+  const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  return text === 'no' || text === 'false' || text === 'off';
+}
+
+/** Writes the tab: newest needs last, dropdowns on the vocabulary columns. */
+function renderRegularNeedsSheet(allRows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGULAR_NEEDS);
+  const headers = HEADERS.Regular_Needs;
+  const map = getIndexMap(headers);
+  const rows = (allRows || readRegularNeedRawRows(sheet)).slice();
+
+  rows.sort((a, b) => {
+    const nameA = String(a[map['Name']] || '');
+    const nameB = String(b[map['Name']] || '');
+    if (nameA !== nameB) return nameA.localeCompare(nameB);
+    return String(a[map['Need']] || '').localeCompare(String(b[map['Need']] || ''));
+  });
+
+  writeMemoryTab(sheet, headers, rows, {
+    banner: '🔔 Regular Needs',
+    bannerNote: 'Standing facts about a person that the sign-in desk would otherwise have to already ' +
+      'know — "put her meals in the fridge", "no milk", "one meal every World Affairs day".\n\n' +
+      'Quick Mark shows them the moment a name is picked, and stamps them onto the row it marks.\n\n' +
+      'Leave Location or Program blank for "any". Leave the whole When block blank for "every time".',
+    staffColumns: REGULAR_NEEDS_STAFF_COLUMNS,
+    dateColumns: ['Starts', 'Ends', 'Last_Applied', 'Added_On'],
+    numberColumns: ['Quantity', 'Interval']
+  });
+
+  if (rows.length > 0) {
+    const count = rows.length;
+    [map['Active'] + 1, map['Auto_Note'] + 1].forEach(col => {
+      sheet.getRange(MEMORY_TAB_DATA_ROW, col, count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
+    applyValueListValidationBounded(sheet, map['Frequency'] + 1, REGULAR_NEED_FREQUENCIES,
+      MEMORY_TAB_DATA_ROW, count);
+    applyValueListValidationBounded(sheet, map['Kind'] + 1, REGULAR_NEED_KINDS, MEMORY_TAB_DATA_ROW, count);
+    // OPEN, not restricted: the shared vocabulary is there to keep the common
+    // notes spelled one way, not to refuse the note nobody thought of.
+    applyOpenValueListValidationBounded(sheet, map['Need'] + 1,
+      REGULAR_NEED_PRESETS.map(p => p.text), MEMORY_TAB_DATA_ROW, count);
+    applyLocationValidationBounded(sheet, map['Location'] + 1, MEMORY_TAB_DATA_ROW, count);
+  }
+
+  // Need_ID is the join key, not something to read.
+  applyColumnVisibility(sheet, headers, ['Need_ID']);
+  return rows.length;
+}
+
+/** The raw rows, for a render that is only reordering what is already there. */
+function readRegularNeedRawRows(sheet) {
+  if (!sheet) return [];
+  try {
+    return readSimpleTable(sheet, HEADERS.Regular_Needs);
+  } catch (err) {
+    log(`⚠️ Could not read "${SHEET_NAMES.REGULAR_NEEDS}" (${err}) — treating it as empty.`);
+    return [];
+  }
+}
+
+/**
+ * Adds one need from the Quick Mark dialog, and says in plain words what it
+ * will now do.
+ *
+ * APPENDED, NOT RE-RENDERED. A desk adding "no milk" mid-shift must not cost a
+ * rewrite of the whole tab, and appending is also what keeps somebody's
+ * half-typed row on the bottom line of the tab from being sorted out from
+ * under them.
+ */
+function addRegularNeedFromDialog(args) {
+  args = args || {};
+  const need = String(args.need || '').trim();
+  if (!need) return { ok: false, message: 'Nothing was added — a need needs some words in it.' };
+
+  return withScriptLock(DESK_LOCK_WAIT_MS, () => {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGULAR_NEEDS);
+    const headers = HEADERS.Regular_Needs;
+    const map = getIndexMap(headers);
+    // A tab that has never been rendered has no header row to write under.
+    if (sheet.getLastRow() < MEMORY_TAB_HEADER_ROW) renderRegularNeedsSheet([]);
+
+    const name = String(args.name || '').trim();
+    const row = new Array(headers.length).fill('');
+    row[map['Name']] = name;
+    row[map['Need']] = need;
+    row[map['Kind']] = String(args.kind || 'Note').trim();
+    row[map['Quantity']] = Number(args.quantity) || '';
+    row[map['Location']] = String(args.location || '').trim();
+    row[map['Program']] = String(args.program || '').trim();
+    row[map['Frequency']] = REGULAR_NEED_FREQUENCIES.indexOf(String(args.frequency || '').trim()) !== -1
+      ? String(args.frequency).trim()
+      : 'Every time';
+    row[map['Weekdays']] = String(args.weekdays || '').trim();
+    row[map['Interval']] = Number(args.interval) || '';
+    row[map['Dates']] = String(args.dates || '').trim();
+    const starts = coerceDate(args.starts);
+    const ends = coerceDate(args.ends);
+    if (starts) row[map['Starts']] = starts;
+    if (ends) row[map['Ends']] = ends;
+    row[map['Active']] = true;
+    row[map['Auto_Note']] = args.autoNote === false ? false : true;
+    row[map['Added_By']] = getCurrentUserEmail() || 'the desk';
+    row[map['Added_On']] = new Date();
+    row[map['Need_ID']] = `RN-${Utilities.getUuid().substring(0, 8).toUpperCase()}`;
+
+    const at = Math.max(sheet.getLastRow() + 1, MEMORY_TAB_DATA_ROW);
+    if (sheet.getMaxRows() < at) sheet.insertRowsAfter(sheet.getMaxRows(), at - sheet.getMaxRows());
+    sheet.getRange(at, 1, 1, headers.length).setValues([row]);
+    ['Starts', 'Ends', 'Added_On'].forEach(h => {
+      sheet.getRange(at, map[h] + 1, 1, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
+    });
+    [map['Active'] + 1, map['Auto_Note'] + 1].forEach(col => {
+      sheet.getRange(at, col, 1, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
+
+    // The dialog is holding a copy of the need list — see getQuickMarkIndex().
+    invalidateQuickMarkIndexCache();
+
+    const message = `🔔 Noted for ${name || 'everyone on that session'}: ${need} — ` +
+      `${describeNeedSchedule(parseRegularNeedRow(row))}.`;
+    log(`addRegularNeedFromDialog: ${message}`);
+    toastIfPossible(message);
+    return { ok: true, message, stored: needForDialog(parseRegularNeedRow(row)) };
+  }, { ok: false, message: 'Somebody else is writing to the desk tabs — try again in a moment.' });
+}
+
+/** "every Tue and Thu", "on 16 Sep", "every time" — the WHEN of a need, in words. */
+function describeNeedSchedule(need) {
+  if (!need) return 'every time';
+  const days = (need.weekdays || []).map(d => REGULAR_NEED_WEEKDAYS[d]);
+  const dayPhrase = days.length ? ` on ${days.join(', ')}` : '';
+  const where = [
+    need.program ? `every ${need.program}` : '',
+    need.location ? `at ${need.location}` : ''
+  ].filter(Boolean).join(' ');
+  const window = [
+    need.startsKey ? `from ${need.startsKey}` : '',
+    need.endsKey ? `until ${need.endsKey}` : ''
+  ].filter(Boolean).join(' ');
+
+  let base;
+  switch (need.frequency) {
+    case 'Once': base = need.startsKey ? `once, on ${need.startsKey}` : 'once'; break;
+    case 'Specific dates': base = `on ${(need.dates || []).join(', ') || 'the listed dates'}`; break;
+    case 'Monthly': base = `monthly${dayPhrase}`; break;
+    case 'Every N weeks': base = `every ${Math.max(1, Math.round(need.interval || 1))} weeks${dayPhrase}`; break;
+    case 'Weekly': base = `weekly${dayPhrase || ''}`; break;
+    default: base = days.length ? `every time${dayPhrase}` : 'every time';
+  }
+  return [base, where, need.frequency === 'Once' ? '' : window].filter(Boolean).join(', ');
+}
+
+/**
+ * One need as the dialog wants it: what it says, when it says it, and the few
+ * fields the browser needs to decide whether it applies to the name just
+ * picked. Deliberately NOT the whole row — the dialog is not an editor for
+ * this tab, and the fields it does not use are fields it cannot get wrong.
+ */
+function needForDialog(need) {
+  return {
+    text: describeRegularNeed(need),
+    when: describeNeedSchedule(need),
+    kind: need.kind || 'Note',
+    nameKey: need.nameKey,
+    location: need.location,
+    program: need.program,
+    frequency: need.frequency,
+    weekdays: need.weekdays,
+    dates: need.dates,
+    startsKey: need.startsKey,
+    endsKey: need.endsKey
+  };
 }
 
 /** Joins a location and a session label into the key namesBySession is stored under. */
@@ -17748,6 +18550,11 @@ function buildQuickMarkIndex() {
     byLookup[`${choice.location}\u0000${choice.title}\u0000${choice.dateKey}`] = bucket;
     sessions.push({
       value: choice.label, label: choice.label, group: choice.group, location: choice.location,
+      // The two facts a REGULAR NEED is matched against. Parsing them back out
+      // of the label in the browser works until a programme's own name
+      // contains the separator — see parseQuickMarkProgramChoice(), which is
+      // the whole reason that function is careful.
+      title: choice.title, dateKey: choice.dateKey,
       // Whether a booking on this session needs a TIME, and which times are
       // left. The two are separate facts because a fully-booked appointment
       // session has no free times and is still an appointment session — the
@@ -17805,7 +18612,17 @@ function buildQuickMarkIndex() {
     members.push({ name, key });
   });
 
-  return { sessions, namesBySession, members, builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a') };
+  // The standing needs travel with the lists, for the same reason the roll
+  // does: the dialog has to be able to say "🔔 no milk" the instant a name is
+  // picked, and a server call at that moment is a wait in the middle of the
+  // one interaction this tool exists to make fast. There are tens of these,
+  // not thousands.
+  const needs = readRegularNeedRows().filter(need => need.active !== false).map(needForDialog);
+
+  return {
+    sessions, namesBySession, members, needs,
+    builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
+  };
 }
 
 /**
@@ -18351,6 +19168,12 @@ function applyQuickMarkLocked(args) {
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
   const extra = candidates.length > 1 ? ` (${candidates.length} sessions matched — marked the nearest)` : '';
   const what = describeQuickMark(attended, lunch, signup);
+  // The standing facts about this person land on the row they were marked on,
+  // so the roster and the kitchen list carry them without anybody re-typing —
+  // see stampRegularNeedsOnRow().
+  const needsNote = stampRegularNeedsOnRow(sheet, map, target.sheetRow, regularNeedsFor(readRegularNeedRows(), {
+    name, location, title: selection.title, date: target.date
+  }));
   // A SIGN-UP CHANGES THE ORDER, so the dashboard is rebuilt straight away —
   // the same rule Lunch_Status edits on the tab itself follow, and for the
   // same reason. Lunch_Served ticks deliberately do NOT (see
@@ -18359,7 +19182,7 @@ function applyQuickMarkLocked(args) {
   // the opposite on both counts: rare, and it is the number.
   if (signup) recalculateCateringCounts(sheet, map, target.sheetRow, 1);
 
-  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${movedNote}${earlierNote}${standingNote}`;
+  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${movedNote}${needsNote}${earlierNote}${standingNote}`;
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
   return Object.assign({ ok: true, message, namesChanged: false }, moveResult);
@@ -18593,7 +19416,18 @@ function addQuickMarkWalkIn(sheet, args) {
   const how = signup ? 'Lunch sign-up'
     : (lunch && !attended ? 'Take-out walk-in'
       : (register && !attended ? (slot ? 'Appointment booked at the desk' : 'Registered at the desk') : 'Walk-in'));
-  row[map['Admin_Notes']] = `${how} added at the desk on ${formatDateLabel(new Date())}.`;
+  // The standing facts about this person, on the row from the moment it
+  // exists — a walk-in is exactly the case where nobody has had a chance to
+  // read them off anything else. See stampRegularNeedsOnRow(), which does the
+  // same for a row that already existed; here the cell is being written for
+  // the first time, so it is one string rather than an edit.
+  const walkInNeeds = regularNeedsFor(readRegularNeedRows(), {
+    name, location: session.location, title: session.title, date: session.date
+  }).filter(need => need.autoNote !== false);
+  row[map['Admin_Notes']] = [
+    `${how} added at the desk on ${formatDateLabel(new Date())}.`,
+    ...walkInNeeds.map(need => `🔔 ${describeRegularNeed(need)}`)
+  ].join(' · ');
   row[map['Manual_Override']] = 'Manually Added';
   row[map['Form_Source']] = (register && !attended && !lunch)
     ? 'Front desk registration (no form)'
@@ -18621,7 +19455,8 @@ function addQuickMarkWalkIn(sheet, args) {
     : (register && !attended && !lunch
       ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.` +
         (earlierAppointment ? ' They will be called if an earlier appointment opens up.' : '')
-      : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`)) + standingNote;
+      : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`)) + standingNote +
+    (walkInNeeds.length ? ` Noted: ${walkInNeeds.map(describeRegularNeed).join('; ')}.` : '');
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
   // A row that did not exist a moment ago is a name and possibly a whole
