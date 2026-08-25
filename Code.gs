@@ -17026,6 +17026,9 @@ function buildQuickMarkHtml() {
 <input type="text" id="newName" placeholder="Type their name" style="display:none" autocomplete="off"
        oninput="refreshButton()">
 
+<label class="tick" id="moveLabel" style="display:none">
+  <input type="checkbox" id="moveTime" onchange="showAppointmentTimes(); refreshButton()"> 🕐 Move them to a different time
+  <span class="note">— they rang to reschedule, or turned up for the wrong slot</span></label>
 <label class="field" for="apptTime" id="apptTimeLabel" style="display:none">4. Appointment time</label>
 <select id="apptTime" onchange="refreshButton()" style="display:none">
   <option value="">— choose a time —</option>
@@ -17059,6 +17062,7 @@ function buildQuickMarkHtml() {
   var WALK_IN = '__WALK_IN__';
   var LOCATIONS = ${locations};
   var SEP = '${QUICK_MARK_SESSION_KEY_SEPARATOR}';
+  var NAME_TIME_SEP = '${QUICK_MARK_NAME_TIME_SEPARATOR}';
   // Everything the three dropdowns are built from, fetched once. Null until it
   // lands — see buildQuickMarkIndex() for why it is one call and not three.
   var INDEX = null;
@@ -17161,17 +17165,63 @@ function buildQuickMarkHtml() {
   // the roll. The roll arrives once for the whole dialog, so subtracting this
   // session's people from it is done here rather than sent per session.
   function namesFor(loc, session) {
-    var bucket = (INDEX && INDEX.namesBySession[loc + SEP + session]) || { names: [], keys: [] };
+    var bucket = (INDEX && INDEX.namesBySession[loc + SEP + session]) || { names: [], keys: [], times: [] };
+    var times = bucket.times || [];
     var taken = {};
     bucket.keys.forEach(function (k) { taken[k] = true; });
-    var out = bucket.names.map(function (n) {
-      return { value: n, label: n, group: 'Registered for this session' };
+
+    // ON AN APPOINTMENT SESSION THE TIME IS HALF THE NAME. A Personalized
+    // Assistance morning IS a list of times — 10:30, 11:00, 11:30 — and a desk
+    // marking one off is looking at a person who arrived for a slot, not at an
+    // alphabetical roll. Listed as "10:30 AM — Jane Smith", in time order, the
+    // dropdown reads like the schedule taped to the desk. It also makes the
+    // one case that was previously unmarkable possible: the same person
+    // holding two slots is now two entries, each of which marks its own row.
+    var order = bucket.names.map(function (n, i) { return i; });
+    var showTimes = times.some(function (t) { return !!t; });
+    if (showTimes) {
+      order.sort(function (a, b) {
+        var ta = minutesOfDay(times[a]), tb = minutesOfDay(times[b]);
+        if (ta !== tb) return ta - tb;
+        return bucket.names[a].localeCompare(bucket.names[b]);
+      });
+    }
+    var out = order.map(function (i) {
+      var name = bucket.names[i];
+      var time = times[i] || '';
+      return {
+        value: packNamePick(name, time),
+        label: (showTimes && time) ? time + '  —  ' + name : name,
+        group: 'Registered for this session'
+      };
     });
     INDEX.members.forEach(function (m) {
       if (taken[m.key]) return;
-      out.push({ value: m.name, label: m.name, group: 'Other known members' });
+      out.push({ value: packNamePick(m.name, ''), label: m.name, group: 'Other known members' });
     });
     return { options: out, registeredCount: bucket.names.length, otherCount: out.length - bucket.names.length };
+  }
+
+  // "10:30 AM" -> 630, for sorting a session's people into the order they are
+  // actually due. Anything unparseable sorts last rather than at midnight,
+  // which is where a blank would otherwise put a walk-in with no slot.
+  function minutesOfDay(label) {
+    var m = /^(\d{1,2}):(\d{2})\s*([AaPp])/.exec(String(label || '').trim());
+    if (!m) return 99999;
+    var hour = Number(m[1]) % 12;
+    if (m[3].toLowerCase() === 'p') hour += 12;
+    return hour * 60 + Number(m[2]);
+  }
+
+  // A pick is a NAME AND A SLOT, because on an appointment session the name
+  // alone does not identify a row. Packed into the option's value and taken
+  // apart again on the way out, so nothing else in the dialog has to care.
+  function packNamePick(name, time) { return time ? (name + NAME_TIME_SEP + time) : name; }
+  function unpackNamePick(value) {
+    var raw = String(value || '');
+    var at = raw.lastIndexOf(NAME_TIME_SEP);
+    if (at < 0) return { name: raw, time: '' };
+    return { name: raw.substring(0, at), time: raw.substring(at + NAME_TIME_SEP.length) };
   }
 
   // The chosen session's own entry in the index — where its appointment times
@@ -17190,28 +17240,53 @@ function buildQuickMarkHtml() {
   // form makes them. A session with none never shows the dropdown at all.
   function showAppointmentTimes() {
     var session = chosenSession();
-    var times = (session && session.times) || [];
+    var free = (session && session.times) || [];
     var on = !!(session && session.byAppointment);
-    el('apptTimeLabel').style.display = on ? 'block' : 'none';
-    el('apptTime').style.display = on ? 'block' : 'none';
-    el('apptNote').style.display = on ? 'block' : 'none';
+    // THE TIME DROPDOWN HAS TWO JOBS, and which one it is doing depends on
+    // whether the person already has a slot. Booking somebody new offers the
+    // FREE slots. Moving somebody who is already down for 10:30 has to offer
+    // their own slot as well — it is not free, it is theirs — or the control
+    // opens on a blank and the desk cannot see what they are moving from.
+    var held = chosenBookedTime();
+    var moving = !!held && el('moveTime').checked;
+    var showPicker = on && (el('register').checked || moving);
+
+    el('moveLabel').style.display = (on && held) ? 'block' : 'none';
+    if (!on || !held) el('moveTime').checked = false;
+    el('apptTimeLabel').style.display = showPicker ? 'block' : 'none';
+    el('apptTime').style.display = showPicker ? 'block' : 'none';
+    el('apptNote').style.display = showPicker ? 'block' : 'none';
     el('earlierLabel').style.display = on ? 'block' : 'none';
     if (!on) el('earlier').checked = false;
-    el('apptNote').textContent = times.length
-      ? 'This programme is booked by appointment. Times already taken are not listed.'
-      : 'Every appointment on this date is taken — nobody else can be booked onto it.';
+
+    el('apptTimeLabel').textContent = moving ? 'Move them to' : '4. Appointment time';
+    el('apptNote').textContent = moving
+      ? 'Currently at ' + held + '. Only free slots are listed, plus the one they already hold.'
+      : (free.length
+        ? 'This programme is booked by appointment. Times already taken are not listed.'
+        : 'Every appointment on this date is taken — nobody else can be booked onto it.');
+
+    // Their own slot first when moving, then everything still free. Sorted
+    // back into clock order so the list reads like the afternoon does.
+    var offered = free.slice();
+    if (moving && !offered.some(function (t) { return t.value === held; })) {
+      offered.push({ value: held, label: held + ' (their slot now)' });
+    }
+    offered.sort(function (a, b) { return minutesOfDay(a.value) - minutesOfDay(b.value); });
+
     el('apptTime').innerHTML = '';
-    if (!times.length) { el('apptTime').value = ''; return; }
+    if (!offered.length) { el('apptTime').value = ''; return; }
     var blank = document.createElement('option');
     blank.value = '';
     blank.textContent = '— choose a time —';
     el('apptTime').appendChild(blank);
-    times.forEach(function (t) {
+    offered.forEach(function (t) {
       var o = document.createElement('option');
       o.value = t.value;
       o.textContent = t.label;
       el('apptTime').appendChild(o);
     });
+    if (moving) el('apptTime').value = held;
   }
 
   /** True when a booking on the chosen session has to name an appointment time. */
@@ -17239,18 +17314,38 @@ function buildQuickMarkHtml() {
 
   // A walk-in that was just written is on that session from now on, without
   // going back to the server for a list we can correct here.
-  function rememberWalkIn(loc, session, name, nameKey) {
+  function rememberWalkIn(loc, session, name, nameKey, time) {
     if (!INDEX || !name || !nameKey) return;
     var key = loc + SEP + session;
     var bucket = INDEX.namesBySession[key];
-    if (!bucket) { bucket = { names: [], keys: [] }; INDEX.namesBySession[key] = bucket; }
-    if (bucket.keys.indexOf(nameKey) !== -1) return;
+    if (!bucket) { bucket = { names: [], keys: [], times: [] }; INDEX.namesBySession[key] = bucket; }
+    if (!bucket.times) bucket.times = bucket.names.map(function () { return ''; });
+    if (bucket.keys.some(function (k, i) { return k === nameKey && bucket.times[i] === (time || ''); })) return;
     bucket.names.push(name);
     bucket.keys.push(nameKey);
+    bucket.times.push(time || '');
+  }
+
+  // The same correction rememberWalkIn() makes, for a slot that MOVED rather
+  // than a name that arrived: the row is the same row, at a different time.
+  function retimeName(loc, session, nameKey, fromTime, toTime) {
+    if (!INDEX || !nameKey) return;
+    var bucket = INDEX.namesBySession[loc + SEP + session];
+    if (!bucket || !bucket.times) return;
+    for (var i = 0; i < bucket.keys.length; i++) {
+      if (bucket.keys[i] === nameKey && bucket.times[i] === (fromTime || '')) {
+        bucket.times[i] = toTime || '';
+        return;
+      }
+    }
   }
 
   function nameChanged() {
     showWalkIn(el('name').value === WALK_IN);
+    // The chosen person's own slot is what the time controls key off — whether
+    // "move them" is even offered, and what it starts from.
+    el('moveTime').checked = false;
+    showAppointmentTimes();
     refreshButton();
   }
 
@@ -17263,7 +17358,18 @@ function buildQuickMarkHtml() {
   function chosenName() {
     var picked = el('name').value;
     if (picked === WALK_IN) return el('newName').value.trim();
-    return picked;
+    return unpackNamePick(picked).name;
+  }
+
+  /**
+   * The SLOT the chosen person already holds, or '' — which is what tells the
+   * server which of two appointment rows a mark is for, and what the "move
+   * them" control starts from.
+   */
+  function chosenBookedTime() {
+    var picked = el('name').value;
+    if (picked === WALK_IN) return '';
+    return unpackNamePick(picked).time;
   }
 
   // "Lunch" and "Sign up for lunch" are the same fact at two different times —
@@ -17283,18 +17389,29 @@ function buildQuickMarkHtml() {
     var on = el('register').checked && !appointmentSession();
     el('standingLabel').style.display = on ? 'block' : 'none';
     if (!on) el('standing').checked = false;
+    // Ticking Register is the other thing that brings the time dropdown out.
+    showAppointmentTimes();
     refreshButton();
   }
 
   function refreshButton() {
     var registering = el('register').checked;
+    // Moving somebody to another time IS a thing to press the button for, on
+    // its own — "she rang to move to 11:30" is not an attendance mark and not
+    // a registration, and until it counted here the button stayed grey.
+    var moving = el('moveTime').checked && !!chosenBookedTime();
     var ready = !!el('session').value && !!chosenName() &&
-      (el('attended').checked || el('lunch').checked || el('signup').checked || registering) &&
-      // An appointment session cannot be booked without naming the slot.
-      !(appointmentSession() && registering && !el('apptTime').value);
+      (el('attended').checked || el('lunch').checked || el('signup').checked || registering || moving) &&
+      // An appointment session cannot be booked, or moved, without naming the slot.
+      !(appointmentSession() && (registering || moving) && !el('apptTime').value) &&
+      // And moving somebody onto the slot they already hold is not a move.
+      !(moving && el('apptTime').value === chosenBookedTime() && !el('attended').checked &&
+        !el('lunch').checked && !el('signup').checked && !registering);
     el('go').disabled = !ready;
     var onlySignup = el('signup').checked && !el('attended').checked && !el('lunch').checked;
-    el('go').textContent = (registering || onlySignup) ? 'Sign up' : 'Mark';
+    el('go').textContent = registering ? 'Sign up'
+      : (moving && !el('attended').checked && !el('lunch').checked && !onlySignup) ? 'Move'
+        : (onlySignup ? 'Sign up' : 'Mark');
   }
 
   function submit(confirmWalkIn) {
@@ -17324,18 +17441,36 @@ function buildQuickMarkHtml() {
           el('register').checked = false;
           el('standing').checked = false;
           el('earlier').checked = false;
+          el('moveTime').checked = false;
           registerChanged();
-          // A slot just booked is gone for the next person in the queue, and
-          // the dialog holds the only copy of that list until it is reloaded.
-          if (res.bookedTime) {
+          // A slot just booked is gone for the next person in the queue, and a
+          // slot just vacated by a move is free again. The dialog holds the
+          // only copy of that list until it is reloaded, so it keeps its own
+          // copy honest rather than re-fetching between two people in a queue.
+          if (res.bookedTime || res.freedTime) {
             var session = chosenSession();
             if (session && session.times) {
-              session.times = session.times.filter(function (t) { return t.value !== res.bookedTime; });
+              if (res.bookedTime) {
+                session.times = session.times.filter(function (t) { return t.value !== res.bookedTime; });
+              }
+              if (res.freedTime && !session.times.some(function (t) { return t.value === res.freedTime; })) {
+                session.times.push({ value: res.freedTime, label: res.freedTime });
+                session.times.sort(function (a, b) { return minutesOfDay(a.value) - minutesOfDay(b.value); });
+              }
             }
             showAppointmentTimes();
           }
-          if (res.namesChanged) {
-            rememberWalkIn(el('location').value, el('session').value, res.addedName, res.addedNameKey);
+          // A move rewrites the slot on a row the list is already showing, so
+          // the list has to be rebuilt for the next person to see it.
+          if (res.namesChanged || res.movedTime) {
+            if (res.namesChanged) {
+              rememberWalkIn(el('location').value, el('session').value, res.addedName, res.addedNameKey,
+                res.bookedTime);
+            }
+            if (res.movedTime) {
+              retimeName(el('location').value, el('session').value, res.addedNameKey, res.freedTime,
+                res.bookedTime);
+            }
             sessionChanged();
           }
         }
@@ -17352,6 +17487,10 @@ function buildQuickMarkHtml() {
         register: el('register').checked,
         standing: el('standing').checked,
         appointmentTime: el('apptTime').value,
+        // WHICH ROW this mark is for, when the name alone does not say — see
+        // QUICK_MARK_NAME_TIME_SEPARATOR.
+        bookedTime: chosenBookedTime(),
+        moveTime: el('moveTime').checked,
         earlierAppointment: el('earlier').checked,
         confirmWalkIn: !!confirmWalkIn
       });
@@ -17367,6 +17506,18 @@ function buildQuickMarkHtml() {
 
 /** Joins a location and a session label into the key namesBySession is stored under. */
 const QUICK_MARK_SESSION_KEY_SEPARATOR = '|~|';
+
+/**
+ * Joins a name and the appointment slot it holds into one dropdown value.
+ *
+ * A NAME IS NOT AN IDENTITY on a Personalized Assistance session: the same
+ * person can hold 10:30 and 11:30 on the same afternoon, and a mark against
+ * "Jane Smith" alone lands on whichever of her two rows sorts first. Carrying
+ * the slot in the value is what makes the second one markable at all.
+ *
+ * Deliberately not a character a name or a time label can contain.
+ */
+const QUICK_MARK_NAME_TIME_SEPARATOR = '|@|';
 
 /**
  * How long a stored index is served before it is rebuilt. Six hours is the
@@ -17572,7 +17723,16 @@ function buildQuickMarkIndex() {
   const sessions = [];
   /** "location \0 title \0 dateKey" -> the bucket of names for that session. */
   const byLookup = {};
-  /** sessionKey -> { names, keys } — keys are normalized, so the browser can subtract them from the roll. */
+  /**
+   * sessionKey -> { names, keys, times }, three parallel arrays.
+   *
+   * `keys` are normalized, so the browser can subtract this session's people
+   * from the roll. `times` is each person's BOOKED SLOT on an appointment
+   * session ('' on an ordinary one) — see the appointment note in namesFor():
+   * a list of bare names is unusable at a Personalized Assistance desk, where
+   * the whole shape of the morning is who is at 10:30 and who is at 11:00,
+   * and where the same person can legitimately hold two slots.
+   */
   const namesBySession = {};
 
   // Which appointment times are already gone, for the assistance sessions
@@ -17583,7 +17743,7 @@ function buildQuickMarkIndex() {
   orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
     const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
     if (namesBySession[sessionKey]) return;
-    const bucket = { names: [], keys: [] };
+    const bucket = { names: [], keys: [], times: [] };
     namesBySession[sessionKey] = bucket;
     byLookup[`${choice.location}\u0000${choice.title}\u0000${choice.dateKey}`] = bucket;
     sessions.push({
@@ -17606,6 +17766,10 @@ function buildQuickMarkIndex() {
     const d = coerceDate(row[map['Event_Date']]);
     const dateKey = d ? formatDateKey(d) : '';
     const nameKey = normalizeNameKey(rowName);
+    // The booked slot, as the START label the row is matched on elsewhere
+    // (appointmentStartLabelOf()). Blank on every ordinary session, which is
+    // what the dialog keys "does this list show times?" off.
+    const slot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
 
     // This row belongs to its own session, and also to the dateless "program
     // only" entry for the same programme — the fallback choice a desk picks
@@ -17616,10 +17780,16 @@ function buildQuickMarkIndex() {
     lookups.forEach(lookup => {
       const bucket = byLookup[lookup];
       if (!bucket) return;
-      if (bucket.keys.indexOf(nameKey) !== -1) return;
+      // DEDUPED ON NAME AND SLOT TOGETHER, not on name alone. One person with
+      // two rows for the same session is a duplicate registration on an
+      // ordinary programme — and two genuine appointments on a Personalized
+      // Assistance one, which the desk has to be able to tell apart and mark
+      // separately. Name alone hid the second one entirely.
+      if (bucket.keys.some((k, i) => k === nameKey && bucket.times[i] === slot)) return;
       if (bucket.names.length >= QUICK_MARK_MAX_DROPDOWN_ITEMS) return;
       bucket.names.push(rowName);
       bucket.keys.push(nameKey);
+      bucket.times.push(slot);
     });
   });
 
@@ -17983,6 +18153,16 @@ function applyQuickMarkLocked(args) {
   // Refused below, once the session is known, rather than silently dropped.
   const standing = register && !!args.standing;
   const appointmentTime = String(args.appointmentTime || '').trim();
+  // WHICH ROW, when the name does not say. On a Personalized Assistance
+  // session one person can hold two slots, and the dialog sends back the slot
+  // the picked entry came from so the mark lands on that row rather than on
+  // whichever of the two sorts first. Blank everywhere else, which matches
+  // every row and so changes nothing.
+  const bookedTime = appointmentStartLabelOf(args.bookedTime);
+  // "She rang to move to 11:30" — a rebooking, which is neither an attendance
+  // mark nor a registration and had no way to be expressed here at all.
+  const moveTime = !!args.moveTime && !!bookedTime && !!appointmentTime &&
+    appointmentTime !== bookedTime;
   // Only ever asked beside an appointment time, because that is the only kind
   // of booking there is anything earlier to move somebody into.
   const earlierAppointment = (appointmentTime && args.earlierAppointment)
@@ -18019,7 +18199,13 @@ function applyQuickMarkLocked(args) {
       // session list names dates. Only an undated choice falls back to the
       // nearest-session guess below.
       if (selection.dateKey && (!d || formatDateKey(d) !== selection.dateKey)) return;
-      candidates.push({ sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '' });
+      const rowSlot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
+      // A slot named by the dialog means THAT row and no other — the same rule
+      // a dated choice follows one line up, one level finer.
+      if (bookedTime && rowSlot !== bookedTime) return;
+      candidates.push({
+        sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '', slot: rowSlot
+      });
     });
   });
 
@@ -18067,6 +18253,29 @@ function applyQuickMarkLocked(args) {
     };
   }
 
+  // THE MOVE GOES FIRST, and is refused before anything else is written when
+  // the slot has gone: half a move — marked attended, still down for the old
+  // time — is worse than no move, because the row then disagrees with both the
+  // desk and the person standing at it.
+  let movedNote = '';
+  if (moveTime) {
+    const clash = appointmentSlotTaken(sheet, map, target, appointmentTime, target.sheetRow);
+    if (clash) {
+      return {
+        ok: false,
+        message: `⚠️ ${appointmentTime} is already booked${clash === true ? '' : ` (${clash})`} — ` +
+          `${name} is still down for ${bookedTime}. Nothing was changed.`
+      };
+    }
+    const slots = appointmentSlotsForRow(sheet, map, target);
+    const moved = slots.filter(slot => slot.startLabel === appointmentTime)[0];
+    if (map['Event_Time'] !== undefined) {
+      sheet.getRange(target.sheetRow, map['Event_Time'] + 1)
+        .setValue(moved ? moved.rangeLabel : appointmentTime);
+    }
+    movedNote = ` Moved from ${bookedTime} to ${appointmentTime}.`;
+  }
+
   if (attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
   // Signing an existing registration up for lunch changes only the two lunch
   // columns. Attended is deliberately left exactly as it is: whether they were
@@ -18111,12 +18320,32 @@ function applyQuickMarkLocked(args) {
     sheet.getRange(target.sheetRow, map['Earlier_Appointment'] + 1).setValue(earlierAppointment);
     earlierNote = ' Marked to be called if an earlier appointment opens up.';
   }
-  if (register && !attended && !lunch && !signup) {
+  // What the dialog needs to keep its own copy of the slot list honest without
+  // re-fetching it between two people in a queue: the slot now taken, the slot
+  // now free, and which row moved.
+  const moveResult = moveTime
+    ? {
+      movedTime: true, bookedTime: appointmentTime, freedTime: bookedTime,
+      addedNameKey: normalizeNameKey(name)
+    }
+    : {};
+
+  if (register && !attended && !lunch && !signup && !moveTime) {
     const already = `✅ ${name} is already registered for ${selection.title || 'that programme'} on ` +
       `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.` +
       `${earlierNote}${standingNote}`;
     toastIfPossible(already);
     return { ok: true, message: already, namesChanged: false };
+  }
+
+  // A move ON ITS OWN, with nothing ticked beside it. Said in its own words
+  // rather than through describeQuickMark(), which has no vocabulary for it.
+  if (moveTime && !attended && !lunch && !signup) {
+    const moveOnly = `✅ ${name} — ${bookedTime} → ${appointmentTime}, ` +
+      `${target.date ? formatDateLabel(target.date) : 'that date'}.${earlierNote}${standingNote}`;
+    toastIfPossible(moveOnly);
+    log(`applyQuickMarkFromDialog: ${moveOnly}`);
+    return Object.assign({ ok: true, message: moveOnly, namesChanged: false }, moveResult);
   }
 
   const dateLabel = target.date ? formatDateLabel(target.date) : 'an undated session';
@@ -18130,10 +18359,74 @@ function applyQuickMarkLocked(args) {
   // the opposite on both counts: rare, and it is the number.
   if (signup) recalculateCateringCounts(sheet, map, target.sheetRow, 1);
 
-  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${earlierNote}${standingNote}`;
+  const message = `✅ ${name} — ${what}, ${dateLabel}${extra}.${movedNote}${earlierNote}${standingNote}`;
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
-  return { ok: true, message, namesChanged: false };
+  return Object.assign({ ok: true, message, namesChanged: false }, moveResult);
+}
+
+/**
+ * Is `startLabel` already held by somebody else on the session `target` sits
+ * on? Returns false, or the name holding it (true when the row has no name).
+ *
+ * Read straight off the tab rather than out of the Quick Mark index: the index
+ * is a snapshot, and double-booking a chair is exactly the mistake a snapshot
+ * would let through — two desks moving two people onto the same 11:30 in the
+ * same minute. Under the same lock as the write it guards.
+ */
+function appointmentSlotTaken(sheet, map, target, startLabel, ignoreRow) {
+  const wanted = appointmentStartLabelOf(startLabel);
+  if (!wanted || !target.dateKey) return false;
+  const eventId = String(sheet.getRange(target.sheetRow, map['Event_ID'] + 1).getValue() || '').trim();
+  if (!eventId) return false;
+  let held = false;
+  getSectionZones(sheet, 'Event_ID').forEach(zone => {
+    if (held) return;
+    const count = zone.dataEnd - zone.dataStart + 1;
+    if (count < 1) return;
+    const values = sheet.getRange(zone.dataStart, 1, count, Math.max(sheet.getLastColumn(), 1)).getValues();
+    values.forEach((row, i) => {
+      if (held || zone.dataStart + i === ignoreRow) return;
+      if (String(row[map['Event_ID']] || '').trim() !== eventId) return;
+      // A cancelled row has released its slot — the whole reason staff cancel
+      // one is so somebody else can have that time.
+      const status = String(row[map['Program_Status']] || '').trim();
+      if (status === 'Cancelled' || status === 'Superseded') return;
+      if (appointmentStartLabelOf(row[map['Event_Time']]) !== wanted) return;
+      held = String(row[map['Name']] || '').trim() || true;
+    });
+  });
+  return held;
+}
+
+/**
+ * The slots on the session a registrant row belongs to, so a moved
+ * appointment can be written as the RANGE staff read ("11:30 AM – 12:00 PM")
+ * rather than as a bare start time.
+ *
+ * Empty when the session table has nothing to say, and the caller then writes
+ * the start label on its own — a move recorded roughly is better than a move
+ * refused over its formatting.
+ */
+function appointmentSlotsForRow(sheet, map, target) {
+  try {
+    const eventId = String(sheet.getRange(target.sheetRow, map['Event_ID'] + 1).getValue() || '').trim();
+    if (!eventId) return [];
+    const dash = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (!dash) return [];
+    const headers = HEADERS.Master_Program_Dashboard;
+    const dashMap = getIndexMap(headers);
+    const session = readAllSectionedRowValues(dash, headers, 'Event_ID')
+      .filter(row => String(row[dashMap['Event_ID']] || '').trim() === eventId)[0];
+    if (!session) return [];
+    return buildAppointmentSlots(
+      coerceDate(session[dashMap['Event_Date']]),
+      dashMap['Event_End'] === undefined ? null : coerceDate(session[dashMap['Event_End']]),
+      resolveSlotMinutes({ slotMinutes: Number(session[dashMap['Slot_Minutes']]) || 0 }));
+  } catch (err) {
+    log(`ℹ️ Could not read the slots for a moved appointment (${err}) — wrote the start time on its own.`);
+    return [];
+  }
 }
 
 /**

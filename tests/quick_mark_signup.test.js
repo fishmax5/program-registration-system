@@ -139,6 +139,31 @@ check('a cancelled booking gives the time back',
     .filter(s => s.byAppointment)[0].times.map(t => t.value),
   ['12:30 PM', '1:30 PM']);
 
+// THE BOOKED SLOT TRAVELS WITH THE NAME. A Personalized Assistance morning is
+// a list of times, and a dropdown of bare names is unreadable against it — the
+// desk cannot tell who is at 10:30, and the same person holding two slots was
+// one entry that marked whichever row sorted first.
+registrants.push(reg('Ruth Kaplan', 'Narberth', 'Low-Cost Wills', WILLS_START, '1:30 PM – 2:00 PM'));
+const slotted = sandbox.buildQuickMarkIndex();
+// (Sam Weber's cancelled 12:30 row from the check above is on this session
+// too — a cancelled registration still shows in the list, because correcting
+// one is a thing the desk does.)
+const willsKey = 'Narberth' + SEP + wills.value;
+check('a registered person carries the slot they hold',
+  slotted.namesBySession[willsKey].times, ['1:00 PM', '12:30 PM', '1:30 PM']);
+check('and one person with two appointments is TWO entries, not one',
+  slotted.namesBySession[willsKey].names, ['Ruth Kaplan', 'Sam Weber', 'Ruth Kaplan']);
+check('both under the same identity key, so the roll still subtracts her once',
+  slotted.namesBySession[willsKey].keys.filter(k => k === 'ruth kaplan').length, 2);
+
+// A genuine duplicate — same person, same session, same slot — is still one
+// entry. Deduping got FINER, not weaker.
+registrants.push(reg('Ruth Kaplan', 'Narberth', 'Low-Cost Wills', WILLS_START, '1:30 PM – 2:00 PM'));
+check('but the same slot twice is still one entry',
+  sandbox.buildQuickMarkIndex().namesBySession[willsKey].names.length, 3);
+registrants.pop();
+registrants.pop();
+
 // The ordinary programme, which must be untouched by any of this: no times, no
 // dropdown, and the desk can still put somebody on it.
 sessions.push(session('Chair Yoga', 'Narberth', new RealDate(2026, 8, 23, 10, 0), new RealDate(2026, 8, 23, 11, 0), false));
