@@ -18888,22 +18888,23 @@ function renderRegularNeedsSheet(allRows) {
     numberColumns: ['Quantity', 'Interval']
   });
 
-  if (rows.length > 0) {
-    const count = rows.length;
-    [map['Active'] + 1, map['Auto_Note'] + 1].forEach(col => {
-      sheet.getRange(MEMORY_TAB_DATA_ROW, col, count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
-    });
-    applyValueListValidationBounded(sheet, map['Frequency'] + 1, REGULAR_NEED_FREQUENCIES,
-      MEMORY_TAB_DATA_ROW, count);
-    applyValueListValidationBounded(sheet, map['Kind'] + 1, REGULAR_NEED_KINDS, MEMORY_TAB_DATA_ROW, count);
+  // Down the blank band as well as the data — the row that needs a dropdown is
+  // the empty one somebody is about to type a standing need into. See
+  // MEMORY_TAB_SPARE_ROWS.
+  applyMemoryTabValidation(sheet, headers, rows.length, {
+    checkboxes: ['Active', 'Auto_Note'],
+    lists: { Frequency: REGULAR_NEED_FREQUENCIES, Kind: REGULAR_NEED_KINDS },
     // OPEN, not restricted: the shared vocabulary is there to keep the common
-    // notes spelled one way, not to refuse the note nobody thought of.
-    applyOpenValueListValidationBounded(sheet, map['Need'] + 1,
-      REGULAR_NEED_PRESETS.map(p => p.text), MEMORY_TAB_DATA_ROW, count);
-    applyLocationValidationBounded(sheet, map['Location'] + 1, MEMORY_TAB_DATA_ROW, count);
-  }
+    // notes spelled one way, not to refuse the note nobody thought of. Program
+    // joins them for the same reason it does on Program_Questions — it is
+    // matched by exact text, so a title typed from memory silently matches
+    // nothing.
+    openLists: {
+      Need: REGULAR_NEED_PRESETS.map(p => p.text),
+      Location: Object.values(CALENDAR_MAP),
+      Program: listKnownProgramTitles()
+    }
+  });
 
   // Need_ID is the join key, not something to read.
   applyColumnVisibility(sheet, headers, ['Need_ID']);
@@ -21462,6 +21463,84 @@ const MEMORY_TAB_BANNER_ROW = 1;
 const MEMORY_TAB_HEADER_ROW = 2;
 const MEMORY_TAB_DATA_ROW = 3;
 
+/**
+ * HOW FAR A MEMORY TAB'S DROPDOWNS REACH BELOW THE LAST ROW.
+ *
+ * THE BUG THIS FIXES, and it is the one people actually hit: every one of
+ * these tabs applied its dropdowns and checkboxes to `rows.length` rows —
+ * exactly the rows that already existed. writeMemoryTab() clears every data
+ * validation on the sheet first, so the row a person types their NEXT question
+ * into had no dropdown on it, no checkbox in Required or Active, and no
+ * warning when the Type was spelled "dropdown " with a trailing space. An
+ * EMPTY tab was worse still: `rows.length` is 0, so the whole block was
+ * skipped and the tab a person met on their first visit had nothing to pick
+ * from anywhere on it.
+ *
+ * A tab is a form somebody fills in, so the blank line under the last row is
+ * part of it. The dropdowns now run a band of spare rows past the data, and
+ * ensureMemoryTabSpareRows() makes sure the sheet is long enough to hold them.
+ *
+ * Fifty because it is more rows than anyone adds between renders and few
+ * enough that the validation write stays one call.
+ */
+const MEMORY_TAB_SPARE_ROWS = 50;
+
+/**
+ * How many rows a memory tab's validation should cover: the data, plus the
+ * blank band under it. Always at least one, so an empty tab still gets its
+ * dropdowns.
+ */
+function memoryTabValidationRows(rowCount) {
+  return Math.max(Number(rowCount) || 0, 0) + MEMORY_TAB_SPARE_ROWS;
+}
+
+/**
+ * Grows the sheet so the spare band exists to put validation on. A sheet that
+ * is already long enough is left alone — insertRowsAfter() on a full-height
+ * sheet is a write nobody needs.
+ */
+function ensureMemoryTabSpareRows(sheet, rowCount) {
+  const needed = MEMORY_TAB_DATA_ROW + memoryTabValidationRows(rowCount) - 1;
+  const have = sheet.getMaxRows();
+  if (have >= needed) return;
+  sheet.insertRowsAfter(have, needed - have);
+}
+
+/**
+ * The two things every memory tab wants on its spare band as well as its data:
+ * a real checkbox in each boolean column, and a dropdown on each column with a
+ * fixed vocabulary.
+ *
+ * `spec.checkboxes` is a list of header names; `spec.lists` is
+ * { header: [options] } for a restricted dropdown and `spec.openLists` the
+ * same for a suggesting one (see applyOpenValueListValidationBounded).
+ * Anything naming a column this tab hasn't got is skipped rather than
+ * throwing, so a workbook on an older layout renders instead of failing.
+ */
+function applyMemoryTabValidation(sheet, headers, rowCount, spec) {
+  const map = getIndexMap(headers);
+  const span = memoryTabValidationRows(rowCount);
+  ensureMemoryTabSpareRows(sheet, rowCount);
+
+  (spec.checkboxes || []).forEach(header => {
+    if (map[header] === undefined) return;
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map[header] + 1, span, 1)
+      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+      .setHorizontalAlignment('center');
+  });
+  Object.keys(spec.lists || {}).forEach(header => {
+    if (map[header] === undefined) return;
+    applyValueListValidationBounded(sheet, map[header] + 1, spec.lists[header],
+      MEMORY_TAB_DATA_ROW, span);
+  });
+  Object.keys(spec.openLists || {}).forEach(header => {
+    if (map[header] === undefined) return;
+    applyOpenValueListValidationBounded(sheet, map[header] + 1, spec.openLists[header],
+      MEMORY_TAB_DATA_ROW, span);
+  });
+  return span;
+}
+
 /** Writes a memory tab: banner, header row, data, and the yellow staff-column wash. */
 function writeMemoryTab(sheet, headers, rows, options) {
   const numCols = headers.length;
@@ -21659,12 +21738,14 @@ function renderClubMembersSheet(allRows) {
     dateColumns: ['Joined_On']
   });
 
-  if (rows.length > 0) {
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Active'] + 1, rows.length, 1)
-      .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-      .setHorizontalAlignment('center');
-    applyValueListValidationBounded(sheet, map['Lunch'] + 1, CLUB_LUNCH_OPTIONS, MEMORY_TAB_DATA_ROW, rows.length);
-  }
+  // Down the blank band too, so a member added by hand at the bottom of the
+  // list gets the same Active checkbox as one the roster wrote. See
+  // MEMORY_TAB_SPARE_ROWS.
+  applyMemoryTabValidation(sheet, headers, rows.length, {
+    checkboxes: ['Active'],
+    lists: { Lunch: CLUB_LUNCH_OPTIONS },
+    openLists: { Location: Object.values(CALENDAR_MAP) }
+  });
   // Club_Key is the join key, not something to read. Everything else stays.
   applyColumnVisibility(sheet, headers, ['Club_Key']);
   return rows.length;
@@ -27649,6 +27730,41 @@ const PROGRAM_QUESTION_TYPE_OPTIONS = [
   'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice', 'Notice', 'Image'
 ];
 
+/**
+ * What Program (or Location) says for "every one of them". Blank means the
+ * same thing and always has — this is the spelling the dropdown offers,
+ * because a blank cell in a dropdown looks like a cell nobody filled in.
+ */
+const PROGRAM_QUESTION_ALL_PROGRAMS = '*';
+
+/**
+ * Every programme title currently on the session table, once each, in
+ * alphabetical order — the Programme dropdown's list on Program_Questions and
+ * on the review dialog.
+ *
+ * Read from the dashboard rather than the calendar: the calendar takes seconds
+ * to read and this is called while drawing a tab, and a programme that has no
+ * session row is a programme no form covers, so offering it would be offering
+ * a title that matches nothing.
+ */
+function listKnownProgramTitles() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!sheet) return [];
+  try {
+    const headers = HEADERS.Master_Program_Dashboard;
+    const map = getIndexMap(headers);
+    const seen = {};
+    readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+      const title = String(row[map['Clean_Title']] || '').trim();
+      if (title) seen[title] = true;
+    });
+    return Object.keys(seen).sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    log(`Could not list the programme titles for a dropdown (${err}) — offering none.`);
+    return [];
+  }
+}
+
 /** True for the three types that need a Choices cell to mean anything. */
 function questionTypeNeedsChoices(kind) {
   return kind === 'LIST' || kind === 'CHECKBOX' || kind === 'MULTIPLE_CHOICE';
@@ -27853,11 +27969,17 @@ function questionsForFormContext(specs, context) {
   const norm = v => String(v || '').trim().toLowerCase();
   const titles = new Set((context.titles || []).map(norm));
   const locations = new Set((context.locations || []).map(norm));
+  // "*" MEANS EVERY ONE, IN BOTH COLUMNS. Programme has always read it that
+  // way; Location had not, so a row saying Location "*" — which is what the
+  // dropdown on that column now offers, and what somebody copying the
+  // Programme cell would write — matched no location at all and the question
+  // was asked on nothing. Blank still means the same thing, as it always did.
+  const isEvery = value => !value || value === '*';
   return (specs || []).filter(spec => {
     const p = norm(spec.program);
-    if (p && p !== '*' && !titles.has(p)) return false;
+    if (!isEvery(p) && !titles.has(p)) return false;
     const l = norm(spec.location);
-    if (l && !locations.has(l)) return false;
+    if (!isEvery(l) && !locations.has(l)) return false;
     return true;
   });
 }
@@ -28540,17 +28662,29 @@ function renderProgramQuestionsSheet(allRows) {
     numberColumns: ['Sort']
   });
 
-  if (rows.length > 0) {
-    applyValueListValidationBounded(sheet, map['Type'] + 1, PROGRAM_QUESTION_TYPE_OPTIONS,
-      MEMORY_TAB_DATA_ROW, rows.length);
-    [map['Required'] + 1, map['Active'] + 1].forEach(col => {
-      sheet.getRange(MEMORY_TAB_DATA_ROW, col, rows.length, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
-    });
-    // Choices is one option per line, so the cell has to be able to show them.
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, rows.length, 1).setWrap(true);
-  }
+  // EVERY COLUMN WITH A FIXED VOCABULARY GETS A DROPDOWN, and they reach a
+  // band of blank rows past the data — because the row that matters is the
+  // NEXT one, the empty one somebody is about to type a question into. See
+  // MEMORY_TAB_SPARE_ROWS for what this used to do instead.
+  //
+  // Programme and Location are dropdowns for the first time here. Both are
+  // matched against the calendar by exact text (questionsForFormContext()),
+  // so a title typed from memory — "Bookclub", "Book Club " — is a question
+  // that silently applies to no form at all, with nothing on the tab to say
+  // so. They are OPEN lists rather than closed ones: "*" is a legitimate
+  // answer to both, a programme that has not been imported yet is a
+  // legitimate answer to Programme, and refusing either would be worse than
+  // not knowing it.
+  const span = applyMemoryTabValidation(sheet, headers, rows.length, {
+    checkboxes: ['Required', 'Active'],
+    lists: { Type: PROGRAM_QUESTION_TYPE_OPTIONS },
+    openLists: {
+      Program: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(listKnownProgramTitles()),
+      Location: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(Object.values(CALENDAR_MAP))
+    }
+  });
+  // Choices is one option per line, so the cell has to be able to show them.
+  sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, span, 1).setWrap(true);
 
   // THE NOTES ARE ON THE HEADERS, not the rows: a note on the header is there
   // on an empty tab, which is exactly when somebody needs telling what the
@@ -28582,9 +28716,14 @@ function renderProgramQuestionsSheet(allRows) {
     'Drive, use Share \u25b8 Copy link, and paste the link here.\n\n' +
     'Ignored by the text types and by Notice.');
   headerNote('Program',
-    'The programme name, spelled exactly as the Google Calendar spells it.\n' +
-    'Blank (or "*") means every form in the workbook.');
-  headerNote('Location', 'Blank means every location. Otherwise only forms covering that location.');
+    'Pick from the dropdown — it lists every programme currently on the\n' +
+    'dashboard, spelled the way the Google Calendar spells it. A name typed\n' +
+    'from memory that does not match exactly asks its question of no form at\n' +
+    'all, and nothing here would say so.\n\n' +
+    'Pick "*" (or leave it blank) for every form in the workbook.');
+  headerNote('Location',
+    'Pick "*" or leave it blank for every location. Otherwise only forms\n' +
+    'covering that location are asked.');
   return rows.length;
 }
 
@@ -28666,11 +28805,16 @@ function renderAssistanceRequestsSheet(allRows) {
     dateColumns: ['Received', 'Scheduled_For']
   });
 
-  if (rows.length > 0) {
-    applyValueListValidationBounded(sheet, map['Status'] + 1, ASSISTANCE_REQUEST_STATUSES,
-      MEMORY_TAB_DATA_ROW, rows.length);
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Answers'] + 1, rows.length, 1).setWrap(true);
-  }
+  // Down the blank band too: a request phoned in is typed onto the row under
+  // the last one, and it needs the same Status dropdown as one the form filed.
+  const span = applyMemoryTabValidation(sheet, headers, rows.length, {
+    lists: { Status: ASSISTANCE_REQUEST_STATUSES },
+    openLists: {
+      Location: Object.values(CALENDAR_MAP),
+      Program: listKnownProgramTitles()
+    }
+  });
+  sheet.getRange(MEMORY_TAB_DATA_ROW, map['Answers'] + 1, span, 1).setWrap(true);
   applyColumnVisibility(sheet, headers, ['Request_ID']);
   return rows.length;
 }
