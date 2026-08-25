@@ -6151,6 +6151,15 @@ const ROW_HEIGHTS = {
  *
  * `hero` gives the one banner per tab that should dominate (Today's Lunch
  * Needs, Today at Each Location) a larger size, deeper blue and a taller row.
+ *
+ * `note` is where the EXPLANATION goes. These banners had grown into
+ * paragraphs — a label, then a dash, then two lines telling you what the
+ * section is for, why some rows are hidden and which menu item brings them
+ * back. In a blue strip across twenty columns that is not a heading any more;
+ * it is a wall of text over every table on the tab, and the one word a person
+ * was actually looking for is buried in the middle of it. So the banner says
+ * what the section IS, in a few words, and everything that explains it becomes
+ * a cell note: still there, one hover away, on exactly the cell it is about.
  */
 function writeSectionBanner(sheet, row, numCols, text, options) {
   options = options || {};
@@ -6171,11 +6180,40 @@ function writeSectionBanner(sheet, row, numCols, text, options) {
   sheet.getRange(row, 1)
     .setValue(text)
     .setHorizontalAlignment('left')
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW)
+    // Always set, blank included: a note left behind by an earlier render (or
+    // by an earlier version of this function, which put all of this in the
+    // banner text) has to be cleared rather than inherited.
+    .setNote(options.note || '');
 
   try {
     sheet.setRowHeight(row, options.hero ? ROW_HEIGHTS.BANNER_HERO : ROW_HEIGHTS.BANNER);
   } catch (err) { /* row may not exist yet on a brand-new sheet */ }
+}
+
+/**
+ * Freezes rows 1..`row` — the header row of the table that IS the tab, so the
+ * column names stay on screen however far down somebody scrolls.
+ *
+ * "The table that is the tab" is the rule, and it is not always the topmost
+ * table: Master_Program_Dashboard opens with a Today block and a metrics
+ * block, and freezing at those left the session table's headers — the thing
+ * five hundred rows are read against — scrolling away with everything else.
+ * Whatever a tab puts above its main table comes along in the frozen band.
+ *
+ * TOLERATES FAILURE, exactly like freezeColumnsSafely(). Sheets refuses to
+ * freeze more rows than the grid has room to show, and a tab whose main table
+ * starts unusually far down is a lost nicety, not a lost render.
+ */
+function freezeRowsSafely(sheet, row) {
+  if (!row || row < 1) return false;
+  try {
+    sheet.setFrozenRows(row);
+    return true;
+  } catch (err) {
+    log(`ℹ️ Could not freeze ${row} row(s) on "${sheet.getName()}" (${err}) — everything else rendered normally.`);
+    return false;
+  }
 }
 
 /**
@@ -6827,7 +6865,7 @@ function writeConfigStructure(sheet) {
       .setBackground(TYPO.COLUMN_HEADER.background)
       .setFontColor(TYPO.COLUMN_HEADER.color);
   });
-  sheet.setFrozenRows(CONFIG_HEADER_ROW);
+  freezeRowsSafely(sheet, CONFIG_HEADER_ROW);
 }
 
 function styleConfigSheet(sheet) {
@@ -8972,7 +9010,7 @@ function getPendingFlagSheet(createIfMissing) {
     sheet.getRange(1, 1, 1, PENDING_FLAG_HEADERS.length)
       .setValues([PENDING_FLAG_HEADERS])
       .setFontWeight('bold');
-    sheet.setFrozenRows(1);
+    freezeRowsSafely(sheet, 1);
     try { if (wasActive) ss.setActiveSheet(wasActive); } catch (err) { /* nothing to go back to */ }
     try { sheet.hideSheet(); } catch (err) { /* a lone or active tab cannot be hidden */ }
   }
@@ -11410,7 +11448,8 @@ function renameClubRosterKeys(ss, renames) {
  */
 function programOptionsTabOptions() {
   return {
-    banner: '📋 Program Options — every program, with your standing notes',
+    banner: '📋 Program Options',
+    bannerNote: 'Every programme this workbook has ever run, with your standing notes against each one.',
     staffColumns: PROGRAM_OPTIONS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
     numberColumns: ['Sessions_Tracked']
@@ -16710,9 +16749,15 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
     ? 0
     : collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx);
   if (hidden > 0) {
-    sheet.getRange(pastBannerRow, 1).setValue(
-      `${options.pastLabel || '🕓 Past'}  —  ${hidden} row(s) before ${getVisibleMonthCutoffKey()} are hidden ` +
-      `(they're still here and still searchable; "Show All Past Rows" on the menu brings them back)`);
+    // The COUNT in the banner, the explanation in the note. "247 hidden" is
+    // the fact somebody scanning the tab needs; the sentence about them still
+    // being searchable and how to bring them back is what they need once, on
+    // the day they first wonder — and that is what a note is for.
+    sheet.getRange(pastBannerRow, 1)
+      .setValue(`${options.pastLabel || '🕓 Past'}  ·  ${hidden} hidden`)
+      .setNote(`${hidden} row(s) dated before ${getVisibleMonthCutoffKey()} are hidden.\n\n` +
+        `They are still on this tab and still found by Ctrl+F. ` +
+        `"Show All Past Rows" on the ${APP_MENU_NAME} menu brings them back.`);
   }
 
   return {
@@ -16752,7 +16797,7 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // Mark panel did, and is now a dialog (section 6d) — but the parameter is
   // what keeps that an option rather than a rewrite.
   const result = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
-  sheet.setFrozenRows(result.upcomingHeaderRow);
+  freezeRowsSafely(sheet, result.upcomingHeaderRow);
 
   if (opts.afterWrite) opts.afterWrite(sheet, headers, result);
 
@@ -18817,9 +18862,15 @@ function writeLunchAddBlock(sheet, startRow) {
   const needed = startRow + 1 + LUNCH_ADD_BLANK_ROWS;
   if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
 
-  writeSectionBanner(sheet, startRow, numCols,
-    `${LUNCH_ADD_MARKER} — paste CSV here (Date, Location, Type, Description, Shorthand). ` +
-    `One row or a hundred; they move into the schedule above automatically.`);
+  // The marker itself and nothing else. findLunchAddBlock() matches on the
+  // START of this cell, so the trailing instructions were never load-bearing —
+  // they were four lines of blue explaining a block whose own column headers
+  // sit directly beneath it and say the same thing.
+  writeSectionBanner(sheet, startRow, numCols, LUNCH_ADD_MARKER, {
+    note: 'Paste rows here: Date, Location, Type, Description, Shorthand.\n\n' +
+      'One row or a hundred — they move up into the schedule above by themselves, ' +
+      'and this block empties again.'
+  });
 
   const headerRow = startRow + 1;
   sheet.getRange(headerRow, 1, 1, numCols)
@@ -18972,7 +19023,8 @@ function refreshMemberRoll(ss, registrantRows) {
   });
 
   writeMemoryTab(sheet, headers, outRows, {
-    banner: '👤 Member Roll — everyone who has ever registered',
+    banner: '👤 Member Roll',
+    bannerNote: 'Everyone who has ever registered for anything, whichever form they came in on.',
     staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
     dateColumns: ['First_Seen', 'Last_Seen'],
     numberColumns: ['Times_Seen']
@@ -19200,7 +19252,7 @@ function writeMemoryTab(sheet, headers, rows, options) {
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
-  writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, options.banner);
+  writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, options.banner, { note: options.bannerNote });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, options.staffColumns);
 
@@ -19217,7 +19269,7 @@ function writeMemoryTab(sheet, headers, rows, options) {
     tintManualEntryColumns(sheet, MEMORY_TAB_DATA_ROW, rows.length, headers, options.staffColumns);
   }
 
-  sheet.setFrozenRows(MEMORY_TAB_HEADER_ROW);
+  freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
   freezeColumnsSafely(sheet, 1); // the name/program is the row's identity — keep it visible
   autosizeColumns(sheet, { minCols: numCols, force: true });
 }
@@ -19383,7 +19435,8 @@ function renderClubMembersSheet(allRows) {
   });
 
   writeMemoryTab(sheet, headers, rows, {
-    banner: '🎟️ Club Members — who is on each club\'s standing list (untick Active to take someone off)',
+    banner: '🎟️ Club Members',
+    bannerNote: 'Who is on each club\'s standing list.\n\nUntick Active to take somebody off it.',
     staffColumns: CLUB_MEMBERS_STAFF_COLUMNS,
     dateColumns: ['Joined_On']
   });
@@ -20524,10 +20577,11 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // hideLunchOnlySessionRows().
   const hiddenLunchRows = hideLunchOnlySessionRows(sheet, map, upcoming, past, result);
   if (hiddenLunchRows > 0) {
-    sheet.getRange(result.upcomingHeaderRow - 1, 1).setValue(
-      `${'🔜 Upcoming Sessions'}  —  ${hiddenLunchRows} ${LUNCH_ONLY_PROGRAM_LABEL} row(s) are hidden ` +
-      `(a meal is not a programme; they're still here, and the sign-up links are pinned at the top of ` +
-      `${SHEET_NAMES.LUNCH_DASHBOARD}. "Show All Past Rows" on the menu brings them back)`);
+    sheet.getRange(result.upcomingHeaderRow - 1, 1)
+      .setValue(`🔜 Upcoming Sessions  ·  ${hiddenLunchRows} lunch-only hidden`)
+      .setNote(`${hiddenLunchRows} "${LUNCH_ONLY_PROGRAM_LABEL}" row(s) are hidden — a meal is not a programme.\n\n` +
+        `They are still on this tab, and their sign-up links are pinned at the top of ` +
+        `${SHEET_NAMES.LUNCH_DASHBOARD}. "Show All Past Rows" on the ${APP_MENU_NAME} menu brings them back.`);
   }
 
   const zones = [
@@ -20582,8 +20636,14 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);
 
-  // Freeze through the Today block only, so it stays visible while the rest scrolls.
-  sheet.setFrozenRows(todayDataStart + todayRowsOut.length - 1);
+  // THROUGH THE SESSION TABLE'S HEADER ROW, like every other tab in this
+  // workbook — not through the Today block, which is where this used to stop.
+  // The bulk of this tab is the session table: hundreds of rows, twenty
+  // columns, and the only thing that says which column is which was the first
+  // thing to scroll off the top of it. Freezing here keeps the Today and
+  // metrics blocks visible as well, since they sit above it — the old
+  // behaviour, plus the headers it was missing.
+  freezeRowsSafely(sheet, result.upcomingHeaderRow);
   freezeColumnsSafely(sheet, 3); // date, location, program name
   autosizeColumns(sheet, { force: !!force, minCols: headers.length });
   log(`renderProgramDashboard complete: ${todayRowsOut.length} location(s) today, ${upcoming.length} upcoming / ${past.length} past session row(s).`);
@@ -21424,7 +21484,9 @@ function dropNotServingRows(tableRows, map, rollup) {
 function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
   const rows = signUpRows || [];
   writeSectionBanner(sheet, plan.signUpBannerRow, numCols,
-    '🥡 LUNCH SIGN-UP FORMS — for people who come for the meal, not a programme', { hero: true });
+    '🥡 LUNCH SIGN-UP FORMS',
+    { hero: true, note: 'For people who come for the meal rather than for a programme — ' +
+      'one form per location, listed below.' });
   // Padded to the tab's full width so the header BAND spans the sheet like
   // every other header row on it. Stopping at column E left five grey cells
   // floating in a twenty-column row, which reads as a half-drawn table rather
@@ -21606,7 +21668,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
     tintManualEntryColumns(sheet, z.start, z.count, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
   });
 
-  sheet.setFrozenRows(result.upcomingHeaderRow);
+  freezeRowsSafely(sheet, result.upcomingHeaderRow);
   const locationCol = map['Location'] + 1;
 
   zones.forEach(z => {
@@ -22701,9 +22763,13 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
 
   const stamp = Utilities.formatDate(new Date(),
     Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
+  // The programme and where it runs. The refresh stamp and the "tick the
+  // yellow columns" instruction are a note: this sheet goes to an instructor
+  // who reads the top line to check they have opened the right one, and a
+  // heading that is three facts joined by bullets is not a top line.
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols,
-    `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}   •   refreshed ${stamp}   •   ` +
-    `tick the yellow columns; everything else fills in by itself`);
+    `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`,
+    { note: `Refreshed ${stamp}.\n\nTick the yellow columns; everything else fills in by itself.` });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, INSTRUCTOR_OWNED_COLUMNS);
 
@@ -22733,7 +22799,7 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
       .setFontColor('#666666');
   }
 
-  sheet.setFrozenRows(MEMORY_TAB_HEADER_ROW);
+  freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
   applyColumnVisibility(sheet, headers, INSTRUCTOR_SHEET_HIDDEN_COLUMNS);
   autosizeColumns(sheet, { minCols: numCols, force: true });
   // After the autosize, which would otherwise size the two hidden machine
@@ -26181,8 +26247,9 @@ function renderProgramQuestionsSheet(allRows) {
   invalidateProgramQuestionSpecs();
 
   writeMemoryTab(sheet, headers, rows, {
-    banner: 'Program Questions — extra questions added to a program\'s registration form ' +
-      '(one row per question; press "Update Program Questions on Forms" when you are done)',
+    banner: '❓ Program Questions',
+    bannerNote: 'Extra questions added to a programme\'s registration form — one row per question.\n\n' +
+      'Press "Update Program Questions on Forms" on the menu when you are done editing.',
     staffColumns: PROGRAM_QUESTIONS_STAFF_COLUMNS,
     numberColumns: ['Sort']
   });
@@ -26306,8 +26373,9 @@ function renderAssistanceRequestsSheet(allRows) {
   const rows = allRows || readAssistanceRequestRows(sheet);
 
   writeMemoryTab(sheet, headers, rows, {
-    banner: 'Appointment Requests — people who need a personalized-assistance appointment ' +
-      'at a time we have not scheduled yet',
+    banner: '🗓️ Appointment Requests',
+    bannerNote: 'People who need a personalized-assistance appointment at a time ' +
+      'we have not scheduled yet.',
     staffColumns: ASSISTANCE_REQUEST_STAFF_COLUMNS,
     dateColumns: ['Received', 'Scheduled_For']
   });

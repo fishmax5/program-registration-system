@@ -141,4 +141,6 @@ node tests/quick_mark_index.test.js
 node tests/quick_mark_signup.test.js
 node tests/lunch_demand.test.js
 node tests/form_rebuild.test.js
+node tests/sectioned_value_reader.test.js
+node tests/column_widths.test.js
 ```
