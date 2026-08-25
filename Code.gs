@@ -1070,6 +1070,23 @@ const ASSISTANCE_COLUMN_VALUE = true;
  */
 const APPOINTMENT_SLOT_MINUTES = 30;
 
+/**
+ * HOW MANY PEOPLE ONE APPOINTMENT SLOT HOLDS: one. That is what an
+ * appointment IS — the provider sees one person (or one party) at 10:30 and
+ * the next at 11:00 — and it is the number every other rule here has always
+ * assumed without ever writing down: buildAppointmentChoicesForContext()
+ * drops a slot from the form the moment it is taken, and
+ * existingAppointmentHolder() flags a second booking of the same time.
+ *
+ * Written down because a session's CAPACITY is derived from it: an appointment
+ * session holds one person per slot, so its Max_Capacity is its slot count —
+ * see resolveAppointmentCapacity(). A "[Cap: N]" typed on such an event can
+ * only ever mean FEWER appointments than the span allows (a provider keeping
+ * the last half hour free); it cannot conjure a second chair into a slot,
+ * which is why a larger one is clamped rather than honoured.
+ */
+const APPOINTMENT_SLOT_CAPACITY = 1;
+
 /** Sanity bounds on "[Slots: N]" — a 2-minute or 7-hour appointment is a typo, not an instruction. */
 const MIN_APPOINTMENT_SLOT_MINUTES = 5;
 const MAX_APPOINTMENT_SLOT_MINUTES = 240;
@@ -1175,6 +1192,8 @@ const PROGRAM_FLAG_COLUMNS = [
     tag: CLUB_TAG,
     regex: CLUB_WORDS_REGEX,
     groupKey: 'isClub',
+    describeOn: title => `"${title}" is a club`,
+    describeOff: title => `"${title}" is no longer a club`,
     onQuestion: title => `Make "${title}" a club?`,
     onDetail: title =>
       `People who sign up for "${title}" will stay signed up: its registration form grows a ` +
@@ -1190,6 +1209,8 @@ const PROGRAM_FLAG_COLUMNS = [
     tag: NO_REGISTRATION_TAG,
     regex: NO_REGISTRATION_WORDS_REGEX,
     groupKey: 'noRegistration',
+    describeOn: title => `"${title}" takes no registration`,
+    describeOff: title => `"${title}" takes registrations again`,
     onQuestion: title => `Turn registration off for "${title}"?`,
     onDetail: title =>
       `"${title}" will stop taking sign-ups. No registration form is built for it, the registration ` +
@@ -1206,6 +1227,8 @@ const PROGRAM_FLAG_COLUMNS = [
     tag: ASSISTANCE_TAG,
     regex: ASSISTANCE_WORDS_REGEX,
     groupKey: 'isAssistance',
+    describeOn: title => `"${title}" is booked by appointment`,
+    describeOff: title => `"${title}" is booked by date again`,
     onQuestion: title => `Make "${title}" an appointment program?`,
     onDetail: title =>
       `"${title}" will be registered for by APPOINTMENT rather than by date. Each of its calendar ` +
@@ -8107,6 +8130,12 @@ function buildAppMenu(ui, includeAdmin) {
       // are currently doing to the forms — and fixes any form the hourly sync
       // has not caught up with yet.
       .addItem('Rebuild Appointment Forms + Report…', 'rebuildAssistanceFormsNow')
+      // The single-form version of 🔧 Admin ▸ Rebuild Forms In Place, and the
+      // one staff actually reach for: one form has gone wrong, and rebuilding
+      // every form on the workbook to correct it is a sweep nobody wants to
+      // wait for. Same repair, same kept link, finished while the dialog is
+      // still open.
+      .addItem('🩹 Update One Form (keeps its link)…', 'showFixOneFormDialog')
       .addItem('Link Program Across Locations…', 'linkProgramAcrossLocations')
       .addItem('Move Sessions to Another Form…', 'showRepointSessionsDialog'))
     .addSeparator()
@@ -9333,12 +9362,23 @@ function pendingProgramKeysFor(flagColumn) {
   return keys;
 }
 
-/** "Book Club is a club" / "Coffee Hour takes no registration" — one line, for a toast or a list. */
+/**
+ * "Book Club is a club" / "Coffee Hour takes no registration" — one line, for
+ * a toast or a list.
+ *
+ * The wording lives on the flag itself (PROGRAM_FLAG_COLUMNS.describeOn /
+ * .describeOff) rather than in a chain of column-name tests here. It used to
+ * be the latter, with [Club] as the fall-through, and the third flag arrived
+ * after that chain was written: every log line and every toast about
+ * Personalized_Assistance announced that the program "is a club", which is
+ * both wrong and — on a tab where Club is a real neighbouring checkbox —
+ * actively misleading about what had just been ticked.
+ */
 function describeFlagState(flag, title, on) {
-  if (flag.column === 'No_Registration') {
-    return on ? `"${title}" takes no registration` : `"${title}" takes registrations again`;
-  }
-  return on ? `"${title}" is a club` : `"${title}" is no longer a club`;
+  const describe = on ? (flag && flag.describeOn) : (flag && flag.describeOff);
+  if (typeof describe === 'function') return describe(title);
+  // A flag added without wording still says something true about itself.
+  return `"${title}" ${on ? 'is now' : 'is no longer'} ${flag ? `[${flag.tag}]` : 'tagged'}`;
 }
 
 /** Stamps one program's new Type_Tag onto its calendar events and reports what happened. */
@@ -9657,6 +9697,15 @@ function setFlagBracketInDescription(description, wordsRegex, tagWord, on) {
 
   let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
     if (!wordsRegex.test(content)) return whole;
+    // A NOTE IS NOT A TAG, and this is the side of that rule that was missing.
+    // parseSettingsBrackets() reads a bracket only when the WHOLE bracket is
+    // tags (isTagOnlyBracket()), so "[Call the office for an appointment]" is
+    // prose and sets nothing. This function still counted it as "already
+    // tagged" and therefore wrote nothing to the calendar — so ticking
+    // Personalized_Assistance on such a program stamped 0 events, the sync
+    // read the calendar back, found no tag, and unticked the box. The two
+    // halves have to agree about what a tag is, or a checkbox cannot stick.
+    if (!isTagOnlyBracket(content)) return whole;
     sawTag = true;
     if (on) return whole; // already tagged — leave the author's spelling alone
     const parts = content.split(',').map(part => part.trim()).filter(Boolean);
@@ -9683,7 +9732,16 @@ function descriptionStillCarriesFlag(description, wordsRegex) {
   BRACKET_GROUP_REGEX.lastIndex = 0;
   let match;
   while ((match = BRACKET_GROUP_REGEX.exec(String(description || ''))) !== null) {
-    if (wordsRegex.test(match[1] || '')) { BRACKET_GROUP_REGEX.lastIndex = 0; return true; }
+    const content = match[1] || '';
+    // Tag-only brackets only, matching the parser (isTagOnlyBracket()) and
+    // setFlagBracketInDescription() above. A prose bracket that merely
+    // contains the word — "[Film Club selection: Casablanca]" — is not read as
+    // a tag by anything any more, so warning that it will re-tick the box is
+    // a false alarm about a note the untick never had any business touching.
+    if (isTagOnlyBracket(content) && wordsRegex.test(content)) {
+      BRACKET_GROUP_REGEX.lastIndex = 0;
+      return true;
+    }
   }
   return false;
 }
@@ -11008,6 +11066,9 @@ function importCalendarGroups(registrySheet, options) {
   // sync after they are ticked, not the sync after the program's next new
   // date.
   reconcileProgramFlagColumns(registrySheet, work.allGroups || []);
+  // The same gap, for the columns a tick of Personalized_Assistance implies
+  // rather than sets — see reconcileAssistanceSessionSettings().
+  reconcileAssistanceSessionSettings(registrySheet, work.allGroups || []);
   applyNoRegistrationEffects(registrySheet, work.allGroups || []);
 
   const summary = {
@@ -11830,6 +11891,129 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
   });
 
   if (changed > 0) log(`reconcileProgramFlagColumns: updated ${changed} flag cell(s) on the session table.`);
+  return changed;
+}
+
+/**
+ * The rest of what [Personalized Assistance] means to a session row:
+ * Slot_Minutes and Max_Capacity.
+ *
+ * WHY THIS IS A SEPARATE PASS, and why the feature looked broken without it.
+ * writeEventRegistryRows() only ever writes NEW rows, so a program whose
+ * twelve dates are already on the sheet is skipped wholesale by
+ * collectCalendarWork(). reconcileProgramFlagColumns() closes that gap for the
+ * CHECKBOXES — tick Personalized_Assistance and every row of the program shows
+ * it on the next sync — and closed it for nothing else. The tick therefore
+ * landed on a table whose Slot_Minutes stayed blank and whose Max_Capacity
+ * stayed whatever the program had as a date-based program (usually nothing, ie
+ * "🟢 Unlimited"), which reads exactly like an appointment program that did not
+ * take: the box is on, the sheet says unlimited, and nothing about the session
+ * knows it is now cut into slots.
+ *
+ * What it writes, per row, from the row's OWN start and end times — a group's
+ * events are not all the same length, and the slot count is arithmetic on the
+ * session, not on the program:
+ *   Slot_Minutes    resolveSlotMinutes(group), or blank once the tag comes off
+ *   Max_Capacity    one person per slot — see resolveAppointmentCapacity()
+ * and, so the tab is not left showing a stale count beside a fresh capacity,
+ * Remaining_Seats and Status are recomputed from the Active_Count already on
+ * the row. (The registration sync recomputes all three from the registrants
+ * themselves later; this just keeps the two columns from disagreeing in the
+ * meantime.)
+ *
+ * A program that has just LOST the tag is reconciled the same way, back to its
+ * stated cap or to uncapped — one reversal path, same pass.
+ *
+ * Returns how many rows changed.
+ */
+function reconcileAssistanceSessionSettings(registrySheet, groups) {
+  if (!groups || groups.length === 0) return 0;
+
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return 0;
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  const needed = ['Calendar_Source', 'Clean_Title', 'Event_Date', 'Event_End', 'Slot_Minutes',
+    'Max_Capacity', 'Active_Count', 'Remaining_Seats', 'Status'];
+  if (needed.some(header => !sheetMap[header])) return 0; // a workbook still on the old layout
+
+  // Programs whose tick has not reached the calendar yet are left alone, for
+  // the same reason reconcileProgramFlagColumns() leaves their checkbox alone:
+  // the groups were built from a calendar that has not been told yet.
+  const pendingKeys = pendingProgramKeysFor('Personalized_Assistance');
+
+  const expected = {};
+  groups.forEach(group => {
+    const spec = {
+      isAssistance: !!group.isAssistance,
+      slotMinutes: group.isAssistance ? resolveSlotMinutes(group) : 0,
+      statedCapacity: Number(group.capacity) || 0
+    };
+    group.sessions.forEach(session => {
+      expected[`${session.calendarId}|${group.cleanTitle}`] = spec;
+    });
+  });
+
+  let changed = 0;
+  headerRows.forEach((hRow, i) => {
+    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+    if (!zone) return;
+
+    const read = header => registrySheet.getRange(zone.start, sheetMap[header], zone.count, 1).getValues();
+    const sources = read('Calendar_Source');
+    const titles = read('Clean_Title');
+    const starts = read('Event_Date');
+    const ends = read('Event_End');
+    const actives = read('Active_Count');
+    const slotRange = registrySheet.getRange(zone.start, sheetMap['Slot_Minutes'], zone.count, 1);
+    const capRange = registrySheet.getRange(zone.start, sheetMap['Max_Capacity'], zone.count, 1);
+    const remainingRange = registrySheet.getRange(zone.start, sheetMap['Remaining_Seats'], zone.count, 1);
+    const statusRange = registrySheet.getRange(zone.start, sheetMap['Status'], zone.count, 1);
+    const slots = slotRange.getValues();
+    const caps = capRange.getValues();
+    const remaining = remainingRange.getValues();
+    const statuses = statusRange.getValues();
+
+    let touched = false;
+    for (let r = 0; r < zone.count; r++) {
+      const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
+      if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
+      if (pendingKeys.has(key)) continue;
+      const spec = expected[key];
+
+      let wantSlots = '';
+      let wantCap = spec.statedCapacity > 0 ? spec.statedCapacity : '';
+      if (spec.isAssistance) {
+        wantSlots = spec.slotMinutes;
+        const slotCount = buildAppointmentSlots(starts[r][0], ends[r][0], spec.slotMinutes).length;
+        const capacity = resolveAppointmentCapacity(spec.statedCapacity, slotCount, titles[r][0]);
+        wantCap = capacity > 0 ? capacity : '';
+      }
+      // Number(), not ===: a blank cell reads as '' and a written number as a
+      // number, and neither is worth a write when it already says the same.
+      if (Number(slots[r][0] || 0) === Number(wantSlots || 0) &&
+        Number(caps[r][0] || 0) === Number(wantCap || 0)) continue;
+
+      slots[r] = [wantSlots];
+      caps[r] = [wantCap];
+      const active = Number(actives[r][0]) || 0;
+      const cap = Number(wantCap) || 0;
+      remaining[r] = [cap > 0 ? Math.max(cap - active, 0) : ''];
+      statuses[r] = [cap > 0 ? computeStatus(active, cap) : '🟢 Unlimited'];
+      touched = true;
+      changed++;
+    }
+    if (touched) {
+      slotRange.setValues(slots);
+      capRange.setValues(caps);
+      remainingRange.setValues(remaining);
+      statusRange.setValues(statuses);
+    }
+  });
+
+  if (changed > 0) {
+    log(`reconcileAssistanceSessionSettings: updated appointment length/capacity on ${changed} session row(s).`);
+  }
   return changed;
 }
 
@@ -13912,12 +14096,16 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Slot_Minutes']] = group.isAssistance ? slotMinutes : '';
     row[map['Max_Per_Month']] = group.maxPerMonth || '';
 
-    // Capacity, per session: what the group says, or — on an appointment
-    // program that named no cap — how many slots this particular event holds.
+    // Capacity, per session. An appointment program's is arithmetic — one
+    // person per slot (APPOINTMENT_SLOT_CAPACITY), so however many slots fit
+    // between this event's start and end IS how many people can be seen.
+    // Everything else takes the group's stated cap, or none.
     const slotCount = group.isAssistance
       ? buildAppointmentSlots(startTime, endTime, slotMinutes).length
       : 0;
-    const capacity = group.capacity || slotCount;
+    const capacity = group.isAssistance
+      ? resolveAppointmentCapacity(group.capacity, slotCount, group.cleanTitle)
+      : group.capacity;
     const isUncapped = !capacity || capacity <= 0;
 
     row[map['Max_Capacity']] = isUncapped ? '' : capacity;
@@ -15912,6 +16100,175 @@ function rebuildAllFormsInPlace() {
 
   runInPlaceRebuildSlice();
   return { started: true, planned: plan.length };
+}
+
+/**
+ * MENU ENTRY: fix ONE form, now, in place.
+ *
+ * The same repair rebuildAllFormsInPlace() performs, aimed at a single form
+ * and finished before the dialog closes. That sweep is the right tool after a
+ * template change, when every form on the workbook is behind; it is the wrong
+ * one for the ordinary case, which is one form that has gone wrong — a
+ * question somebody edited, a date list that never caught up, an appointment
+ * form still showing the attendance grids. Rebuilding forty forms to correct
+ * one of them is a background sweep, a wait, and forty forms' worth of risk
+ * for a job that takes ten seconds.
+ *
+ * KEEPS THE LINK. The form keeps its ID, so every link already handed out goes
+ * on opening it — that is the whole reason this is the in-place rebuild rather
+ * than the destroy-and-replace one.
+ */
+function showFixOneFormDialog() {
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return;
+  }
+  const forms = listExistingForms();
+  if (forms.length === 0) {
+    toastIfPossible('No form on this workbook covers an upcoming session — run Sync Cal first.');
+    return;
+  }
+  const html = HtmlService.createHtmlOutput(buildFixOneFormHtml(forms))
+    .setWidth(560)
+    .setHeight(440);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Update One Form');
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildFixOneFormHtml(forms) {
+  const formTags = forms.map(f =>
+    `<option value="${escapeHtmlForDialog(f.value)}">${escapeHtmlForDialog(f.label)}</option>`).join('\n');
+
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  label.field { display: block; font-weight: bold; margin-top: 12px; }
+  input[type=text], select { width: 100%; padding: 6px; font-size: 13px; box-sizing: border-box; margin-top: 4px; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
+           font-size: 13px; cursor: pointer; margin-top: 14px; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #status { margin-top: 12px; min-height: 18px; font-weight: bold; line-height: 1.5; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+</style>
+<h3>Update one form</h3>
+<p class="hint">
+  Rebuilds a single registration form from the current template — its dates, its questions, and the
+  appointment times if it is a Personalized Assistance form. <b>The link keeps working:</b> the form
+  keeps its own ID, so anything already handed out still opens it.
+</p>
+<p class="hint">
+  Outstanding responses are imported first. What is lost is the per-question detail of a response
+  still sitting unimported on the form; rows already on ${escapeHtmlForDialog(SHEET_NAMES.REGISTRANT_DASH)}
+  are untouched. Anyone part-way through filling it in will have to start again.
+</p>
+
+<label class="field">Which form?
+  <select id="pickedForm">${formTags}</select>
+</label>
+<label class="field">…or paste a form URL or ID to use instead
+  <input type="text" id="formRef" placeholder="https://docs.google.com/forms/d/…/edit">
+</label>
+
+<button id="go" onclick="submit()">Update this form</button>
+<div id="status"></div>
+<script>
+  function submit() {
+    var ref = document.getElementById('formRef').value || document.getElementById('pickedForm').value;
+    if (!ref) { say('Pick a form, or paste its URL.', 'err'); return; }
+    document.getElementById('go').disabled = true;
+    say('Working… importing registrations, then rebuilding. This can take a moment.', '');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        document.getElementById('go').disabled = false;
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('go').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      })
+      .fixOneFormNow(ref);
+  }
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+</script>`;
+}
+
+/**
+ * Called from the dialog. Imports outstanding registrations, then rebuilds
+ * that one form in place from the current template.
+ *
+ * The import comes first for the same reason it heads every slice of the
+ * in-place sweep: a rebuild deletes the questions an unimported response
+ * hangs off, so a failed import stops the job rather than being stepped over.
+ *
+ * Returns a human-readable summary for the dialog to show.
+ */
+function fixOneFormNow(formRef) {
+  if (isBootstrapActive()) return `⚠️ ${bootstrapBusyMessage()}`;
+  if (isInPlaceRebuildActive()) {
+    return '⚠️ A rebuild of every form is already running — let it finish, it will reach this form too.';
+  }
+
+  const formId = extractFormId(formRef);
+  if (!formId) return '⚠️ That is not a form ID or an editable form URL — copy the /d/<id>/edit link.';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return '⚠️ No program dashboard yet — run Sync Cal first.';
+
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const describe = () => {
+    const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID')
+      .filter(row => String(row[map['Form_ID']] || '').trim() === formId);
+    if (rows.length === 0) return '';
+    const context = buildFormSessionContext(formId, rows, map, getSharedFormIdSet());
+    return `${context.titles.slice(0, 3).join(', ')} (${describeLocations(context.locations)})`;
+  };
+  const label = describe();
+  if (!label) {
+    return `⚠️ No session on ${SHEET_NAMES.PROGRAM_DASHBOARD} uses form ${formId}. ` +
+      `Only a form this workbook manages can be rebuilt from its template.`;
+  }
+
+  const outcome = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+    try {
+      syncRegistrationsInternal();
+    } catch (err) {
+      return { ok: false, message: `⚠️ Nothing was changed. The registrations on this form could not be ` +
+        `imported first (${err}), and rebuilding would have destroyed any that had not come across yet. ` +
+        `Run "Sync Registrations only", then try again.` };
+    }
+    try {
+      // force: true — the point of asking for one form by name is that the
+      // sync's own staleness test has already decided it looks fine.
+      const rebuilt = migrateFormsToCurrentTemplate(registrySheet, null, {
+        force: true, onlyFormIds: new Set([formId]), limit: 1
+      });
+      return { ok: true, rebuilt };
+    } catch (err) {
+      log(`⚠️ Could not update form ${formId} in place (${err}).`);
+      return { ok: false, message: `⚠️ Could not update "${label}" (${err}). The form is unchanged.` };
+    }
+  }, null);
+
+  if (!outcome) return '⚠️ A sync is running just now — try again in a moment.';
+  if (!outcome.ok) return outcome.message;
+
+  flushPersistentRegistries(); // the template version and link fingerprints written above
+  flushAdminDigest('Update one form');
+  if (outcome.rebuilt === 0) {
+    return `⚠️ "${label}" could not be rebuilt — see the log for what the form itself reported. ` +
+      `Its link and its registrations are unchanged.`;
+  }
+  log(`Updated form ${formId} ("${label}") in place from the menu.`);
+  return `✅ "${label}" was rebuilt from the current template. Its registration link is unchanged, and ` +
+    `its dates and questions now match the sheet.`;
 }
 
 /**
@@ -26926,6 +27283,31 @@ function buildAppointmentSlots(startTime, endTime, minutes) {
   // program with no capacity.
   if (slots.length === 0) push(start, end);
   return slots;
+}
+
+/**
+ * How many people ONE appointment session holds: one per slot
+ * (APPOINTMENT_SLOT_CAPACITY), which for a session is simply its slot count.
+ *
+ * A "[Cap: N]" typed on the event still wins where it can, because it says
+ * something the arithmetic cannot know — a provider keeping the last half hour
+ * free books six appointments in an eight-slot afternoon. What it cannot do is
+ * raise the number: a slot holds one person, so a cap ABOVE the slot count
+ * describes chairs that do not exist, and honouring it would let the form take
+ * registrations for times it has no times for. Those are clamped and logged,
+ * once, where somebody can see why the number on the sheet is not the number
+ * they typed.
+ */
+function resolveAppointmentCapacity(statedCapacity, slotCount, title) {
+  const seats = Math.max(0, Number(slotCount) || 0) * APPOINTMENT_SLOT_CAPACITY;
+  const stated = Number(statedCapacity) || 0;
+  if (stated <= 0) return seats;
+  if (seats > 0 && stated > seats) {
+    log(`ℹ️ "[Cap: ${stated}]" on "${title}" asks for more people than the ${seats} appointment(s) that fit in ` +
+      `the session — an appointment slot holds ${APPOINTMENT_SLOT_CAPACITY}. Using ${seats}.`);
+    return seats;
+  }
+  return stated;
 }
 
 /** "Mon, Oct 13, 2026 · Narberth @ 10:30 AM" — one choice on the time question. */

@@ -252,7 +252,7 @@ appointment-based.
 |---|---|---|
 | What you register for | a **date** | a **time on a date** |
 | The form asks | which dates, who's coming, who eats | which appointment time, and whether they'd take an earlier one |
-| Capacity | `[Cap: N]`, or unlimited | however many slots fit in the event, unless `[Cap: N]` says otherwise |
+| Capacity | `[Cap: N]`, or unlimited | **one person per slot** — so however many slots fit in the event. A *smaller* `[Cap: N]` still wins (keep the last half hour free); a bigger one is ignored, because a slot has no second chair |
 | Lunch | asked, if the date serves it | never asked |
 | Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
 | Guest questions | yes | **yes** — "individual or couple" is a real answer for a will |
@@ -263,6 +263,16 @@ somebody has booked **disappears from the form**, and the remaining times are
 offered earliest first — so the afternoon fills from the front on its own, which
 is what stops a provider being handed a schedule with holes in it. A partial
 slot at the end is never offered.
+
+**One person per slot, automatically.** You never type a cap on an appointment
+program: a slot holds one person, so the session's `Max_Capacity` on
+`Master_Program_Dashboard` is simply its number of slots — a 12:30–3:30 clinic
+in 30-minute slots shows **6**. Ticking `Personalized_Assistance` on a program
+whose dates are already on the dashboard updates those rows on the next
+**Sync Cal**; you don't have to wait for its next new date. Put `[Cap: 4]` on
+the event if the provider wants to see fewer people than the span allows —
+anything *larger* than the slot count is ignored and logged, since it would be
+offering times that don't exist.
 
 **Nobody can book the same time twice.** In the rare case where two people
 submit inside the same few minutes, neither is dropped: the second one is
@@ -1835,6 +1845,7 @@ Everything else is grouped by the job it belongs to.
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Apply Type / Club / No-Reg / Assistance Changes to Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
+| **🩹 Update One Form (keeps its link)…** | Rebuilds **one** form from the current template while you wait — its dates, its questions, and its appointment times. The form keeps its ID, so **every link already handed out goes on working**. This is the single-form version of 🔧 Admin ▸ Rebuild Forms In Place; reach for it when one form has gone wrong and you don't want to sweep the whole workbook. See [Rebuild forms in place](#rebuild-forms-in-place) |
 | **Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |
 
@@ -2139,6 +2150,14 @@ calendar, and the link is on the dashboard row for the new month's sessions.
 
 **🔧 Admin ▸ 🩹 Rebuild Forms In Place (keeps links)…** — the one to reach for
 once forms are live and their links are out in the world.
+
+> **One form, not all of them?** **📝 Programmes & Forms ▸ 🩹 Update One Form
+> (keeps its link)…** does exactly the same repair to a single form, and
+> finishes before the dialog closes. Pick the form from the list (or paste its
+> editing URL), press the button, and that's the job — no background sweep, no
+> other form touched. Everything below applies to it too: the link survives,
+> outstanding responses are imported first, and anyone part-way through filling
+> that form in has to start again.
 
 It does what the hourly sync's own repair does — rewrites a form's questions
 from the current template, in the same form, under the same ID and the same URL
