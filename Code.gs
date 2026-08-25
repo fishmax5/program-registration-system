@@ -9762,6 +9762,26 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
       if (otherCalendarId !== calendarId &&
         !(parseSettingsBrackets(existing).isShared || parsed.legacyIsShared)) return;
 
+      // A NO-OP EDIT IS STILL AN EDIT, and every one of them is a notification
+      // to everybody the event is shared with — the same rule
+      // setFlagBracketInDescription() follows when a tag is already there.
+      //
+      // [Regular] is the DEFAULT: an event whose description says nothing
+      // about grouping already means Regular, so appending the word tells the
+      // system nothing it did not know and tells every subscriber that the
+      // event changed. Applying "Monthly sign-up" from the review would
+      // otherwise rewrite the description of every event of every programme
+      // that was already monthly, which is most of them.
+      //
+      // NOT skipped when the description is silent but the TITLE still carries
+      // a legacy "[Grouped]": there the appended [Regular] is doing real work,
+      // because an explicit statement in the description is the only thing
+      // that overrides a bracket left in a title (see resolveEventSettings()).
+      const settings = resolveEventSettings(ev, parsed);
+      const statesGrouping = !!parseSettingsBrackets(existing).explicitGrouping;
+      const wantsGrouped = newTag === EVENT_TYPES.GROUPED;
+      if (!statesGrouping && settings.isFixed === wantsGrouped) return;
+
       const updated = setGroupingBracketInDescription(existing, newTag);
       if (updated === existing) return;
       ev.setDescription(updated);
