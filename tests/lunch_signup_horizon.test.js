@@ -58,6 +58,10 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.LUNCH_SIGNUP_LOOKAHEAD_MONTHS = LUNCH_SIGNUP_LOOKAHEAD_MONTHS;
 this.SHEET_NAMES = SHEET_NAMES;
+this.lunchOnlyRowTitle = lunchOnlyRowTitle;
+this.lunchOnlyProgramLabel = lunchOnlyProgramLabel;
+this.isLunchOnlyProgramTitle = isLunchOnlyProgramTitle;
+this.quickMarkTitleKey = quickMarkTitleKey;
 `, sandbox, { filename: 'Code.gs' });
 
 let failures = 0;
@@ -257,10 +261,14 @@ unchanged.getItems()[0].asListItem().getHelpText = () =>
 sandbox.applyAttendanceModeChoices(unchanged, {});
 check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
 
-// --- lunch rows come off the programme dashboard's view ---------------------
-// Hidden, never deleted: buildRegistryIndex() reads these rows to turn a lunch
-// form response back into dates, so a lunch form with no session rows cannot
-// be imported at all.
+// --- lunch rows are ON the programme dashboard's view -----------------------
+// They used to be hidden, on the argument that a meal is not a programme. That
+// was really an argument about the old NAME: thirty rows a month all reading
+// "🥡 Lunch Only (no program)" said nothing thirty times. Now each one reads
+// "Lunch @ Narberth — Chx Parm" and belongs on the schedule like any other
+// line — and because hiding is a property of the sheet's ROWS rather than of
+// their contents, a workbook that ever ran the old code has to be told to show
+// them again explicitly, on every render.
 const progMap = vm.runInContext('getIndexMap(HEADERS.Master_Program_Dashboard)', sandbox);
 const sessionRow = (eventId, title) => {
   const row = new Array(vm.runInContext('HEADERS.Master_Program_Dashboard.length', sandbox)).fill('');
@@ -271,36 +279,77 @@ const sessionRow = (eventId, title) => {
 };
 const lunchId = k => sandbox.makeLunchOnlyEventId(k, 'Narberth');
 
-const hidden = [];
+const shownBands = [];
 const fakeSheet = {
   getName: () => 'Master_Program_Dashboard',
-  hideRows: (start, count) => hidden.push(`${start}+${count}`)
+  showRows: (start, count) => shownBands.push(`${start}+${count}`)
 };
 
 // Two separate runs of lunch dates with a class between them, and one in Past.
 const upcomingRows = [
-  sessionRow(lunchId('2026-09-01'), '🥡 Lunch Only (no program)'),
-  sessionRow(lunchId('2026-09-02'), '🥡 Lunch Only (no program)'),
+  sessionRow(lunchId('2026-09-01'), 'Lunch @ Narberth — Chx Parm'),
+  sessionRow(lunchId('2026-09-02'), 'Lunch @ Narberth — Turkey Wrap'),
   sessionRow('cal-hash-1', 'Chair Yoga'),
-  sessionRow(lunchId('2026-09-08'), '🥡 Lunch Only (no program)')
+  sessionRow(lunchId('2026-09-08'), 'Lunch @ Narberth')
 ];
 const pastRows = [
   sessionRow('cal-hash-2', 'Bingo'),
-  sessionRow(lunchId('2026-08-04'), '🥡 Lunch Only (no program)')
+  sessionRow(lunchId('2026-08-04'), '🥡 Lunch Only (no program)') // written before the rename
 ];
-const count = sandbox.hideLunchOnlySessionRows(fakeSheet, progMap, upcomingRows, pastRows,
+const count = sandbox.showLunchOnlySessionRows(fakeSheet, progMap, upcomingRows, pastRows,
   { upcomingDataStart: 10, pastDataStart: 100 });
-check('every lunch row is hidden and no class is', count, 4);
-check('and consecutive ones go in one call, not one each', hidden, ['10+2', '13+1', '101+1']);
+check('every lunch row is shown and no class is touched', count, 4);
+check('and consecutive ones go in one call, not one each', shownBands, ['10+2', '13+1', '101+1']);
 
-// The summaries count programmes only — a hidden row that still counted would
-// make the table disagree with its own totals.
+// The summaries still count programmes only. "42 programmes this month"
+// counting thirty lunches is a number nobody can use, and the Today block
+// names what is RUNNING at a location — the meal has its own count on the
+// lunch dashboard.
 const scan = { countsByEventId: {}, activeNamesByEventId: {} };
 const programOnly = upcomingRows.filter(r => !sandbox.isLunchOnlyEventId(r[progMap['Event_ID']]));
 check('a lunch date is not a programme session',
   sandbox.computeProgramMetrics(programOnly, progMap, scan).totalSessions, 1);
 check('and never gets listed as what is on today',
   sandbox.computeProgramMetrics(programOnly, progMap, scan).totalPrograms, 1);
+
+// --- a lunch row says WHICH lunch ------------------------------------------
+// "🥡 Lunch Only (no program)" named the row by what it isn't, which is only
+// meaningful to somebody who already knows the row is generated. A person
+// reading the schedule wants the two facts the old name left out: where, and
+// what is being served.
+sandbox.getMealInfoForDate = (date, loc) =>
+  (loc === 'Narberth' ? { type: 'Hot', shorthand: 'Chx Parm', description: 'Chicken Parmesan' } : null);
+check('a lunch row is named for its location and its dish',
+  sandbox.lunchOnlyRowTitle('Narberth', '2026-09-16'), 'Lunch @ Narberth — Chx Parm');
+// A menu that has not been typed yet still gives a usable name, and gains the
+// dish on the next render without anything downstream noticing.
+check('a lunch with no menu row typed yet is still named',
+  sandbox.lunchOnlyRowTitle('Ashbridge', '2026-09-16'), 'Lunch @ Ashbridge');
+check('the FORM keeps the location-scoped name, not one Tuesday\'s dish',
+  sandbox.lunchOnlyProgramLabel('Narberth'), 'Lunch @ Narberth');
+
+// Recognized by SHAPE, never by equality: the dish changes whenever somebody
+// retypes a menu, and the old name is still sitting in registrant rows and
+// Program_Options entries written before the rename.
+check('a dated lunch title is recognized',
+  sandbox.isLunchOnlyProgramTitle('Lunch @ Narberth — Chx Parm'), true);
+check('so is a dishless one', sandbox.isLunchOnlyProgramTitle('Lunch @ Ashbridge'), true);
+check('and so is the name written before the rename',
+  sandbox.isLunchOnlyProgramTitle('🥡 Lunch Only (no program)'), true);
+check('a real programme is not', sandbox.isLunchOnlyProgramTitle('Chair Yoga'), false);
+
+// THE POINT OF THE CANONICAL KEY. Retyping Tuesday's menu renames the session
+// row, but the people already registered for it keep the name they were
+// written under — registrations are not rebuilt. Matching on the displayed
+// string would hide them from the desk and drop them into the walk-in path,
+// which would add a SECOND row for somebody who is already registered.
+check('every spelling of a lunch title matches every other',
+  [sandbox.quickMarkTitleKey('Lunch @ Narberth — Chx Parm'),
+    sandbox.quickMarkTitleKey('Lunch @ Narberth — Turkey Wrap'),
+    sandbox.quickMarkTitleKey('🥡 Lunch Only (no program)')]
+    .every(k => k === sandbox.quickMarkTitleKey('Lunch @ Ashbridge')), true);
+check('...and a programme still matches only itself',
+  sandbox.quickMarkTitleKey('Chair Yoga') === sandbox.quickMarkTitleKey('Lunch @ Narberth'), false);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

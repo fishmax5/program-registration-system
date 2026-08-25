@@ -4143,13 +4143,28 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
 
   const locations = locationsOfSessions(sessions);
   const titles = distinctSessionTitles(sessions);
+  // Computed up here because showTitle depends on it — see below.
+  const isLunchOnly = formRows.length > 0 &&
+    formRows.every(row => isLunchOnlyEventId(row[map['Event_ID']]));
   return {
     formId,
     sessions,
     locations,
     titles,
     showLocation: locations.length > 1 || !!(sharedFormIds && sharedFormIds.has(formId)),
-    showTitle: titles.length > 1,
+    // A DATE LABEL NEVER CARRIES A LUNCH ROW'S TITLE, and this is load-bearing
+    // rather than cosmetic. Every lunch row is named for its own dish now
+    // ("Lunch @ Narberth — Chx Parm"), so a month of them is a month of
+    // DISTINCT titles — which would otherwise flip showTitle on and put the
+    // dish inside the label a form response is matched back to
+    // (buildRegistryIndex()). The dish is the one part of that name that
+    // changes when somebody retypes a menu, so a label built from it would
+    // strand every registration made before the edit.
+    //
+    // Nothing is lost by leaving it out: the form's own name already says
+    // which location and month it covers, and each date row carries the day's
+    // menu as a hint anyway (formatDateLabelWithMeal()).
+    showTitle: titles.length > 1 && !isLunchOnly,
     // A form is a club form when the sessions on it are club sessions. On a
     // combined form (several programs, one of them a club) that is still true
     // of the form as a whole, which is the right answer: the club option has
@@ -4164,13 +4179,13 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
     // not misrepresented as an appointment.
     isAssistance: map['Personalized_Assistance'] !== undefined &&
       formRows.some(row => isAssistanceColumnValue(row[map['Personalized_Assistance']])),
-    // EVERY row, not some: a form mixing lunch-only sessions with real
-    // programs is not a lunch-only form, and shaping it as one would strip the
-    // attendance question off a program that needs it. syncLunchOnlySessions()
-    // never builds such a form, but a hand-edited Form_ID could, and the
-    // conservative reading is the one that leaves the ordinary form alone.
-    isLunchOnly: formRows.length > 0 &&
-      formRows.every(row => isLunchOnlyEventId(row[map['Event_ID']])),
+    // Computed above (EVERY row, not some: a form mixing lunch-only sessions
+    // with real programs is not a lunch-only form, and shaping it as one would
+    // strip the attendance question off a program that needs it.
+    // syncLunchOnlySessions() never builds such a form, but a hand-edited
+    // Form_ID could, and the conservative reading is the one that leaves the
+    // ordinary form alone).
+    isLunchOnly,
     programTitle: titles.length === 1 ? titles[0] : '',
     capacityHints: buildCapacityHintsFromRegistryRows(formRows, map)
   };
@@ -6016,14 +6031,17 @@ function syncLunchOnlySessions(registrySheet) {
     const sessions = entry.dateKeys.map(dateKey => ({
       date: lunchOnlySessionDate(dateKey),
       location: entry.location,
-      title: LUNCH_ONLY_PROGRAM_LABEL
+      // The LOCATION-scoped name, not the dated one: these sessions share a
+      // form covering a whole month, and a form named after one Tuesday's
+      // chicken would be wrong on every other date it carries.
+      title: lunchOnlyProgramLabel(entry.location)
     }));
 
     // A synthetic group, shaped exactly like the ones processCalendarGroup()
     // hands the form layer — minus `sessions[].event`, which is why
     // sessionsOfGroup() has a branch for `lunchOnlySessions`.
     const group = {
-      cleanTitle: LUNCH_ONLY_PROGRAM_LABEL,
+      cleanTitle: lunchOnlyProgramLabel(entry.location),
       monthLabel: entry.monthLabel,
       locations: [entry.location],
       isFixed: false,
@@ -6131,7 +6149,10 @@ function buildLunchOnlySessionRow(headers, map, dateKey, location, formInfo) {
   const row = new Array(headers.length).fill('');
   row[map['Event_Date']] = lunchOnlySessionDate(dateKey);
   row[map['Location']] = location;
-  row[map['Clean_Title']] = LUNCH_ONLY_PROGRAM_LABEL;
+  // THE ROW SAYS WHICH LUNCH IT IS. Rebuilt on every render, so a menu typed
+  // or corrected later shows up here without a migration — the row's identity
+  // is its Event_ID, never its name.
+  row[map['Clean_Title']] = lunchOnlyRowTitle(location, dateKey);
   row[map['Type_Tag']] = LUNCH_ONLY_TYPE_TAG;
   row[map['Active_Count']] = 0;
   row[map['Form_Response_Link']] = makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form');
@@ -13663,10 +13684,10 @@ function refreshFormForNewDates(formId, group, configInfo) {
  * renameFormForGroup().
  */
 function buildFormTitleForGroup(group) {
-  // The lunch-only form is named for what it does, not for the internal label
-  // its sessions carry: "🥡 Lunch Only (no program) - September 2026" is a
-  // sentence about this workbook's data model, and it would be the first thing
-  // a registrant read.
+  // The lunch-only form is named for what it does and for the whole span it
+  // covers, not for any one of its sessions: its rows are named per DATE now
+  // ("Lunch @ Narberth — Chx Parm"), and a form covering a month of dates must
+  // not be named after one Tuesday's chicken.
   if (group.isLunchOnly) {
     return `Lunch Sign-Up — ${group.locations[0] || ''}, ${group.monthLabel}`;
   }
@@ -19066,7 +19087,7 @@ function buildQuickMarkIndex() {
     if (namesBySession[sessionKey]) return;
     const bucket = { names: [], keys: [], times: [] };
     namesBySession[sessionKey] = bucket;
-    byLookup[`${choice.location}\u0000${choice.title}\u0000${choice.dateKey}`] = bucket;
+    byLookup[`${choice.location}\u0000${quickMarkTitleKey(choice.title)}\u0000${choice.dateKey}`] = bucket;
     sessions.push({
       value: choice.label, label: choice.label, group: choice.group, location: choice.location,
       // The two facts a REGULAR NEED is matched against. Parsing them back out
@@ -19100,9 +19121,12 @@ function buildQuickMarkIndex() {
     // This row belongs to its own session, and also to the dateless "program
     // only" entry for the same programme — the fallback choice a desk picks
     // when it doesn't matter which date. Same rule the per-session read used.
+    // Matched on the canonical title, so a lunch row whose dish was retyped
+    // still finds its session — see quickMarkTitleKey().
+    const titleKey = quickMarkTitleKey(title);
     const lookups = dateKey
-      ? [`${location}\u0000${title}\u0000${dateKey}`, `${location}\u0000${title}\u0000`]
-      : [`${location}\u0000${title}\u0000`];
+      ? [`${location}\u0000${titleKey}\u0000${dateKey}`, `${location}\u0000${titleKey}\u0000`]
+      : [`${location}\u0000${titleKey}\u0000`];
     lookups.forEach(lookup => {
       const bucket = byLookup[lookup];
       if (!bucket) return;
@@ -19220,7 +19244,7 @@ function orderQuickMarkChoices(choices) {
  *
  *     Chair Yoga · Wed, Sep 16
  *     Chair Yoga · Wed, Sep 23
- *     🥡 Lunch Only (no program) · Wed, Sep 16
+ *     Lunch @ Narberth — Chx Parm · Wed, Sep 16
  *
  * The list used to hold bare program names, which left the panel guessing
  * which session a tick meant — it picked the nearest one and said so in the
@@ -19337,7 +19361,9 @@ function collectKnownProgramChoices(location, registrantRows) {
       readLunchScheduleRows(menu).forEach(row => {
         const type = String(row[map['Type']] || '').trim();
         if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return; // nothing is being served
-        note(LUNCH_ONLY_PROGRAM_LABEL, row[map['Location']], row[map['Event_Date']], { lunchOnly: true });
+        const menuDate = coerceDate(row[map['Event_Date']]);
+        note(lunchOnlyRowTitle(row[map['Location']], menuDate ? formatDateKey(menuDate) : ''),
+          row[map['Location']], row[map['Event_Date']], { lunchOnly: true });
       });
     }
   } catch (err) {
@@ -19354,11 +19380,92 @@ function collectKnownProgramChoices(location, registrantRows) {
 }
 
 /**
- * The program name used for a meal eaten on a day with no programming behind
- * it. Stored verbatim in the Registrants tab's Event column, so it reads the
- * same on the sheet, in the dropdown, and on the printed sign-in sheet.
+ * What a meal with no programming behind it is CALLED, wherever a program name
+ * is expected: the session table, the Registrants tab's Event column, the Quick
+ * Mark dropdown, the printed sign-in sheet.
+ *
+ * "🥡 Lunch Only (no program)" — what this used to say — was written from the
+ * inside out. It names the row by what it ISN'T, which is only meaningful to
+ * somebody who already knows the row is generated; to everybody else it is a
+ * tab announcing that nothing is on. And thirty of them in a month all read
+ * identically, so the one thing a person actually wants from the row — which
+ * lunch, where — was the one thing the name did not say.
+ *
+ * So a lunch is named the way a program is: `Lunch @ Narberth — Chx Parm`.
+ * Two forms of it, because the two are used for different things:
+ *
+ *   lunchOnlyProgramLabel(location)          "Lunch @ Narberth"
+ *     Constant per location, so it can name a FORM that covers a whole month
+ *     of dates and a group of sessions that share one.
+ *
+ *   lunchOnlyRowTitle(location, dateKey)     "Lunch @ Narberth — Chx Parm"
+ *     Per date, because the dish is the fact a person reads the row for.
+ *     Falls back to the plain label when no menu row names a dish.
+ *
+ * The dish is NOT part of any identity. Every join in this file keys on
+ * Event_ID (makeLunchOnlyEventId()), and a title that changes when somebody
+ * retypes a menu must never be able to strand a registration — see
+ * isLunchOnlyProgramTitle(), which is how a title is recognized rather than
+ * compared.
  */
-const LUNCH_ONLY_PROGRAM_LABEL = '🥡 Lunch Only (no program)';
+const LUNCH_ONLY_LABEL_PREFIX = 'Lunch @ ';
+
+/** What the label read before it named the location and the dish. Still recognized, never written. */
+const LEGACY_LUNCH_ONLY_PROGRAM_LABEL = '🥡 Lunch Only (no program)';
+
+/** "Lunch @ Narberth" — the name of the lunch programme at one location. */
+function lunchOnlyProgramLabel(location) {
+  const loc = String(location || '').trim();
+  return loc ? `${LUNCH_ONLY_LABEL_PREFIX}${loc}` : 'Lunch';
+}
+
+/**
+ * "Lunch @ Narberth — Chx Parm" — one dated lunch row's own name.
+ *
+ * The dish is read off Lunch_Schedule at render time and is decoration only;
+ * a row whose menu has not been typed yet is simply "Lunch @ Narberth", and
+ * gains its dish on the next render without anything downstream noticing.
+ */
+function lunchOnlyRowTitle(location, dateKey) {
+  const base = lunchOnlyProgramLabel(location);
+  if (!dateKey) return base;
+  const meal = getMealInfoForDate(parseDateKey(dateKey), location);
+  const dish = meal ? String(meal.shorthand || meal.description || '').trim() : '';
+  return dish ? `${base}${MEAL_HINT_SEPARATOR}${dish}` : base;
+}
+
+/**
+ * Is `title` the name of a lunch-only session? Matched by SHAPE, not equality:
+ * the dish is part of the name and changes when a menu is retyped, and the old
+ * "🥡 Lunch Only (no program)" is still sitting in registrant rows and
+ * Program_Options entries written before the rename.
+ */
+function isLunchOnlyProgramTitle(title) {
+  const text = String(title || '').trim();
+  if (!text) return false;
+  return text === LEGACY_LUNCH_ONLY_PROGRAM_LABEL || text.indexOf(LUNCH_ONLY_LABEL_PREFIX) === 0;
+}
+
+/**
+ * The title a lunch row is MATCHED on, as opposed to the one it displays.
+ *
+ * The display name now carries the dish, and a dish is the one part of it that
+ * changes: somebody retypes Tuesday's menu and the session row is renamed on
+ * the next render — while the registrant rows written under the old name keep
+ * it, because registrations are not rebuilt. Matching on the displayed string
+ * would then hide those people from the desk and, worse, drop them into the
+ * walk-in path, which would add a SECOND row for somebody who is already
+ * registered.
+ *
+ * So every lunch title collapses to one key for matching purposes. Identity
+ * still ultimately rests on Event_ID; this is what keeps the dropdown honest
+ * in between.
+ */
+const LUNCH_ONLY_TITLE_MATCH_KEY = '\u0000lunch';
+
+function quickMarkTitleKey(title) {
+  return isLunchOnlyProgramTitle(title) ? LUNCH_ONLY_TITLE_MATCH_KEY : String(title || '').trim();
+}
 
 /**
  * Event_ID prefix for a lunch-only row. Deliberately NOT a computeEventId()
@@ -19397,7 +19504,7 @@ function parseQuickMarkProgramChoice(value) {
       dateKey = formatDateKey(parsed);
     }
   }
-  return { title, dateKey, lunchOnly: title === LUNCH_ONLY_PROGRAM_LABEL };
+  return { title, dateKey, lunchOnly: isLunchOnlyProgramTitle(title) };
 }
 
 /** Every name on Member_Roll — the standing directory, registered or not. */
@@ -19541,7 +19648,8 @@ function applyQuickMarkLocked(args) {
     values.forEach((row, i) => {
       if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
       if (location && String(row[map['Location']] || '').trim() !== location) return;
-      if (selection.title && String(row[map['Event']] || '').trim() !== selection.title) return;
+      if (selection.title &&
+        quickMarkTitleKey(row[map['Event']]) !== quickMarkTitleKey(selection.title)) return;
       const d = coerceDate(row[map['Event_Date']]);
       // A dated choice means THAT session and no other — the whole reason the
       // session list names dates. Only an undated choice falls back to the
@@ -20159,7 +20267,7 @@ function buildLunchOnlySession(dateKey, location) {
     date,
     dateKey: key,
     location: loc,
-    title: LUNCH_ONLY_PROGRAM_LABEL,
+    title: lunchOnlyRowTitle(loc, key),
     eventId: makeLunchOnlyEventId(key, loc),
     // No calendar event behind it, so no clock time to show.
     eventTime: '',
@@ -21895,19 +22003,13 @@ function renderProgramDashboard(force, options) {
   const reusableRegistrantRows = triageResult.registrantsMoved ? null : options.registrantRows;
   const registrantScan = scanRegistrants(registrantsSheet, reusableRegistrantRows);
 
-  // THE HEADLINE NUMBERS COUNT PROGRAMMES, AND A MEAL IS NOT ONE. The
-  // generated lunch sessions still go to the table writer below — they are
-  // written and then hidden (hideLunchOnlySessionRows()) — but they are kept
-  // out of both summaries, for the same reason they are kept off the view and
-  // one more: a hidden row that still counts makes the table disagree with its
-  // own totals, and somebody counting rows to check a number would get a
-  // different answer from the tab than the tab gives itself.
-  //
-  // It also fixes a sentence that read as a bug. The Today block names the
-  // programmes running at each location, and on any catered day the first one
-  // in the list was "🥡 Lunch Only (no program)" — a tab announcing "no
-  // program" as the thing on today. The day's meal is on the lunch dashboard,
-  // which is where somebody looks for it.
+  // THE HEADLINE NUMBERS COUNT PROGRAMMES, AND A MEAL IS NOT ONE. The lunch
+  // rows are written to the table below and are now plainly VISIBLE there —
+  // they read "Lunch @ Narberth — Chx Parm", which is a line on the schedule
+  // like any other — but they stay out of both summaries. "42 programmes this
+  // month" counting thirty lunches is a number nobody can use, and the Today
+  // block names what is RUNNING at each location: the meal is on the lunch
+  // dashboard, in a count of its own, which is where somebody looks for it.
   const programSessionRows = sessionRows.filter(row => !isLunchOnlyEventId(row[map['Event_ID']]));
   const todayData = buildTodayAtLocations(programSessionRows, map, registrantScan);
   const metrics = computeProgramMetrics(programSessionRows, map, registrantScan);
@@ -22204,31 +22306,30 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
 
 /** Clears the sheet and redraws all sections in order, then applies all formatting. */
 /**
- * Takes the generated lunch-only sessions off Master_Program_Dashboard's VIEW.
+ * Puts the generated lunch rows BACK ON SCREEN — the inverse of what used to
+ * happen here, and the reason this function still exists rather than simply
+ * being deleted.
  *
- * WHY THEY ARE HIDDEN AND NOT DELETED, which is the only question that matters
- * here. "🥡 Lunch Only (no program)" is not a programme and does not belong on
- * the tab staff read to see what is running — a month of Tuesdays at two
- * locations is thirty rows of noise between them and the classes. But the row
- * is not decoration: it is the ANCHOR the whole lunch sign-up path hangs off.
- * buildRegistryIndex() reads this table to turn a form response back into
- * dates, so a lunch form whose sessions are not here cannot be imported at
- * all — every meal somebody ordered online would land nowhere. The
- * registration-horizon pass reads it for the same reason (it is the only place
- * that knows which dates a lunch form covers), and syncLunchOnlySessions()
- * reads the rows' Form_ID to find the form it already built, which is what
- * survives a workbook losing its Script Properties.
+ * They were hidden on the argument that a meal is not a programme and thirty
+ * identical rows a month are noise between staff and the classes. Both halves
+ * of that were really about the old NAME: every row read "🥡 Lunch Only (no
+ * program)", so thirty of them said nothing thirty times and the tab appeared
+ * to announce that nothing was on. A row that reads "Lunch @ Narberth — Chx
+ * Parm" is a line on the schedule like any other, and hiding the day's lunch
+ * from the tab staff read to see what is running was never what anybody
+ * wanted.
  *
- * So the rows stay exactly where they are and stop being LOOKED at, which is
- * the same trade collapseOldPastMonths() makes one section below: hidden, not
- * gone, still read by every getValues() in this file, still searchable, and
- * back on screen with "Show All Past Rows". The banner says so, because a run
- * of skipped row numbers with no explanation reads as lost data.
+ * SHOWING HAS TO BE DONE, not merely not-hidden. Hiding is a property of the
+ * sheet's ROWS, not of their contents: it survives clear() and every rewrite
+ * of the tab, so a workbook that has ever run the old code would keep its
+ * lunch rows invisible forever unless something explicitly shows them. This is
+ * that something, and it runs on every render — which also undoes a row
+ * somebody hid by hand.
  *
- * Hidden in RUNS rather than one row at a time — a month of lunches is one
- * hideRows() call per unbroken stretch, not thirty.
+ * Shown in RUNS, for the same reason they were hidden in runs: a month of
+ * lunches is one showRows() call per unbroken stretch, not thirty.
  */
-function hideLunchOnlySessionRows(sheet, map, upcoming, past, result) {
+function showLunchOnlySessionRows(sheet, map, upcoming, past, result) {
   const bands = [];
   const collect = (rows, startRow) => {
     let runStart = -1;
@@ -22247,16 +22348,16 @@ function hideLunchOnlySessionRows(sheet, map, upcoming, past, result) {
   collect(upcoming, result.upcomingDataStart);
   collect(past, result.pastDataStart);
 
-  let hidden = 0;
+  let shown = 0;
   bands.forEach(band => {
     try {
-      sheet.hideRows(band.start, band.count);
-      hidden += band.count;
+      sheet.showRows(band.start, band.count);
+      shown += band.count;
     } catch (err) {
-      log(`ℹ️ Could not hide ${band.count} lunch-only row(s) at row ${band.start} (${err}).`);
+      log(`ℹ️ Could not show ${band.count} lunch row(s) at row ${band.start} (${err}).`);
     }
   });
-  return hidden;
+  return shown;
 }
 
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
@@ -22326,16 +22427,11 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   setEventTimeFormulas(sheet, result.upcomingDataStart, upcoming.length, map, dateColLetter);
   setEventTimeFormulas(sheet, result.pastDataStart, past.length, map, dateColLetter);
 
-  // THE LUNCH SIGN-UP ROWS COME OFF THE VIEW, and only off the view — see
-  // hideLunchOnlySessionRows().
-  const hiddenLunchRows = hideLunchOnlySessionRows(sheet, map, upcoming, past, result);
-  if (hiddenLunchRows > 0) {
-    sheet.getRange(result.upcomingHeaderRow - 1, 1)
-      .setValue(`🔜 Upcoming Sessions  ·  ${hiddenLunchRows} lunch-only hidden`)
-      .setNote(`${hiddenLunchRows} "${LUNCH_ONLY_PROGRAM_LABEL}" row(s) are hidden — a meal is not a programme.\n\n` +
-        `They are still on this tab, and their sign-up links are pinned at the top of ` +
-        `${SHEET_NAMES.LUNCH_DASHBOARD}. "Show All Past Rows" on the ${APP_MENU_NAME} menu brings them back.`);
-  }
+  // THE LUNCH ROWS ARE ON THE VIEW, and are put back onto it if an older
+  // render (or a person) hid them — see showLunchOnlySessionRows(). The banner
+  // says nothing about them any more because there is nothing left to explain:
+  // they read as what they are.
+  showLunchOnlySessionRows(sheet, map, upcoming, past, result);
 
   const zones = [
     { start: result.upcomingDataStart, count: upcoming.length },
@@ -23320,7 +23416,7 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
   if (rows.length > shown.length) {
     values.push(['…', '…', '', '',
       `+ ${rows.length - shown.length} later month(s) — their links are on ${SHEET_NAMES.PROGRAM_DASHBOARD}, ` +
-      `on any "${LUNCH_ONLY_PROGRAM_LABEL}" row.`]);
+      `on any "${LUNCH_ONLY_LABEL_PREFIX}…" row.`]);
   }
   const range = sheet.getRange(plan.signUpDataStart, 1, values.length, LUNCH_SIGNUP_HEADERS.length);
   range.setValues(values).setVerticalAlignment('middle');

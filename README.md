@@ -57,9 +57,11 @@ It also:
   of the lunch dashboard**, which is where staff are standing when somebody
   asks for them, and a menu typed **up to six months ahead** gets its form and
   its link straight away, so the link exists before the newsletter advertising
-  it does; the generated lunch dates stay off the programme dashboard's view
-  and out of its participation numbers — a meal is not a programme — while
-  remaining in the table underneath, where the sign-up import needs them;
+  it does; each generated lunch date sits on the programme dashboard named for
+  its place and its dish (`Lunch @ Narberth — Chx Parm`) rather than as one of
+  thirty identical rows reading "Lunch Only (no program)", and stays out of the
+  participation numbers and the Today block — a meal is not a programme, but it
+  is worth reading;
 - lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
   per person per date and location, with their programs, phone, `Hot`/`Cold`
   and whether they've been handed their meal — built from the same pass as the

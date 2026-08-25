@@ -612,7 +612,7 @@ Only the **four soonest** location/month forms are pinned, with a line saying
 how many more there are. Everything above the schedule is frozen, so each
 pinned row is a row of screen the schedule doesn't get; the later months are
 on **Master_Program_Dashboard** like every other form, on any
-`🥡 Lunch Only (no program)` row.
+`Lunch @ …` row.
 
 See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) for what
 registrants see and how it reaches the counts.
@@ -785,8 +785,8 @@ item on the menu, because on a serving day it's the only one you need.
    **Upcoming** (soonest first) and **Past** (most recent first): *"Chair Yoga
    · Wed, Sep 16"*. Every program at that location is offered, past and
    present, not just the ones somebody has already registered for. The list
-   also includes **🥡 Lunch Only (no program)** for each catered day, for
-   someone who came in only for the meal.
+   also includes the day's lunch — *"Lunch @ Narberth — Chx Parm · Wed, Sep
+   16"* — for someone who came in only for the meal.
 3. **Name** — the people registered for **that session** first, then
    **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
    a name that's on neither.
@@ -926,8 +926,8 @@ whatever form currently covers it — forever, until somebody unticks them.
 #### Signing someone up for lunch at the desk
 
 Somebody comes to the front desk on Monday and wants lunch a week Thursday.
-Pick the location, pick **that Thursday's** session (or **🥡 Lunch Only (no
-program)** if nothing else is running), pick or type their name, tick **Sign up
+Pick the location, pick **that Thursday's** session (or that day's
+**Lunch @ …** entry if nothing else is running), pick or type their name, tick **Sign up
 for lunch**, press **Sign up**.
 
 They're now on the order for that day: `Lunch_Status` = `Needed`,
@@ -1730,7 +1730,8 @@ its first line, that this books a meal and **not** a programme.
 **Where the registrations land.** Exactly where every other registration
 lands: rows on **Registrant_Dash**, a name on
 [Lunch_Roster](#3-lunch_roster), and a number in `Registered_Count` on the
-lunch dashboard. The `Event` column reads `🥡 Lunch Only (no program)`.
+lunch dashboard. The `Event` column reads `Lunch @ Narberth — Chx Parm` — the
+place and the dish, the same as the session row it came from.
 
 A few things worth knowing:
 
@@ -1738,16 +1739,28 @@ A few things worth knowing:
   not two** — the counts are per person (see
   [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
   row shows both under `Programs` with `Requests_Merged` = 1.
-- The dates are **on** Master_Program_Dashboard as sessions like any other,
-  under `🥡 Lunch Only (no program)`, with a blank `Calendar_Source` — because
-  there is no calendar event behind them. That blank is what stops them being
-  swept into triage. They are **hidden** there, though, and left out of the
-  Today block and the participation metrics: a meal is not a programme, and a
-  month of them at two locations is thirty rows between you and the classes.
-  The Upcoming banner says how many are hidden, and **🕓 Show All Past Rows**
-  brings them back into view. They are only hidden, never deleted — the import
-  reads those rows to turn a lunch form response back into dates, so a lunch
-  form with no session rows could not be imported at all.
+- The dates are **on** Master_Program_Dashboard as sessions like any other and
+  **visible there**, each named `Lunch @ <location> — <dish>`, with a blank
+  `Calendar_Source` — because there is no calendar event behind them. That
+  blank is what stops them being swept into triage.
+
+  They used to be **hidden**, on the grounds that a meal is not a programme.
+  That was really about the old name: thirty rows a month all reading
+  `🥡 Lunch Only (no program)` said nothing thirty times, and made the tab
+  look like it was announcing that nothing was on. A row that says
+  `Lunch @ Narberth — Chx Parm` is a line on the schedule like any other, so
+  they stay on screen. (If yours are still hidden from before, they're
+  unhidden automatically on the next render.)
+
+  They're still left out of the **Today block** and the **participation
+  metrics** — "42 programmes this month" counting thirty lunches is a number
+  nobody can use, and the meal has its own count on the lunch dashboard.
+
+- **The dish in the name is decoration, not identity.** Every join in the
+  workbook keys on the row's hidden `Event_ID`, so retyping a menu renames the
+  row on the next render and nothing detaches — the people already registered
+  for that meal keep their rows, and Quick Mark still finds them under the new
+  name.
 - For the same reason, **`Type_Tag`, `Club` and `No_Registration` can't be
   edited on those rows.** They're instructions to a calendar event that doesn't
   exist. The workbook tells you so and puts the cell back; change the date on
