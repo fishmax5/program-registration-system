@@ -1429,6 +1429,31 @@ const HEADERS = {
   // tick on the day, and they sit immediately after Name so marking a row is
   // one glance and one click, with no horizontal scrolling.
   //
+  // MEALS_ORDERED is HOW MANY MEALS THIS PERSON IS DOWN FOR, and it is the
+  // planned counterpart of the consumed counts behind it. One row used to mean
+  // exactly one meal — buildDashboardRollup() counted PEOPLE and the kitchen
+  // ordered one per head — which cannot express the standing orders the desk
+  // actually takes: Joan orders four meals every lunch day, all of them hers,
+  // and the Ginsburgs collect three between two people. The only way to say
+  // that was to invent guests ("Extra Meal 1", "Extra Meal 2"), which puts
+  // people who do not exist on the roster, the sign-in sheet and the party
+  // count.
+  //
+  // BLANK MEANS ONE — the rule the workbook has always followed silently, so
+  // turning this column on moves no number in any existing workbook. A number
+  // typed here is how many meals that registrant is ordering, and it is what
+  // Master_Lunch_Dashboard's Registered_Count adds up (see
+  // readRegistrantMealsOrdered() and countLunchMeals()).
+  //
+  // It is a count of MEALS, never of people: Party_Size still says how many
+  // human beings arrived together, Lunch_Roster still lists one row per
+  // person, and four meals for Joan is one name with a 4 beside it.
+  //
+  // To order NO meal, set Lunch_Status to "No Lunch" — that is the column that
+  // says whether this registrant eats at all, and a 0 here would be a second,
+  // quieter way to say the same thing (readRegistrantMealsOrdered() therefore
+  // floors a lunch-needing row at one).
+  //
   // THE FOUR MEAL COUNTS behind them (plus Meals_In_Fridge) are what let ONE
   // PERSON account for SEVERAL DIFFERENT MEALS on the same day, which is what
   // actually happens at the counter: Joe eats the day-1 hot meal in the dining
@@ -1485,6 +1510,7 @@ const HEADERS = {
   // staff ring when a program moves.
   Registrant_Dash: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
+    'Meals_Ordered',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
@@ -1496,6 +1522,15 @@ const HEADERS = {
   // Registered_Count (what the forms say) and Served_Confirmed (what was
   // actually ticked off on the Registrants tab) sit side by side on purpose —
   // planned versus real is the comparison this tab exists to support.
+  //
+  // Registered_Count counts MEALS and Served_Confirmed counts PEOPLE, and the
+  // difference is deliberate rather than an oversight. What the kitchen orders
+  // is meals, and one person can be down for four of them (Meals_Ordered on
+  // Registrant_Dash) — so a day where Joan orders four and nobody else eats
+  // reads 4 registered. What a tick on Lunch_Served records is that a PERSON
+  // was handed their food; how much of it they took is the four consumption
+  // counts beside it, which is the honest place for that number. Lunch_Roster
+  // shows both per person, which is where the two are reconciled by eye.
   //
   // The consumption columns are no longer hand-typed here (see
   // LUNCH_DASHBOARD_MANUAL_COLUMNS): they're tallied by buildDashboardRollup()
@@ -1558,9 +1593,16 @@ const HEADERS = {
    * person asked for lunch on three different program forms for this one day
    * and is being ordered ONE meal. That de-duplication used to be done by hand
    * every morning; the column is what shows it happened.
+   *
+   * Meals is the other half of that audit, and the reason the dashboard's
+   * Registered_Count can be larger than the number of rows here: it is how
+   * many meals this ONE PERSON is down for (Meals_Ordered on Registrant_Dash).
+   * Joan is one row reading 4, not four rows — which is what the desk needs to
+   * see when it hands the meals over, and what stops "Extra Meal 1" and "Extra
+   * Meal 2" being typed into the guest boxes as though they were people.
    */
   Lunch_Roster: [
-    'Event_Date', 'Location', 'Name', 'Lunch_Type', 'Lunch_Served',
+    'Event_Date', 'Location', 'Name', 'Lunch_Type', 'Meals', 'Lunch_Served',
     'Registered', 'Requests_Merged', 'Programs', 'Phone', 'Source'
   ],
   // Now one row per Event_Date PER LOCATION. Type includes "Not Serving"
@@ -1588,6 +1630,7 @@ const HEADERS = {
   // landing in triage rows automatically, with no per-column wiring.
   Deleted_Event_Triage: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
+    'Meals_Ordered',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
     'Meal_Source',
     'Phone', 'Email',
@@ -1786,6 +1829,14 @@ const REGISTRANT_MEAL_COUNT_COLUMNS = [
  * One list, so the rollup, the printed sign-in sheet and the dashboard's
  * numeric formatting can never drift apart on what counts as what.
  */
+/**
+ * Every whole-number meal quantity on a registrant row: what they ORDERED,
+ * then what they actually took. One list because they get the same treatment
+ * on the sheet — integer validation, no free text, centred — and because a
+ * column that is a count of meals should look like one wherever it appears.
+ */
+const REGISTRANT_MEAL_QUANTITY_COLUMNS = ['Meals_Ordered'].concat(REGISTRANT_MEAL_COUNT_COLUMNS);
+
 const MEAL_COUNT_TO_DASHBOARD_COLUMN = {
   Day1_Dined_In: 'Day_1_In-Person',
   Day1_Taken_Out: 'Day_1_Takeaway',
@@ -2185,7 +2236,7 @@ function getOrCreateFormsFolder() {
 // Back button instead of the browser's answer-destroying one
 // (GUEST_ORDER_REMINDER), and the guest columns say outright that a solo
 // registrant should ignore them (NO_GUESTS_NOTE).
-const TEMPLATE_VERSION = 6;
+const TEMPLATE_VERSION = 7;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
@@ -2200,6 +2251,21 @@ const TEMPLATE_ITEM_TITLES = {
   ADDITIONAL_NOTES: 'Anything Else?',
   ATTENDANCE_MODE: 'How would you like to sign up?',
   ALL_DATES_LUNCH_PEOPLE: 'Who Needs Lunch? (Applies to Every Date)',
+  /**
+   * The extra-meals question, asked once per submission beside the lunch
+   * question on whichever branch page the respondent lands on.
+   *
+   * It exists because a meal and a person are not the same thing and the form
+   * had no way to say so: somebody who collects four meals could only be
+   * entered as four people, which puts three invented names on the roster, the
+   * sign-in sheet and the party count. See Meals_Ordered on Registrant_Dash.
+   *
+   * Answered ONCE and applied to every date on the submission that asked for
+   * lunch, which is what a standing order actually is — "four meals, every
+   * lunch day". A one-off extra on a single date is a Quick Mark edit or a
+   * number typed on the row, not a question worth asking sixteen times.
+   */
+  EXTRA_MEALS: 'Extra Meals (Beyond One Each)',
   /**
    * The one question an appointment form asks instead of the roster grids —
    * see ASSISTANCE_TAG. It is NOT built by the template (the template belongs
@@ -2541,11 +2607,18 @@ const TEMPLATE_GRID_PLACEHOLDER_ROW = '(dates will be filled in automatically)';
  *
  *   "Sign Up For Every Date"  ALL_DATES_LUNCH_PEOPLE checkbox (who eats,
  *                             applied to every session date, including dates
- *                             added to a Grouped series later)    -> SUBMIT
+ *                             added to a Grouped series later)
+ *                             + EXTRA_MEALS                       -> SUBMIT
  *
  *   "Pick Your Dates"         ATTENDANCE_GRID + LUNCH_GRID roster grids,
  *                             dates as rows and PERSON_COLUMN_LABELS as
- *                             columns                             -> SUBMIT
+ *                             columns
+ *                             + EXTRA_MEALS                       -> SUBMIT
+ *
+ * EXTRA_MEALS is on both branch pages because a respondent meets exactly one of
+ * them, and it goes wherever the lunch question goes: syncLunchQuestionsOnForm()
+ * strips and restores all three together, since "how many extra?" is a question
+ * about a meal nobody is serving on a form that offers none.
  *
  * Both branch pages end with Allergies and an "Anything Else?" catch-all whose
  * HELP TEXT carries the per-location footer note.
@@ -2647,6 +2720,7 @@ function addTemplateItemsToForm(form) {
   // --- Branch A: every date ---------------------------------------------
   const allDatesPage = form.addPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.ALL_DATES);
   addAllDatesLunchItem(form);
+  addExtraMealsItem(form);
   addClosingQuestions(form);
   allDatesPage.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
@@ -2654,6 +2728,7 @@ function addTemplateItemsToForm(form) {
   const specificPage = form.addPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   addAttendanceGridItem(form);
   addLunchGridItem(form);
+  addExtraMealsItem(form);
   addClosingQuestions(form);
   specificPage.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
@@ -2670,6 +2745,17 @@ function addTemplateItemsToForm(form) {
 
 /** The "no guests" choice. A word rather than "0" — it is an answer, not a quantity. */
 const GUEST_COUNT_NONE_LABEL = 'Just me — no guests';
+
+/** The "no extras" choice on the extra-meals question, for the same reason. */
+const EXTRA_MEALS_NONE_LABEL = 'None — one meal each is right';
+
+/**
+ * The largest extra order a form will take. Not a limit on what the workbook
+ * can hold — staff type any number into Meals_Ordered — but a limit on what a
+ * public form will accept without a person in the loop, the same judgement
+ * MAX_GUESTS makes: an order of thirty meals is a conversation, not a tick.
+ */
+const MAX_EXTRA_MEALS = 6;
 
 /** Page title for the N-guest page. Distinct per count so form.getItems() lookups are unambiguous. */
 function guestPageTitle(guestCount) {
@@ -2791,6 +2877,27 @@ function addAllDatesLunchItem(form) {
     .setChoiceValues(PERSON_COLUMN_LABELS)
     .setHelpText('Tick everyone who will be eating. This applies only to the dates lunch is ' +
       'actually served on.\n\n' + NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER);
+}
+
+/**
+ * The extra-meals question. A LIST, not a free-text number: an open box
+ * collects "2 for my sister", "maybe 1?" and "n/a", none of which is a number,
+ * and this answer goes straight into a count the kitchen orders against.
+ *
+ * "None" leads, because it is the true answer for almost everyone and a
+ * required question whose first choice is a number invites a stray pick.
+ * Appended wherever the cursor is — callers position it.
+ */
+function addExtraMealsItem(form) {
+  const choices = [EXTRA_MEALS_NONE_LABEL];
+  for (let n = 1; n <= MAX_EXTRA_MEALS; n++) choices.push(String(n));
+  return form.addListItem().setTitle(TEMPLATE_ITEM_TITLES.EXTRA_MEALS)
+    .setChoiceValues(choices)
+    .setHelpText('Everyone you have listed above who is having lunch already gets one meal. ' +
+      'Only answer this if you need MORE than that — an extra meal to take home, or meals you ' +
+      'collect for yourself on top of your own. They are added to the person filling in this form, ' +
+      `on every date above that you asked for lunch on. Need more than ${MAX_EXTRA_MEALS} extra? ` +
+      `Please call us on ${CENTER_PHONE}.`);
 }
 
 /** The per-date attendance roster grid. Rows are set later by applyFormDateLabels(). */
@@ -4325,7 +4432,11 @@ function withFormRetry(label, fn) {
  */
 function removeLunchQuestionsFromForm(form, locations, reason) {
   const where = describeLocations(Array.isArray(locations) ? locations : [locations]);
-  const doomed = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE];
+  // The extra-meals question goes with them: it is a question ABOUT the meal,
+  // and asking how many extra of a meal nobody is serving is worse than not
+  // asking at all.
+  const doomed = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.EXTRA_MEALS];
   const removed = deleteFormItems(form,
     form.getItems().filter(item => doomed.indexOf(item.getTitle()) !== -1),
     `the ${where} form`);
@@ -4367,8 +4478,75 @@ function restoreLunchQuestionsOnForm(form) {
     restored++;
   }
 
+  // One extra-meals question per BRANCH PAGE, the same as the template builds:
+  // a respondent meets exactly one of the two pages, and a single shared item
+  // could only live on one of them.
+  [TEMPLATE_PAGE_TITLES.ALL_DATES, TEMPLATE_PAGE_TITLES.SPECIFIC_DATES].forEach(pageTitle => {
+    if (countExtraMealsItemsOnPage(form, pageTitle) > 0) return;
+    const item = addExtraMealsItem(form);
+    // It belongs immediately after the last question on its page that is not
+    // one of the two closing ones — i.e. right behind the lunch question,
+    // which is what it is a follow-up to.
+    const anchorIdx = lastLunchQuestionIndexOnPage(form, pageTitle);
+    if (anchorIdx !== -1) form.moveItem(item.getIndex(), anchorIdx + 1);
+    restored++;
+  });
+
   if (restored > 0) log(`Restored ${restored} lunch question(s) to form ${form.getId()} — it has catered dates again.`);
   return restored;
+}
+
+/**
+ * The item indexes that make up ONE page of a form: everything after that
+ * page's break, up to the next one (or the end).
+ *
+ * Every other lookup in this file finds an item by title across the whole
+ * form, which is exactly what will not do for the extra-meals question: there
+ * are legitimately TWO of it, one per branch page, and a form-wide "is it
+ * there?" answers yes when the page a respondent is actually on has lost it.
+ */
+function formPageItemRange(form, pageTitle) {
+  const items = form.getItems();
+  const start = items.findIndex(it =>
+    it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === pageTitle);
+  if (start === -1) return null;
+  let end = items.length;
+  for (let i = start + 1; i < items.length; i++) {
+    if (items[i].getType() === FormApp.ItemType.PAGE_BREAK) { end = i; break; }
+  }
+  return { items, start, end };
+}
+
+/** How many extra-meals questions one branch page carries — 0 or 1 in a healthy form. */
+function countExtraMealsItemsOnPage(form, pageTitle) {
+  const range = formPageItemRange(form, pageTitle);
+  if (!range) return 0;
+  let count = 0;
+  for (let i = range.start + 1; i < range.end; i++) {
+    if (range.items[i].getTitle() === TEMPLATE_ITEM_TITLES.EXTRA_MEALS) count++;
+  }
+  return count;
+}
+
+/**
+ * The index of the last LUNCH question on a branch page — the grid on the
+ * specific-dates page, the who-eats checkbox on the all-dates one — or the
+ * page break itself when neither is there yet.
+ *
+ * Used to park the extra-meals question directly behind whatever it is a
+ * follow-up to, so a restored item does not land at the bottom of the form
+ * under "Anything Else?" where it reads as a question about something else.
+ */
+function lastLunchQuestionIndexOnPage(form, pageTitle) {
+  const range = formPageItemRange(form, pageTitle);
+  if (!range) return -1;
+  const lunchTitles = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID];
+  let found = range.start;
+  for (let i = range.start + 1; i < range.end; i++) {
+    if (lunchTitles.indexOf(range.items[i].getTitle()) !== -1) found = i;
+  }
+  return found;
 }
 
 /**
@@ -14556,6 +14734,28 @@ function getCustomAnswersResponse(formIndex, response) {
 }
 
 /**
+ * How many EXTRA meals one submission asked for, beyond one per person listed.
+ *
+ * Zero for every form that does not carry the question (an appointment form, a
+ * form whose location never caters, every response submitted before the
+ * question existed) — getResponseValueByTitle() returns '' for all of those,
+ * which is the same answer as "None" and needs no special case.
+ *
+ * CAPPED at MAX_EXTRA_MEALS rather than trusted: the question is a list of
+ * fixed choices, so a number above the cap can only come from an edited form,
+ * and an order of ninety meals should reach a person before it reaches the
+ * kitchen. Anything unparseable is zero — the safe direction here, since the
+ * person still gets the one meal their registration is.
+ */
+function readExtraMealsResponse(formIndex, response) {
+  const raw = String(getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.EXTRA_MEALS) || '').trim();
+  if (!raw || raw === EXTRA_MEALS_NONE_LABEL) return 0;
+  const amount = Math.floor(Number(raw) || 0);
+  if (!(amount > 0)) return 0;
+  return Math.min(amount, MAX_EXTRA_MEALS);
+}
+
+/**
  * Resolves the people on one submission from the name fields alone. There
  * is no guest-count question any more: the headcount IS how many guest
  * name fields were filled in, which makes the old "said 3, named 2,
@@ -14600,6 +14800,10 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
   // both paths below carry it, and kept OUT of Admin_Notes so a staff note and
   // a form answer never turn into each other.
   const customAnswers = getCustomAnswersResponse(formIndex, response);
+  // Asked once, applied to every date on this submission that wants lunch, and
+  // attributed to the PERSON FILLING THE FORM IN — see EXTRA_MEALS. A guest is
+  // one guest and one meal; the extras belong to whoever collects them.
+  const extraMeals = readExtraMealsResponse(formIndex, response);
 
   // AN APPOINTMENT FORM IS RECOGNIZED BY ITS OWN SHAPE, not by a flag passed
   // in: a form carrying the time question is one, and nothing else is. That
@@ -14621,7 +14825,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     return processAllDatesResponse({
       formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
       name, people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-      phone, email, joiningClub, collectors, customAnswers
+      phone, email, joiningClub, collectors, customAnswers, extraMeals
     });
   }
 
@@ -14691,6 +14895,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
         lunchType: wantsLunch ? 'Yes - Lunch' : 'No Lunch', primaryRegistrant: person.primaryRegistrant,
         adminNotes: notes, formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
         partyId, partySize,
+        mealsOrdered: 1 + (person.personType === 'Attendee' ? extraMeals : 0),
         formAnswers: person.personType === 'Attendee' ? customAnswers : '',
         // A response being read as it arrives — the one path allowed to lift a
         // deletion tombstone. See buildRegistrantRow() and section 5c.
@@ -14718,7 +14923,7 @@ function processAllDatesResponse(args) {
   const {
     formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
     people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-    phone, email, joiningClub, collectors, customAnswers
+    phone, email, joiningClub, collectors, customAnswers, extraMeals
   } = args;
 
   // A single checkbox of PERSON_COLUMN_LABELS: who eats, applied to every
@@ -14762,7 +14967,11 @@ function processAllDatesResponse(args) {
       name: person.name, personType: person.personType, lunchType,
       primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '',
       formEditUrl: responseEditUrl, submittedAt: submittedAt.toISOString(), partyId, partySize,
-      phone: phone || '', email: email || ''
+      phone: phone || '', email: email || '',
+      // Stored with the registration so applyAllDatesCatchup() re-derives the
+      // same order on a date added months later. An entry written before this
+      // existed has no field and reads as zero extras, which is what it meant.
+      extraMeals: person.personType === 'Attendee' ? (extraMeals || 0) : 0
     });
 
     // The club half. Recorded per person, not per submission: a party of three
@@ -14790,6 +14999,7 @@ function processAllDatesResponse(args) {
         primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '', formEditUrl: responseEditUrl,
         protectedKeys, existingRowIndex, submittedAt, orderAheadDays, partyId, partySize,
         fromLiveSubmission: true,
+        mealsOrdered: 1 + (person.personType === 'Attendee' ? (extraMeals || 0) : 0),
         formAnswers: person.personType === 'Attendee' ? (customAnswers || '') : '',
         phone, email
       }));
@@ -14840,6 +15050,7 @@ function applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, or
           formEditUrl: entry.formEditUrl, protectedKeys, existingRowIndex,
           submittedAt: new Date(entry.submittedAt), orderAheadDays,
           partyId: entry.partyId || '', partySize: entry.partySize || '',
+          mealsOrdered: 1 + (Number(entry.extraMeals) || 0),
           phone: entry.phone || '', email: entry.email || ''
         });
         if (row) newRows.push(row);
@@ -14970,6 +15181,7 @@ function buildRegistrantRow(args) {
         : (wantsLunch ? 'Needed' : 'No Lunch');
       existingRow[map['Admin_Notes']] = adminNotes || '';
       existingRow[map['Party_Size']] = partySize || '';
+      writeMealsOrdered(existingRow, map, resolveMealsOrderedArg(args.mealsOrdered, wantsLunch));
       if (map['Form_Answers'] !== undefined && args.formAnswers !== undefined) {
         existingRow[map['Form_Answers']] = args.formAnswers || '';
       }
@@ -15034,6 +15246,7 @@ function buildRegistrantRow(args) {
   row[map['Primary_Registrant']] = primaryRegistrant;
   row[map['Party_ID']] = partyId || '';
   row[map['Party_Size']] = partySize || '';
+  writeMealsOrdered(row, map, resolveMealsOrderedArg(args.mealsOrdered, wantsLunch));
   // Points at this specific submission (response.getEditResponseUrl(), via
   // processFormResponse()/processAllDatesResponse()), not the shared form editor.
   row[map['Form_Source']] = formSource;
@@ -15045,6 +15258,44 @@ function buildRegistrantRow(args) {
 
   existingRowIndex.set(key, row); // reserve/replace immediately so a later row in this same pass supersedes/patches THIS one
   return row;
+}
+
+/**
+ * What a caller's `mealsOrdered` means once it is known whether the row is
+ * having lunch at all: undefined stays undefined (no opinion — see
+ * writeMealsOrdered()), and a row with no lunch orders no meals whatever the
+ * form said, since the extras were extras OF a meal that is not happening.
+ */
+function resolveMealsOrderedArg(mealsOrdered, wantsLunch) {
+  if (mealsOrdered === undefined || mealsOrdered === null) return undefined;
+  return wantsLunch ? mealsOrdered : 0;
+}
+
+/**
+ * Writes Meals_Ordered — and writes NOTHING for an ordinary one-meal
+ * registration, which is almost all of them.
+ *
+ * A blank cell already means one meal (readRegistrantMealsOrdered()), so
+ * stamping a literal 1 onto every row would fill a column with a number that
+ * says exactly what its absence said, on a tab staff read across. Worse, it
+ * would rewrite every existing row on the next sync for no change in meaning.
+ * So the column stays empty until somebody actually orders more than one, and
+ * a number in it is always news.
+ *
+ * A resubmission that drops back to one meal DOES clear it, which is why this
+ * writes '' rather than skipping: "I do not need the extras any more" has to
+ * be able to reach the kitchen.
+ */
+function writeMealsOrdered(row, map, mealsOrdered) {
+  if (map['Meals_Ordered'] === undefined) return;
+  // A CALLER THAT SAID NOTHING CHANGES NOTHING. Only the form paths know how
+  // many meals a submission asked for; the club roster and the all-dates
+  // catch-up re-derive rows from standing state and have no opinion on it. If
+  // "no opinion" wrote a blank, every one of those passes would quietly wipe a
+  // number staff had typed onto the row by hand.
+  if (mealsOrdered === undefined || mealsOrdered === null) return;
+  const amount = Math.floor(Number(mealsOrdered) || 0);
+  row[map['Meals_Ordered']] = amount > 1 ? amount : '';
 }
 
 /** Recomputes Active_Count / Waitlist_Count / Remaining_Seats / Status on the session table (both Upcoming and Past zones). */
@@ -17100,6 +17351,9 @@ function buildQuickMarkHtml(preloadedIndex) {
   #needs .need span.when { color: #666; }
   #needs a.add { color: #1A73E8; cursor: pointer; text-decoration: underline; font-size: 12px; }
   #needDays label { display: inline-block; margin-right: 8px; font-size: 12px; }
+  .meals { margin: 2px 0 8px 22px; padding: 6px 8px; background: #F1F3F4; border-radius: 3px; }
+  .meals label.num { display: inline-block; margin-right: 10px; font-size: 12px; }
+  .meals input[type=number] { width: 52px; margin-left: 4px; padding: 2px 4px; }
 </style>
 <h3>Quick Mark</h3>
 <p class="hint">
@@ -17107,7 +17361,9 @@ function buildQuickMarkHtml(preloadedIndex) {
   tick <b>Lunch</b> on its own for a meal collected without attending; tick <b>Register them</b> to
   put somebody on a session they have not signed up for — over the phone or at the desk, with no
   form. The dialog stays open on the same session, so a queue of people is one pick and one click
-  each.
+  each.<br>
+  <b>More than one meal?</b> Ticking <b>Lunch</b> opens boxes for how many they ate here and how many
+  they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.
 </p>
 
 <label class="field" for="location">1. Location</label>
@@ -17182,8 +17438,19 @@ function buildQuickMarkHtml(preloadedIndex) {
   <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
   <label class="tick"><input type="checkbox" id="lunch" onchange="exclusiveLunch('lunch'); refreshButton()"> Lunch
     <span class="note">— on its own means a meal collected, not present</span></label>
+  <div id="servedBox" class="meals" style="display:none">
+    <p class="hint" style="margin:0 0 4px 0">How many meals did they actually take? Leave them all at 0
+      to record only that they were served.</p>
+    <label class="num">Ate here <input type="number" id="ateHere" min="0" max="20" step="1" value="0"></label>
+    <label class="num">Took home <input type="number" id="tookHome" min="0" max="20" step="1" value="0"></label>
+    <label class="num">Into the fridge <input type="number" id="inFridge" min="0" max="20" step="1" value="0"></label>
+  </div>
   <label class="tick"><input type="checkbox" id="signup" onchange="exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
     <span class="note">— they want a meal on this date; nothing has been served yet</span></label>
+  <div id="mealsBox" class="meals" style="display:none">
+    <label class="num">Meals to order <input type="number" id="mealsOrdered" min="1" max="20" step="1" value="1"></label>
+    <span class="note">— more than one for a standing order ("Joan takes four")</span>
+  </div>
   <label class="tick"><input type="checkbox" id="register" onchange="registerChanged()"> Register them for this session
     <span class="note">— no form needed; nothing is marked attended</span></label>
   <label class="tick" id="standingLabel" style="display:none">
@@ -17707,6 +17974,25 @@ function buildQuickMarkHtml(preloadedIndex) {
   function exclusiveLunch(justTicked) {
     var other = justTicked === 'lunch' ? 'signup' : 'lunch';
     if (el(justTicked).checked) el(other).checked = false;
+    showMealBoxes();
+  }
+
+  // THE TWO MEAL BOXES ANSWER TWO DIFFERENT QUESTIONS, which is why they are
+  // two boxes and not one. "Sign up" is an ORDER — how many meals to put on
+  // the kitchen's list — and "Lunch" is a HANDOVER: how many they took, and
+  // whether they ate them here or carried them out. Somebody can order four
+  // and eat one; the counter needs both numbers and they are never the same
+  // column (see Meals_Ordered and the four consumption counts).
+  function showMealBoxes() {
+    el('servedBox').style.display = el('lunch').checked ? 'block' : 'none';
+    el('mealsBox').style.display = el('signup').checked ? 'block' : 'none';
+  }
+
+  /** A number field's value as a whole count, floored at 0 — a blank box is 0. */
+  function countIn(id, min) {
+    var n = Math.floor(Number(el(id).value));
+    if (!(n > 0)) return min || 0;
+    return Math.min(n, 20);
   }
 
   // "Every future session" is a rider on registering, not a mark of its own:
@@ -17767,6 +18053,11 @@ function buildQuickMarkHtml(preloadedIndex) {
           el('lunch').checked = false;
           el('signup').checked = false;
           el('register').checked = false;
+          el('mealsOrdered').value = '1';
+          el('ateHere').value = '0';
+          el('tookHome').value = '0';
+          el('inFridge').value = '0';
+          showMealBoxes();
           el('standing').checked = false;
           el('earlier').checked = false;
           el('moveTime').checked = false;
@@ -17815,6 +18106,12 @@ function buildQuickMarkHtml(preloadedIndex) {
         register: el('register').checked,
         standing: el('standing').checked,
         appointmentTime: el('apptTime').value,
+        // How many meals, on both sides of the same tab. Sent whatever is
+        // ticked; the server ignores the half that does not apply.
+        mealsOrdered: countIn('mealsOrdered', 1),
+        ateHere: countIn('ateHere', 0),
+        tookHome: countIn('tookHome', 0),
+        inFridge: countIn('inFridge', 0),
         // WHICH ROW this mark is for, when the name alone does not say — see
         // QUICK_MARK_NAME_TIME_SEPARATOR.
         bookedTime: chosenBookedTime(),
@@ -18388,8 +18685,39 @@ const QUICK_MARK_NAME_TIME_SEPARATOR = '|@|';
  * every write that could add a name drops the entry (see
  * invalidateQuickMarkIndexCache()).
  */
+/**
+ * The most meals one Quick Mark can record in a single box. Not a rule about
+ * what the workbook can hold — staff type any number onto the row — but the
+ * same judgement MAX_EXTRA_MEALS makes about a control anybody can lean on: a
+ * mistyped 200 in a hurry should not reach the kitchen's order.
+ */
+const QUICK_MARK_MAX_MEAL_COUNT = 20;
+
 const QUICK_MARK_CACHE_SECONDS = 21600;
 const QUICK_MARK_CACHE_KEY = 'QUICK_MARK_INDEX_V2';
+
+/**
+ * THE SHAPE of the stored index, stamped into every copy and checked on every
+ * read. Bump it whenever buildQuickMarkIndex() starts producing a field the
+ * dialog relies on.
+ *
+ * WHY THIS HAD TO EXIST. The index is kept in two places, and one of them is
+ * durable: a CacheService entry that expires in six hours, and a hidden TAB
+ * that expires never. Adding appointment TIMES to the index therefore did not
+ * reach a workbook that already had a stored copy — getQuickMarkIndex() reads
+ * cache, then tab, then builds, so the pre-times tab copy was found first,
+ * copied back into the cache on the way past, and served to the desk for as
+ * long as nobody ran a full rebuild. The dialog then had sessions with no
+ * `times` and no `byAppointment`, and a Personalized Assistance session showed
+ * no appointment times at all — the exact symptom, on exactly the workbooks
+ * that had used Quick Mark before the feature landed.
+ *
+ * A durable store with no version is a bug that only appears after a deploy,
+ * on somebody else's spreadsheet, which is the worst kind to be missing. So a
+ * stored copy that does not carry the CURRENT stamp is not an index: both
+ * readers drop it and the next open rebuilds.
+ */
+const QUICK_MARK_INDEX_SCHEMA = 3;
 /**
  * CacheService caps one value at 100KB. The index for a workbook with a year
  * of history is bigger than that even gzipped, so it is stored as a manifest
@@ -18476,6 +18804,10 @@ function warmQuickMarkIndexCache() {
  * nothing about the lists changed is the cost this cache exists to avoid.
  */
 function invalidateQuickMarkIndexCache() {
+  // The durable copy first, and unconditionally: a workbook with no script
+  // cache at all still has the tab, and returning early on a missing cache is
+  // how the stale-tab bug survived its own invalidation.
+  clearSheetQuickMarkIndex();
   const cache = tryGetScriptCache();
   if (!cache) return;
   try {
@@ -18486,6 +18818,33 @@ function invalidateQuickMarkIndexCache() {
     for (let i = 0; i < count; i++) keys.push(`${QUICK_MARK_CACHE_KEY}_${i}`);
     if (keys.length > 0) cache.removeAll(keys);
   } catch (err) { /* a cache is an optimization; never let it decide anything */ }
+}
+
+/**
+ * Empties the hidden index tab, leaving the tab itself in place — the next
+ * refresh rewrites it, and a missing tab and an empty one are read the same
+ * way (readSheetQuickMarkIndex() returns null for both).
+ */
+function clearSheetQuickMarkIndex() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(QUICK_MARK_INDEX_SHEET_NAME);
+    if (!sheet) return;
+    if (sheet.getLastRow() >= QUICK_MARK_INDEX_FIRST_ROW) {
+      sheet.getRange(QUICK_MARK_INDEX_FIRST_ROW, 1,
+        sheet.getLastRow() - QUICK_MARK_INDEX_FIRST_ROW + 1, 1).clearContent();
+    }
+  } catch (err) {
+    log(`ℹ️ Could not clear the stored Quick Mark lists on ${QUICK_MARK_INDEX_SHEET_NAME} (${err}).`);
+  }
+}
+
+/**
+ * Is a stored index one THIS version of the script can serve? See
+ * QUICK_MARK_INDEX_SCHEMA. A copy with no stamp at all predates the stamp and
+ * is therefore certainly stale.
+ */
+function isCurrentQuickMarkIndex(index) {
+  return !!index && index.schema === QUICK_MARK_INDEX_SCHEMA && Array.isArray(index.sessions);
 }
 
 /** The stored index, or null for a miss, an unreadable entry, or no cache at all. */
@@ -18507,6 +18866,7 @@ function readCachedQuickMarkIndex() {
       packed += parts[keys[i]];
     }
     const index = JSON.parse(unpackCachedText(packed));
+    if (!isCurrentQuickMarkIndex(index)) return null;
     index.fromCache = true;
     return index;
   } catch (err) {
@@ -18579,6 +18939,12 @@ function readSheetQuickMarkIndex() {
       .join('');
     if (!packed) return null;
     const index = JSON.parse(unpackCachedText(packed));
+    if (!isCurrentQuickMarkIndex(index)) {
+      log(`ℹ️ The stored Quick Mark lists on ${QUICK_MARK_INDEX_SHEET_NAME} were built by an older ` +
+        `version of this script (schema ${index && index.schema ? index.schema : 'none'}, ` +
+        `now ${QUICK_MARK_INDEX_SCHEMA}) — rebuilding them.`);
+      return null;
+    }
     index.fromSheet = true;
     return index;
   } catch (err) {
@@ -18773,6 +19139,8 @@ function buildQuickMarkIndex() {
   const needs = readRegularNeedRows().filter(need => need.active !== false).map(needForDialog);
 
   return {
+    // Stamped here, checked by both readers — see QUICK_MARK_INDEX_SCHEMA.
+    schema: QUICK_MARK_INDEX_SCHEMA,
     sessions, namesBySession, members, needs,
     builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
   };
@@ -19113,6 +19481,16 @@ function applyQuickMarkLocked(args) {
   // and fill it in as you". It marks nothing: a registration says where
   // somebody is expected, and Attended is a separate fact recorded on the day.
   const register = !!args.register;
+  // HOW MANY MEALS, on both sides of the counter. A sign-up carries the size
+  // of the ORDER (Joan's four), and a served tick carries what was actually
+  // handed over and where it went — eaten here, carried out, left in the
+  // fridge. They are different facts about different columns, which is why the
+  // desk is asked for them separately and why neither is inferred from the
+  // other: ordering four and eating one is an ordinary Tuesday.
+  const mealsOrdered = quickMarkCount(args.mealsOrdered);
+  const ateHere = quickMarkCount(args.ateHere);
+  const tookHome = quickMarkCount(args.tookHome);
+  const inFridge = quickMarkCount(args.inFridge);
   // A standing place — every future session of this programme, not just this
   // one. It is the Club_Members list, which is exactly this promise already
   // (see CLUB_TAG); the only thing that has changed is that a desk can add
@@ -19185,7 +19563,8 @@ function applyQuickMarkLocked(args) {
     // walk-in case rather than a dead end.
     return addQuickMarkWalkIn(sheet, {
       name, selection, location, attended, lunch, signup, register, standing, appointmentTime,
-      earlierAppointment, confirmed: !!args.confirmWalkIn
+      earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge,
+      confirmed: !!args.confirmWalkIn
     });
   }
 
@@ -19258,6 +19637,12 @@ function applyQuickMarkLocked(args) {
     if (map['Lunch_Type'] !== undefined) {
       sheet.getRange(target.sheetRow, map['Lunch_Type'] + 1).setValue(resolveWalkInLunchType(signupSession));
     }
+    // Only ever WRITTEN UP, never down to a blank: one is the default the
+    // dialog sends when nobody touched the box, and a desk signing somebody up
+    // for the meal they already have four of must not quietly cancel three.
+    if (map['Meals_Ordered'] !== undefined && mealsOrdered > 1) {
+      sheet.getRange(target.sheetRow, map['Meals_Ordered'] + 1).setValue(mealsOrdered);
+    }
   }
   if (lunch) {
     sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
@@ -19265,6 +19650,12 @@ function applyQuickMarkLocked(args) {
     // able to UNDO an earlier mistaken attendance mark — otherwise the one
     // correction staff actually need is the one thing they cannot make here.
     if (!attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
+    // The counts are ADDED to whatever the row already holds, not set over it.
+    // A person comes back for a second meal an hour later, and the desk marks
+    // the second handover the same way it marked the first; overwriting would
+    // make the later, smaller number erase the earlier one.
+    addQuickMarkMealCounts(sheet, map, target.sheetRow,
+      { ateHere, tookHome, inFridge });
   }
 
   // Hand-marking is a manual edit — say so, the same as any other.
@@ -19403,6 +19794,49 @@ function appointmentSlotsForRow(sheet, map, target) {
     log(`ℹ️ Could not read the slots for a moved appointment (${err}) — wrote the start time on its own.`);
     return [];
   }
+}
+
+/** One meal count off the dialog: a whole number, 0 for anything unreadable, capped like the field. */
+function quickMarkCount(value) {
+  const amount = Math.floor(Number(value) || 0);
+  if (!(amount > 0)) return 0;
+  return Math.min(amount, QUICK_MARK_MAX_MEAL_COUNT);
+}
+
+/**
+ * Adds the desk's meal counts onto a registrant row — day-1 dined in, day-1
+ * taken out, and meals left in the fridge.
+ *
+ * ADDED, NOT SET, for the reason the caller gives: a second handover later in
+ * the same service is marked exactly like the first, and setting would make it
+ * replace rather than extend. It also means a desk that ticks Lunch twice by
+ * accident over-counts by one meal rather than silently losing three — the
+ * safe direction, and a visible one, since the number is right there on the
+ * row to correct.
+ *
+ * Nothing is written for a zero. A tick with all three boxes left alone still
+ * means what it always meant: served, and the count comes off the paper sheet
+ * later.
+ */
+function addQuickMarkMealCounts(sheet, map, sheetRow, counts) {
+  const columns = [
+    { header: 'Day1_Dined_In', amount: counts.ateHere },
+    { header: 'Day1_Taken_Out', amount: counts.tookHome },
+    { header: 'Meals_In_Fridge', amount: counts.inFridge }
+  ];
+  let written = 0;
+  columns.forEach(entry => {
+    if (!(entry.amount > 0) || map[entry.header] === undefined) return;
+    const cell = sheet.getRange(sheetRow, map[entry.header] + 1);
+    // A legacy TICKED fridge checkbox is not a count of one — same rule
+    // readRegistrantMealCounts() applies, and the same reason: the old column
+    // meant something else entirely and must not be added to.
+    const current = cell.getValue();
+    const existing = isLegacyFridgeCheckbox(current) ? 0 : (Number(current) || 0);
+    cell.setValue(existing + entry.amount);
+    written += entry.amount;
+  });
+  return written;
 }
 
 /**
@@ -19558,6 +19992,18 @@ function addQuickMarkWalkIn(sheet, args) {
   const wantsLunch = (lunch || signup) && lunchOffered;
   row[map['Lunch_Type']] = wantsLunch ? resolveWalkInLunchType(session) : 'No Lunch';
   row[map['Lunch_Status']] = wantsLunch ? 'Needed' : 'No Lunch';
+  // HOW MANY MEALS this new row is for, and what became of them. The order
+  // side is the number the desk typed; the consumption side is only written
+  // when the desk actually counted something out, so a plain Lunch tick still
+  // means what it always meant. Both go on at row-creation time rather than
+  // through addQuickMarkMealCounts(), since there is nothing here to add to.
+  const walkInMeals = quickMarkCount(args.mealsOrdered);
+  writeMealsOrdered(row, map, wantsLunch ? walkInMeals : 0);
+  [['Day1_Dined_In', args.ateHere], ['Day1_Taken_Out', args.tookHome],
+    ['Meals_In_Fridge', args.inFridge]].forEach(pair => {
+    const amount = quickMarkCount(pair[1]);
+    if (amount > 0 && map[pair[0]] !== undefined) row[map[pair[0]]] = amount;
+  });
   row[map['Program_Status']] = 'Active';
   // "Ring me if something opens up sooner" — the fact staff used to keep in a
   // note. See EARLIER_APPOINTMENT_CHOICES.
@@ -19828,6 +20274,7 @@ function renderTriageSheet(force, allRows) {
  */
 const REGISTRANT_EDITABLE_COLUMNS = [
   'Attended', 'Lunch_Served',
+  'Meals_Ordered',
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
   'Meal_Source',
   'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment', 'Admin_Notes'
@@ -19876,8 +20323,9 @@ function applyRegistrantsFormatting(sheet, headers, result) {
         .setHorizontalAlignment('center');
     });
     // Whole meal counts, not free text — this is what buildDashboardRollup()
-    // sums into Master_Lunch_Dashboard's Day_1_*/Subs_* columns.
-    REGISTRANT_MEAL_COUNT_COLUMNS.forEach(h => {
+    // sums into Master_Lunch_Dashboard's Day_1_*/Subs_* columns, plus
+    // Meals_Ordered, which is the same kind of number on the ordering side.
+    REGISTRANT_MEAL_QUANTITY_COLUMNS.forEach(h => {
       if (map[h] === undefined) return;
       sheet.getRange(z.start, map[h] + 1, z.count, 1)
         .setDataValidation(SpreadsheetApp.newDataValidation()
@@ -20430,6 +20878,30 @@ function readRegistrantMealCounts(row, map) {
     add(column, amount);
   });
   return out;
+}
+
+/**
+ * How many meals ONE registrant row is ordering.
+ *
+ * BLANK IS ONE. Every row written before Meals_Ordered existed is blank, and
+ * every ordinary registration still is — so this reads the workbook's original
+ * "one row, one meal" rule out of an empty cell rather than needing a
+ * migration to write 1 into a hundred thousand of them.
+ *
+ * FLOORED AT ONE for a row that is having lunch, because a 0 here would be a
+ * second way to say "no meal" and the workbook already has one that everything
+ * else reads: Lunch_Status. A row that says Needed and 0 is somebody's typo,
+ * and resolving a typo towards a missing meal is the one direction the lunch
+ * numbers must never round (see lunchPersonEntry()).
+ *
+ * Non-numeric text ("four", "2 subs") reads as one for the same reason: the
+ * row plainly wants feeding, and the alternative is dropping it.
+ */
+function readRegistrantMealsOrdered(row, map) {
+  if (map['Meals_Ordered'] === undefined) return 1;
+  const raw = row[map['Meals_Ordered']];
+  const amount = Math.floor(Number(raw) || 0);
+  return amount > 1 ? amount : 1;
 }
 
 /**
@@ -22103,6 +22575,9 @@ function lunchPersonEntry(bucket, row, lrMap) {
       // How many EXTRA lunch requests this person made for this one day, i.e.
       // how many rows were merged away. 0 on the overwhelming majority.
       mergedRequests: 0,
+      // How many MEALS they are down for across those merged rows — see
+      // countLunchMeals(). 0 until a row that actually wants lunch sets it.
+      mealsOrdered: 0,
       lunchType: '',
       programs: [],
       phone: '',
@@ -22127,6 +22602,28 @@ function lunchPersonEntry(bucket, row, lrMap) {
 function countLunchPeople(bucket, flag) {
   const people = bucket.people || {};
   return Object.keys(people).reduce((n, k) => n + (people[k][flag] ? 1 : 0), 0);
+}
+
+/**
+ * How many MEALS the registered people on a bucket add up to — which is what
+ * the kitchen orders, and therefore what Registered_Count holds.
+ *
+ * It is not the same number as countLunchPeople(): one person can be down for
+ * four meals (Meals_Ordered), and the whole point of that column is that the
+ * order and the roster can differ without either being wrong. The roster still
+ * lists Joan once; the order still says four.
+ *
+ * Anyone whose mealsOrdered never got set still counts as one, so a person who
+ * reached this bucket by a path that predates the column is never dropped from
+ * the order.
+ */
+function countLunchMeals(bucket) {
+  const people = bucket.people || {};
+  return Object.keys(people).reduce((n, k) => {
+    const person = people[k];
+    if (!person.registered) return n;
+    return n + (person.mealsOrdered > 0 ? person.mealsOrdered : 1);
+  }, 0);
 }
 
 /**
@@ -22431,6 +22928,14 @@ function buildDashboardRollup(registrantRows) {
       const entry = lunchPersonEntry(rollup[key], row, lrMap);
       if (entry.registered) entry.mergedRequests++;
       entry.registered = true;
+      // THE LARGEST ORDER WINS across merged rows, never the sum. Three rows
+      // for one person on one day are three FORMS they ticked the lunch box
+      // on, not three orders — that is the whole reason this is keyed on the
+      // person — so adding them up would restore the exact over-order
+      // lunchPersonEntry() exists to prevent. Somebody who wrote 4 on one form
+      // and left the others blank means four, not seven.
+      const rowMeals = readRegistrantMealsOrdered(row, lrMap);
+      if (rowMeals > entry.mealsOrdered) entry.mealsOrdered = rowMeals;
     });
   }
 
@@ -22439,7 +22944,11 @@ function buildDashboardRollup(registrantRows) {
   // Lunch_Roster is guaranteed to list the very people the dashboard counted.
   Object.keys(rollup).forEach(key => {
     const r = rollup[key];
-    r.registeredCount = countLunchPeople(r, 'registered');
+    // MEALS, not heads: Registered_Count is the number the kitchen orders
+    // against, and one person can be down for four of them (see
+    // countLunchMeals() and Meals_Ordered on Registrant_Dash).
+    r.registeredCount = countLunchMeals(r);
+    r.registeredPeople = countLunchPeople(r, 'registered');
     r.servedConfirmed = countLunchPeople(r, 'served');
     r.mergedRequests = Object.keys(r.people || {})
       .reduce((n, k) => n + r.people[k].mergedRequests, 0);
@@ -22454,7 +22963,8 @@ function buildDashboardRollup(registrantRows) {
     const hasMenu = !!meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1;
     if (hasMenu) return;
     noteForAdmin('Lunch needed with no menu set',
-      `${r.registeredCount} person(s) need lunch at ${r.location} on ${formatDateLabel(parseDateKey(r.dateKey))}, ` +
+      `${r.registeredCount} meal(s) for ${r.registeredPeople} person(s) are needed at ${r.location} on ` +
+      `${formatDateLabel(parseDateKey(r.dateKey))}, ` +
       `but Lunch_Schedule has no Hot/Cold row for it.`);
   });
 
@@ -22620,6 +23130,10 @@ function renderLunchRosterSheet(rollup) {
       // The day's menu wins over whatever the person's own row says: one
       // batch is cooked per date and location, and that is what they get.
       row[map['Lunch_Type']] = bucket.mealType || person.lunchType || '';
+      // Always a number for somebody who is registered, never a blank that has
+      // to be read as "presumably one": this is the column the desk counts
+      // meals out against, and a 1 it can see is worth the ink.
+      row[map['Meals']] = person.registered ? (person.mealsOrdered > 0 ? person.mealsOrdered : 1) : '';
       row[map['Lunch_Served']] = person.served ? '✅' : '';
       row[map['Registered']] = person.registered ? '✅' : '— walk-in';
       row[map['Requests_Merged']] = person.mergedRequests > 0 ? person.mergedRequests : '';
@@ -22667,6 +23181,8 @@ function applyLunchRosterFormatting(sheet, headers, result) {
     buildLocationColorRules(activeZones.map(z => sheet.getRange(z.start, map['Location'] + 1, z.count, 1))));
 
   activeZones.forEach(z => {
+    sheet.getRange(z.start, map['Meals'] + 1, z.count, 1)
+      .setNumberFormat('0').setHorizontalAlignment('center');
     sheet.getRange(z.start, map['Lunch_Served'] + 1, z.count, 1).setHorizontalAlignment('center');
     sheet.getRange(z.start, map['Registered'] + 1, z.count, 1).setHorizontalAlignment('center');
     sheet.getRange(z.start, map['Requests_Merged'] + 1, z.count, 1).setHorizontalAlignment('center');
@@ -22680,7 +23196,7 @@ function applyLunchRosterFormatting(sheet, headers, result) {
   // Only the columns somebody would plausibly type into, rather than all ten:
   // each name costs a protection object per zone on every render, and a
   // warning on Source is a warning nobody was ever going to trip.
-  protectDerivedColumns(sheet, headers, ['Name', 'Lunch_Served', 'Requests_Merged'], zones);
+  protectDerivedColumns(sheet, headers, ['Name', 'Meals', 'Lunch_Served', 'Requests_Merged'], zones);
 
   // No autosize here: renderFlatDateSheet() does it immediately after.
 }
@@ -23330,10 +23846,10 @@ function createSignInSheetPdf(sessionValue, include) {
 
   const file = renderSignInSheetPdf(data);
   const message = `✅ ${data.rows.length} name(s) on the sheet ` +
-    `(${data.lunchCount} with lunch, ${data.noLunchCount} without)` +
+    `(${data.lunchCount} meal(s) ordered, ${data.noLunchCount} here without lunch)` +
     (data.meal ? `, lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
   log(`createSignInSheetPdf: built "${file.getName()}" with ${data.rows.length} row(s) — ` +
-    `${data.lunchCount} with lunch, ${data.noLunchCount} without.`);
+    `${data.lunchCount} meal(s) ordered, ${data.noLunchCount} without.`);
   return { url: file.getUrl(), message };
 }
 
@@ -23389,7 +23905,11 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
       // holding the pen can see that two rows belong together.
       family: describePartyForPrinting(row, map),
       notes: buildSignInNotes(row, map, status),
-      lunch: String(row[map['Lunch_Status']] || '').trim() === 'Needed'
+      lunch: String(row[map['Lunch_Status']] || '').trim() === 'Needed',
+      // What is actually printed in MEALS ORDERED. A standing order of four is
+      // the one fact on this sheet the desk cannot work out for itself, and a
+      // pre-printed 1 was the workbook asserting something untrue about Joan.
+      meals: readRegistrantMealsOrdered(row, map)
     });
   });
 
@@ -23397,7 +23917,10 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
 
   const meal = getMealInfoForDate(date, location);
-  const lunchCount = rows.filter(r => r.lunch).length;
+  // MEALS, matching Master_Lunch_Dashboard's Registered_Count — the kitchen
+  // figure printed at the head of this sheet has to be the same number the
+  // kitchen was given, or the desk has two counts and no way to choose.
+  const lunchCount = rows.reduce((n, r) => n + (r.lunch ? r.meals : 0), 0);
   return {
     date,
     dateKey,
@@ -23406,7 +23929,11 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     rows,
     meal: meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1 ? meal : null,
     lunchCount,
-    noLunchCount: rows.length - lunchCount,
+    // PEOPLE, not meals — this is the count the "rows pre-filled with 0" note
+    // explains, and it counts rows on the page. Derived from the rows rather
+    // than by subtracting lunchCount, which stopped being a headcount the
+    // moment one person could order four (see Meals_Ordered).
+    noLunchCount: rows.filter(r => !r.lunch).length,
     ordering: lookupOrderingNumbersForPrinting(dateKey, location)
   };
 }
@@ -23591,7 +24118,7 @@ function writeSignInSheetTable(body, data) {
     const zero = row.lunch ? '' : '0';
     cells.push([
       '', '', row.last, row.first, row.phone, row.program, row.family, row.notes,
-      row.lunch ? '1' : '0', zero, zero, zero
+      row.lunch ? String(row.meals) : '0', zero, zero, zero
     ]);
   });
   for (let i = 0; i < SIGN_IN_SHEET_BLANK_ROWS; i++) {

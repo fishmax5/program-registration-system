@@ -48,7 +48,8 @@ It also:
 - counts a lunch **once per person per day**, however many of that day's
   programs they ticked the lunch box on — three sign-ups from one person is one
   meal on the order, not three, with a `Requests_Merged` column showing where a
-  merge happened so the number stays auditable;
+  merge happened so the number stays auditable (a person who genuinely orders
+  several meals says so in one place, not by registering repeatedly);
 - takes registrations for **lunch on its own**, with no programme attached — a
   self-building sign-up form per location per month, generated from the lunch
   menu rather than the calendar, on which "I want lunch on every date listed"
@@ -68,8 +69,15 @@ It also:
   meal collected by somebody who never came in — and **signs somebody up for a
   future lunch** from the same dialog, recording the demand without claiming a
   meal was served;
+- orders **more than one meal for the same person** — a standing order of four
+  is a number in `Meals_Ordered` on one row, not four invented guests called
+  "Extra Meal 1"; the kitchen's count adds meals rather than heads, the roster
+  still shows one name, and the printed sign-in sheet prints the real number in
+  its `MEALS ORDERED` box. Registrants can ask for extras on the form itself,
+  and a desk can type them into Quick Mark;
 - records **several different meals per person** on one day (ate the day-1
-  meal here, took two subs home), attached to whoever took them — and **which
+  meal here, took two subs home), attached to whoever took them — enterable at
+  the desk from Quick Mark rather than only by finding the row — and **which
   lunch** they were, so serving Wednesday's leftovers on Thursday stops
   reporting one batch of food as both waste and phantom demand;
 - shares a **live sign-up sheet with an instructor** — a small spreadsheet in
@@ -145,4 +153,5 @@ node tests/sectioned_value_reader.test.js
 node tests/column_widths.test.js
 node tests/regular_needs.test.js
 node tests/quick_mark_inline_index.test.js
+node tests/multiple_meals.test.js
 ```

@@ -647,7 +647,7 @@ The columns you read first are at the **front**:
 
 | Column | What it means |
 |---|---|
-| `Registered_Count` | What the **forms** say — how many **people** asked for lunch |
+| `Registered_Count` | What the **forms** say — how many **meals** were asked for. Usually one per person; more when somebody has a standing order (see `Meals_Ordered` below) |
 | `Served_Confirmed` | What **actually happened** — how many **people** you ticked `Lunch_Served` for on the Registrants tab |
 | `Total_to_Order` | Live formula: `Registered_Count + Standard_Buffer + Tester_Buffer` |
 
@@ -656,7 +656,15 @@ a real `0` ("nobody came") and "not counted yet" mean very different things, so
 it doesn't claim the first. It counts every tick, including walk-ins who never
 registered.
 
-> **Both numbers count PEOPLE, not form answers.** Somebody who signs up for
+> **`Registered_Count` counts MEALS; `Served_Confirmed` counts PEOPLE.** That
+> difference is deliberate. What the kitchen orders is meals, and one person
+> can be down for four of them — Joan orders four every lunch day and they are
+> all hers. What a tick on `Lunch_Served` records is that a **person** was
+> handed their food; how much of it they took is the four consumption counts
+> beside it. [Lunch_Roster](#3-lunch_roster) shows both per person, which is
+> where you reconcile them by eye.
+
+> **Neither number counts form answers.** Somebody who signs up for
 > Chair Yoga, Bingo and the Book Club on the same Tuesday and ticks "yes,
 > lunch" on all three forms — which is the normal thing to do, because each
 > form asks — is **one lunch on the order, not three**. Names are matched the
@@ -734,6 +742,7 @@ type into CoPilot afterwards.
 | `Event_Date` · `Location` | The meal this person is on |
 | `Name` | As typed on the form, or as entered at the desk |
 | `Lunch_Type` | `Hot` or `Cold`, taken from that day's menu row |
+| `Meals` | How many meals **this one person** is down for. `1` for almost everyone; `4` beside Joan's name is her standing order, not four Joans |
 | `Lunch_Served` | ✅ once you've ticked them off (in Quick Mark or on the Registrants tab) |
 | `Registered` | ✅ if they asked in advance; `— walk-in` if they only turned up |
 | `Requests_Merged` | Blank for almost everyone. `2` means they asked for lunch on **three** different program forms for this one day and are being ordered **one** meal |
@@ -930,6 +939,31 @@ Someone pre-registering for a **month** of lunches is the same thing once per
 date — pick the next date, same name, tick, press. The dialog keeps the
 location and clears only the name and the ticks, so it's a few seconds each.
 
+**More than one meal for them?** Ticking **Sign up for lunch** opens a
+**Meals to order** box beside it. Leave it at `1` for an ordinary sign-up, or
+put `4` in for Joan — it writes `Meals_Ordered` on the row, and the kitchen's
+number goes up by four rather than by one. It only ever writes the number
+**up**: signing somebody up who already has a standing order of four does not
+quietly cut it to one.
+
+#### Recording what somebody actually ate
+
+Ticking **Lunch** opens three boxes: **Ate here**, **Took home** and **Into the
+fridge**. They answer the question the tick on its own cannot — *how many, and
+where did they go*.
+
+Leave all three at `0` and a Lunch tick means exactly what it always meant:
+served, count it off the paper sheet later. Fill them in and they land on that
+person's own `Day1_Dined_In`, `Day1_Taken_Out` and `Meals_In_Fridge` — so
+"ate 2 here and took 3 home" is one pick and one press, instead of finding
+their row on the Registrants tab afterwards.
+
+> **The counts ADD to what the row already holds.** Somebody who comes back an
+> hour later for another meal is marked the same way the first time was, and
+> the second mark has to extend the first rather than replace it. If you tick
+> twice by mistake you will see a number that is one too high, on the row, in
+> front of you — which is the correctable direction.
+
 > **The date must have a `Hot` or `Cold` row on Lunch_Schedule.** If it
 > doesn't, the sign-up is refused with a message saying so, rather than
 > accepted into a day nothing is being cooked on. Add the menu row first.
@@ -991,6 +1025,7 @@ are backfilled from the session table the next time this tab is drawn.
 | `Location` / `Event` | Which program and location this row belongs to |
 | ✍️ `Attended` | **Yours to tick.** They turned up |
 | ✍️ `Lunch_Served` | **Yours to tick.** They were actually fed — this is what `Served_Confirmed` on the lunch dashboard counts |
+| ✍️ `Meals_Ordered` | **Yours to fill in.** How many meals this person is ordering. **Leave it blank for one** — blank means one everywhere. Type `4` for a standing order like Joan's |
 | ✍️ `Day1_Dined_In` | **Yours to fill in.** Day-1 meals this person **ate here** |
 | ✍️ `Day1_Taken_Out` | **Yours to fill in.** Day-1 meals this person **carried out** |
 | ✍️ `Subs_Dined_In` | **Yours to fill in.** Subs eaten here |
@@ -1025,6 +1060,37 @@ instructor's browser tab, and theirs isn't clobbered by yours.
 tab. Everything without it came from a form or is worked out automatically, and
 will be overwritten if you type in it (you'll get a warning if you try).
 
+> **Ordering more than one meal for the same person.** Some people order
+> several meals and they are all theirs: Joan takes four every lunch day, the
+> Ginsburgs pick up three between the two of them, and on some days you offer
+> people a second meal after they've had their first.
+>
+> **Type the number into `Meals_Ordered` on their row.** That's the whole of
+> it. Blank means one — every ordinary registration leaves it empty — so a
+> number in that column is always news. `4` on Joan's row means:
+>
+> * `Registered_Count` on [Master_Lunch_Dashboard](#2-master_lunch_dashboard)
+>   counts **four meals** for her,
+> * [Lunch_Roster](#3-lunch_roster) shows **one row** — hers — reading `4`
+>   under `Meals`,
+> * the [printed sign-in sheet](#printed-sign-in-sheets) prints `4` in her
+>   `MEALS ORDERED` box instead of a `1` you'd have to cross out.
+>
+> **Do not put extra meals in the guest boxes.** "Extra Meal 1" and "Extra Meal
+> 2" become *people* — they get their own roster rows, their own lines on the
+> sign-in sheet, and they inflate `Party_Size` — and every one of them then has
+> to be explained to whoever reads those. A meal is not a person.
+>
+> To order **no** meal, set `Lunch_Status` to `No Lunch`. That's the column
+> that says whether somebody eats at all; a `0` in `Meals_Ordered` is ignored
+> so that a typo can never quietly cancel somebody's lunch.
+>
+> **Registrants can order extras themselves.** Every form that asks about lunch
+> now also asks **"Extra Meals (Beyond One Each)"** — `None`, or 1 to 6. It is
+> asked once and applies to every date on that submission that asked for lunch,
+> and the extras go on the person filling the form in, which is who collects
+> them. Somebody who needs more than six is asked to ring the office.
+>
 > **One person, several different meals.** The five meal counts are
 > **independent**, which is the whole point of them: Joe eats the day-1 meal in
 > the dining room *and* takes two subs home, so his row reads
@@ -1556,6 +1622,15 @@ says how many more there are.)
 The help text under the question spells out what each option does, rather than
 telling anyone which one to pick.
 
+**Every form that asks about lunch also asks about extra meals**, right under
+the lunch question: **"Extra Meals (Beyond One Each)"** — *None*, or 1 to 6.
+Everyone listed who is having lunch already gets one; this is only for people
+who need **more** than that. It's asked once and applied to every date on the
+submission that asked for lunch, and the extras go on the person filling the
+form in, since that's who collects them. More than six is asked to ring the
+office. On a form with nothing catered the question isn't there at all — it
+comes and goes with the lunch questions themselves.
+
 The roster, for those who want it:
 
 ```
@@ -1876,6 +1951,10 @@ for. So the roster is **every registrant at that location on that date, across
 every program**, with a **Program** column saying which is which. One sheet, not
 three.
 
+**MEALS ORDERED is pre-filled with the real number**, not a `1` — so Joan's row
+prints `4` and nobody has to remember it or cross anything out. It comes
+straight from `Meals_Ordered` on her registrant row.
+
 **Everybody appears, including the people not eating.** Anyone who didn't order
 lunch is printed with a **0** in all four meal columns. That's deliberate: a
 blank box is indistinguishable from one nobody's filled in yet, so at the end of
@@ -1887,7 +1966,8 @@ back in as the zero it is. A line under the header says so on the sheet itself.
   paper list. Deliberately *not* grouped lunch-first: you're looking people up
   one at a time all morning, and a roster split into two alphabetical halves
   makes every lookup two lookups.
-- The header line carries the day's **menu**, how many meals were **requested**,
+- The header line carries the day's **menu**, how many **meals** were
+  **requested** (meals, not heads — the same number the kitchen was given),
   how many are **here without lunch**, and what was **ordered** (registered +
   standard buffer + tester buffer).
 - **Family / Alt Name** says who a row is with: *"guest of Marion Webb"* for a
@@ -2899,6 +2979,22 @@ Same cell. The horizon closes a form only when *every* remaining session on it
 is past the date, so moving the date past that form's first session re-opens it
 on the next sync. If the form was closed by hand in the Forms UI instead, the
 horizon won't re-open it — open it yourself in Google Forms.
+
+**Quick Mark shows no appointment times on a Personalized Assistance session**
+Quick Mark keeps its lists in two places — a cache, and a hidden
+`Quick_Mark_Index` tab — so the dialog opens without a wait. The tab copy does
+not expire, and lists built by an older version of the script used to be served
+forever. They now carry a version stamp and are thrown away when it doesn't
+match, so this heals itself; if you hit it once more, press **🔧 Admin ▸
+Rebuild Quick Mark Lists** (or the **↻ reload** link in the dialog itself).
+
+If the times are still missing after a rebuild, the session isn't flagged as an
+appointment one: check `Personalized_Assistance` is ticked on its
+**Master_Program_Dashboard** row, and that the calendar event carries
+`[Personalized Assistance]` — the tick comes from the calendar, and an untagged
+event has no slots to offer. The time picker only appears when you tick
+**Register them** (you are booking a slot) or **🕐 Move them to a different
+time** — marking somebody who already has a booking needs no time.
 
 **A form shows the wrong dates or meals**
 Press **🍱 Push Menu Changes to Forms**. Editing `Lunch_Schedule` deliberately
