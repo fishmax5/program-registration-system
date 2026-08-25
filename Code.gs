@@ -9724,6 +9724,41 @@ function setFlagBracketInDescription(description, wordsRegex, tagWord, on) {
 }
 
 /**
+ * Returns `description` with "[Slots: N]" saying `minutes` — rewriting the
+ * number where one is already stated, appending a bracket where none is.
+ *
+ * Same rules as setFlagBracketInDescription(), which is the point: only a
+ * TAG-ONLY bracket is rewritten (isTagOnlyBracket()), so "[Slots: 20 if Gerry
+ * is in]" is somebody's note and is left exactly as typed, and a bracket that
+ * holds other tags keeps them — "[Personalized Assistance, Slots: 30]" becomes
+ * "[Personalized Assistance, Slots: 20]" rather than growing a second bracket
+ * that contradicts the first.
+ *
+ * `minutes` outside the sanity bounds is refused rather than written: the
+ * parser would ignore it anyway (see parseSettingsBrackets), and a description
+ * that says one thing while the system does another is worse than a
+ * description that says nothing.
+ */
+function setSlotMinutesInDescription(description, minutes) {
+  const raw = String(description || '');
+  const wanted = Number(minutes) || 0;
+  if (wanted < MIN_APPOINTMENT_SLOT_MINUTES || wanted > MAX_APPOINTMENT_SLOT_MINUTES) return raw;
+
+  const slotsPattern = /Slots?:\s*\d+/i;
+  let replaced = false;
+  let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
+    if (!slotsPattern.test(content) || !isTagOnlyBracket(content)) return whole;
+    replaced = true;
+    return `[${content.replace(new RegExp(slotsPattern.source, 'gi'), `Slots: ${wanted}`)}]`;
+  });
+
+  // raw.trim(), not raw — an all-whitespace description has no content for the
+  // tag to sit under, exactly as in setFlagBracketInDescription().
+  if (!replaced) out = raw.trim() ? `${raw.replace(/\s*$/, '')}\n[Slots: ${wanted}]` : `[Slots: ${wanted}]`;
+  return out;
+}
+
+/**
  * True when `description` still reads as carrying `wordsRegex`'s tag inside a
  * bracket — what setFlagBracketInDescription(…, false) could not remove
  * without destroying somebody's own words. See stampProgramFlagOnCalendar().
@@ -11929,13 +11964,6 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
 function reconcileAssistanceSessionSettings(registrySheet, groups) {
   if (!groups || groups.length === 0) return 0;
 
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
-  const needed = ['Calendar_Source', 'Clean_Title', 'Event_Date', 'Event_End', 'Slot_Minutes',
-    'Max_Capacity', 'Active_Count', 'Remaining_Seats', 'Status'];
-  if (needed.some(header => !sheetMap[header])) return 0; // a workbook still on the old layout
-
   // Programs whose tick has not reached the calendar yet are left alone, for
   // the same reason reconcileProgramFlagColumns() leaves their checkbox alone:
   // the groups were built from a calendar that has not been told yet.
@@ -11949,9 +11977,48 @@ function reconcileAssistanceSessionSettings(registrySheet, groups) {
       statedCapacity: Number(group.capacity) || 0
     };
     group.sessions.forEach(session => {
-      expected[`${session.calendarId}|${group.cleanTitle}`] = spec;
+      const key = `${session.calendarId}|${group.cleanTitle}`;
+      if (pendingKeys.has(key)) return;
+      expected[key] = spec;
     });
   });
+
+  const changed = applyAssistanceSettingsToRows(registrySheet, expected);
+  if (changed > 0) {
+    log(`reconcileAssistanceSessionSettings: updated appointment length/capacity on ${changed} session row(s).`);
+  }
+  return changed;
+}
+
+/**
+ * The row-writing half of the above, taking the answer directly:
+ * `expected` is { "calendarId|Clean_Title": { isAssistance, slotMinutes,
+ * statedCapacity } }, and every session row of a named program is brought into
+ * line with it.
+ *
+ * Split out because the sync is not the only thing that knows this answer.
+ * convertTimeBlockToAppointments() has just written the tag onto the calendar
+ * itself and should not have to wait an hour — or rebuild a group — to see the
+ * sheet agree with it.
+ *
+ * options.writeFlagColumn — also tick (or untick) Personalized_Assistance.
+ *   The sync leaves that to reconcileProgramFlagColumns(), which has already
+ *   run by then off the same groups; a caller writing the calendar directly
+ *   has nothing else to do it.
+ *
+ * Returns how many rows changed.
+ */
+function applyAssistanceSettingsToRows(registrySheet, expected, options) {
+  options = options || {};
+  if (!expected || Object.keys(expected).length === 0) return 0;
+
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return 0;
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  const needed = ['Calendar_Source', 'Clean_Title', 'Event_Date', 'Event_End', 'Slot_Minutes',
+    'Max_Capacity', 'Active_Count', 'Remaining_Seats', 'Status'];
+  if (needed.some(header => !sheetMap[header])) return 0; // a workbook still on the old layout
+  const flagCol = options.writeFlagColumn ? sheetMap['Personalized_Assistance'] : null;
 
   let changed = 0;
   headerRows.forEach((hRow, i) => {
@@ -11969,17 +12036,25 @@ function reconcileAssistanceSessionSettings(registrySheet, groups) {
     const capRange = registrySheet.getRange(zone.start, sheetMap['Max_Capacity'], zone.count, 1);
     const remainingRange = registrySheet.getRange(zone.start, sheetMap['Remaining_Seats'], zone.count, 1);
     const statusRange = registrySheet.getRange(zone.start, sheetMap['Status'], zone.count, 1);
+    const flagRange = flagCol ? registrySheet.getRange(zone.start, flagCol, zone.count, 1) : null;
     const slots = slotRange.getValues();
     const caps = capRange.getValues();
     const remaining = remainingRange.getValues();
     const statuses = statusRange.getValues();
+    const flags = flagRange ? flagRange.getValues() : null;
 
     let touched = false;
+    let flagTouched = false;
     for (let r = 0; r < zone.count; r++) {
       const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
       if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
-      if (pendingKeys.has(key)) continue;
       const spec = expected[key];
+
+      if (flags && !(isFlagColumnValue(flags[r][0], ASSISTANCE_WORDS_REGEX) === spec.isAssistance &&
+        typeof flags[r][0] === 'boolean')) {
+        flags[r] = [spec.isAssistance];
+        flagTouched = true;
+      }
 
       let wantSlots = '';
       let wantCap = spec.statedCapacity > 0 ? spec.statedCapacity : '';
@@ -12009,11 +12084,9 @@ function reconcileAssistanceSessionSettings(registrySheet, groups) {
       remainingRange.setValues(remaining);
       statusRange.setValues(statuses);
     }
+    if (flagTouched && flagRange) flagRange.setValues(flags);
   });
 
-  if (changed > 0) {
-    log(`reconcileAssistanceSessionSettings: updated appointment length/capacity on ${changed} session row(s).`);
-  }
   return changed;
 }
 
