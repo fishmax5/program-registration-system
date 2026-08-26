@@ -190,4 +190,5 @@ node tests/column_widths.test.js
 node tests/regular_needs.test.js
 node tests/quick_mark_inline_index.test.js
 node tests/multiple_meals.test.js
+node tests/standing_lunch.test.js
 ```

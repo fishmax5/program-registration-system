@@ -985,9 +985,16 @@ is listed underneath as it happens, so you can see what you've done.
 | **Sign up for lunch** | They **want** a meal on that date. Nothing is recorded as served, and `Attended` is left exactly as it is. |
 | **Register them for this session** | They are **on the list** for that session. Nothing is marked — not attendance, not lunch. This is the phone call and the front-desk sign-up, with no form involved. |
 | **…and every future session of it** | The same, plus a **standing place** on that program: they are booked into every future session of it automatically. See [Standing lists](#standing-lists--somebody-who-comes-to-everything). |
+| **…and a lunch every time** | The standing place **with a meal on each of those dates**, not just on today's. For the many people who come to a class they never miss and stay for the lunch every time. |
 
 **Lunch** and **Sign up for lunch** are the same fact at two different times —
 already handed over, versus expected — so ticking one clears the other.
+
+**…and a lunch every time** only appears once **…and every future session of
+it** is ticked, and it arrives already ticked if you ticked **Sign up for
+lunch** — because somebody signing a person up for lunch today *and* putting
+them on every future session has usually described the whole arrangement, not
+half of it. Untick it if you meant only today's meal.
 
 #### Registering somebody at the desk or over the phone
 
@@ -1055,6 +1062,13 @@ it**. They go on the **[Club_Members](#8-club_members)** tab, and from the next
 sync they are booked into **every upcoming session of that program**, on
 whatever form currently covers it — forever, until somebody unticks them.
 
+**A place, or a place and a meal.** Those are two different arrangements, and
+the third tick — **…and a lunch every time** — is which one you mean. It writes
+the **Lunch** column on their `Club_Members` row, and every booking the
+standing place makes from then on carries it. Leave it unticked and they are
+booked into the program with **No Lunch**, which is what a standing place has
+always meant on its own.
+
 - **It doesn't need the `[Club]` tag.** That tag decides whether the public
   *form* offers people the "sign up for all future meetings" option. A standing
   place added at the desk is a decision staff have already made, so any program
@@ -1066,6 +1080,14 @@ whatever form currently covers it — forever, until somebody unticks them.
   for — registered normally, added as a walk-in, or cancelled for that one date
   — is left exactly as it is. A standing place fills gaps; it does not
   re-assert itself over decisions somebody made about individual dates.
+  **This applies to the lunch too:** changing somebody's standing lunch changes
+  what gets booked from then on, and leaves rows that already exist alone. To
+  add a meal to a date they are already down for, use **Sign up for lunch** on
+  that session, or edit the row on `Registrant_Dash`.
+- **You can change your mind later**, either by ticking **…and a lunch every
+  time** at the desk again — a tick at the counter is a person saying what the
+  arrangement is now, so it updates a member who is already on the list — or by
+  editing the **Lunch** column on `Club_Members` directly.
 - **Past dates are never filled in.** A standing place says where somebody is
   expected, not where they were.
 

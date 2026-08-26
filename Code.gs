@@ -2348,17 +2348,27 @@ const LEGACY_FOOTER_ITEM_TITLE = 'Footer Note';
  * said only "most people want the first option," which tells someone which box
  * to tick without ever telling them what either box does.
  *
- * TWO SPELLINGS OF EACH, and it matters which a given form gets: a [Regular]
+ * THREE SPELLINGS OF EACH, and it matters which a given form gets: a [Regular]
  * form genuinely covers one calendar month, so "all events this month" is
  * exactly right and is what people asked to read. A [Grouped] series runs
  * across however many months it runs across, and telling someone they are
  * signing up for "this month" when the dates listed above run into March would
- * be plainly untrue. buildAttendanceModeChoiceSet() picks the pair that
- * matches the form. Nothing downstream compares against these strings
- * directly: isAllDatesModeAnswer() and isClubModeAnswer() accept either
+ * be plainly untrue. A lunch-only form has a third pair again, because nothing
+ * is being "attended" on it. buildAttendanceModeChoiceSet() picks the pair
+ * that matches the form. Nothing downstream compares against these strings
+ * directly: isAllDatesModeAnswer() and isClubModeAnswer() accept EVERY
  * spelling AND the pre-v4 wording, and "pick specific dates" is simply
  * whatever neither of them claims — so responses collected before this change
- * keep parsing, and adding a fourth wording later breaks nothing.
+ * keep parsing.
+ *
+ * ADDING A SPELLING MEANS ADDING IT TO isAllDatesModeAnswer() TOO. That is not
+ * a style note: the lunch-only pair below was added without it, and because
+ * "every date" is recognized by name and "pick specific dates" is merely
+ * everything else, an unrecognized all-dates answer does not fail loudly — it
+ * is read as "pick specific dates", sent looking for a roster grid the
+ * respondent was correctly branched past, and dropped with no row and no
+ * warning. Every lunch-only form's one-page option silently registered nobody
+ * for a month.
  */
 const ATTENDANCE_MODE_CHOICES = {
   ALL_DATES: 'I want to sign up for all events this month.',
@@ -2396,11 +2406,16 @@ function buildClubModeChoice(programTitle) {
   return `${CLUB_MODE_CHOICE_PREFIX}${title}${CLUB_MODE_CHOICE_SUFFIX}`;
 }
 
-/** True when this answer means "every date on this form" — either current spelling, or the pre-v4 one. */
+/** True when this answer means "every date on this form" — any current spelling, or the pre-v4 one. */
 function isAllDatesModeAnswer(value) {
   const v = String(value || '').trim();
   return v === ATTENDANCE_MODE_CHOICES.ALL_DATES ||
     v === ATTENDANCE_MODE_CHOICES.ALL_DATES_SERIES ||
+    // The lunch-only form's own wording. It says "lunch" rather than "sign up"
+    // because a meal is not something you attend — but it is the same answer,
+    // and leaving it out here is what stopped a month of lunches booked in one
+    // pass from booking anything at all.
+    v === ATTENDANCE_MODE_CHOICES.ALL_DATES_LUNCH ||
     v === LEGACY_ATTENDANCE_MODE_CHOICES.ALL_DATES;
 }
 
@@ -18050,6 +18065,10 @@ function buildQuickMarkHtml(preloadedIndex) {
   legend { font-weight: bold; padding: 0 4px; }
   label.tick { display: block; padding: 3px 0; }
   label.tick span.note { color: #666; font-weight: normal; }
+  /* A tick that qualifies the one above it rather than standing on its own —
+     indented to the same 22px the meal boxes use, so the shape of the answer
+     is visible before anything is read. */
+  label.tick.sub { padding-left: 22px; }
   button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 9px 18px;
            font-size: 13px; cursor: pointer; margin-top: 14px; }
   button[disabled] { background: #9aa0a6; cursor: default; }
@@ -18170,8 +18189,11 @@ function buildQuickMarkHtml(preloadedIndex) {
   <label class="tick"><input type="checkbox" id="register" onchange="registerChanged()"> Register them for this session
     <span class="note">— no form needed; nothing is marked attended</span></label>
   <label class="tick" id="standingLabel" style="display:none">
-    <input type="checkbox" id="standing" onchange="refreshButton()"> …and every future session of it
+    <input type="checkbox" id="standing" onchange="standingChanged()"> …and every future session of it
     <span class="note">— a standing place on the list, until staff untick them on Club_Members</span></label>
+  <label class="tick sub" id="standingLunchLabel" style="display:none">
+    <input type="checkbox" id="standingLunch" onchange="refreshButton()"> …and a lunch every time
+    <span class="note">— a meal on every future session too, not only this one</span></label>
 </fieldset>
 
 <button id="go" onclick="submit(false)" disabled>Mark</button>
@@ -18702,6 +18724,13 @@ function buildQuickMarkHtml(preloadedIndex) {
   function showMealBoxes() {
     el('servedBox').style.display = el('lunch').checked ? 'block' : 'none';
     el('mealsBox').style.display = el('signup').checked ? 'block' : 'none';
+    // Untick "sign up for lunch" after the standing box has already defaulted
+    // itself from it and the default is stale — a standing lunch order nobody
+    // asked for. Only ever taken AWAY here: ticking lunch again does not
+    // re-tick a box the person has deliberately cleared.
+    if (!el('signup').checked && el('standingLunchLabel').style.display !== 'none') {
+      el('standingLunch').checked = false;
+    }
   }
 
   /** A number field's value as a whole count, floored at 0 — a blank box is 0. */
@@ -18719,8 +18748,39 @@ function buildQuickMarkHtml(preloadedIndex) {
     var on = el('register').checked && !appointmentSession();
     el('standingLabel').style.display = on ? 'block' : 'none';
     if (!on) el('standing').checked = false;
+    standingChanged();
     // Ticking Register is the other thing that brings the time dropdown out.
     showAppointmentTimes();
+    refreshButton();
+  }
+
+  // THREE DIFFERENT THINGS A DESK CAN MEAN, and until now the middle one was
+  // the only one it could say:
+  //
+  //   Register                          → this session, and this session only.
+  //   Register + every future session   → a standing place on the programme.
+  //   Register + every future session
+  //            + a lunch every time     → and a meal on each of those dates.
+  //
+  // The third is what Caroline asked for, and it is a great many of the people
+  // who come: a programme they never miss and a lunch they always stay for.
+  // The standing place already lands on Club_Members, which carries a Lunch
+  // column that applyClubRosterCatchup() honours on every booking it makes —
+  // so this tick is not a new mechanism, it is the desk finally being asked
+  // which of the two kinds of standing place it means.
+  //
+  // DEFAULTED FROM THE LUNCH TICK BESIDE IT, because somebody signing a person
+  // up for lunch today AND putting them on every future session has almost
+  // certainly described the whole standing arrangement, not half of it. Shown
+  // ticked rather than applied invisibly: it is one line above the button, and
+  // untickable by anyone who meant only today's meal.
+  function standingChanged() {
+    var on = el('standing').checked && el('standingLabel').style.display !== 'none';
+    var box = el('standingLunchLabel');
+    var wasOn = box.style.display !== 'none';
+    box.style.display = on ? 'block' : 'none';
+    if (!on) el('standingLunch').checked = false;
+    else if (!wasOn) el('standingLunch').checked = el('signup').checked;
     refreshButton();
   }
 
@@ -18775,6 +18835,7 @@ function buildQuickMarkHtml(preloadedIndex) {
           el('inFridge').value = '0';
           showMealBoxes();
           el('standing').checked = false;
+          el('standingLunch').checked = false;
           el('earlier').checked = false;
           el('moveTime').checked = false;
           registerChanged();
@@ -18821,6 +18882,7 @@ function buildQuickMarkHtml(preloadedIndex) {
         signup: el('signup').checked,
         register: el('register').checked,
         standing: el('standing').checked,
+        standingLunch: el('standingLunch').checked,
         appointmentTime: el('apptTime').value,
         // How many meals, on both sides of the same tab. Sent whatever is
         // ticked; the server ignores the half that does not apply.
@@ -20303,6 +20365,15 @@ function applyQuickMarkLocked(args) {
   // would otherwise book one person into every slot the programme ever runs.
   // Refused below, once the session is known, rather than silently dropped.
   const standing = register && !!args.standing;
+  // WHICH KIND OF STANDING PLACE. A place on every future session of a
+  // programme and a lunch on every one of those dates are two different
+  // promises, and the desk was previously only able to make the first: the
+  // Club_Members row went in with no Lunch value at all, so
+  // applyClubRosterCatchup() booked every future session as "No Lunch" — the
+  // programme carried forward and the meal did not. This is the second
+  // promise, said out loud, for the many people who come to a class they never
+  // miss and stay for the lunch every time.
+  const standingLunch = standing && !!args.standingLunch;
   const appointmentTime = String(args.appointmentTime || '').trim();
   // WHICH ROW, when the name does not say. On a Personalized Assistance
   // session one person can hold two slots, and the dialog sends back the slot
@@ -20366,8 +20437,8 @@ function applyQuickMarkLocked(args) {
     // offer every known member and not just the registered ones, this is the
     // walk-in case rather than a dead end.
     return addQuickMarkWalkIn(sheet, {
-      name, selection, location, attended, lunch, signup, register, standing, appointmentTime,
-      earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge,
+      name, selection, location, attended, lunch, signup, register, standing, standingLunch,
+      appointmentTime, earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge,
       confirmed: !!args.confirmWalkIn
     });
   }
@@ -20476,7 +20547,8 @@ function applyQuickMarkLocked(args) {
   // this one, and every one after it" is a perfectly ordinary thing to ask on
   // a day she happens to be booked for already.
   const standingNote = standing
-    ? addStandingListMember({ title: selection.title, location, date: target.date }, name)
+    ? addStandingListMember({ title: selection.title, location, date: target.date }, name,
+      { standingLunch })
     : '';
   // "She rang back to say she'd take an earlier slot after all" — recorded on
   // the row she already has, which is the whole use of a second call.
@@ -20679,7 +20751,7 @@ function describeQuickMark(attended, lunch, signup, register) {
  * because a button was clicked by accident.
  */
 function addQuickMarkWalkIn(sheet, args) {
-  const { name, selection, location, attended, lunch, signup, register, standing } = args;
+  const { name, selection, location, attended, lunch, signup, register, standing, standingLunch } = args;
   const appointmentTime = String(args.appointmentTime || '').trim();
   const earlierAppointment = String(args.earlierAppointment || '').trim();
   const program = selection ? selection.title : '';
@@ -20767,7 +20839,8 @@ function addQuickMarkWalkIn(sheet, args) {
       question: `"${name}" has no registration for ${program}.\n\n` +
         `Add a new row for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''} ` +
         `(${session.location}), marked ${what} and flagged "Manually Added"?` +
-        (standing ? `\n\nThey will also be kept on the list for every future ${program}.` : '') +
+        (standing ? `\n\nThey will also be kept on the list for every future ${program}` +
+          (standingLunch ? ', with a lunch on each of those dates.' : '.') : '') +
         (lunch && !lunchOffered ? '\n\nNote: no lunch is scheduled for that date, so no meal will be counted.' : '')
     };
   }
@@ -20852,7 +20925,7 @@ function addQuickMarkWalkIn(sheet, args) {
   // the row just added, so no re-read is needed.
   if (signup) updateMasterLunchDashboard(existing);
 
-  const standingNote = standing ? addStandingListMember(session, name) : '';
+  const standingNote = standing ? addStandingListMember(session, name, { standingLunch }) : '';
   const message = (signup
     ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
     : (register && !attended && !lunch
@@ -20902,11 +20975,22 @@ function addQuickMarkWalkIn(sheet, args) {
  * description lacks a word would leave the Zoom classes — the whole reason
  * this was asked for — unable to have one.
  *
+ * WITH OR WITHOUT A LUNCH — options.standingLunch, which is the desk's answer
+ * to "a place every time, or a place and a meal every time?". It is written to
+ * the roster row's own Lunch column, which is where the fact belongs: staff
+ * can see it, change it on the tab, and applyClubRosterCatchup() reads it back
+ * on every booking it makes. Nothing here books a meal directly.
+ *
  * Failure is reported, never thrown: the registration this rides on has
  * already been written, and losing it to a roster problem would be a much
  * worse outcome than a message saying the standing part did not take.
  */
-function addStandingListMember(session, name) {
+function addStandingListMember(session, name, options) {
+  const wantsLunch = !!(options && options.standingLunch);
+  // Both are in CLUB_LUNCH_OPTIONS, which is the Lunch column's own validation
+  // list — a value outside it would be written and then flagged as invalid on
+  // the tab the moment somebody looked at it.
+  const lunchType = wantsLunch ? 'Yes - Lunch' : 'No Lunch';
   try {
     const title = String((session && session.title) || '').trim();
     const location = String((session && session.location) || '').trim();
@@ -20937,11 +21021,22 @@ function addStandingListMember(session, name) {
       name,
       personType: 'Attendee',
       primaryRegistrant: 'Self',
+      lunchType,
+      // SAID AT THE DESK, JUST NOW, by somebody with the person in front of
+      // them — so it outranks whatever the row already said, which a form
+      // re-submission deliberately does not. See upsertClubMembers().
+      lunchTypeFromDesk: true,
       source: 'Added at the front desk'
     }]);
-    if (result.added > 0) return ` They are now on the standing list for every future ${title}.`;
-    if (result.reactivated > 0) return ` They are back on the standing list for every future ${title}.`;
-    return ` They were already on the standing list for ${title}.`;
+    const meals = wantsLunch ? ', with a lunch each time' : '';
+    if (result.added > 0) return ` They are now on the standing list for every future ${title}${meals}.`;
+    if (result.reactivated > 0) return ` They are back on the standing list for every future ${title}${meals}.`;
+    if (result.lunchChanged > 0) {
+      return wantsLunch
+        ? ` They were already on the standing list for ${title}, and will now get a lunch each time.`
+        : ` They were already on the standing list for ${title}; their standing lunch has been taken off.`;
+    }
+    return ` They were already on the standing list for ${title}${meals}.`;
   } catch (err) {
     log(`addStandingListMember: could not add "${name}" to a standing list (${err}).`);
     return ` (their registration is saved, but the standing list could not be updated — ${err})`;
@@ -21994,10 +22089,12 @@ function indexClubMemberRows(rows) {
  * member can ask, and quietly ignoring it would be worse than the surprise —
  * so it is also reported to the admin digest rather than done silently.
  *
- * Returns { added, reactivated, unchanged }.
+ * Returns { added, reactivated, unchanged, lunchChanged } — the last of these
+ * counting members who were already on the list and whose standing lunch a desk
+ * tick has just changed.
  */
 function upsertClubMembers(entries) {
-  const result = { added: 0, reactivated: 0, unchanged: 0 };
+  const result = { added: 0, reactivated: 0, unchanged: 0, lunchChanged: 0 };
   if (!entries || entries.length === 0) return result;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -22035,7 +22132,19 @@ function upsertClubMembers(entries) {
           `(${entry.source || 'a registration form'}), so they are on the list again. Untick Active on ` +
           `"${SHEET_NAMES.CLUB_MEMBERS}" if that is wrong.`);
       } else {
-        result.unchanged++;
+        // AN ACTIVE MEMBER'S LUNCH IS STAFF'S TO SET, and a form arriving again
+        // must not quietly overwrite what somebody typed on the tab. A DESK
+        // TICK IS DIFFERENT: it is a person at the counter saying what this
+        // arrangement is now, which is the same kind of statement the column
+        // holds — and refusing it would mean "she's on the list already" was
+        // the one case where "…and a lunch every time" did nothing at all.
+        if (entry.lunchTypeFromDesk && entry.lunchType &&
+          String(existing[map['Lunch']] || '') !== entry.lunchType) {
+          existing[map['Lunch']] = entry.lunchType;
+          result.lunchChanged++;
+        } else {
+          result.unchanged++;
+        }
       }
       return;
     }
@@ -22058,12 +22167,13 @@ function upsertClubMembers(entries) {
     result.added++;
   });
 
-  if (result.added > 0 || result.reactivated > 0) {
+  if (result.added > 0 || result.reactivated > 0 || result.lunchChanged > 0) {
     renderClubMembersSheet(rows);
     // applyClubRosterCatchup() reads this tab back moments from now, in the
     // same execution — make sure what it reads is what was just written.
     SpreadsheetApp.flush();
-    log(`Club_Members: ${result.added} new member(s), ${result.reactivated} re-activated.`);
+    log(`Club_Members: ${result.added} new member(s), ${result.reactivated} re-activated, ` +
+      `${result.lunchChanged} standing lunch(es) changed.`);
   }
   return result;
 }
