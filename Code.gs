@@ -17748,12 +17748,20 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const dateColIdx = headers.indexOf('Event_Date');
   let row = startRow;
 
+  // Columns that must stay TEXT however time-like they read — stamped before
+  // the values land, because that is the only moment it works. See
+  // stampTextColumns().
+  const textCols = (options.textColumns || [])
+    .map(h => headers.indexOf(h) + 1)
+    .filter(col => col > 0);
+
   writeSectionBanner(sheet, row, numCols, options.upcomingLabel || '⏳ Upcoming');
   row++;
   writeSectionHeader(sheet, row, numCols, headers);
   const upcomingHeaderRow = row;
   row++;
   const upcomingDataStart = row;
+  stampTextColumns(sheet, textCols, upcomingDataStart, upcomingRows.length);
   if (upcomingRows.length > 0) sheet.getRange(upcomingDataStart, 1, upcomingRows.length, numCols).setValues(upcomingRows);
   applyZebraStripingManualBounded(sheet, upcomingDataStart, upcomingRows.length, numCols);
   if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length);
@@ -17767,6 +17775,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const pastHeaderRow = row;
   row++;
   const pastDataStart = row;
+  stampTextColumns(sheet, textCols, pastDataStart, pastRows.length);
   if (pastRows.length > 0) sheet.getRange(pastDataStart, 1, pastRows.length, numCols).setValues(pastRows);
   applyZebraStripingManualBounded(sheet, pastDataStart, pastRows.length, numCols);
   if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length);
@@ -17796,6 +17805,31 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
     pastBannerRow, pastHeaderRow, pastDataStart, pastCount: pastRows.length,
     hiddenPastRows: hidden
   };
+}
+
+/**
+ * Stamps 1-based columns as PLAIN TEXT, before anything is written into them.
+ *
+ * "10:00 AM" in a cell Sheets is free to interpret stops being those words and
+ * becomes a time value dated 30 Dec 1899 — the epoch it counts times from —
+ * which is what put "12/30/1899" in the Event_Time column beside a correct
+ * date. The format has to be on the cells FIRST: applying it afterwards
+ * reformats a number that is already a number, and the words are gone by then.
+ *
+ * Cheap, and deliberately not conditional on there being rows: an empty band
+ * formatted as text is what keeps the next single-cell write — Quick Mark
+ * moving somebody to 11:30 — text as well.
+ */
+function stampTextColumns(sheet, cols, startRow, numRows) {
+  if (!cols || cols.length === 0) return;
+  const rows = Math.max(numRows, 1);
+  cols.forEach(col => {
+    try {
+      sheet.getRange(startRow, col, rows, 1).setNumberFormat('@');
+    } catch (err) {
+      log(`ℹ️ Could not stamp column ${col} on "${sheet.getName()}" as text (${err}).`);
+    }
+  });
 }
 
 /**
@@ -17849,13 +17883,16 @@ function renderRegistrantsSheet(force, allRows) {
   return renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',
+    // "10:00 AM" is words, not a time value — see stampTextColumns().
+    textColumns: ['Event_Time'],
     force,
     afterWrite: applyRegistrantsFormatting
   });
 }
 
 /**
- * Fills Event_Time in on any row that hasn't got one, from the session table.
+ * Fills Event_Time in on any row that hasn't got one, from the session table —
+ * and turns any cell Sheets has already eaten back into the words it held.
  *
  * New rows are stamped at build time (buildRegistrantRow()), so this only ever
  * has work to do for rows written before the column existed — and for those it
@@ -17863,10 +17900,24 @@ function renderRegistrantsSheet(force, allRows) {
  * simply right the first time anyone looks at it. Reads the session table only
  * when at least one row actually needs it, and never fails the render: a
  * missing time is cosmetic, and the tab is not.
+ *
+ * THE REPAIR IS THE SAME PASS. A session with no end time wrote its start
+ * alone — "10:00 AM" — and Sheets turned that into a time value dated 30 Dec
+ * 1899, which is what the column showed: the right date in Event_Date and
+ * "12/30/1899" beside it. New writes can no longer be coerced (the column is
+ * stamped as text before the rows land), but the cells already coerced read
+ * back as Dates, and this is the render that puts their labels back. Done here
+ * rather than in a one-off repair because every registrant render passes
+ * through it, so the tab heals the first time anybody looks at it.
  */
 function backfillRegistrantEventTimes(ss, headers, rows) {
   const map = getIndexMap(headers);
   if (map['Event_Time'] === undefined) return;
+  rows.forEach(row => {
+    const value = row[map['Event_Time']];
+    const label = eventTimeLabelOf(value);
+    if (label !== value) row[map['Event_Time']] = label;
+  });
   const needy = rows.filter(row =>
     !String(row[map['Event_Time']] || '').trim() && String(row[map['Event_ID']] || '').trim());
   if (needy.length === 0) return;
@@ -20494,7 +20545,11 @@ function applyQuickMarkLocked(args) {
     const slots = appointmentSlotsForRow(sheet, map, target);
     const moved = slots.filter(slot => slot.startLabel === appointmentTime)[0];
     if (map['Event_Time'] !== undefined) {
+      // Text first, THEN the value: a single "11:30 AM" written into a cell
+      // Sheets may interpret comes back as a 1899 time value. See
+      // stampTextColumns().
       sheet.getRange(target.sheetRow, map['Event_Time'] + 1)
+        .setNumberFormat('@')
         .setValue(moved ? moved.rangeLabel : appointmentTime);
     }
     movedNote = ` Moved from ${bookedTime} to ${appointmentTime}.`;
@@ -21134,9 +21189,28 @@ function formatTimeRange(start, end) {
   const from = coerceDate(start);
   if (!from) return '';
   const label = formatTimeLabel(from);
-  const to = coerceDate(end);
+  const to = clockTimeOnDayOf(coerceDate(end), from);
   if (!to || to <= from) return label;
   return `${label} – ${formatTimeLabel(to)}`;
+}
+
+/**
+ * An end time that is a CLOCK TIME rather than a moment — 30 Dec 1899, 11:30 —
+ * moved onto the day its session actually runs. Anything else is handed back
+ * untouched.
+ *
+ * A cell holding only a time is how Sheets stores one, so an Event_End that has
+ * been retyped by a person (or coerced from text) reads back dated to the 1899
+ * epoch. Compared against a real session start it is always EARLIER, so the
+ * range collapsed to the start alone — "10:00 AM" — which is precisely the
+ * lone time-like string Sheets then ate back into another 1899 value. Reading
+ * it as the clock time it plainly is keeps the range, and keeps the column
+ * showing a time range rather than a date.
+ */
+function clockTimeOnDayOf(time, day) {
+  if (!time || !day || time.getFullYear() >= 1900) return time;
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate(),
+    time.getHours(), time.getMinutes(), time.getSeconds());
 }
 
 /**
@@ -21151,6 +21225,36 @@ function formatTimeRange(start, end) {
 function formatTimeLabel(value) {
   const date = coerceDate(value);
   return date ? Utilities.formatDate(date, TIMEZONE, 'h:mm a') : '';
+}
+
+/**
+ * An Event_Time cell as the words it is meant to hold — "10:00 AM",
+ * "10:00 AM – 11:30 AM" — whatever shape the cell has ended up in.
+ *
+ * WHY A DATE EVER COMES BACK OUT OF THIS COLUMN. Event_Time is written as
+ * text, but a session with no end time (or one whose stored end is not after
+ * its start) writes the START ALONE — "10:00 AM" — and Sheets coerces a cell
+ * that merely LOOKS like a time into a real time value, whose date part is the
+ * epoch Sheets counts from: 30 Dec 1899. The cell then reads back as a Date,
+ * and under a date number format it SHOWS as "12/30/1899" beside a perfectly
+ * correct Event_Date. It is the same coercion setEventTimeFormulas() exists to
+ * dodge on the session table, arriving on the registrant rows by the one route
+ * that tab has: a single time with no range around it.
+ *
+ * Both halves of that are fixed at the source — the column is stamped as plain
+ * text before the rows are written (see writeUpcomingPastSections()) — but
+ * every workbook that has been running since before this has cells already
+ * coerced, and everything that READS a time (the appointment slot match, the
+ * provider list, the instructor sheet) has to keep working on those. Turning
+ * the Date back into its label is all that takes, and it is what heals the
+ * cell: the next render writes the label back as text.
+ */
+function eventTimeLabelOf(value) {
+  // Duck-typed rather than `instanceof Date`: a value that came out of a cell
+  // is a date if it behaves like one, and the identity check is the sort of
+  // thing that quietly stops being true across a realm boundary.
+  if (value && typeof value.getMonth === 'function') return formatTimeLabel(value);
+  return String(value === null || value === undefined ? '' : value).trim();
 }
 
 /** Hot/Cold for a walk-in's meal, taken from that day's menu; 'Hot' if the menu says nothing. */
@@ -21168,6 +21272,8 @@ function renderTriageSheet(force, allRows) {
   return renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming (Triaged)',
     pastLabel: '🕓 Past (Triaged)',
+    // Triage rows are registrant rows — same column, same coercion.
+    textColumns: ['Event_Time'],
     force,
     afterWrite: applyRegistrantsFormatting
   });
@@ -25511,7 +25617,7 @@ function buildInstructorRowsByProgram(sessionRows, registrantRows) {
     const values = readInstructorValues(row, map);
     const out = new Array(INSTRUCTOR_SHEET_HEADERS.length).fill('');
     out[sheetMap['Event_Date']] = row[map['Event_Date']];
-    out[sheetMap['Event_Time']] = row[map['Event_Time']] || '';
+    out[sheetMap['Event_Time']] = eventTimeLabelOf(row[map['Event_Time']]);
     out[sheetMap['Location']] = row[map['Location']] || '';
     out[sheetMap['Name']] = row[map['Name']] || '';
     out[sheetMap['Party_Size']] = row[map['Party_Size']] || '';
@@ -25578,6 +25684,10 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, INSTRUCTOR_OWNED_COLUMNS);
 
   if (rows.length > 0) {
+    // Before the values, never after — a bare "10:00 AM" that Sheets is
+    // allowed to read as a time stops being those words. See
+    // stampTextColumns().
+    stampTextColumns(sheet, [map['Event_Time'] + 1], MEMORY_TAB_DATA_ROW, rows.length);
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1, rows.length, numCols).setValues(rows);
     sheet.getRange(MEMORY_TAB_DATA_ROW, map['Event_Date'] + 1, rows.length, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     sheet.getRange(MEMORY_TAB_DATA_ROW, map['Party_Size'] + 1, rows.length, 1).setNumberFormat('0');
@@ -27797,7 +27907,10 @@ function buildAppointmentSlots(startTime, endTime, minutes) {
   const start = coerceDate(startTime);
   if (!start) return [];
   const slotMs = Math.max(MIN_APPOINTMENT_SLOT_MINUTES, Number(minutes) || APPOINTMENT_SLOT_MINUTES) * 60 * 1000;
-  const end = coerceDate(endTime);
+  // An end stored as a bare clock time reads back dated to 1899 and would
+  // otherwise fall EARLIER than its own session, collapsing an afternoon of
+  // appointments into a single slot. See clockTimeOnDayOf().
+  const end = clockTimeOnDayOf(coerceDate(endTime), start);
 
   const slots = [];
   const push = (from, to) => slots.push({
@@ -27882,7 +27995,11 @@ function parseAppointmentChoice(value) {
  * start is what identifies the slot.
  */
 function appointmentStartLabelOf(eventTime) {
-  const text = String(eventTime || '').trim();
+  // eventTimeLabelOf() rather than String(): a cell Sheets has coerced into a
+  // time value reads back as a Date, and String()ing that gives "Sat Dec 30
+  // 1899 10:00:00 GMT-0500" — which matches no slot, so the booked chair
+  // silently reads as free.
+  const text = eventTimeLabelOf(eventTime);
   if (!text) return '';
   return text.split('–')[0].split(' - ')[0].trim();
 }
@@ -29398,7 +29515,7 @@ function getAssistanceScheduleData(daysAhead) {
     const earlier = rMap['Earlier_Appointment'] === undefined
       ? false : wantsEarlierAppointment(row[rMap['Earlier_Appointment']]);
     byDay[key].people.push({
-      time: String(row[rMap['Event_Time']] || ''),
+      time: eventTimeLabelOf(row[rMap['Event_Time']]),
       name: String(row[rMap['Name']] || ''),
       personType: String(row[rMap['Person_Type']] || ''),
       phone: String(row[rMap['Phone']] || ''),
@@ -29416,7 +29533,7 @@ function getAssistanceScheduleData(daysAhead) {
       earlierList.push({
         dateKey: formatDateKey(date),
         dateLabel: formatDateLabel(date),
-        time: String(row[rMap['Event_Time']] || ''),
+        time: eventTimeLabelOf(row[rMap['Event_Time']]),
         program: String(row[rMap['Event']] || ''),
         location: String(row[rMap['Location']] || ''),
         name: String(row[rMap['Name']] || ''),
