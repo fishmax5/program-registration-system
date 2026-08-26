@@ -13760,8 +13760,28 @@ const LEGACY_REGISTRATION_LINE_REGEX_GLOBAL =
 const ANY_FORMS_ANCHOR_REGEX = /<a[^>]*href="[^"]*docs\.google\.com\/forms\/[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
 /** A bare Google Forms URL with no anchor around it — what Calendar leaves behind when it flattens one. */
 const BARE_FORMS_URL_REGEX = /https?:\/\/docs\.google\.com\/forms\/\S*/gi;
+/**
+ * WHAT THIS SCRIPT WROTE IS NOT WHAT COMES BACK OUT.
+ *
+ * Google Calendar re-encodes a description whenever the event is edited in the
+ * web UI, and the two characters this system stamps its own lines with are
+ * exactly what it re-encodes: the "🚧" written here can be read back as
+ * "&#128679;" (or "&#x1F6A7;"), and the plain space after it as "&nbsp;". A
+ * pattern that only knows the literal characters stops recognizing this
+ * system's own line the moment somebody edits the event by hand — and a notice
+ * that is not recognized is a notice that is not removed, so the event ends up
+ * carrying BOTH a register link and a stale "not open yet" line under it.
+ *
+ * So every pattern below matches the stamp and its spacing in all three
+ * encodings. The `i` flag on each pattern covers "&#X1f6A7;" and friends.
+ */
+const DESCRIPTION_HTML_SPACE = '(?:\\s|&nbsp;|&#0*160;|&#x0*a0;)';
+const REGISTRATION_NOTICE_STAMP = '(?:🚧|&#0*128679;|&#x0*1f6a7;)';
+const REGISTER_LABEL_STAMP = '(?:📝|&#0*128221;|&#x0*1f4dd;)';
+
 /** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
-const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
+const ORPHAN_REGISTER_LABEL_REGEX =
+  new RegExp(`^${DESCRIPTION_HTML_SPACE}*${REGISTER_LABEL_STAMP}${DESCRIPTION_HTML_SPACE}*Register for .*$`, 'gim');
 /**
  * The "🚧 Registration Not Yet Open" notice, in every shape it survives as.
  *
@@ -13775,15 +13795,17 @@ const ORPHAN_REGISTER_LABEL_REGEX = /^\s*📝\s*Register for .*$/gim;
 const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
   // Alone on its line — how this script writes it — however it ends up
   // indented, quoted, or wrapped in tags by a later edit.
-  new RegExp(`^[\\s>]*(?:<[^>]+>\\s*)*(?:🚧\\s*)?${REGISTRATION_NOT_OPEN_TEXT}\\s*(?:<[^>]+>\\s*)*$`, 'gim'),
+  new RegExp(`^(?:[\\s>]|&nbsp;|&#0*160;|&#x0*a0;)*(?:<[^>]+>\\s*)*(?:${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*)?` +
+    `${REGISTRATION_NOT_OPEN_TEXT}${DESCRIPTION_HTML_SPACE}*(?:<[^>]+>\\s*)*$`, 'gim'),
   // Wrapped in one element on a line it now shares with other content: the
   // Calendar web UI re-flows a whole description into <div>s when somebody
   // edits any part of it, and our line stops being a line.
-  new RegExp(`<(div|p|span)[^>]*>\\s*(?:🚧\\s*)?${REGISTRATION_NOT_OPEN_TEXT}\\s*</\\1>`, 'gi'),
-  // Bare and mid-line, with nothing around it. Requires the emoji: the words
+  new RegExp(`<(div|p|span)[^>]*>${DESCRIPTION_HTML_SPACE}*(?:${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*)?` +
+    `${REGISTRATION_NOT_OPEN_TEXT}${DESCRIPTION_HTML_SPACE}*</\\1>`, 'gi'),
+  // Bare and mid-line, with nothing around it. Requires the stamp: the words
   // on their own could plausibly be something a person typed, but "🚧 " in
   // front of them is this script's stamp.
-  new RegExp(`🚧\\s*${REGISTRATION_NOT_OPEN_TEXT}`, 'gi')
+  new RegExp(`${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*${REGISTRATION_NOT_OPEN_TEXT}`, 'gi')
 ];
 
 /**
@@ -13852,7 +13874,10 @@ function tidyDescriptionWhitespace(text) {
   return String(text || '')
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map(line => (line.replace(/<br\s*\/?>/gi, '').trim() === '' ? '' : line))
+    // A line holding nothing but separators is blank — including one whose
+    // only content is the &nbsp; a Calendar edit left where a space had been,
+    // which would otherwise sit on the page as a stubborn empty line.
+    .map(line => (line.replace(/<br\s*\/?>/gi, '').replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ').trim() === '' ? '' : line))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(BR_RUN, '<br><br>')
