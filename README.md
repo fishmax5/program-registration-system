@@ -50,17 +50,17 @@ It also:
   meal on the order, not three, with a `Requests_Merged` column showing where a
   merge happened so the number stays auditable (a person who genuinely orders
   several meals says so in one place, not by registering repeatedly);
-- takes registrations for **lunch on its own**, with no programme attached — a
+- takes registrations for **lunch on its own**, with no program attached — a
   self-building sign-up form per location per month, generated from the lunch
   menu rather than the calendar, on which "I want lunch on every date listed"
   books a whole month of meals in one page; its links are **pinned to the top
   of the lunch dashboard**, which is where staff are standing when somebody
   asks for them, and a menu typed **up to six months ahead** gets its form and
   its link straight away, so the link exists before the newsletter advertising
-  it does; each generated lunch date sits on the programme dashboard named for
+  it does; each generated lunch date sits on the program dashboard named for
   its place and its dish (`Lunch @ Narberth — Chx Parm`) rather than as one of
   thirty identical rows reading "Lunch Only (no program)", and stays out of the
-  participation numbers and the Today block — a meal is not a programme, but it
+  participation numbers and the Today block — a meal is not a program, but it
   is worth reading;
 - lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
   per person per date and location, with their programs, phone, `Hot`/`Cold`
@@ -100,20 +100,20 @@ It also:
   session on the hourly pass, or a session you pick from the menu — and
   un-invites them if they cancel.
 
-- **reviews itself, programme by programme** — every rule here is enforced on
+- **reviews itself, program by program** — every rule here is enforced on
   the way IN, when a sync runs or a box is ticked, and none of them on the way
-  out; so after a season of editing nothing says which of forty programmes are
+  out; so after a season of editing nothing says which of forty programs are
   still in the state their author believes they are in. One dialog now walks
   them a screen at a time and states what ought to be true of each — the sheet
-  and the calendar agreeing about what kind of programme it is, its events all
+  and the calendar agreeing about what kind of program it is, its events all
   saying the same thing, as many forms as its kind implies, a register link on
-  every event, a slot length on an appointment programme, every row with an
+  every event, a slot length on an appointment program, every row with an
   event behind it and every event with a row — with the fix on a button beside
   each answer that isn't a tick. It reads twice and opens no form, so forty
-  programmes take seconds, and marking one reviewed records what was TRUE when
+  programs take seconds, and marking one reviewed records what was TRUE when
   you looked, so a calendar that moves underneath says "changed since" rather
-  than going on claiming the programme is fine;
-- asks **what kind of programme is this** in one place instead of spreading it
+  than going on claiming the program is fine;
+- asks **what kind of program is this** in one place instead of spreading it
   over four checkboxes that interact in ways nobody holds in their head:
   monthly, series, club, club series, appointments, drop-in. Each of the six is
   exactly a setting for all four of the old controls — same tags, same calendar

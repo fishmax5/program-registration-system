@@ -64,7 +64,7 @@ This matters because the tag words are ordinary English — *Club*, *Combined*,
 *Shared*, *Regular*, *Appointments*, *Drop-In* — and you are asked to put
 clarifying info in the description. Before this rule, a bracket only had to
 *contain* one of those words: `[Film Club selection: Casablanca]` gave the
-programme a standing club roster, and `[Drop-in welcome]` deleted its
+program a standing club roster, and `[Drop-in welcome]` deleted its
 registration form, both silently.
 
 If you meant a tag and the system decided it was a note, put the tag in a
@@ -344,7 +344,7 @@ rebuilds the form as an ordinary date-based one. Appointments already booked
 keep their times on Registrant_Dash.
 
 **If a form doesn't look right** — no times on it, or it still offers *"I want
-to sign up for all events this month"* — run **📝 Programmes & Forms ▸ Rebuild
+to sign up for all events this month"* — run **📝 Programs & Forms ▸ Rebuild
 Appointment Forms + Report…**. It reshapes every appointment form on the spot
 instead of waiting for the hourly pass, and reports:
 
@@ -393,7 +393,7 @@ The shape that works is the one `[Personalized Assistance]` was built for: **one
 event covering 12:30–2:30**, tagged with how long an appointment is, cut into
 slots by the form.
 
-**📝 Programmes & Forms ▸ ⏱️ Merge Half-Hour Blocks…** converts one into the
+**📝 Programs & Forms ▸ ⏱️ Merge Half-Hour Blocks…** converts one into the
 other. It lists every day on the calendar that has two or more back-to-back
 events of the same name, with how many blocks and how long each one is. Tick the
 ones to merge and pick what they are:
@@ -425,7 +425,7 @@ Run **🔄 Update Everything Now** afterwards so the forms catch up.
 
 ---
 
-### Reviewing your programmes
+### Reviewing your programs
 
 Every rule in this system is enforced *on the way in* — when a sync runs, when
 you tick a box, when a form is rebuilt. None of them is enforced on the way
@@ -436,9 +436,9 @@ forty programs are still in the state you think they are.
 
 The workbook looks fine. The dashboard is full of rows. The forms all open.
 
-**📝 Programmes & Forms ▸ 🔍 Review Programmes One by One…** walks them a screen
-at a time and states, for each one, what ought to be true — then says whether it
-is.
+**📝 Programs & Forms ▸ 🔍 Review Programs, Then Update Once…** walks them a
+screen at a time and states, for each one, what ought to be true — then says
+whether it is.
 
 | It checks | Because |
 |---|---|
@@ -452,7 +452,36 @@ is.
 | The **capacity arithmetic** adds up | People waitlisted while other dates have seats free; more registered than the room holds |
 
 Each answer is a ✅ or a sentence saying what disagrees with what, and where
-there is one, **the fix is on a button** — applied to that program alone.
+there is one, **the fix is offered right there**.
+
+#### You decide as you go; everything is applied once, at the end
+
+Nothing you do on this screen is written when you do it. Picking a kind,
+choosing to merge a day of half-hour blocks, marking a program reviewed — all of
+it is *selected*, and a purple bar at the bottom tells you what is waiting:
+
+> **Selected, not yet applied:** 6 kind change(s), 1 merge(s), 12 mark(s).
+> Nothing has been written yet — press Apply and it is all done in one pass.
+> *Discard selections*
+
+Then **Apply everything & update** does the lot in a single pass: every calendar
+retag, every merge, and then **one** update of the sheet, the calendar and the
+forms. That last part is the slow bit — a minute or two — and this way you wait
+for it **once** instead of once per program.
+
+This matters more than it sounds. Every fix here ends in the same place: a few
+calendar writes, then a sync to rebuild the form behind them and rewrite the
+"register here" links. Doing that per program meant sitting through forty full
+updates to make forty decisions, and each of those updates re-read every
+calendar and every form in the workbook to publish the effect of one retag. The
+work is the same either way — only the waiting multiplies.
+
+If nothing is selected, the button says **Update everything now** and simply
+runs that same update.
+
+> **Changed your mind?** Pick the kind it already is, or press *undo* next to a
+> selection, and it comes off the plan. *Discard selections* clears the lot.
+> Nothing has been written, so nothing has to be undone.
 
 **Three filters at the top:** *Needs attention* (the default — only the programs
 with a ❌ or a ⚠️), *Not yet reviewed*, and *All*.
@@ -465,7 +494,32 @@ at all.
 
 > **It is fast because it opens no forms.** The whole review is the dashboard
 > rows plus one pass over the calendar, and the result is handed to the dialog in
-> one go — so *Next* is instant. Only the buttons go back to the server.
+> one go — so *Next* is instant. The decisions go back the same way: all at once,
+> when you press Apply.
+
+#### Which program is on which form
+
+The second tab, **Which form is each program on?**, reads the same facts the
+other way round: one row per form, and everything registering through it. The
+dialog switches to it automatically once an update finishes, because it is the
+one screen that answers *"did that leave two links for the same sessions?"*
+
+Read down the first column. Two names in one cell means two programs sharing a
+sign-up. Above the table, three overlaps are called out by name:
+
+| It says | What it means |
+|---|---|
+| ❌ **A month split across two forms** | Sessions of one program in the same month sitting on different forms. Two links were handed out for what people think of as one thing, so half the sign-ups land somewhere the person holding the other link can't see. **Move Sessions to Another Form…** puts them back on one |
+| ❌ **One form, two differently-named programs** | One program's registrants are being filed under another's name — almost always a repoint that took the wrong rows with it |
+| ⚠️ **One form, one name, two locations** | How a cross-location sign-up is *meant* to work. Listed so you can confirm it's deliberate, not because it's wrong |
+| ⚠️ **The calendar points somewhere else** | An event description advertising a form your session rows don't use — so the link the public follows and the form this workbook reads are different forms. An update rewrites the event links |
+
+Rows are tinted: red where two different programs share a form, amber where one
+program shares one across locations. The form ID links straight to the form's
+edit page.
+
+> **This costs nothing.** It is built from the review that was already gathered,
+> and — like everything else here — it opens no forms.
 
 #### One kind instead of four checkboxes
 
@@ -489,10 +543,10 @@ this?** — with six answers:
 
 Each of the six is exactly a setting for all four of the old controls, so
 **nothing underneath changed** — same tags, same calendar stamps, same columns,
-and a workbook you've been editing by hand goes on working. Picking one and
-pressing **Apply** writes all four out to **the calendar first** (which is what
-makes a change stick), then updates the dashboard immediately so you can see it
-took.
+and a workbook you've been editing by hand goes on working. Choosing one selects
+it; when you press **Apply everything & update**, all four are written out to
+**the calendar first** (which is what makes a change stick), then onto the
+dashboard, and then the update rebuilds the form in its new shape.
 
 ---
 
@@ -630,7 +684,7 @@ stay ticked while the write is on its way.
 > **🔧 Admin ▸ Check Triggers** once on a workbook to install it (it's part of
 > the normal trigger set, and **Trigger Status** tells you if it's missing).
 > Without it nothing is lost — the tick sits in the queue and the next
-> **Sync Cal** delivers it. **📝 Programmes & Forms ▸ Push Dashboard
+> **Sync Cal** delivers it. **📝 Programs & Forms ▸ Push Dashboard
 > Ticks to the Calendar** pushes the queue through by hand at any time.
 
 **Tentative events** — start the **title** with `*`:
@@ -1924,7 +1978,7 @@ Who Needs Lunch on Each Date?
 The fork at the top reads in lunch terms too — *"I want lunch on every date
 listed on this form"* books a meal on every date in one page, which is the
 month-at-a-time case this form exists for. The description says outright, in
-its first line, that this books a meal and **not** a programme.
+its first line, that this books a meal and **not** a program.
 
 **Where the registrations land.** Exactly where every other registration
 lands: rows on **Registrant_Dash**, a name on
@@ -1934,7 +1988,7 @@ place and the dish, the same as the session row it came from.
 
 A few things worth knowing:
 
-- **Signing up here and on a programme's form for the same day is one meal,
+- **Signing up here and on a program's form for the same day is one meal,
   not two** — the counts are per person (see
   [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
   row shows both under `Programs` with `Requests_Merged` = 1.
@@ -1943,7 +1997,7 @@ A few things worth knowing:
   `Calendar_Source` — because there is no calendar event behind them. That
   blank is what stops them being swept into triage.
 
-  They used to be **hidden**, on the grounds that a meal is not a programme.
+  They used to be **hidden**, on the grounds that a meal is not a program.
   That was really about the old name: thirty rows a month all reading
   `🥡 Lunch Only (no program)` said nothing thirty times, and made the tab
   look like it was announcing that nothing was on. A row that says
@@ -1952,7 +2006,7 @@ A few things worth knowing:
   unhidden automatically on the next render.)
 
   They're still left out of the **Today block** and the **participation
-  metrics** — "42 programmes this month" counting thirty lunches is a number
+  metrics** — "42 programs this month" counting thirty lunches is a number
   nobody can use, and the meal has its own count on the lunch dashboard.
 
 - **The dish in the name is decoration, not identity.** Every join in the
@@ -1965,7 +2019,7 @@ A few things worth knowing:
   exist. The workbook tells you so and puts the cell back; change the date on
   `Lunch_Schedule` instead.
 - **Nobody is invited to a calendar event** for a lunch-only date, since there
-  isn't one. Programme invitations are unaffected.
+  isn't one. Program invitations are unaffected.
 - If a form for a month **can't be opened** — trashed, permissions changed —
   that month is left alone and reported by email rather than being silently
   moved onto a replacement form, which would strand every response already on
@@ -2027,11 +2081,11 @@ Everything else is grouped by the job it belongs to.
 | **Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
 | **Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 
-**📝 Programmes & Forms**
+**📝 Programs & Forms**
 
 | Item | What it does |
 |---|---|
-| **🔍 Review Programmes One by One…** | Walks your programmes a screen at a time and says, for each, what ought to be true and whether it is — see [Reviewing your programmes](#reviewing-your-programmes). Start here when something looks wrong and you don't know where |
+| **🔍 Review Programs, Then Update Once…** | Walks your programs a screen at a time and says, for each, what ought to be true and whether it is; your answers are applied together in one pass at the end, and a second tab shows which program is on which form — see [Reviewing your programs](#reviewing-your-programs). Start here when something looks wrong and you don't know where |
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
@@ -2313,10 +2367,10 @@ does rebuild forms and "rebuild" sounds like "replace":
   are added to a series, or a question is added, the form is rewritten **in
   place** — same form, same ID, same URL. This happens routinely and breaks
   nothing.
-- **A programme being renamed keeps its link.** The form is retitled, not
+- **A program being renamed keeps its link.** The form is retitled, not
   replaced.
-- **A new month on a `Regular` programme gets a NEW link**, because it is a new
-  form. That is what `Regular` means. A programme whose link must never change
+- **A new month on a `Regular` program gets a NEW link**, because it is a new
+  form. That is what `Regular` means. A program whose link must never change
   wants `[Grouped]` — one form for the whole run, one link forever.
 - **🩹 Rebuild Forms In Place keeps every link.** It rewrites the questions on
   every live form at once, and each form stays the same form — see
@@ -2325,8 +2379,8 @@ does rebuild forms and "rebuild" sounds like "replace":
   It says so twice before it runs, and it is an admin action nobody presses by
   accident.
 
-So a button on the website pointing at a `[Grouped]` programme's form is safe
-to set once and leave. For a `Regular` programme, the button needs updating
+So a button on the website pointing at a `[Grouped]` program's form is safe
+to set once and leave. For a `Regular` program, the button needs updating
 when the new month's form appears — which is the same job as updating the
 calendar, and the link is on the dashboard row for the new month's sessions.
 
@@ -2342,7 +2396,7 @@ calendar, and the link is on the dashboard row for the new month's sessions.
 **🔧 Admin ▸ 🩹 Rebuild Forms In Place (keeps links)…** — the one to reach for
 once forms are live and their links are out in the world.
 
-> **One form, not all of them?** **📝 Programmes & Forms ▸ 🩹 Update One Form
+> **One form, not all of them?** **📝 Programs & Forms ▸ 🩹 Update One Form
 > (keeps its link)…** does exactly the same repair to a single form, and
 > finishes before the dialog closes. Pick the form from the list (or paste its
 > editing URL), press the button, and that's the job — no background sweep, no
@@ -2369,7 +2423,7 @@ them" has to mean.
    unimported on a form would lose its detail. If that import fails, **nothing
    is rebuilt** — you'll get a message saying so.
 2. Empties the form and rebuilds it from the current template: its dates, its
-   sign-up wording, its lunch questions, its programme questions, its
+   sign-up wording, its lunch questions, its program questions, its
    appointment times, its notice and picture.
 3. Refreshes the dashboard's **View Live Form** link, whose pre-ticked boxes
    are keyed to the questions the rebuild just replaced.
@@ -3072,7 +3126,7 @@ Top of **Master_Lunch_Dashboard** — right-click the `Sign_Up_Link` for their
 location and month, copy, paste. See
 [The lunch-only sign-up form](#the-lunch-only-sign-up-form).
 
-**Let people register for a month of lunches without coming to a programme**
+**Let people register for a month of lunches without coming to a program**
 Put the month's `Hot`/`Cold` rows on **Lunch_Schedule**, then run
 **🥡 Build / Refresh Lunch Sign-Up Forms**. The form and its link appear at the
 top of the lunch dashboard; on it, *"I want lunch on every date listed"* books

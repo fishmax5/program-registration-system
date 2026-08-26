@@ -47,7 +47,7 @@ Five, ordered by how much damage each can do. All five are fixed on this
 branch. The three marked **new** are not in `SYSTEM_REVIEW.md` or
 `STRESS_TEST.md`.
 
-### 2.1 A bracketed note silently reconfigured a programme — **new, worst**
+### 2.1 A bracketed note silently reconfigured a program — **new, worst**
 
 Staff were told two things at once, and the two collided:
 
@@ -63,7 +63,7 @@ against the real parser before the fix:
 
 | Somebody types | What actually happened |
 |---|---|
-| `[Film Club selection: Casablanca]` | programme given a **standing club roster** |
+| `[Film Club selection: Casablanca]` | program given a **standing club roster** |
 | `[Drop-in welcome]` | **registration form deleted** |
 | `[Combined with the JCC]` | **pooled onto one form with every other location** |
 | `[Call the office for an appointment]` | **cut into 30-minute appointment slots** |
@@ -74,7 +74,7 @@ None of it announced itself. The parser's own comment promised the opposite:
 *"Unrecognized bracket contents are ignored, so people can bracket other notes
 in a description without confusing anything."*
 
-This was not hypothetical. The programme roster in the workbook includes a Film
+This was not hypothetical. The program roster in the workbook includes a Film
 Club and a Book Club, and the person who maintains the print calendar had
 already asked, in writing, where to put the month's film and book topics.
 
@@ -150,7 +150,7 @@ Asked for from the desk:
 > as the date? It would make it easier to find things like 'Advanced Mah Jongg'
 > at Ashbridge (Tues) vs 'Advanced Mah Jongg' at Narberth (Mon)."*
 
-Programmes here are known by their day as much as by their name. Every
+Programs here are known by their day as much as by their name. Every
 `Event_Date` now reads `Tue 9/16/2026`, across all six date-bearing tabs, from
 one change in the function that already formats that column.
 
@@ -183,10 +183,10 @@ Every tab was assessed for whether it earns its place:
 | `Lunch_Schedule` | date × location | Core. Keep |
 | `Config` | settings | Keep |
 | `Club_Members` | person × club | Keep |
-| `Program_Questions` | programme × question | Keep, now doing more (§4) |
+| `Program_Questions` | program × question | Keep, now doing more (§4) |
 | `Assistance_Requests` | request | Keep — but see the workflow gap below |
 | `Member_Roll` | person | Thin: feeds Quick Mark's name list, plus staff notes. Keep |
-| `Program_Options` | programme × location | **Thinnest.** One functional column (`Instructor_Email`); the rest are display-only or staff notes |
+| `Program_Options` | program × location | **Thinnest.** One functional column (`Instructor_Email`); the rest are display-only or staff notes |
 | `Deleted_Event_Triage` | person × session | **The real merge candidate** — 37 columns duplicating `Registrant_Dash`'s entire schema plus four |
 
 Two are genuinely mergeable:
@@ -294,11 +294,11 @@ API reads and a mapping layer, custom questions are limited (Low-Cost Wills
 needs a six-option dropdown that Heather can only fulfil three ways), and the
 existing implementation already works and already feeds the sheet, which is the
 entire point of the system. **Verdict: not worth swapping now.** Revisit if
-appointment programmes grow past a handful.
+appointment programs grow past a handful.
 
-**One form per programme forever, instead of one per month.** This is already
+**One form per program forever, instead of one per month.** This is already
 available — it is `[Grouped]` — and it is the answer to the website-button
-question ("do the links change?"). Worth *recommending* per programme rather
+question ("do the links change?"). Worth *recommending* per program rather
 than changing the default, since `Regular` correctly stops January's sign-ups
 piling up with December's.
 
@@ -323,10 +323,10 @@ has real limits, and none of them bind yet.
 
 | Commit | What |
 |---|---|
-| Stop a bracketed note from silently reconfiguring a programme | Bug 2.1, plus `tests/bracket_tags.test.js` |
+| Stop a bracketed note from silently reconfiguring a program | Bug 2.1, plus `tests/bracket_tags.test.js` |
 | Stop a background forms sweep shutting the sign-in desk | Bugs 2.2 and 2.3 |
 | Put the day of the week on every date, and stop admin locking itself out | Bugs 2.4 and 2.5 |
-| Let a programme put a notice or a picture on its form, permanently | `Notice` and `Image` types on `Program_Questions` |
+| Let a program put a notice or a picture on its form, permanently | `Notice` and `Image` types on `Program_Questions` |
 | Group the menu by the job, and make catching up one click | 18 top-level items → 3 + 4 submenus; `Update Everything Now` |
 | Colour the tabs by what they are for | Four groups, in reading order |
 | Document the new menu, the bracket rule, notices, images and link stability | `USER_GUIDE.md` |
@@ -357,7 +357,7 @@ day names on dates, and brackets that hold sentences no longer doing anything.
 
 1. **Check the live calendars for bracketed notes** that were being read as
    tags. Anything that reads as prose now stops taking effect, which is
-   correct — but if a programme has been quietly running as a club or with no
+   correct — but if a program has been quietly running as a club or with no
    form because of one, that changes back on the next sync. The log names every
    bracket it declines.
 2. **Decide `[Max Per Month: N]`**: flag, or refuse?

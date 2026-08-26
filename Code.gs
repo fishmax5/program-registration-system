@@ -8358,7 +8358,7 @@ function buildAppMenu(ui, includeAdmin) {
       // FIRST on this submenu, because it is the one that says what is wrong
       // before anything else here is worth pressing. Everything below it acts
       // on one program; this is how somebody finds out which. See section 14.
-      .addItem('🔍 Review Programs One by One…', 'showProgramReviewDialog')
+      .addItem('🔍 Review Programs, Then Update Once…', 'showProgramReviewDialog')
       .addSeparator()
       .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
       // NAMED FOR WHAT IT DOES, not for the four columns it happens to read.
@@ -30287,7 +30287,7 @@ function programFormTypeSettings(key) {
 
 
 // ============================================================================
-// 14. THE PROGRAM REVIEW  (go through them one at a time and assert)
+// 14. THE PROGRAM REVIEW  (decide them one at a time, apply them all at once)
 // ============================================================================
 //
 // WHY THIS EXISTS. Everything in this file is a rule about how the calendar,
@@ -30318,8 +30318,27 @@ function programFormTypeSettings(key) {
 //     event has a row.
 //
 // Each answer is either a tick or a sentence saying what disagrees with what,
-// and — where there is one — the fix, on a button, applied to that program
-// alone.
+// and — where there is one — the fix.
+//
+// DECIDING IS QUICK; THE CONSEQUENCES ARE SLOW, so they are separated. Every
+// fix on this screen ends in the same place: a handful of calendar writes, and
+// then a sync to rebuild the form behind them and rewrite the links on the
+// events. Carrying that out per program meant a wait between one program and
+// the next, forty times over, and each of those syncs re-read every calendar
+// and every form in the workbook to publish the effect of one retag.
+//
+// So the answers are held in the browser as they are given — nothing is
+// written — and one press at the end applies all of them inside ONE quiet
+// window and runs ONE sync over the lot. The work is the same either way; only
+// the waiting multiplies. See reviewApplyPlan().
+//
+// AND THEN, WHICH PROGRAM IS ON WHICH FORM. Every assertion here is about one
+// program in isolation, and the thing a batch of changes can leave behind is a
+// relationship BETWEEN programs: two of them sharing a form, or one program's
+// sessions handed out on two different links. Neither is visible from a screen
+// that shows one program at a time, so the review has a second view that reads
+// form-first — and the dialog lands on it the moment an apply comes back. See
+// buildFormLinkageReport().
 //
 // IT READS TWICE AND OPENS NOTHING. The whole review is the dashboard rows and
 // one pass over the calendar window, both of which are already cached per
@@ -30332,6 +30351,9 @@ function programFormTypeSettings(key) {
 // underneath afterwards, the mark says "reviewed, but it has changed since"
 // rather than going on claiming the program is fine. A mark that can quietly
 // become a lie is worse than no mark at all on a workbook several people edit.
+// Marks made during a batch are stamped with what is true AFTER the update, not
+// before it — otherwise every program in the batch would announce itself as
+// changed-since-reviewed the instant it was marked.
 // ============================================================================
 
 /** Where the review marks live. One property, one JSON object, keyed by program. */
@@ -30378,7 +30400,12 @@ function programReviewId(scope, title) {
 function buildProgramReview() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!sheet) return { programs: [], summary: { total: 0, problems: 0, warnings: 0, reviewed: 0 }, ready: false };
+  if (!sheet) {
+    return {
+      programs: [], summary: { total: 0, problems: 0, warnings: 0, reviewed: 0 },
+      formLinks: { forms: [], conflicts: [] }, ready: false
+    };
+  }
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
@@ -30435,7 +30462,149 @@ function buildProgramReview() {
     reviewed: programs.filter(p => p.reviewedAt && !p.changedSinceReview).length,
     calendarsUnread: calendarFacts.unreadable
   };
-  return { programs, summary, ready: true };
+  const formLinks = buildFormLinkageReport(programs);
+  summary.formConflicts = formLinks.conflicts.length;
+  return { programs, summary, formLinks, ready: true };
+}
+
+
+/**
+ * WHICH PROGRAMS ARE ON WHICH FORMS — the whole list, from one side and then
+ * the other.
+ *
+ * WHY IT EXISTS. Every assertion above is about one program in isolation, and
+ * the thing that goes wrong after a season of repointing sessions is a
+ * relationship BETWEEN programs: two of them quietly sharing a form, or one
+ * program's sessions handed out on two different links. Neither is visible from
+ * a screen that only ever shows you one program at a time, and neither is
+ * visible from the dashboard, where Form_ID is a column of opaque IDs nobody
+ * reads across rows.
+ *
+ * So this inverts the review: form first, then everyone on it.
+ *
+ * FREE, in the sense that matters here — it reads the programs already
+ * described above and opens no forms. The edit URL is built from the ID rather
+ * than fetched (FormApp.openById() is a remote round trip each, and forty of
+ * them is the minute this whole section exists to avoid); it is the canonical
+ * /forms/d/<id>/edit address, which is what Google itself redirects to.
+ *
+ * THE CONFLICTS ARE THE POINT. Three things are worth saying out loud:
+ *
+ *   • ONE MONTH, TWO FORMS. Sessions of the same program in the same month
+ *     sitting on different forms. This is the one that hurts: two links were
+ *     handed out for what people think of as one thing, so half the sign-ups
+ *     land somewhere the person reading the other link cannot see.
+ *   • ONE FORM, TWO PROGRAMS. A form carrying more than one program's
+ *     sessions. Sometimes deliberate; usually a repoint that took the wrong
+ *     rows with it, and it means one program's registrants appear under
+ *     another's name.
+ *   • THE CALENDAR POINTS SOMEWHERE ELSE. The event description advertises a
+ *     form the sheet no longer uses, so the public link and the staff link are
+ *     different forms.
+ */
+function buildFormLinkageReport(programs) {
+  const byForm = {};
+  const order = [];
+  const noteForm = (formId, program, how) => {
+    if (!formId) return;
+    if (!byForm[formId]) {
+      byForm[formId] = {
+        formId,
+        // Built, not fetched — see the note above.
+        editUrl: `https://docs.google.com/forms/d/${formId}/edit`,
+        programs: [], sessions: 0, onSheet: false, onCalendar: false
+      };
+      order.push(formId);
+    }
+    const form = byForm[formId];
+    if (how === 'sheet') form.onSheet = true; else form.onCalendar = true;
+    let entry = form.programs.filter(e => e.id === program.id)[0];
+    if (!entry) {
+      entry = {
+        id: program.id, title: program.title, locations: program.locations,
+        kindLabel: program.sheetTypeLabel, months: [], sessions: 0, onSheet: false, onCalendar: false
+      };
+      form.programs.push(entry);
+    }
+    if (how === 'sheet') entry.onSheet = true; else entry.onCalendar = true;
+    return entry;
+  };
+
+  const conflicts = [];
+
+  (programs || []).forEach(program => {
+    (program.formsByMonth || []).forEach(bucket => {
+      bucket.formIds.forEach(formId => {
+        const entry = noteForm(formId, program, 'sheet');
+        if (!entry) return;
+        if (entry.months.indexOf(bucket.month) === -1) entry.months.push(bucket.month);
+        // Sessions are counted once per month per form: a month split over two
+        // forms is a conflict reported below, not a reason to count its
+        // sessions twice.
+        if (bucket.formIds.length === 1) {
+          entry.sessions += bucket.sessions;
+          byForm[formId].sessions += bucket.sessions;
+        }
+      });
+      if (bucket.formIds.length > 1) {
+        conflicts.push({
+          kind: 'split-month',
+          programId: program.id,
+          level: REVIEW_LEVELS.PROBLEM,
+          text: `"${program.title}" has ${bucket.sessions} session(s) in ${bucket.month} spread across ` +
+            `${bucket.formIds.length} different forms. Those are the same sessions as far as anybody ` +
+            `signing up is concerned, and they were handed two different links. ` +
+            `"Move Sessions to Another Form…" puts them back on one.`
+        });
+      }
+    });
+
+    (program.calendarFormIds || []).forEach(formId => {
+      noteForm(formId, program, 'calendar');
+      if ((program.formIds || []).indexOf(formId) === -1 && (program.formIds || []).length > 0) {
+        conflicts.push({
+          kind: 'calendar-elsewhere',
+          programId: program.id,
+          level: REVIEW_LEVELS.WARN,
+          text: `"${program.title}" has calendar events pointing at form ${formId}, which is not one of ` +
+            `the ${program.formIds.length} form(s) its session rows use. The link the public follows and ` +
+            `the form this workbook reads are different forms. A sync rewrites the event links.`
+        });
+      }
+    });
+  });
+
+  const forms = order.map(id => byForm[id]).sort((a, b) => {
+    // Shared forms first — they are the ones somebody scanning this list is
+    // looking for — then by the name of the first program on each.
+    if ((a.programs.length > 1) !== (b.programs.length > 1)) return a.programs.length > 1 ? -1 : 1;
+    const an = (a.programs[0] || {}).title || '';
+    const bn = (b.programs[0] || {}).title || '';
+    return an.localeCompare(bn);
+  });
+
+  forms.forEach(form => {
+    if (form.programs.length < 2) return;
+    // ONE NAME AT TWO PLACES IS NOT THE SAME MISTAKE as two names on one form.
+    // The first is how a cross-location program is meant to work — one sign-up
+    // covering both rooms — and reporting it in the same words as the second
+    // would put half the building on this list for working correctly.
+    const titles = dedupePreservingOrder(form.programs.map(e => e.title));
+    form.sharedAcrossTitles = titles.length > 1;
+    conflicts.push({
+      kind: 'shared-form',
+      programId: form.programs[0].id,
+      level: titles.length > 1 ? REVIEW_LEVELS.PROBLEM : REVIEW_LEVELS.WARN,
+      text: titles.length > 1
+        ? `One form (${form.formId}) carries ${titles.length} differently-named programs — ` +
+          `${titles.map(t => `"${t}"`).join(', ')}. One program's registrants are being filed under ` +
+          `another's name. "Move Sessions to Another Form…" separates them.`
+        : `One form (${form.formId}) carries "${titles[0]}" at ${form.programs.length} locations. That is ` +
+          `right for a program taking one sign-up across both rooms — worth confirming it is meant to be.`
+    });
+  });
+
+  return { forms, conflicts };
 }
 
 /** Worst first, then soonest, then by name — the order somebody wants to work down. */
@@ -30599,6 +30768,11 @@ function describeProgramForReview(entry, map, calendarFacts, reviewState, todayK
     calendarTypeLabel: facts.calendarType.label,
     formIds: facts.formIds,
     formCount: facts.formIds.length,
+    // WHICH FORM COVERS WHICH MONTH, and which form its calendar events
+    // actually advertise. Both are what the forms-and-programs list at the end
+    // of the review is built from — see buildFormLinkageReport().
+    formsByMonth: facts.formsByMonth,
+    calendarFormIds: facts.calendarFormIds,
     registered: facts.registered,
     waitlisted: facts.waitlisted,
     capacity: facts.capacity,
@@ -30663,6 +30837,34 @@ function gatherProgramFacts(entry, map, calendarFacts, todayKey) {
     .filter(Boolean));
   const monthsCovered = dedupePreservingOrder(upcoming.map(d => getMonthLabel(d)));
 
+  // WHICH FORM COVERS WHICH MONTH. The form arithmetic above counts forms; this
+  // says which sessions are on which of them, because the counts cannot tell
+  // "two months, two forms" (right) from "one month split across two forms"
+  // (the thing that hands two different links to people signing up for the same
+  // sessions). Grouped by month because a month is the unit a monthly form is
+  // supposed to cover.
+  const formsByMonthIndex = {};
+  const monthOrder = [];
+  upcomingRows.forEach(row => {
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    const month = getMonthLabel(date);
+    if (!formsByMonthIndex[month]) { formsByMonthIndex[month] = { month, formIds: [], sessions: 0 }; monthOrder.push(month); }
+    const bucket = formsByMonthIndex[month];
+    bucket.sessions++;
+    const formId = String(row[map['Form_ID']] || '').trim();
+    if (formId && bucket.formIds.indexOf(formId) === -1) bucket.formIds.push(formId);
+  });
+  const formsByMonth = monthOrder.map(month => formsByMonthIndex[month]);
+
+  // WHAT ITS CALENDAR EVENTS ADVERTISE, which is the other half of the same
+  // question: the sheet's Form_ID is what this workbook believes, and the link
+  // in the event description is what the public is actually handed. They are
+  // written by the same sync and can still come apart — a form rebuilt while
+  // one calendar was unreadable leaves the old link on those events forever.
+  const calendarFormIds = dedupePreservingOrder(
+    calendarParts.reduce((out, part) => out.concat(Object.keys(part.linkedFormIds || {})), []));
+
   return {
     id: entry.id,
     title: entry.title,
@@ -30691,6 +30893,8 @@ function gatherProgramFacts(entry, map, calendarFacts, todayKey) {
     sheetType: resolveProgramFormType(sheetState),
     calendarType: resolveProgramFormType(calendarState),
     formIds,
+    formsByMonth,
+    calendarFormIds,
     linkedEvents: sum('linkedEvents'),
     upcomingEvents: sum('upcomingEvents'),
     // Upcoming, like the rest of the review: "62 registered" over a year of
@@ -31115,9 +31319,16 @@ function assertCapacityIsSane(facts, checks) {
  * reviewing forty programs has to be able to see that the one they just
  * changed has changed.
  *
+ * `options.deferFinish` is what the batched apply passes: it leaves the digest
+ * unflushed and drops the "now run Update Everything Now" advice, because the
+ * batch flushes once at the end and IS the update. Everything else — the
+ * calendar stamps, the queue drop, the dashboard rows — is identical, so a
+ * batch of one does exactly what pressing the button used to do.
+ *
  * Returns { ok, message, stamped }.
  */
-function applyProgramKind(programId, typeKey) {
+function applyProgramKind(programId, typeKey, options) {
+  const deferFinish = !!(options && options.deferFinish);
   const settings = programFormTypeSettings(typeKey);
   if (!settings) return { ok: false, message: '⚠️ That is not one of the kinds.' };
   const type = getProgramFormType(typeKey);
@@ -31165,11 +31376,11 @@ function applyProgramKind(programId, typeKey) {
   dropPendingFlagsForProgram(title, calendarIds);
 
   const rowsChanged = writeProgramKindOntoRows(title, calendarIds, settings);
-  flushAdminDigest('Program review');
+  if (!deferFinish) flushAdminDigest('Program review');
   const message = `✅ "${title}" is now ${type.label.toLowerCase()}. ` +
     (stamped > 0 ? `${stamped} calendar event(s) retagged. ` : `The calendar already said so. `) +
     (rowsChanged > 0 ? `${rowsChanged} dashboard row(s) updated. ` : '') +
-    `Run "Update Everything Now" to rebuild its form in the new shape.`;
+    (deferFinish ? '' : `Run "Update Everything Now" to rebuild its form in the new shape.`);
   log(`applyProgramKind: ${message}`);
   return { ok: true, message, stamped, rowsChanged };
 }
@@ -31237,15 +31448,33 @@ function writeProgramKindOntoRows(title, calendarIds, settings) {
   return changed;
 }
 
-/** Records that somebody has looked at this program, and what was true when they did. */
-function markProgramReviewed(programId, fingerprint) {
+/**
+ * Records that somebody has looked at these programs, and what was true when
+ * they did.
+ *
+ * TAKES THE WHOLE LIST, because the review is walked with the marks held in the
+ * browser and applied in one go at the end — forty separate calls would be
+ * forty reads and forty writes of the same one property, which is exactly the
+ * per-program round trip this screen exists to stop.
+ *
+ * `marks` is [{ id, fingerprint }].
+ */
+function markProgramsReviewed(marks) {
+  const list = (marks || []).filter(m => m && m.id);
+  if (list.length === 0) return 0;
   const state = getProgramReviewState();
-  state[programId] = {
-    at: Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm'),
-    by: getCurrentUserEmail() || '',
-    fingerprint: String(fingerprint || '')
-  };
+  const at = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm');
+  const by = getCurrentUserEmail() || '';
+  list.forEach(mark => {
+    state[mark.id] = { at, by, fingerprint: String(mark.fingerprint || '') };
+  });
   saveProgramReviewState(state);
+  return list.length;
+}
+
+/** One program's mark. The list form above is what the review actually uses. */
+function markProgramReviewed(programId, fingerprint) {
+  markProgramsReviewed([{ id: programId, fingerprint }]);
   return true;
 }
 
@@ -31280,19 +31509,23 @@ function clearProgramReviewed(programId) {
 
 
 // ---------------------------------------------------------------------------
-// THE DIALOG  (🗓️ Programs & Forms ▸ Review Programs One by One…)
+// THE DIALOG  (🗓️ Programs & Forms ▸ Review Programs, Then Update Once…)
 // ---------------------------------------------------------------------------
 
 /**
- * MENU ENTRY: walk the programs, one screen each.
+ * MENU ENTRY: walk the programs, one screen each, and apply the lot at the end.
  *
  * THE WHOLE REVIEW IS SENT TO THE BROWSER AT ONCE, and this is deliberate.
  * Reviewing forty programs means pressing Next forty times, and a round trip
  * per press turns a five-minute job into a twenty-minute one — with a spinner
  * between every program and the next. The review is two sheet reads and one
  * calendar pass; sending all of it costs one wait at the start and none after
- * that. Only the ACTIONS go back to the server, which is exactly where a wait
- * is expected, because something is being changed.
+ * that.
+ *
+ * AND THE DECISIONS COME BACK THE SAME WAY — all at once, in a single call, at
+ * the end. See reviewApplyPlan(): the browser holds every choice and none of
+ * them touches the calendar until Apply, so there is exactly one wait in the
+ * whole session and it is the one somebody is expecting.
  */
 function showProgramReviewDialog() {
   if (isBootstrapActive()) {
@@ -31311,18 +31544,6 @@ function refreshProgramReview() {
   return JSON.stringify(buildProgramReview());
 }
 
-/** Called from the dialog's kind picker. Returns a message and a fresh review. */
-function reviewApplyKind(programId, typeKey) {
-  const outcome = applyProgramKind(programId, typeKey);
-  return JSON.stringify({ message: outcome.message, ok: !!outcome.ok, review: buildProgramReview() });
-}
-
-/** Called from the dialog's "mark reviewed" button. */
-function reviewMarkOne(programId, fingerprint) {
-  markProgramReviewed(programId, fingerprint);
-  return JSON.stringify({ message: '✅ Marked reviewed.', ok: true, review: buildProgramReview() });
-}
-
 /** Called from the dialog's "clear all marks" link. */
 function reviewClearAllMarks() {
   clearProgramReviewed(null);
@@ -31330,67 +31551,209 @@ function reviewClearAllMarks() {
 }
 
 /**
- * Called from the dialog's "merge its blocks" button: collapses every run of
- * back-to-back blocks belonging to ONE program.
+ * THE ONE BIG APPLY: every decision made while walking the review, carried out
+ * in a single pass, followed by a single update of the sheet and the calendar.
+ *
+ * WHY THIS SHAPE. Each decision on this screen — a kind changed, a day of
+ * blocks merged — is a handful of calendar writes and then a sync to rebuild
+ * the form behind it. Applying them one at a time meant a wait between one
+ * program and the next, forty times over, and each of those syncs re-read
+ * every calendar and every form in the workbook to publish the effect of a
+ * single retag. The work is the same whether it is done once or forty times;
+ * only the waiting multiplies.
+ *
+ * So the decisions are held in the browser, where they cost nothing, and this
+ * runs them all at the end:
+ *
+ *   1. every kind, then every merge, inside ONE quiet window — the
+ *      calendar-edit triggers are paused once rather than torn down and
+ *      rebuilt per program (see withCalendarChangeTriggersPaused);
+ *   2. ONE sync, which is what rebuilds the forms, rewrites the event links
+ *      and brings the dashboard into line with all of it at once;
+ *   3. ONE admin digest, so the log reads as the one operation it was;
+ *   4. the review marks, stamped with what is true AFTERWARDS rather than what
+ *      was on screen before — a mark carrying the old fingerprint would
+ *      announce itself as "reviewed, but it has changed since" the instant it
+ *      was written, which is true of every program in the batch and useful
+ *      about none of them.
+ *
+ * NOTHING IS APPLIED TWICE. A plan is a set of decisions, so the same program
+ * appearing twice in it is the later answer replacing the earlier one, not two
+ * stamps.
+ *
+ * AND RE-SENDING THE SAME PLAN IS SAFE, which is what makes one long call an
+ * acceptable thing to hang a session on. Every step here is idempotent —
+ * applyProgramKind() stamps what the description should say and reports "the
+ * calendar already said so" when it already does, and a merged day has no
+ * back-to-back blocks left to merge. So if this call dies partway (a six-minute
+ * execution limit is the realistic way), the dialog keeps the plan and pressing
+ * Apply again finishes the job rather than doing the first half twice.
+ *
+ * `plan` is { kinds: [{id, typeKey}], merges: [id], marks: [id], sync: bool }.
+ */
+function reviewApplyPlan(planJson) {
+  if (isBootstrapActive()) {
+    return JSON.stringify({ message: bootstrapBusyMessage(), ok: false });
+  }
+
+  let plan;
+  try {
+    plan = JSON.parse(planJson || '{}') || {};
+  } catch (err) {
+    return JSON.stringify({ message: `⚠️ Could not read what was selected (${err}).`, ok: false });
+  }
+
+  // Last answer wins, and the order the choices were made in is the order they
+  // are carried out in.
+  const kinds = [];
+  const kindSeen = {};
+  (plan.kinds || []).forEach(entry => {
+    if (!entry || !entry.id || !entry.typeKey) return;
+    if (kindSeen[entry.id] !== undefined) kinds[kindSeen[entry.id]] = entry;
+    else { kindSeen[entry.id] = kinds.length; kinds.push(entry); }
+  });
+  const merges = dedupePreservingOrder((plan.merges || []).filter(Boolean));
+  const markIds = dedupePreservingOrder((plan.marks || []).filter(Boolean));
+
+  const lines = [];
+  let failures = 0;
+  let changedAnything = false;
+
+  if (kinds.length > 0 || merges.length > 0) {
+    // ONE quiet window over the whole batch. The nested call inside
+    // applyProgramKind() sees the depth and does not tear the triggers down
+    // again, so this is one pause and one restore however many programs the
+    // batch touches.
+    withCalendarChangeTriggersPaused(
+      `Program review — applying ${kinds.length + merges.length} change(s)`, () => {
+        kinds.forEach(entry => {
+          const outcome = applyProgramKind(entry.id, entry.typeKey, { deferFinish: true });
+          lines.push(outcome.message);
+          if (outcome.ok) changedAnything = true; else failures++;
+        });
+        merges.forEach(programId => {
+          const outcome = mergeTimeBlocksForProgram(programId);
+          lines.push(outcome.message);
+          if (outcome.ok && outcome.merged > 0) changedAnything = true;
+          if (!outcome.ok) failures++;
+        });
+      });
+  }
+
+  // THE SYNC IS THE POINT OF BATCHING, so it runs whenever anything above
+  // reached the calendar — a retag with no sync behind it leaves the form in
+  // the old shape, which is exactly the half-done state this screen exists to
+  // end. A marks-only pass skips it: recording that somebody looked at forty
+  // programs changes nothing for a sync to catch up with.
+  const wantSync = changedAnything || plan.sync === true;
+  if (wantSync) {
+    const synced = runReviewSync();
+    lines.push(synced.message);
+    if (!synced.ran) failures++;
+  }
+
+  if (kinds.length > 0 || merges.length > 0) flushAdminDigest('Program review');
+
+  const review = buildProgramReview();
+  if (markIds.length > 0) {
+    const byId = {};
+    review.programs.forEach(p => { byId[p.id] = p; });
+    const marked = markProgramsReviewed(markIds.map(id => ({
+      id, fingerprint: byId[id] ? byId[id].fingerprint : ''
+    })));
+    // The payload was built a few milliseconds before those marks. Patching it
+    // is honest and costs nothing; rebuilding the whole review to pick up a
+    // timestamp this function already knows would be another pass over every
+    // calendar.
+    const at = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm');
+    const by = getCurrentUserEmail() || '';
+    markIds.forEach(id => {
+      const p = byId[id];
+      if (!p) return;
+      p.reviewedAt = at;
+      p.reviewedBy = by;
+      p.changedSinceReview = false;
+    });
+    review.summary.reviewed = review.programs.filter(p => p.reviewedAt && !p.changedSinceReview).length;
+    lines.push(`✅ ${marked} program(s) marked reviewed.`);
+  }
+
+  if (lines.length === 0) lines.push('Nothing was selected, so nothing was changed.');
+  log(`reviewApplyPlan: ${kinds.length} kind(s), ${merges.length} merge(s), ${markIds.length} mark(s), ` +
+    `${wantSync ? 'one sync' : 'no sync'}, ${failures} failure(s).`);
+  return JSON.stringify({ message: lines.join('\n'), ok: failures === 0, review });
+}
+
+/**
+ * Collapses every run of back-to-back blocks belonging to ONE program.
  *
  * Scoped to the program rather than offering the whole list, because that is
  * what the person is looking at — the general list is its own menu item (see
  * section 12).
  */
-function reviewMergeBlocksForProgram(programId) {
+function mergeTimeBlocksForProgram(programId) {
   const at = String(programId || '').indexOf('::');
-  if (at === -1) return JSON.stringify({ message: '⚠️ Could not tell which program that is.', ok: false });
+  if (at === -1) return { ok: false, merged: 0, message: '⚠️ Could not tell which program that is.' };
   const title = programId.substring(at + 2);
 
   const runs = findCollapsibleTimeBlocks({}).filter(run => run.title === title);
   if (runs.length === 0) {
-    return JSON.stringify({
-      message: 'No back-to-back blocks left on this program — nothing to merge.',
-      ok: true, review: buildProgramReview()
-    });
+    return { ok: true, merged: 0, message: `"${title}": no back-to-back blocks left — nothing to merge.` };
   }
   const lines = runs.map(run => collapseTimeBlockRun(run, { asAppointments: true }).message);
-  flushAdminDigest('Program review — merge blocks');
-  return JSON.stringify({
-    message: lines.join('\n'), ok: true, review: buildProgramReview()
-  });
+  return { ok: true, merged: runs.length, message: lines.join('\n') };
 }
 
-/** Called from the dialog's "sync now" button — the fix for half of the assertions. */
-function reviewSyncEverything() {
+/**
+ * The calendar pass and the registrations pass, once — the "update everything"
+ * half of the batched apply.
+ *
+ * THE LOCK'S ANSWER IS READ, not discarded. withScriptLock() returns its
+ * onBusy value when it cannot get the lock, and ignoring that would report a
+ * successful update on the one occasion nothing ran at all — sending somebody
+ * back to a review whose checks are exactly as stale as they were, believing
+ * they are fresh.
+ *
+ * syncCalendars() asks its own "are you sure", which is the wrong question at
+ * the end of a screen somebody has just spent five minutes telling what to do.
+ * The internal pair is what the hourly triggers run.
+ */
+function runReviewSync() {
   let ran = false;
   try {
-    // syncCalendars() asks its own "are you sure", which is the wrong question
-    // inside a dialog somebody opened in order to fix exactly this. The
-    // internal pair is what the hourly triggers run.
-    //
-    // THE LOCK'S ANSWER IS READ, not discarded. withScriptLock() returns its
-    // onBusy value when it cannot get the lock, and ignoring that would have
-    // this report a successful sync on the one occasion nothing ran at all —
-    // sending somebody back to a review whose checks are exactly as stale as
-    // they were, believing they are fresh.
     ran = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
       syncCalendarsInternal();
       syncRegistrationsInternal();
       return true;
     }, false);
   } catch (err) {
-    return JSON.stringify({ message: `⚠️ The sync did not finish (${err}).`, ok: false,
-      review: buildProgramReview() });
+    return { ran: false, message: `⚠️ The update did not finish (${err}).` };
   }
   if (!ran) {
-    return JSON.stringify({
-      message: '⚠️ A sync is already running just now — nothing was re-read. Try again in a moment.',
-      ok: false, review: buildProgramReview()
-    });
+    return {
+      ran: false,
+      message: '⚠️ A sync was already running just now, so nothing was re-read. Any calendar changes above ' +
+        'were still made — press Update again in a moment to rebuild the forms.'
+    };
   }
-  return JSON.stringify({
-    message: '✅ Calendar and registrations re-read. The checks below are recomputed.',
-    ok: true, review: buildProgramReview()
-  });
+  return { ran: true, message: '✅ Calendar and registrations re-read, forms rebuilt, event links rewritten.' };
 }
 
-/** The dialog's markup. Inline, so this project stays a single .gs file. */
+/**
+ * The dialog's markup. Inline, so this project stays a single .gs file.
+ *
+ * NOTHING HERE CALLS THE SERVER UNTIL THE END. Walking the review, changing a
+ * kind, choosing to merge a day of blocks, marking a program reviewed — all of
+ * it is held in one object in the browser (`plan`, below) and sent in a single
+ * call when the person presses Apply. That is the whole point of this screen:
+ * the decisions are quick and the consequences are slow, so the consequences
+ * are done once, together, at the end. See reviewApplyPlan().
+ *
+ * THE SECOND VIEW is the forms list — which program is on which form, read the
+ * other way round. It is the last thing anybody wants after a batch of changes
+ * ("did that leave two links for the same sessions?"), so the dialog switches
+ * to it automatically once the apply comes back.
+ */
 function buildProgramReviewHtml(review) {
   // EVERY "<" IS ESCAPED OUT OF BOTH LITERALS, and it is the one way a dialog
   // carrying its data inline can go badly wrong: a program called
@@ -31414,6 +31777,7 @@ function buildProgramReviewHtml(review) {
   footer { border-bottom: 0; border-top: 1px solid #DADCE0; }
   main { flex: 1 1 auto; overflow-y: auto; padding: 14px; }
   h3 { margin: 0; font-size: 17px; }
+  h4 { margin: 18px 0 6px 0; font-size: 14px; }
   .sub { color: #5F6368; margin-top: 3px; }
   .counts { float: right; color: #5F6368; font-size: 12px; text-align: right; line-height: 1.5; }
   .pill { display: inline-block; border-radius: 10px; padding: 1px 9px; font-size: 11px;
@@ -31422,6 +31786,7 @@ function buildProgramReviewHtml(review) {
   .pill.warn    { background: #FEF7E0; color: #B06000; }
   .pill.ok      { background: #E6F4EA; color: #188038; }
   .pill.done    { background: #E8F0FE; color: #1155CC; }
+  .pill.staged  { background: #F3E8FD; color: #7627BB; }
   ul.checks { list-style: none; margin: 12px 0 0 0; padding: 0; }
   ul.checks li { padding: 8px 0 8px 26px; border-top: 1px solid #F1F3F4; position: relative; line-height: 1.5; }
   ul.checks li .mark { position: absolute; left: 0; top: 8px; font-size: 14px; }
@@ -31437,18 +31802,43 @@ function buildProgramReviewHtml(review) {
   button { border: 0; border-radius: 4px; padding: 7px 14px; font-size: 13px; cursor: pointer;
            background: #1155CC; color: #fff; }
   button.ghost { background: #fff; color: #1155CC; border: 1px solid #C6D4F0; }
+  button.go { background: #188038; }
   button[disabled] { background: #9AA0A6; color: #fff; border-color: #9AA0A6; cursor: default; }
   button.small { padding: 4px 10px; font-size: 12px; margin-left: 6px; }
   .dates { color: #5F6368; font-size: 12px; line-height: 1.6; margin-top: 8px; }
-  #status { margin-top: 8px; line-height: 1.5; white-space: pre-wrap; font-size: 12px; }
+  #status { margin-top: 8px; line-height: 1.5; white-space: pre-wrap; font-size: 12px;
+            max-height: 88px; overflow-y: auto; }
   .ok-text { color: #188038; } .err-text { color: #C5221F; }
   a.link { color: #1155CC; cursor: pointer; text-decoration: underline; }
   label.filter { font-weight: normal; margin-right: 12px; color: #5F6368; }
+  .tabs { margin-bottom: 8px; }
+  .tabs a { display: inline-block; padding: 4px 10px; margin-right: 6px; border-radius: 4px;
+            cursor: pointer; color: #1155CC; }
+  .tabs a.on { background: #E8F0FE; font-weight: bold; }
+  .staged-note { margin-top: 8px; color: #7627BB; line-height: 1.5; }
+  table.forms { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  table.forms th, table.forms td { border-top: 1px solid #F1F3F4; padding: 7px 8px; text-align: left;
+                                   vertical-align: top; line-height: 1.5; }
+  table.forms th { color: #5F6368; font-weight: normal; font-size: 12px; border-top: 0; }
+  table.forms td.id { font-family: monospace; font-size: 11px; color: #5F6368; word-break: break-all; }
+  tr.shared td { background: #FEF7E0; }
+  tr.clash td { background: #FCE8E6; }
+  .conflict { padding: 8px 0 8px 26px; position: relative; line-height: 1.5;
+              border-top: 1px solid #F1F3F4; }
+  .conflict .mark { position: absolute; left: 0; top: 8px; }
+  .conflict.problem .mark::before { content: '\\u274C'; }
+  .conflict.warn .mark::before { content: '\\u26A0\\uFE0F'; }
+  .bar { background: #F3E8FD; border: 1px solid #E0CFF6; border-radius: 6px; padding: 8px 10px;
+         margin-bottom: 10px; line-height: 1.6; }
 </style>
 
 <header>
   <div class="counts" id="counts"></div>
-  <div>
+  <div class="tabs">
+    <a id="tab-programs" onclick="setView('programs')">Programs</a>
+    <a id="tab-forms" onclick="setView('forms')">Which form is each program on?</a>
+  </div>
+  <div id="filters">
     <label class="filter"><input type="radio" name="filter" value="attention" checked onchange="setFilter()">
       Needs attention</label>
     <label class="filter"><input type="radio" name="filter" value="unreviewed" onchange="setFilter()">
@@ -31463,9 +31853,11 @@ function buildProgramReviewHtml(review) {
 </main>
 
 <footer>
-  <button class="ghost" id="prev" onclick="step(-1)">‹ Previous</button>
-  <button class="ghost" id="next" onclick="step(1)">Next ›</button>
-  <button id="mark" onclick="markReviewed()">Mark reviewed &amp; next</button>
+  <div id="plan-bar" style="display:none" class="bar"></div>
+  <button class="ghost" id="prev" onclick="step(-1)">&lsaquo; Previous</button>
+  <button class="ghost" id="next" onclick="step(1)">Next &rsaquo;</button>
+  <button class="ghost" id="mark" onclick="toggleMark()">Mark reviewed &amp; next</button>
+  <button class="go" id="apply" onclick="applyPlan()">Apply everything &amp; update</button>
   <span style="float:right; color:#5F6368; font-size:12px;" id="place"></span>
   <div id="status"></div>
 </footer>
@@ -31474,8 +31866,27 @@ function buildProgramReviewHtml(review) {
   var REVIEW = ${payload};
   var KINDS = ${kinds};
   var filter = 'attention';
+  var view = 'programs';
   var at = 0;
   var busy = false;
+
+  // EVERY DECISION MADE ON THIS SCREEN, held here until Apply. kinds is keyed
+  // by program so changing your mind replaces an answer rather than queueing a
+  // second one; merges and marks are sets for the same reason.
+  var plan = { kinds: {}, merges: {}, marks: {} };
+
+  function planCounts() {
+    return {
+      kinds: Object.keys(plan.kinds).length,
+      merges: Object.keys(plan.merges).length,
+      marks: Object.keys(plan.marks).length
+    };
+  }
+
+  function planChanges() {
+    var c = planCounts();
+    return c.kinds + c.merges;
+  }
 
   function visible() {
     return REVIEW.programs.filter(function (p) {
@@ -31492,6 +31903,11 @@ function buildProgramReviewHtml(review) {
     draw();
   }
 
+  function setView(which) {
+    view = which;
+    draw();
+  }
+
   function step(by) {
     var list = visible();
     if (list.length === 0) return;
@@ -31504,30 +31920,77 @@ function buildProgramReviewHtml(review) {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function fixButton(fix, id) {
-    if (fix === 'sync') return '<button class="small ghost" onclick="act(\\'sync\\')">Sync now</button>';
-    if (fix === 'merge') return '<button class="small ghost" onclick="act(\\'merge\\')">Merge its blocks</button>';
-    if (fix === 'kind') return '';   // the picker below IS the fix
-    if (fix === 'repoint') return '';
+  function kindLabel(key) {
+    var picked = KINDS.filter(function (k) { return k.key === key; })[0];
+    return picked ? picked.label : key;
+  }
+
+  // A fix that the final update performs is not a button any more — pressing it
+  // would be the per-program wait this screen was rebuilt to remove. The one
+  // exception is merging a day of blocks, which is a decision (is this really
+  // one session?) rather than a consequence, so it is staged like the rest.
+  function fixNote(fix, p) {
+    if (fix === 'sync') return ' <i>The update at the end fixes this.</i>';
+    if (fix === 'merge') {
+      return plan.merges[p.id]
+        ? ' <span class="pill staged">will be merged</span>' +
+          ' <a class="link" onclick="stageMerge(false)">undo</a>'
+        : ' <button class="small ghost" onclick="stageMerge(true)">Merge its blocks in the update</button>';
+    }
     return '';
   }
 
   function draw() {
-    var list = visible();
     var s = REVIEW.summary || {};
     document.getElementById('counts').innerHTML =
       esc(s.total || 0) + ' programs &nbsp;·&nbsp; ' +
       '<span class="pill problem">' + esc(s.problems || 0) + ' problem</span>' +
       '<span class="pill warn">' + esc(s.warnings || 0) + ' to check</span>' +
-      '<span class="pill done">' + esc(s.reviewed || 0) + ' reviewed</span>';
+      '<span class="pill done">' + esc(s.reviewed || 0) + ' reviewed</span>' +
+      (s.formConflicts > 0
+        ? '<span class="pill warn">' + esc(s.formConflicts) + ' form overlap(s)</span>'
+        : '');
 
+    document.getElementById('tab-programs').className = view === 'programs' ? 'on' : '';
+    document.getElementById('tab-forms').className = view === 'forms' ? 'on' : '';
+    document.getElementById('filters').style.display = view === 'programs' ? '' : 'none';
+
+    drawPlanBar();
+    if (view === 'forms') drawForms(); else drawProgram();
+  }
+
+  function drawPlanBar() {
+    var c = planCounts();
+    var bar = document.getElementById('plan-bar');
+    var apply = document.getElementById('apply');
+    var bits = [];
+    if (c.kinds > 0) bits.push(c.kinds + ' kind change(s)');
+    if (c.merges > 0) bits.push(c.merges + ' merge(s)');
+    if (c.marks > 0) bits.push(c.marks + ' mark(s)');
+    if (bits.length === 0) {
+      bar.style.display = 'none';
+      apply.textContent = 'Update everything now';
+      apply.title = 'Nothing is selected — this re-reads the calendars and rebuilds the forms.';
+    } else {
+      bar.style.display = '';
+      bar.innerHTML = '<b>Selected, not yet applied:</b> ' + esc(bits.join(', ')) +
+        '. Nothing has been written yet — press Apply and it is all done in one pass. ' +
+        '<a class="link" onclick="discardPlan()">Discard selections</a>';
+      apply.textContent = 'Apply everything & update' +
+        (planChanges() > 0 ? ' (' + planChanges() + ')' : '');
+      apply.title = '';
+    }
+  }
+
+  function drawProgram() {
+    var list = visible();
     if (list.length === 0) {
       document.getElementById('card').innerHTML =
         '<h3>Nothing here.</h3><p class="sub">' +
         (filter === 'attention'
           ? 'Every program passes every check. Switch to "All" to walk through them anyway.'
           : 'Every program has been reviewed. Switch to "All" to go through them again, or ' +
-            '<a class="link" onclick="act(\\'clear\\')">clear the marks</a>.') + '</p>';
+            '<a class="link" onclick="clearMarks()">clear the marks</a>.') + '</p>';
       document.getElementById('place').textContent = '';
       return;
     }
@@ -31538,15 +32001,22 @@ function buildProgramReviewHtml(review) {
       : (p.changedSinceReview
         ? '<span class="pill warn">reviewed ' + esc(p.reviewedAt) + ', but it has changed since</span>'
         : '<span class="pill done">reviewed ' + esc(p.reviewedAt) + '</span>');
+    if (plan.marks[p.id]) reviewedNote += '<span class="pill staged">will be marked reviewed</span>';
 
     var checks = p.checks.map(function (c) {
       return '<li class="' + esc(c.level) + '"><span class="mark"></span>' + esc(c.text) +
-        (c.fix ? ' ' + fixButton(c.fix, p.id) : '') + '</li>';
+        (c.fix ? fixNote(c.fix, p) : '') + '</li>';
     }).join('');
 
     var dates = p.dateLabels.length === 0 ? '' :
       '<div class="dates"><b>Dates:</b> ' + p.dateLabels.map(esc).join(' &nbsp;·&nbsp; ') +
       (p.moreDates > 0 ? ' &nbsp;·&nbsp; …and ' + esc(p.moreDates) + ' more' : '') + '</div>';
+
+    var staged = plan.kinds[p.id];
+    var stagedNote = !staged ? '' :
+      '<div class="staged-note"><b>Selected:</b> ' + esc(kindLabel(p.sheetTypeKey)) + ' → ' +
+      esc(kindLabel(staged)) + '. Applied with everything else at the end. ' +
+      '<a class="link" onclick="stageKind(\\'\\')">undo</a></div>';
 
     document.getElementById('card').innerHTML =
       '<h3>' + esc(p.title) + ' ' + reviewedNote + '</h3>' +
@@ -31560,21 +32030,65 @@ function buildProgramReviewHtml(review) {
       dates +
       '<ul class="checks">' + checks + '</ul>' +
       '<fieldset><legend>What kind of program is this?</legend>' +
-        '<select id="kind" onchange="showBlurb()">' + KINDS.map(function (k) {
+        '<select id="kind" onchange="stageKind(this.value)">' + KINDS.map(function (k) {
           return '<option value="' + esc(k.key) + '">' + esc(k.label) + '</option>';
         }).join('') + '</select>' +
         '<div class="blurb" id="blurb"></div>' +
-        '<button id="apply" onclick="act(\\'kind\\')">Apply to its calendar and sheet</button>' +
+        stagedNote +
       '</fieldset>';
 
-    document.getElementById('kind').value = p.sheetTypeKey;
+    document.getElementById('kind').value = staged || p.sheetTypeKey;
     showBlurb();
+    document.getElementById('mark').textContent =
+      plan.marks[p.id] ? 'Unmark & next' : 'Mark reviewed & next';
     document.getElementById('place').textContent = (at + 1) + ' of ' + list.length;
   }
 
+  // WHICH PROGRAM IS ON WHICH FORM, form first. Two programs on one row of this
+  // table is the thing it exists to show, so those rows are tinted and the
+  // sentences saying what is wrong sit above the table rather than under it.
+  function drawForms() {
+    var links = REVIEW.formLinks || { forms: [], conflicts: [] };
+    var conflicts = links.conflicts.length === 0
+      ? '<p class="sub">Nothing overlaps: no form carries two programs, no month is split across two ' +
+        'forms, and every calendar link points at the form its sessions use.</p>'
+      : links.conflicts.map(function (c) {
+          return '<div class="conflict ' + esc(c.level || 'warn') + '"><span class="mark"></span>' +
+            esc(c.text) + '</div>';
+        }).join('');
+
+    var rows = links.forms.map(function (f) {
+      var cls = f.programs.length < 2 ? '' : (f.sharedAcrossTitles ? 'clash' : 'shared');
+      var who = f.programs.map(function (e) {
+        return '<div>' + esc(e.title) +
+          ' <span class="sub" style="display:inline">— ' + esc(e.locations.join(' + ') || 'no location') +
+          ', ' + esc(e.kindLabel) + (e.months.length > 0 ? ', ' + esc(e.months.join(', ')) : '') +
+          (e.onSheet ? '' : ' — calendar link only, no session row uses it') + '</span></div>';
+      }).join('');
+      return '<tr class="' + cls + '">' +
+        '<td>' + who + '</td>' +
+        '<td>' + esc(f.sessions) + '</td>' +
+        '<td class="id"><a class="link" href="' + esc(f.editUrl) + '" target="_blank">' +
+          esc(f.formId) + '</a></td></tr>';
+    }).join('');
+
+    document.getElementById('card').innerHTML =
+      '<h3>Which program is on which form</h3>' +
+      '<p class="sub">One row per form, and everything registering through it. Read down the first ' +
+      'column: two names in one cell means two programs sharing a sign-up.</p>' +
+      '<h4>What overlaps</h4>' + conflicts +
+      '<h4>Every form in use</h4>' +
+      (links.forms.length === 0
+        ? '<p class="sub">No upcoming session points at a form yet.</p>'
+        : '<table class="forms"><tr><th>Program(s) on it</th><th>Upcoming sessions</th>' +
+          '<th>Form</th></tr>' + rows + '</table>');
+    document.getElementById('place').textContent = '';
+  }
+
   function showBlurb() {
-    var key = document.getElementById('kind').value;
-    var picked = KINDS.filter(function (k) { return k.key === key; })[0];
+    var el = document.getElementById('kind');
+    if (!el) return;
+    var picked = KINDS.filter(function (k) { return k.key === el.value; })[0];
     document.getElementById('blurb').textContent = picked ? picked.blurb : '';
   }
 
@@ -31583,25 +32097,70 @@ function buildProgramReviewHtml(review) {
     return list.length > 0 ? list[Math.min(at, list.length - 1)] : null;
   }
 
-  function markReviewed() {
+  // Choosing the kind a program ALREADY is takes it off the plan rather than
+  // queueing a write that would change nothing.
+  function stageKind(key) {
     var p = current();
     if (!p) return;
-    call('reviewMarkOne', [p.id, p.fingerprint], function () { step(1); });
+    if (!key || key === p.sheetTypeKey) delete plan.kinds[p.id];
+    else plan.kinds[p.id] = key;
+    draw();
   }
 
-  function act(what) {
+  function stageMerge(on) {
     var p = current();
     if (!p) return;
-    if (what === 'kind') {
-      call('reviewApplyKind', [p.id, document.getElementById('kind').value]);
-    } else if (what === 'merge') {
-      call('reviewMergeBlocksForProgram', [p.id]);
-    } else if (what === 'sync') {
-      say('Re-reading the calendar and the forms — this takes a moment.', '');
-      call('reviewSyncEverything', []);
-    } else if (what === 'clear') {
-      call('reviewClearAllMarks', []);
+    if (on) plan.merges[p.id] = true; else delete plan.merges[p.id];
+    draw();
+  }
+
+  function toggleMark() {
+    var p = current();
+    if (!p) return;
+    if (plan.marks[p.id]) { delete plan.marks[p.id]; draw(); return; }
+    plan.marks[p.id] = true;
+    step(1);
+  }
+
+  function discardPlan() {
+    plan = { kinds: {}, merges: {}, marks: {} };
+    say('Selections discarded. Nothing had been written.', '');
+    draw();
+  }
+
+  function applyPlan() {
+    var c = planCounts();
+    var body = {
+      kinds: Object.keys(plan.kinds).map(function (id) { return { id: id, typeKey: plan.kinds[id] }; }),
+      merges: Object.keys(plan.merges),
+      marks: Object.keys(plan.marks),
+      // Nothing to write and nothing to merge still means "update everything",
+      // because that is what the button says when the plan is empty.
+      sync: (c.kinds + c.merges) === 0
+    };
+    if (c.kinds + c.merges + c.marks === 0) {
+      if (!confirm('Nothing is selected. Re-read the calendars and rebuild the forms anyway?')) return;
     }
+    say('Applying ' + (c.kinds + c.merges) + ' change(s), then updating the sheet, the calendar and the ' +
+      'forms. This is the long one — a minute or two, and only once.', '');
+    call('reviewApplyPlan', [JSON.stringify(body)], function (out) {
+      // THE PLAN SURVIVES A PARTIAL RUN. Every step of an apply is idempotent
+      // (see reviewApplyPlan), so holding onto the selections after a failure
+      // means pressing Apply again finishes the job — whereas clearing them
+      // would leave somebody with half their afternoon applied and no record
+      // of the other half.
+      if (out.ok === false) { draw(); return; }
+      plan = { kinds: {}, merges: {}, marks: {} };
+      // The forms list is what somebody wants to see the moment a batch lands:
+      // it is the only screen that shows whether the rebuild left two links on
+      // one set of sessions.
+      view = 'forms';
+      draw();
+    });
+  }
+
+  function clearMarks() {
+    call('reviewClearAllMarks', []);
   }
 
   function call(fn, args, after) {
@@ -31614,8 +32173,8 @@ function buildProgramReviewHtml(review) {
         var out = JSON.parse(raw);
         if (out.review) REVIEW = out.review;
         say(out.message || '', out.ok === false ? 'err-text' : 'ok-text');
+        if (after) after(out);
         draw();
-        if (after) after();
       })
       .withFailureHandler(function (err) {
         busy = false; setButtons(false);
