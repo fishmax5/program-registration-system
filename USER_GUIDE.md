@@ -425,6 +425,59 @@ Run **🔄 Update Everything Now** afterwards so the forms catch up.
 
 ---
 
+### Reviewing your appointment months
+
+The question anybody actually asks about an appointment program is not "is this
+program set up correctly". It is:
+
+> **Does the September form at Narberth offer every September date, and every
+> appointment on every one of those dates?**
+
+That is a question about a **month at a place**, because a month at a place is
+what one form covers. **📝 Programs & Forms ▸ 🗓️ Review Appointment Months…**
+walks exactly those — one program-month per screen — and answers it.
+
+Each screen shows every date in the month with the time the sheet has for it,
+how many appointments that cuts into, how many are booked, how many are free,
+and which form it is on. Underneath, in words, what is wrong with it:
+
+| It says | Because |
+|---|---|
+| **The month is spread across two forms** | Both links work. Whoever follows one of them sees half of September and has no way to know about the rest |
+| **The sheet's times are not the calendar's, and N appointments are hidden** | Slots are cut out of the *sheet*. Lengthen an event on the calendar after its date was first written and the row still says the old span, so the form goes on offering one appointment per date |
+| **This day is still several back-to-back events** | They all collide onto one session (see [Merging half-hour blocks](#merging-half-hour-blocks)), leaving duplicate rows and repeated times |
+| **The form these dates are on also carries another month, or another program** | Handed out as "the September form", it offers times running into October — or files one program's registrants under another's name |
+| **The dashboard and the calendar disagree about whether this is an appointment program at all** | The calendar wins on the next sync, so a tick that never reached it is quietly thrown away |
+| **Two different appointment lengths in one month** | Usually a `[Slots: N]` typed onto some events and not others |
+| **Every date has passed / every appointment is booked** | Both produce a form with no times on it, and both are *correct* — said in words so they don't look like a failure |
+
+And the fixes are on the same screen. Tick the ones you want and move on; nothing
+is done until you press **Apply & Update**:
+
+| Fix | What it does |
+|---|---|
+| **Merge each day's back-to-back events** | The same conversion as ⏱️ Merge Half-Hour Blocks, scoped to this month |
+| **Take the times from the calendar again** | Rewrites `Event_Date` and `Event_End` from what the calendar says now, so the slots come out right |
+| **Set one appointment length** | Writes `[Slots: N]` onto this month's calendar events and updates its rows — the calendar first, because the calendar is what the next sync reads |
+| **Put every upcoming date on ONE form** | Either an existing form (by default the one most of the month is already on, so the fewest handed-out links break) or a new form built for this month |
+| **Move one date** | Repoints a single date onto another form, by ID or edit URL — for a session that belongs somewhere else entirely |
+| **Remove the duplicate rows** | Tidies the extra rows a day of separate blocks left behind. They share an Event_ID with the row that stays, so nothing that pointed at those sessions moves |
+
+**Apply does everything in the order that makes it work**: the calendar first
+(merges, then appointment lengths), then the sheet's times, then the duplicate
+rows, then the forms — one sync, and finally the appointment questions
+themselves rewritten on every affected form. Pressing Apply twice is safe: a
+merged day has no blocks left to merge, and a retimed row already matches.
+
+**You do not have to run this to be safe.** Every sync now brings a session's
+times back into line with the calendar on its own, and a day still typed as
+several events reads as the whole span it covers rather than as whichever block
+happened to be written last. This screen is for seeing what is true, and for
+the fixes a sync cannot decide on your behalf — which form a month belongs on,
+and how long an appointment is.
+
+---
+
 ### Reviewing your programs
 
 Every rule in this system is enforced *on the way in* — when a sync runs, when
@@ -2090,6 +2143,7 @@ Everything else is grouped by the job it belongs to.
 | **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
 | **⏱️ Merge Half-Hour Blocks…** | Finds every day typed as a run of back-to-back events of the same name, and merges each into one event — see [Merging half-hour blocks](#merging-half-hour-blocks) |
+| **🗓️ Review Appointment Months…** | Walks your appointment programs one month at a time — the unit a form covers — and says whether that month's form offers every date and every time in it, with the fixes on the same screen — see [Reviewing your appointment months](#reviewing-your-appointment-months) |
 | **🩹 Update One Form (keeps its link)…** | Rebuilds **one** form from the current template while you wait — its dates, its questions, and its appointment times. The form keeps its ID, so **every link already handed out goes on working**. This is the single-form version of 🔧 Admin ▸ Rebuild Forms In Place; reach for it when one form has gone wrong and you don't want to sweep the whole workbook. See [Rebuild forms in place](#rebuild-forms-in-place) |
 | **Link Program Across Locations…** | Puts one program's sessions at every location onto a single shared form — tags the calendar events and moves the sessions already on the dashboard. Run it again to unlink. |
 | **Move Sessions to Another Form…** | Tick any sessions, then either build a **new combined form** covering exactly them, or move them onto an **existing** form. This is also how you fix a wrong form link. See [Moving sessions between forms](#moving-sessions-between-forms) |

@@ -26,6 +26,24 @@ It also:
   times don't suit lands on an `Assistance_Requests` tab instead of being booked
   onto a date they never chose, and one menu item prints the whole day's list —
   names against times, with contact details — to send the provider a week ahead;
+- **reviews those appointment programs a month at a time** — the unit one form
+  actually covers — and fixes them from the same screen: `🗓️ Review Appointment
+  Months…` walks one program-month per screen ("Low-Cost Wills — September 2026,
+  Narberth"), says whether the form somebody is about to hand out offers every
+  date in the month and every appointment on each date, and offers the fixes
+  underneath it: merge a day still typed as one event per appointment, take the
+  times from the calendar again, set one appointment length, put the whole month
+  onto one form, move a single date somewhere else, tidy the duplicate rows a
+  day of blocks left behind. Nothing is applied until you press Apply, and then
+  the calendar, the sheet and the forms are all brought into line in one pass;
+- **keeps a session's times honest.** `Event_Date` and `Event_End` used to be
+  written once, when a date first appeared, and never again — so lengthening a
+  calendar event afterwards left the sheet saying the old span, and an
+  appointment's slots are cut out of the SHEET. A month of 90-minute blocks
+  therefore offered one appointment per date. Every sync now brings those two
+  columns back into line with the calendar, and a day still typed as several
+  back-to-back events reads as the whole span it covers rather than as whichever
+  block was written last;
 - lets a single program **ask its own extra questions** (zip code, membership,
   which document you need drawn up) from a `Program_Questions` tab, applied to
   its form and re-applied after every template rebuild — so a question survives
@@ -192,4 +210,5 @@ node tests/quick_mark_inline_index.test.js
 node tests/multiple_meals.test.js
 node tests/standing_lunch.test.js
 node tests/event_time_epoch.test.js
+node tests/appointment_review.test.js
 ```
