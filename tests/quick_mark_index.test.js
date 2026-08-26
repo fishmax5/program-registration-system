@@ -126,7 +126,7 @@ check('and this session\'s people can be subtracted from it by key',
   ix.members.filter(m => narberth16.keys.indexOf(m.key) === -1).map(m => m.name), ['Mrs Okonkwo']);
 
 // The dateless "program only" fallback sorts last and collects the people from
-// EVERY date of that programme at that location — both Wednesdays at once.
+// EVERY date of that program at that location — both Wednesdays at once.
 check('the dateless fallback is offered last',
   ix.sessions.filter(s => s.location === 'Narberth').map(s => s.label).slice(-1), ['Chair Yoga']);
 check('and it carries every date\'s people',

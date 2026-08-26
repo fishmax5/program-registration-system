@@ -157,13 +157,13 @@ check('the mode of nothing is nothing', sandbox.modeOfNumbers([]), 0);
   check('one event is not a time block', runsFor([ev('Book Club', 10, 0, 11, 30)]).length, 0);
 }
 
-// --- different titles on one day are different programmes -------------------
+// --- different titles on one day are different programs -------------------
 {
   const runs = runsFor([
     ev('Computer Help', 10, 0, 10, 30),
     ev('Low-Cost Wills', 10, 30, 11, 0)
   ]);
-  check('two different programmes back to back are not one run', runs.length, 0);
+  check('two different programs back to back are not one run', runs.length, 0);
 }
 
 // --- a tentative event is never merged --------------------------------------

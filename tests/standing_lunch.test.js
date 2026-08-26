@@ -15,7 +15,7 @@
 //
 // HALF TWO — QUICK MARK. "…and every future session of it" put somebody on
 // Club_Members with no Lunch value, so applyClubRosterCatchup() booked every
-// future session as "No Lunch": the programme carried forward and the meal did
+// future session as "No Lunch": the program carried forward and the meal did
 // not. The desk can now say which of the two it means, and the answer lands in
 // the column the catch-up already reads.
 const fs = require('fs');
@@ -324,7 +324,7 @@ ui.standingChanged();
 check('no standing place, no rider on screen', shown('standingLunchLabel'), false);
 check('…and nothing left ticked underneath it', DOM.standingLunch.checked, false);
 
-// AN APPOINTMENT PROGRAMME HAS NEITHER. It is booked one chair at a time, so
+// AN APPOINTMENT PROGRAM HAS NEITHER. It is booked one chair at a time, so
 // "every future one" was never offered — and the lunch rider must not outlive
 // the tick it hangs off.
 resetDom(); ui.setDom(DOM);
@@ -332,7 +332,7 @@ DOM.register.checked = true; DOM.signup.checked = true;
 ui.registerChanged();
 DOM.standing.checked = true;
 ui.standingChanged();
-check('a standing lunch is on screen for an ordinary programme',
+check('a standing lunch is on screen for an ordinary program',
   shown('standingLunchLabel'), true);
 ui.setAppointment(true);
 ui.registerChanged();

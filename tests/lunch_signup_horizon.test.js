@@ -261,8 +261,8 @@ unchanged.getItems()[0].asListItem().getHelpText = () =>
 sandbox.applyAttendanceModeChoices(unchanged, {});
 check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
 
-// --- lunch rows are ON the programme dashboard's view -----------------------
-// They used to be hidden, on the argument that a meal is not a programme. That
+// --- lunch rows are ON the program dashboard's view -----------------------
+// They used to be hidden, on the argument that a meal is not a program. That
 // was really an argument about the old NAME: thirty rows a month all reading
 // "🥡 Lunch Only (no program)" said nothing thirty times. Now each one reads
 // "Lunch @ Narberth — Chx Parm" and belongs on the schedule like any other
@@ -301,13 +301,13 @@ const count = sandbox.showLunchOnlySessionRows(fakeSheet, progMap, upcomingRows,
 check('every lunch row is shown and no class is touched', count, 4);
 check('and consecutive ones go in one call, not one each', shownBands, ['10+2', '13+1', '101+1']);
 
-// The summaries still count programmes only. "42 programmes this month"
+// The summaries still count programs only. "42 programs this month"
 // counting thirty lunches is a number nobody can use, and the Today block
 // names what is RUNNING at a location — the meal has its own count on the
 // lunch dashboard.
 const scan = { countsByEventId: {}, activeNamesByEventId: {} };
 const programOnly = upcomingRows.filter(r => !sandbox.isLunchOnlyEventId(r[progMap['Event_ID']]));
-check('a lunch date is not a programme session',
+check('a lunch date is not a program session',
   sandbox.computeProgramMetrics(programOnly, progMap, scan).totalSessions, 1);
 check('and never gets listed as what is on today',
   sandbox.computeProgramMetrics(programOnly, progMap, scan).totalPrograms, 1);
@@ -336,7 +336,7 @@ check('a dated lunch title is recognized',
 check('so is a dishless one', sandbox.isLunchOnlyProgramTitle('Lunch @ Ashbridge'), true);
 check('and so is the name written before the rename',
   sandbox.isLunchOnlyProgramTitle('🥡 Lunch Only (no program)'), true);
-check('a real programme is not', sandbox.isLunchOnlyProgramTitle('Chair Yoga'), false);
+check('a real program is not', sandbox.isLunchOnlyProgramTitle('Chair Yoga'), false);
 
 // THE POINT OF THE CANONICAL KEY. Retyping Tuesday's menu renames the session
 // row, but the people already registered for it keep the name they were
@@ -348,7 +348,7 @@ check('every spelling of a lunch title matches every other',
     sandbox.quickMarkTitleKey('Lunch @ Narberth — Turkey Wrap'),
     sandbox.quickMarkTitleKey('🥡 Lunch Only (no program)')]
     .every(k => k === sandbox.quickMarkTitleKey('Lunch @ Ashbridge')), true);
-check('...and a programme still matches only itself',
+check('...and a program still matches only itself',
   sandbox.quickMarkTitleKey('Chair Yoga') === sandbox.quickMarkTitleKey('Lunch @ Narberth'), false);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

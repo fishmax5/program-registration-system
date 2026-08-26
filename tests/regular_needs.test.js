@@ -7,7 +7,7 @@
 // part with anywhere to hide a bug — so this file is mostly recurrence:
 // weekdays typed the way people actually type them, a fortnight that does not
 // split a Tue/Thu pair across two of them, a month end that does not skip
-// February, and a programme-scoped need that must never leak onto a session it
+// February, and a program-scoped need that must never leak onto a session it
 // was not meant for.
 const fs = require('fs');
 const path = require('path');
@@ -171,14 +171,14 @@ check('a bare need follows the person anywhere',
 check('a location-scoped need only at that location',
   forJane({ name: 'Jane Smith', location: 'Narberth', title: 'Chair Yoga', date: WED }),
   ['No milk', 'Put meals in the fridge', 'Bagged lunch for everyone']);
-check('a programme-scoped need only on that programme',
+check('a program-scoped need only on that program',
   forJane({ name: 'Jane Smith', location: 'Ashbridge', title: 'World Affairs', date: WED }),
   ['No milk', 'One meal', 'Bagged lunch for everyone']);
 
 // THE LEAK THIS GUARDS. "One meal every World Affairs day" pinned to a
-// programme must not fire on a session whose programme we could not name —
+// program must not fire on a session whose program we could not name —
 // that is how it becomes a meal every day.
-check('and never on a session with no programme named',
+check('and never on a session with no program named',
   forJane({ name: 'Jane Smith', location: 'Ashbridge', title: '', date: WED }),
   ['No milk', 'Bagged lunch for everyone']);
 check('somebody else gets only the everyone-need',

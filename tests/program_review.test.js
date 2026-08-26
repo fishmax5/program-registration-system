@@ -1,6 +1,6 @@
 // Every rule in this file is enforced on the way IN — when a sync runs, a box
 // is ticked, a form is rebuilt. None of them is enforced on the way OUT, so
-// after a season of editing nothing anywhere says which of forty programmes
+// after a season of editing nothing anywhere says which of forty programs
 // are still in the state their author believes they are in.
 //
 // What is pinned here is the two halves of the review that can silently be
@@ -8,10 +8,10 @@
 //
 //   THE VOCABULARY — six named kinds standing in for four checkboxes. The
 //   round trip has to be exact in both directions, or the review shows people
-//   a kind their programme is not.
+//   a kind their program is not.
 //
 //   THE INLINE PAYLOAD — the whole review travels inside the dialog's own
-//   <script> block, so a programme whose title contains "</script>" would end
+//   <script> block, so a program whose title contains "</script>" would end
 //   the page in the middle of a sentence and leave a dialog that does nothing.
 const fs = require('fs');
 const vm = require('vm');
@@ -90,7 +90,7 @@ const nasty = 'Films </script><script>alert("x")</script> & "quotes" \u2014 O\'B
 const review = {
   ready: true,
   summary: { total: 1, problems: 1, warnings: 0, reviewed: 0, calendarsUnread: [] },
-  programmes: [{
+  programs: [{
     id: 'cal1::' + nasty, title: nasty, locations: ['Narberth'], isShared: false,
     sessionCount: 2, upcomingCount: 2, eventCount: 2, formCount: 1, formIds: ['F1'],
     firstDateLabel: 'Mon, Mar 2', lastDateLabel: 'Mon, Mar 9', nextDateKey: '2026-03-02',
@@ -120,7 +120,7 @@ ok('the dialog script parses as JavaScript', (() => {
   const assign = scriptBody.substring(scriptBody.indexOf('var REVIEW = '));
   const line = assign.substring(0, assign.indexOf('\n'));
   vm.runInContext(line + '\n out = REVIEW;', ctx);
-  check('and the title survives the round trip', box.out.programmes[0].title, nasty);
+  check('and the title survives the round trip', box.out.programs[0].title, nasty);
 }
 
 // The six kinds travel as DATA, not as pre-built markup: stringifying
@@ -131,5 +131,5 @@ ok('no <option> tag is baked in around a label',
   sandbox.PROGRAM_FORM_TYPES.every(t => html.indexOf('<option value="' + t.key + '"') === -1));
 ok('but every label is there', sandbox.PROGRAM_FORM_TYPES.every(t => html.indexOf(t.label) !== -1));
 
-console.log(failures === 0 ? '\nAll programme review checks passed.' : `\n${failures} FAILED`);
+console.log(failures === 0 ? '\nAll program review checks passed.' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

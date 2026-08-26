@@ -3002,11 +3002,11 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
   let description = `${heading}\n\n${dateHeading}\n${dateList}\n\nPlease register below.`;
   if (options.isLunchOnly) {
     // Said FIRST and said plainly, because this form looks like every other
-    // registration form and is not one: there is no programme behind these
+    // registration form and is not one: there is no program behind these
     // dates, only a meal, and somebody who signs up expecting an activity has
     // been misled by a page they had every reason to trust.
-    description = `${heading}\n\nThis form is for LUNCH ONLY — it books you a meal, not a programme. ` +
-      `To sign up for a class or an activity, use that programme's own form.\n\n` +
+    description = `${heading}\n\nThis form is for LUNCH ONLY — it books you a meal, not a program. ` +
+      `To sign up for a class or an activity, use that program's own form.\n\n` +
       `Lunch is served on:\n${dateList}\n\nPlease sign up below.` +
       `\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
@@ -3671,7 +3671,7 @@ function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
  * THE DAY NAME IS THE POINT. Asked for from the desk, in these words: "Any
  * chance we could have the day of the week on the main event page as well as
  * the date? It would make it easier to find things like 'Advanced Mah Jongg'
- * at Ashbridge (Tues) vs 'Advanced Mah Jongg' at Narberth (Mon)." Programmes
+ * at Ashbridge (Tues) vs 'Advanced Mah Jongg' at Narberth (Mon)." Programs
  * here are known by their day as much as by their name, and a bare 9/16/2026
  * made the one distinguishing fact the reader had to work out for themselves.
  *
@@ -4771,7 +4771,7 @@ function makeFormLunchOnly(form) {
 // confirmation a one-off event actually wants.
 //
 // REVERSIBLE, which is why the page is retitled rather than deleted. A
-// programme that gains a second date in the same month is not a rare event —
+// program that gains a second date in the same month is not a rare event —
 // it is what "we've added another session" means — and the form must go back
 // to asking on the very next sync, with the question back on the page it came
 // off and every navigation still aimed at it. Deleting the page would have
@@ -5976,7 +5976,7 @@ function initLunchScheduleSheet(ss) {
 //
 // WHY IT IS BUILT FROM Lunch_Schedule AND NOT THE CALENDAR. Every other form
 // in this system is generated from calendar events, because every other form
-// is for a programme and a programme is a thing on the calendar. A lunch is
+// is for a program and a program is a thing on the calendar. A lunch is
 // not. The record of which days food is served on is Lunch_Schedule, it is
 // already maintained (staff type the month's menu into it), and requiring a
 // duplicate calendar entry per catered day would mean two places to keep in
@@ -5996,7 +5996,7 @@ function initLunchScheduleSheet(ss) {
 //              triageDeletedSessions() only removes a row it can attribute to
 //              a calendar it just read, so a session with no calendar behind it
 //              is never mistaken for a deleted one. Without this the entire
-//              lunch programme would be swept into Deleted_Event_Triage on the
+//              lunch program would be swept into Deleted_Event_Triage on the
 //              first sync after it was written.
 //
 // Everything else — the form, the date labels, the import, the counts, the
@@ -6032,7 +6032,7 @@ const LUNCH_ONLY_SESSION_HOUR = 12;
  * import works in, and that was wrong for a reason worth writing down: the two
  * windows are answering different questions. The calendar's window bounds how
  * far ahead we go LOOKING for events, and 60 days is generous for that,
- * because a programme two months out has usually not been put on the calendar
+ * because a program two months out has usually not been put on the calendar
  * yet. The menu is the opposite. It is TYPED, in blocks, by somebody working
  * ahead — and the whole reason "Build / Refresh Lunch Sign-Up Forms" is on the
  * menu at all is the moment right after a month of it has been pasted in and
@@ -6320,7 +6320,7 @@ function syncLunchOnlySessions(registrySheet) {
         log(`⚠️ Could not build the lunch sign-up form for ${entry.location}, ${entry.monthLabel} (${err}).`);
         noteForAdmin('Lunch sign-up form could not be built',
           `${entry.location}, ${entry.monthLabel} — ${err}. Those dates have no lunch-only form, so nobody can ` +
-          `sign up for a meal online at that location this month. The programme forms are unaffected.`);
+          `sign up for a meal online at that location this month. The program forms are unaffected.`);
         return;
       }
       // A form we already had and can no longer open. Replacing it silently
@@ -6382,7 +6382,7 @@ function syncLunchOnlySessions(registrySheet) {
   // existingRows already carries the in-place Form_ID edits above.
   //
   // skipTriage, and it matters: this render is spreadsheet-only, and a lunch
-  // pass must never be a path that can decide a programme was cancelled on the
+  // pass must never be a path that can decide a program was cancelled on the
   // strength of a calendar read it did not need to make.
   if (newRows.length > 0 || touchedExisting > 0) {
     renderProgramDashboard(true, { sessionRows: existingRows.concat(newRows), skipTriage: true });
@@ -8354,11 +8354,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Refresh Instructor Sheets Now', 'refreshInstructorSignUpSheetsNow')
       .addItem('Personalized Assistance Schedule…', 'showAssistanceScheduleDialog')
       .addItem('Invite Registrants to Calendar Events…', 'showCalendarInviteDialog'))
-    .addSubMenu(ui.createMenu('📝 Programmes & Forms')
+    .addSubMenu(ui.createMenu('📝 Programs & Forms')
       // FIRST on this submenu, because it is the one that says what is wrong
       // before anything else here is worth pressing. Everything below it acts
-      // on one programme; this is how somebody finds out which. See section 14.
-      .addItem('🔍 Review Programmes One by One…', 'showProgramReviewDialog')
+      // on one program; this is how somebody finds out which. See section 14.
+      .addItem('🔍 Review Programs One by One…', 'showProgramReviewDialog')
       .addSeparator()
       .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
       // NAMED FOR WHAT IT DOES, not for the four columns it happens to read.
@@ -9166,7 +9166,7 @@ function handleProgramDashboardEdit(e, sheet) {
     if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1) {
       e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
     }
-    toastIfPossible(`⚠️ That is a lunch date, not a programme — it has no calendar event to change. ` +
+    toastIfPossible(`⚠️ That is a lunch date, not a program — it has no calendar event to change. ` +
       `Edit it on ${SHEET_NAMES.LUNCH_SCHEDULE} instead.`);
     return;
   }
@@ -9785,7 +9785,7 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
       // about grouping already means Regular, so appending the word tells the
       // system nothing it did not know and tells every subscriber that the
       // event changed. Applying "Monthly sign-up" from the review would
-      // otherwise rewrite the description of every event of every programme
+      // otherwise rewrite the description of every event of every program
       // that was already monthly, which is most of them.
       //
       // NOT skipped when the description is silent but the TITLE still carries
@@ -10980,7 +10980,7 @@ const RECOGNIZED_TAG_PATTERNS = [
  * put clarifying notes in the event description. The two instructions
  * collided, silently and in the worst direction:
  *
- *   "[Film Club selection: Casablanca]"   -> gave the programme a standing
+ *   "[Film Club selection: Casablanca]"   -> gave the program a standing
  *                                            club roster
  *   "[Drop-in welcome]"                   -> deleted its registration form
  *   "[Combined with the JCC]"             -> pooled it onto one form with
@@ -11069,7 +11069,7 @@ function parseSettingsBrackets(text) {
     // are told to put clarifying notes in the description, and a note that
     // happens to contain one of these words ("[Film Club selection:
     // Casablanca]", "[Drop-in welcome]", "[Combined with the JCC]") must not
-    // reconfigure the programme behind their back.
+    // reconfigure the program behind their back.
     if (!isTagOnlyBracket(content)) {
       log(`ℹ️ Ignoring "[${content}]" — it reads as a note, not a tag. A bracket only sets something ` +
         `when the WHOLE bracket is tags (e.g. "[Club]", "[Cap: 12, Grouped]"); anything else is left alone.`);
@@ -11288,7 +11288,7 @@ function syncCalendarsInternal() {
         const after = JSON.stringify(syncLunchOnlySessions(registrySheet));
         if (after !== before) updateMasterLunchDashboard(null);
       } catch (err) {
-        log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the programme forms are unaffected.`);
+        log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the program forms are unaffected.`);
         noteForAdmin('Lunch sign-up forms not refreshed',
           `${err}. The lunch-only sign-up forms were not built or updated this run; everything else synced normally.`);
       }
@@ -12060,7 +12060,7 @@ function renameClubRosterKeys(ss, renames) {
 function programOptionsTabOptions() {
   return {
     banner: '📋 Program Options',
-    bannerNote: 'Every programme this workbook has ever run, with your standing notes against each one.',
+    bannerNote: 'Every program this workbook has ever run, with your standing notes against each one.',
     staffColumns: PROGRAM_OPTIONS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
     numberColumns: ['Sessions_Tracked']
@@ -14932,8 +14932,8 @@ function buildRegistryIndex(registrySheet, sessionRows) {
       // per session rather than per form — see computeClubKey().
       clubKey: isClub ? computeClubKey(cleanTitle, location, sharedFormIds.has(formId)) : '',
       // THE SAME KEY, COMPUTED FOR EVERY SESSION. A standing place on a
-      // programme is a Club_Members row, and staff can now add one from the
-      // desk to a programme that carries no [Club] tag at all (see
+      // program is a Club_Members row, and staff can now add one from the
+      // desk to a program that carries no [Club] tag at all (see
       // addStandingListMember()) — a Zoom class whose regulars have never
       // filled in a form is the case this was asked for. So the roster is
       // matched against this, and `isClub` goes on meaning only what it ever
@@ -15429,7 +15429,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     // On a lunch-only session there is nothing to attend, so a tick means the
     // meal — the one and only reading of that grid on such a form. Decided
     // per SESSION rather than per form because that is where the fact lives:
-    // the Event_ID says outright that this row is a lunch with no programme
+    // the Event_ID says outright that this row is a lunch with no program
     // behind it (see makeLunchOnlyEventId()).
     const lunchOnlySession = isLunchOnlyEventId(registryEntry.eventId);
 
@@ -18128,7 +18128,7 @@ function buildQuickMarkHtml(preloadedIndex) {
   <option value="">— choose a time —</option>
 </select>
 <p class="hint" id="apptNote" style="display:none">
-  This programme is booked by appointment. Times already taken are not listed.
+  This program is booked by appointment. Times already taken are not listed.
 </p>
 <label class="tick" id="earlierLabel" style="display:none">
   <input type="checkbox" id="earlier" onchange="refreshButton()"> ☎️ Call them if an earlier appointment opens up
@@ -18160,7 +18160,7 @@ function buildQuickMarkHtml(preloadedIndex) {
   <input type="text" id="needDates" placeholder="16 Sep 2026, 23 Sep 2026" style="display:none"
          autocomplete="off">
 
-  <label class="tick"><input type="checkbox" id="needThisProgram"> Only for this programme
+  <label class="tick"><input type="checkbox" id="needThisProgram"> Only for this program
     <span class="note">— "one meal every World Affairs day"</span></label>
   <label class="tick"><input type="checkbox" id="needThisLocation"> Only at this location</label>
 
@@ -18443,7 +18443,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     el('apptNote').textContent = moving
       ? 'Currently at ' + held + '. Only free slots are listed, plus the one they already hold.'
       : (free.length
-        ? 'This programme is booked by appointment. Times already taken are not listed.'
+        ? 'This program is booked by appointment. Times already taken are not listed.'
         : 'Every appointment on this date is taken — nobody else can be booked onto it.');
 
     // Their own slot first when moving, then everything still free. Sorted
@@ -18758,12 +18758,12 @@ function buildQuickMarkHtml(preloadedIndex) {
   // the only one it could say:
   //
   //   Register                          → this session, and this session only.
-  //   Register + every future session   → a standing place on the programme.
+  //   Register + every future session   → a standing place on the program.
   //   Register + every future session
   //            + a lunch every time     → and a meal on each of those dates.
   //
   // The third is what Caroline asked for, and it is a great many of the people
-  // who come: a programme they never miss and a lunch they always stay for.
+  // who come: a program they never miss and a lunch they always stay for.
   // The standing place already lands on Club_Members, which carries a Lunch
   // column that applyClubRosterCatchup() honours on every booking it makes —
   // so this tick is not a new mechanism, it is the desk finally being asked
@@ -18946,9 +18946,9 @@ function buildQuickMarkHtml(preloadedIndex) {
 //     Specific dates    a listed handful
 //     Once              one date and then done
 //
-// narrowed by LOCATION and PROGRAMME, either of which may be blank for "any".
-// A blank programme with "Every time" is the plain standing note ("no milk,
-// ever"); naming a programme is what expresses "one meal every World Affairs
+// narrowed by LOCATION and PROGRAM, either of which may be blank for "any".
+// A blank program with "Every time" is the plain standing note ("no milk,
+// ever"); naming a program is what expresses "one meal every World Affairs
 // day" without anybody having to know which Tuesdays those fall on.
 //
 // A blank NAME is allowed and means the whole session: "everybody on this
@@ -19149,7 +19149,7 @@ function startOfWeek(date) {
  * Every need that applies to one person on one session.
  *
  * A need with no NAME applies to everybody on a matching session; one with no
- * PROGRAMME or no LOCATION applies at any. Matching on the loose name key
+ * PROGRAM or no LOCATION applies at any. Matching on the loose name key
  * (normalizeNameKey) for the same reason every other name comparison in this
  * file does: "Jane Smith" and "jane  smith " are one person.
  */
@@ -19162,8 +19162,8 @@ function regularNeedsFor(needs, context) {
     if (need.nameKey && need.nameKey !== nameKey) return false;
     if (need.location && location && need.location !== location) return false;
     if (need.program && title && need.program !== title) return false;
-    // A need pinned to a programme must not leak onto a session whose
-    // programme we could not name — that is how "one meal every World Affairs
+    // A need pinned to a program must not leak onto a session whose
+    // program we could not name — that is how "one meal every World Affairs
     // day" becomes a meal every day.
     if (need.program && !title) return false;
     return regularNeedAppliesOn(need, date);
@@ -19849,7 +19849,7 @@ function buildQuickMarkIndex() {
     sessions.push({
       value: choice.label, label: choice.label, group: choice.group, location: choice.location,
       // The two facts a REGULAR NEED is matched against. Parsing them back out
-      // of the label in the browser works until a programme's own name
+      // of the label in the browser works until a program's own name
       // contains the separator — see parseQuickMarkProgramChoice(), which is
       // the whole reason that function is careful.
       title: choice.title, dateKey: choice.dateKey,
@@ -19877,7 +19877,7 @@ function buildQuickMarkIndex() {
     const slot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
 
     // This row belongs to its own session, and also to the dateless "program
-    // only" entry for the same programme — the fallback choice a desk picks
+    // only" entry for the same program — the fallback choice a desk picks
     // when it doesn't matter which date. Same rule the per-session read used.
     // Matched on the canonical title, so a lunch row whose dish was retyped
     // still finds its session — see quickMarkTitleKey().
@@ -19890,7 +19890,7 @@ function buildQuickMarkIndex() {
       if (!bucket) return;
       // DEDUPED ON NAME AND SLOT TOGETHER, not on name alone. One person with
       // two rows for the same session is a duplicate registration on an
-      // ordinary programme — and two genuine appointments on a Personalized
+      // ordinary program — and two genuine appointments on a Personalized
       // Assistance one, which the desk has to be able to tell apart and mark
       // separately. Name alone hid the second one entirely.
       if (bucket.keys.some((k, i) => k === nameKey && bucket.times[i] === slot)) return;
@@ -20041,7 +20041,7 @@ function collectKnownProgramChoices(location, registrantRows) {
     const label = d ? `${name}${LOCATION_LABEL_SEPARATOR}${formatDateLabel(d)}` : name;
     // Keyed by LOCATION AND LABEL, not label alone. The label is
     // "title · date" with no location in it, so two locations running the same
-    // programme on the same day collapse into one entry — invisible while this
+    // program on the same day collapse into one entry — invisible while this
     // was only ever called with a location to filter by, and wrong the moment
     // buildQuickMarkIndex() asks for every location at once.
     const key = `${rowLocation}${QUICK_MARK_SESSION_KEY_SEPARATOR}${label}`;
@@ -20171,7 +20171,7 @@ const LUNCH_ONLY_LABEL_PREFIX = 'Lunch @ ';
 /** What the label read before it named the location and the dish. Still recognized, never written. */
 const LEGACY_LUNCH_ONLY_PROGRAM_LABEL = '🥡 Lunch Only (no program)';
 
-/** "Lunch @ Narberth" — the name of the lunch programme at one location. */
+/** "Lunch @ Narberth" — the name of the lunch program at one location. */
 function lunchOnlyProgramLabel(location) {
   const loc = String(location || '').trim();
   return loc ? `${LUNCH_ONLY_LABEL_PREFIX}${loc}` : 'Lunch';
@@ -20356,21 +20356,21 @@ function applyQuickMarkLocked(args) {
   const ateHere = quickMarkCount(args.ateHere);
   const tookHome = quickMarkCount(args.tookHome);
   const inFridge = quickMarkCount(args.inFridge);
-  // A standing place — every future session of this programme, not just this
+  // A standing place — every future session of this program, not just this
   // one. It is the Club_Members list, which is exactly this promise already
   // (see CLUB_TAG); the only thing that has changed is that a desk can add
-  // somebody to it, for any programme, without waiting for them to tick a box
+  // somebody to it, for any program, without waiting for them to tick a box
   // on a form they have never once filled in.
-  // Never on an appointment programme — see applyClubRosterCatchup(), which
-  // would otherwise book one person into every slot the programme ever runs.
+  // Never on an appointment program — see applyClubRosterCatchup(), which
+  // would otherwise book one person into every slot the program ever runs.
   // Refused below, once the session is known, rather than silently dropped.
   const standing = register && !!args.standing;
   // WHICH KIND OF STANDING PLACE. A place on every future session of a
-  // programme and a lunch on every one of those dates are two different
+  // program and a lunch on every one of those dates are two different
   // promises, and the desk was previously only able to make the first: the
   // Club_Members row went in with no Lunch value at all, so
   // applyClubRosterCatchup() booked every future session as "No Lunch" — the
-  // programme carried forward and the meal did not. This is the second
+  // program carried forward and the meal did not. This is the second
   // promise, said out loud, for the many people who come to a class they never
   // miss and stay for the lunch every time.
   const standingLunch = standing && !!args.standingLunch;
@@ -20568,7 +20568,7 @@ function applyQuickMarkLocked(args) {
     : {};
 
   if (register && !attended && !lunch && !signup && !moveTime) {
-    const already = `✅ ${name} is already registered for ${selection.title || 'that programme'} on ` +
+    const already = `✅ ${name} is already registered for ${selection.title || 'that program'} on ` +
       `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.` +
       `${earlierNote}${standingNote}`;
     toastIfPossible(already);
@@ -20955,7 +20955,7 @@ function addQuickMarkWalkIn(sheet, args) {
 }
 
 /**
- * Puts one person on a programme's STANDING LIST from the desk, and says in
+ * Puts one person on a program's STANDING LIST from the desk, and says in
  * one short clause what happened — appended to whatever message the mark
  * itself produced, because it is a rider on that action rather than an action
  * of its own.
@@ -20966,10 +20966,10 @@ function addQuickMarkWalkIn(sheet, args) {
  * option (see CLUB_TAG) already promises exactly this — "sign up once and stay
  * on the list" — so the answer is not a second mechanism but the same one,
  * reachable by staff: a Club_Members row, which applyClubRosterCatchup() books
- * into every future session of the programme, and which staff take somebody
+ * into every future session of the program, and which staff take somebody
  * off by unticking Active.
  *
- * IT DOES NOT NEED THE PROGRAMME TO BE TAGGED [Club]. That tag decides whether
+ * IT DOES NOT NEED THE PROGRAM TO BE TAGGED [Club]. That tag decides whether
  * the public FORM offers to join; a standing place added at the desk is a
  * decision staff have already made, and refusing it because a calendar
  * description lacks a word would leave the Zoom classes — the whole reason
@@ -20994,16 +20994,16 @@ function addStandingListMember(session, name, options) {
   try {
     const title = String((session && session.title) || '').trim();
     const location = String((session && session.location) || '').trim();
-    if (!title) return ' (no programme name, so no standing place was added)';
+    if (!title) return ' (no program name, so no standing place was added)';
 
-    // An [All Locations] programme's roster is one list, not one per room, so
+    // An [All Locations] program's roster is one list, not one per room, so
     // the key has to be scoped the same way the form's own club joins scope it
     // — which is decided by the form the sessions share.
     let formId = String((session && session.formId) || '').trim();
     if (!formId) {
       const found = findNearestSessionForProgram(title, location, '');
       // The walk-in path refuses this before it gets here; this is the other
-      // caller, where the person already had a registration and the programme
+      // caller, where the person already had a registration and the program
       // was never looked up. Same rule, same reason — see
       // applyClubRosterCatchup().
       if (found && found.isAssistance) {
@@ -21102,7 +21102,7 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
       // session ends and how long one slot is (to cut its appointments),
       // whether it is booked by appointment at all, and which form covers it
       // — the last because a standing place is filed under a key that is
-      // scoped differently for an [All Locations] programme (computeClubKey()).
+      // scoped differently for an [All Locations] program (computeClubKey()).
       end: map['Event_End'] === undefined ? null : coerceDate(row[map['Event_End']]),
       slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0),
       isAssistance: map['Personalized_Assistance'] !== undefined &&
@@ -22237,16 +22237,16 @@ function applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, 
   const members = readClubMemberRows(sheet).filter(row => isTruthyCheckbox(row[map['Active']]));
   if (members.length === 0) return 0;
 
-  // Every session, grouped by the programme it belongs to — not clubs only.
-  // A roster row is a standing place on a PROGRAMME, and one added at the desk
-  // (addStandingListMember()) is attached to programmes the public form never
+  // Every session, grouped by the program it belongs to — not clubs only.
+  // A roster row is a standing place on a PROGRAM, and one added at the desk
+  // (addStandingListMember()) is attached to programs the public form never
   // offered to join. Nothing widens as a result: a person is still booked only
-  // into programmes somebody deliberately put them on.
+  // into programs somebody deliberately put them on.
   const sessionsByClub = {};
   Object.keys(registryIndex).forEach(k => {
     const entry = registryIndex[k];
     // NEVER AN APPOINTMENT SESSION. A standing place means "book me into every
-    // one of these"; on a [Personalized Assistance] programme that would hand
+    // one of these"; on a [Personalized Assistance] program that would hand
     // one person a slot in every Wills afternoon for the rest of the year and
     // take those chairs off the form. An appointment is booked one at a time,
     // by whoever wants it — from the form, or from Quick Mark.
@@ -22903,10 +22903,10 @@ function renderProgramDashboard(force, options) {
   const reusableRegistrantRows = triageResult.registrantsMoved ? null : options.registrantRows;
   const registrantScan = scanRegistrants(registrantsSheet, reusableRegistrantRows);
 
-  // THE HEADLINE NUMBERS COUNT PROGRAMMES, AND A MEAL IS NOT ONE. The lunch
+  // THE HEADLINE NUMBERS COUNT PROGRAMS, AND A MEAL IS NOT ONE. The lunch
   // rows are written to the table below and are now plainly VISIBLE there —
   // they read "Lunch @ Narberth — Chx Parm", which is a line on the schedule
-  // like any other — but they stay out of both summaries. "42 programmes this
+  // like any other — but they stay out of both summaries. "42 programs this
   // month" counting thirty lunches is a number nobody can use, and the Today
   // block names what is RUNNING at each location: the meal is on the lunch
   // dashboard, in a count of its own, which is where somebody looks for it.
@@ -23210,7 +23210,7 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
  * happen here, and the reason this function still exists rather than simply
  * being deleted.
  *
- * They were hidden on the argument that a meal is not a programme and thirty
+ * They were hidden on the argument that a meal is not a program and thirty
  * identical rows a month are noise between staff and the classes. Both halves
  * of that were really about the old NAME: every row read "🥡 Lunch Only (no
  * program)", so thirty of them said nothing thirty times and the tab appeared
@@ -23430,7 +23430,7 @@ function getDashboardRowPlan(signUpRowCount) {
   // this tab that is meant to leave the building. Staff are asked for "the
   // lunch link" at the desk, on the phone and by email, and every other home
   // for it (a Drive folder of sixty forms, a session row buried in the
-  // programme dashboard, an email from three weeks ago) is somewhere it has to
+  // program dashboard, an email from three weeks ago) is somewhere it has to
   // be hunted for. Top of the tab whose whole subject is lunch is where
   // somebody looks without being told.
   //
@@ -24278,7 +24278,7 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
   const rows = signUpRows || [];
   writeSectionBanner(sheet, plan.signUpBannerRow, numCols,
     '🥡 LUNCH SIGN-UP FORMS',
-    { hero: true, note: 'For people who come for the meal rather than for a programme — ' +
+    { hero: true, note: 'For people who come for the meal rather than for a program — ' +
       'one form per location, listed below.' });
   // Padded to the tab's full width so the header BAND spans the sheet like
   // every other header row on it. Stopping at column E left five grey cells
@@ -25567,7 +25567,7 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
 
   const stamp = Utilities.formatDate(new Date(),
     Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
-  // The programme and where it runs. The refresh stamp and the "tick the
+  // The program and where it runs. The refresh stamp and the "tick the
   // yellow columns" instruction are a note: this sheet goes to an instructor
   // who reads the top line to check they have opened the right one, and a
   // heading that is three facts joined by bullets is not a top line.
@@ -28206,13 +28206,13 @@ const PROGRAM_QUESTION_TYPE_OPTIONS = [
 const PROGRAM_QUESTION_ALL_PROGRAMS = '*';
 
 /**
- * Every programme title currently on the session table, once each, in
- * alphabetical order — the Programme dropdown's list on Program_Questions and
+ * Every program title currently on the session table, once each, in
+ * alphabetical order — the Program dropdown's list on Program_Questions and
  * on the review dialog.
  *
  * Read from the dashboard rather than the calendar: the calendar takes seconds
- * to read and this is called while drawing a tab, and a programme that has no
- * session row is a programme no form covers, so offering it would be offering
+ * to read and this is called while drawing a tab, and a program that has no
+ * session row is a program no form covers, so offering it would be offering
  * a title that matches nothing.
  */
 function listKnownProgramTitles() {
@@ -28228,7 +28228,7 @@ function listKnownProgramTitles() {
     });
     return Object.keys(seen).sort((a, b) => a.localeCompare(b));
   } catch (err) {
-    log(`Could not list the programme titles for a dropdown (${err}) — offering none.`);
+    log(`Could not list the program titles for a dropdown (${err}) — offering none.`);
     return [];
   }
 }
@@ -28437,10 +28437,10 @@ function questionsForFormContext(specs, context) {
   const norm = v => String(v || '').trim().toLowerCase();
   const titles = new Set((context.titles || []).map(norm));
   const locations = new Set((context.locations || []).map(norm));
-  // "*" MEANS EVERY ONE, IN BOTH COLUMNS. Programme has always read it that
+  // "*" MEANS EVERY ONE, IN BOTH COLUMNS. Program has always read it that
   // way; Location had not, so a row saying Location "*" — which is what the
   // dropdown on that column now offers, and what somebody copying the
-  // Programme cell would write — matched no location at all and the question
+  // Program cell would write — matched no location at all and the question
   // was asked on nothing. Blank still means the same thing, as it always did.
   const isEvery = value => !value || value === '*';
   return (specs || []).filter(spec => {
@@ -28827,7 +28827,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
  * which is precisely the problem when something looks wrong: the answer to
  * "why has this form still got the wrong questions on it" is an hour away, and
  * when it arrives it is silent. This runs the same reshape on demand and
- * reports what it saw, per programme:
+ * reports what it saw, per program:
  *
  *   - which sessions the workbook thinks are appointments (the
  *     Personalized_Assistance tick on Master_Program_Dashboard, which is what
@@ -28845,7 +28845,7 @@ function rebuildAssistanceFormsNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!dash) {
-    toastIfPossible('⚠️ There is no programme dashboard yet — run Sync Cal once.');
+    toastIfPossible('⚠️ There is no program dashboard yet — run Sync Cal once.');
     return;
   }
   const headers = HEADERS.Master_Program_Dashboard;
@@ -28862,10 +28862,10 @@ function rebuildAssistanceFormsNow() {
     return;
   }
 
-  // WHAT IS AN APPOINTMENT, PROGRAMME BY PROGRAMME. Reported for every
-  // programme on the dashboard, not just the ticked ones: "Low-Cost Wills —
+  // WHAT IS AN APPOINTMENT, PROGRAM BY PROGRAM. Reported for every
+  // program on the dashboard, not just the ticked ones: "Low-Cost Wills —
   // not marked" is the answer to the commonest version of this question, and
-  // it cannot be given by listing only the programmes that ARE marked.
+  // it cannot be given by listing only the programs that ARE marked.
   const byProgram = {};
   rows.forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
@@ -28901,14 +28901,14 @@ function rebuildAssistanceFormsNow() {
     lines.push(`  ✅ ${p.title} (${p.location}) — ${p.marked} of ${p.total} session(s) marked, ` +
       `${p.upcoming} still upcoming`);
     if (p.marked < p.total) {
-      lines.push(`     ⚠️ ${p.total - p.marked} session(s) of this programme are NOT marked — those dates ` +
+      lines.push(`     ⚠️ ${p.total - p.marked} session(s) of this program are NOT marked — those dates ` +
         `are offered as ordinary sign-ups.`);
     }
   });
   const unmarked = programs.filter(p => p.marked === 0);
   if (unmarked.length > 0) {
     lines.push('');
-    lines.push(`NOT MARKED (${unmarked.length} programme(s)) — ordinary date-based sign-up:`);
+    lines.push(`NOT MARKED (${unmarked.length} program(s)) — ordinary date-based sign-up:`);
     unmarked.slice(0, ASSISTANCE_REPORT_MAX_UNMARKED).forEach(p =>
       lines.push(`  – ${p.title} (${p.location})`));
     if (unmarked.length > ASSISTANCE_REPORT_MAX_UNMARKED) {
@@ -28965,7 +28965,7 @@ function rebuildAssistanceFormsNow() {
   }
 }
 
-/** How many ordinary programmes the report above lists before summarizing the rest. */
+/** How many ordinary programs the report above lists before summarizing the rest. */
 const ASSISTANCE_REPORT_MAX_UNMARKED = 12;
 
 // ---------------------------------------------------------------------------
@@ -29175,7 +29175,7 @@ function renderProgramQuestionsSheet(allRows) {
 
   writeMemoryTab(sheet, headers, rows, {
     banner: '❓ Program Questions',
-    bannerNote: 'Extra questions added to a programme\'s registration form — one row per question.\n\n' +
+    bannerNote: 'Extra questions added to a program\'s registration form — one row per question.\n\n' +
       'Press "Update Program Questions on Forms" on the menu when you are done editing.',
     staffColumns: PROGRAM_QUESTIONS_STAFF_COLUMNS,
     numberColumns: ['Sort']
@@ -29186,13 +29186,13 @@ function renderProgramQuestionsSheet(allRows) {
   // NEXT one, the empty one somebody is about to type a question into. See
   // MEMORY_TAB_SPARE_ROWS for what this used to do instead.
   //
-  // Programme and Location are dropdowns for the first time here. Both are
+  // Program and Location are dropdowns for the first time here. Both are
   // matched against the calendar by exact text (questionsForFormContext()),
   // so a title typed from memory — "Bookclub", "Book Club " — is a question
   // that silently applies to no form at all, with nothing on the tab to say
   // so. They are OPEN lists rather than closed ones: "*" is a legitimate
-  // answer to both, a programme that has not been imported yet is a
-  // legitimate answer to Programme, and refusing either would be worse than
+  // answer to both, a program that has not been imported yet is a
+  // legitimate answer to Program, and refusing either would be worse than
   // not knowing it.
   const span = applyMemoryTabValidation(sheet, headers, rows.length, {
     checkboxes: ['Required', 'Active'],
@@ -29235,7 +29235,7 @@ function renderProgramQuestionsSheet(allRows) {
     'Drive, use Share \u25b8 Copy link, and paste the link here.\n\n' +
     'Ignored by the text types and by Notice.');
   headerNote('Program',
-    'Pick from the dropdown — it lists every programme currently on the\n' +
+    'Pick from the dropdown — it lists every program currently on the\n' +
     'dashboard, spelled the way the Google Calendar spells it. A name typed\n' +
     'from memory that does not match exactly asks its question of no form at\n' +
     'all, and nothing here would say so.\n\n' +
@@ -29685,7 +29685,7 @@ const TIME_BLOCK_MAX_GAP_MINUTES = 15;
 
 /**
  * The longest a single block can be and still look like an appointment slot
- * rather than a programme. Two hours of "Chair Yoga" followed by two more is a
+ * rather than a program. Two hours of "Chair Yoga" followed by two more is a
  * double session, not a diary — and merging it would silently turn two classes
  * into one four-hour event.
  */
@@ -29977,7 +29977,7 @@ function collapseTimeBlockRun(run, options) {
 
 
 // ---------------------------------------------------------------------------
-// THE DIALOG  (🗓️ Programmes & Forms ▸ Merge Half-Hour Blocks…)
+// THE DIALOG  (🗓️ Programs & Forms ▸ Merge Half-Hour Blocks…)
 // ---------------------------------------------------------------------------
 
 /**
@@ -30020,7 +30020,7 @@ function buildTimeBlockHtml(runs) {
       &nbsp;·&nbsp; ${escapeHtmlForDialog(shape)}${tag}</span></label>`;
   }).join('\n');
 
-  const empty = `<p class="hint"><b>Nothing to merge.</b> No programme on the calendar has two or more
+  const empty = `<p class="hint"><b>Nothing to merge.</b> No program on the calendar has two or more
     back-to-back events of the same name on the same day. That is the shape this looks for — an
     afternoon typed in one event per appointment.</p>`;
 
@@ -30145,10 +30145,10 @@ function mergeTimeBlocksNow(indexes, mode) {
 
 
 // ============================================================================
-// 13. WHAT KIND OF PROGRAMME IS THIS?  (one answer instead of four)
+// 13. WHAT KIND OF PROGRAM IS THIS?  (one answer instead of four)
 // ============================================================================
 //
-// FOUR CONTROLS FOR ONE DECISION. A programme's registration is currently set
+// FOUR CONTROLS FOR ONE DECISION. A program's registration is currently set
 // by a Type_Tag dropdown and three checkboxes — Club, No_Registration,
 // Personalized_Assistance — sitting side by side on the dashboard, each with
 // its own tag, its own calendar stamp and its own meaning. They are genuinely
@@ -30175,7 +30175,7 @@ function mergeTimeBlocksNow(indexes, mode) {
 // resolves to one of the six (resolveProgramFormType), and each of the six
 // resolves back to the four (PROGRAM_FORM_TYPES[].settings). That is the
 // property the review dialog depends on — it must be able to show what a
-// programme currently IS, not merely set what it should be.
+// program currently IS, not merely set what it should be.
 //
 // [All Locations] is deliberately NOT one of the six. It answers WHERE, not
 // what kind, and it composes cleanly with all six — see SHARED_LOCATION_SCOPE.
@@ -30247,7 +30247,7 @@ function getProgramFormType(key) {
 }
 
 /**
- * Which of the six a programme currently IS, from the four things that decide
+ * Which of the six a program currently IS, from the four things that decide
  * it. Takes whatever shape the caller has: a group off the calendar
  * ({ isClub, noRegistration, isAssistance, typeTag/isFixed }) or a row's worth
  * of dashboard values.
@@ -30287,30 +30287,30 @@ function programFormTypeSettings(key) {
 
 
 // ============================================================================
-// 14. THE PROGRAMME REVIEW  (go through them one at a time and assert)
+// 14. THE PROGRAM REVIEW  (go through them one at a time and assert)
 // ============================================================================
 //
 // WHY THIS EXISTS. Everything in this file is a rule about how the calendar,
 // the sheet and the forms should agree, and every one of those rules is
 // enforced on the way IN — at the moment a sync runs, a checkbox is ticked, a
 // form is rebuilt. None of them is enforced on the way OUT. So after a season
-// of editing — a programme renamed, a tag typed by hand, a form rebuilt on
+// of editing — a program renamed, a tag typed by hand, a form rebuilt on
 // Tuesday and re-split on Thursday, a day of appointments entered as seven
-// half-hour blocks — nothing anywhere says which of forty programmes are still
+// half-hour blocks — nothing anywhere says which of forty programs are still
 // in the state their author believes they are in. The workbook looks fine. The
 // dashboard is full of rows. The forms all open.
 //
 // The only way to find out has been to know what to look for and go looking.
 //
-// So this states, per programme, WHAT OUGHT TO BE TRUE, and then says whether
+// So this states, per program, WHAT OUGHT TO BE TRUE, and then says whether
 // it is:
 //
-//   • the sheet and the calendar agree about what kind of programme this is;
+//   • the sheet and the calendar agree about what kind of program this is;
 //   • every session of it says the same thing as every other;
 //   • it has a form, and as many forms as its kind implies — one for a series,
 //     one per month for a monthly, none at all for a drop-in;
 //   • a drop-in carries no "register here" link;
-//   • an appointment programme has a slot length, and a capacity that is its
+//   • an appointment program has a slot length, and a capacity that is its
 //     number of slots;
 //   • its day is one event rather than seven back-to-back blocks;
 //   • it is shared across locations everywhere or nowhere;
@@ -30318,26 +30318,26 @@ function programFormTypeSettings(key) {
 //     event has a row.
 //
 // Each answer is either a tick or a sentence saying what disagrees with what,
-// and — where there is one — the fix, on a button, applied to that programme
+// and — where there is one — the fix, on a button, applied to that program
 // alone.
 //
 // IT READS TWICE AND OPENS NOTHING. The whole review is the dashboard rows and
 // one pass over the calendar window, both of which are already cached per
-// execution. No form is opened, which is what keeps a forty-programme review a
+// execution. No form is opened, which is what keeps a forty-program review a
 // few seconds rather than a minute: FormApp.openById() is a remote round trip
 // each, and none of the questions above needs one.
 //
-// THE REVIEW MARK IS A FINGERPRINT, not a tick. Marking a programme reviewed
+// THE REVIEW MARK IS A FINGERPRINT, not a tick. Marking a program reviewed
 // records what was true when you looked at it; if the calendar moves
 // underneath afterwards, the mark says "reviewed, but it has changed since"
-// rather than going on claiming the programme is fine. A mark that can quietly
+// rather than going on claiming the program is fine. A mark that can quietly
 // become a lie is worse than no mark at all on a workbook several people edit.
 // ============================================================================
 
-/** Where the review marks live. One property, one JSON object, keyed by programme. */
+/** Where the review marks live. One property, one JSON object, keyed by program. */
 const PROGRAM_REVIEW_PROP_KEY = 'PROGRAM_REVIEW_STATE_V1';
 
-/** How many programmes the dialog will draw. Beyond this it is a bootstrap, not a review. */
+/** How many programs the dialog will draw. Beyond this it is a bootstrap, not a review. */
 const PROGRAM_REVIEW_LIMIT = 250;
 
 /** Severity of one assertion. Ordered worst-first, which is the order they are shown in. */
@@ -30356,11 +30356,11 @@ function saveProgramReviewState(state) {
 }
 
 /**
- * A programme's identity for review purposes: its calendar and its title, or
- * the shared scope and its title when it is a cross-location programme.
+ * A program's identity for review purposes: its calendar and its title, or
+ * the shared scope and its title when it is a cross-location program.
  *
  * DELIBERATELY THE SAME SHAPE buildEventGroups() KEYS ON, minus the month:
- * what a person means by "a programme" is the thing that carries one name at
+ * what a person means by "a program" is the thing that carries one name at
  * one place, whether it meets once or forty times, and whether its dates are
  * on one form or twelve.
  */
@@ -30369,7 +30369,7 @@ function programReviewId(scope, title) {
 }
 
 /**
- * The whole review: one entry per programme, each with its facts and its
+ * The whole review: one entry per program, each with its facts and its
  * assertions.
  *
  * Two reads and no forms opened — see the section note. Everything else is
@@ -30378,7 +30378,7 @@ function programReviewId(scope, title) {
 function buildProgramReview() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!sheet) return { programmes: [], summary: { total: 0, problems: 0, warnings: 0, reviewed: 0 }, ready: false };
+  if (!sheet) return { programs: [], summary: { total: 0, problems: 0, warnings: 0, reviewed: 0 }, ready: false };
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
@@ -30387,59 +30387,59 @@ function buildProgramReview() {
   const reviewState = getProgramReviewState();
   const todayKey = formatDateKey(new Date());
 
-  const byProgramme = {};
+  const byProgram = {};
   rows.forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!title || !date) return;
-    // A LUNCH ROW IS NOT A PROGRAMME. It has no calendar event behind it, no
+    // A LUNCH ROW IS NOT A PROGRAM. It has no calendar event behind it, no
     // tags to disagree about and a form built from the menu rather than the
     // template — every assertion below would fire on it, forty times a month,
     // about a thing that is working exactly as intended.
     if (isLunchOnlyEventId(row[map['Event_ID']])) return;
 
-    const facts = calendarFacts.byProgramme[`${calendarId}|${title}`];
+    const facts = calendarFacts.byProgram[`${calendarId}|${title}`];
     const scope = (facts && facts.isShared) ? SHARED_LOCATION_SCOPE : calendarId;
     const id = programReviewId(scope, title);
-    if (!byProgramme[id]) {
-      byProgramme[id] = { id, scope, title, isShared: !!(facts && facts.isShared), rows: [], calendarIds: [] };
+    if (!byProgram[id]) {
+      byProgram[id] = { id, scope, title, isShared: !!(facts && facts.isShared), rows: [], calendarIds: [] };
     }
-    const entry = byProgramme[id];
+    const entry = byProgram[id];
     entry.rows.push(row);
     if (calendarId && entry.calendarIds.indexOf(calendarId) === -1) entry.calendarIds.push(calendarId);
   });
 
-  // A programme that exists ONLY on the calendar has no row to have been found
+  // A program that exists ONLY on the calendar has no row to have been found
   // above, and is exactly the thing somebody is reviewing to discover: an
   // event added since the last sync, or one whose rows were swept into triage.
-  Object.keys(calendarFacts.byProgramme).forEach(key => {
-    const facts = calendarFacts.byProgramme[key];
+  Object.keys(calendarFacts.byProgram).forEach(key => {
+    const facts = calendarFacts.byProgram[key];
     const scope = facts.isShared ? SHARED_LOCATION_SCOPE : facts.calendarId;
     const id = programReviewId(scope, facts.title);
-    if (byProgramme[id]) return;
-    byProgramme[id] = {
+    if (byProgram[id]) return;
+    byProgram[id] = {
       id, scope, title: facts.title, isShared: facts.isShared, rows: [], calendarIds: [facts.calendarId]
     };
   });
 
-  const programmes = Object.keys(byProgramme)
-    .map(id => describeProgrammeForReview(byProgramme[id], map, calendarFacts, reviewState, todayKey))
-    .sort(compareProgrammesForReview)
+  const programs = Object.keys(byProgram)
+    .map(id => describeProgramForReview(byProgram[id], map, calendarFacts, reviewState, todayKey))
+    .sort(compareProgramsForReview)
     .slice(0, PROGRAM_REVIEW_LIMIT);
 
   const summary = {
-    total: programmes.length,
-    problems: programmes.filter(p => p.worst === REVIEW_LEVELS.PROBLEM).length,
-    warnings: programmes.filter(p => p.worst === REVIEW_LEVELS.WARN).length,
-    reviewed: programmes.filter(p => p.reviewedAt && !p.changedSinceReview).length,
+    total: programs.length,
+    problems: programs.filter(p => p.worst === REVIEW_LEVELS.PROBLEM).length,
+    warnings: programs.filter(p => p.worst === REVIEW_LEVELS.WARN).length,
+    reviewed: programs.filter(p => p.reviewedAt && !p.changedSinceReview).length,
     calendarsUnread: calendarFacts.unreadable
   };
-  return { programmes, summary, ready: true };
+  return { programs, summary, ready: true };
 }
 
 /** Worst first, then soonest, then by name — the order somebody wants to work down. */
-function compareProgrammesForReview(a, b) {
+function compareProgramsForReview(a, b) {
   const rank = { problem: 0, warn: 1, ok: 2, info: 2 };
   const ra = rank[a.worst] === undefined ? 2 : rank[a.worst];
   const rb = rank[b.worst] === undefined ? 2 : rank[b.worst];
@@ -30450,18 +30450,18 @@ function compareProgrammesForReview(a, b) {
 
 /**
  * One pass over the calendar window, reduced to what the review asks of it:
- * per programme, what its events say about it, and per date, whether an event
+ * per program, what its events say about it, and per date, whether an event
  * exists at all.
  *
  * `unreadable` names any calendar that could not be read, because every
  * "the calendar does not have this" assertion below would otherwise fire for
- * every programme on it — an outage reported forty times as forty missing
- * programmes.
+ * every program on it — an outage reported forty times as forty missing
+ * programs.
  */
 function readCalendarFactsForReview() {
   const { start, end } = computeSyncDateRange();
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
-  const byProgramme = {};
+  const byProgram = {};
   const eventDateKeys = {};
   const unreadable = [];
   const todayKey = formatDateKey(new Date());
@@ -30476,14 +30476,14 @@ function readCalendarFactsForReview() {
       if (!parsed || parsed.isTentative || !parsed.cleanTitle) return;
       const settings = resolveEventSettings(ev, parsed);
       const key = `${calendarId}|${parsed.cleanTitle}`;
-      if (!byProgramme[key]) {
-        byProgramme[key] = {
+      if (!byProgram[key]) {
+        byProgram[key] = {
           calendarId, title: parsed.cleanTitle, location: CALENDAR_MAP[calendarId] || '',
           eventCount: 0, taggedShared: 0, dateKeys: {},
           // Counted rather than OR-ed: "some of its events say club" is the
-          // fact a half-tagged programme needs reported, and a boolean cannot
+          // fact a half-tagged program needs reported, and a boolean cannot
           // hold it. buildEventGroups() deliberately ORs them for the SYNC —
-          // one tagged event means the programme is tagged — which is right
+          // one tagged event means the program is tagged — which is right
           // there and useless here.
           taggedClub: 0, taggedNoReg: 0, taggedAssistance: 0, taggedGrouped: 0, taggedRegular: 0,
           slotMinutes: 0, capacity: 0, maxPerMonth: 0, linkedFormIds: {},
@@ -30491,12 +30491,12 @@ function readCalendarFactsForReview() {
           // at the 1st of the current month, so it always holds some days that
           // have already happened — and a register link is written for dates
           // people can still sign up for. Counting a fortnight of finished
-          // sessions as "events with no link" would report every programme in
+          // sessions as "events with no link" would report every program in
           // the building as broken on the 20th of the month.
           upcomingEvents: 0, linkedEvents: 0
         };
       }
-      const p = byProgramme[key];
+      const p = byProgram[key];
       const dateKey = formatDateKey(ev.getStartTime());
       const upcoming = dateKey >= todayKey;
       p.eventCount++;
@@ -30519,18 +30519,18 @@ function readCalendarFactsForReview() {
     });
   });
 
-  Object.keys(byProgramme).forEach(key => {
-    const p = byProgramme[key];
+  Object.keys(byProgram).forEach(key => {
+    const p = byProgram[key];
     // Shared is the one flag read as ANY, matching buildEventGroups(): an
     // event carrying [All Locations] joins the shared form whatever its
-    // neighbours say, so the programme IS shared the moment one of them does.
+    // neighbours say, so the program IS shared the moment one of them does.
     // The half-tagged case is reported separately, as its own assertion.
     p.isShared = p.taggedShared > 0;
   });
 
   // The window the calendar was read over, so the assertions can tell "this row
   // has no event" apart from "this row is older than anything we looked at".
-  return { byProgramme, eventDateKeys, unreadable, windowStartKey: formatDateKey(start),
+  return { byProgram, eventDateKeys, unreadable, windowStartKey: formatDateKey(start),
     windowEndKey: formatDateKey(end) };
 }
 
@@ -30554,16 +30554,16 @@ function registrationFormIdInDescription(description) {
 // ---------------------------------------------------------------------------
 
 /**
- * One programme, described and checked.
+ * One program, described and checked.
  *
  * The facts are gathered first and the assertions read only those facts, so
  * every check below is a pure statement about two numbers rather than another
  * pass over the calendar.
  */
-function describeProgrammeForReview(entry, map, calendarFacts, reviewState, todayKey) {
-  const facts = gatherProgrammeFacts(entry, map, calendarFacts, todayKey);
+function describeProgramForReview(entry, map, calendarFacts, reviewState, todayKey) {
+  const facts = gatherProgramFacts(entry, map, calendarFacts, todayKey);
   const checks = [];
-  assertProgrammeKind(facts, checks);
+  assertProgramKind(facts, checks);
   assertSessionsAgree(facts, checks);
   assertFormsMatchKind(facts, checks);
   assertLinksMatchKind(facts, checks);
@@ -30575,7 +30575,7 @@ function describeProgrammeForReview(entry, map, calendarFacts, reviewState, toda
   const worst = [REVIEW_LEVELS.PROBLEM, REVIEW_LEVELS.WARN, REVIEW_LEVELS.OK]
     .filter(level => checks.some(c => c.level === level))[0] || REVIEW_LEVELS.OK;
 
-  const fingerprint = programmeReviewFingerprint(facts);
+  const fingerprint = programReviewFingerprint(facts);
   const mark = reviewState[entry.id] || null;
   return {
     id: entry.id,
@@ -30589,7 +30589,7 @@ function describeProgrammeForReview(entry, map, calendarFacts, reviewState, toda
     lastDateLabel: facts.lastDateLabel,
     nextDateKey: facts.nextDateKey,
     // The UPCOMING dates, soonest first — the ones somebody reviewing this
-    // programme is about to be asked about. A list that opens with last
+    // program is about to be asked about. A list that opens with last
     // October pushes next week off the end of it.
     dateLabels: facts.upcomingDateLabels.slice(0, 12),
     moreDates: Math.max(0, facts.upcomingDateLabels.length - 12),
@@ -30614,10 +30614,10 @@ function describeProgrammeForReview(entry, map, calendarFacts, reviewState, toda
 }
 
 /** Everything the assertions read, gathered once. */
-function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
+function gatherProgramFacts(entry, map, calendarFacts, todayKey) {
   const rows = entry.rows;
   const calendarParts = entry.calendarIds
-    .map(id => calendarFacts.byProgramme[`${id}|${entry.title}`])
+    .map(id => calendarFacts.byProgram[`${id}|${entry.title}`])
     .filter(Boolean);
 
   const sum = key => calendarParts.reduce((n, p) => n + (p[key] || 0), 0);
@@ -30649,8 +30649,8 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
   };
 
   // THE REVIEW IS ABOUT WHAT IS STILL ACTIONABLE, so the form arithmetic reads
-  // the UPCOMING rows only. The dashboard keeps every session a programme ever
-  // had: a programme running since last autumn covers ten months and has ten
+  // the UPCOMING rows only. The dashboard keeps every session a program ever
+  // had: a program running since last autumn covers ten months and has ten
   // forms, and comparing those two numbers says nothing anybody can act on
   // while burying the one month that is actually wrong. Nobody can re-split
   // last April.
@@ -30683,7 +30683,7 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     monthsCovered,
     firstDateLabel: dates.length > 0 ? formatDateLabel(dates[0]) : '',
     lastDateLabel: dates.length > 0 ? formatDateLabel(dates[dates.length - 1]) : '',
-    // Sorts a programme with nothing upcoming to the bottom of its severity
+    // Sorts a program with nothing upcoming to the bottom of its severity
     // band rather than the top: it is the least urgent thing on the list.
     nextDateKey: upcoming.length > 0 ? formatDateKey(upcoming[0]) : '9999-12-31',
     sheetState,
@@ -30708,9 +30708,9 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
     // lists rather than a third pass.
     // ONLY ROWS INSIDE THE WINDOW THE CALENDAR WAS READ OVER. That window
     // starts at the 1st of the current month, and the dashboard holds every
-    // session this programme has ever had — so testing an April row against a
+    // session this program has ever had — so testing an April row against a
     // calendar nobody looked at April on reports the whole of last season as
-    // "no calendar event behind it", on every programme, forever.
+    // "no calendar event behind it", on every program, forever.
     rowsWithoutEvents: rows.filter(row => {
       const date = coerceDate(row[map['Event_Date']]);
       const calendarId = String(row[map['Calendar_Source']] || '').trim();
@@ -30730,12 +30730,12 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
       Object.keys(part.dateKeys).forEach(key => { if (!known[key]) out.push(`${key} (${part.location})`); });
       return out;
     }, []),
-    timeBlockDays: countTimeBlockDaysForProgramme(entry, calendarFacts)
+    timeBlockDays: countTimeBlockDaysForProgram(entry, calendarFacts)
   };
 }
 
 /**
- * How many of this programme's days are typed as a run of back-to-back blocks
+ * How many of this program's days are typed as a run of back-to-back blocks
  * rather than as one event — see section 12.
  *
  * Counted from the dateKeys already gathered rather than by re-reading the
@@ -30744,10 +30744,10 @@ function gatherProgrammeFacts(entry, map, calendarFacts, todayKey) {
  * turn out to be. The dialog's merge action re-derives the real runs before
  * touching anything.
  */
-function countTimeBlockDaysForProgramme(entry, calendarFacts) {
+function countTimeBlockDaysForProgram(entry, calendarFacts) {
   let days = 0;
   entry.calendarIds.forEach(calendarId => {
-    const part = calendarFacts.byProgramme[`${calendarId}|${entry.title}`];
+    const part = calendarFacts.byProgram[`${calendarId}|${entry.title}`];
     if (!part) return;
     const dayCount = Object.keys(part.dateKeys).length;
     // More events than distinct days means at least one day carries several.
@@ -30757,7 +30757,7 @@ function countTimeBlockDaysForProgramme(entry, calendarFacts) {
 }
 
 /** What was true when somebody last looked — see the section note on review marks. */
-function programmeReviewFingerprint(facts) {
+function programReviewFingerprint(facts) {
   return [
     facts.sheetType.key, facts.calendarType.key,
     facts.sessionCount, facts.eventCount, facts.formIds.length,
@@ -30773,7 +30773,7 @@ function reviewCheck(level, text, fix) {
 }
 
 /**
- * ASSERT: the sheet and the calendar agree about what kind of programme this
+ * ASSERT: the sheet and the calendar agree about what kind of program this
  * is.
  *
  * This is the one that goes wrong most, and it goes wrong invisibly. The
@@ -30783,19 +30783,19 @@ function reviewCheck(level, text, fix) {
  * adopted. Either way the dashboard is a report on the calendar rather than a
  * control over it, and nothing anywhere says which of the two somebody meant.
  */
-function assertProgrammeKind(facts, checks) {
+function assertProgramKind(facts, checks) {
   if (facts.calendarUnreadable) {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-      `The calendar this programme lives on could not be read, so nothing below compares it with the ` +
+      `The calendar this program lives on could not be read, so nothing below compares it with the ` +
       `sheet. Try again in a moment.`));
     return;
   }
   if (facts.eventCount === 0) {
-    // A PROGRAMME THAT HAS FINISHED IS NOT A BROKEN ONE. The dashboard keeps
-    // every session a programme ever had; the calendar is read from the 1st of
+    // A PROGRAM THAT HAS FINISHED IS NOT A BROKEN ONE. The dashboard keeps
+    // every session a program ever had; the calendar is read from the 1st of
     // the current month forward. So last season's twelve-week course has rows
     // and no events, and reporting that as a problem would put every finished
-    // programme in the building at the top of the list — permanently, and
+    // program in the building at the top of the list — permanently, and
     // ahead of the ones that are actually wrong.
     if (facts.upcomingCount === 0) {
       checks.push(reviewCheck(REVIEW_LEVELS.INFO,
@@ -30805,13 +30805,13 @@ function assertProgrammeKind(facts, checks) {
     }
     checks.push(reviewCheck(REVIEW_LEVELS.PROBLEM,
       `No calendar event for "${facts.title}" anywhere in the sync window, but ${facts.upcomingCount} ` +
-      `of its session rows are still UPCOMING. Either the events were deleted or the programme was ` +
+      `of its session rows are still UPCOMING. Either the events were deleted or the program was ` +
       `renamed on the calendar and the rows were left behind under the old name.`));
     return;
   }
   if (facts.sessionCount === 0) {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
-      `${facts.eventCount} calendar event(s), and no session row for any of them — this programme has ` +
+      `${facts.eventCount} calendar event(s), and no session row for any of them — this program has ` +
       `never been imported. Run "Update Everything Now".`, 'sync'));
     return;
   }
@@ -30828,11 +30828,11 @@ function assertProgrammeKind(facts, checks) {
 }
 
 /**
- * ASSERT: every session of the programme says the same thing as every other.
+ * ASSERT: every session of the program says the same thing as every other.
  *
- * Half a programme tagged is not a setting, it is an edit that stopped
+ * Half a program tagged is not a setting, it is an edit that stopped
  * halfway — and because buildEventGroups() reads these as ANY, one tagged
- * event makes the whole programme tagged. So a half-tagged programme behaves
+ * event makes the whole program tagged. So a half-tagged program behaves
  * as though it were fully tagged while LOOKING, on the dashboard, as though
  * somebody had made a deliberate distinction between its dates.
  */
@@ -30861,14 +30861,14 @@ function assertSessionsAgree(facts, checks) {
   }
   checks.push(reviewCheck(REVIEW_LEVELS.WARN,
     `Its calendar events disagree with each other — ${disagreements.join('; ')}. One tagged event is ` +
-    `read as tagging the whole programme, so it already behaves as if they all said so. Applying a kind ` +
+    `read as tagging the whole program, so it already behaves as if they all said so. Applying a kind ` +
     `below writes the same answer onto every one of them.`, 'kind'));
 }
 
 /**
  * ASSERT: it has as many forms as its kind implies.
  *
- * A monthly programme has one form per calendar month it covers; a series has
+ * A monthly program has one form per calendar month it covers; a series has
  * exactly one; a drop-in has none. More than that is what "a lot of editing"
  * leaves behind — a form rebuilt, sessions repointed, a month re-split — and
  * the visible symptom is people registering on a link that covers half the
@@ -30918,7 +30918,7 @@ function assertFormsMatchKind(facts, checks) {
   } else {
     checks.push(reviewCheck(REVIEW_LEVELS.WARN,
       `It has ${forms} form(s) covering ${facts.monthsCovered.length} upcoming month(s). A monthly ` +
-      `programme normally gets a fresh form each month so its dates and menu stay current.`));
+      `program normally gets a fresh form each month so its dates and menu stay current.`));
   }
 }
 
@@ -30927,14 +30927,14 @@ function assertFormsMatchKind(facts, checks) {
  *
  * The link is what the public actually uses — the dashboard's "View Live Form"
  * column is staff-facing. An event with a form but no link on it is a
- * programme nobody can find, and it is invisible from every screen in this
+ * program nobody can find, and it is invisible from every screen in this
  * workbook.
  */
 function assertLinksMatchKind(facts, checks) {
   // UPCOMING EVENTS ONLY, on both sides of every comparison here. A register
   // link is for a date somebody can still sign up for, and the sync window
   // always holds part of a month that has already happened — so counting
-  // finished sessions as unlinked would report every programme in the building
+  // finished sessions as unlinked would report every program in the building
   // as broken by the 20th.
   const total = facts.upcomingEvents;
   if (total === 0) return;
@@ -30965,7 +30965,7 @@ function assertLinksMatchKind(facts, checks) {
 }
 
 /**
- * ASSERT: an appointment programme is set up as one.
+ * ASSERT: an appointment program is set up as one.
  *
  * Three things have to be true together for a day of appointments to work, and
  * each of them is invisible on its own: the tag, a slot length, and a day
@@ -30998,11 +30998,11 @@ function assertAppointmentSettings(facts, checks) {
 /**
  * ASSERT: it is shared across locations everywhere or nowhere.
  *
- * A half-shared programme is the one genuinely ambiguous state in the tag
+ * A half-shared program is the one genuinely ambiguous state in the tag
  * system: the tagged events pool onto a shared form and the untagged ones keep
- * their own, so the programme has two forms and neither covers all its dates.
+ * their own, so the program has two forms and neither covers all its dates.
  * warnAboutPartiallySharedPrograms() says so during a sync; this says so on
- * demand, next to the rest of what is wrong with the same programme.
+ * demand, next to the rest of what is wrong with the same program.
  */
 function assertSharedConsistently(facts, checks) {
   const shared = facts.calendarParts.reduce((n, p) => n + (p.taggedShared || 0), 0);
@@ -31045,7 +31045,7 @@ function assertCalendarAndSheetLineUp(facts, checks) {
   }
   if (facts.rowsWithoutEvents.length === 0 && facts.eventsWithoutRows.length === 0) {
     // "Over the window" said out loud, because the two numbers are not
-    // comparable without it: the dashboard holds every session this programme
+    // comparable without it: the dashboard holds every session this program
     // ever had, and the calendar was read from the 1st of this month forward.
     checks.push(reviewCheck(REVIEW_LEVELS.OK,
       `Its ${facts.eventCount} calendar event(s) from this month on all have a session row, and none ` +
@@ -31058,7 +31058,7 @@ function assertCalendarAndSheetLineUp(facts, checks) {
  * a room that cannot hold them.
  *
  * Both are arithmetic the dashboard already carries and nobody adds up: a
- * capacity typed down after people registered, or a cap left on a programme
+ * capacity typed down after people registered, or a cap left on a program
  * that has since moved to a bigger room.
  */
 function assertCapacityIsSane(facts, checks) {
@@ -31102,7 +31102,7 @@ function assertCapacityIsSane(facts, checks) {
 // ---------------------------------------------------------------------------
 
 /**
- * Sets one programme's kind — on the calendar AND on the sheet, now.
+ * Sets one program's kind — on the calendar AND on the sheet, now.
  *
  * THE CALENDAR FIRST, and that is the whole point of doing it here rather than
  * by ticking boxes. resolveEventSettings() reads the description on every
@@ -31112,7 +31112,7 @@ function assertCapacityIsSane(facts, checks) {
  * which is what makes "this is a drop-in now" actually remove [Club].
  *
  * Then the dashboard, straight away, rather than an hour later: somebody
- * reviewing forty programmes has to be able to see that the one they just
+ * reviewing forty programs has to be able to see that the one they just
  * changed has changed.
  *
  * Returns { ok, message, stamped }.
@@ -31123,15 +31123,15 @@ function applyProgramKind(programId, typeKey) {
   const type = getProgramFormType(typeKey);
 
   const at = String(programId || '').indexOf('::');
-  if (at === -1) return { ok: false, message: '⚠️ Could not tell which programme that is.' };
+  if (at === -1) return { ok: false, message: '⚠️ Could not tell which program that is.' };
   const scope = programId.substring(0, at);
   const title = programId.substring(at + 2);
-  if (!title) return { ok: false, message: '⚠️ Could not tell which programme that is.' };
+  if (!title) return { ok: false, message: '⚠️ Could not tell which program that is.' };
 
-  // A shared programme has no single calendar of its own, so its stamp goes
+  // A shared program has no single calendar of its own, so its stamp goes
   // out from every calendar that carries it — stampProgramFlagOnCalendar()
   // already walks the others when the events say [All Locations], and
-  // starting from each in turn is what covers a programme whose tag is on
+  // starting from each in turn is what covers a program whose tag is on
   // some calendars and not others.
   const calendarIds = scope === SHARED_LOCATION_SCOPE ? Object.keys(CALENDAR_MAP) : [scope];
   let stamped = 0;
@@ -31160,12 +31160,12 @@ function applyProgramKind(programId, typeKey) {
   // delivered later as though it were the newer instruction. The queue exists
   // because a checkbox cannot reach a calendar on its own (see
   // PENDING_FLAG_SHEET_NAME); this call HAS reached the calendar, so anything
-  // queued for the same programme has been superseded by it and must not be
+  // queued for the same program has been superseded by it and must not be
   // stamped back over the top an hour from now.
-  dropPendingFlagsForProgramme(title, calendarIds);
+  dropPendingFlagsForProgram(title, calendarIds);
 
   const rowsChanged = writeProgramKindOntoRows(title, calendarIds, settings);
-  flushAdminDigest('Programme review');
+  flushAdminDigest('Program review');
   const message = `✅ "${title}" is now ${type.label.toLowerCase()}. ` +
     (stamped > 0 ? `${stamped} calendar event(s) retagged. ` : `The calendar already said so. `) +
     (rowsChanged > 0 ? `${rowsChanged} dashboard row(s) updated. ` : '') +
@@ -31175,13 +31175,13 @@ function applyProgramKind(programId, typeKey) {
 }
 
 /**
- * Brings one programme's dashboard rows into line with a kind that has just
+ * Brings one program's dashboard rows into line with a kind that has just
  * been written to its calendar.
  *
  * Cosmetic in the strict sense — the next sync would recompute all of it from
  * the calendar — and worth doing anyway, because the alternative is a review
  * screen that says "changed" while the row behind it still says the old thing
- * for an hour. Reviewing forty programmes against a sheet that lags the
+ * for an hour. Reviewing forty programs against a sheet that lags the
  * calendar is exactly the confusion this whole tool exists to end.
  */
 function writeProgramKindOntoRows(title, calendarIds, settings) {
@@ -31237,8 +31237,8 @@ function writeProgramKindOntoRows(title, calendarIds, settings) {
   return changed;
 }
 
-/** Records that somebody has looked at this programme, and what was true when they did. */
-function markProgrammeReviewed(programId, fingerprint) {
+/** Records that somebody has looked at this program, and what was true when they did. */
+function markProgramReviewed(programId, fingerprint) {
   const state = getProgramReviewState();
   state[programId] = {
     at: Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm'),
@@ -31250,14 +31250,14 @@ function markProgrammeReviewed(programId, fingerprint) {
 }
 
 /**
- * Forgets every queued tick for one programme.
+ * Forgets every queued tick for one program.
  *
  * Called when a kind has just been written straight to the calendar, which is
  * the thing the queue was holding those ticks in order to eventually do. A
  * queued entry that survives is not a pending instruction any more; it is an
  * older answer waiting to overwrite a newer one.
  */
-function dropPendingFlagsForProgramme(title, calendarIds) {
+function dropPendingFlagsForProgram(title, calendarIds) {
   const wanted = {};
   (calendarIds || []).forEach(id => { wanted[id] = true; });
   const stale = readPendingProgramFlags()
@@ -31269,8 +31269,8 @@ function dropPendingFlagsForProgramme(title, calendarIds) {
   return stale.length;
 }
 
-/** Takes the mark off one programme, or off all of them. */
-function clearProgrammeReviewed(programId) {
+/** Takes the mark off one program, or off all of them. */
+function clearProgramReviewed(programId) {
   if (!programId) { saveProgramReviewState({}); return 0; }
   const state = getProgramReviewState();
   delete state[programId];
@@ -31280,16 +31280,16 @@ function clearProgrammeReviewed(programId) {
 
 
 // ---------------------------------------------------------------------------
-// THE DIALOG  (🗓️ Programmes & Forms ▸ Review Programmes One by One…)
+// THE DIALOG  (🗓️ Programs & Forms ▸ Review Programs One by One…)
 // ---------------------------------------------------------------------------
 
 /**
- * MENU ENTRY: walk the programmes, one screen each.
+ * MENU ENTRY: walk the programs, one screen each.
  *
  * THE WHOLE REVIEW IS SENT TO THE BROWSER AT ONCE, and this is deliberate.
- * Reviewing forty programmes means pressing Next forty times, and a round trip
+ * Reviewing forty programs means pressing Next forty times, and a round trip
  * per press turns a five-minute job into a twenty-minute one — with a spinner
- * between every programme and the next. The review is two sheet reads and one
+ * between every program and the next. The review is two sheet reads and one
  * calendar pass; sending all of it costs one wait at the start and none after
  * that. Only the ACTIONS go back to the server, which is exactly where a wait
  * is expected, because something is being changed.
@@ -31303,7 +31303,7 @@ function showProgramReviewDialog() {
   const html = HtmlService.createHtmlOutput(buildProgramReviewHtml(review))
     .setWidth(760)
     .setHeight(640);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Review Programmes');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Review Programs');
 }
 
 /** Re-runs the review and hands the browser a fresh payload, without reopening the dialog. */
@@ -31319,38 +31319,38 @@ function reviewApplyKind(programId, typeKey) {
 
 /** Called from the dialog's "mark reviewed" button. */
 function reviewMarkOne(programId, fingerprint) {
-  markProgrammeReviewed(programId, fingerprint);
+  markProgramReviewed(programId, fingerprint);
   return JSON.stringify({ message: '✅ Marked reviewed.', ok: true, review: buildProgramReview() });
 }
 
 /** Called from the dialog's "clear all marks" link. */
 function reviewClearAllMarks() {
-  clearProgrammeReviewed(null);
+  clearProgramReviewed(null);
   return JSON.stringify({ message: 'Every review mark cleared.', ok: true, review: buildProgramReview() });
 }
 
 /**
  * Called from the dialog's "merge its blocks" button: collapses every run of
- * back-to-back blocks belonging to ONE programme.
+ * back-to-back blocks belonging to ONE program.
  *
- * Scoped to the programme rather than offering the whole list, because that is
+ * Scoped to the program rather than offering the whole list, because that is
  * what the person is looking at — the general list is its own menu item (see
  * section 12).
  */
-function reviewMergeBlocksForProgramme(programId) {
+function reviewMergeBlocksForProgram(programId) {
   const at = String(programId || '').indexOf('::');
-  if (at === -1) return JSON.stringify({ message: '⚠️ Could not tell which programme that is.', ok: false });
+  if (at === -1) return JSON.stringify({ message: '⚠️ Could not tell which program that is.', ok: false });
   const title = programId.substring(at + 2);
 
   const runs = findCollapsibleTimeBlocks({}).filter(run => run.title === title);
   if (runs.length === 0) {
     return JSON.stringify({
-      message: 'No back-to-back blocks left on this programme — nothing to merge.',
+      message: 'No back-to-back blocks left on this program — nothing to merge.',
       ok: true, review: buildProgramReview()
     });
   }
   const lines = runs.map(run => collapseTimeBlockRun(run, { asAppointments: true }).message);
-  flushAdminDigest('Programme review — merge blocks');
+  flushAdminDigest('Program review — merge blocks');
   return JSON.stringify({
     message: lines.join('\n'), ok: true, review: buildProgramReview()
   });
@@ -31393,7 +31393,7 @@ function reviewSyncEverything() {
 /** The dialog's markup. Inline, so this project stays a single .gs file. */
 function buildProgramReviewHtml(review) {
   // EVERY "<" IS ESCAPED OUT OF BOTH LITERALS, and it is the one way a dialog
-  // carrying its data inline can go badly wrong: a programme called
+  // carrying its data inline can go badly wrong: a program called
   // "Films \u003c/script\u003e" would otherwise end the script block in the
   // middle of a sentence, leaving a page that does nothing at all. JSON is
   // valid JavaScript and \u003c is a valid JSON escape for "<", so the value
@@ -31478,7 +31478,7 @@ function buildProgramReviewHtml(review) {
   var busy = false;
 
   function visible() {
-    return REVIEW.programmes.filter(function (p) {
+    return REVIEW.programs.filter(function (p) {
       if (filter === 'all') return true;
       if (filter === 'unreviewed') return !p.reviewedAt || p.changedSinceReview;
       return p.worst === 'problem' || p.worst === 'warn';
@@ -31516,7 +31516,7 @@ function buildProgramReviewHtml(review) {
     var list = visible();
     var s = REVIEW.summary || {};
     document.getElementById('counts').innerHTML =
-      esc(s.total || 0) + ' programmes &nbsp;·&nbsp; ' +
+      esc(s.total || 0) + ' programs &nbsp;·&nbsp; ' +
       '<span class="pill problem">' + esc(s.problems || 0) + ' problem</span>' +
       '<span class="pill warn">' + esc(s.warnings || 0) + ' to check</span>' +
       '<span class="pill done">' + esc(s.reviewed || 0) + ' reviewed</span>';
@@ -31525,8 +31525,8 @@ function buildProgramReviewHtml(review) {
       document.getElementById('card').innerHTML =
         '<h3>Nothing here.</h3><p class="sub">' +
         (filter === 'attention'
-          ? 'Every programme passes every check. Switch to "All" to walk through them anyway.'
-          : 'Every programme has been reviewed. Switch to "All" to go through them again, or ' +
+          ? 'Every program passes every check. Switch to "All" to walk through them anyway.'
+          : 'Every program has been reviewed. Switch to "All" to go through them again, or ' +
             '<a class="link" onclick="act(\\'clear\\')">clear the marks</a>.') + '</p>';
       document.getElementById('place').textContent = '';
       return;
@@ -31559,7 +31559,7 @@ function buildProgramReviewHtml(review) {
       '</div>' +
       dates +
       '<ul class="checks">' + checks + '</ul>' +
-      '<fieldset><legend>What kind of programme is this?</legend>' +
+      '<fieldset><legend>What kind of program is this?</legend>' +
         '<select id="kind" onchange="showBlurb()">' + KINDS.map(function (k) {
           return '<option value="' + esc(k.key) + '">' + esc(k.label) + '</option>';
         }).join('') + '</select>' +
@@ -31595,7 +31595,7 @@ function buildProgramReviewHtml(review) {
     if (what === 'kind') {
       call('reviewApplyKind', [p.id, document.getElementById('kind').value]);
     } else if (what === 'merge') {
-      call('reviewMergeBlocksForProgramme', [p.id]);
+      call('reviewMergeBlocksForProgram', [p.id]);
     } else if (what === 'sync') {
       say('Re-reading the calendar and the forms — this takes a moment.', '');
       call('reviewSyncEverything', []);

@@ -6,7 +6,7 @@
 // [Regular] is the DEFAULT. An event whose description says nothing about
 // grouping already means Regular, so appending the word tells the system
 // nothing and tells every subscriber the event changed. Applying "Monthly
-// sign-up" to a programme that was already monthly would have rewritten every
+// sign-up" to a program that was already monthly would have rewritten every
 // one of its events, which is most of the calendar.
 //
 // The exception is the one case where the appended word does real work: a
@@ -90,13 +90,13 @@ function stamp(events, tag) {
 // --- the writes that do real work ---------------------------------------
 {
   const ev = event('Chair Yoga', 'Bring a mat.');
-  check('making a silent programme Grouped IS a change',
+  check('making a silent program Grouped IS a change',
     stamp([ev], sandbox.EVENT_TYPES.GROUPED), 1);
   check('and it says so', /\[Grouped\]/.test(ev.state.description), true);
 }
 {
   const ev = event('Chair Yoga', '[Grouped]');
-  check('moving a Grouped programme to Regular is a change',
+  check('moving a Grouped program to Regular is a change',
     stamp([ev], sandbox.EVENT_TYPES.REGULAR), 1);
   check('and the bracket is rewritten, not added to', ev.state.description, '[Regular]');
 }
@@ -123,12 +123,12 @@ function stamp(events, tag) {
   check('and stays exactly as typed', ev.state.description, 'Meets in the [big room upstairs]');
 }
 
-// --- another programme on the same calendar is not touched --------------
+// --- another program on the same calendar is not touched --------------
 {
   const mine = event('Chair Yoga', '');
   const theirs = event('Book Club', '');
   stamp([mine, theirs], sandbox.EVENT_TYPES.GROUPED);
-  check('only the named programme is stamped', theirs.state.writes, 0);
+  check('only the named program is stamped', theirs.state.writes, 0);
 }
 
 console.log(failures === 0 ? '\nAll type-tag stamp checks passed.' : `\n${failures} FAILED`);

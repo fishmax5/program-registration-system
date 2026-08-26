@@ -1,10 +1,10 @@
 // Registering somebody from the desk — the thing the front desk could not do
-// at all before, and the one shape of programme where doing it wrong puts two
+// at all before, and the one shape of program where doing it wrong puts two
 // people in one chair.
 //
 // Caroline's ask was two sentences: "can we add Sign-Up for Future Program to
 // Quick Mark", and "it would help a LOT to have that for the Personalized
-// Assistance programmes, because people ring up to book Wills and Computers."
+// Assistance programs, because people ring up to book Wills and Computers."
 // The second is what this file mostly pins: an appointment session is offered
 // as a list of FREE TIMES, cut the same way the public form cuts them and with
 // the booked ones already gone, so a desk and a form can never hand out the
@@ -164,7 +164,7 @@ check('but the same slot twice is still one entry',
 registrants.pop();
 registrants.pop();
 
-// The ordinary programme, which must be untouched by any of this: no times, no
+// The ordinary program, which must be untouched by any of this: no times, no
 // dropdown, and the desk can still put somebody on it.
 sessions.push(session('Chair Yoga', 'Narberth', new RealDate(2026, 8, 23, 10, 0), new RealDate(2026, 8, 23, 11, 0), false));
 const yoga = sandbox.buildQuickMarkIndex().sessions
@@ -181,7 +181,7 @@ check('a past appointment session offers nothing',
   }, {}), []);
 
 // "[Slots: 20]" is the provider saying how long they actually sit with people.
-check('the per-programme slot length is honoured',
+check('the per-program slot length is honoured',
   sandbox.freeAppointmentTimesForChoice({
     dateKey: '2026-10-13',
     appointment: { eventId: 'EV-X', start: WILLS_START, end: WILLS_END, slotMinutes: 45 }

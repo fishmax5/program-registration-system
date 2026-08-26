@@ -6,7 +6,7 @@
 // instructions collided — every tag was detected by testing its regex against
 // the whole bracket, so a bracket only had to CONTAIN one of these ordinary
 // English words to switch the setting on. "[Film Club selection: Casablanca]"
-// gave the programme a standing club roster; "[Drop-in welcome]" deleted its
+// gave the program a standing club roster; "[Drop-in welcome]" deleted its
 // registration form.
 //
 // The two halves of this file are the two halves of the rule: every real tag
@@ -110,7 +110,7 @@ console.log('\n-- and a NOTE in brackets changes nothing --');
 // Each of these turned a setting on before isTagOnlyBracket() existed. The
 // wording is drawn from what staff were actually told to write: the calendar
 // naming-conventions email asks everyone to move clarifying info into the
-// description, and the programme titles here are real ones.
+// description, and the program titles here are real ones.
 const notes = [
   '[Film Club selection: Casablanca]',      // used to become a club
   '[Book Club is reading Beloved]',         // used to become a club
@@ -153,7 +153,7 @@ check('separators alone survive stripping', sandbox.isTagOnlyBracket('Club / Gro
 console.log('\n-- titles carrying legacy brackets follow the same rule --');
 
 // parseEventTitle() runs the same parser over the TITLE for backwards
-// compatibility, so a programme literally named "Film Club" must not pick up
+// compatibility, so a program literally named "Film Club" must not pick up
 // a roster from its own name. (It never could — the name has no brackets —
 // but a title someone bracketed by hand is the case that matters.)
 check('"Film Club" is just a name',

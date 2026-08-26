@@ -3,7 +3,7 @@
 // gathered for it, so each one can be driven directly with a fact sheet.
 //
 // The two that matter most, because nothing else in the workbook reports them:
-//   • the sheet and the calendar disagreeing about what a programme IS — the
+//   • the sheet and the calendar disagreeing about what a program IS — the
 //     calendar wins on the next sync, so the sheet's answer is thrown away;
 //   • a day of appointments typed as several events, which collide onto one
 //     session row because an Event_ID carries no time.
@@ -24,7 +24,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(src + `
-;this.assertProgrammeKind = assertProgrammeKind;
+;this.assertProgramKind = assertProgramKind;
 this.assertSessionsAgree = assertSessionsAgree;
 this.assertFormsMatchKind = assertFormsMatchKind;
 this.assertLinksMatchKind = assertLinksMatchKind;
@@ -45,8 +45,8 @@ function ok(name, cond, extra) {
 const L = sandbox.REVIEW_LEVELS;
 const T = sandbox.EVENT_TYPES;
 
-// A fact sheet in the shape gatherProgrammeFacts() produces, defaulting to a
-// programme with nothing wrong with it.
+// A fact sheet in the shape gatherProgramFacts() produces, defaulting to a
+// program with nothing wrong with it.
 function facts(over) {
   const sheetState = Object.assign(
     { typeTag: T.REGULAR, isClub: false, noRegistration: false, isAssistance: false },
@@ -91,9 +91,9 @@ const has = (checks, level) => checks.some(c => c.level === level);
 const text = checks => checks.map(c => c.text).join(' || ');
 
 // --- the sheet and the calendar agreeing, or not ----------------------------
-ok('agreement is a tick', has(run('assertProgrammeKind', facts()), L.OK));
+ok('agreement is a tick', has(run('assertProgramKind', facts()), L.OK));
 {
-  const checks = run('assertProgrammeKind', facts({
+  const checks = run('assertProgramKind', facts({
     sheetState: { isClub: true },
     calendarState: { isClub: false }
   }));
@@ -103,26 +103,26 @@ ok('agreement is a tick', has(run('assertProgrammeKind', facts()), L.OK));
   ok('and offers the kind picker as the fix', checks.some(c => c.fix === 'kind'));
 }
 ok('upcoming rows with no calendar event at all is a problem',
-  has(run('assertProgrammeKind',
+  has(run('assertProgramKind',
     facts({ eventCount: 0, calendarParts: [], upcomingCount: 2 })), L.PROBLEM));
-// A FINISHED PROGRAMME IS NOT A BROKEN ONE. The dashboard keeps every session a
-// programme ever had; the calendar is read from the 1st of this month forward.
+// A FINISHED PROGRAM IS NOT A BROKEN ONE. The dashboard keeps every session a
+// program ever had; the calendar is read from the 1st of this month forward.
 // Last season's course therefore has rows and no events, and calling that a
-// problem would put every finished programme in the building at the top of the
+// problem would put every finished program in the building at the top of the
 // list, permanently, ahead of the ones that are actually wrong.
 {
-  const checks = run('assertProgrammeKind',
+  const checks = run('assertProgramKind',
     facts({ eventCount: 0, calendarParts: [], upcomingCount: 0 }));
-  ok('a finished programme is not a problem', !has(checks, L.PROBLEM), text(checks));
+  ok('a finished program is not a problem', !has(checks, L.PROBLEM), text(checks));
   ok('it is just noted as finished', /Finished/.test(text(checks)), text(checks));
 }
 ok('events with no rows at all is a warning',
-  has(run('assertProgrammeKind', facts({ sessionCount: 0, rows: [] })), L.WARN));
-ok('an unreadable calendar is reported as unreadable, not as a missing programme',
-  /could not be read/.test(text(run('assertProgrammeKind',
+  has(run('assertProgramKind', facts({ sessionCount: 0, rows: [] })), L.WARN));
+ok('an unreadable calendar is reported as unreadable, not as a missing program',
+  /could not be read/.test(text(run('assertProgramKind',
     facts({ calendarUnreadable: true, eventCount: 0, calendarParts: [] })))));
 
-// --- half-tagged programmes -------------------------------------------------
+// --- half-tagged programs -------------------------------------------------
 ok('events that all say the same thing are a tick',
   has(run('assertSessionsAgree', facts()), L.OK));
 {
@@ -151,7 +151,7 @@ ok('an upcoming session row with no form at all is a problem',
 // HISTORY IS NOT ACTIONABLE. Nobody can re-split last April, and comparing ten
 // months of rows against ten forms says nothing while burying the one month
 // that is actually wrong.
-ok('a programme whose dates have all happened is asked nothing about forms',
+ok('a program whose dates have all happened is asked nothing about forms',
   run('assertFormsMatchKind', facts({ upcomingRows: [], monthsCovered: [] })).length === 0);
 ok('and a form missing from a PAST row is not reported',
   !has(run('assertFormsMatchKind', facts({
@@ -171,9 +171,9 @@ ok('some events linked is a warning',
 // PAST EVENTS ARE NOT COUNTED ON EITHER SIDE. The sync window starts at the 1st
 // of the current month, so it always holds days that have already happened, and
 // a link is written for dates people can still sign up for. Counting a
-// fortnight of finished sessions as unlinked would report every programme in
+// fortnight of finished sessions as unlinked would report every program in
 // the building as broken by the 20th.
-ok('a programme whose events have all happened is asked nothing',
+ok('a program whose events have all happened is asked nothing',
   run('assertLinksMatchKind', facts({ eventCount: 8, upcomingEvents: 0, linkedEvents: 0 })).length === 0);
 ok('and only the upcoming ones have to carry a link',
   has(run('assertLinksMatchKind',
@@ -190,17 +190,17 @@ ok('a drop-in still advertising a link is a warning',
   ok('extra events on one day is a problem', has(checks, L.PROBLEM), text(checks));
   ok('and merging is offered as the fix', checks.some(c => c.fix === 'merge'));
 }
-ok('an appointment programme with a slot length is a tick',
+ok('an appointment program with a slot length is a tick',
   has(run('assertAppointmentSettings',
     facts({ sheetState: { isAssistance: true }, slotMinutes: 20 })), L.OK));
-ok('an appointment programme without one is told the default',
+ok('an appointment program without one is told the default',
   /minutes is being used/.test(text(run('assertAppointmentSettings',
     facts({ sheetState: { isAssistance: true }, slotMinutes: 0 })))));
-ok('an ordinary programme is asked nothing about slots',
+ok('an ordinary program is asked nothing about slots',
   run('assertAppointmentSettings', facts()).length === 0);
 
 // --- shared across locations, or not ----------------------------------------
-ok('a programme nobody shared is asked nothing',
+ok('a program nobody shared is asked nothing',
   run('assertSharedConsistently', facts()).length === 0);
 ok('shared everywhere is a tick',
   has(run('assertSharedConsistently', facts({

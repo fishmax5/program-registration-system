@@ -4,7 +4,7 @@
 // its own, and the dialog's whole job on opening was to make one.
 //
 // Shipping data inside a <script> block is also the one way this could go
-// badly wrong: a member called O'Brien, or a programme title containing the
+// badly wrong: a member called O'Brien, or a program title containing the
 // two characters that end a script tag, would otherwise end the page in the
 // middle of a sentence and leave a dialog that does nothing at all. So what
 // this file pins is that the literal is a literal — through a name chosen to
