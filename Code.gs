@@ -4401,7 +4401,9 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
         .forEach(it => it.asPageBreakItem().setHelpText(modeNote));
     }
   } catch (err) {
-    log(`⚠️ Could not write date labels to form ${formId}${options.context ? ` (${options.context})` : ''}: ${err}`);
+    log(`⚠️ Could not write the date labels on ${describeFormLink(formId)}` +
+      `${options.context ? ` (${options.context})` : ''}: ${err}. Its dates will read as whatever they ` +
+      `said before — usually a stale capacity or a date that has moved.`);
     return false;
   }
 
@@ -8416,6 +8418,13 @@ function buildAppMenu(ui, includeAdmin) {
       // one place a width set by hand stops being undone by the next render.
       .addItem('📏 Column Widths…', 'showColumnWidthDialog')
       .addSeparator()
+      .addSeparator()
+      // THE ONE THAT ANSWERS "WHY ISN'T THIS TAG WORKING". Every other item on
+      // this menu does something; this one only looks — at a calendar event,
+      // with the sync's own parser — and says which brackets it read, which it
+      // ignored, and whether the dashboard agrees. See section 4c-bis.
+      .addItem('🏷️ Read an Event\'s Tags…', 'showEventTagInspectorDialog')
+      .addSeparator()
       .addItem('Trigger Status', 'showTriggerStatus')
       .addItem('Check Triggers', 'writeTriggers')
       .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
@@ -9963,7 +9972,13 @@ function setFlagBracketInDescription(description, wordsRegex, tagWord, on) {
   };
   let sawTag = false;
 
-  let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
+  let out = raw.replace(/\[([^\]]*)\]/g, (whole, rawContent) => {
+    // Normalized for the same reason the parser normalizes — the two halves of
+    // this round trip have to agree about what a tag is, and a description
+    // edited in the Calendar web UI says "Personalized&nbsp;Assistance". Left
+    // unnormalized here, ticking the box on a program whose calendar already
+    // said so appended a SECOND [Personalized Assistance] bracket.
+    const content = normalizeBracketContent(rawContent);
     if (!wordsRegex.test(content)) return whole;
     // A NOTE IS NOT A TAG, and this is the side of that rule that was missing.
     // parseSettingsBrackets() reads a bracket only when the WHOLE bracket is
@@ -10014,7 +10029,8 @@ function setSlotMinutesInDescription(description, minutes) {
 
   const slotsPattern = /Slots?:\s*\d+/i;
   let replaced = false;
-  let out = raw.replace(/\[([^\]]*)\]/g, (whole, content) => {
+  let out = raw.replace(/\[([^\]]*)\]/g, (whole, rawContent) => {
+    const content = normalizeBracketContent(rawContent); // see the note there
     if (!slotsPattern.test(content) || !isTagOnlyBracket(content)) return whole;
     replaced = true;
     return `[${content.replace(new RegExp(slotsPattern.source, 'gi'), `Slots: ${wanted}`)}]`;
@@ -10041,7 +10057,7 @@ function descriptionStillCarriesFlag(description, wordsRegex) {
     // contains the word — "[Film Club selection: Casablanca]" — is not read as
     // a tag by anything any more, so warning that it will re-tick the box is
     // a false alarm about a note the untick never had any business touching.
-    if (isTagOnlyBracket(content) && wordsRegex.test(content)) {
+    if (isTagOnlyBracket(content) && wordsRegex.test(normalizeBracketContent(content))) {
       BRACKET_GROUP_REGEX.lastIndex = 0;
       return true;
     }
@@ -11002,8 +11018,37 @@ const RECOGNIZED_TAG_PATTERNS = [
  * Whole-bracket, not per-word: that is what keeps "[Cap: 12, Grouped]" and
  * "[Cap: 12 Grouped]" both working while rejecting the prose above.
  */
+/**
+ * WHAT THIS SCRIPT WROTE IS NOT WHAT COMES BACK OUT — the same fact the
+ * registration-notice patterns are built around (see
+ * REGISTRATION_NOTICE_STAMP), applied to the brackets.
+ *
+ * Google Calendar re-encodes a description whenever anybody edits the event in
+ * the web UI. A tag this script wrote as "[Personalized Assistance]" comes back
+ * as "[Personalized&nbsp;Assistance]", sometimes wrapped in <div> or with a
+ * stray <br> in it. `\s+` does not match "&nbsp;", so the bracket stopped
+ * matching ASSISTANCE_WORDS_REGEX, isTagOnlyBracket() read it as prose, and the
+ * tag disappeared — from a description that still SAYS the tag when you look at
+ * the event. The failure is invisible in the place a person would go to check.
+ *
+ * So every read of a bracket's contents goes through here first: entities back
+ * to the characters they stand for, tags out, whitespace collapsed. Reading
+ * only — setFlagBracketInDescription() still writes back whatever shape the
+ * description is already in.
+ */
+function normalizeBracketContent(content) {
+  return String(content || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/&amp;|&#0*38;|&#x0*26;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function isTagOnlyBracket(content) {
-  let remaining = String(content || '');
+  let remaining = normalizeBracketContent(content);
   if (!remaining.trim()) return false;
   RECOGNIZED_TAG_PATTERNS.forEach(pattern => {
     // A fresh non-global copy: several of these constants are shared, and a
@@ -11064,17 +11109,22 @@ function parseSettingsBrackets(text) {
   BRACKET_GROUP_REGEX.lastIndex = 0; // the /g regex is module-level; never trust its cursor
   let match;
   while ((match = BRACKET_GROUP_REGEX.exec(raw)) !== null) {
-    const content = match[1] || '';
+    const rawContent = match[1] || '';
     // A BRACKET IS EITHER ALL TAGS OR ALL PROSE — see isTagOnlyBracket(). Staff
     // are told to put clarifying notes in the description, and a note that
     // happens to contain one of these words ("[Film Club selection:
     // Casablanca]", "[Drop-in welcome]", "[Combined with the JCC]") must not
     // reconfigure the program behind their back.
-    if (!isTagOnlyBracket(content)) {
-      log(`ℹ️ Ignoring "[${content}]" — it reads as a note, not a tag. A bracket only sets something ` +
+    if (!isTagOnlyBracket(rawContent)) {
+      log(`ℹ️ Ignoring "[${rawContent}]" — it reads as a note, not a tag. A bracket only sets something ` +
         `when the WHOLE bracket is tags (e.g. "[Club]", "[Cap: 12, Grouped]"); anything else is left alone.`);
       continue;
     }
+    // Read from the NORMALIZED text, matching the test just made of it: a
+    // description that has been edited in the Calendar web UI comes back with
+    // "&nbsp;" where this script wrote a space, and every regex below wants
+    // \s — see normalizeBracketContent().
+    const content = normalizeBracketContent(rawContent);
     const capMatch = /Cap:\s*(\d+)/i.exec(content);
     if (capMatch) { capacity = parseInt(capMatch[1], 10); sawAny = true; }
     // The WHERE half of grouping, orthogonal to Grouped/Regular above — see
@@ -11213,6 +11263,431 @@ function resolveEventSettings(event, parsedTitle) {
   return { capacity, isFixed, isShared, isClub, noRegistration, isAssistance, slotMinutes, maxPerMonth };
 }
 
+/**
+ * Every field resolveEventSettings() answers, named once so that nothing has
+ * to re-list them — see assignEventSettings() for what re-listing them cost.
+ */
+const EVENT_SETTING_KEYS =
+  ['capacity', 'isFixed', 'isShared', 'isClub', 'noRegistration', 'isAssistance', 'slotMinutes', 'maxPerMonth'];
+
+/**
+ * Copies a resolveEventSettings() answer onto a parseEventTitle() result, and
+ * returns it.
+ *
+ * Exists because the copy used to be written out field by field in
+ * buildGroupsForWindow(), and three fields were missing from that list. A
+ * setting the description states, the parser reads and the group never sees is
+ * indistinguishable from a setting nobody typed — and worse than that, because
+ * the flag reconciler treats "the calendar does not say so" as an instruction
+ * to untick the box. See the comment at the call site.
+ */
+function assignEventSettings(target, settings) {
+  EVENT_SETTING_KEYS.forEach(key => { target[key] = settings[key]; });
+  return target;
+}
+
+// ============================================================================
+// 4c-bis. WHAT DOES THE SYSTEM ACTUALLY READ IN THIS DESCRIPTION?
+// ============================================================================
+//
+// Every tag in this file is a bracket somebody typed into a calendar
+// description, and the rules for reading one are not obvious from looking at
+// it: a bracket is honoured only when the WHOLE bracket is tags
+// (isTagOnlyBracket()), the words have several accepted spellings apiece,
+// "[Slots: 20]" implies [Personalized Assistance] without saying it, and a
+// description that has been edited in the Calendar web UI comes back re-encoded
+// (normalizeBracketContent()).
+//
+// So when a tag "isn't working", the question is never "is it typed there" —
+// somebody has already looked at the event and seen it. The question is
+// whether THIS SCRIPT reads it, and until now there was no way to ask. The
+// answer had to be inferred from a checkbox two syncs later.
+//
+// readTagsFromDescription() answers it directly, and 🔧 Admin ▸ Read an Event's
+// Tags… puts it in front of a person: paste a program name, get every matching
+// calendar event with its description, every bracket in it, which ones were
+// read as tags, which were left as notes and why — and what the dashboard
+// currently says about the same session, which is the comparison that names
+// the problem when the two disagree.
+// ============================================================================
+
+/**
+ * Every setting a bracket can state, as one table: the pattern that finds it,
+ * what to call it on screen, and what it does.
+ *
+ * The parser proper (parseSettingsBrackets) still reads each setting with its
+ * own regex; this is deliberately a second, REPORTING view of the same
+ * vocabulary, so the inspector can name a tag it found without the parser
+ * having to grow a debug mode. The patterns are the same constants, so the two
+ * cannot disagree about what matches — only about what to say about it.
+ */
+const DESCRIPTION_TAG_READERS = [
+  {
+    key: 'capacity', label: 'Cap: N', pattern: /Cap:\s*(\d+)/i, numeric: true,
+    describe: v => `Max_Capacity is ${v}. Above that, registrations go on the waitlist.`
+  },
+  {
+    key: 'slotMinutes', label: 'Slots: N', pattern: /Slots?:\s*(\d+)/i, numeric: true,
+    describe: v => `Appointments are ${v} minutes long. On its own this ALSO makes the program ` +
+      `appointment-based — a slot length is a statement about appointments.`
+  },
+  {
+    key: 'maxPerMonth', label: 'Max Per Month: N', pattern: /Max\s*Per\s*Month:\s*(\d+)/i, numeric: true,
+    describe: v => `A person booking more than ${v} appointment(s) in one calendar month is flagged.`
+  },
+  {
+    key: 'isShared', label: SHARED_LOCATION_TAG, pattern: SHARED_LOCATION_WORDS_REGEX,
+    describe: () => 'This program pools with the same-named program at every other location onto ONE form.'
+  },
+  {
+    key: 'isClub', label: CLUB_TAG, pattern: CLUB_WORDS_REGEX,
+    describe: () => 'Standing membership: people sign up once and are booked into every future session.'
+  },
+  {
+    key: 'noRegistration', label: NO_REGISTRATION_TAG, pattern: NO_REGISTRATION_WORDS_REGEX,
+    describe: () => 'No registration form at all. This tag beats every other tag here.'
+  },
+  {
+    key: 'isAssistance', label: ASSISTANCE_TAG, pattern: ASSISTANCE_WORDS_REGEX,
+    describe: () => 'Booked by APPOINTMENT, not by date: each event is cut into back-to-back slots and ' +
+      'the form asks for a time.'
+  },
+  {
+    key: 'grouped', label: 'Grouped', pattern: /\b(Grouped|Fixed)\b/i,
+    describe: () => 'One form for the whole series, rather than one form per calendar month.'
+  },
+  {
+    key: 'regular', label: 'Regular', pattern: /\b(Monthly|Regular)\b/i,
+    describe: () => 'One form per calendar month — the default, stated explicitly (which is how it ' +
+      'overrides a [Grouped] left behind in the event TITLE).'
+  }
+];
+
+/**
+ * READS a description exactly as the sync does, and says what it saw.
+ *
+ * Returns:
+ *   brackets    every "[...]" in the description, in order, each with the
+ *               normalized text the parser actually matched against
+ *   recognized  [{ key, label, value, describe, bracket }] — one entry per
+ *               setting found, in the order the brackets appear
+ *   ignored     [{ content, reason }] — brackets left alone, and why
+ *   settings    parseSettingsBrackets()'s own answer, so the report can never
+ *               drift from the thing it is reporting on
+ *
+ * Pure: no calendar, no sheet, no writes. That is what makes it safe to call
+ * from a dialog and testable offline.
+ */
+function readTagsFromDescription(description) {
+  const raw = String(description || '');
+  const brackets = [];
+  const recognized = [];
+  const ignored = [];
+
+  BRACKET_GROUP_REGEX.lastIndex = 0;
+  let match;
+  while ((match = BRACKET_GROUP_REGEX.exec(raw)) !== null) {
+    const content = match[1] || '';
+    const normalized = normalizeBracketContent(content);
+    const tagOnly = isTagOnlyBracket(content);
+    brackets.push({ content, normalized, tagOnly });
+
+    if (!tagOnly) {
+      ignored.push({
+        content,
+        reason: normalized
+          ? 'read as a note, not a tag — a bracket only sets something when the WHOLE bracket is ' +
+            'tags this script knows. Put the note outside the brackets, or split the tag into its own bracket.'
+          : 'empty.'
+      });
+      continue;
+    }
+
+    DESCRIPTION_TAG_READERS.forEach(reader => {
+      const found = new RegExp(reader.pattern.source, 'i').exec(normalized);
+      if (!found) return;
+      const value = reader.numeric ? parseInt(found[1], 10) : true;
+      recognized.push({
+        key: reader.key,
+        label: reader.label,
+        matched: found[0],
+        value,
+        describe: reader.describe(value),
+        bracket: content
+      });
+    });
+  }
+
+  return { brackets, recognized, ignored, settings: parseSettingsBrackets(raw) };
+}
+
+/**
+ * The whole answer for ONE calendar event: what its description says, what
+ * this script reads out of it, what the title contributes, and what the
+ * session table currently shows for the same session.
+ *
+ * `dashboardRows` is the already-read Master_Program_Dashboard, passed in so
+ * inspecting twelve events costs one read of the tab rather than twelve.
+ */
+function inspectOneEventTags(ev, calendarId, locationName, dashboardRows, map) {
+  const parsed = parseEventTitle(ev.getTitle());
+  const description = ev.getDescription() || '';
+  const read = readTagsFromDescription(description);
+  const settings = parsed ? resolveEventSettings(ev, parsed) : null;
+  const start = ev.getStartTime();
+
+  // The row this event became, matched the way every other part of this system
+  // matches one: same calendar, same clean title, same date.
+  let sheetRow = null;
+  if (parsed && map['Clean_Title'] !== undefined) {
+    const dateKey = formatDateKey(start);
+    const found = (dashboardRows || []).filter(row =>
+      String(row[map['Calendar_Source']] || '').trim() === calendarId &&
+      String(row[map['Clean_Title']] || '').trim() === parsed.cleanTitle &&
+      (coerceDate(row[map['Event_Date']]) ? formatDateKey(coerceDate(row[map['Event_Date']])) : '') === dateKey);
+    if (found.length > 0) {
+      const row = found[0];
+      sheetRow = {
+        typeTag: String(row[map['Type_Tag']] || '').trim(),
+        isClub: isClubColumnValue(row[map['Club']]),
+        noRegistration: isNoRegistrationColumnValue(row[map['No_Registration']]),
+        isAssistance: isAssistanceColumnValue(row[map['Personalized_Assistance']]),
+        slotMinutes: row[map['Slot_Minutes']],
+        maxCapacity: row[map['Max_Capacity']],
+        formId: String(row[map['Form_ID']] || '').trim()
+      };
+    }
+  }
+
+  // The three flags the sheet shows as checkboxes, calendar answer beside
+  // sheet answer. A disagreement here IS the bug report — it means the tick and
+  // the tag have come apart, and which way round says which one to fix.
+  const comparisons = settings && sheetRow ? PROGRAM_FLAG_COLUMNS.map(flag => ({
+    column: flag.column,
+    tag: flag.tag,
+    calendar: !!settings[flag.groupKey],
+    sheet: !!sheetRow[flag.groupKey],
+    agrees: !!settings[flag.groupKey] === !!sheetRow[flag.groupKey]
+  })) : [];
+
+  return {
+    title: ev.getTitle(),
+    cleanTitle: parsed ? parsed.cleanTitle : '',
+    isTentative: !!(parsed && parsed.isTentative),
+    location: locationName,
+    calendarId,
+    dateLabel: formatDateLabel(start),
+    timeLabel: `${formatTimeLabel(start)}–${formatTimeLabel(ev.getEndTime())}`,
+    description,
+    read,
+    settings,
+    hasLegacyTitleBrackets: !!(parsed && parsed.hasLegacyBrackets),
+    sheetRow,
+    comparisons
+  };
+}
+
+/** How many events the inspector will report on at once — more than this is a list, not an answer. */
+const TAG_INSPECTOR_MAX_EVENTS = 12;
+
+/**
+ * Finds the calendar events a person means and inspects each one.
+ *
+ * `query` is matched loosely against the event title, because the whole point
+ * of this tool is being used by somebody who is not sure what the system
+ * thinks the program is CALLED — a leading "*", a stray bracket or a double
+ * space all change cleanTitle without changing what a person reads.
+ * `dateHint` ('yyyy-MM-dd', or blank) narrows it to one day.
+ */
+function inspectCalendarEventTags(query, dateHint) {
+  const wanted = String(query || '').trim().toLowerCase();
+  if (!wanted) return { error: 'Type part of the program name.', events: [], matched: 0 };
+
+  const { start, end } = computeSyncDateRange();
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const dashboardRows = dash
+    ? readAllSectionedRows(dash, HEADERS.Master_Program_Dashboard, 'Event_ID') : [];
+
+  const hits = [];
+  const unreadable = [];
+  Object.keys(CALENDAR_MAP).forEach(calendarId => {
+    const locationName = CALENDAR_MAP[calendarId];
+    const events = eventsByCalendar[calendarId];
+    if (!events) { unreadable.push(locationName); return; }
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const title = String(ev.getTitle() || '');
+      const parsed = parseEventTitle(title);
+      const haystack = `${title} ${parsed ? parsed.cleanTitle : ''}`.toLowerCase();
+      if (haystack.indexOf(wanted) === -1) return;
+      if (dateHint && formatDateKey(ev.getStartTime()) !== dateHint) return;
+      hits.push({ ev, calendarId, locationName });
+    });
+  });
+
+  hits.sort((a, b) => a.ev.getStartTime() - b.ev.getStartTime());
+  const shown = hits.slice(0, TAG_INSPECTOR_MAX_EVENTS);
+  return {
+    matched: hits.length,
+    truncated: hits.length > shown.length,
+    unreadable,
+    windowLabel: `${formatDateLabel(start)} – ${formatDateLabel(end)}`,
+    events: shown.map(h => inspectOneEventTags(h.ev, h.calendarId, h.locationName, dashboardRows, map))
+  };
+}
+
+/** 🔧 Admin ▸ Read an Event's Tags… */
+function showEventTagInspectorDialog() {
+  const html = HtmlService.createHtmlOutput(buildEventTagInspectorHtml())
+    .setWidth(760)
+    .setHeight(620);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Read an Event’s Tags');
+}
+
+/** Called from the dialog. Returns the report as markup. */
+function inspectEventTagsFromDialog(query, dateHint) {
+  try {
+    const report = inspectCalendarEventTags(query, String(dateHint || '').trim());
+    log(`Tag inspector: "${query}"${dateHint ? ` on ${dateHint}` : ''} -> ${report.matched || 0} event(s).`);
+    return renderEventTagReportHtml(report);
+  } catch (err) {
+    log(`showEventTagInspectorDialog: ${err}`);
+    return `<p class="err">Could not read the calendar: ${escapeHtmlForDialog(err)}</p>`;
+  }
+}
+
+/** The report markup for one inspectCalendarEventTags() answer. */
+function renderEventTagReportHtml(report) {
+  const esc = escapeHtmlForDialog;
+  if (report.error) return `<p class="err">${esc(report.error)}</p>`;
+
+  const head = [];
+  if (report.unreadable && report.unreadable.length > 0) {
+    head.push(`<p class="err">⚠️ Could not read: ${esc(report.unreadable.join(', '))}.</p>`);
+  }
+  if (report.matched === 0) {
+    head.push(`<p class="err">No event matched, ${esc(report.windowLabel)}.</p>
+      <p class="hint">The search is on the event's TITLE as it appears on the calendar. If the program
+      is outside this window, or its title is spelled differently, nothing will match — and neither
+      does the sync, which is worth knowing on its own.</p>`);
+    return head.join('\n');
+  }
+  head.push(`<p class="hint">${report.matched} event(s) matched, ${esc(report.windowLabel)}` +
+    `${report.truncated ? ` — showing the first ${report.events.length}` : ''}.</p>`);
+
+  const blocks = report.events.map(e => {
+    const tags = e.read.recognized.length === 0
+      ? `<p class="none">Nothing in this description is read as a tag.</p>`
+      : `<table>${e.read.recognized.map(t => `<tr>
+          <td class="tagcell">[${esc(t.label)}]</td>
+          <td>${esc(t.describe)}<br><span class="detail">matched "${esc(t.matched)}" in
+          "[${esc(t.bracket)}]"</span></td></tr>`).join('')}</table>`;
+
+    const ignored = e.read.ignored.length === 0 ? '' :
+      `<div class="sub"><b>Brackets left alone</b>${e.read.ignored.map(b =>
+        `<p class="detail">"[${esc(b.content)}]" — ${esc(b.reason)}</p>`).join('')}</div>`;
+
+    const legacy = e.hasLegacyTitleBrackets
+      ? `<p class="detail">⚠️ This event still carries settings in its TITLE. They are still read as a
+         fallback, but the supported place is the description.</p>` : '';
+    const tentative = e.isTentative
+      ? `<p class="err">⚠️ The title starts with "*", so this event is skipped entirely — no form,
+         no dashboard row — until the asterisk comes off.</p>` : '';
+
+    const sheet = !e.sheetRow
+      ? `<p class="detail">No row on the dashboard for this date yet — run 🔄 Update Everything Now.</p>`
+      : `<table>${e.comparisons.map(c => `<tr>
+          <td class="tagcell">${esc(c.column)}</td>
+          <td>calendar says <b>${c.calendar ? 'yes' : 'no'}</b>,
+              sheet says <b>${c.sheet ? 'yes' : 'no'}</b>
+              ${c.agrees ? '<span class="ok">✔ agree</span>'
+                : `<span class="err">✘ DISAGREE — the next sync will make the sheet say
+                   "${c.calendar ? 'yes' : 'no'}", because the calendar is the source of truth.
+                   To keep the sheet's answer, tick the box again and use
+                   "Push Dashboard Ticks to the Calendar".</span>`}</td></tr>`).join('')}
+        <tr><td class="tagcell">Slot_Minutes</td><td>${esc(e.sheetRow.slotMinutes || '(blank)')}</td></tr>
+        <tr><td class="tagcell">Max_Capacity</td><td>${esc(e.sheetRow.maxCapacity || '(blank)')}</td></tr>
+        <tr><td class="tagcell">Form_ID</td><td>${esc(e.sheetRow.formId || '(none)')}</td></tr></table>`;
+
+    return `<div class="event">
+      <h4>${esc(e.title)}</h4>
+      <p class="detail">${esc(e.dateLabel)}, ${esc(e.timeLabel)} · ${esc(e.location)}
+        · reads as the program "<b>${esc(e.cleanTitle)}</b>"</p>
+      ${tentative}${legacy}
+      <div class="sub"><b>Description, exactly as the calendar returns it</b>
+        <pre>${esc(e.description) || '<i>(empty)</i>'}</pre></div>
+      <div class="sub"><b>Tags this script reads</b>${tags}</div>
+      ${ignored}
+      <div class="sub"><b>What the dashboard says about this session</b>${sheet}</div>
+    </div>`;
+  });
+
+  return head.concat(blocks).join('\n');
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildEventTagInspectorHtml() {
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  h4 { margin: 0 0 2px 0; font-size: 14px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.45; }
+  .detail { color: #666; line-height: 1.4; margin: 2px 0; }
+  .none { color: #C5221F; margin: 4px 0; }
+  input[type=text] { font-size: 13px; padding: 6px; width: 320px; }
+  input.date { width: 130px; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 7px 14px;
+           font-size: 13px; cursor: pointer; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  .event { border: 1px solid #ccc; border-radius: 4px; padding: 10px; margin: 12px 0; }
+  .sub { margin-top: 10px; }
+  pre { background: #f6f6f6; border: 1px solid #eee; border-radius: 3px; padding: 8px;
+        white-space: pre-wrap; word-break: break-word; margin: 4px 0 0 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  td { border-bottom: 1px solid #f0f0f0; padding: 4px 6px; vertical-align: top; line-height: 1.4; }
+  td.tagcell { width: 190px; font-weight: bold; color: #1155CC; white-space: nowrap; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+  #out { margin-top: 8px; }
+</style>
+<h3>What does this script read in a calendar event?</h3>
+<p class="hint">
+  Type part of a program's name as it appears on the calendar. This reads its events with the same
+  code the sync uses and shows every bracket in the description, which ones became settings, which
+  were left as notes and why — then compares that with what the dashboard currently shows for the
+  same session. <b>It changes nothing.</b>
+</p>
+<div>
+  <input type="text" id="q" placeholder="e.g. Low-Cost Wills" onkeydown="if(event.keyCode===13)go()">
+  <input type="text" id="d" class="date" placeholder="yyyy-mm-dd (optional)">
+  <button id="btn" onclick="go()">Read the tags</button>
+</div>
+<div id="out"></div>
+<script>
+  function go() {
+    var q = document.getElementById('q').value;
+    if (!q.trim()) { document.getElementById('out').innerHTML = '<p class="err">Type part of a name.</p>'; return; }
+    document.getElementById('btn').disabled = true;
+    document.getElementById('out').innerHTML = '<p class="hint">Reading the calendar\\u2026</p>';
+    google.script.run
+      .withSuccessHandler(function (html) {
+        document.getElementById('btn').disabled = false;
+        document.getElementById('out').innerHTML = html;
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('btn').disabled = false;
+        document.getElementById('out').innerHTML = '<p class="err">Failed: ' + err.message + '</p>';
+      })
+      .inspectEventTagsFromDialog(q, document.getElementById('d').value);
+  }
+  document.getElementById('q').focus();
+</script>`;
+}
+
 /** Public entry point: acquires a script lock so overlapping executions can't race each other. */
 function syncCalendars() {
   // Before the bootstrap check, which reads a Script Property, and before
@@ -11323,7 +11798,8 @@ function syncCalendarsInternal() {
 function importCalendarGroups(registrySheet, options) {
   options = options || {};
   const { start, end } = computeSyncDateRange();
-  log(`Calendar import window: ${start} -> ${end}`);
+  log(`Calendar import window: ${formatDateLabel(start)} – ${formatDateLabel(end)}, across ` +
+    `${Object.keys(CALENDAR_MAP).length} calendar(s): ${Object.keys(CALENDAR_MAP).map(id => CALENDAR_MAP[id]).join(', ')}.`);
 
   // FIRST, before a single event is read: deliver any checkbox tick that has
   // not reached the calendar yet (see PENDING_FLAG_SHEET_NAME). This run is
@@ -11361,6 +11837,16 @@ function importCalendarGroups(registrySheet, options) {
   }
 
   const work = collectCalendarWork(groups, existingState, renamedGroupKeys);
+
+  // WHAT THIS RUN THINKS IS ON THE CALENDAR, before it acts on any of it.
+  //
+  // Everything after this point is decided from `groups` — which forms exist,
+  // which rows are written, which checkboxes are ticked and which are cleared —
+  // and until this line the log said nothing at all about what was in it. A
+  // whole class of bug (a tag read from a description and then dropped on the
+  // way to the group; a tag typed into a bracket that reads as prose; a program
+  // split across months) is invisible in its effects and obvious here.
+  logCalendarGroupInventory(groups, work);
 
   // Before the per-group loop, and independently of it: a group whose dates
   // are all already on the sheet is skipped below as "up to date", which is
@@ -11402,7 +11888,7 @@ function importCalendarGroups(registrySheet, options) {
       // One bad group must not cost the whole run — especially mid-bootstrap,
       // where everything after it would be stranded too.
       summary.groupsFailed++;
-      log(`⚠️ Could not import "${item.group.groupKey}" (${err}) — continuing with the rest.`);
+      log(`⚠️ Could not import ${describeGroup(item.group)}: ${err} — continuing with the rest.`);
       noteForAdmin('Programs that could not be imported',
         `${item.group.cleanTitle} (${describeLocations(item.group.locations)}) — ${err}`);
     }
@@ -11421,6 +11907,55 @@ function importCalendarGroups(registrySheet, options) {
   // the SAME sync that restores its form, rather than on the one after.
   updateRegistrationLinkCells(registrySheet, work.allGroups || [], buildFormIdByProgram(work.allGroups || []));
   return summary;
+}
+
+/**
+ * The one-per-run census of what the calendar was read as.
+ *
+ * TAGGED PROGRAMS ARE NAMED INDIVIDUALLY; untagged ones are counted. That is
+ * the ratio the log needs: an ordinary monthly program with no tags on it is
+ * the overwhelming majority and says nothing when it is working, while the
+ * tagged ones are every feature that has ever been reported as "not sticking".
+ * Naming a hundred untagged programs to find the two that matter is why nobody
+ * read the log the last time this went wrong.
+ */
+function logCalendarGroupInventory(groups, work) {
+  if (!groups || groups.length === 0) {
+    log('Read 0 program group(s) from the calendar — nothing in the window has a usable title.');
+    return;
+  }
+
+  const tagged = groups.filter(g => g.isClub || g.noRegistration || g.isAssistance || g.isShared);
+  const programs = dedupePreservingOrder(groups.map(g => `${g.scope}::${g.cleanTitle}`)).length;
+  const dates = groups.reduce((n, g) => n + (g.sessions ? g.sessions.length : 0), 0);
+
+  log(`Read ${groups.length} group(s) from the calendar — ${programs} program(s), ${dates} date(s). ` +
+    `${work.length} group(s) have work to do this run; ${groups.length - work.length} are already up to date.`);
+
+  const byTag = {};
+  const count = (label, g) => { (byTag[label] = byTag[label] || []).push(g); };
+  groups.forEach(g => {
+    if (g.isAssistance) count(ASSISTANCE_TAG, g);
+    if (g.isClub) count(CLUB_TAG, g);
+    if (g.noRegistration) count(NO_REGISTRATION_TAG, g);
+    if (g.isShared) count(SHARED_LOCATION_TAG, g);
+  });
+
+  if (tagged.length === 0) {
+    log(`No program in the window carries [${ASSISTANCE_TAG}], [${CLUB_TAG}], ` +
+      `[${NO_REGISTRATION_TAG}] or [${SHARED_LOCATION_TAG}]. If you expected one to, its bracket is not ` +
+      `being read — check it with 🔧 Admin ▸ Read an Event's Tags…`);
+    return;
+  }
+
+  Object.keys(byTag).forEach(tag => {
+    const names = dedupePreservingOrder(byTag[tag].map(g => g.cleanTitle));
+    log(`[${tag}] — ${names.length} program(s): ${names.join(', ')}`);
+  });
+  // And then the full line for each, because the tags are only half of it: the
+  // slot length and the span are what an appointment program is actually made
+  // of, and a wrong one of those looks identical to a missing tag on the sheet.
+  tagged.forEach(g => log(`  ${describeGroup(g)}`));
 }
 
 /** Human-readable one-liner for a toast/log line. */
@@ -11472,12 +12007,27 @@ function buildGroupsForWindow(eventsByCalendar) {
           tentativeTitles.add(parsed.cleanTitle);
           return;
         }
-        const settings = resolveEventSettings(ev, parsed);
-        parsed.capacity = settings.capacity;
-        parsed.isFixed = settings.isFixed;
-        parsed.isShared = settings.isShared;
-        parsed.isClub = settings.isClub;
-        parsed.noRegistration = settings.noRegistration;
+        // EVERY resolved setting, copied by NAME OF THE SETTING rather than
+        // one hand-written line per field. This loop used to list five of
+        // them, and resolveEventSettings() answers eight: isAssistance,
+        // slotMinutes and maxPerMonth were resolved correctly from the
+        // description on every single sync and then dropped on the floor here.
+        //
+        // That one omission is the whole of "[Personalized Assistance] does
+        // not stick". buildEventGroups() reads `parsed.isAssistance`, got
+        // undefined, and built every group with isAssistance false — so
+        // reconcileProgramFlagColumns() went on to write `false` into the
+        // Personalized_Assistance checkbox of every session row of every
+        // program, every hour, no matter what the calendar said. The tick
+        // reached the calendar exactly as designed and the sync that read it
+        // back could not see it.
+        //
+        // Copying the whole object is what stops the fourth flag from
+        // arriving in the same way. `parsed` also carries title-level facts
+        // (cleanTitle, isTentative, the legacy* fallbacks resolveEventSettings
+        // has already folded in), so the settings are assigned OVER it rather
+        // than replacing it.
+        assignEventSettings(parsed, resolveEventSettings(ev, parsed));
         parsedSessions.push({ event: ev, parsed, calendarId, locationName });
       });
 
@@ -11526,13 +12076,13 @@ function collectCalendarWork(groups, existingState, renamedGroupKeys) {
     const wasRenamed = renamed.has(group.groupKey);
 
     if (newSessions.length === 0 && !needsUnblocking && !wasRenamed) {
-      log(`No new dates for "${group.groupKey}" — already up to date, skipping.`);
+      log(`Up to date: ${describeGroup(group)} — every date already on the session table, nothing to do.`);
       return;
     }
     if (newSessions.length === 0) {
-      log(`No new dates for "${group.groupKey}", but it ` +
-        (wasRenamed ? 'was just renamed — refreshing its form so the form is renamed too.'
-          : `is coming back off [${NO_REGISTRATION_TAG}] — restoring its form and links.`));
+      log(`No new dates for ${describeGroup(group)}, but processing it anyway: it ` +
+        (wasRenamed ? 'was just renamed on the calendar — its form has to be renamed to match.'
+          : `is coming back off [${NO_REGISTRATION_TAG}] — its form and its calendar links have to be restored.`));
     }
     work.push({
       group,
@@ -12146,6 +12696,18 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
   if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
 
   let changed = 0;
+  // Per PROGRAM and per DIRECTION, so the log can say what happened rather
+  // than how many cells it took. "37 flag cell(s) updated" is the line this
+  // used to write, and it is the same line whether the sync has just delivered
+  // somebody's tick to twelve dates or just wiped [Personalized Assistance]
+  // off every program in the building. Those are opposite events.
+  const ticked = {};
+  const unticked = {};
+  const note = (bucket, column, title) => {
+    const list = bucket[column] = bucket[column] || [];
+    if (list.indexOf(title) === -1) list.push(title);
+  };
+
   PROGRAM_FLAG_COLUMNS.forEach(flag => {
     if (!sheetMap[flag.column]) return; // a workbook still on the old layout
 
@@ -12185,6 +12747,13 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
         // MEANING — but not in TYPE, hence the second test: it is rewritten as
         // a real boolean so the checkbox renders, once, and never again.
         if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
+        // Only a real change of ANSWER is worth reporting; rewriting the word
+        // "Club" as a boolean is the same answer in a different type, and
+        // saying so once per program per sync would drown the lines that
+        // matter.
+        if (isFlagColumnValue(current[r][0], flag.regex) !== want) {
+          note(want ? ticked : unticked, flag.column, String(titles[r][0] || '').trim());
+        }
         current[r] = [want];
         touched = true;
         changed++;
@@ -12193,7 +12762,24 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
     });
   });
 
-  if (changed > 0) log(`reconcileProgramFlagColumns: updated ${changed} flag cell(s) on the session table.`);
+  Object.keys(ticked).forEach(column => log(
+    `Ticked ${column} on the session table for: ${ticked[column].join(', ')} — the calendar says so.`));
+  // UNTICKING IS THE LOUD ONE. It is how this feature fails, and it is
+  // indistinguishable from "nobody ever ticked it" by the time anyone looks.
+  // The line says which programs, and what would put the tick back, because
+  // the sync is not wrong to do this — the calendar IS the source of truth,
+  // and the interesting question is always why the calendar stopped saying it.
+  Object.keys(unticked).forEach(column => {
+    const flag = getProgramFlagByColumn(column);
+    log(`⚠️ Cleared ${column} on the session table for: ${unticked[column].join(', ')}. ` +
+      `No calendar event of those programs reads as [${flag ? flag.tag : column}] any more, and the ` +
+      `calendar is the source of truth. If the tag IS typed on the event, this script is not reading ` +
+      `it — check the exact bracket with 🔧 Admin ▸ Read an Event's Tags…. To put it back, tick the ` +
+      `box and let it reach the calendar (Programs & Forms ▸ Push Dashboard Ticks to the Calendar).`);
+  });
+  if (changed > 0 && Object.keys(ticked).length === 0 && Object.keys(unticked).length === 0) {
+    log(`Rewrote ${changed} flag cell(s) as real checkboxes — same answers, tidier types.`);
+  }
   return changed;
 }
 
@@ -12253,7 +12839,15 @@ function reconcileAssistanceSessionSettings(registrySheet, groups) {
 
   const changed = applyAssistanceSettingsToRows(registrySheet, expected);
   if (changed > 0) {
-    log(`reconcileAssistanceSessionSettings: updated appointment length/capacity on ${changed} session row(s).`);
+    // Named, and with the arithmetic shown: "N rows updated" cannot tell a
+    // program that has just BECOME appointment-based from one that has just
+    // stopped being one, and those are the two things this pass does.
+    const on = groups.filter(g => g.isAssistance);
+    const off = groups.filter(g => !g.isAssistance);
+    log(`Appointment settings written to ${changed} session row(s).` +
+      (on.length > 0 ? ` Booked by appointment: ${dedupePreservingOrder(on.map(g =>
+        `${g.cleanTitle} (${resolveSlotMinutes(g)}-min slots)`)).join(', ')}.` : '') +
+      (off.length > 0 && on.length > 0 ? ` Everything else on this run is booked by date.` : ''));
   }
   return changed;
 }
@@ -12464,7 +13058,9 @@ function applyNoRegistrationEffects(registrySheet, groups) {
           reopenedNow++;
         }
       } catch (err) {
-        log(`ℹ️ "${group.cleanTitle}" no longer says [${NO_REGISTRATION_TAG}], but its form ${formId} could not be re-opened (${err}).`);
+        log(`ℹ️ "${group.cleanTitle}" no longer says [${NO_REGISTRATION_TAG}], so its form should be taking ` +
+          `sign-ups again — but ${describeFormLink(formId)} could not be re-opened (${err}). Anyone ` +
+          `following its link still sees "no longer accepting responses".`);
       }
       delete closedIds[formId];
     }
@@ -12757,7 +13353,9 @@ function reconcileRegistrationHorizonForms(registrySheet) {
         }
         closedIds[formId] = state.title;
       } catch (err) {
-        log(`ℹ️ Form ${formId} ("${state.title}") is entirely past the registration horizon but could not be closed (${err}).`);
+        log(`ℹ️ "${state.title}" is entirely past the registration horizon, so its form should have ` +
+          `stopped taking sign-ups — but ${describeFormLink(formId)} could not be closed (${err}). It ` +
+          `is still open, and can still take a registration for a session that has passed.`);
       }
       return;
     }
@@ -12774,7 +13372,9 @@ function reconcileRegistrationHorizonForms(registrySheet) {
       }
       delete closedIds[formId];
     } catch (err) {
-      log(`ℹ️ Form ${formId} ("${state.title}") is inside the registration horizon again but could not be re-opened (${err}).`);
+      log(`ℹ️ "${state.title}" is inside the registration horizon again, so its form should be taking ` +
+        `sign-ups — but ${describeFormLink(formId)} could not be re-opened (${err}). Anyone following ` +
+        `its link still sees "no longer accepting responses".`);
     }
   });
 
@@ -12952,7 +13552,8 @@ function processCalendarGroup(registrySheet, item, existingState) {
     writeEventRegistryRows(registrySheet, noFormGroup, null);
     newSessions.forEach(s => existingState.eventIds.add(
       computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()))));
-    log(`"${group.groupKey}" is tagged [${NO_REGISTRATION_TAG}] — wrote ${newSessions.length} date(s) with no form.`);
+    log(`No form wanted: ${describeGroup(group)} — wrote ${newSessions.length} new date(s) to the session ` +
+      `table and built no registration form, because the calendar says [${NO_REGISTRATION_TAG}].`);
     return { formCreated: false, noForm: true, eventsAdded: newSessions.length };
   }
 
@@ -12962,7 +13563,8 @@ function processCalendarGroup(registrySheet, item, existingState) {
     // same group earlier in the run — see recoverFormIdFromGroupEvents().
     existingFormId = recoverFormIdFromGroupEvents(group);
     if (existingFormId) {
-      log(`Recovered existing form ${existingFormId} for "${group.groupKey}" from a calendar event description.`);
+      log(`Recovered form for ${describeGroup(group)} — the registry had lost it, but a calendar event ` +
+        `description still names ${describeFormLink(existingFormId)}. Reusing it, so nobody's link breaks.`);
     }
   }
 
@@ -12971,17 +13573,21 @@ function processCalendarGroup(registrySheet, item, existingState) {
   if (existingFormId) {
     try {
       formInfo = refreshFormForNewDates(existingFormId, group, configInfo);
-      log(`Reused existing form for "${group.groupKey}"; added ${newSessions.length} new date(s).`);
+      log(`Reused form for ${describeGroup(group)} — added ${newSessions.length} new date(s) to ` +
+        `${describeFormLink(formInfo.formId)}.`);
     } catch (err) {
-      log(`⚠️ Could not reopen existing form ${existingFormId} for "${group.groupKey}" (${err}) — creating a replacement form.`);
+      log(`⚠️ ${describeGroup(group)} points at ${describeFormLink(existingFormId)}, which could not be ` +
+        `opened (${err}). Building a REPLACEMENT form — links already handed out for the old one will ` +
+        `stop working, so check the old form is really gone.`);
       formInfo = createRegistrationForm(group, configInfo);
       formCreated = true;
     }
   } else {
     formInfo = createRegistrationForm(group, configInfo);
     formCreated = true;
-    log(`Created new form for "${group.groupKey}" with ${newSessions.length} date(s)` +
-      (group.isShared ? ` across ${describeLocations(group.locations)}` : '') + '.');
+    log(`Created form for ${describeGroup(group)} — ${describeFormLink(formInfo.formId)}, ` +
+      `${newSessions.length} date(s)` +
+      (group.isShared ? `, pooled across ${describeLocations(group.locations)}` : '') + '.');
   }
   savePersistentFormRegistryEntry(group.groupKey, formInfo.formId);
   // Flushed HERE, not at the end of the run: between creating a form and
@@ -13083,7 +13689,7 @@ function buildEventGroups(parsedSessions) {
     groups[key].sessions.push({ event, calendarId, locationName });
   });
 
-  return Object.values(groups).map(g => {
+  return unifyProgramFlagsAcrossGroups(Object.values(groups)).map(g => {
     g.sessions.sort((a, b) => a.event.getStartTime() - b.event.getStartTime());
     g.events = g.sessions.map(s => s.event);
     g.locations = distinctLocations(g.sessions.map(s => s.locationName));
@@ -13096,6 +13702,167 @@ function buildEventGroups(parsedSessions) {
     return g;
   });
 }
+
+/**
+ * A FLAG IS A PROPERTY OF A PROGRAM, NOT OF ONE MONTH OF IT — the rule
+ * buildEventGroups() states three times over and could only keep inside one
+ * group.
+ *
+ * A Regular program is grouped per calendar MONTH (see the `span` half of the
+ * group key), so "Low-Cost Wills" running fortnightly through the spring is
+ * five groups, not one. The "tagging one event says it about the program" rule
+ * above therefore reached only the events of the same month, and every
+ * consumer downstream keys the answer by CALENDAR + TITLE with no month in it:
+ *
+ *   - reconcileProgramFlagColumns() builds
+ *     `expected["<calendarId>|<title>"] = group.isClub`, so five month groups
+ *     write to one key and whichever is enumerated LAST silently decides the
+ *     program. One untagged month unticked the other four.
+ *   - reconcileAssistanceSessionSettings() does the same for Slot_Minutes and
+ *     Max_Capacity.
+ *   - the appointment forms are shaped from whichever group carried the tag.
+ *
+ * So the flags are ORed across every group of one program before anything sees
+ * them: tagging September's event marks the program, exactly as tagging one
+ * event of September's group already marked September. Nothing is ever turned
+ * OFF here — a month with no tag on it is an omission, which is the same
+ * reading the per-group rule takes.
+ *
+ * WHAT COUNTS AS ONE PROGRAM: `scope::cleanTitle` — the group key with the
+ * month taken off. `scope` is the calendar for an ordinary program and
+ * SHARED_LOCATION_SCOPE for one tagged [All Locations], which is exactly the
+ * boundary the rest of the system draws: two locations running an unlinked
+ * "Chair Yoga" are two programs with two forms (spreadFlagToSiblingRows()
+ * refuses to cross that line for the same reason), while a linked program is
+ * one program that happens to meet in two rooms.
+ *
+ * The numbers that only mean anything alongside [Personalized Assistance]
+ * travel with it: a slot length typed on the September event is a statement
+ * about how long an appointment with Heather takes, not about September.
+ * Capacity deliberately does NOT — "[Cap: 12]" on one month's event is a fact
+ * about the room that month, and a program's months genuinely differ.
+ *
+ * Returns the same array, mutated in place.
+ */
+function unifyProgramFlagsAcrossGroups(groups) {
+  const byProgram = {};
+  groups.forEach(g => {
+    const key = `${g.scope}::${g.cleanTitle}`;
+    if (!byProgram[key]) {
+      byProgram[key] = { isClub: false, noRegistration: false, isAssistance: false,
+        slotMinutes: 0, maxPerMonth: 0, groups: [] };
+    }
+    const p = byProgram[key];
+    p.groups.push(g);
+    if (g.isClub) p.isClub = true;
+    if (g.noRegistration) p.noRegistration = true;
+    if (g.isAssistance) p.isAssistance = true;
+    if (!p.slotMinutes && g.slotMinutes) p.slotMinutes = g.slotMinutes;
+    if (!p.maxPerMonth && g.maxPerMonth) p.maxPerMonth = g.maxPerMonth;
+  });
+
+  Object.keys(byProgram).forEach(key => {
+    const p = byProgram[key];
+    if (p.groups.length < 2) return; // nothing to spread; keep the log quiet
+    const spread = [];
+    p.groups.forEach(g => {
+      if (p.isClub && !g.isClub) { g.isClub = true; spread.push(CLUB_TAG); }
+      if (p.noRegistration && !g.noRegistration) { g.noRegistration = true; spread.push(NO_REGISTRATION_TAG); }
+      if (p.isAssistance && !g.isAssistance) { g.isAssistance = true; spread.push(ASSISTANCE_TAG); }
+      if (p.slotMinutes && !g.slotMinutes) g.slotMinutes = p.slotMinutes;
+      if (p.maxPerMonth && !g.maxPerMonth) g.maxPerMonth = p.maxPerMonth;
+    });
+    if (spread.length > 0) {
+      const title = p.groups[0].cleanTitle;
+      log(`ℹ️ "${title}": ${dedupePreservingOrder(spread).map(t => `[${t}]`).join(' ')} is tagged on some of its ` +
+        `calendar events but not all of them — applying it to all ${p.groups.length} month(s) of the program. ` +
+        `Put the tag on every event (or tick the box on the dashboard, which writes it to all of them) to ` +
+        `silence this.`);
+    }
+  });
+  return groups;
+}
+
+/**
+ * ONE PROGRAM GROUP, IN WORDS — "Low-Cost Wills (Narberth · September 2026)
+ * [Personalized Assistance, Slots: 20] — 3 date(s)".
+ *
+ * WHY THIS EXISTS. The calendar sync identified programs in its log by GROUP
+ * KEY, which is `scope::cleanTitle::span` — and `scope` is a calendar ID:
+ *
+ *   Reused existing form for "c7706e8a3c057e02a4adca78268262aeb7116b9717b93
+ *   25926bf746728566faa@group.calendar.google.com::Low-Cost Wills::September 2026"
+ *
+ * Everything a person wants is in there and none of it is legible: which
+ * building, which month, and — the question the log is actually opened to
+ * answer — what this run thinks the program IS. A line that names the program,
+ * the place, the span and the tags says in one glance whether the sync agrees
+ * with the calendar, which is the whole diagnostic.
+ *
+ * The group key is still what the code keys on and is still logged where the
+ * key itself is the subject (a form registry entry, a repoint). It is not what
+ * a log line about a PROGRAM should say.
+ */
+function describeGroup(group) {
+  if (!group) return '(unknown program)';
+  const where = describeLocations(group.locations || []) ||
+    (group.calendarId ? CALENDAR_MAP[group.calendarId] || group.calendarId : '');
+  const when = group.isFixed
+    ? 'whole series' + (group.seriesWeeks ? `, ~${group.seriesWeeks} week(s)` : '')
+    : (group.monthLabel || '');
+  const scope = [where, when].filter(Boolean).join(' · ');
+  const tags = describeGroupTags(group);
+  const dates = group.sessions ? `${group.sessions.length} date(s)` : '';
+  return `"${group.cleanTitle}"${scope ? ` (${scope})` : ''}${tags ? ` ${tags}` : ''}` +
+    `${dates ? ` — ${dates}` : ''}`;
+}
+
+/**
+ * The tags a group resolved to, as they would be written in a description:
+ * "[Club, Grouped, Cap: 12]". Empty string when a program is an ordinary
+ * untagged one, so describeGroup() does not print "[]" for most of them.
+ *
+ * This is the half of a log line that turns "the sync ran" into "the sync ran
+ * and read this program as an appointment program" — the fact that was
+ * unavailable anywhere, at any log level, while [Personalized Assistance] was
+ * being silently dropped.
+ */
+function describeGroupTags(group) {
+  const tags = [];
+  if (group.isShared) tags.push(SHARED_LOCATION_TAG);
+  if (group.noRegistration) tags.push(NO_REGISTRATION_TAG);
+  if (group.isClub) tags.push(CLUB_TAG);
+  if (group.isAssistance) {
+    tags.push(ASSISTANCE_TAG);
+    tags.push(`Slots: ${resolveSlotMinutes(group)}`);
+    if (group.maxPerMonth > 0) tags.push(`Max Per Month: ${group.maxPerMonth}`);
+  }
+  tags.push(group.isFixed ? EVENT_TYPES.GROUPED : EVENT_TYPES.REGULAR);
+  if (group.capacity > 0) tags.push(`Cap: ${group.capacity}`);
+  return `[${tags.join(', ')}]`;
+}
+
+/**
+ * A FORM, AS SOMETHING SOMEBODY CAN OPEN — its edit URL, not its ID.
+ *
+ * A bare form ID in a log line is a dead end: to act on it a person has to
+ * know that a form ID is pasted into docs.google.com/forms/d/<id>/edit, and
+ * most of the people reading this log do not. The ID is still right there in
+ * the middle of the URL for anyone matching it against the Form_ID column.
+ *
+ * `title` is optional and is worth passing wherever the caller already knows
+ * it — this deliberately does NOT open the form to look it up, because these
+ * lines are written in loops over every form on the workbook and a round trip
+ * apiece to decorate a log message is not a trade worth making.
+ */
+function describeFormLink(formId, title) {
+  const id = String(formId || '').trim();
+  if (!id) return 'no form';
+  return `${title ? `"${title}" ` : ''}(${FORM_EDIT_URL_PREFIX}${id}/edit)`;
+}
+
+/** Where a form ID becomes something clickable. */
+const FORM_EDIT_URL_PREFIX = 'https://docs.google.com/forms/d/';
 
 /** The [{date, location, title}] sessions of a group, in the shape the form layer wants. */
 function sessionsOfGroup(group) {
@@ -28983,6 +29750,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   // directly and reshapes every one of them whatever any hash says.
   const fingerprints = getFormLabelFingerprints();
   let skipped = 0;
+  const reshaped = []; // program names, for a log line worth reading
 
   assistanceFormIds.forEach(formId => {
     const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
@@ -28997,20 +29765,40 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
 
     try {
       const form = FormApp.openById(formId);
-      touched += syncAssistanceQuestionsOnForm(form, context, choices);
+      const written = syncAssistanceQuestionsOnForm(form, context, choices);
+      touched += written;
+      if (written > 0) {
+        const free = choices.filter(c => c !== ASSISTANCE_NO_TIME_CHOICE).length;
+        reshaped.push(`${context.programTitle || describeLocations(context.locations) || formId} ` +
+          `(${free} free time(s))`);
+      }
       // Recorded only after the write succeeded: a form that could not be
       // opened must be tried again next hour, not marked as done.
       fingerprints[key] = fingerprint;
       __formLabelFingerprintDirty = true;
     } catch (err) {
-      log(`Could not refresh the appointment times on form ${formId} (${err}).`);
+      const name = context.programTitle || describeLocations(context.locations) || formId;
+      log(`⚠️ "${name}": its appointment times could not be refreshed on ` +
+        `${describeFormLink(formId)} (${err}). The form is still offering whatever it offered before, ` +
+        `which may include a slot somebody has already taken.`);
       noteForAdmin('Appointment forms not updated',
-        `${formId} — its list of free times could not be refreshed: ${err}`);
+        `"${name}" — the list of free appointment times on ${describeFormLink(formId)} could not be ` +
+        `refreshed: ${err}. Until it is, the form may offer a time that is already booked.`);
     }
   });
 
-  if (touched > 0) log(`Reshaped / refreshed the appointment times on ${touched} form(s).`);
-  if (skipped > 0) log(`${skipped} appointment form(s) already offered exactly these times — not opened.`);
+  if (touched > 0) {
+    // reshaped.length is FORMS; `touched` is the number of question edits
+    // those forms needed. The old line reported the edit count as a form count
+    // ("refreshed 14 form(s)" for four forms), which made a quiet run look
+    // like a storm.
+    log(`Refreshed the appointment times on ${reshaped.length} form(s) (${touched} question edit(s)): ` +
+      `${dedupePreservingOrder(reshaped).join(', ')}.`);
+  }
+  if (skipped > 0) {
+    log(`${skipped} appointment form(s) already offered exactly these times — not opened. ` +
+      `(Use Programs & Forms ▸ Rebuild Appointment Forms + Report… to reshape them anyway.)`);
+  }
   return touched;
 }
 
@@ -29112,6 +29900,57 @@ function rebuildAssistanceFormsNow() {
     }
   }
 
+  // WHAT THE CALENDAR SAYS — the half of this report that was missing, and the
+  // only half that can answer the question people actually arrive with.
+  //
+  // Everything above reads the SHEET. When the ticks are all gone, a report
+  // built from the sheet says "nothing is marked", which is true, useless, and
+  // exactly what somebody already knew before they clicked. The calendar is
+  // the source of truth for these ticks — the sync reads it and writes them —
+  // so the useful comparison is calendar against sheet, and the two ways they
+  // can disagree are two different problems with two different fixes:
+  //
+  //   calendar says yes, sheet says no  -> the sync has not run since the tag
+  //                                        went on. Run 🔄 Update Everything Now.
+  //   calendar says no, sheet said yes  -> the tag never reached the calendar,
+  //                                        or is typed in a bracket this script
+  //                                        reads as a note. The next sync will
+  //                                        clear the tick again, whatever you do
+  //                                        to the sheet.
+  lines.push('');
+  lines.push('WHAT THE CALENDAR SAYS (the source of truth for these ticks)');
+  const onCalendar = summarizeAssistanceOnCalendar();
+  if (onCalendar.error) {
+    lines.push(`  ⚠️ The calendar could not be read: ${onCalendar.error}`);
+  } else {
+    onCalendar.unreadable.forEach(name => lines.push(`  ⚠️ ${name} could not be read.`));
+    if (onCalendar.programs.length === 0) {
+      lines.push('  (nothing — no calendar event in the sync window reads as [Personalized Assistance])');
+      lines.push(`  Window searched: ${onCalendar.windowLabel}.`);
+      lines.push('  If the tag IS typed on an event, this script is not reading the bracket it is in —');
+      lines.push('  a bracket only sets something when the WHOLE bracket is tags, so');
+      lines.push('  "[Call for an appointment]" is a note and sets nothing. Check the exact wording with');
+      lines.push('  🔧 Admin ▸ Read an Event\'s Tags…');
+    }
+    onCalendar.programs.forEach(p => {
+      lines.push(`  ${p.tagged === p.total ? '✅' : '⚠️'} ${p.title} (${p.location}) — tagged on ` +
+        `${p.tagged} of ${p.total} calendar event(s)${p.slotMinutes ? `, ${p.slotMinutes}-minute slots` : ''}`);
+      const sheetEntry = byProgram[`${p.title}\u0000${p.location}`];
+      if (sheetEntry && sheetEntry.marked === 0) {
+        lines.push('     ⚠️ …but NO session of it is ticked on the dashboard. The sync has not read this ' +
+          'tag yet — run 🔄 Update Everything Now.');
+      }
+    });
+    programs.filter(p => p.marked > 0).forEach(p => {
+      const still = onCalendar.programs.filter(c => c.title === p.title && c.location === p.location);
+      if (still.length === 0) {
+        lines.push(`  ⚠️ ${p.title} (${p.location}) is ticked on the dashboard but NO calendar event of ` +
+          `it reads as [${ASSISTANCE_TAG}]. The next sync will clear those ticks. Use ` +
+          `"Push Dashboard Ticks to the Calendar" to write the tag, then re-run this.`);
+      }
+    });
+  }
+
   // THE RESHAPE ITSELF, form by form.
   const byForm = groupRegistryRowsByForm(rows, map);
   const assistanceFormIds = Object.keys(byForm).filter(formId =>
@@ -29163,6 +30002,63 @@ function rebuildAssistanceFormsNow() {
 
 /** How many ordinary programs the report above lists before summarizing the rest. */
 const ASSISTANCE_REPORT_MAX_UNMARKED = 12;
+
+/**
+ * WHICH PROGRAMS THE CALENDAR ITSELF SAYS ARE APPOINTMENT PROGRAMS, read with
+ * the sync's own parser and nothing else.
+ *
+ * Deliberately independent of the session table and of buildEventGroups(): the
+ * point of the answer is to be compared with those, and a summary derived from
+ * them could not disagree with them. It walks the events, resolves each one's
+ * settings exactly as buildGroupsForWindow() does, and counts.
+ *
+ * Returns { programs: [{ title, location, tagged, total, slotMinutes }],
+ * unreadable: [locationName], windowLabel, error }.
+ */
+function summarizeAssistanceOnCalendar() {
+  let start, end, eventsByCalendar;
+  try {
+    const range = computeSyncDateRange();
+    start = range.start;
+    end = range.end;
+    eventsByCalendar = getCalendarEventsForWindow(start, end);
+  } catch (err) {
+    return { programs: [], unreadable: [], windowLabel: '', error: String(err) };
+  }
+
+  const byProgram = {};
+  const unreadable = [];
+  Object.keys(CALENDAR_MAP).forEach(calendarId => {
+    const locationName = CALENDAR_MAP[calendarId];
+    const events = eventsByCalendar[calendarId];
+    if (!events) { unreadable.push(locationName); return; }
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed || parsed.isTentative) return;
+      const settings = resolveEventSettings(ev, parsed);
+      const key = `${parsed.cleanTitle}\u0000${locationName}`;
+      if (!byProgram[key]) {
+        byProgram[key] = { title: parsed.cleanTitle, location: locationName,
+          tagged: 0, total: 0, slotMinutes: 0 };
+      }
+      const entry = byProgram[key];
+      entry.total++;
+      if (!settings.isAssistance) return;
+      entry.tagged++;
+      if (!entry.slotMinutes) entry.slotMinutes = resolveSlotMinutes(settings);
+    });
+  });
+
+  return {
+    programs: Object.keys(byProgram).map(k => byProgram[k])
+      .filter(p => p.tagged > 0)
+      .sort((a, b) => a.title.localeCompare(b.title)),
+    unreadable,
+    windowLabel: `${formatDateLabel(start)} – ${formatDateLabel(end)}`,
+    error: ''
+  };
+}
 
 // ---------------------------------------------------------------------------
 // READING AN APPOINTMENT SUBMISSION

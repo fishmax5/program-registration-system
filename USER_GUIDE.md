@@ -2112,6 +2112,7 @@ Everything else is grouped by the job it belongs to.
 | **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **🩹 Rebuild Forms In Place (keeps links)…** | Rewrites every live form's questions from the current template, keeping each form's ID. **Every link already handed out goes on working** — see [Rebuild forms in place](#rebuild-forms-in-place) |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
+| **🏷️ Read an Event's Tags…** | Read-only. Type part of a program name and it reads that program's calendar events with the sync's own parser: every `[bracket]` in the description, which ones became settings, which were left as notes and **why**, and whether the dashboard agrees. The tool to reach for whenever a tag "isn't working" — see [Why a tag isn't sticking](#why-a-tag-isnt-sticking) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
 | **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` / `Personalized_Assistance` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
 | **Take Over Trigger Ownership** | Moves ownership to your account, if the recorded owner is gone. Warns you that it can't delete their triggers |
@@ -3251,6 +3252,43 @@ every render.
 ---
 
 ## Troubleshooting
+
+<a id="why-a-tag-isnt-sticking"></a>
+**A checkbox keeps clearing itself — `Personalized_Assistance`, `Club` or
+`No_Registration` untick themselves an hour after I tick them**
+
+The calendar is the source of truth for all three. You tick the box, the tick
+is written into the event's description as `[Personalized Assistance]`, and
+every sync reads the descriptions back and sets the boxes from them. So a box
+that clears itself is always the same sentence: **the sync did not read the tag
+in the description.** Either it never got there, or it is there in a form this
+script does not read.
+
+Press **🔧 Admin ▸ 🏷️ Read an Event's Tags…** and type part of the program
+name. It reads the events with the sync's own parser and shows you, per event:
+the description exactly as the calendar returns it, every `[bracket]` in it,
+which brackets became settings, which were left as notes **and why**, and what
+the dashboard currently says about the same session. Where the calendar and the
+sheet disagree it says so in those words, and which way round tells you which
+to fix:
+
+* **calendar says yes, sheet says no** — the sync hasn't run since the tag went
+  on. Press **🔄 Update Everything Now**.
+* **calendar says no, sheet said yes** — the tick never reached the calendar.
+  Tick the box again and press **📝 Programs & Forms ▸ Push Dashboard Ticks to
+  the Calendar**.
+* **the tag is plainly typed on the event, and the tool says the bracket was
+  left as a note** — that is the commonest one. A bracket sets something only
+  when the **whole bracket** is tags this script knows, so
+  `[Call the office for an appointment]` is somebody's note and sets nothing,
+  on purpose (otherwise `[Film Club selection: Casablanca]` would give the
+  program a club roster). Put the tag in a bracket of its own:
+  `[Personalized Assistance]` on its own line, and the note in plain text
+  beside it.
+
+The same answer, program by program rather than event by event, is at the
+bottom of **📝 Programs & Forms ▸ Rebuild Appointment Forms + Report…** under
+**WHAT THE CALENDAR SAYS**.
 
 **A new event didn't get a form**
 Check, in order: does the title start with `*` (tentative)? Is it an all-day
