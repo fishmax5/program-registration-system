@@ -2860,6 +2860,14 @@ starts again:
 2. **Every** registration link is removed — all copies, all formats: the
    current hyperlink, the older `Registration Link: … [Form ID: …]` line,
    flattened plain-text links, and orphaned "📝 Register for …" labels.
+   The line an earlier version wrote while links were hidden — "📝
+   Registration for … is available on our dashboard/website. [Form: …]" — comes
+   off too, marker and all. That sentence carries no URL, so nothing used to
+   recognize it: switching [🔗 Registration Link in Events](#-registration-link-in-events)
+   from **Hide link** back to **Show link** put the new link in above it and
+   left the event advertising registration twice, the second time pointing at a
+   form that had since been replaced.
+
    The "🚧 Registration Not Yet Open" notice comes off with them, in
    whatever shape Calendar handed it back — including the re-encoded
    `&#128679;&nbsp;Registration Not Yet Open` a hand-edited event comes back

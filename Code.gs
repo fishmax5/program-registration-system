@@ -13782,6 +13782,42 @@ const REGISTER_LABEL_STAMP = '(?:📝|&#0*128221;|&#x0*1f4dd;)';
 /** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
 const ORPHAN_REGISTER_LABEL_REGEX =
   new RegExp(`^${DESCRIPTION_HTML_SPACE}*${REGISTER_LABEL_STAMP}${DESCRIPTION_HTML_SPACE}*Register for .*$`, 'gim');
+
+/**
+ * THE LINE AN EARLIER SYSTEM WROTE WHILE THE LINK WAS HIDDEN.
+ *
+ *   📝 Registration for Chair Yoga is available on our dashboard/website. [Form: 1xUAo...]
+ *
+ * It is a registration line like any other — this system's stamp, this
+ * system's form ID — but it carries no URL, so none of the patterns above see
+ * it: not the anchor, not the "Registration Link: … [Form ID: …]" line, not a
+ * bare forms URL. It outlived every cleanup, and the day the link display was
+ * switched from "Hide link" back to "Show link" the new link went in ABOVE it,
+ * leaving the event advertising registration twice — a live link, and a
+ * sentence pointing at a form that had since been replaced.
+ *
+ * Matched by its "[Form: …]" marker, and separately by its wording, so a
+ * hand-edited copy that lost one of the two still comes off. Bounded to text
+ * with no tag or line break inside it (`[^<\\n]`) rather than to a whole line:
+ * an edited description arrives re-flowed into one long line of <div>s, and
+ * "the rest of the line" there is the rest of the description.
+ *
+ * The form ID in that sentence is deliberately NOT read back as this event's
+ * form — it names whatever form was current when the line was written, which
+ * is exactly what makes it stale. Form ownership comes from the session table.
+ */
+const LEGACY_HIDDEN_REGISTRATION_LINE_PATTERNS = [
+  // The whole sentence, ending at its [Form: …] marker.
+  new RegExp(`(?:${REGISTER_LABEL_STAMP}${DESCRIPTION_HTML_SPACE}*)?Registration for [^<\\n]*?` +
+    `\\[Form:${DESCRIPTION_HTML_SPACE}*[a-zA-Z0-9_-]+\\]`, 'gi'),
+  // The same sentence with the marker edited away — recognized by the wording,
+  // which no person types into a program description by hand.
+  new RegExp(`(?:${REGISTER_LABEL_STAMP}${DESCRIPTION_HTML_SPACE}*)?Registration for [^<\\n]*?` +
+    `is available on our dashboard\\/website\\.?`, 'gi')
+];
+/** A "[Form: …]" marker left on its own — debris from the line above, never a link in its own right. */
+const ORPHAN_FORM_MARKER_REGEX =
+  new RegExp(`\\[Form:${DESCRIPTION_HTML_SPACE}*[a-zA-Z0-9_-]+\\]`, 'gi');
 /**
  * The "🚧 Registration Not Yet Open" notice, in every shape it survives as.
  *
@@ -13837,9 +13873,16 @@ function stripAllRegistrationLines(description) {
   text = countAndClear(text, LEGACY_REGISTRATION_LINE_REGEX_GLOBAL);
   text = countAndClear(text, ANY_FORMS_ANCHOR_REGEX);
   text = countAndClear(text, BARE_FORMS_URL_REGEX);
-  // Labels are debris, not links — cleared, but never counted as a link found,
-  // or an event with a flattened anchor would report two.
+  // Counted as links: a "Registration for … [Form: …]" sentence is a
+  // registration line, and callers that only act when they found one (the
+  // "Hide link" sweep, the sync's already-correct fast path) must act on it.
+  LEGACY_HIDDEN_REGISTRATION_LINE_PATTERNS.forEach(pattern => {
+    text = countAndClear(text, pattern);
+  });
+  // Labels and markers are debris, not links — cleared, but never counted as a
+  // link found, or an event with a flattened anchor would report two.
   text = text.replace(ORPHAN_REGISTER_LABEL_REGEX, '');
+  text = text.replace(ORPHAN_FORM_MARKER_REGEX, '');
 
   // The horizon notice is this system's line too, and comes off with
   // everything else so the caller can write back whichever ONE line is right
@@ -14676,12 +14719,23 @@ function backInjectCalendarDescriptions(group, formInfo) {
     }
 
     const found = findRegistrationLineInDescription(existing);
+    const stripped = stripAllRegistrationLines(existing);
 
-    // Already current, in the current format, and already at the top — leave
-    // the event alone rather than burning a write (and a notification) on
-    // every sync.
+    // Already current, in the current format, already at the top — AND THE
+    // ONLY ONE. Leave the event alone rather than burning a write (and a
+    // calendar notification) on every sync.
+    //
+    // The last clause is what the first version of this check was missing.
+    // "The first link in the description is the right one" says nothing about
+    // what is UNDER it, so an event that also carried an older registration
+    // line — the "Registration for … [Form: …]" sentence left over from when
+    // links were hidden, or a stale horizon notice — took this fast path on
+    // every sync and kept both forever. One strip (pure string work, and the
+    // rebuild below needs it anyway) settles it: exactly one registration line
+    // in the whole description, no notice, and nothing to do.
     if (found && !found.isLegacy && found.url === formInfo.publishedUrl &&
-      found.formId === formInfo.formId && existing.indexOf(linkLine) === 0) {
+      found.formId === formInfo.formId && existing.indexOf(linkLine) === 0 &&
+      stripped.removed === 1 && stripped.noticesRemoved === 0) {
       return;
     }
 
@@ -14690,7 +14744,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
     // was what let a second, mangled copy sit in a description untouched
     // forever, since the first match was always the one that got corrected.
     // A stale notice from a horizon that has since moved comes off here too.
-    const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text, linkLine);
+    const updated = prependRegistrationLine(stripped.text, linkLine);
     if (updated !== existing) ev.setDescription(updated);
   });
 

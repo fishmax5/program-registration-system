@@ -31,6 +31,7 @@ vm.runInContext(src + `
 ;this.stripAllRegistrationLines = stripAllRegistrationLines;
 this.prependRegistrationLine = prependRegistrationLine;
 this.buildRegistrationLinkLine = buildRegistrationLinkLine;
+this.findRegistrationLineInDescription = findRegistrationLineInDescription;
 this.REGISTRATION_NOT_OPEN_LINE = REGISTRATION_NOT_OPEN_LINE;
 `, sandbox, { filename: 'Code.gs' });
 
@@ -96,6 +97,57 @@ const rewritten = sandbox.prependRegistrationLine(stripped.text, sandbox.buildRe
 check('no notice left under the new link', /Registration Not Yet Open/.test(rewritten), false);
 check('exactly one register link', (rewritten.match(/📝 Register for/g) || []).length, 1);
 check('the room number is still there', /Room 12, back entrance/.test(rewritten), true);
+
+console.log('\n-- the line an earlier system wrote while the link was hidden --');
+
+// Verbatim from a live program calendar: the register link at the top is
+// current, and the sentence under it is what "Hide link" used to leave behind.
+// It names a form that has since been replaced, so it is not just a duplicate
+// — it points the reader at the wrong one.
+const HIDDEN_ERA = '<a href="https://docs.google.com/forms/d/e/1FAIpQLSfDWLp8R4K6WN9MM4nXKHjrDzDFbma9Offm0ebISFgu55n6Yg/viewform#form=1AvayYZO1QvUU4wGULAneYL_RJCNxCISKatQdPGb1uXw">\u{1F4DD} Register for Mah Jongg (For intermediate Players) — August 2026</a>\n\n\u{1F4DD} Registration for Mah Jongg (For intermediate Players) is available on our dashboard/website. [Form: 1xUAo1h3bmn1EQyl_A_RdauP8lH--dREPEwfMhMYJW8Q]\n[Regular]\n[Club]';
+
+const hiddenEra = sandbox.stripAllRegistrationLines(HIDDEN_ERA);
+check('the sentence and its [Form: …] marker are gone', hiddenEra.text, '[Regular]\n[Club]');
+check('both registration lines are counted', hiddenEra.removed, 2);
+check('the [Regular] / [Club] tags the sync reads survive', hiddenEra.text, '[Regular]\n[Club]');
+check('a description around it keeps its own words',
+  sandbox.stripAllRegistrationLines(
+    '\u{1F4DD} Registration for Mat Yoga is available on our dashboard/website. [Form: 1cvk3g2]\n\n' +
+    '4 weeks, with Ro. Limited space available.\n[Regular]').text,
+  '4 weeks, with Ro. Limited space available.\n[Regular]');
+check('re-flowed into <div>s, it takes only its own sentence',
+  sandbox.stripAllRegistrationLines(
+    '<div>Room 12</div><div>\u{1F4DD}&nbsp;Registration for Chair Yoga is available on our dashboard/website. [Form: 1abc-DEF_9]</div><div>[Cap: 12]</div>').text,
+  '<div>Room 12</div><div></div><div>[Cap: 12]</div>');
+check('the marker alone, after a hand edit took the sentence',
+  sandbox.stripAllRegistrationLines('Room 12\n[Form: 1abc-DEF_9]').text, 'Room 12');
+check('the sentence alone, after a hand edit took the marker',
+  sandbox.stripAllRegistrationLines(
+    '\u{1F4DD} Registration for Chair Yoga is available on our dashboard/website.\nRoom 12').text, 'Room 12');
+check('a sentence of a person\'s own about registering is left alone',
+  sandbox.stripAllRegistrationLines('Registration for this trip closes Friday — see Dana.').text,
+  'Registration for this trip closes Friday — see Dana.');
+
+console.log('\n-- switching Hide link back to Show link leaves ONE line --');
+
+// What the next sync does with that event: the link at the top is already
+// correct, so the whole question is whether the sync still looks underneath it.
+const linkLine = sandbox.buildRegistrationLinkLine(
+  { isFixed: false, cleanTitle: 'Mah Jongg (For intermediate Players)', monthLabel: 'August 2026' },
+  { formId: '1AvayYZO1QvUU4wGULAneYL_RJCNxCISKatQdPGb1uXw',
+    publishedUrl: 'https://docs.google.com/forms/d/e/1FAIpQLSfDWLp8R4K6WN9MM4nXKHjrDzDFbma9Offm0ebISFgu55n6Yg/viewform' });
+const found = sandbox.findRegistrationLineInDescription(HIDDEN_ERA);
+check('the top link reads as current, which is why the sync used to stop here',
+  found.formId === '1AvayYZO1QvUU4wGULAneYL_RJCNxCISKatQdPGb1uXw' &&
+  HIDDEN_ERA.indexOf(linkLine) === 0, true);
+check('...but there is more than one registration line, so it must not stop',
+  hiddenEra.removed === 1 && hiddenEra.noticesRemoved === 0, false);
+check('an event that really is finished takes the fast path',
+  (() => {
+    const clean = sandbox.prependRegistrationLine('[Regular]\n[Club]', linkLine);
+    const s = sandbox.stripAllRegistrationLines(clean);
+    return s.removed === 1 && s.noticesRemoved === 0 && clean.indexOf(linkLine) === 0;
+  })(), true);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
