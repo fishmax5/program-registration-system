@@ -2119,6 +2119,8 @@ Everything else is grouped by the job it belongs to.
 | **Release My Triggers** | Deletes the triggers *your* account created. The one useful thing a non-owner can do about a duplicate set they're responsible for |
 | **Import Everything (First Run)** | The batched first import — see [First run](#first-run). **Trigger-owner account only** |
 | **Find Leftover Tabs (read-only report)** | Reports old/stray tabs holding data — see [Leftover tabs](#leftover-tabs) |
+| **Find Leftover Calendar Rows (read-only report)** | Read-only: session rows left behind by a calendar this workbook no longer reads — see [Leftover calendar rows](#leftover-calendar-rows) |
+| **🧹 Remove Leftover Calendar Rows…** | Takes those rows off the session table. Registrants move to **Deleted_Event_Triage**, not deleted; forms are left alone. Names every calendar before doing anything |
 | **Archive Old Months (report)** | Read-only: how much history each tab is carrying — see [Old months](#old-months) |
 
 **Not on any menu, on purpose.** Anything that deletes or rebuilds runs from
@@ -2727,6 +2729,56 @@ the tab stays put so you can try again. Deleted tabs are recoverable from
 
 ---
 
+## Leftover calendar rows
+
+The other leftover, one tab down: not a stray tab, but stray **rows** on
+**Master_Program_Dashboard** for sessions that were on a calendar once and
+aren't anymore — because the *calendar* went, not the event.
+
+This happens when a location's calendar is **retired, recreated, or repointed
+at a new ID**. Ordinary cancellations are handled automatically (the session
+disappears and its registrants land in **Deleted_Event_Triage**), but that
+sweep deliberately only touches rows it can attribute to a calendar it just
+read. That rule is what stops one calendar failing to load for a minute from
+wiping every program at that location — and it means rows from a calendar
+that's no longer connected at all are skipped on **every** sync, forever.
+
+What you see when it's happened:
+
+- **two rows for the same session**, one live and one stale, and often two
+  registration forms
+- the older registrants attached to the **stale** row, so the counts on the
+  live one look wrong
+- nothing in the log complaining, because as far as every sync is concerned
+  those rows are simply none of its business
+
+Two steps, report first:
+
+1. **🔧 Admin ▸ Find Leftover Calendar Rows (read-only report)** — names each
+   retired calendar by its full ID, with how many rows it's holding, which
+   programs, and the date span, then lists the calendars this workbook *does*
+   read so you can see the difference. Changes nothing.
+2. **🔧 Admin ▸ 🧹 Remove Leftover Calendar Rows…** — removes them. It shows
+   you the same breakdown and does nothing if you say no.
+
+**What it will and won't touch.** It decides purely from each row's stored
+calendar, and reads no calendar at all — so a connected calendar that happened
+to be unreachable can never be mistaken for a retired one, whatever the
+weather. Rows with no calendar behind them — lunch rows, anything added by
+hand — are never in scope. And **registrants are moved to
+Deleted_Event_Triage, not deleted**, with a note saying the calendar is gone
+rather than the event, so whoever calls them knows the program may simply have
+moved.
+
+**It leaves the old forms alone**, on purpose: a link that's already out in the
+world still opens. Retiring those forms is a separate, deliberate job.
+
+> There's no size limit on this one, unlike the ordinary triage sweep. A
+> retired location legitimately *is* most of the table, so the safeguard here
+> is the confirmation naming every calendar ID — read it before saying yes.
+
+---
+
 ## First run
 
 The very first import is the one genuinely big job this system ever does: it
@@ -2938,7 +2990,8 @@ specific Google accounts:
 **Gated:** Rebuild Layout, Rewrite Event Links, Rebuild Forms In Place,
 Destroy & Rebuild Forms,
 Trigger Status, Check Triggers, Take Over Trigger Ownership, Release My
-Triggers, Import Everything (First Run), Find Leftover Tabs, Archive Old
+Triggers, Import Everything (First Run), Find Leftover Tabs, Find Leftover
+Calendar Rows, Remove Leftover Calendar Rows, Archive Old
 Months (report), `mergeLegacyTabs()`, `initSheet()`,
 `initializeAndSyncAll()`, `cancelBootstrapCalendars()`, `confirmLargeTriage()`,
 `restoreTriagedRegistrants()`, `recheckAllRegistrationForms()`,
@@ -3376,6 +3429,15 @@ Rebuild Layout (no calendar sync)** — see
 Check **Deleted_Event_Triage** — the event may have been deleted. Otherwise run
 **Sync Registrations** and check whether the row is there but `Superseded` (they
 submitted twice) or `Waitlisted` (session was full).
+
+**Every session is listed twice, and one copy has all the registrations**
+The location's calendar was replaced with a new one. Sessions are keyed partly
+by which calendar they came from, so the same class on the same day under a new
+calendar ID is a brand-new session — and the old rows are never swept, because
+the sweep that removes cancelled sessions only touches calendars it can still
+read. Run **🔧 Admin ▸ Find Leftover Calendar Rows (read-only report)** to
+confirm, then **🧹 Remove Leftover Calendar Rows…** to clear the stale half.
+Full detail in [Leftover calendar rows](#leftover-calendar-rows).
 
 **The lunch count looks too low**
 Only `Active` + `Needed` rows count. Check for rows sitting at `Waitlisted`,

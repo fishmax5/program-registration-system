@@ -110,7 +110,7 @@ is a **different session** as far as this system is concerned.
 
 | | What happens |
 |---|---|
-| Old session rows | Kept. `triageDeletedSessions()` only considers rows whose `Calendar_Source` is a calendar it could read, and the old IDs aren't in `CALENDAR_MAP` any more — so they're skipped, not deleted. **Nothing is lost.** |
+| Old session rows | Kept. `triageDeletedSessions()` only considers rows whose `Calendar_Source` is a calendar it could read, and the old IDs aren't in `CALENDAR_MAP` any more — so they're skipped, not deleted. **Nothing is lost**, and nothing removes them either, on any later run. `removeOrphanedSessionRows()` is the sweep that does, once you've decided they should go. |
 | New sync | Imports the new calendars' events as **new** rows with new `Event_ID`s |
 | If both calendars hold the same programs | You get **two rows per session** — one stale, one live — and **two forms** |
 | Existing registrants | Still joined to the **old** `Event_ID`s, so they attach to the stale rows, not the new ones |
@@ -126,6 +126,16 @@ calendar), decide before syncing. The clean options are to start the workbook's
 session history fresh, or to rewrite `Calendar_Source` and `Event_ID` on the
 existing rows to match the new IDs. Do **not** just sync and sort it out
 afterwards — once duplicate forms exist, registrations start arriving on both.
+
+**If you've already synced**, the stale half is reachable: **🔧 Admin ▸ Find
+Leftover Calendar Rows (read-only report)** names each retired calendar ID with
+its row count, program list and date span, and **🧹 Remove Leftover Calendar
+Rows…** takes those rows off the session table, moving their registrants to
+`Deleted_Event_Triage` rather than deleting them. It is scoped by
+`Calendar_Source` alone and reads no calendar, so a configured calendar that
+merely failed to load can never be swept by it; it also leaves the retired
+calendar's forms untouched, so a link already in circulation still opens. The
+duplicate *forms* are still yours to retire by hand.
 
 ### 5b. Re-grouping only reaches dates that haven't been imported yet
 
