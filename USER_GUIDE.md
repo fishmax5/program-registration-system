@@ -615,20 +615,53 @@ the answers**.
 So extra questions live on the **Program_Questions** tab, one row per question,
 and the system puts them back on the form every time. Add a row:
 
+> **The quickest way in is the builder.** **📝 Programs & Forms ▸ ➕ Build a
+> Form Question…** asks for one question at a time, shows only the fields that
+> kind of question actually uses, **uploads a picture for you** if the row is
+> one, and — the part the tab cannot do — tells you **which forms it would land
+> on, by name**, before you commit to it. It writes the same row you would have
+> typed, and can push it to the forms on the spot.
+> The tab below is still the right place to edit twenty of them.
+
 | Column | What to put |
 |---|---|
 | `Program` | **pick from the dropdown** — it lists every program on the dashboard, spelled the way the calendar spells it. `*` (or blank) = every form in the workbook |
 | `Location` | dropdown of your locations. `*` or blank = everywhere |
+| `Match_Keywords` | the other way to aim a row — **by word rather than by exact name**. One per line (or separated by `\|` or a comma), matched as text against every program title the form covers, its locations and its calendar tags. `wills` reaches *Low-Cost Wills* **and** *Wills & Estates Clinic*; `zoom` reaches everything online; `club` reaches every `[Club]` program. **Any one** keyword matching is enough, and this narrows **together** with Program and Location — Location `Narberth` plus keyword `wills` means the wills clinic at Narberth, not either. Blank = do not narrow by keyword |
 | `Question` | the question as the registrant will read it |
-| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice` — or `Notice` / `Image`, which show something instead of asking it (see below) |
-| `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For an `Image` row this holds the picture's Google Drive link instead |
-| `Help_Text` | the small grey line under the question. Optional |
+| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice`, `Date`, `Time`, `Scale` — or `Notice` / `Image` / `Header image` / `Form description`, which show something instead of asking it (see below) |
+| `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For a picture row this holds the picture's Google Drive link instead (the builder fills it in for you); for a `Scale` row it holds the range and the end labels — `1-5 \| Not at all \| Very much` |
+| `Help_Text` | the small grey line under the question. Optional — except on a `Notice` or a `Form description` row, where it is the wording people actually read |
 | `Required` | tick to make it compulsory |
 | `Sort` | the order the questions appear in. Optional |
 | `Active` | untick to take the question off the form without deleting the row |
 
 Then press **❓ Update Program Questions on Forms**, or wait for the next
 **Sync Cal**.
+
+**The three rows that show something instead of asking it.**
+
+| Type | Where it lands |
+|---|---|
+| `Notice` | a block of words **in the middle of the form**, just above *Anything Else?*. `Question` is the bold heading (*"Please note"*), `Help_Text` is the wording. This is where a class disclaimer belongs |
+| `Image` | a picture beside the last question, with `Question` as its caption |
+| `Header image` | the same picture, **at the very top of the form** instead — above the first question. This is the one for a logo, a photo of the class, a book cover |
+| `Form description` | wording added to the **top of the form**, above the first question, where it is read before anybody starts. `Question` only names the rule (it is not shown); `Help_Text` is what people read. *"Bring a photo ID"* belongs here; *"this class involves floor work"* is a `Notice` |
+
+**Putting a photo on a form: choose it, and that's it.** In the builder, pick
+`Header image` (or `Image`) and a file picker appears. Choose the photo on your
+computer and it is uploaded, filed in a Drive folder called **Form Images**, and
+its link written into the row for you — the six steps of *save it, open Drive,
+upload, find it, Share, Copy link, come back, paste* are gone. You can still
+paste a Drive link by hand if the picture is already up there.
+
+A `Header image` is placed at index 0 of the form, above the first question.
+That is as close to a banner as a script can get: Google's own form banner lives
+in the form's *theme*, and neither Apps Script nor the Forms API can set it.
+
+> **Uploading a photo does not share anything.** The form does not read the
+> Drive file — the script fetches its bytes and puts a copy *into* the form. A
+> photo on a public form is not a public Drive file.
 
 > **The dropdowns reach the blank rows too**, so the row you are *about* to type
 > into already has them. They used to stop at the last row that had something on
@@ -1546,9 +1579,27 @@ impossible. Instead:
 - The **daily Sync Cal** picks it up on its own, or
 - click **🍱 Push Menu Changes to Forms** when you want it out there now.
 
-It asks first, then rewrites the date labels — and adds or removes the lunch
-question — on every form covering an upcoming menu date. Past dates are left
-alone.
+It asks first, then does the whole job in one press:
+
+1. **re-stamps `Lunch_Schedule`** so every row has its `Meal_ID`, and the
+   labels below are built from what you just typed rather than a cached copy;
+2. **builds or refreshes the lunch sign-up form for every month you touched.**
+   This is the step that puts a *newly added date* on its monthly form. A date
+   that is new to the menu has no session row yet, and a form's dates come from
+   its session rows — so before this existed, adding a date to next month's
+   menu and pressing push did nothing visible until the hourly sync happened to
+   come round;
+3. **rewrites every registration form covering an affected location-month** —
+   its date labels, its lunch question, and its description. The *month* is the
+   unit, not the date you edited, which is what makes a **deleted** date
+   disappear from the forms still offering it and a date flipped to **Not
+   Serving** lose its meal hint everywhere it appears;
+4. **re-renders `Master_Lunch_Dashboard`**, so the order counts match the menu
+   you just pushed.
+
+Past dates are left alone. The toast afterwards says how many forms were
+actually rewritten out of how many were tried — and says so plainly when some
+of them failed, rather than reporting a ✅ for forms it could not open.
 
 #### Adding rows the easy way
 
@@ -1837,9 +1888,13 @@ Forms** when you're done, or leave it for the next **Sync Cal**.
 
 **Every column with a fixed answer is a dropdown, including on the blank rows
 below.** `Program` lists every program currently on the dashboard, spelled the
-way your calendar spells it; `Location` lists your locations; `Type` lists the
-seven kinds of row; `Required` and `Active` are real tick boxes. Pick **`*`** in
+way your calendar spells it; `Location` lists your locations; `Type` lists every
+kind of row; `Required` and `Active` are real tick boxes. Pick **`*`** in
 Program or Location (or leave it blank) for *"every one of them"*.
+
+> **Or don't type the program at all.** `Match_Keywords` aims a row by word
+> instead of by exact name — `wills`, `zoom`, `club` — and survives a program
+> being renamed on the calendar, which an exactly-matched title does not.
 
 > **Use the Program dropdown rather than typing.** A program name is matched
 > against the calendar **exactly** — so `Bookclub`, or `Book Club ` with a
@@ -2123,7 +2178,7 @@ Everything else is grouped by the job it belongs to.
 |---|---|
 | **Add Menu Items (paste/upload CSV)…** | Paste CSV or upload a `.csv` of menu items — see [Lunch_Schedule](#5-lunch_schedule) |
 | **Build / Refresh Lunch Sign-Up Forms** | Builds (or updates) the lunch-only sign-up form for every location serving food, and pins the links to the top of Master_Lunch_Dashboard. The hourly pass does this anyway; this is for when you want the link now. See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) |
-| **Push Menu Changes to Forms** | Rewrites the date labels and lunch question on every form covering an upcoming menu date |
+| **Push Menu Changes to Forms** | The whole delivery in one press: re-stamps the menu tab, builds/refreshes the lunch sign-up form for every month you touched (this is what puts a **newly added date** on its monthly form), rewrites the date labels, lunch question and description on every form covering an affected location-month, and re-renders the lunch dashboard |
 
 **👩‍🏫 Rosters & Schedules**
 
@@ -2139,6 +2194,7 @@ Everything else is grouped by the job it belongs to.
 | Item | What it does |
 |---|---|
 | **🔍 Review Programs, Then Update Once…** | Walks your programs a screen at a time and says, for each, what ought to be true and whether it is; your answers are applied together in one pass at the end, and a second tab shows which program is on which form — see [Reviewing your programs](#reviewing-your-programs). Start here when something looks wrong and you don't know where |
+| **➕ Build a Form Question…** | Builds one extra question, notice, picture (uploading it for you) or form-description injection — showing which forms it would reach *before* it writes it — and adds it to **Program_Questions**. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
@@ -2229,7 +2285,7 @@ say no:
 | Press **🗑️ Delete Registrations…** | It **permanently deletes** registrant rows, and can delete the form responses behind them. It also makes you type `DELETE` |
 | Press **🩹 Rebuild Forms In Place…** | It rewrites the questions on every live form at once. Links survive, but anyone mid-way through filling one in loses what they typed |
 | Press **🔗 Link Program Across Locations…** | It tags calendar events, moves upcoming sessions onto one shared form, and rewrites the registration link on every upcoming event |
-| Press **🍱 Push Menu Changes to Forms** | It rewrites the date labels on live forms, and can add/remove the lunch question |
+| Press **🍱 Push Menu Changes to Forms** | It builds any missing lunch sign-up month, rewrites the date labels, lunch question and description on live forms, and re-renders the lunch dashboard |
 | Add a **walk-in** from the Quick Mark dialog | It writes a person into the record, and into the catering count |
 | Change **Lunch Service by Location** in Config | It decides whether that location's forms ask about lunch at all |
 | `mergeLegacyTabs()` (editor only) | It deletes tabs (after moving their rows to safety) |
@@ -2382,6 +2438,28 @@ addresses are fine, separated by commas.
 
 Leave it blank and the sheet is still made; the dialog just hands you the link
 to share yourself.
+
+**Anyone with the link can open and edit these sheets.** That is deliberate.
+They are rosters of first names, times and ticks, handed to instructors who
+often have no account here at all — and the alternative in practice is a sheet
+nobody can open. The dialog tells you either way, and if link sharing could not
+be turned on it says so, because that is the more urgent half.
+
+**The account that runs the syncs is put on the file too.** This is the failure
+this fixes. A sheet is created by whoever clicked the menu item; it is then read
+and written every hour by whoever owns the triggers, which is routinely a
+*different* account. Drive shares a new file with its creator and nobody else,
+so the hourly pass was refused and the round trip silently stopped: the
+instructor's ticks never came back, and the workbook's rows never went out —
+both sides still looking like they worked.
+
+Now the admins and the trigger owner are added as editors when the sheet is
+made, link sharing is turned on, and **a sheet made before this existed is
+repaired the first time a sync can still open it**. If a sheet genuinely cannot
+be opened, that is reported in plain language — naming the account that was
+refused and the two ways to fix it — and it can no longer take the rest of the
+run down with it: the other sheets still refresh, and the registrations
+themselves were never at risk.
 
 ### Things to know
 
@@ -3380,6 +3458,14 @@ time** — marking somebody who already has a booking needs no time.
 Press **🍱 Push Menu Changes to Forms**. Editing `Lunch_Schedule` deliberately
 does *not* rewrite live forms on the spot — that push (or the daily Sync Cal)
 is what delivers it.
+
+**I added a lunch date and it never appeared on the monthly form**
+Press **🍱 Push Menu Changes to Forms**. The push now builds the sign-up month
+before it rewrites anything, which is what creates the row a new date hangs
+off. If it still does not appear, the toast will say what failed; the most
+common answer is that the date is further out than the sign-up forms are built
+(six months — see **Build / Refresh Lunch Sign-Up Forms**), in which case the
+menu is fine as typed and that month builds itself as it comes closer.
 
 **A menu row I typed didn't go anywhere**
 It's in the **➕ ADD MENU ITEMS** block at the bottom of `Lunch_Schedule` and

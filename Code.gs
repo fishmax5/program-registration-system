@@ -119,6 +119,15 @@
  *      item. getAdminNotesResponse() reads "Anything Else?" BY TITLE for the
  *      same reason — it used to take the first paragraph item with an answer,
  *      which a custom paragraph question would have hijacked.
+ *      A row is aimed at forms by Program, by Location, and by MATCH_KEYWORDS
+ *      — words matched against the program titles, locations and bracket tags
+ *      a form covers ("wills", "zoom", "club"), which is the aim that survives
+ *      a program being renamed on the calendar. Besides questions, a row can
+ *      be a NOTICE, an IMAGE, or a FORM DESCRIPTION injected above the first
+ *      question; and a HEADER IMAGE row puts a picture at the very top of the
+ *      form, above everything. "➕ Build a Form Question…" writes a row from a
+ *      dialog — uploading the picture for you — and says which forms it would
+ *      reach BEFORE it writes it.
  *    - THE REGISTRATION LINK injected into each event description is an
  *      HTML ANCHOR, not a raw URL, and carries no visible Form ID. The ID
  *      rides in the href's #fragment — invisible to the reader, ignored by
@@ -1758,16 +1767,32 @@ const HEADERS = {
    *   Program     the program's name as the calendar spells it. Blank or "*"
    *               means every form in the workbook.
    *   Location    blank means every location; otherwise only forms covering it.
+   *   Match_Keywords
+   *               the OTHER way to aim a row, and the one that survives a
+   *               program being renamed: a word (or several, one per line or
+   *               separated by "|" or ",") matched as text against the
+   *               program titles the form covers, its locations, and its
+   *               calendar type tags. "wills" reaches "Low-Cost Wills" and
+   *               "Wills & Estates Clinic" without either being typed out;
+   *               "zoom" reaches every online session. Any one keyword
+   *               matching is enough. Blank means "do not narrow by keyword",
+   *               so a row that names neither a program nor a keyword still
+   *               reaches every form as it always did.
    *   Question    the question text, and its identity. Renaming it is adding a
    *               new question and retiring the old one.
    *   Type        Short answer / Paragraph / Dropdown / Checkboxes /
-   *               Multiple choice.
+   *               Multiple choice / Date / Time / Scale, or one of the four
+   *               that ask nothing — Notice, Image, Header image, Form
+   *               description.
    *   Choices     one per line (or separated by "|"), for the three choice
-   *               types. Ignored by the text types.
+   *               types; the picture's Drive link for an Image; the range and
+   *               end labels for a Scale ("1-5 | Not at all | Very much").
+   *               Ignored by the text types.
    *   Sort        the order they appear in. Ties fall back to the row order.
    */
   Program_Questions: [
-    'Program', 'Location', 'Question', 'Type', 'Choices', 'Help_Text', 'Required', 'Sort', 'Active'
+    'Program', 'Location', 'Match_Keywords', 'Question', 'Type', 'Choices', 'Help_Text',
+    'Required', 'Sort', 'Active'
   ],
   /**
    * Assistance_Requests — people who want a personalized-assistance
@@ -1791,7 +1816,8 @@ const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Note
 
 /** Program_Questions columns staff type into — which is all of them. */
 const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
-  'Program', 'Location', 'Question', 'Type', 'Choices', 'Help_Text', 'Required', 'Sort', 'Active'
+  'Program', 'Location', 'Match_Keywords', 'Question', 'Type', 'Choices', 'Help_Text',
+  'Required', 'Sort', 'Active'
 ];
 
 /** What a request's Status can say. New until somebody looks at it. */
@@ -4218,11 +4244,20 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   // Computed up here because showTitle depends on it — see below.
   const isLunchOnly = formRows.length > 0 &&
     formRows.every(row => isLunchOnlyEventId(row[map['Event_ID']]));
+  // THE BRACKET TAGS THIS FORM'S SESSIONS CARRY, deduped. Nothing in the form
+  // layer reads them directly; they exist so a Program_Questions keyword rule
+  // can be aimed at what a program IS rather than what it is called — "zoom",
+  // "club", "assistance" — and survive it being renamed. See
+  // questionsForFormContext().
+  const typeTags = dedupePreservingOrder(formRows
+    .map(row => String((map['Type_Tag'] === undefined ? '' : row[map['Type_Tag']]) || '').trim())
+    .filter(Boolean));
   return {
     formId,
     sessions,
     locations,
     titles,
+    typeTags,
     showLocation: locations.length > 1 || !!(sharedFormIds && sharedFormIds.has(formId)),
     // A DATE LABEL NEVER CARRIES A LUNCH ROW'S TITLE, and this is load-bearing
     // rather than cosmetic. Every lunch row is named for its own dish now
@@ -5550,48 +5585,218 @@ function pushLunchMenuToForms() {
   const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   if (!sheet) { toastIfPossible('No Lunch_Schedule tab yet — nothing to push.'); return 0; }
 
-  const headers = HEADERS.Lunch_Schedule;
-  const map = getIndexMap(headers);
-  const todayKey = formatDateKey(new Date());
-
-  const pairs = [];
-  const seen = {};
-  readLunchScheduleRows(sheet).forEach(row => {
-    const d = coerceDate(row[map['Event_Date']]);
-    if (!d || formatDateKey(d) < todayKey) return;
-    const location = String(row[map['Location']] || '').trim();
-    const key = `${formatDateKey(d)}|${location}`;
-    if (seen[key]) return;
-    seen[key] = true;
-    pairs.push({ date: d, location });
-  });
-
-  if (pairs.length === 0) {
+  const scope = buildLunchPushScope(sheet);
+  if (scope.pairs.length === 0) {
     toastIfPossible('No upcoming menu dates — nothing to push.');
     return 0;
   }
 
   if (!confirmConsequentialAction('Push the menu to the registration forms?',
-    `${pairs.length} upcoming date(s) will be pushed.\n\n` +
-    'Every registration form covering them will have its date labels rewritten, and the lunch ' +
-    'question added or removed to match what the schedule now says.\n\n' +
+    `${scope.pairs.length} upcoming date(s) across ${scope.monthCount} location/month(s) will be pushed.\n\n` +
+    'The lunch sign-up form for each of those months is built or brought up to date FIRST, so a date you ' +
+    'have just added gains a row to hang off — and then every registration form covering those months has ' +
+    'its date labels, its lunch question and its description rewritten to match what the schedule now says.\n\n' +
     'Registrants and their existing answers are never changed.', false)) {
     return 0;
   }
 
-  const affected = refreshFormsForLunchDates(pairs);
-  toastIfPossible(`Menu pushed to ${affected} form(s) across ${pairs.length} date(s) ✅`);
-  return affected;
+  // UNDER THE SYNC LOCK. This builds forms and rewrites the session table
+  // (syncLunchOnlySessions()), which is exactly the read-change-write shape
+  // that loses rows when the hourly sync is half way through the same tabs.
+  // Pressing a menu item happens to be the most likely moment for that: it is
+  // pressed the minute a menu has been typed in, on the hour, by somebody who
+  // has no way of knowing a sync is running.
+  const stats = withScriptLock(SYNC_LOCK_WAIT_MS, () => pushLunchMenuNow(scope), null);
+  if (!stats) {
+    toastIfPossible('A sync is already running — nothing was pushed. Try again in a moment; ' +
+      'the menu on the tab is safe either way.');
+    return 0;
+  }
+  toastIfPossible(describeLunchPushOutcome(scope, stats));
+  return stats.formsRefreshed;
 }
 
 /**
- * Batched form refresh for a list of {date, location} pairs.
+ * WHAT A MENU PUSH IS ACTUALLY ABOUT, which is not the set of dates somebody
+ * just typed.
  *
- * Reads the session table ONCE and touches each affected form ONCE, however
- * many dates it covers. The per-date refreshFormsForChangedLunchDate() below
- * re-reads the whole dashboard on every call, which was fine for the single
- * date an onEdit produced and quadratic for a pasted month.
+ * The old scope was exactly those dates: pairs of {date, location} read off
+ * Lunch_Schedule, and a form was touched only if one of its session rows fell
+ * on one of them. Three things fall through a scope that narrow, and all three
+ * were reported as a successful push:
+ *
+ *   A DATE THAT IS NEW has no session row yet, so it matches no form and
+ *     reaches nothing — which is precisely the case somebody presses this for.
+ *     The lunch-only months are built by syncLunchOnlySessions(), and the push
+ *     never called it, so a date added to next month's menu did not appear on
+ *     next month's form until the hourly sync happened to get to it.
+ *   A DATE THAT WAS DELETED is not on the tab at all any more, so it is in no
+ *     pair, so the form still offering it is never reopened. The stale row
+ *     outlives every push made after it.
+ *   A DATE FLIPPED TO "Not Serving" keeps its row here, but the forms whose
+ *     labels have to lose the meal hint are the OTHER dates' forms too — a
+ *     form's labels are rewritten as a set, not per row.
+ *
+ * So the scope is the LOCATION-MONTH, not the date: every month that has any
+ * upcoming menu row at a location, plus every location-month a form's sessions
+ * fall in. Every form covering an affected month is reopened once, and its
+ * whole label set, its lunch question and its description are re-derived from
+ * the sheet. Unchanged forms cost a fingerprint comparison and no Forms write
+ * (applyFormDateLabels()), so widening the net is close to free on the runs
+ * where nothing moved.
  */
+function buildLunchPushScope(sheet) {
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+  const todayKey = formatDateKey(new Date());
+
+  const pairs = [];
+  const seenPair = {};
+  const months = {};
+  readLunchScheduleRows(sheet).forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d) return;
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey) return;
+    const location = String(row[map['Location']] || '').trim();
+    const key = `${dateKey}|${location}`;
+    if (!seenPair[key]) {
+      seenPair[key] = true;
+      pairs.push({ date: d, location });
+    }
+    // "Not Serving" rows are in scope too, and deliberately: taking a meal OFF
+    // a date is a menu change like any other, and the form saying so is the
+    // whole point of the row.
+    months[lunchMonthScopeKey(location, dateKey)] = true;
+  });
+
+  return { pairs, months, monthCount: Object.keys(months).length };
+}
+
+/** "Narberth|2026-09" — the unit a lunch push actually works in. A blank location means "wherever". */
+function lunchMonthScopeKey(location, dateKey) {
+  return `${String(location || '').trim()}|${String(dateKey).slice(0, 7)}`;
+}
+
+/**
+ * The push itself, in the order the stages depend on one another.
+ *
+ * Every stage is guarded on its own. A push that cannot reach the Forms API
+ * must still leave the sheet correct, and a menu row that cannot be stamped
+ * must not stop the forms being rewritten — the failure modes are independent
+ * and reporting them as one "it worked" was how this came to be trusted while
+ * doing half its job.
+ */
+function pushLunchMenuNow(scope) {
+  const stats = {
+    scheduleRestamped: false,
+    signUpFormsBuilt: 0,
+    signUpFormsRefreshed: 0,
+    signUpFormsFailed: 0,
+    newLunchDates: 0,
+    formsSeen: 0,
+    formsRefreshed: 0,
+    formsFailed: 0,
+    dashboardUpdated: false,
+    problems: []
+  };
+  const trouble = (what, err) => {
+    log(`⚠️ Menu push: ${what} (${err}).`);
+    stats.problems.push(what);
+    noteForAdmin('Menu push', `${what} — ${err}`);
+  };
+
+  // 1. THE TAB FIRST. Meal_IDs are stamped by the render, and a date typed in
+  //    without one is a date the meal index cannot join a registration back to
+  //    — so pushing before stamping would push half-identified meals. The
+  //    render also drops the meal-info cache the labels below are built from,
+  //    which is what makes an edited dish reach the forms at all.
+  try {
+    renderLunchScheduleSheet(true);
+    stats.scheduleRestamped = true;
+  } catch (err) {
+    trouble('the Lunch_Schedule tab could not be re-stamped, so the labels below were built from ' +
+      'whatever the tab said before', err);
+    invalidateMealInfoIndex(); // at minimum, do not push a cached copy of the old menu
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    trouble('there is no session table yet, so no form could be found to push to',
+      'run "Sync Cal" once first');
+    return stats;
+  }
+
+  // 2. THE SIGN-UP MONTHS. This is the stage the old push did not have, and
+  //    the one the reported bug lived in: a date that is new to the menu has
+  //    no session row anywhere, and a form's dates come from its session rows.
+  //    syncLunchOnlySessions() is what mints the row, so a new date becomes a
+  //    row here and a label in stage 3 — in the same press of the button.
+  try {
+    syncLunchOnlySessions(registrySheet);
+    const run = getLastLunchSignUpRunStats();
+    stats.signUpFormsBuilt = run.formsBuilt;
+    stats.signUpFormsRefreshed = run.formsRefreshed;
+    stats.signUpFormsFailed = run.formsFailed;
+    if (run.formsFailed > 0) {
+      stats.problems.push(`${run.formsFailed} lunch sign-up form(s) could not be built or reopened`);
+    }
+  } catch (err) {
+    trouble('the lunch sign-up forms could not be brought up to date, so a date added to the menu may ' +
+      'not be on its month\'s form yet', err);
+  }
+  flushPersistentRegistries();
+  // The rows syncLunchOnlySessions() just wrote are read back off the tab in
+  // the next stage, so they have to actually BE on the tab first.
+  SpreadsheetApp.flush();
+
+  // 3. EVERY FORM COVERING AN AFFECTED MONTH — see buildLunchPushScope().
+  try {
+    const refreshed = refreshFormsForLunchDates(scope.pairs, { months: scope.months });
+    stats.formsSeen = refreshed.formsSeen;
+    stats.formsRefreshed = refreshed.formsRefreshed;
+    stats.formsFailed = refreshed.formsFailed;
+    stats.newLunchDates = refreshed.lunchDatesOffered;
+    if (refreshed.formsFailed > 0) {
+      stats.problems.push(`${refreshed.formsFailed} registration form(s) could not be rewritten`);
+    }
+  } catch (err) {
+    trouble('the registration forms could not be rewritten', err);
+  }
+
+  // 4. THE DASHBOARD LAST, on the settled picture. A menu push changes what is
+  //    catered on which date, which is exactly what the rollup counts — and
+  //    leaving it stale is how somebody orders yesterday's numbers.
+  try {
+    updateMasterLunchDashboard(null);
+    stats.dashboardUpdated = true;
+  } catch (err) {
+    trouble('the lunch dashboard could not be re-rendered', err);
+  }
+
+  flushAdminDigest('Menu push');
+  return stats;
+}
+
+/**
+ * The sentence the toast says — which is the whole of what anybody learns
+ * about a push, so it says what FAILED as readily as what worked.
+ *
+ * The old one said "Menu pushed to N form(s) across M date(s) ✅" and counted
+ * every form it had TRIED, whether the write landed or threw. A push that
+ * reached nothing looked identical to one that reached everything.
+ */
+function describeLunchPushOutcome(scope, stats) {
+  const parts = [];
+  if (stats.signUpFormsBuilt > 0) parts.push(`${stats.signUpFormsBuilt} lunch sign-up form(s) built`);
+  if (stats.signUpFormsRefreshed > 0) parts.push(`${stats.signUpFormsRefreshed} refreshed`);
+  parts.push(`${stats.formsRefreshed} of ${stats.formsSeen} registration form(s) rewritten`);
+  const head = stats.problems.length === 0
+    ? `Menu pushed ✅ — ${parts.join(', ')} across ${scope.monthCount} location/month(s).`
+    : `Menu pushed with problems ⚠️ — ${parts.join(', ')}. ${stats.problems.join('; ')}. See the log.`;
+  return head;
+}
+
 /**
  * Menu action: build or bring up to date the lunch-only sign-up form for every
  * location serving food in the window, and pin the links to the top of
@@ -5678,21 +5883,27 @@ function describeWhyNoLunchSignUpForms() {
   return `nothing on ${SHEET_NAMES.LUNCH_SCHEDULE} produced a form this run — see the log.`;
 }
 
-function refreshFormsForLunchDates(pairs) {
+function refreshFormsForLunchDates(pairs, options) {
+  options = options || {};
+  const blank = { formsSeen: 0, formsRefreshed: 0, formsFailed: 0, lunchDatesOffered: 0 };
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!registrySheet) return 0;
+  if (!registrySheet) return blank;
 
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) return blank;
   const map = getIndexMap(headers);
 
   const wanted = {};
-  pairs.forEach(p => {
+  (pairs || []).forEach(p => {
     if (!p.date) return;
     wanted[`${formatDateKey(p.date)}|${p.location || ''}`] = true;
   });
+  // The location-months this push covers, when the caller has worked them out
+  // (buildLunchPushScope()). Without them this behaves exactly as it always
+  // did — which is what refreshFormsForChangedLunchDate()'s single date wants.
+  const months = options.months || null;
 
   const affectedFormIds = {};
   rows.forEach(row => {
@@ -5701,29 +5912,53 @@ function refreshFormsForLunchDates(pairs) {
     const key = formatDateKey(d);
     const location = String(row[map['Location']] || '').trim();
     // A pair with no location means "this date, wherever it is".
-    if (!wanted[`${key}|${location}`] && !wanted[`${key}|`]) return;
+    const byDate = wanted[`${key}|${location}`] || wanted[`${key}|`];
+    // A SESSION IN AN AFFECTED MONTH counts even when its own date carries no
+    // menu row: that is the form still offering a date somebody deleted, and
+    // the form whose OTHER labels have to lose a meal hint. See
+    // buildLunchPushScope() for why the month is the honest unit here.
+    const byMonth = months && (months[lunchMonthScopeKey(location, key)] ||
+      months[lunchMonthScopeKey('', key)]);
+    if (!byDate && !byMonth) return;
     const formId = row[map['Form_ID']];
     if (formId) affectedFormIds[formId] = true;
   });
 
   const formIds = Object.keys(affectedFormIds);
-  formIds.forEach(formId => refreshOneFormDateLabels(formId, rows, map, 'menu push'));
+  const stats = { formsSeen: formIds.length, formsRefreshed: 0, formsFailed: 0, lunchDatesOffered: 0 };
+  formIds.forEach(formId => {
+    // COUNTED BY WHAT CAME BACK, not by what was attempted. This used to
+    // return formIds.length whatever happened inside, so a push where every
+    // single form was unopenable reported the same number as one where every
+    // form was rewritten — and the toast said ✅ either way.
+    const outcome = refreshOneFormDateLabels(formId, rows, map, 'menu push');
+    if (outcome && outcome.failed) stats.formsFailed++;
+    else if (outcome && outcome.written) stats.formsRefreshed++;
+    if (outcome && outcome.lunchDates) stats.lunchDatesOffered += outcome.lunchDates;
+  });
   flushPersistentRegistries();
-  log(`refreshFormsForLunchDates: refreshed ${formIds.length} form(s) for ${pairs.length} date(s).`);
-  return formIds.length;
+  log(`refreshFormsForLunchDates: ${stats.formsRefreshed} of ${stats.formsSeen} form(s) rewritten, ` +
+    `${stats.formsFailed} failed, for ${(pairs || []).length} date(s).`);
+  return stats;
 }
 
 /**
  * Rebuilds one form's date-dependent items from the session rows already in
  * memory — every date that form covers, not just the changed one, so a single
  * menu edit self-heals any stale label on it.
+ *
+ * Returns { failed, written, lunchDates } rather than a bare boolean: the
+ * caller counts what actually landed, and "could not open the form" and
+ * "opened it and found nothing to change" are the two answers it most needs
+ * told apart. See refreshFormsForLunchDates().
  */
 function refreshOneFormDateLabels(formId, sessionRows, map, context) {
+  const nothing = { failed: false, written: false, lunchDates: 0 };
   const formRows = sessionRows.filter(row => row[map['Form_ID']] === formId);
-  if (formRows.length === 0) return false;
+  if (formRows.length === 0) return nothing;
 
   const formContext = buildFormSessionContext(formId, formRows, map, getSharedFormIdSet());
-  if (formContext.sessions.length === 0) return false;
+  if (formContext.sessions.length === 0) return nothing;
 
   const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
 
@@ -5736,11 +5971,76 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
     questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0, formContext);
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);
-    return false;
+    noteForAdmin('Forms that could not be updated',
+      `${describeFormLink(formId)} (${describeLocations(formContext.locations)}) could not be opened after a ` +
+      `${context}: ${err}. Its dates and its lunch question still read as they did before.`);
+    return { failed: true, written: false, lunchDates: 0 };
   }
 
-  return applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
+  // THE DESCRIPTION LISTS THE DATES, and it was the one date-dependent thing
+  // on the form that a refresh did not rewrite. applyFormDateLabels() below
+  // writes the grid rows and the mode page's note; the description sat above
+  // both of them still reading out last month's dates — on a lunch-only form,
+  // where the description IS the menu ("Lunch is served on: …"), that is the
+  // part of the page somebody actually reads. Guarded on its own: a
+  // description that will not write must not cost the form its date labels,
+  // which are what a registration is matched back by.
+  let descriptionWritten = false;
+  try {
+    descriptionWritten = applyFormDescription(form, formContext, allDateLabels, lunchDateLabels);
+  } catch (err) {
+    log(`⚠️ Could not rewrite the description on form ${formId} after a ${context} (${err}) — ` +
+      `its dates and questions were still updated.`);
+  }
+
+  const labelsWritten = applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
     { form, force: questionsChanged > 0, context });
+
+  return {
+    failed: false,
+    written: labelsWritten || descriptionWritten || questionsChanged > 0,
+    lunchDates: lunchDateLabels.length
+  };
+}
+
+/**
+ * Writes the form's description from the session picture, and only when it
+ * actually differs from what is on the form.
+ *
+ * ONE PLACE, because there are five callers of buildFormDescription() and each
+ * of them assembles the same options object out of a slightly different
+ * carrier (a calendar group, a session context, a rebuild spec). A refresh
+ * path that has a context in hand should not have to re-derive that mapping to
+ * keep a form's dates honest.
+ *
+ * Returns true when the form was written to.
+ */
+function applyFormDescription(form, context, allDateLabels, lunchDateLabels) {
+  const description = buildFormDescription(context.locations, allDateLabels, context.isFixed,
+    (lunchDateLabels || []).length > 0, {
+      isClub: context.isClub,
+      programTitle: context.programTitle,
+      isLunchOnly: context.isLunchOnly,
+      isAssistance: context.isAssistance
+    });
+  const wanted = applyDescriptionInjectionsToText(description, context);
+  // RECORDED EVEN WHEN NOTHING IS WRITTEN. This is the same block
+  // syncDescriptionInjectionsOnForm() strips before appending its own, and a
+  // rebuild that wrote one without recording it would leave that function
+  // stripping nothing and stacking a second copy underneath.
+  rememberDescriptionInjection(form.getId(), wanted.slice(description.length));
+  if (wanted === (form.getDescription() || '')) return false;
+  form.setDescription(wanted);
+  return true;
+}
+
+/** Records the description block this script last appended to one form. See syncDescriptionInjectionsOnForm(). */
+function rememberDescriptionInjection(formId, injection) {
+  const store = getAppliedCustomQuestions();
+  const entry = store[formId] || {};
+  if (String(entry.description || '') === String(injection || '')) return;
+  store[formId] = Object.assign({}, entry, { description: String(injection || '') });
+  saveAppliedCustomQuestions(store);
 }
 
 /**
@@ -5749,7 +6049,16 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
  * wrong"). Pass no location to mean "this date, wherever it is".
  */
 function refreshFormsForChangedLunchDate(changedDate, location) {
-  return refreshFormsForLunchDates([{ date: changedDate, location: location || '' }]);
+  const date = coerceDate(changedDate);
+  if (!date) return { formsSeen: 0, formsRefreshed: 0, formsFailed: 0, lunchDatesOffered: 0 };
+  // The whole location-month, not the bare date — the same widening the menu
+  // push does, and for the same reason: somebody running this by hand is
+  // running it because a label looks wrong, and the label that is wrong is as
+  // likely to be the one for a date that has since been DELETED as the one
+  // they typed. See buildLunchPushScope().
+  const months = {};
+  months[lunchMonthScopeKey(location || '', formatDateKey(date))] = true;
+  return refreshFormsForLunchDates([{ date, location: location || '' }], { months });
 }
 
 
@@ -8362,6 +8671,11 @@ function buildAppMenu(ui, includeAdmin) {
       // on one program; this is how somebody finds out which. See section 14.
       .addItem('🔍 Review Programs, Then Update Once…', 'showProgramReviewDialog')
       .addSeparator()
+      // ABOVE the push, because it is the half somebody does first: this
+      // WRITES a question (and says which forms it would reach before it does),
+      // the item below sends whatever the tab currently says. Both work on the
+      // same tab — see section 6g.
+      .addItem('➕ Build a Form Question…', 'showQuestionBuilderDialog')
       .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
       // NAMED FOR WHAT IT DOES, not for the four columns it happens to read.
       // "Apply Type / Club / No-Reg / Assistance Changes to Calendar" is a
@@ -26573,10 +26887,11 @@ function pullInstructorSheetEdits(registrantRows) {
     } catch (err) {
       // Deleted, trashed, or unreachable. NOT unregistered automatically: a
       // permission blip would otherwise silently detach a live sheet and the
-      // next push would build a second one.
+      // next push would build a second one. NOT re-thrown either — see the
+      // push half.
       log(`⚠️ Could not read the instructor sheet for "${entry.title}" (${err}).`);
       noteForAdmin('Instructor sheets that could not be read',
-        `${entry.title || programKey} — ${err}`);
+        describeInstructorAccessFailure(entry, programKey, err));
       return;
     }
 
@@ -26615,6 +26930,34 @@ function pullInstructorSheetEdits(registrantRows) {
 }
 
 
+/**
+ * What to say when an instructor sheet cannot be opened — and, when the reason
+ * is a permission, WHO has to do WHAT about it.
+ *
+ * "Sign_Up — Tai Chi (Narberth) — Exception: You do not have permission to
+ * access the requested document" is a true sentence that leaves the reader
+ * with no idea that the fix is thirty seconds of sharing, or that the account
+ * needing access is the one running the triggers rather than the one reading
+ * the email.
+ */
+function describeInstructorAccessFailure(entry, programKey, err) {
+  const name = (entry && entry.title) ? `${entry.title}${entry.location ? ` (${entry.location})` : ''}` : programKey;
+  const text = String((err && err.message) || err || '');
+  const fileRef = (entry && entry.fileId) ? `\nThe file is: https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '';
+  if (/permission|access|not found|forbidden/i.test(text)) {
+    const runningAs = getCurrentUserEmail() || 'the account running the sync';
+    return `${name} — this workbook cannot open its shared sheet: ${text}\n\n` +
+      `This run is signed in as ${runningAs}, and that account is not on the file. Nothing is lost — the ` +
+      `sheet and everything on it are fine — but the instructor's ticks are not coming back into the ` +
+      `workbook and the workbook's rows are not going out to them.\n\n` +
+      `To fix it: open the file, press Share, and either add ${runningAs} as an editor or set "Anyone with ` +
+      `the link" to Editor. Then run "Refresh Instructor Sheets Now" once. A sheet made from this menu now ` +
+      `does both of those automatically.${fileRef}`;
+  }
+  return `${name} — ${text}${fileRef}`;
+}
+
+
 // --- writing the sheets back out --------------------------------------------
 
 /**
@@ -26640,10 +26983,26 @@ function pushInstructorSignUpSheets(sessionRows, registrantRows) {
       const tab = getOrCreateSheet(file, INSTRUCTOR_SHEET_TAB_NAME);
       writeInstructorSignUpTab(tab, entry, byProgram[programKey] || []);
       pushed++;
+      // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
+      // ensureInstructorSheetAccess() existed was shared with its creator and
+      // nobody else, which is what stopped this whole round trip working when
+      // the syncs moved to another account. Repaired here because this is the
+      // pass that proves we can still open it; the flag on the registry entry
+      // is what keeps it from being three Drive calls every hour thereafter.
+      if (!entry.accessOpened) {
+        const access = ensureInstructorSheetAccess(file, `instructor sheet for "${entry.title}"`);
+        if (access.openedUp || access.editors.length > 0) {
+          saveInstructorSheetRegistryEntry(programKey, Object.assign({}, entry, { accessOpened: true }));
+        }
+      }
     } catch (err) {
+      // NEVER RE-THROWN. The registration sync calls this at the very end, on
+      // a settled picture, and an instructor's spreadsheet being unreachable
+      // is not a reason to fail a run that has already imported every
+      // registration correctly.
       log(`⚠️ Could not refresh the instructor sheet for "${entry.title}" (${err}).`);
       noteForAdmin('Instructor sheets that could not be refreshed',
-        `${entry.title || programKey} — ${err}`);
+        describeInstructorAccessFailure(entry, programKey, err));
     }
   });
   if (pushed > 0) log(`Instructor sheets: refreshed ${pushed} shared sheet(s).`);
@@ -26809,6 +27168,80 @@ function getOrCreateInstructorSheetFolder() {
 }
 
 /**
+ * OPENS THE SHEET UP so that everyone who has to touch it can.
+ *
+ * THE FAILURE THIS EXISTS FOR. An instructor sheet is created by whoever
+ * clicked the menu item — a real person, signed in as themselves — and it is
+ * then read and written every hour by whoever owns the triggers, which is
+ * routinely a DIFFERENT account. Drive shares a new file with its creator and
+ * nobody else, so the hourly sync opens it, is refused, and the sheet silently
+ * stops round-tripping: the instructor's ticks never come back into the
+ * workbook, and the workbook's rows never go out to the instructor. Both sides
+ * carry on looking like they are working.
+ *
+ * Three things are done about it here, cheapest first:
+ *
+ *   THE ADMINS AND THE TRIGGER OWNER are added as editors by name, so the
+ *     accounts that actually run this system can always open the file.
+ *   ANYONE WITH THE LINK CAN EDIT. This is a roster of first names, times and
+ *     ticks, handed to instructors who are not in the organization's directory
+ *     and who should not have to have accounts at all — and the alternative,
+ *     in practice, is a sheet nobody can open and a feature nobody uses. Low
+ *     security here is a deliberate trade, not an oversight. Anybody who wants
+ *     it narrowed can change the sharing on the file itself; nothing below
+ *     forces it open again except the run that creates it.
+ *   EVERY PART OF IT IS GUARDED separately and none of it can throw. A sheet
+ *     that cannot be shared is still a sheet — with a link somebody can share
+ *     by hand — and losing the roster over a Drive permission error is a far
+ *     worse outcome than an unshared file.
+ *
+ * Returns { openedUp, editors, problems } for the caller to report; never
+ * throws.
+ */
+function ensureInstructorSheetAccess(file, describe) {
+  const outcome = { openedUp: false, editors: [], problems: [] };
+  if (!file) return outcome;
+  const label = describe || 'instructor sheet';
+
+  let driveFile = null;
+  try {
+    driveFile = DriveApp.getFileById(file.getId());
+  } catch (err) {
+    // Almost always "you do not have permission" — i.e. we are already the
+    // account that cannot reach it, and there is nothing to do from here.
+    outcome.problems.push(`could not be reached in Drive (${err})`);
+    log(`ℹ️ Could not open the ${label} in Drive to check its sharing (${err}).`);
+    return outcome;
+  }
+
+  // The people this system runs as. Named editors survive a link-sharing
+  // setting later being tightened by hand, which is the point of doing both.
+  const wanted = listAuthorizedAdminEmails()
+    .concat([getTriggerOwner(), getCurrentUserEmail()])
+    .map(e => String(e || '').trim().toLowerCase())
+    .filter(e => e.indexOf('@') > 0);
+  dedupePreservingOrder(wanted).forEach(email => {
+    try {
+      driveFile.addEditor(email);
+      outcome.editors.push(email);
+    } catch (err) {
+      // Adding yourself, adding the owner, or a Workspace policy saying no.
+      // None of those is worth a line in the admin digest.
+      log(`ℹ️ Could not add ${email} as an editor of the ${label} (${err}).`);
+    }
+  });
+
+  try {
+    driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+    outcome.openedUp = true;
+  } catch (err) {
+    outcome.problems.push(`link sharing could not be turned on (${err})`);
+    log(`⚠️ Could not open the ${label} to anyone with the link (${err}).`);
+  }
+  return outcome;
+}
+
+/**
  * The instructor addresses recorded for one program, off Program_Options'
  * Instructor_Email column. Several are allowed, comma- or semicolon-separated,
  * because a class with a lead and an assistant is ordinary.
@@ -26928,6 +27361,12 @@ function createInstructorSignUpSheet(programValue) {
   // A brand-new spreadsheet arrives with an empty "Sheet1" beside ours.
   removeDefaultSheetIfIdle(file, INSTRUCTOR_SHEET_TAB_NAME);
 
+  // BEFORE the named instructors, and on every run rather than only the first:
+  // this is what keeps the file openable by the account that syncs it, and a
+  // sheet created before this existed is repaired the next time somebody
+  // presses the menu item. See ensureInstructorSheetAccess().
+  const access = ensureInstructorSheetAccess(file, `instructor sheet for "${title}"`);
+
   const emails = getInstructorEmailsForProgram(title, location);
   const shared = [];
   emails.forEach(email => {
@@ -26935,12 +27374,20 @@ function createInstructorSignUpSheet(programValue) {
       file.addEditor(email);
       shared.push(email);
     } catch (err) {
+      // NOT fatal, and not silent either. An address that bounces off Drive
+      // (a typo, a personal address a Workspace policy will not share with) is
+      // exactly the case where the link still works and somebody should be
+      // told to send it by hand.
       log(`⚠️ Could not share the instructor sheet for "${title}" with ${email} (${err}).`);
+      noteForAdmin('Instructor sheets that could not be shared',
+        `"${title}" (${location}) could not be shared with ${email} — ${err}. The sheet exists and ` +
+        `anyone with its link can open it, so sending them the link by hand works.`);
     }
   });
 
   log(`Instructor sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
-    `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es).`);
+    `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es), ` +
+    `link sharing ${access.openedUp ? 'on' : 'NOT on'}.`);
 
   return {
     url: file.getUrl(),
@@ -26949,7 +27396,12 @@ function createInstructorSignUpSheet(programValue) {
     isNew,
     rowCount: (byProgram[programKey] || []).length,
     shared,
-    unshared: emails.filter(e => shared.indexOf(e) === -1)
+    unshared: emails.filter(e => shared.indexOf(e) === -1),
+    // Told to the dialog, because "anyone with this link can edit it" is
+    // exactly what somebody about to paste that link into an email needs to
+    // know, and so is the opposite.
+    linkSharing: access.openedUp,
+    accessProblems: access.problems
   };
 }
 
@@ -27063,12 +27515,34 @@ function refreshInstructorSignUpSheetsNow() {
     const registrantRows = readAllSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
 
-    const merged = pullInstructorSheetEdits(registrantRows);
-    if (merged > 0) renderRegistrantsSheet(false, registrantRows);
-    const pushed = pushInstructorSignUpSheets(sessionRows, registrantRows);
+    // EACH HALF GUARDED SEPARATELY, and neither allowed to fail the action.
+    // One unreachable sheet used to be able to take the whole refresh down
+    // with it — including the sheets that were perfectly reachable, sitting
+    // further down the same loop. Both halves already skip a sheet they cannot
+    // open; this is the outer guard for everything else (a Drive outage, a
+    // quota, a registry entry pointing at something that is no longer a
+    // spreadsheet at all).
+    let merged = 0;
+    let pushed = 0;
+    const failures = [];
+    try {
+      merged = pullInstructorSheetEdits(registrantRows);
+      if (merged > 0) renderRegistrantsSheet(false, registrantRows);
+    } catch (err) {
+      log(`⚠️ Could not read the instructor sheets back in (${err}).`);
+      failures.push(`the instructors' own edits could not be read back in (${err})`);
+    }
+    try {
+      pushed = pushInstructorSignUpSheets(sessionRows, registrantRows);
+    } catch (err) {
+      log(`⚠️ Could not push the instructor sheets out (${err}).`);
+      failures.push(`the rosters could not be sent out (${err})`);
+    }
 
     flushAdminDigest('Instructor sheet refresh');
-    toastIfPossible(`Instructor sheets refreshed ✅ — ${pushed} sheet(s) out, ${merged} instructor edit(s) in.`);
+    const trouble = failures.length === 0 ? '' : ` ⚠️ ${failures.join('; ')}.`;
+    toastIfPossible(`Instructor sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
+      `${pushed} sheet(s) out, ${merged} instructor edit(s) in.${trouble}`);
   } finally {
     lock.releaseLock();
   }
@@ -27180,8 +27654,18 @@ function buildInstructorSheetHtml(options) {
         var failed = res.unshared.length > 0
           ? '<br>Could not share with ' + res.unshared.join(', ') + '.'
           : '';
+        // SAID OUT LOUD, both ways. Anyone with the link can edit this sheet —
+        // which is what makes it work for instructors who have no account here
+        // and what keeps the hourly sync able to read their ticks back — and
+        // somebody about to paste that link into an email is entitled to know
+        // it. When it could NOT be opened up, that is the more urgent half:
+        // the sync will not be able to reach it either.
+        var link = res.linkSharing
+          ? '<br>Anyone with the link can open and edit it.'
+          : '<br><b>Link sharing could not be turned on</b>, so only the people named above can open it — ' +
+            'including the account that runs the hourly sync. Share it by hand if the ticks stop coming back.';
         el.innerHTML = (res.isNew ? 'Created' : 'Refreshed') + ' — ' + res.rowCount +
-          ' row(s). ' + shared + failed +
+          ' row(s). ' + shared + failed + link +
           '<br><a href="' + res.url + '" target="_blank">Open the sheet</a>';
       })
       .withFailureHandler(function (err) {
@@ -29387,15 +29871,50 @@ const PROGRAM_QUESTION_TYPES = {
   'note': 'SECTION_HEADER',
   'header': 'SECTION_HEADER',
   'disclaimer': 'SECTION_HEADER',
-  'text': 'SECTION_HEADER',
   'image': 'IMAGE',
   'picture': 'IMAGE',
-  'photo': 'IMAGE'
+  'photo': 'IMAGE',
+  // 'text' USED TO BE IN HERE TWICE — once at the top meaning a short answer
+  // box, and again down here meaning a notice. The second one won, silently,
+  // so a row typed as "Text" became a block of words with nothing to type
+  // into. It is a short answer, which is what the first entry always said and
+  // what anybody writing "text" in a Type column means; the notice types are
+  // the four named above it.
+  //
+  // THE THREE ADDED SHAPES. Date, Time and Scale are questions the office
+  // asked for by example rather than by name — "which day would suit you",
+  // "what time do you normally arrive", "how did you hear about us, 1 to 5" —
+  // and each was being approximated with a short answer box that then had to
+  // be read by a human.
+  'date': 'DATE',
+  'time': 'TIME',
+  'scale': 'SCALE',
+  'rating': 'SCALE',
+  'linear scale': 'SCALE',
+  // ASKS NOTHING AND IS NOT AN ITEM AT ALL: this wording is appended to the
+  // form's own DESCRIPTION, the block of text above the first question. A
+  // notice sits in the middle of the form where somebody scrolling may not
+  // reach it; a description is read before anybody starts. "Bring a photo ID"
+  // belongs in one, "please note this class involves floor work" in the other.
+  'form description': 'DESCRIPTION',
+  'description': 'DESCRIPTION',
+  'intro': 'DESCRIPTION',
+  'preamble': 'DESCRIPTION',
+  // THE PICTURE AT THE TOP. Same item as 'image' — a picture with a caption —
+  // but placed at the head of the form rather than down beside the last
+  // question, which is what "put our logo on it" and "show them the book
+  // cover" actually mean. See imageGoesAtTheTop().
+  'header image': 'HEADER_IMAGE',
+  'header photo': 'HEADER_IMAGE',
+  'banner': 'HEADER_IMAGE',
+  'logo': 'HEADER_IMAGE',
+  'top image': 'HEADER_IMAGE'
 };
 
 /** What the Type column offers as a dropdown — the canonical spelling of each shape. */
 const PROGRAM_QUESTION_TYPE_OPTIONS = [
-  'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice', 'Notice', 'Image'
+  'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice',
+  'Date', 'Time', 'Scale', 'Notice', 'Header image', 'Image', 'Form description'
 ];
 
 /**
@@ -29444,7 +29963,72 @@ function questionTypeNeedsChoices(kind) {
  * setRequired() does not exist on either item; see addCustomQuestionItem().
  */
 function questionTypeIsDisplayOnly(kind) {
-  return kind === 'SECTION_HEADER' || kind === 'IMAGE';
+  return kind === 'SECTION_HEADER' || questionTypeIsImage(kind) || kind === 'DESCRIPTION';
+}
+
+/** True for both picture kinds — the one in place and the one at the top. Both need a Drive link. */
+function questionTypeIsImage(kind) {
+  return kind === 'IMAGE' || kind === 'HEADER_IMAGE';
+}
+
+/**
+ * True for the picture that belongs at the HEAD of the form rather than down
+ * beside the last question.
+ *
+ * Google gives a form one banner image, in its theme, and there is no way to
+ * set it from Apps Script or from the Forms API — so "put our photo at the top
+ * of the form" is done the one way a script can do it: an image item moved to
+ * index 0, above the first question. It is the first thing on the page, which
+ * is what was actually being asked for.
+ */
+function imageGoesAtTheTop(kind) {
+  return kind === 'HEADER_IMAGE';
+}
+
+/**
+ * True for the one kind that is not an ITEM on the form at all — its wording
+ * goes into the form's description, above every question. Filtered out of the
+ * item passes and handled by syncDescriptionInjectionsOnForm().
+ */
+function questionTypeIsDescription(kind) {
+  return kind === 'DESCRIPTION';
+}
+
+/**
+ * The scale row's shape, out of the Choices cell: "1-5", "0-10 | Never |
+ * Always", or blank for the default.
+ *
+ * Google's own limits are 0-or-1 at the bottom and at most 10 at the top, and
+ * a scale outside them is refused by the Forms API with an error that names
+ * neither the row nor the tab it came from — so it is clamped here, where the
+ * reason can be said in the row's own terms.
+ */
+function parseQuestionScale(raw) {
+  const parts = parseQuestionChoices(raw);
+  const range = /^\s*(\d+)\s*[-–to]+\s*(\d+)\s*$/i.exec(String(parts[0] || ''));
+  let lower = 1;
+  let upper = 5;
+  let labelsFrom = 0;
+  if (range) {
+    lower = Math.min(1, Math.max(0, Number(range[1])));
+    upper = Math.max(lower + 1, Math.min(10, Number(range[2])));
+    labelsFrom = 1;
+  }
+  return {
+    lower,
+    upper,
+    lowerLabel: String(parts[labelsFrom] || '').trim(),
+    upperLabel: String(parts[labelsFrom + 1] || '').trim()
+  };
+}
+
+/**
+ * The keywords on one row, lower-cased: one per line, or separated by "|" or
+ * ",". Reuses the Choices splitter so a staff member who types a list one way
+ * in one column and another way in the next is understood both times.
+ */
+function parseQuestionKeywords(raw) {
+  return parseQuestionChoices(raw).map(k => k.trim().toLowerCase()).filter(Boolean);
 }
 
 /**
@@ -29541,91 +30125,121 @@ function buildProgramQuestionSpecs(rows) {
   const seen = new Set();
 
   (rows || []).forEach((row, i) => {
-    const title = String(row[map['Question']] || '').trim();
-    if (!title) return;
-    const active = row[map['Active']];
-    // Blank means ACTIVE. A row somebody typed is a question they want asked;
-    // making them also tick a box to mean it is a trap, and the tab is
-    // rendered with the box ticked anyway.
-    if (active === false || /^(no|false|off)$/i.test(String(active || '').trim())) return;
-
-    const reject = reason => {
-      log(`${SHEET_NAMES.PROGRAM_QUESTIONS}: skipping "${title}" — ${reason}.`);
+    const outcome = readProgramQuestionRow(row, map, reserved, i);
+    if (!outcome) return; // blank or unticked — not a row, and not a mistake either
+    if (outcome.error) {
+      log(`${SHEET_NAMES.PROGRAM_QUESTIONS}: skipping "${outcome.title}" — ${outcome.error}.`);
       noteForAdmin('Program questions not added',
-        `"${title}" on "${SHEET_NAMES.PROGRAM_QUESTIONS}" was skipped — ${reason}.`);
-    };
-
-    if (reserved.has(title.toLowerCase())) {
-      reject('that is one of the registration form\'s own question titles, and re-using it would ' +
-        'make the answers to both unreadable. Give it a different wording');
+        `"${outcome.title}" on "${SHEET_NAMES.PROGRAM_QUESTIONS}" was skipped — ${outcome.error}.`);
       return;
     }
-    const rawType = String(row[map['Type']] || '').trim().toLowerCase();
-    const kind = rawType ? (PROGRAM_QUESTION_TYPES[rawType] || null) : 'TEXT';
-    if (!kind) {
-      reject(`"${row[map['Type']]}" is not a question type. Use one of: ` +
-        PROGRAM_QUESTION_TYPE_OPTIONS.join(', '));
+    if (seen.has(outcome.spec.key)) {
+      log(`${SHEET_NAMES.PROGRAM_QUESTIONS}: skipping "${outcome.title}" — it is already listed for this program.`);
+      noteForAdmin('Program questions not added',
+        `"${outcome.title}" on "${SHEET_NAMES.PROGRAM_QUESTIONS}" was skipped — it is already listed for ` +
+        `this program.`);
       return;
     }
-    const choices = parseQuestionChoices(row[map['Choices']]);
-    if (questionTypeNeedsChoices(kind) && choices.length === 0) {
-      reject('a dropdown, checkbox or multiple-choice question needs its options in the Choices column');
-      return;
-    }
-    // An image row carries a Drive link in Choices instead of options. Checked
-    // HERE rather than when the form is built, because this is where a rejected
-    // row can still say why on a tab somebody is looking at — a link that
-    // failed at form-build time would show up as a form quietly missing its
-    // picture.
-    let imageFileId = '';
-    if (kind === 'IMAGE') {
-      imageFileId = parseDriveFileId(row[map['Choices']]);
-      if (!imageFileId) {
-        reject('an image row needs the picture\'s Google Drive link in the Choices column. Upload the ' +
-          'image to Drive, use Share ▸ Copy link, and paste that here');
-        return;
-      }
-    }
-    // NOTE ON THE QUESTION COLUMN FOR THESE TWO. Every row needs one (the
-    // blank-title check at the top of this loop), because the title is this
-    // question's identity: it is how a duplicate is spotted, how the form is
-    // searched for an existing copy, and how a row that gets deleted from the
-    // tab is found and taken off the form again. So a notice's heading and an
-    // image's caption are not optional — which is no hardship, since a notice
-    // wants a heading and an untitled picture on a form is a puzzle.
-    //
-    // For a notice, the long wording goes in Help_Text and the Question column
-    // is the bold line above it ("Please note", "About this class").
-
-    const program = String(row[map['Program']] || '').trim();
-    const location = String(row[map['Location']] || '').trim();
-    // Identity is title + program + location: the same question asked of two
-    // programs is two rows, and the same question twice for one program is a
-    // duplicate that would appear on the form twice.
-    const key = `${program.toLowerCase()}|${location.toLowerCase()}|${title.toLowerCase()}`;
-    if (seen.has(key)) {
-      reject('it is already listed for this program');
-      return;
-    }
-    seen.add(key);
-
-    const required = row[map['Required']] === true ||
-      /^(yes|true|required)$/i.test(String(row[map['Required']] || '').trim());
-    const sortRaw = Number(row[map['Sort']]);
-    specs.push({
-      program, location, title, kind, choices, imageFileId,
-      help: String(row[map['Help_Text']] || '').trim(),
-      // A notice and an image collect nothing, so Required cannot apply to
-      // them however the cell is filled in — see questionTypeIsDisplayOnly().
-      required: required && !questionTypeIsDisplayOnly(kind),
-      // Row order breaks ties, so a tab with no Sort column filled in still
-      // asks the questions in the order they were typed.
-      sort: isNaN(sortRaw) || String(row[map['Sort']] || '').trim() === '' ? i : sortRaw * 1000 + i
-    });
+    seen.add(outcome.spec.key);
+    specs.push(outcome.spec);
   });
 
   specs.sort((a, b) => a.sort - b.sort);
   return specs;
+}
+
+/**
+ * ONE ROW, READ AND CHECKED: { spec } when it is usable, { error } when it is
+ * not, and null when it is not a row at all (no wording, or Active unticked).
+ *
+ * Split out of buildProgramQuestionSpecs() so the question builder dialog can
+ * put a row through the SAME rules before it is written to the tab. Two copies
+ * of "is this title reserved" is how a dialog comes to accept a question the
+ * sync then silently refuses — the person who typed it watching a form that
+ * never grows it, and the only explanation in an admin email they may not
+ * read.
+ */
+function readProgramQuestionRow(row, map, reserved, index) {
+  const title = String(row[map['Question']] || '').trim();
+  if (!title) return null;
+  const active = row[map['Active']];
+  // Blank means ACTIVE. A row somebody typed is a question they want asked;
+  // making them also tick a box to mean it is a trap, and the tab is
+  // rendered with the box ticked anyway.
+  if (active === false || /^(no|false|off)$/i.test(String(active || '').trim())) return null;
+
+  const fail = error => ({ title, error });
+
+  if ((reserved || reservedQuestionTitles()).has(title.toLowerCase())) {
+    return fail('that is one of the registration form\'s own question titles, and re-using it would ' +
+      'make the answers to both unreadable. Give it a different wording');
+  }
+  const rawType = String(row[map['Type']] || '').trim().toLowerCase();
+  const kind = rawType ? (PROGRAM_QUESTION_TYPES[rawType] || null) : 'TEXT';
+  if (!kind) {
+    return fail(`"${row[map['Type']]}" is not a question type. Use one of: ` +
+      PROGRAM_QUESTION_TYPE_OPTIONS.join(', '));
+  }
+  const choices = parseQuestionChoices(row[map['Choices']]);
+  if (questionTypeNeedsChoices(kind) && choices.length === 0) {
+    return fail('a dropdown, checkbox or multiple-choice question needs its options in the Choices column');
+  }
+  // An image row carries a Drive link in Choices instead of options. Checked
+  // HERE rather than when the form is built, because this is where a rejected
+  // row can still say why on a tab somebody is looking at — a link that
+  // failed at form-build time would show up as a form quietly missing its
+  // picture.
+  let imageFileId = '';
+  if (questionTypeIsImage(kind)) {
+    imageFileId = parseDriveFileId(row[map['Choices']]);
+    if (!imageFileId) {
+      return fail('an image row needs the picture\'s Google Drive link in the Choices column. Either use ' +
+        '"➕ Build a Form Question…", which uploads the picture for you, or upload it to Drive yourself, ' +
+        'use Share ▸ Copy link, and paste that here');
+    }
+  }
+  // NOTE ON THE QUESTION COLUMN FOR THE DISPLAY-ONLY TYPES. Every row needs
+  // one (the blank-title check at the top), because the title is this
+  // question's identity: it is how a duplicate is spotted, how the form is
+  // searched for an existing copy, and how a row that gets deleted from the
+  // tab is found and taken off the form again. So a notice's heading and an
+  // image's caption are not optional — which is no hardship, since a notice
+  // wants a heading and an untitled picture on a form is a puzzle.
+  //
+  // For a notice, the long wording goes in Help_Text and the Question column
+  // is the bold line above it ("Please note", "About this class"). A form
+  // description row is the same arrangement: the row's name here, the words
+  // people read in Help_Text.
+
+  const program = String(row[map['Program']] || '').trim();
+  const location = String(row[map['Location']] || '').trim();
+  const keywords = parseQuestionKeywords(row[map['Match_Keywords']]);
+  const required = row[map['Required']] === true ||
+    /^(yes|true|required)$/i.test(String(row[map['Required']] || '').trim());
+  const sortRaw = Number(row[map['Sort']]);
+  const at = index || 0;
+
+  return {
+    title,
+    spec: {
+      program, location, keywords, title, kind, choices, imageFileId,
+      scale: kind === 'SCALE' ? parseQuestionScale(row[map['Choices']]) : null,
+      help: String(row[map['Help_Text']] || '').trim(),
+      // A notice, an image and a description collect nothing, so Required
+      // cannot apply to them however the cell is filled in — see
+      // questionTypeIsDisplayOnly().
+      required: required && !questionTypeIsDisplayOnly(kind),
+      // Identity is title + program + location + keywords: the same question
+      // asked of two programs is two rows, and the same question twice for one
+      // program is a duplicate that would appear on the form twice. The
+      // keywords are part of it because "Bring your ID" aimed at wills and the
+      // same wording aimed at Medicare are two rules, not a duplicate.
+      key: `${program.toLowerCase()}|${location.toLowerCase()}|${keywords.join(',')}|${title.toLowerCase()}`,
+      // Row order breaks ties, so a tab with no Sort column filled in still
+      // asks the questions in the order they were typed.
+      sort: isNaN(sortRaw) || String(row[map['Sort']] || '').trim() === '' ? at : sortRaw * 1000 + at
+    }
+  };
 }
 
 /**
@@ -29637,6 +30251,16 @@ function questionsForFormContext(specs, context) {
   const norm = v => String(v || '').trim().toLowerCase();
   const titles = new Set((context.titles || []).map(norm));
   const locations = new Set((context.locations || []).map(norm));
+  // WHAT A KEYWORD IS MATCHED AGAINST: everything about this form that names
+  // what it is for — the programs on it, the sites it runs at, and the
+  // bracket tags its calendar events carry ([Club], [Personalized
+  // Assistance], [Zoom]...). One blob, searched as text, because a keyword
+  // rule is a staff member saying "anything to do with wills" and they should
+  // not have to know which of the three columns the word lives in.
+  const haystack = (context.titles || [])
+    .concat(context.locations || [])
+    .concat(context.typeTags || [])
+    .map(norm).filter(Boolean).join(' \n ');
   // "*" MEANS EVERY ONE, IN BOTH COLUMNS. Program has always read it that
   // way; Location had not, so a row saying Location "*" — which is what the
   // dropdown on that column now offers, and what somebody copying the
@@ -29648,8 +30272,55 @@ function questionsForFormContext(specs, context) {
     if (!isEvery(p) && !titles.has(p)) return false;
     const l = norm(spec.location);
     if (!isEvery(l) && !locations.has(l)) return false;
+    // ANY keyword matching is enough, and all three columns narrow TOGETHER.
+    // A row naming Location "Narberth" and keyword "wills" is asking for the
+    // wills clinic at Narberth, not for either — which is the reading that
+    // lets one row do what previously took a row per program title.
+    const keywords = spec.keywords || [];
+    if (keywords.length > 0 && !keywords.some(k => haystack.indexOf(k) !== -1)) return false;
     return true;
   });
+}
+
+/**
+ * The wording every matching "Form description" row contributes to ONE form,
+ * in Sort order, or '' when none match.
+ *
+ * The Question column is the row's name (it has to be — that is how a row is
+ * spotted as a duplicate and how a deleted one is found again); the wording
+ * itself is Help_Text. A row with only a name says that name, which is the
+ * generous reading of somebody who typed their sentence into the first column
+ * they came to.
+ */
+function buildDescriptionInjectionText(specs) {
+  const blocks = (specs || [])
+    .filter(spec => questionTypeIsDescription(spec.kind))
+    .map(spec => String(spec.help || spec.title || '').trim())
+    .filter(Boolean);
+  return blocks.length === 0 ? '' : `\n\n${blocks.join('\n\n')}`;
+}
+
+/**
+ * A freshly built description with the matching injections on the end.
+ *
+ * PURE, and used by the path that rebuilds the description from scratch
+ * (applyFormDescription()). The other path — a sync where the dates have not
+ * moved and only the injection has — cannot rebuild the base text and so has
+ * to strip its own last block off the live description instead; see
+ * syncDescriptionInjectionsOnForm().
+ */
+function applyDescriptionInjectionsToText(description, context, specs) {
+  let matching;
+  try {
+    matching = questionsForFormContext(specs || getProgramQuestionSpecs(), context);
+  } catch (err) {
+    log(`Could not read the description rows for form ${context.formId || ''} (${err}) — ` +
+      `the form keeps its plain description.`);
+    return description;
+  }
+  const injection = buildDescriptionInjectionText(matching);
+  if (!injection) return description;
+  return `${description}${injection}`;
 }
 
 /**
@@ -29695,7 +30366,12 @@ function appliedCustomQuestionTitles(formId) {
 function computeCustomQuestionFingerprint(specs) {
   const payload = (specs || []).map(s =>
     [s.title, s.kind, s.required ? 1 : 0, s.help, (s.choices || []).join('~'),
-      s.imageFileId || ''].join('|')).join('||');
+      s.imageFileId || '',
+      // The scale's shape is not in `choices` (it is parsed out of the same
+      // cell into its own object), so without this a 1-5 rating retyped as
+      // 0-10 hashed identically and never reached the form.
+      s.scale ? `${s.scale.lower}-${s.scale.upper}:${s.scale.lowerLabel}:${s.scale.upperLabel}` : ''
+    ].join('|')).join('||');
   return Utilities.base64EncodeWebSafe(
     Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, payload, Utilities.Charset.UTF_8));
 }
@@ -29720,10 +30396,12 @@ function computeCustomQuestionFingerprint(specs) {
 function syncCustomQuestionsOnForm(form, context, specs, options) {
   options = options || {};
   const formId = form.getId();
-  const wanted = specs || [];
+  // THE DESCRIPTION ROWS ARE NOT ITEMS. They are handled by
+  // syncDescriptionInjectionsOnForm(), and letting them through here would put
+  // a section header on the form saying the same thing twice.
+  const wanted = (specs || []).filter(spec => !questionTypeIsDescription(spec.kind));
   const fingerprint = computeCustomQuestionFingerprint(wanted);
-  const all = getAppliedCustomQuestions();
-  const applied = all[formId] || { fingerprint: '', titles: [] };
+  const applied = getAppliedCustomQuestions()[formId] || { fingerprint: '', titles: [] };
   if (!options.force && applied.fingerprint === fingerprint) return 0;
 
   const wantedTitles = wanted.map(s => s.title);
@@ -29748,7 +30426,11 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
   wanted.forEach(spec => {
     const items = form.getItems();
     const anchors = items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
-    const wantedCopies = Math.max(1, anchors.length);
+    // ONE COPY OF A HEADER IMAGE, WHATEVER THE PAGE COUNT. Every other custom
+    // row is repeated on both branch pages so a respondent meets it whichever
+    // way they sign up; a picture at the top of the form is at the top of the
+    // form, once. See imageGoesAtTheTop().
+    const wantedCopies = imageGoesAtTheTop(spec.kind) ? 1 : Math.max(1, anchors.length);
     const existing = items.filter(it => it.getTitle() === spec.title);
     if (existing.length === wantedCopies) return; // already on every page it belongs on
 
@@ -29766,12 +30448,18 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
       if (!item) break;
       changed++;
       try {
-        // Re-read: the item just added sits at the end of the form, and moving
-        // it to an anchor's CURRENT index puts it immediately before it.
-        const fresh = form.getItems().filter(it =>
-          it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
-        const at = fresh[n] || fresh[fresh.length - 1];
-        if (at) form.moveItem(item.getIndex(), at.getIndex());
+        // INDEX 0 for a header image — the whole point of it is to be the
+        // first thing on the page, above the first question. Everything else
+        // is re-read and moved to an anchor's CURRENT index, which puts it
+        // immediately before that anchor.
+        if (imageGoesAtTheTop(spec.kind)) {
+          form.moveItem(item.getIndex(), 0);
+        } else {
+          const fresh = form.getItems().filter(it =>
+            it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
+          const at = fresh[n] || fresh[fresh.length - 1];
+          if (at) form.moveItem(item.getIndex(), at.getIndex());
+        }
       } catch (err) {
         log(`Added "${spec.title}" to form ${formId} but could not position it (${err}) — ` +
           `it is asked at the end of the form instead.`);
@@ -29779,8 +30467,14 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
     }
   });
 
-  all[formId] = { fingerprint, titles: wantedTitles };
-  saveAppliedCustomQuestions(all);
+  // RE-READ rather than reused: the map was read at the top of this function
+  // and adding a dozen items to a form is slow enough that another pass in the
+  // same execution may have recorded against a different form since. Merged so
+  // the description block recorded by syncDescriptionInjectionsOnForm() is not
+  // dropped by a question sync that knows nothing about it.
+  const store = getAppliedCustomQuestions();
+  store[formId] = Object.assign({}, store[formId], { fingerprint, titles: wantedTitles });
+  saveAppliedCustomQuestions(store);
   if (changed > 0) {
     invalidateFormItemIndex(formId);
     log(`Program questions: ${changed} item change(s) on form ${formId}.`);
@@ -29797,7 +30491,18 @@ function addCustomQuestionItem(form, spec) {
     else if (spec.kind === 'CHECKBOX') item = form.addCheckboxItem().setChoiceValues(spec.choices);
     else if (spec.kind === 'MULTIPLE_CHOICE') item = form.addMultipleChoiceItem().setChoiceValues(spec.choices);
     else if (spec.kind === 'SECTION_HEADER') item = form.addSectionHeaderItem();
-    else if (spec.kind === 'IMAGE') {
+    else if (spec.kind === 'DATE') item = form.addDateItem();
+    else if (spec.kind === 'TIME') item = form.addTimeItem();
+    else if (spec.kind === 'SCALE') {
+      const scale = spec.scale || parseQuestionScale('');
+      item = form.addScaleItem().setBounds(scale.lower, scale.upper);
+      // Both ends or neither: Forms takes them as a pair, and one label on its
+      // own reads as a scale somebody half-filled-in.
+      if (scale.lowerLabel || scale.upperLabel) {
+        item.setLabels(scale.lowerLabel || String(scale.lower), scale.upperLabel || String(scale.upper));
+      }
+    }
+    else if (questionTypeIsImage(spec.kind)) {
       // The blob is fetched per form. A picture on ten forms is ten uploads,
       // which is why this only ever runs when the questions actually changed
       // (see syncCustomQuestionsOnForm()'s fingerprint).
@@ -29866,16 +30571,67 @@ function applyProgramFormExtensions(form, context, options) {
     log(`Could not shape form ${form.getId()} for its ${context.sessions.length} session(s) (${err}).`);
   }
 
+  let matching = null;
   try {
     const specs = options.questionSpecs || getProgramQuestionSpecs();
-    changed += syncCustomQuestionsOnForm(form, context,
-      questionsForFormContext(specs, context), { force: options.force });
+    matching = questionsForFormContext(specs, context);
+    changed += syncCustomQuestionsOnForm(form, context, matching, { force: options.force });
   } catch (err) {
     log(`Could not apply the extra questions to form ${form.getId()} (${err}).`);
     noteForAdmin('Program questions not added',
       `Form ${form.getId()} (${describeLocations(context.locations)}) — ${err}`);
   }
+
+  // THE WORDING ABOVE THE FIRST QUESTION. Separately guarded from the items
+  // for the usual reason — a description that will not write must not cost the
+  // form its questions — and done here rather than inside
+  // buildFormDescription() because this is the one step every form-building
+  // path reaches with the form already open and its dates already settled.
+  try {
+    changed += syncDescriptionInjectionsOnForm(form, context, matching);
+  } catch (err) {
+    log(`Could not apply the description wording to form ${form.getId()} (${err}).`);
+  }
   return changed;
+}
+
+/**
+ * Puts the matching "Form description" wording onto a form whose description
+ * this pass did NOT rebuild — the hourly sync, where the dates have not moved
+ * and the only thing that changed is the tab.
+ *
+ * HOW IT AVOIDS STACKING. The base text cannot be re-derived here (a rebuild
+ * path knows the capacity hints and the sign-up wording that went into it;
+ * this one does not), so what is stripped is the exact block this script
+ * appended last time, recorded per form beside the question titles. A
+ * description somebody has since edited by hand simply will not carry that
+ * block, in which case nothing is stripped and the new wording is appended to
+ * what they wrote — which is the conservative answer: their words survive.
+ *
+ * Returns 1 when the form was written to, 0 otherwise.
+ */
+function syncDescriptionInjectionsOnForm(form, context, matching) {
+  const formId = form.getId();
+  const specs = matching || questionsForFormContext(getProgramQuestionSpecs(), context);
+  const injection = buildDescriptionInjectionText(specs);
+
+  const store = getAppliedCustomQuestions();
+  const entry = store[formId] || {};
+  const previous = String(entry.description || '');
+
+  const current = form.getDescription() || '';
+  let base = current;
+  if (previous && current.lastIndexOf(previous) === current.length - previous.length) {
+    base = current.slice(0, current.length - previous.length);
+  }
+
+  const wanted = `${base}${injection}`;
+  if (wanted !== current) form.setDescription(wanted);
+  if (previous === injection && wanted === current) return 0;
+
+  store[formId] = Object.assign({}, store[formId], { description: injection });
+  saveAppliedCustomQuestions(store);
+  return wanted === current ? 0 : 1;
 }
 
 /**
@@ -29926,6 +30682,13 @@ function formContextFromGroup(group, formId) {
     isAssistance: !!group.isAssistance,
     isLunchOnly: !!group.isLunchOnly,
     maxPerMonth: group.maxPerMonth || 0,
+    // The same keyword surface the sheet-side context carries (see
+    // buildFormSessionContext()), assembled from what a calendar group knows
+    // about itself — so a keyword rule matches a form identically whether it
+    // was just built from the calendar or refreshed from the dashboard.
+    typeTags: [group.typeTag, group.isClub ? 'Club' : '',
+      group.isAssistance ? 'Personalized Assistance' : '',
+      group.isFixed ? 'Grouped' : ''].map(t => String(t || '').trim()).filter(Boolean),
     programTitle: group.cleanTitle
   };
 }
@@ -30533,6 +31296,10 @@ function renderProgramQuestionsSheet(allRows) {
   });
   // Choices is one option per line, so the cell has to be able to show them.
   sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, span, 1).setWrap(true);
+  // Same for the keywords, which are a list in exactly the same way.
+  if (map['Match_Keywords'] !== undefined) {
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Match_Keywords'] + 1, span, 1).setWrap(true);
+  }
 
   // THE NOTES ARE ON THE HEADERS, not the rows: a note on the header is there
   // on an empty tab, which is exactly when somebody needs telling what the
@@ -30545,11 +31312,23 @@ function renderProgramQuestionsSheet(allRows) {
     'What kind of thing this row puts on the form.\n\n' +
     'ASKS A QUESTION:\n' +
     '  Short answer / Paragraph — free text\n' +
-    '  Dropdown / Checkboxes / Multiple choice — needs its options in Choices\n\n' +
+    '  Dropdown / Checkboxes / Multiple choice — needs its options in Choices\n' +
+    '  Date / Time — a real date or time picker, not a typed-in one\n' +
+    '  Scale — 1 to 5 by default. Choices can set the range and the end\n' +
+    '          labels: "1-5 | Not at all | Very much"\n' +
+
     'SHOWS SOMETHING (asks nothing, so Required does not apply):\n' +
-    '  Notice — a block of words. The heading goes in Question and the wording\n' +
-    '           in Help_Text. This is where a class disclaimer belongs.\n' +
-    '  Image  — a picture. Put its Google Drive link in Choices.\n\n' +
+    '  Notice — a block of words in the middle of the form. The heading goes\n' +
+    '           in Question and the wording in Help_Text. This is where a\n' +
+    '           class disclaimer belongs.\n' +
+    '  Image  — a picture beside the last question. Put its Google Drive\n' +
+    '           link in Choices.\n' +
+    '  Header image — the same picture, at the TOP of the form instead,\n' +
+    '           above the first question. This is the one for a logo or a\n' +
+    '           photo of the class.\n' +
+    '  Form description — wording added to the top of the form, above the\n' +
+    '           first question, where it is read before anybody starts.\n' +
+    '           Question names the row; Help_Text is what is actually shown.\n\n' +
     'Anything here survives a form being rebuilt. Anything you type onto the\n' +
     'form itself does not.');
   headerNote('Question',
@@ -30572,6 +31351,18 @@ function renderProgramQuestionsSheet(allRows) {
   headerNote('Location',
     'Pick "*" or leave it blank for every location. Otherwise only forms\n' +
     'covering that location are asked.');
+  headerNote('Match_Keywords',
+    'The other way to aim a row — by what a program IS rather than by its\n' +
+    'exact name. One keyword per line (or separated by "|" or a comma).\n\n' +
+    'A keyword is matched as text against every program title the form\n' +
+    'covers, its locations, and its calendar tags. So:\n\n' +
+    '  wills      reaches "Low-Cost Wills" AND "Wills & Estates Clinic"\n' +
+    '  zoom       reaches everything running online\n' +
+    '  club       reaches every [Club] program\n\n' +
+    'ANY one keyword matching is enough. Program, Location and Match_Keywords\n' +
+    'narrow TOGETHER: Location "Narberth" plus keyword "wills" means the\n' +
+    'wills clinic at Narberth, not either of them.\n\n' +
+    'Leave it blank not to narrow by keyword at all.');
   return rows.length;
 }
 
@@ -30893,6 +31684,508 @@ function buildAssistanceScheduleHtml() {
 </script>`;
 }
 
+// ---------------------------------------------------------------------------
+// THE QUESTION BUILDER  (the dialog behind "➕ Build a Form Question…")
+// ---------------------------------------------------------------------------
+//
+// WHY A DIALOG WHEN THERE IS ALREADY A TAB. Program_Questions is nine columns
+// wide, and four of them only mean something for certain values of a fifth:
+// Choices is options, or a Drive link, or a scale range, depending on Type;
+// Required means nothing for three of the types; Program, Location and
+// Match_Keywords narrow together in a way a spreadsheet cannot show you. The
+// tab is the right place to EDIT twenty questions and the wrong place to write
+// the first one, and the failure it produces is silent — a row that reaches no
+// form, on a tab that looks exactly like a row that reaches every form.
+//
+// So this asks for one question at a time, shows only the fields that type
+// actually uses, runs the same validation the sync runs (readProgramQuestionRow())
+// before anything is written, and — the part that a tab genuinely cannot do —
+// says WHICH FORMS IT WOULD LAND ON, by name, before you commit to it.
+
+/** Where a picture uploaded through the builder is kept. One folder, so they stay findable. */
+const FORM_IMAGE_FOLDER_NAME = 'Form Images';
+
+/**
+ * The biggest picture the dialog will take. Not a Drive limit — a
+ * google.script.run one: the whole file crosses as a base64 string in one
+ * call, and a phone photo straight off a camera roll is the shape that would
+ * otherwise fail with a browser error naming nothing.
+ */
+const FORM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** The folder the builder's uploads go in, made on first use. */
+function getOrCreateFormImageFolder() {
+  const folders = DriveApp.getFoldersByName(FORM_IMAGE_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  const folder = DriveApp.createFolder(FORM_IMAGE_FOLDER_NAME);
+  log(`Created Drive folder "${FORM_IMAGE_FOLDER_NAME}" for pictures put on forms.`);
+  return folder;
+}
+
+/**
+ * Called from the builder dialog: takes the picture somebody chose off their
+ * own computer, puts it in Drive, and hands back the link the row stores.
+ *
+ * WHY THE UPLOAD IS HERE AT ALL. The row has always stored a Drive link, and
+ * getting one meant: save the photo, open Drive, upload it, find it, Share,
+ * Copy link, come back, paste. Six steps outside this workbook to put a
+ * picture on a form, every one of them a place to give up. The picture is the
+ * whole content of the row; asking somebody to go and file it themselves first
+ * is asking them to do the system's job.
+ *
+ * NOTHING IS SHARED. The form does not read the Drive file — the script fetches
+ * its bytes and uploads a copy INTO the form (addImageItem().setImage()), so
+ * the file's own permissions never come into it. That is worth knowing: a
+ * photo put on a public form is not a Drive file made public.
+ *
+ * Returns { ok, url, fileId, name, error }.
+ */
+function uploadFormImage(payload) {
+  payload = payload || {};
+  const name = String(payload.name || 'form-image').trim() || 'form-image';
+  const mimeType = String(payload.mimeType || '').trim();
+  if (mimeType.indexOf('image/') !== 0) {
+    return { ok: false, error: `That is a ${mimeType || 'file of unknown type'}, not a picture. ` +
+      `Choose a JPG, PNG or GIF.` };
+  }
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(String(payload.bytes || ''));
+  } catch (err) {
+    return { ok: false, error: `That file could not be read (${err}).` };
+  }
+  if (bytes.length === 0) return { ok: false, error: 'That file is empty.' };
+  if (bytes.length > FORM_IMAGE_MAX_BYTES) {
+    return { ok: false, error: `That picture is ${Math.round(bytes.length / (1024 * 1024))}MB, and the ` +
+      `limit here is ${FORM_IMAGE_MAX_BYTES / (1024 * 1024)}MB. Most phone photos shrink below it if you ` +
+      `send them at "medium" size.` };
+  }
+
+  try {
+    const blob = Utilities.newBlob(bytes, mimeType, name);
+    const file = getOrCreateFormImageFolder().createFile(blob);
+    log(`Form image uploaded: "${name}" (${file.getId()}).`);
+    return { ok: true, url: file.getUrl(), fileId: file.getId(), name };
+  } catch (err) {
+    log(`⚠️ Could not save the uploaded form image "${name}" (${err}).`);
+    return { ok: false, error: `Could not save it to Drive (${err}).` };
+  }
+}
+
+/** MENU ENTRY: build one form question, see what it would match, then add it. */
+function showQuestionBuilderDialog() {
+  const html = HtmlService.createHtmlOutput(buildQuestionBuilderHtml({
+    programs: listKnownProgramTitles(),
+    locations: Object.keys(CALENDAR_MAP).map(k => CALENDAR_MAP[k]).filter(Boolean),
+    types: PROGRAM_QUESTION_TYPE_OPTIONS
+  })).setWidth(620).setHeight(680);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Build a Form Question');
+}
+
+/**
+ * The row a dialog answer describes, in Program_Questions order.
+ *
+ * Built here rather than in the browser so the column ORDER lives in exactly
+ * one place — HEADERS.Program_Questions — and adding a column later cannot
+ * leave the dialog writing values one cell to the left.
+ */
+function buildQuestionRowFromDialog(answer) {
+  const headers = HEADERS.Program_Questions;
+  const map = getIndexMap(headers);
+  const row = headers.map(() => '');
+  const put = (column, value) => { if (map[column] !== undefined) row[map[column]] = value; };
+  put('Program', String(answer.program || '').trim() || PROGRAM_QUESTION_ALL_PROGRAMS);
+  put('Location', String(answer.location || '').trim() || PROGRAM_QUESTION_ALL_PROGRAMS);
+  put('Match_Keywords', String(answer.keywords || '').trim());
+  put('Question', String(answer.title || '').trim());
+  put('Type', String(answer.type || '').trim() || 'Short answer');
+  put('Choices', String(answer.choices || '').trim());
+  put('Help_Text', String(answer.help || '').trim());
+  put('Required', !!answer.required);
+  put('Sort', String(answer.sort || '').trim() === '' ? '' : Number(answer.sort));
+  put('Active', true);
+  return row;
+}
+
+/**
+ * Called from the dialog on every keystroke-ish change: what this row would do
+ * if it were saved.
+ *
+ * Returns { ok, error, matches, sample, note } — `matches` counting the LIVE
+ * FORMS it would be added to and `sample` naming the first few, which is the
+ * one question the tab cannot answer and the one that decides whether the
+ * keywords were right.
+ */
+function previewBuiltQuestion(answer) {
+  const map = getIndexMap(HEADERS.Program_Questions);
+  const outcome = readProgramQuestionRow(buildQuestionRowFromDialog(answer || {}), map,
+    reservedQuestionTitles(), 0);
+  if (!outcome) return { ok: false, error: 'Type the question\'s wording first.' };
+  if (outcome.error) return { ok: false, error: `${outcome.error}.` };
+
+  const spec = outcome.spec;
+  let contexts;
+  try {
+    contexts = listFormContextsForMatching();
+  } catch (err) {
+    log(`Question builder: could not list the forms to match against (${err}).`);
+    return { ok: true, error: '', matches: -1, sample: [], note: 'Could not read the session table, so ' +
+      'this cannot say which forms it would reach. The question itself is fine.' };
+  }
+
+  const hits = contexts.filter(context => questionsForFormContext([spec], context).length === 1);
+  const sample = hits.slice(0, 6).map(context =>
+    `${(context.titles || []).slice(0, 2).join(' + ') || '(untitled)'} — ${describeLocations(context.locations)}`);
+
+  let note = '';
+  if (hits.length === 0) {
+    note = 'As typed, this reaches NO form. Check the spelling of the program, or use a keyword ' +
+      'instead of an exact name.';
+  } else if (hits.length === contexts.length && contexts.length > 1) {
+    note = 'This reaches EVERY form in the workbook. If that is not what you meant, name a program, ' +
+      'a location, or a keyword.';
+  }
+  if (imageGoesAtTheTop(spec.kind)) {
+    note += (note ? ' ' : '') + 'The picture goes at the very top of the form, above the first question.';
+  }
+  return { ok: true, error: '', matches: hits.length, total: contexts.length, sample, note };
+}
+
+/**
+ * Every live form as a matching context, once each — what previewBuiltQuestion()
+ * tries a candidate row against.
+ *
+ * The same buildFormSessionContext() the real thing uses, so a preview cannot
+ * disagree with what the sync will do half an hour later.
+ */
+function listFormContextsForMatching() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return [];
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const byForm = groupRegistryRowsByForm(rows, map);
+  const sharedFormIds = getSharedFormIdSet();
+  return Object.keys(byForm)
+    .map(formId => buildFormSessionContext(formId, byForm[formId], map, sharedFormIds))
+    .filter(context => context.sessions.length > 0);
+}
+
+/**
+ * Called from the dialog's Add button: validate, append the row to
+ * Program_Questions, and (if asked) push it to the forms straight away.
+ *
+ * APPENDED, NEVER REWRITTEN. The tab is read, the row is added to the end of
+ * what was there, and the whole lot is re-rendered — so a question added here
+ * cannot disturb one somebody typed by hand, and both are ordered by the same
+ * Sort column afterwards.
+ */
+function saveBuiltQuestion(answer, alsoPush) {
+  const map = getIndexMap(HEADERS.Program_Questions);
+  const row = buildQuestionRowFromDialog(answer || {});
+  const outcome = readProgramQuestionRow(row, map, reservedQuestionTitles(), 0);
+  if (!outcome) return '⚠️ Type the question\'s wording first.';
+  if (outcome.error) return `⚠️ ${outcome.error}.`;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_QUESTIONS);
+  const existing = sheet ? readProgramQuestionRows(sheet) : [];
+
+  // The same duplicate rule the sync applies, said here where it can be acted
+  // on rather than in an email after the fact.
+  const clash = existing.some(other => {
+    const parsed = readProgramQuestionRow(other, map, reservedQuestionTitles(), 0);
+    return parsed && parsed.spec && parsed.spec.key === outcome.spec.key;
+  });
+  if (clash) {
+    return `⚠️ "${outcome.title}" is already listed for that program, location and keyword set. ` +
+      `Edit the row on the ${SHEET_NAMES.PROGRAM_QUESTIONS} tab instead of adding a second one.`;
+  }
+
+  renderProgramQuestionsSheet(existing.concat([row]));
+  invalidateProgramQuestionSpecs();
+  sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_QUESTIONS);
+  if (sheet) ss.setActiveSheet(sheet);
+
+  const where = outcome.spec.program === PROGRAM_QUESTION_ALL_PROGRAMS && !outcome.spec.keywords.length
+    ? 'every form' : 'the forms it names';
+  if (!alsoPush) {
+    return `✅ Added "${outcome.title}" to ${SHEET_NAMES.PROGRAM_QUESTIONS}. It reaches ${where} on the ` +
+      `next sync — or press "Update Program Questions on Forms" to do it now.`;
+  }
+
+  let pushed;
+  try {
+    // skipConfirm: the dialog's own button IS the confirmation, and a second
+    // "are you sure?" behind a modal that is already open cannot be answered
+    // (Apps Script will not show a prompt on top of a modal dialog).
+    pushed = pushProgramQuestionsToForms({ skipConfirm: true });
+  } catch (err) {
+    log(`Question builder: could not push "${outcome.title}" to the forms (${err}).`);
+    return `✅ Added "${outcome.title}" to ${SHEET_NAMES.PROGRAM_QUESTIONS}, but the forms could not be ` +
+      `updated just now (${err}). The next sync will put it on them.`;
+  }
+  return `✅ Added "${outcome.title}" and updated the forms — ${pushed} item(s) changed.`;
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildQuestionBuilderHtml(options) {
+  const option = (value, label) =>
+    `<option value="${escapeHtmlForDialog(value)}">${escapeHtmlForDialog(label === undefined ? value : label)}</option>`;
+  const typeTags = (options.types || []).map(t => option(t)).join('\n');
+  const programTags = [option(PROGRAM_QUESTION_ALL_PROGRAMS, '* — every program')]
+    .concat((options.programs || []).map(p => option(p))).join('\n');
+  const locationTags = [option(PROGRAM_QUESTION_ALL_PROGRAMS, '* — every location')]
+    .concat((options.locations || []).map(l => option(l))).join('\n');
+
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 12px; }
+  h3 { margin: 0 0 6px 0; font-size: 15px; }
+  p.hint { color: #666; margin: 0 0 10px 0; line-height: 1.4; }
+  label.field { display: block; font-weight: bold; margin-top: 12px; }
+  input[type=text], select, textarea { width: 100%; padding: 6px; font-size: 13px;
+    box-sizing: border-box; margin-top: 4px; font-family: inherit; }
+  textarea { height: 56px; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .sub { color: #666; font-weight: normal; font-size: 12px; }
+  button { background: #1155CC; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
+           font-size: 13px; cursor: pointer; margin-top: 14px; }
+  button.secondary { background: #E8EAED; color: #202124; }
+  button[disabled] { background: #9aa0a6; cursor: default; }
+  #match { margin-top: 12px; padding: 8px; background: #F1F3F4; border-radius: 4px; line-height: 1.5;
+           min-height: 34px; }
+  #match ul { margin: 6px 0 0 18px; padding: 0; }
+  #status { margin-top: 10px; min-height: 18px; font-weight: bold; line-height: 1.5; }
+  .ok { color: #188038; } .err { color: #C5221F; }
+</style>
+<h3>Build a form question</h3>
+<p class="hint">
+  Everything here is written to the <b>${escapeHtmlForDialog(SHEET_NAMES.PROGRAM_QUESTIONS)}</b> tab as one
+  row, and re-applied to the forms after every rebuild — unlike a question typed onto a form by hand,
+  which the next rebuild deletes.
+</p>
+
+<label class="field">What is it?
+  <select id="type" onchange="shape(); preview();">${typeTags}</select>
+</label>
+
+<label class="field">Wording <span class="sub" id="titleHint">— the question people read</span>
+  <input type="text" id="title" oninput="preview()" placeholder="e.g. What is your zip code?">
+</label>
+
+<label class="field">Help text <span class="sub" id="helpHint">— the small print under it (optional)</span>
+  <textarea id="help" oninput="preview()"></textarea>
+</label>
+
+<div id="choicesBlock">
+  <label class="field">Choices <span class="sub" id="choicesHint">— one per line</span>
+    <textarea id="choices" oninput="preview()"></textarea>
+  </label>
+</div>
+
+<div id="pictureBlock" style="display:none;">
+  <label class="field">Picture
+    <span class="sub">— choose it here and it is uploaded for you</span>
+    <input type="file" id="picker" accept="image/*" onchange="uploadPicture()">
+  </label>
+  <div id="pictureState" class="sub" style="margin-top:6px;">No picture chosen yet.</div>
+  <img id="picturePreview" style="display:none;max-width:100%;margin-top:8px;border-radius:4px;">
+  <label class="field">…or paste a Google Drive link
+    <input type="text" id="pictureLink" oninput="preview()" placeholder="https://drive.google.com/file/d/…">
+  </label>
+</div>
+
+<div class="row">
+  <div>
+    <label class="field">Program
+      <select id="program" onchange="preview()">${programTags}</select>
+    </label>
+  </div>
+  <div>
+    <label class="field">Location
+      <select id="location" onchange="preview()">${locationTags}</select>
+    </label>
+  </div>
+</div>
+
+<label class="field">Keywords <span class="sub">— or match by word instead: "wills", "zoom", "club"</span>
+  <input type="text" id="keywords" oninput="preview()" placeholder="one per line, or separated by | or ,">
+</label>
+
+<div class="row">
+  <div>
+    <label class="field">Order <span class="sub">(optional)</span>
+      <input type="text" id="sort" oninput="preview()" placeholder="1">
+    </label>
+  </div>
+  <div>
+    <label class="field" id="requiredBlock">Answer required?
+      <select id="required" onchange="preview()">
+        <option value="">No</option>
+        <option value="yes">Yes</option>
+      </select>
+    </label>
+  </div>
+</div>
+
+<div id="match">Fill in the wording to see which forms this would reach.</div>
+
+<button id="add" onclick="save(true)">Add it and update the forms now</button>
+<button class="secondary" onclick="save(false)">Add it to the tab only</button>
+<div id="status"></div>
+
+<script>
+  var DISPLAY_ONLY = ['Notice', 'Image', 'Header image', 'Form description'];
+  var NO_CHOICES = ['Short answer', 'Paragraph', 'Notice', 'Form description', 'Date', 'Time'];
+  var PICTURE = ['Image', 'Header image'];
+
+  function val(id) { return document.getElementById(id).value; }
+
+  function answer() {
+    // A picture row stores its Drive link in the SAME column the choice types
+    // store their options in — see the Choices column on Program_Questions —
+    // so the two inputs feed one field rather than the row growing a tenth.
+    var isPicture = PICTURE.indexOf(val('type')) !== -1;
+    return {
+      type: val('type'), title: val('title'), help: val('help'),
+      choices: isPicture ? val('pictureLink') : val('choices'),
+      program: val('program'), location: val('location'), keywords: val('keywords'),
+      sort: val('sort'), required: val('required') === 'yes'
+    };
+  }
+
+  // The file is read in the browser and crosses as base64 — google.script.run
+  // cannot carry a File object. Everything about the outcome is said in
+  // #pictureState, because a silent failure here leaves somebody looking at a
+  // picture they believe is attached and a row that has nothing in it.
+  function uploadPicture() {
+    var file = document.getElementById('picker').files[0];
+    if (!file) return;
+    state('Uploading “' + file.name + '”…');
+    var reader = new FileReader();
+    reader.onerror = function () { state('That file could not be read.'); };
+    reader.onload = function () {
+      var base64 = String(reader.result).split(',')[1] || '';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res || !res.ok) { state(res && res.error ? res.error : 'Upload failed.'); return; }
+          document.getElementById('pictureLink').value = res.url;
+          var img = document.getElementById('picturePreview');
+          img.src = String(reader.result);
+          img.style.display = 'block';
+          state('“' + res.name + '” uploaded ✓ — it is saved in your Drive under “Form Images”.');
+          if (!val('title')) {
+            document.getElementById('title').value = res.name.replace(/\\.[a-z0-9]+$/i, '');
+          }
+          preview();
+        })
+        .withFailureHandler(function (err) { state('Upload failed: ' + err.message); })
+        .uploadFormImage({ name: file.name, mimeType: file.type, bytes: base64 });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function state(text) { document.getElementById('pictureState').textContent = text; }
+
+  // Only the fields this type actually uses. The tab cannot do this, and it is
+  // where most of the confusion about Choices comes from.
+  function shape() {
+    var type = val('type');
+    var display = DISPLAY_ONLY.indexOf(type) !== -1;
+    var picture = PICTURE.indexOf(type) !== -1;
+    document.getElementById('requiredBlock').style.display = display ? 'none' : 'block';
+    document.getElementById('pictureBlock').style.display = picture ? 'block' : 'none';
+    document.getElementById('choicesBlock').style.display =
+      (!picture && NO_CHOICES.indexOf(type) === -1) ? 'block' : 'none';
+
+    var titleHint = '— the question people read';
+    var helpHint = '— the small print under it (optional)';
+    var choicesHint = '— one per line';
+    if (type === 'Notice') {
+      titleHint = '— the bold heading ("Please note")';
+      helpHint = '— the wording itself. This is the part people read.';
+    } else if (type === 'Form description') {
+      titleHint = '— a name for this rule (not shown on the form)';
+      helpHint = '— the wording added to the top of the form. This is what people read.';
+    } else if (type === 'Image') {
+      titleHint = '— the caption under the picture';
+    } else if (type === 'Header image') {
+      titleHint = '— the caption. The picture goes at the very top of the form';
+    } else if (type === 'Scale') {
+      choicesHint = '— range and end labels: 1-5 | Not at all | Very much';
+    }
+    document.getElementById('titleHint').textContent = titleHint;
+    document.getElementById('helpHint').textContent = helpHint;
+    document.getElementById('choicesHint').textContent = choicesHint;
+  }
+
+  var pending = null;
+  function preview() {
+    if (pending) window.clearTimeout(pending);
+    // Unhurried on purpose: each preview reads the whole session table server
+    // side, and the answer only changes when the program, location, keywords
+    // or type do — not on every letter of the wording.
+    pending = window.setTimeout(runPreview, 800);
+  }
+
+  function runPreview() {
+    if (!val('title')) {
+      show('Fill in the wording to see which forms this would reach.');
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(render)
+      .withFailureHandler(function (err) { show('Could not check this: ' + err.message); })
+      .previewBuiltQuestion(answer());
+  }
+
+  function render(result) {
+    if (!result.ok) { show('<span class="err">' + esc(result.error) + '</span>'); return; }
+    var html;
+    if (result.matches < 0) {
+      html = esc(result.note);
+    } else {
+      html = '<b>' + result.matches + ' of ' + result.total + ' form(s)</b> would be asked this.';
+      if (result.sample && result.sample.length) {
+        html += '<ul><li>' + result.sample.map(esc).join('</li><li>') + '</li></ul>';
+      }
+      if (result.note) html += '<div style="margin-top:6px;">' + esc(result.note) + '</div>';
+    }
+    show(html);
+  }
+
+  function save(alsoPush) {
+    document.getElementById('add').disabled = true;
+    say('Working…', '');
+    google.script.run
+      .withSuccessHandler(function (message) {
+        document.getElementById('add').disabled = false;
+        say(message, message.indexOf('⚠') === 0 ? 'err' : 'ok');
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('add').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      })
+      .saveBuiltQuestion(answer(), alsoPush);
+  }
+
+  function esc(text) {
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function show(html) { document.getElementById('match').innerHTML = html; }
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = cls;
+  }
+  shape();
+</script>`;
+}
+
+
 /**
  * Menu action: push the current Program_Questions tab onto every live form now,
  * rather than waiting for the next calendar sync.
@@ -30902,8 +32195,13 @@ function buildAssistanceScheduleHtml() {
  * again by hand on the form itself — which is the failure this whole feature
  * exists to prevent.
  */
-function pushProgramQuestionsToForms() {
-  if (!confirmConsequentialAction('Update the registration forms now?',
+function pushProgramQuestionsToForms(options) {
+  options = options || {};
+  // skipConfirm is for a caller that has ALREADY asked — the question builder
+  // dialog, whose own button is the confirmation. Apps Script cannot show a
+  // prompt on top of an open modal, so asking again there is not a second
+  // safeguard, it is a dialog that appears to hang.
+  if (!options.skipConfirm && !confirmConsequentialAction('Update the registration forms now?',
     `Every question on "${SHEET_NAMES.PROGRAM_QUESTIONS}" is added to the forms it names, and any ` +
     `question this system added before but which is no longer listed is removed from them.\n\n` +
     `Answers already collected are never changed.`, true)) {
