@@ -39,7 +39,7 @@ const sandbox = {
     })
   },
   SpreadsheetApp: { getActiveSpreadsheet: () => null, getActive: () => null },
-  FormApp: { ItemType: { PAGE_BREAK: 'PAGE_BREAK', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', FILE_UPLOAD: 'FILE_UPLOAD' } },
+  FormApp: { ItemType: { PAGE_BREAK: 'PAGE_BREAK', PARAGRAPH_TEXT: 'PARAGRAPH_TEXT' } },
   CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},
   Session: { getScriptTimeZone: () => 'America/New_York',
     getEffectiveUser: () => ({ getEmail: () => 'test@example.com' }) },
@@ -80,7 +80,8 @@ const specs = sandbox.buildProgramQuestionSpecs([
         Help_Text: 'This session runs on Zoom. A link is emailed the day before.' }),
   row({ Program: '*', Question: 'How did you hear about us?', Type: 'Scale',
         Choices: '1-7 | Not at all | A great deal' }),
-  row({ Program: '*', Question: 'Photo of your device', Type: 'Photo upload' }),
+  row({ Program: '*', Question: 'Our T\'ai Chi class', Type: 'Header image',
+        Choices: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing' }),
   row({ Program: '*', Question: 'Preferred day', Type: 'Date' })
 ]);
 
@@ -97,8 +98,16 @@ check('and its end labels', specs.find(s => s.kind === 'SCALE').scale.upperLabel
 check('an out-of-range scale is clamped', sandbox.parseQuestionScale('0-40').upper, 10);
 check('a blank scale is 1 to 5',
   [sandbox.parseQuestionScale('').lower, sandbox.parseQuestionScale('').upper], [1, 5]);
-check('a photo upload row is a file upload', specs.find(s => s.title === 'Photo of your device').kind,
-  'FILE_UPLOAD');
+const header = specs.find(s => s.kind === 'HEADER_IMAGE');
+check('a header image reads its Drive link', header.imageFileId, '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+check('a header image goes at the top', sandbox.imageGoesAtTheTop(header.kind), true);
+check('an ordinary image does not', sandbox.imageGoesAtTheTop('IMAGE'), false);
+check('both picture kinds are pictures',
+  [sandbox.questionTypeIsImage('IMAGE'), sandbox.questionTypeIsImage('HEADER_IMAGE')], [true, true]);
+check('a picture asks nothing', sandbox.questionTypeIsDisplayOnly('HEADER_IMAGE'), true);
+check('a picture row with no link is refused',
+  !!sandbox.readProgramQuestionRow(row({ Question: 'Logo', Type: 'Header image' }),
+    qMap, sandbox.reservedQuestionTitles(), 0).error, true);
 check('a date row is a date', specs.find(s => s.title === 'Preferred day').kind, 'DATE');
 check('a description row asks nothing', sandbox.questionTypeIsDisplayOnly('DESCRIPTION'), true);
 

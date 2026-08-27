@@ -124,11 +124,10 @@
  *      a form covers ("wills", "zoom", "club"), which is the aim that survives
  *      a program being renamed on the calendar. Besides questions, a row can
  *      be a NOTICE, an IMAGE, or a FORM DESCRIPTION injected above the first
- *      question; and a PHOTO UPLOAD row adopts the form's own file-upload item
- *      and keeps it named through every rebuild, because Apps Script cannot
- *      create one (see adoptFileUploadItem()). "➕ Build a Form Question…"
- *      writes a row from a dialog, and says which forms it would reach BEFORE
- *      it writes it.
+ *      question; and a HEADER IMAGE row puts a picture at the very top of the
+ *      form, above everything. "➕ Build a Form Question…" writes a row from a
+ *      dialog — uploading the picture for you — and says which forms it would
+ *      reach BEFORE it writes it.
  *    - THE REGISTRATION LINK injected into each event description is an
  *      HTML ANCHOR, not a raw URL, and carries no visible Form ID. The ID
  *      rides in the href's #fragment — invisible to the reader, ignored by
@@ -1782,10 +1781,9 @@ const HEADERS = {
    *   Question    the question text, and its identity. Renaming it is adding a
    *               new question and retiring the old one.
    *   Type        Short answer / Paragraph / Dropdown / Checkboxes /
-   *               Multiple choice / Date / Time / Scale, or one of the three
-   *               that ask nothing — Notice, Image, Form description — or
-   *               Photo upload (see adoptFileUploadItem() for what Apps
-   *               Script can and cannot build).
+   *               Multiple choice / Date / Time / Scale, or one of the four
+   *               that ask nothing — Notice, Image, Header image, Form
+   *               description.
    *   Choices     one per line (or separated by "|"), for the three choice
    *               types; the picture's Drive link for an Image; the range and
    *               end labels for a Scale ("1-5 | Not at all | Very much").
@@ -29902,19 +29900,21 @@ const PROGRAM_QUESTION_TYPES = {
   'description': 'DESCRIPTION',
   'intro': 'DESCRIPTION',
   'preamble': 'DESCRIPTION',
-  // A FILE — in practice a photo. Apps Script cannot CREATE one of these (see
-  // adoptFileUploadItem()); what this row does is adopt and keep the one on
-  // the form, or leave a link box in its place until somebody adds it.
-  'photo upload': 'FILE_UPLOAD',
-  'file upload': 'FILE_UPLOAD',
-  'upload': 'FILE_UPLOAD',
-  'attachment': 'FILE_UPLOAD'
+  // THE PICTURE AT THE TOP. Same item as 'image' — a picture with a caption —
+  // but placed at the head of the form rather than down beside the last
+  // question, which is what "put our logo on it" and "show them the book
+  // cover" actually mean. See imageGoesAtTheTop().
+  'header image': 'HEADER_IMAGE',
+  'header photo': 'HEADER_IMAGE',
+  'banner': 'HEADER_IMAGE',
+  'logo': 'HEADER_IMAGE',
+  'top image': 'HEADER_IMAGE'
 };
 
 /** What the Type column offers as a dropdown — the canonical spelling of each shape. */
 const PROGRAM_QUESTION_TYPE_OPTIONS = [
   'Short answer', 'Paragraph', 'Dropdown', 'Checkboxes', 'Multiple choice',
-  'Date', 'Time', 'Scale', 'Photo upload', 'Notice', 'Image', 'Form description'
+  'Date', 'Time', 'Scale', 'Notice', 'Header image', 'Image', 'Form description'
 ];
 
 /**
@@ -29963,7 +29963,26 @@ function questionTypeNeedsChoices(kind) {
  * setRequired() does not exist on either item; see addCustomQuestionItem().
  */
 function questionTypeIsDisplayOnly(kind) {
-  return kind === 'SECTION_HEADER' || kind === 'IMAGE' || kind === 'DESCRIPTION';
+  return kind === 'SECTION_HEADER' || questionTypeIsImage(kind) || kind === 'DESCRIPTION';
+}
+
+/** True for both picture kinds — the one in place and the one at the top. Both need a Drive link. */
+function questionTypeIsImage(kind) {
+  return kind === 'IMAGE' || kind === 'HEADER_IMAGE';
+}
+
+/**
+ * True for the picture that belongs at the HEAD of the form rather than down
+ * beside the last question.
+ *
+ * Google gives a form one banner image, in its theme, and there is no way to
+ * set it from Apps Script or from the Forms API — so "put our photo at the top
+ * of the form" is done the one way a script can do it: an image item moved to
+ * index 0, above the first question. It is the first thing on the page, which
+ * is what was actually being asked for.
+ */
+function imageGoesAtTheTop(kind) {
+  return kind === 'HEADER_IMAGE';
 }
 
 /**
@@ -30171,11 +30190,12 @@ function readProgramQuestionRow(row, map, reserved, index) {
   // failed at form-build time would show up as a form quietly missing its
   // picture.
   let imageFileId = '';
-  if (kind === 'IMAGE') {
+  if (questionTypeIsImage(kind)) {
     imageFileId = parseDriveFileId(row[map['Choices']]);
     if (!imageFileId) {
-      return fail('an image row needs the picture\'s Google Drive link in the Choices column. Upload the ' +
-        'image to Drive, use Share ▸ Copy link, and paste that here');
+      return fail('an image row needs the picture\'s Google Drive link in the Choices column. Either use ' +
+        '"➕ Build a Form Question…", which uploads the picture for you, or upload it to Drive yourself, ' +
+        'use Share ▸ Copy link, and paste that here');
     }
   }
   // NOTE ON THE QUESTION COLUMN FOR THE DISPLAY-ONLY TYPES. Every row needs
@@ -30385,18 +30405,12 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
   if (!options.force && applied.fingerprint === fingerprint) return 0;
 
   const wantedTitles = wanted.map(s => s.title);
-  // NEVER DELETED, even when its row goes: an adopted upload question is the
-  // one item on the form this script cannot build back (see
-  // adoptFileUploadItem()), so retiring its row un-names it rather than
-  // destroying it and the answers hanging off it.
-  const protectedTitles = new Set(applied.uploads || []);
   let changed = 0;
 
   // 1. Retire what is no longer asked for. Only titles WE recorded are ever
   //    deleted — a question staff typed onto the form by hand is not ours to
   //    remove, however much it looks like one of ours.
-  const stale = (applied.titles || [])
-    .filter(t => wantedTitles.indexOf(t) === -1 && !protectedTitles.has(t));
+  const stale = (applied.titles || []).filter(t => wantedTitles.indexOf(t) === -1);
   if (stale.length > 0) {
     const staleSet = new Set(stale);
     changed += deleteFormItems(form,
@@ -30412,13 +30426,11 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
   wanted.forEach(spec => {
     const items = form.getItems();
     const anchors = items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
-    // ONE COPY OF AN UPLOAD QUESTION, WHATEVER THE PAGE COUNT. Every other
-    // custom question is asked on both branch pages so a respondent meets it
-    // whichever way they sign up; an upload question cannot be, because there
-    // is exactly one on the form and it cannot be duplicated — asking for a
-    // second copy would find the same item twice and, on the next sync, count
-    // one copy as a mismatch and delete it.
-    const wantedCopies = spec.kind === 'FILE_UPLOAD' ? 1 : Math.max(1, anchors.length);
+    // ONE COPY OF A HEADER IMAGE, WHATEVER THE PAGE COUNT. Every other custom
+    // row is repeated on both branch pages so a respondent meets it whichever
+    // way they sign up; a picture at the top of the form is at the top of the
+    // form, once. See imageGoesAtTheTop().
+    const wantedCopies = imageGoesAtTheTop(spec.kind) ? 1 : Math.max(1, anchors.length);
     const existing = items.filter(it => it.getTitle() === spec.title);
     if (existing.length === wantedCopies) return; // already on every page it belongs on
 
@@ -30428,7 +30440,7 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
     // wrong leaves two copies on one page and none on the other. Clearing and
     // re-adding is a handful of extra calls on a path that only runs when the
     // questions actually changed.
-    if (existing.length > 0 && spec.kind !== 'FILE_UPLOAD') {
+    if (existing.length > 0) {
       changed += deleteFormItems(form, existing, `form ${formId} (re-placing "${spec.title}")`);
     }
     for (let n = 0; n < wantedCopies; n++) {
@@ -30436,12 +30448,18 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
       if (!item) break;
       changed++;
       try {
-        // Re-read: the item just added sits at the end of the form, and moving
-        // it to an anchor's CURRENT index puts it immediately before it.
-        const fresh = form.getItems().filter(it =>
-          it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
-        const at = fresh[n] || fresh[fresh.length - 1];
-        if (at) form.moveItem(item.getIndex(), at.getIndex());
+        // INDEX 0 for a header image — the whole point of it is to be the
+        // first thing on the page, above the first question. Everything else
+        // is re-read and moved to an anchor's CURRENT index, which puts it
+        // immediately before that anchor.
+        if (imageGoesAtTheTop(spec.kind)) {
+          form.moveItem(item.getIndex(), 0);
+        } else {
+          const fresh = form.getItems().filter(it =>
+            it.getTitle() === TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
+          const at = fresh[n] || fresh[fresh.length - 1];
+          if (at) form.moveItem(item.getIndex(), at.getIndex());
+        }
       } catch (err) {
         log(`Added "${spec.title}" to form ${formId} but could not position it (${err}) — ` +
           `it is asked at the end of the form instead.`);
@@ -30455,16 +30473,7 @@ function syncCustomQuestionsOnForm(form, context, specs, options) {
   // the description block recorded by syncDescriptionInjectionsOnForm() is not
   // dropped by a question sync that knows nothing about it.
   const store = getAppliedCustomQuestions();
-  store[formId] = Object.assign({}, store[formId], {
-    fingerprint,
-    titles: wantedTitles,
-    // ONLY the ones that really are upload items. A "Photo upload" row on a
-    // form that had none to adopt left a short-answer LINK box behind
-    // (adoptFileUploadItem()), and recording that as an upload would protect
-    // it from ever being removed again — the row could be deleted from the tab
-    // and the box would stay on the form for good.
-    uploads: titlesBackedByUploadItem(form, adoptedUploadTitles(wanted))
-  });
+  store[formId] = Object.assign({}, store[formId], { fingerprint, titles: wantedTitles });
   saveAppliedCustomQuestions(store);
   if (changed > 0) {
     invalidateFormItemIndex(formId);
@@ -30493,14 +30502,12 @@ function addCustomQuestionItem(form, spec) {
         item.setLabels(scale.lowerLabel || String(scale.lower), scale.upperLabel || String(scale.upper));
       }
     }
-    else if (spec.kind === 'FILE_UPLOAD') item = adoptFileUploadItem(form, spec);
-    else if (spec.kind === 'IMAGE') {
+    else if (questionTypeIsImage(spec.kind)) {
       // The blob is fetched per form. A picture on ten forms is ten uploads,
       // which is why this only ever runs when the questions actually changed
       // (see syncCustomQuestionsOnForm()'s fingerprint).
       item = form.addImageItem().setImage(DriveApp.getFileById(spec.imageFileId).getBlob());
     } else item = form.addTextItem();
-    if (!item) return null; // an adopted upload item reports its own reason
     item.setTitle(spec.title);
     if (spec.help) item.setHelpText(spec.help);
     // A notice and an image have no setRequired() at all — calling it throws,
@@ -30512,100 +30519,6 @@ function addCustomQuestionItem(form, spec) {
     noteForAdmin('Program questions not added',
       `"${spec.title}" could not be added to form ${form.getId()}: ${err}`);
     return null;
-  }
-}
-
-/**
- * A "Photo upload" row, applied to one form — by ADOPTING the upload question
- * already on it, because Apps Script cannot build one.
- *
- * THE LIMIT, stated plainly because it shapes everything below: neither the
- * FormApp service nor the Forms REST API can CREATE a file-upload question.
- * FormApp has an addTextItem, an addDateItem and a dozen others; there is no
- * addFileUploadItem, and there never has been. What Apps Script CAN do is read
- * one that exists, and set its title, its help text and whether it is
- * required.
- *
- * So a Photo upload row does one of two things:
- *
- *   THE FORM ALREADY HAS AN UPLOAD QUESTION — somebody added it by hand once —
- *     and this adopts it: retitled to the row's wording, and kept that way
- *     through every future rebuild, which is the whole reason to list it on
- *     the tab rather than leave it on the form. An adopted item is never
- *     deleted by the retirement pass (see syncCustomQuestionsOnForm()), because
- *     deleting it would take the uploaded files' question with it and we could
- *     not build it back.
- *   THE FORM HAS NONE — and a short answer box asking for a LINK goes in its
- *     place, so the form still collects something, plus one note telling
- *     whoever runs this what to add by hand to turn it into a real upload.
- *     A silent nothing here would be a form quietly missing the one question
- *     it was edited to ask.
- */
-function adoptFileUploadItem(form, spec) {
-  const existing = findAdoptableFileUploadItem(form, spec.title);
-  if (existing) {
-    // Returned for the caller to title, help and position exactly like any
-    // other item — the point of adoption is that it then behaves like one.
-    return existing;
-  }
-  log(`ℹ️ Form ${form.getId()} has no file-upload question to use for "${spec.title}" — ` +
-    `asking for a link instead (Apps Script cannot create an upload question).`);
-  noteForAdmin('Photo upload questions',
-    `"${spec.title}" on "${SHEET_NAMES.PROGRAM_QUESTIONS}" asks for a photo or file upload, and ` +
-    `${describeFormLink(form.getId())} has no upload question for it to use. Google does not let a script ` +
-    `create one. The form is asking for a LINK instead, which still works. To turn it into a real upload: ` +
-    `open the form, add a "File upload" question anywhere on it, and this system will adopt it, rename it ` +
-    `to "${spec.title}" and keep it through every future rebuild.`);
-  return form.addTextItem();
-}
-
-/**
- * A file-upload item on `form` that is free to be adopted — one already
- * carrying this row's title first (so a re-run finds its own), else any other.
- *
- * Type-guarded rather than title-guarded, and wrapped: FormApp.ItemType.FILE_UPLOAD
- * is absent from some older runtimes, and a missing enum member must read as
- * "this form has no upload question" rather than throw and cost the form every
- * question after this one.
- */
-function findAdoptableFileUploadItem(form, title) {
-  try {
-    const uploadType = FormApp.ItemType && FormApp.ItemType.FILE_UPLOAD;
-    if (!uploadType) return null;
-    const uploads = form.getItems(uploadType) || [];
-    if (uploads.length === 0) return null;
-    const wanted = String(title || '').trim().toLowerCase();
-    return uploads.filter(it => it.getTitle().trim().toLowerCase() === wanted)[0] || uploads[0];
-  } catch (err) {
-    log(`ℹ️ Could not look for a file-upload question on form ${form.getId()} (${err}).`);
-    return null;
-  }
-}
-
-/** The titles wanted as file uploads. Which of them the form actually HAS is titlesBackedByUploadItem(). */
-function adoptedUploadTitles(specs) {
-  return (specs || []).filter(s => s.kind === 'FILE_UPLOAD').map(s => s.title);
-}
-
-/**
- * Of `titles`, the ones that name a real file-upload item on this form — the
- * set the retirement pass must never delete, because nothing here could build
- * one back.
- *
- * A title that ended up as the link-box fallback is deliberately NOT in it:
- * that box is an ordinary text item and should come off the form the day its
- * row comes off the tab, like every other question.
- */
-function titlesBackedByUploadItem(form, titles) {
-  if (!titles || titles.length === 0) return [];
-  try {
-    const uploadType = FormApp.ItemType && FormApp.ItemType.FILE_UPLOAD;
-    if (!uploadType) return [];
-    const onForm = new Set((form.getItems(uploadType) || []).map(it => it.getTitle()));
-    return titles.filter(t => onForm.has(t));
-  } catch (err) {
-    log(`ℹ️ Could not confirm which questions on form ${form.getId()} are file uploads (${err}).`);
-    return [];
   }
 }
 
@@ -31403,15 +31316,16 @@ function renderProgramQuestionsSheet(allRows) {
     '  Date / Time — a real date or time picker, not a typed-in one\n' +
     '  Scale — 1 to 5 by default. Choices can set the range and the end\n' +
     '          labels: "1-5 | Not at all | Very much"\n' +
-    '  Photo upload — adopts the form\'s own file-upload question and keeps it\n' +
-    '          named and in place through every rebuild. Google does not let a\n' +
-    '          script CREATE one, so if the form has none this asks for a link\n' +
-    '          instead and emails you what to add by hand (once).\n\n' +
+
     'SHOWS SOMETHING (asks nothing, so Required does not apply):\n' +
     '  Notice — a block of words in the middle of the form. The heading goes\n' +
     '           in Question and the wording in Help_Text. This is where a\n' +
     '           class disclaimer belongs.\n' +
-    '  Image  — a picture. Put its Google Drive link in Choices.\n' +
+    '  Image  — a picture beside the last question. Put its Google Drive\n' +
+    '           link in Choices.\n' +
+    '  Header image — the same picture, at the TOP of the form instead,\n' +
+    '           above the first question. This is the one for a logo or a\n' +
+    '           photo of the class.\n' +
     '  Form description — wording added to the top of the form, above the\n' +
     '           first question, where it is read before anybody starts.\n' +
     '           Question names the row; Help_Text is what is actually shown.\n\n' +
@@ -31788,6 +31702,76 @@ function buildAssistanceScheduleHtml() {
 // before anything is written, and — the part that a tab genuinely cannot do —
 // says WHICH FORMS IT WOULD LAND ON, by name, before you commit to it.
 
+/** Where a picture uploaded through the builder is kept. One folder, so they stay findable. */
+const FORM_IMAGE_FOLDER_NAME = 'Form Images';
+
+/**
+ * The biggest picture the dialog will take. Not a Drive limit — a
+ * google.script.run one: the whole file crosses as a base64 string in one
+ * call, and a phone photo straight off a camera roll is the shape that would
+ * otherwise fail with a browser error naming nothing.
+ */
+const FORM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** The folder the builder's uploads go in, made on first use. */
+function getOrCreateFormImageFolder() {
+  const folders = DriveApp.getFoldersByName(FORM_IMAGE_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  const folder = DriveApp.createFolder(FORM_IMAGE_FOLDER_NAME);
+  log(`Created Drive folder "${FORM_IMAGE_FOLDER_NAME}" for pictures put on forms.`);
+  return folder;
+}
+
+/**
+ * Called from the builder dialog: takes the picture somebody chose off their
+ * own computer, puts it in Drive, and hands back the link the row stores.
+ *
+ * WHY THE UPLOAD IS HERE AT ALL. The row has always stored a Drive link, and
+ * getting one meant: save the photo, open Drive, upload it, find it, Share,
+ * Copy link, come back, paste. Six steps outside this workbook to put a
+ * picture on a form, every one of them a place to give up. The picture is the
+ * whole content of the row; asking somebody to go and file it themselves first
+ * is asking them to do the system's job.
+ *
+ * NOTHING IS SHARED. The form does not read the Drive file — the script fetches
+ * its bytes and uploads a copy INTO the form (addImageItem().setImage()), so
+ * the file's own permissions never come into it. That is worth knowing: a
+ * photo put on a public form is not a Drive file made public.
+ *
+ * Returns { ok, url, fileId, name, error }.
+ */
+function uploadFormImage(payload) {
+  payload = payload || {};
+  const name = String(payload.name || 'form-image').trim() || 'form-image';
+  const mimeType = String(payload.mimeType || '').trim();
+  if (mimeType.indexOf('image/') !== 0) {
+    return { ok: false, error: `That is a ${mimeType || 'file of unknown type'}, not a picture. ` +
+      `Choose a JPG, PNG or GIF.` };
+  }
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(String(payload.bytes || ''));
+  } catch (err) {
+    return { ok: false, error: `That file could not be read (${err}).` };
+  }
+  if (bytes.length === 0) return { ok: false, error: 'That file is empty.' };
+  if (bytes.length > FORM_IMAGE_MAX_BYTES) {
+    return { ok: false, error: `That picture is ${Math.round(bytes.length / (1024 * 1024))}MB, and the ` +
+      `limit here is ${FORM_IMAGE_MAX_BYTES / (1024 * 1024)}MB. Most phone photos shrink below it if you ` +
+      `send them at "medium" size.` };
+  }
+
+  try {
+    const blob = Utilities.newBlob(bytes, mimeType, name);
+    const file = getOrCreateFormImageFolder().createFile(blob);
+    log(`Form image uploaded: "${name}" (${file.getId()}).`);
+    return { ok: true, url: file.getUrl(), fileId: file.getId(), name };
+  } catch (err) {
+    log(`⚠️ Could not save the uploaded form image "${name}" (${err}).`);
+    return { ok: false, error: `Could not save it to Drive (${err}).` };
+  }
+}
+
 /** MENU ENTRY: build one form question, see what it would match, then add it. */
 function showQuestionBuilderDialog() {
   const html = HtmlService.createHtmlOutput(buildQuestionBuilderHtml({
@@ -31861,10 +31845,8 @@ function previewBuiltQuestion(answer) {
     note = 'This reaches EVERY form in the workbook. If that is not what you meant, name a program, ' +
       'a location, or a keyword.';
   }
-  if (spec.kind === 'FILE_UPLOAD') {
-    note += (note ? ' ' : '') + 'Google does not let a script create an upload question. This adopts the ' +
-      'one already on a form (and keeps it named through every rebuild); a form without one is asked for ' +
-      'a link instead, and you are emailed what to add by hand.';
+  if (imageGoesAtTheTop(spec.kind)) {
+    note += (note ? ' ' : '') + 'The picture goes at the very top of the form, above the first question.';
   }
   return { ok: true, error: '', matches: hits.length, total: contexts.length, sample, note };
 }
@@ -32004,6 +31986,18 @@ function buildQuestionBuilderHtml(options) {
   </label>
 </div>
 
+<div id="pictureBlock" style="display:none;">
+  <label class="field">Picture
+    <span class="sub">— choose it here and it is uploaded for you</span>
+    <input type="file" id="picker" accept="image/*" onchange="uploadPicture()">
+  </label>
+  <div id="pictureState" class="sub" style="margin-top:6px;">No picture chosen yet.</div>
+  <img id="picturePreview" style="display:none;max-width:100%;margin-top:8px;border-radius:4px;">
+  <label class="field">…or paste a Google Drive link
+    <input type="text" id="pictureLink" oninput="preview()" placeholder="https://drive.google.com/file/d/…">
+  </label>
+</div>
+
 <div class="row">
   <div>
     <label class="field">Program
@@ -32044,27 +32038,68 @@ function buildQuestionBuilderHtml(options) {
 <div id="status"></div>
 
 <script>
-  var DISPLAY_ONLY = ['Notice', 'Image', 'Form description'];
-  var NO_CHOICES = ['Short answer', 'Paragraph', 'Notice', 'Form description', 'Date', 'Time', 'Photo upload'];
+  var DISPLAY_ONLY = ['Notice', 'Image', 'Header image', 'Form description'];
+  var NO_CHOICES = ['Short answer', 'Paragraph', 'Notice', 'Form description', 'Date', 'Time'];
+  var PICTURE = ['Image', 'Header image'];
 
   function val(id) { return document.getElementById(id).value; }
 
   function answer() {
+    // A picture row stores its Drive link in the SAME column the choice types
+    // store their options in — see the Choices column on Program_Questions —
+    // so the two inputs feed one field rather than the row growing a tenth.
+    var isPicture = PICTURE.indexOf(val('type')) !== -1;
     return {
-      type: val('type'), title: val('title'), help: val('help'), choices: val('choices'),
+      type: val('type'), title: val('title'), help: val('help'),
+      choices: isPicture ? val('pictureLink') : val('choices'),
       program: val('program'), location: val('location'), keywords: val('keywords'),
       sort: val('sort'), required: val('required') === 'yes'
     };
   }
+
+  // The file is read in the browser and crosses as base64 — google.script.run
+  // cannot carry a File object. Everything about the outcome is said in
+  // #pictureState, because a silent failure here leaves somebody looking at a
+  // picture they believe is attached and a row that has nothing in it.
+  function uploadPicture() {
+    var file = document.getElementById('picker').files[0];
+    if (!file) return;
+    state('Uploading “' + file.name + '”…');
+    var reader = new FileReader();
+    reader.onerror = function () { state('That file could not be read.'); };
+    reader.onload = function () {
+      var base64 = String(reader.result).split(',')[1] || '';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res || !res.ok) { state(res && res.error ? res.error : 'Upload failed.'); return; }
+          document.getElementById('pictureLink').value = res.url;
+          var img = document.getElementById('picturePreview');
+          img.src = String(reader.result);
+          img.style.display = 'block';
+          state('“' + res.name + '” uploaded ✓ — it is saved in your Drive under “Form Images”.');
+          if (!val('title')) {
+            document.getElementById('title').value = res.name.replace(/\\.[a-z0-9]+$/i, '');
+          }
+          preview();
+        })
+        .withFailureHandler(function (err) { state('Upload failed: ' + err.message); })
+        .uploadFormImage({ name: file.name, mimeType: file.type, bytes: base64 });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function state(text) { document.getElementById('pictureState').textContent = text; }
 
   // Only the fields this type actually uses. The tab cannot do this, and it is
   // where most of the confusion about Choices comes from.
   function shape() {
     var type = val('type');
     var display = DISPLAY_ONLY.indexOf(type) !== -1;
+    var picture = PICTURE.indexOf(type) !== -1;
     document.getElementById('requiredBlock').style.display = display ? 'none' : 'block';
+    document.getElementById('pictureBlock').style.display = picture ? 'block' : 'none';
     document.getElementById('choicesBlock').style.display =
-      NO_CHOICES.indexOf(type) === -1 ? 'block' : 'none';
+      (!picture && NO_CHOICES.indexOf(type) === -1) ? 'block' : 'none';
 
     var titleHint = '— the question people read';
     var helpHint = '— the small print under it (optional)';
@@ -32077,11 +32112,10 @@ function buildQuestionBuilderHtml(options) {
       helpHint = '— the wording added to the top of the form. This is what people read.';
     } else if (type === 'Image') {
       titleHint = '— the caption under the picture';
-      choicesHint = '— the picture\'s Google Drive link (Share ▸ Copy link)';
+    } else if (type === 'Header image') {
+      titleHint = '— the caption. The picture goes at the very top of the form';
     } else if (type === 'Scale') {
       choicesHint = '— range and end labels: 1-5 | Not at all | Very much';
-    } else if (type === 'Photo upload') {
-      helpHint = '— tell people what to attach';
     }
     document.getElementById('titleHint').textContent = titleHint;
     document.getElementById('helpHint').textContent = helpHint;

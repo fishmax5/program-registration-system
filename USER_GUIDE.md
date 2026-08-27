@@ -617,9 +617,10 @@ and the system puts them back on the form every time. Add a row:
 
 > **The quickest way in is the builder.** **📝 Programs & Forms ▸ ➕ Build a
 > Form Question…** asks for one question at a time, shows only the fields that
-> kind of question actually uses, and — the part the tab cannot do — tells you
-> **which forms it would land on, by name**, before you commit to it. It writes
-> the same row you would have typed, and can push it to the forms on the spot.
+> kind of question actually uses, **uploads a picture for you** if the row is
+> one, and — the part the tab cannot do — tells you **which forms it would land
+> on, by name**, before you commit to it. It writes the same row you would have
+> typed, and can push it to the forms on the spot.
 > The tab below is still the right place to edit twenty of them.
 
 | Column | What to put |
@@ -628,8 +629,8 @@ and the system puts them back on the form every time. Add a row:
 | `Location` | dropdown of your locations. `*` or blank = everywhere |
 | `Match_Keywords` | the other way to aim a row — **by word rather than by exact name**. One per line (or separated by `\|` or a comma), matched as text against every program title the form covers, its locations and its calendar tags. `wills` reaches *Low-Cost Wills* **and** *Wills & Estates Clinic*; `zoom` reaches everything online; `club` reaches every `[Club]` program. **Any one** keyword matching is enough, and this narrows **together** with Program and Location — Location `Narberth` plus keyword `wills` means the wills clinic at Narberth, not either. Blank = do not narrow by keyword |
 | `Question` | the question as the registrant will read it |
-| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice`, `Date`, `Time`, `Scale`, `Photo upload` — or `Notice` / `Image` / `Form description`, which show something instead of asking it (see below) |
-| `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For an `Image` row this holds the picture's Google Drive link instead; for a `Scale` row it holds the range and the end labels — `1-5 \| Not at all \| Very much` |
+| `Type` | `Short answer`, `Paragraph`, `Dropdown`, `Checkboxes`, `Multiple choice`, `Date`, `Time`, `Scale` — or `Notice` / `Image` / `Header image` / `Form description`, which show something instead of asking it (see below) |
+| `Choices` | the options, **one per line** (or separated by `\|`), for `Dropdown` / `Checkboxes` / `Multiple choice`. For a picture row this holds the picture's Google Drive link instead (the builder fills it in for you); for a `Scale` row it holds the range and the end labels — `1-5 \| Not at all \| Very much` |
 | `Help_Text` | the small grey line under the question. Optional — except on a `Notice` or a `Form description` row, where it is the wording people actually read |
 | `Required` | tick to make it compulsory |
 | `Sort` | the order the questions appear in. Optional |
@@ -643,22 +644,24 @@ Then press **❓ Update Program Questions on Forms**, or wait for the next
 | Type | Where it lands |
 |---|---|
 | `Notice` | a block of words **in the middle of the form**, just above *Anything Else?*. `Question` is the bold heading (*"Please note"*), `Help_Text` is the wording. This is where a class disclaimer belongs |
-| `Image` | a picture, with `Question` as its caption. Put its Google Drive link in `Choices` |
+| `Image` | a picture beside the last question, with `Question` as its caption |
+| `Header image` | the same picture, **at the very top of the form** instead — above the first question. This is the one for a logo, a photo of the class, a book cover |
 | `Form description` | wording added to the **top of the form**, above the first question, where it is read before anybody starts. `Question` only names the rule (it is not shown); `Help_Text` is what people read. *"Bring a photo ID"* belongs here; *"this class involves floor work"* is a `Notice` |
 
-**`Photo upload` is a half-measure, deliberately, and here is why.** Google does
-not let a script *create* a file-upload question — not through Apps Script and
-not through the Forms API. What a `Photo upload` row does instead is **adopt**
-the upload question already on a form: it renames it to your wording, sets its
-help text and whether it is required, and — the point of listing it here —
-**keeps it through every rebuild**, which a hand-added question does not
-survive. It is also never deleted when you remove the row, since nothing could
-build it back.
+**Putting a photo on a form: choose it, and that's it.** In the builder, pick
+`Header image` (or `Image`) and a file picker appears. Choose the photo on your
+computer and it is uploaded, filed in a Drive folder called **Form Images**, and
+its link written into the row for you — the six steps of *save it, open Drive,
+upload, find it, Share, Copy link, come back, paste* are gone. You can still
+paste a Drive link by hand if the picture is already up there.
 
-If the form has no upload question yet, the row asks for a **link** instead so
-the form still collects something, and you get one email telling you what to do:
-open the form, add a *File upload* question anywhere on it, and it will be
-adopted, renamed and kept from then on.
+A `Header image` is placed at index 0 of the form, above the first question.
+That is as close to a banner as a script can get: Google's own form banner lives
+in the form's *theme*, and neither Apps Script nor the Forms API can set it.
+
+> **Uploading a photo does not share anything.** The form does not read the
+> Drive file — the script fetches its bytes and puts a copy *into* the form. A
+> photo on a public form is not a public Drive file.
 
 > **The dropdowns reach the blank rows too**, so the row you are *about* to type
 > into already has them. They used to stop at the last row that had something on
@@ -2191,7 +2194,7 @@ Everything else is grouped by the job it belongs to.
 | Item | What it does |
 |---|---|
 | **🔍 Review Programs, Then Update Once…** | Walks your programs a screen at a time and says, for each, what ought to be true and whether it is; your answers are applied together in one pass at the end, and a second tab shows which program is on which form — see [Reviewing your programs](#reviewing-your-programs). Start here when something looks wrong and you don't know where |
-| **➕ Build a Form Question…** | Builds one extra question, notice, image, photo-upload rule or form-description injection — showing which forms it would reach *before* it writes it — and adds it to **Program_Questions**. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
+| **➕ Build a Form Question…** | Builds one extra question, notice, picture (uploading it for you) or form-description injection — showing which forms it would reach *before* it writes it — and adds it to **Program_Questions**. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
