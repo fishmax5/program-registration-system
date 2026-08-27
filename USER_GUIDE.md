@@ -252,8 +252,8 @@ appointment-based.
 |---|---|---|
 | What you register for | a **date** | a **time on a date** |
 | The form asks | which dates, who's coming, who eats | which appointment time, and whether they'd take an earlier one |
-| Capacity | `[Cap: N]`, or unlimited | **one person per slot** — so however many slots fit in the event. A *smaller* `[Cap: N]` still wins (keep the last half hour free); a bigger one is ignored, because a slot has no second chair |
-| Lunch | asked, if the date serves it | never asked |
+| Capacity | `[Cap: N]`, or unlimited | **one person per slot** — so however many slots fit in the event. A *smaller* `[Cap: N]` still wins (keep the last half hour free); a bigger one is ignored, because a slot has no second chair; and `[Cap: 1]` means *one person per appointment*, not a session that fills on its first booking |
+| Lunch | asked as a grid — which dates, who eats | asked as **one yes/no**, about the day they just booked, and only where lunch is served on it |
 | Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
 | Guest questions | yes | **yes** — "individual or couple" is a real answer for a will |
 
@@ -273,6 +273,26 @@ whose dates are already on the dashboard updates those rows on the next
 the event if the provider wants to see fewer people than the span allows —
 anything *larger* than the slot count is ignored and logged, since it would be
 offering times that don't exist.
+
+**`[Cap: 1]` says what these programs ARE, so it is read that way.** One-to-one
+is the whole point of an appointment program, and `[Cap: 1]` is the natural way
+to type it — but read as a *session* cap it would mean "of the six appointments
+this afternoon, sell one", so a 12:30–3:30 clinic went 🔴 Waitlist Only after
+the first booking and every remaining time was stamped *(FULL - Waitlist)* on
+the form. It now means **one person per appointment**, which is the same answer
+as leaving the tag off entirely: the session holds however many slots fit, and
+three sessions of three slots take nine bookings before anything is full. If you
+genuinely want a provider to see *one* person that day, say it with the event's
+own length (or `[Slots: N]` set to the whole span) so the day really does hold
+one appointment — that is also the only version the form can show honestly.
+
+**Lunch on an appointment form.** The roster grids stay off — a person books one
+time on one day, so a table of dates against people is the wrong question — but
+where the day serves lunch the form now asks one optional yes/no under the time
+they picked: *"Would you like lunch on the day of your appointment?"* A **Yes**
+orders them a meal on that date like any other registration; a **No**, or no
+answer at all, orders nothing. On a day nothing is catered the question is not
+on the form.
 
 **Nobody can book the same time twice.** In the rare case where two people
 submit inside the same few minutes, neither is dropped: the second one is
@@ -646,7 +666,7 @@ Then press **❓ Update Program Questions on Forms**, or wait for the next
 | `Notice` | a block of words **in the middle of the form**, just above *Anything Else?*. `Question` is the bold heading (*"Please note"*), `Help_Text` is the wording. This is where a class disclaimer belongs |
 | `Image` | a picture beside the last question, with `Question` as its caption |
 | `Header image` | the same picture, **at the very top of the form** instead — above the first question. This is the one for a logo, a photo of the class, a book cover |
-| `Form description` | wording added to the **top of the form**, above the first question, where it is read before anybody starts. `Question` only names the rule (it is not shown); `Help_Text` is what people read. *"Bring a photo ID"* belongs here; *"this class involves floor work"* is a `Notice` |
+| `Form description` | wording added to the **top of the form**, above the first question, where it is read before anybody starts. `Question` only names the rule (it is not shown); `Help_Text` is what people read. *"Bring a photo ID"* belongs here; *"this class involves floor work"* is a `Notice`. **Update Program Questions on Forms** pushes these as well as the questions — a run that changes only the wording now says so instead of *"the forms already match"* |
 
 **Putting a photo on a form: choose it, and that's it.** In the builder, pick
 `Header image` (or `Image`) and a file picker appears. Choose the photo on your
@@ -1480,7 +1500,7 @@ from all counts automatically.
 | `Location` | Narberth / Ashbridge / Zoom |
 | `Type` | `Hot`, `Cold`, or `Not Serving` |
 | `Meal_Description` | Full description |
-| `Meal_Shorthand` | Short label — **this is what registrants see on the form** |
+| `Meal_Shorthand` | Short label — **this is what registrants see on the form**, beside the date as *"Tue 9/16/2026 — (Lunch: Chx Parm)"* |
 | `Meal_ID` | Worked out for you. The name of that day's meal, which is what `Meal_Source` on the Registrants tab points at. Don't type in it — it's rewritten every sync |
 
 #### "Not Serving" — closing the kitchen for a day
@@ -2033,8 +2053,13 @@ A few things worth knowing:
   page entirely and they come back to a blank form. Forms' own Back button walks
   back with every answer still in place. The note now says which to use and
   warns off the other.
-- Each date shows the **meal shorthand** next to it, and `(FULL - Waitlist)` once
-  a capped session runs out of seats — so nobody joins a waitlist unknowingly.
+- Each date shows **that day's lunch** next to it — *"Tue 9/16/2026 —
+  (Lunch: Chx Parm)"* — and `(FULL - Waitlist)` once a capped session runs out
+  of seats, so nobody joins a waitlist unknowingly. The lunch is named as a
+  lunch on purpose: it used to read as the bare dish after a dash, which more
+  than one person took for the name of the session. A day with no meal on it
+  reads `(No Lunch Served)`, and the description at the top of the form says
+  what the dash means in so many words.
 - **Nobody is asked about a lunch that isn't happening.** A date marked
   `Not Serving` never appears as a lunch row, and a form with no catered dates
   at all doesn't show the lunch question in either branch.
@@ -2043,6 +2068,12 @@ A few things worth knowing:
 - There's a dedicated **Allergies / Dietary Needs** field, and the "Anything
   Else?" box carries your location's own note as its instructions. (It used to
   be a bold heading floating above that question with nothing under it.)
+- **Every form says where it is**, with the address: *"Location: Narberth — 100
+  Conway Avenue, 2nd Floor, Narberth, PA"*. A form covering both buildings lists
+  both. The name alone is the whole address to somebody who has been coming for
+  years and no address at all to the person the form was built to reach.
+  Anywhere without an address of its own — Zoom — reads as just its name. The
+  two addresses live in `LOCATION_ADDRESSES` at the top of `Code.gs`.
 - **Every form ends with a way to reach a person:** *"If you need additional
   assistance, please call (610) 664-2366 or email
   info@newhorizonsseniorcenter.org"*. To change it, edit `CENTER_PHONE` /
@@ -3421,6 +3452,35 @@ to fix:
 The same answer, program by program rather than event by event, is at the
 bottom of **📝 Programs & Forms ▸ Rebuild Appointment Forms + Report…** under
 **WHAT THE CALENDAR SAYS**.
+
+**The date row shows the lunch, but the form never asks about lunch**
+
+That combination used to be possible and no longer is. A form's date labels
+carry the day's menu; its *questions* carry whether lunch is asked about at all;
+and the questions were only ever re-checked when something else gave the sync a
+reason to open that form — a **menu push**, or a program with a **new date**. A
+program whose dates were all already on the dashboard is skipped by the sync as
+*"up to date"*, so typing a menu row straight onto `Lunch_Schedule` for a month
+a form already covered painted *(Lunch: …)* onto its dates and left it with no
+lunch question anywhere.
+
+Every sync now re-checks every live form's **lunch shape** as well as its date
+labels, and opens the ones where either has moved — so the question comes back
+by itself within the hour. A form that is already right still costs nothing: the
+check is a hash comparison, and nothing is opened. To fix one immediately rather
+than waiting, run **🔄 Update Everything Now**, or push the month's menu again.
+(Because a lot of forms can come due at once — the first run after an update,
+or a month of menus typed in one sitting — no single run opens more than 25;
+the rest are picked up by the next one.)
+
+**I typed a `Form description` row and the push said "the forms already match"**
+
+Fixed. **Update Program Questions on Forms** used to push only the rows that
+become *questions*, and decided there was nothing to do by comparing those —
+so a run whose only change was a `Form description` row wrote nothing and then
+reported that everything matched, which is the opposite of what had happened.
+Description rows are pushed by that menu item now, and counted in what it says
+afterwards.
 
 **A new event didn't get a form**
 Check, in order: does the title start with `*` (tentative)? Is it an all-day

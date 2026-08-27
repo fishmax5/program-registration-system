@@ -304,7 +304,7 @@
  *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —
- *      syncLunchQuestionsOnForm() takes both lunch questions off the form
+ *      syncLunchQuestionsOnForm() takes both roster lunch questions off the form
  *      entirely and says so in the description. They come back on their own
  *      if a catered date later appears. On the data side buildRegistrantRow()
  *      gates lunch demand on isLunchOfferedOn(), so the "everyone, every
@@ -343,7 +343,7 @@
  *    - CAPACITY IS VISIBLE ON THE FORM: whenever a capped session hits 0
  *      Remaining_Seats, its date label on both roster grids gets a
  *      CAPACITY_HINT_SUFFIX ("(FULL - Waitlist)") appended — see
- *      buildCapacityHintsFromRegistryRows() / refreshFormCapacityLabelsForAllForms(),
+ *      buildCapacityHintsFromRegistryRows() / refreshFormShapeForAllForms(),
  *      called at the end of every syncRegistrations() once Remaining_Seats
  *      is fresh. Converts silent waitlisting into something a respondent
  *      actually sees before submitting. A plain hyphen is used (not the em
@@ -1031,8 +1031,15 @@ const NO_REGISTRATION_LINK_LABEL = '— no registration —';
  *     "Which appointment time?" question takes their place — see
  *     syncAssistanceQuestionsOnForm(). The guest questions STAY: "individual
  *     or couple" is a real answer for a will.
- *   - LUNCH COMES OFF. A counseling appointment is not a meal, and asking
- *     invites a lunch nobody is catering for.
+ *   - LUNCH IS ASKED AS ONE YES/NO, on the days it is served. The two roster
+ *     grids come off with everything else date-based — a person books one time
+ *     on one day, so a grid of dates against people is the wrong question —
+ *     but the DAY may still come with a meal, and somebody seeing Heather at
+ *     12:30 at a site that serves lunch at noon is exactly the person who
+ *     would stay for it. So the form asks once, under the time they picked,
+ *     and only where a date on the form actually serves lunch. See
+ *     TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH and
+ *     applyAppointmentLunchQuestion().
  *   - IT ASKS WHETHER THEY WOULD COME SOONER. Under the time question, one
  *     optional question — "if an earlier appointment opens up, may we call
  *     you?" — because these bookings run months ahead and the person who took
@@ -1089,10 +1096,13 @@ const APPOINTMENT_SLOT_MINUTES = 30;
  *
  * Written down because a session's CAPACITY is derived from it: an appointment
  * session holds one person per slot, so its Max_Capacity is its slot count —
- * see resolveAppointmentCapacity(). A "[Cap: N]" typed on such an event can
- * only ever mean FEWER appointments than the span allows (a provider keeping
- * the last half hour free); it cannot conjure a second chair into a slot,
- * which is why a larger one is clamped rather than honoured.
+ * see resolveAppointmentCapacity(). A "[Cap: N]" above one on such an event
+ * can only ever mean FEWER appointments than the span allows (a provider
+ * keeping the last half hour free); it cannot conjure a second chair into a
+ * slot, which is why a larger one is clamped rather than honoured. And
+ * "[Cap: 1]" is read as this number — one person per appointment, which is
+ * what a one-to-one program is — rather than as a session that goes full on
+ * its first booking.
  */
 const APPOINTMENT_SLOT_CAPACITY = 1;
 
@@ -1144,6 +1154,34 @@ const EARLIER_APPOINTMENT_VALUES = {
   YES: '☎️ Call if earlier',
   NO: 'Keeping this time'
 };
+
+/**
+ * The two answers to TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH. Worded as an
+ * offer rather than as a bare Yes/No because that is what it is — the meal is
+ * not part of the appointment, and somebody who wants one has to be told they
+ * may have one.
+ */
+const APPOINTMENT_LUNCH_CHOICES = {
+  YES: 'Yes — please order me a lunch that day',
+  NO: 'No thank you'
+};
+
+/**
+ * One answer to that question -> the lunch intent buildRegistrantRow() wants
+ * ('Yes - Lunch' / 'No Lunch'). Matched on the LEADING WORD, the same way
+ * readEarlierAppointmentAnswer() is, so the wording above can be changed
+ * without orphaning the answers already collected.
+ *
+ * A BLANK IS "NO". The question is not required — somebody who booked an
+ * appointment and ignored a question about food has not ordered a meal, and
+ * ordering one for them puts a portion on the kitchen's list that nobody
+ * eats.
+ */
+function readAppointmentLunchAnswer(value) {
+  const text = String(value || '').trim();
+  if (!text) return 'No Lunch';
+  return /^y/i.test(text) ? 'Yes - Lunch' : 'No Lunch';
+}
 
 /** The dropdown offered on the sheet itself: the two answers, plus blank for "not asked". */
 const EARLIER_APPOINTMENT_OPTIONS = ['', EARLIER_APPOINTMENT_VALUES.YES, EARLIER_APPOINTMENT_VALUES.NO];
@@ -2222,6 +2260,31 @@ const FORM_FOOTER_BY_LOCATION = {
 const DEFAULT_FORM_FOOTER = 'Additional notes or dietary needs?';
 
 /**
+ * WHERE EACH LOCATION ACTUALLY IS, as it goes at the top of every form.
+ *
+ * A form said "Location: Narberth" and stopped, which is the whole address to
+ * somebody who has been coming for years and no address at all to the person
+ * the form was built to reach. The centre runs at two buildings a fifteen
+ * minute drive apart and a new registrant has no way to tell from the form
+ * which one they are signing up for.
+ *
+ * A location with no entry here — Zoom, and anything typed onto the calendar
+ * that is not one of the two buildings — simply reads as its own name, exactly
+ * as it did before. Nothing invents an address.
+ */
+const LOCATION_ADDRESSES = {
+  Narberth: '100 Conway Avenue, 2nd Floor, Narberth, PA',
+  Ashbridge: 'Ashbridge House, Ashbridge Park, Bryn Mawr, PA'
+};
+
+/** "Narberth — 100 Conway Avenue, 2nd Floor, Narberth, PA" — a location as a form names it. */
+function describeLocationWithAddress(locationName) {
+  const name = String(locationName || '').trim();
+  const address = LOCATION_ADDRESSES[name];
+  return address ? `${name} — ${address}` : name;
+}
+
+/**
  * THE ONE PLACE THE CENTER'S CONTACT DETAILS LIVE.
  *
  * They appear in three registrant-facing places that must never disagree with
@@ -2330,6 +2393,24 @@ const TEMPLATE_ITEM_TITLES = {
    * appointment form.
    */
   EARLIER_APPOINTMENT: 'If an earlier appointment opens up, may we call you?',
+  /**
+   * WHETHER THEY ARE STAYING FOR LUNCH — asked on an appointment form, and
+   * only on the days one is actually being served.
+   *
+   * The appointment shape used to take lunch off outright, on the reasoning
+   * that a counselling appointment is not a meal. That is true of the
+   * APPOINTMENT and false of the DAY: somebody seeing Heather at 12:30 at a
+   * site that serves lunch at noon is exactly the person who would stay for
+   * it, and the form was the only place they could have said so. The two
+   * roster grids still have no business on this form — an appointment is one
+   * person at one time, not a party across a month of dates — so this is a
+   * plain yes/no rather than a restored grid, asked once, about the one day
+   * they just booked.
+   *
+   * Built by syncAssistanceQuestionsOnForm(), like the two questions above it,
+   * and taken off again the moment no date on the form serves lunch.
+   */
+  APPOINTMENT_LUNCH: 'Would you like lunch on the day of your appointment?',
   /**
    * What the ATTENDANCE_GRID is RETITLED TO on a lunch-only form, where
    * "which dates are you coming" and "which dates do you want lunch" are the
@@ -3006,6 +3087,40 @@ function addLunchGridItem(form) {
 }
 
 /**
+ * THE SENTENCE THAT EXPLAINS THE DASH.
+ *
+ * Every date on a form can carry what is being served that day, written by
+ * formatDateLabelWithMeal() as "Tue 9/16/2026 — (Lunch: Chicken Parmesan)".
+ * The brackets say what the words are; this says what they are FOR, once, in
+ * the description, because the thing being misread is a date that appears to
+ * have a second name — and the person misreading it is signing up for a
+ * program, not for the dish.
+ *
+ * Returns '' — not a sentence about nothing — when no date on the form carries
+ * a menu hint at all, which is every form at a location that does not cater
+ * and every form whose month has no menu typed yet.
+ */
+function buildLunchLegendNote(dateLabels) {
+  const labels = dateLabels || [];
+  const hasMenu = labels.some(l => String(l).indexOf('(Lunch: ') !== -1);
+  const hasNone = labels.some(l => String(l).indexOf(NO_LUNCH_HINT) !== -1);
+  if (!hasMenu && !hasNone) return '';
+  const parts = [];
+  if (hasMenu) {
+    parts.push(`what follows the dash on a date is THAT DAY'S LUNCH — "(Lunch: Chicken Parmesan)" ` +
+      `means chicken parmesan is on the menu that day, not that the session is about it`);
+  }
+  if (hasNone) parts.push(`a date marked "${NO_LUNCH_HINT}" has no lunch on it`);
+  return `Note: ${parts.join('; and ')}.`;
+}
+
+/** The legend as a description BLOCK — a blank line and the sentence, or nothing at all. */
+function appendLunchLegend(dateLabels) {
+  const note = buildLunchLegendNote(dateLabels);
+  return note ? `\n\n${note}` : '';
+}
+
+/**
  * Builds the form description, including the exact dates being registered
  * for — one date per line, not one long semicolon-separated line. Adds a
  * note when any date is lunch-free, a line about club membership on a club
@@ -3017,8 +3132,9 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
   const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
   const dateList = dateLabels.map(label => `• ${label}`).join('\n');
   const heading = list.length > 1
-    ? `Locations: ${list.join(', ')}\n(This program runs at more than one location — each date below says where.)`
-    : `Location: ${list[0] || ''}`;
+    ? `Locations:\n${list.map(loc => `• ${describeLocationWithAddress(loc)}`).join('\n')}\n` +
+      `(This program runs at more than one location — each date below says where.)`
+    : `Location: ${describeLocationWithAddress(list[0] || '')}`;
   // ONE DATE IS NOT "Dates". A one-off event's form led with a plural heading
   // over a list of one, which reads as a form that has lost most of its
   // content — and it is the first thing on the page. See section 1g for the
@@ -3034,6 +3150,7 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     description = `${heading}\n\nThis form is for LUNCH ONLY — it books you a meal, not a program. ` +
       `To sign up for a class or an activity, use that program's own form.\n\n` +
       `Lunch is served on:\n${dateList}\n\nPlease sign up below.` +
+      `${appendLunchLegend(dateLabels)}` +
       `\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
   }
@@ -3045,7 +3162,18 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     description = `${heading}\n\nThis is a one-to-one appointment — you book a TIME, not a day. ` +
       `Appointments are offered on:\n${dateList}\n\nPick a time on the next page. Times already ` +
       `taken are not shown; if none of the times work for you, say so and we will call you to ` +
-      `arrange another.\n\n${FORM_ASSISTANCE_TAGLINE}`;
+      `arrange another.`;
+    // LUNCH IS SERVED ON SOME OF THESE DAYS, and an appointment form is now
+    // allowed to ask about it — see syncAssistanceQuestionsOnForm(). Somebody
+    // seeing a dish beside their appointment date needs telling that they are
+    // welcome to stay for it, not left to assume the meal comes with the
+    // appointment.
+    if (hasLunchDates !== false) {
+      description += `\n\nLunch is served on some of these days. If you would like to stay for it, ` +
+        `say so under the time you pick and we will order you one.`;
+    }
+    description += appendLunchLegend(dateLabels);
+    description += `\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
   }
   if (hasLunchDates === false) {
@@ -3053,8 +3181,8 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     // at all (see syncLunchQuestionsOnForm()) — say so rather than leaving
     // its absence to be guessed at.
     description += `\n\nNote: Lunch is not provided on any of these dates, so there is nothing to choose.`;
-  } else if (dateLabels.some(l => l.indexOf('No Lunch Served') !== -1)) {
-    description += `\n\nNote: Lunch is not provided on any date marked "No Lunch Served" above.`;
+  } else {
+    description += appendLunchLegend(dateLabels);
   }
   if (options.isClub) {
     const title = String(options.programTitle || '').trim();
@@ -3628,7 +3756,7 @@ function computeStatus(activeCount, maxCapacity) {
  * Suffix appended by formatDateLabelWithMeal() when a capped session has
  * hit 0 Remaining_Seats — converts silent waitlisting into something a
  * respondent actually sees before submitting (see
- * buildCapacityHintsFromRegistryRows() / refreshFormCapacityLabelsForAllForms()).
+ * buildCapacityHintsFromRegistryRows() / refreshFormShapeForAllForms()).
  * Deliberately a plain hyphen, not the em dash " — " used for meal hints,
  * so stripMealHint() can tell the two apart unambiguously.
  */
@@ -3636,6 +3764,35 @@ const CAPACITY_HINT_SUFFIX = ' (FULL - Waitlist)';
 
 /** What formatDateLabelWithMeal() puts between a session label and its menu hint. */
 const MEAL_HINT_SEPARATOR = ' — ';
+
+/**
+ * HOW A DATE'S MENU READS ON THE FORM: "(Lunch: Chicken Parmesan)".
+ *
+ * It used to be the bare dish — "Tue 9/16/2026 — Chicken Parmesan" — and a
+ * respondent scanning a column of those has to work out for themselves what
+ * the words after the dash are FOR. Several read them as the name of the
+ * session (a "Chicken Parmesan" class), which is a reasonable reading of a
+ * date followed by a phrase, and one of them is on a form for a program that
+ * has nothing to do with food. Saying "Lunch:" in front of the dish costs
+ * seven characters and removes the guess.
+ *
+ * The SEPARATOR IS UNCHANGED, deliberately: stripMealHint() and
+ * sessionLabelCandidates() cut a decorated label back to the plain one at
+ * " — ", which is the join key between a grid row and its session, so every
+ * registration already collected against an old-style label still resolves.
+ * Only the text after the separator has changed.
+ */
+function formatMealHint(hint) {
+  return `(Lunch: ${String(hint).trim()})`;
+}
+
+/**
+ * What a date marked "Not Serving" says instead. Still carries the exact words
+ * "No Lunch Served" — buildFormDescription() looks for them in the label list
+ * to decide whether to add its footnote — inside the same brackets the menu
+ * hint uses, so a column of dates reads as one thing rather than two.
+ */
+const NO_LUNCH_HINT = '(No Lunch Served)';
 
 /** Strips the CAPACITY_HINT_SUFFIX and/or the " — <shorthand/description>" menu hint appended by formatDateLabelWithMeal(), returning the plain date label. */
 function stripMealHint(label) {
@@ -4088,10 +4245,10 @@ function formatDateLabelWithMeal(date, location, capacityHint, showLocation, tit
   const meal = getMealInfoForDate(date, location);
   let label;
   if (!meal) label = baseLabel;
-  else if (meal.type === 'Not Serving') label = `${baseLabel} — No Lunch Served`;
+  else if (meal.type === 'Not Serving') label = `${baseLabel}${MEAL_HINT_SEPARATOR}${NO_LUNCH_HINT}`;
   else {
     const hint = meal.shorthand || meal.description;
-    label = hint ? `${baseLabel} — ${hint}` : baseLabel;
+    label = hint ? `${baseLabel}${MEAL_HINT_SEPARATOR}${formatMealHint(hint)}` : baseLabel;
   }
   return capacityHint ? `${label}${capacityHint}` : label;
 }
@@ -4351,7 +4508,7 @@ const GENERIC_LUNCH_CHOICES = ['No Lunch', 'Yes - Lunch'];
 // Every path that pushes date labels onto a form funnels through
 // applyFormDateLabels(). Writing a form item is a remote call AND creates a
 // new form revision, and the labels are usually byte-identical to what's
-// already there — refreshFormCapacityLabelsForAllForms() in particular runs
+// already there — refreshFormShapeForAllForms() in particular runs
 // on EVERY hourly sync across every capped form. So we keep a hash of the
 // last labels written per form in Script Properties and short-circuit
 // before FormApp.openById() (itself the most expensive call in the path)
@@ -4374,8 +4531,17 @@ function getFormLabelFingerprints() {
   return __formLabelFingerprintCache;
 }
 
-function computeFormLabelFingerprint(attendanceLabels, lunchLabels) {
-  const raw = JSON.stringify([attendanceLabels, lunchLabels]);
+/**
+ * The hash a form's date-label write is skipped on. The SHAPE rides along with
+ * the labels, and has to: a menu row typed for a month whose dates were
+ * already on the form changes what the form should ASK ("does anybody want
+ * lunch?") without changing a single date, and a fingerprint made of labels
+ * alone said "nothing to do" — which is precisely how a form ended up showing
+ * the dish beside every date with no lunch question anywhere on it. See
+ * formLunchShapeKey() and refreshFormShapeForAllForms().
+ */
+function computeFormLabelFingerprint(attendanceLabels, lunchLabels, shape) {
+  const raw = JSON.stringify([attendanceLabels, lunchLabels, shape || '']);
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
   return digest.map(b => ((b < 0 ? b + 256 : b).toString(16)).padStart(2, '0')).join('');
 }
@@ -4398,12 +4564,17 @@ function computeFormLabelFingerprint(attendanceLabels, lunchLabels) {
  *
  * options.form    — an already-open Form, to avoid a second openById()
  * options.force   — write even if the fingerprint matches
+ * options.shape   — formLunchShapeKey() for this form, folded into the
+ *                   fingerprint so a form whose QUESTIONS should change is
+ *                   re-examined even when its labels have not moved. Callers
+ *                   that hold a form context all pass it; one that does not
+ *                   simply fingerprints the labels as before.
  * options.context — short string for the log line on failure
  * Returns true if the form was actually written to.
  */
 function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
   options = options || {};
-  const fingerprint = computeFormLabelFingerprint(attendanceLabels, lunchLabels);
+  const fingerprint = computeFormLabelFingerprint(attendanceLabels, lunchLabels, options.shape);
   const fingerprints = getFormLabelFingerprints();
   if (!options.force && fingerprints[formId] === fingerprint) return false;
 
@@ -4711,13 +4882,20 @@ function syncLunchQuestionsOnForm(form, locations, hasLunchDates, options) {
   // tug-of-war fought fresh on every hourly sync.
   if (options && options.isLunchOnly) return makeFormLunchOnly(form);
 
-  // AN APPOINTMENT PROGRAM NEVER ASKS ABOUT LUNCH (see ASSISTANCE_TAG), and it
+  // AN APPOINTMENT PROGRAM NEVER CARRIES THE ROSTER LUNCH QUESTIONS, and it
   // has to be said HERE rather than only in the assistance pass: this function
   // runs first on every sync, and would otherwise restore the two lunch
   // questions that pass then deletes again — two Forms writes an hour, forever,
   // and a form whose shape depends on which of the two ran last.
+  //
+  // It is NOT the same as "an appointment form never asks about lunch". Such a
+  // form does ask, where lunch is served: one yes/no about the single day just
+  // booked, put on by applyAppointmentLunchQuestion(). What comes off here are
+  // the per-date GRIDS, which are the wrong shape for a form on which a person
+  // picks one time on one day — see ASSISTANCE_TAG.
   if (options && options.isAssistance) {
-    return removeLunchQuestionsFromForm(form, list, 'this program is booked by appointment');
+    return removeLunchQuestionsFromForm(form, list,
+      'this program is booked by appointment (it asks about lunch one day at a time instead)');
   }
 
   const catersSomewhere = list.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER);
@@ -4728,6 +4906,45 @@ function syncLunchQuestionsOnForm(form, locations, hasLunchDates, options) {
     return removeLunchQuestionsFromForm(form, list, 'no date on this form serves lunch');
   }
   return restoreLunchQuestionsOnForm(form);
+}
+
+/**
+ * THE SAME DECISION, ON ITS OWN — does a form with these locations and this
+ * many lunch dates ask about lunch at all? It is the pair of conditions the
+ * function above branches on, lifted out because two other places now need the
+ * answer without wanting the roster questions written: the appointment shape,
+ * which asks it about its own yes/no (applyAppointmentLunchQuestion()), and
+ * the hourly all-forms pass, which folds the answer into its fingerprint so a
+ * form whose lunch shape has changed is opened even when its date labels have
+ * not (refreshFormShapeForAllForms()).
+ */
+function formWantsLunchQuestions(locations, hasLunchDates) {
+  const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
+  if (hasLunchDates === false) return false;
+  return list.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER);
+}
+
+/**
+ * WHAT SHAPE THIS FORM'S LUNCH QUESTIONS SHOULD BE IN, as a short string —
+ * the answer syncLunchQuestionsOnForm() and the appointment pass are about to
+ * act on, written down so a cheap comparison can notice it has changed.
+ *
+ * Four answers, because there are four shapes: the lunch-only form (one grid,
+ * which is the meal), the appointment form with and without its yes/no, and
+ * the ordinary form with or without its two roster questions.
+ */
+function formLunchShapeKey(context, hasLunchDates) {
+  const ctx = context || {};
+  if (ctx.isLunchOnly) return 'lunch-only';
+  const asks = formWantsLunchQuestions(ctx.locations || [], hasLunchDates);
+  if (ctx.isAssistance) return asks ? 'appointment+lunch' : 'appointment';
+  return asks ? 'lunch' : 'no-lunch';
+}
+
+/** True when any session in a form context falls on a day its own location caters. */
+function contextHasLunchDates(context) {
+  return !!context && (context.sessions || []).some(session =>
+    isLunchOfferedOn(session.date, session.location));
 }
 
 /**
@@ -5994,7 +6211,8 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   }
 
   const labelsWritten = applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
-    { form, force: questionsChanged > 0, context });
+    { form, force: questionsChanged > 0, context,
+      shape: formLunchShapeKey(formContext, lunchDateLabels.length > 0) });
 
   return {
     failed: false,
@@ -15562,7 +15780,8 @@ function refreshFormForNewDates(formId, group, configInfo) {
   // Only ROWS are refreshed here — grid COLUMNS (the person labels) are the
   // same on every form and are set once at template-build time.
   applyFormDateLabels(formId, allDateLabels, lunchDateLabels,
-    { form, force: questionsChanged > 0, context: 'new dates on an existing form' });
+    { form, force: questionsChanged > 0, context: 'new dates on an existing form',
+      shape: formLunchShapeKey(group, lunchDateLabels.length > 0) });
 
   // LAST, after the dates and the lunch questions have settled: the
   // appointment shaping deletes the very grids the call above just filled in
@@ -15724,7 +15943,8 @@ function configureCopiedRegistrationForm(form, group, configInfo, formTitle) {
   // baked into the template. force:true because a fresh copy still carries
   // the template's placeholder rows even though this brand-new form ID has
   // no fingerprint on file yet.
-  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'new form' });
+  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'new form',
+    shape: formLunchShapeKey(group, lunchDateLabels.length > 0) });
   applyFormFooterNote(form, configInfo.footerNote);
   // A COPY OF THE TEMPLATE CARRIES NO CUSTOM QUESTIONS AND NO SHAPE OF ITS
   // OWN — both are re-applied here, with force so the brand-new form ID (which
@@ -16221,7 +16441,7 @@ function syncRegistrationsInternal() {
   // where renderProgramDashboard()'s triage pass rewrites the tab, which it
   // reports back via registrantsMoved.
   recomputeEventRegistryCounts(registrySheet, registrantsSheet, combinedRegistrantRows);
-  refreshFormCapacityLabelsForAllForms(registrySheet);
+  refreshFormShapeForAllForms(registrySheet);
   // The appointment half of the same idea: capacity labels tell a date-based
   // form which dates are full, and this tells an appointment form which TIMES
   // are gone. Both run here, on fresh counts, for the same reason — a form
@@ -17310,38 +17530,86 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
 }
 
 /**
- * Call AFTER recomputeEventRegistryCounts() so Remaining_Seats is fresh.
- * Re-stamps every capped form's roster-grid ROW labels with a
- * CAPACITY_HINT_SUFFIX wherever a session has hit 0 Remaining_Seats — this
- * is what turns silent waitlisting into a signal a respondent can actually
- * see before they submit. Forms with no capped sessions at all are skipped
- * entirely (nothing on them can ever go full), so this stays cheap on the
- * common case of unlimited/"Regular" programs.
+ * How many forms this pass may OPEN in one run.
+ *
+ * It normally opens none — a form whose labels and lunch shape have not moved
+ * costs a hash compare — so the cap only ever bites when something changed for
+ * a lot of forms at once: a month of menus typed in one sitting, or the first
+ * run after a change to what a label says. Those are exactly the runs that
+ * could otherwise spend the whole six-minute execution on Forms calls and be
+ * killed part-way. Whatever is left keeps its stale fingerprint and is picked
+ * up by the next sync, an hour later, until the backlog is gone.
  */
-function refreshFormCapacityLabelsForAllForms(registrySheet) {
+const FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN = 25;
+
+/**
+ * THE ONE PASS THAT VISITS EVERY LIVE FORM ON EVERY SYNC, and the answer to
+ * "why did the form show the dish beside the date and never ask about lunch?"
+ *
+ * WHAT IT USED TO BE. This was refreshFormCapacityLabelsForAllForms(): it
+ * re-stamped roster-grid ROW LABELS with CAPACITY_HINT_SUFFIX wherever a
+ * capped session had hit 0 Remaining_Seats, skipped any form with no capped
+ * session at all, and touched nothing but labels.
+ *
+ * WHY THAT WAS NOT ENOUGH. A form's date labels carry the day's menu
+ * (formatDateLabelWithMeal()) and its QUESTIONS carry whether lunch is asked
+ * about at all — and the two were refreshed by different things. The questions
+ * were only ever re-checked by a path with a reason of its own to open the
+ * form: a menu PUSH (refreshFormsForLunchDates()), or a group with a NEW date,
+ * which collectCalendarWork() skips for every program whose dates are already
+ * on the sheet. Type a menu row straight onto Lunch_Schedule for a month a
+ * form already covers and neither happens — but this pass, running for its
+ * capacity hints, cheerfully wrote "(Lunch: Chicken Parmesan)" onto the date
+ * rows of a form carrying no lunch question anywhere. The respondent is shown
+ * the meal and given no way to ask for one.
+ *
+ * WHAT IT IS NOW. The same fingerprinted pass over EVERY form — the
+ * capped-only shortcut is gone, since a form's lunch shape can change with
+ * nothing on it capped — and the fingerprint now covers the lunch SHAPE as
+ * well as the labels (see formLunchShapeKey()). When either has moved, the
+ * form goes to refreshOneFormDateLabels(), which is already the function that
+ * re-checks the questions, rewrites the description and writes the rows in one
+ * open. When neither has, it costs one hash compare and no FormApp call at
+ * all, exactly as before.
+ *
+ * Call AFTER recomputeEventRegistryCounts(), so Remaining_Seats — and with it
+ * the capacity hints this still exists to write — is fresh.
+ */
+function refreshFormShapeForAllForms(registrySheet) {
   const headers = HEADERS.Master_Program_Dashboard;
   const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
+  const fingerprints = getFormLabelFingerprints();
+  let opened = 0;
+  let deferred = 0;
 
   Object.keys(byForm).forEach(formId => {
     const formRows = byForm[formId];
-    const hasCappedSession = formRows.some(row => {
-      const rawCap = row[map['Max_Capacity']];
-      return rawCap !== '' && rawCap !== '--' && Number(rawCap) > 0;
-    });
-    if (!hasCappedSession) return; // nothing on this form can ever go FULL — skip the API round trip
-
     const formContext = buildFormSessionContext(formId, formRows, map, sharedFormIds);
     if (formContext.sessions.length === 0) return;
     const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
-    // Fingerprinted: on the overwhelmingly common "nothing filled up since
-    // last hour" sync this costs a hash compare and no FormApp call at all.
-    applyFormDateLabels(formId, allDateLabels, lunchDateLabels, { context: 'capacity labels' });
+    const shape = formLunchShapeKey(formContext, lunchDateLabels.length > 0);
+    // The same hash refreshOneFormDateLabels() will store if it writes, so a
+    // form that is already right is not opened at all.
+    if (fingerprints[formId] === computeFormLabelFingerprint(allDateLabels, lunchDateLabels, shape)) return;
+    if (opened >= FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN) { deferred++; return; }
+    opened++;
+    refreshOneFormDateLabels(formId, formRows, map, 'form check');
   });
+  if (opened > 0) {
+    log(`Hourly form check: ${opened} form(s) had labels or a lunch shape to bring up to date` +
+      (deferred > 0 ? `, and ${deferred} more left for the next run (this run's limit is ` +
+        `${FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN} forms).` : '.'));
+  }
   flushPersistentRegistries();
+}
+
+/** Former name of the pass above, kept so any existing trigger or hand-run call still reaches it. */
+function refreshFormCapacityLabelsForAllForms(registrySheet) {
+  return refreshFormShapeForAllForms(registrySheet);
 }
 
 /** { Form_ID: [session rows] } from a batch of Master_Program_Dashboard rows. Rows with no form are skipped. */
@@ -17446,7 +17714,8 @@ function rebuildFormFromCurrentTemplate(form, context) {
   syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0, context);
   // force: a rebuilt form's grids are back to the template placeholder row,
   // and its fingerprint on file still describes the labels it had before.
-  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true, context: 'template migration' });
+  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, { form, force: true,
+    context: 'template migration', shape: formLunchShapeKey(context, lunchDateLabels.length > 0) });
   try {
     applyFormFooterNote(form, buildFooterNoteForLocations(context.locations));
   } catch (err) {
@@ -24573,7 +24842,8 @@ function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
     const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
     const attendanceLabels = allDateLabels.length > 0 ? allDateLabels : ['No upcoming dates'];
     const lunchLabels = lunchDateLabels.length > 0 ? lunchDateLabels : ['No upcoming dates'];
-    if (applyFormDateLabels(formId, attendanceLabels, lunchLabels, { context: 'deleted-event cleanup' })) {
+    if (applyFormDateLabels(formId, attendanceLabels, lunchLabels, { context: 'deleted-event cleanup',
+      shape: formLunchShapeKey(formContext, lunchDateLabels.length > 0) })) {
       log(`Refreshed form ${formId}'s date list to ${dates.length} remaining date(s) after a deleted-event cleanup.`);
     }
     if (dates.length === 0) {
@@ -28156,7 +28426,8 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
     { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly });
   syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0, spec);
   applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels,
-    { form, force: true, context: context || 'new form' });
+    { form, force: true, context: context || 'new form',
+      shape: formLunchShapeKey(Object.assign({}, spec, { locations }), lunchDateLabels.length > 0) });
   applyFormFooterNote(form, buildFooterNoteForLocations(locations));
   setFormTemplateVersion(form.getId(), TEMPLATE_VERSION);
   flushPersistentRegistries();
@@ -29517,6 +29788,30 @@ function resolveAppointmentCapacity(statedCapacity, slotCount, title) {
   const seats = Math.max(0, Number(slotCount) || 0) * APPOINTMENT_SLOT_CAPACITY;
   const stated = Number(statedCapacity) || 0;
   if (stated <= 0) return seats;
+  // "[Cap: 1]" ON AN APPOINTMENT PROGRAM MEANS ONE PERSON PER APPOINTMENT.
+  //
+  // It is the number staff reach for to say what these programs ARE — one
+  // visitor at a time with the provider — and read as a SESSION cap it says
+  // the opposite of what they meant: an afternoon holding six appointments
+  // went 🔴 Waitlist Only after the first booking, and the form stamped
+  // "(FULL - Waitlist)" on a date with five free times on it. Nobody typing
+  // it on a one-to-one program has ever meant "of the six appointments this
+  // afternoon, sell one".
+  //
+  // So on a session with room for more than one, a stated cap of exactly
+  // APPOINTMENT_SLOT_CAPACITY is read as the per-slot statement it is, and
+  // the session's capacity is its slot count — the same answer as leaving the
+  // tag off. Any HIGHER number is still a session cap ("six of the eight
+  // slots this afternoon"), which is the only thing a number above one can
+  // usefully mean here. A genuine "see one person and no more today" is said
+  // by making the session hold one slot — shorten the event, or [Slots: N] to
+  // its full length — which is also what the form has to show either way.
+  if (stated === APPOINTMENT_SLOT_CAPACITY && seats > APPOINTMENT_SLOT_CAPACITY) {
+    log(`ℹ️ "[Cap: ${stated}]" on "${title}" reads as one person per APPOINTMENT, not one per session — ` +
+      `that session holds ${seats} appointment(s), so it takes ${seats}. To offer fewer, shorten the ` +
+      `event or say "[Cap: ${seats - 1}]" or lower.`);
+    return seats;
+  }
   if (seats > 0 && stated > seats) {
     log(`ℹ️ "[Cap: ${stated}]" on "${title}" asks for more people than the ${seats} appointment(s) that fit in ` +
       `the session — an appointment slot holds ${APPOINTMENT_SLOT_CAPACITY}. Using ${seats}.`);
@@ -29699,6 +29994,14 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   changed += applyAppointmentChoices(form, context, choices, modePage);
   // 4. And, directly under it, whether they would take an earlier one.
   changed += applyEarlierAppointmentQuestion(form);
+  // 5. And, under that, lunch — but only where lunch is actually served on
+  //    one of this form's days. Step 1 above deleted the two roster grids and
+  //    syncLunchQuestionsOnForm() takes the all-dates checkbox and the
+  //    extra-meals question off every appointment form, so this yes/no is the
+  //    only lunch question such a form carries and there is nothing here for
+  //    the two passes to fight over.
+  changed += applyAppointmentLunchQuestion(form,
+    formWantsLunchQuestions(context.locations, contextHasLunchDates(context)));
   if (changed > 0) invalidateFormItemIndex(form.getId());
   return changed;
 }
@@ -30596,6 +30899,75 @@ function applyProgramFormExtensions(form, context, options) {
 }
 
 /**
+ * Asks — or stops asking — whether the person is staying for lunch on the day
+ * of their appointment. See TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH.
+ *
+ * BOTH DIRECTIONS, on every sync, for the same reason every other question
+ * here is: a provider's dates move into a month with no menu typed yet, or the
+ * site stops catering, and a question about a meal nobody is serving orders
+ * one. Idempotent — in the steady state it compares two lists and returns 0.
+ *
+ * Returns how many writes it made.
+ */
+function applyAppointmentLunchQuestion(form, wantsLunch) {
+  const items = form.getItems();
+  const existing = items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH &&
+    it.getType() !== FormApp.ItemType.PAGE_BREAK);
+
+  if (!wantsLunch) {
+    return deleteFormItems(form, existing, `the appointment form ${form.getId()} (no lunch on its dates)`);
+  }
+
+  const wanted = [APPOINTMENT_LUNCH_CHOICES.YES, APPOINTMENT_LUNCH_CHOICES.NO];
+  const helpText = 'Lunch is served at the centre on some of the days above — the menu for each day is ' +
+    'shown beside its date. This is only about the day you have just picked, and you are welcome to ' +
+    'stay for it whether or not your appointment is at lunchtime.';
+
+  if (existing.length > 0) {
+    // More than one can only be a half-finished earlier pass; keep the first
+    // and let the rest go, so a respondent is never asked the same thing twice.
+    let changed = existing.length > 1
+      ? deleteFormItems(form, existing.slice(1), `the appointment form ${form.getId()} (duplicate lunch question)`)
+      : 0;
+    try {
+      const list = existing[0].asMultipleChoiceItem();
+      const current = list.getChoices().map(c => c.getValue());
+      if (current.length === wanted.length && current.every((v, i) => v === wanted[i]) &&
+        String(list.getHelpText() || '') === helpText) {
+        return changed;
+      }
+      list.setChoiceValues(wanted);
+      list.setHelpText(helpText);
+      return changed + 1;
+    } catch (err) {
+      // Unreadable, or the wrong item type — rebuild it below rather than
+      // leave a question nobody can answer.
+      try { form.deleteItem(existing[0]); } catch (delErr) { return changed; }
+    }
+  }
+
+  const item = form.addMultipleChoiceItem()
+    .setTitle(TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH)
+    .setHelpText(helpText)
+    .setChoiceValues(wanted)
+    .setRequired(false);
+  // Under the earlier-appointment question, which is itself under the time
+  // question: the three read as one block about the appointment just chosen.
+  const anchor = form.getItems().filter(it => it.getType() !== FormApp.ItemType.PAGE_BREAK &&
+    (it.getTitle() === TEMPLATE_ITEM_TITLES.EARLIER_APPOINTMENT ||
+      it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT)).pop() || null;
+  if (anchor) {
+    try {
+      form.moveItem(item.getIndex(), anchor.getIndex() + 1);
+    } catch (err) {
+      log(`Added the lunch question to appointment form ${form.getId()} but could not move it under the ` +
+        `time question (${err}) — it is still asked, at the end.`);
+    }
+  }
+  return 1;
+}
+
+/**
  * Puts the matching "Form description" wording onto a form whose description
  * this pass did NOT rebuild — the hourly sync, where the dates have not moved
  * and the only thing that changed is the tab.
@@ -30760,7 +31132,13 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
     // two different writes to two different questions, and one key would have
     // each of them permanently invalidating the other.
     const key = `${formId}::appointments`;
-    const fingerprint = computeFormLabelFingerprint(choices, [context.maxPerMonth || 0]);
+    // THE LUNCH SHAPE IS PART OF THIS ANSWER TOO. An appointment form now asks
+    // about lunch on the days one is served (applyAppointmentLunchQuestion()),
+    // and a menu typed for dates this form already covers changes that without
+    // freeing or taking a single appointment — so a hash of the times alone
+    // says "nothing to do" on exactly the run that has something to do.
+    const fingerprint = computeFormLabelFingerprint(choices, [context.maxPerMonth || 0],
+      formLunchShapeKey(context, contextHasLunchDates(context)));
     if (fingerprints[key] === fingerprint) { skipped++; return; }
 
     try {
@@ -31088,6 +31466,10 @@ function processAppointmentResponse(args) {
   // Optional, and blank means no — see EARLIER_APPOINTMENT_CHOICES.
   const earlierAppointment = readEarlierAppointmentAnswer(
     getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.EARLIER_APPOINTMENT));
+  // Likewise optional, likewise blank-means-no, and absent altogether on a
+  // form whose dates serve no lunch — see TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH.
+  const appointmentLunch = readAppointmentLunchAnswer(
+    getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH));
 
   if (!parsed) {
     // Either the escape hatch, or a form whose times changed under a
@@ -31155,10 +31537,16 @@ function processAppointmentResponse(args) {
   people.forEach((person, i) => {
     rows.push(buildRegistrantRow({
       registryEntry, name: person.name, personType: person.personType,
-      // An appointment is not a meal. buildRegistrantRow() gates lunch on
-      // isLunchOfferedOn() as well, but saying it here is what makes the
-      // intent legible at the call site.
-      lunchType: 'No Lunch',
+      // AN APPOINTMENT IS NOT A MEAL, BUT THE DAY MIGHT COME WITH ONE. This is
+      // the answer to the form's own lunch question and nothing else: no
+      // question on the form (its dates serve none) reads as 'No Lunch', which
+      // is what this call site said unconditionally until the question
+      // existed. buildRegistrantRow() still gates it on the date, so a Yes on
+      // a day that turns out not to be catered orders nothing.
+      //
+      // On EVERY person in the party, for the same reason earlierAppointment
+      // is: a couple seeing Heather together eat together.
+      lunchType: appointmentLunch,
       primaryRegistrant: person.primaryRegistrant,
       adminNotes: i === 0 ? notes : (person.baseNotes || ''),
       formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
@@ -32194,6 +32582,11 @@ function buildQuestionBuilderHtml(options) {
  * seeing it on the form is exactly where they conclude it did not work and try
  * again by hand on the form itself — which is the failure this whole feature
  * exists to prevent.
+ *
+ * BOTH KINDS OF ROW GO. The tab holds questions (items on the form) and "Form
+ * description" rows (wording above the first question), and this used to push
+ * only the first kind — so the one row somebody could type, press the button
+ * for, and watch do nothing was the description. See the comment in the loop.
  */
 function pushProgramQuestionsToForms(options) {
   options = options || {};
@@ -32226,11 +32619,27 @@ function pushProgramQuestionsToForms(options) {
     if (context.sessions.length === 0) return;
     const wanted = questionsForFormContext(specs, context);
     const before = applied[formId];
-    // Nothing wanted and nothing ever applied: no reason to open the form.
-    if (wanted.length === 0 && (!before || (before.titles || []).length === 0)) return;
+    // Nothing wanted and nothing ever applied — no questions AND no wording —
+    // is the one case with no reason to open the form. The description half
+    // has to be in this test as well as the titles: a form whose only custom
+    // row was a "Form description" that has since been deleted still carries
+    // that wording, and skipping it here would leave it there forever.
+    const everApplied = !!before &&
+      (((before.titles || []).length > 0) || !!String(before.description || ''));
+    if (wanted.length === 0 && !everApplied) return;
     try {
       const form = FormApp.openById(formId);
-      const n = syncCustomQuestionsOnForm(form, context, wanted);
+      let n = syncCustomQuestionsOnForm(form, context, wanted);
+      // THE DESCRIPTION ROWS ARE NOT ITEMS, and this menu item used to push
+      // only items. syncCustomQuestionsOnForm() filters every "Form
+      // description" row out (they belong above the first question, not among
+      // them) and fingerprints what is left — so a run whose ONLY change was a
+      // description row saw an unchanged fingerprint, wrote nothing, and said
+      // "the forms already match the question list", which is the exact
+      // opposite of what had just happened. The wording is pushed here, by the
+      // same function the hourly sync uses, so the tab and the forms agree
+      // whichever one gets there first.
+      n += syncDescriptionInjectionsOnForm(form, context, wanted);
       if (n > 0) { changed += n; forms++; }
     } catch (err) {
       log(`Could not update the questions on form ${formId} (${err}).`);
@@ -32241,7 +32650,7 @@ function pushProgramQuestionsToForms(options) {
   flushAdminDigest('Program questions');
   const message = changed === 0
     ? 'The forms already match the question list — nothing to change.'
-    : `Updated ${forms} form(s) — ${changed} question(s) added or removed.`;
+    : `Updated ${forms} form(s) — ${changed} question(s) or description(s) added, changed or removed.`;
   toastIfPossible(message);
   log(`pushProgramQuestionsToForms: ${message}`);
   return changed;
