@@ -1439,7 +1439,12 @@ const HEADERS = {
   // The per-session table inside Master_Program_Dashboard (section C).
   //
   // Active_Count sits directly beside Status — "how many signed up" and "is it
-  // full" is the pair anyone reads first. The three CAPACITY columns
+  // full" is the pair anyone reads first. On an APPOINTMENT session it counts
+  // SLOTS TAKEN rather than heads, because that is the unit its Max_Capacity
+  // is written in and Remaining_Seats is the subtraction of the two: a couple
+  // seeing the provider together is one appointment, and counting them as two
+  // closed a session with a free time still on its form. See
+  // occupancyForSession(). The three CAPACITY columns
   // (Max_Capacity / Waitlist_Count / Remaining_Seats) trail at the end of the
   // VISIBLE run instead, ahead of the hidden plumbing block: most programs
   // here are uncapped, so all three read "" / "🟢 Unlimited" on most rows, and
@@ -3122,7 +3127,9 @@ function appendLunchLegend(dateLabels) {
 
 /**
  * Builds the form description, including the exact dates being registered
- * for — one date per line, not one long semicolon-separated line. Adds a
+ * for — one date per line, not one long semicolon-separated line, and each
+ * with the session's own start and end time on it (options.dateLines, from
+ * buildDateLabelSets()). Adds a
  * note when any date is lunch-free, a line about club membership on a club
  * form, and — always, last — the assistance tagline, so every form ends with
  * a way to reach a person.
@@ -3130,7 +3137,22 @@ function appendLunchLegend(dateLabels) {
 function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, options) {
   options = options || {};
   const list = (Array.isArray(locations) ? locations : [locations]).filter(Boolean);
-  const dateList = dateLabels.map(label => `• ${label}`).join('\n');
+  // THE LINES, NOT THE LABELS, wherever the caller has them: a description
+  // line is the same date with its clock time in it (buildDateLabelSets()).
+  // The labels are the fallback for a caller that has none — and are still
+  // what every other decision below is made on, because they are what the
+  // form's grid rows actually read.
+  //
+  // NOT ON A LUNCH-ONLY FORM. Those sessions are dated at noon by
+  // LUNCH_ONLY_SESSION_HOUR so that they sort and print sensibly — it is a
+  // placeholder, not the hour the food goes out — and printing it would be
+  // this system inventing a serving time and putting it in front of the
+  // people who turn up by it.
+  const lines = (!options.isLunchOnly && Array.isArray(options.dateLines) &&
+      options.dateLines.length === dateLabels.length)
+    ? options.dateLines
+    : dateLabels;
+  const dateList = lines.map(line => `• ${line}`).join('\n');
   const heading = list.length > 1
     ? `Locations:\n${list.map(loc => `• ${describeLocationWithAddress(loc)}`).join('\n')}\n` +
       `(This program runs at more than one location — each date below says where.)`
@@ -4241,16 +4263,50 @@ function getMealInfoForDate(date, location) {
  * stripMealHint()/formatDateLabel().
  */
 function formatDateLabelWithMeal(date, location, capacityHint, showLocation, title, showTitle) {
-  const baseLabel = formatSessionLabel(date, location, showLocation, title, showTitle);
+  const parts = buildSessionLabelParts(date, location, capacityHint, showLocation, title, showTitle);
+  return `${parts.base}${parts.hint}${parts.capacityHint}`;
+}
+
+/**
+ * The same label BEFORE it is joined up: { base, hint, capacityHint }.
+ *
+ * It exists because the form's DESCRIPTION wants one more thing in the middle
+ * of it than the grid row does — the session's clock time, which belongs
+ * directly after the date and cannot go on the end, where the meal already is.
+ * The grid row label is a join key and must not gain a character (see
+ * formatSessionLabel()); the description is prose and can say more. Building
+ * both from the same parts is what keeps them from drifting into two different
+ * answers about the same day.
+ */
+function buildSessionLabelParts(date, location, capacityHint, showLocation, title, showTitle) {
+  const base = formatSessionLabel(date, location, showLocation, title, showTitle);
   const meal = getMealInfoForDate(date, location);
-  let label;
-  if (!meal) label = baseLabel;
-  else if (meal.type === 'Not Serving') label = `${baseLabel}${MEAL_HINT_SEPARATOR}${NO_LUNCH_HINT}`;
-  else {
-    const hint = meal.shorthand || meal.description;
-    label = hint ? `${baseLabel}${MEAL_HINT_SEPARATOR}${formatMealHint(hint)}` : baseLabel;
+  let hint = '';
+  if (meal && meal.type === 'Not Serving') hint = `${MEAL_HINT_SEPARATOR}${NO_LUNCH_HINT}`;
+  else if (meal) {
+    const dish = meal.shorthand || meal.description;
+    if (dish) hint = `${MEAL_HINT_SEPARATOR}${formatMealHint(dish)}`;
   }
-  return capacityHint ? `${label}${capacityHint}` : label;
+  return { base, hint, capacityHint: capacityHint || '' };
+}
+
+/**
+ * A SESSION'S CLOCK TIME, as the form description says it: "10:00 AM – 11:30 AM".
+ *
+ * Asked for because the form told people WHICH DAY and never what time, which
+ * is the other half of the question anybody deciding whether they can come is
+ * actually asking — and the answer was on the calendar, in the event, on a
+ * page they were not looking at.
+ *
+ * BLANK WHEN THERE IS NO TIME TO SAY. A session at midnight is an all-day
+ * event or a date typed without one, and "12:00 AM" is worse than silence: it
+ * is a time, and somebody will believe it.
+ */
+function sessionTimeRangeForDisplay(session) {
+  const start = coerceDate(session && session.date);
+  if (!start) return '';
+  if (start.getHours() === 0 && start.getMinutes() === 0) return '';
+  return formatTimeRange(start, (session && session.end) || null);
 }
 
 /**
@@ -4338,12 +4394,51 @@ function buildDateLabelSets(sessions, options) {
     ? distinctSessionTitles(sessions).length > 1
     : !!options.showTitle;
 
-  const label = s => formatDateLabelWithMeal(
-    s.date, s.location, capacityHints[formatDateKey(s.date)], showLocation, s.title, showTitle);
-  const allDateLabels = dedupePreservingOrder(sessions.map(label));
-  const lunchDateLabels = dedupePreservingOrder(
-    sessions.filter(s => isLunchOfferedOn(s.date, s.location)).map(label));
-  return { allDateLabels, lunchDateLabels };
+  // ONE PASS OVER THE SESSIONS, because everything below is a different view
+  // of the same three facts about each one: its label parts, whether it serves
+  // lunch, and what time it runs at.
+  const partsByLabel = {};
+  const timesByLabel = {};
+  const decorated = sessions.map(session => {
+    const parts = buildSessionLabelParts(session.date, session.location,
+      capacityHints[formatDateKey(session.date)], showLocation, session.title, showTitle);
+    const label = `${parts.base}${parts.hint}${parts.capacityHint}`;
+    if (!partsByLabel[label]) partsByLabel[label] = parts;
+    const time = sessionTimeRangeForDisplay(session);
+    if (time) {
+      if (!timesByLabel[label]) timesByLabel[label] = [];
+      if (timesByLabel[label].indexOf(time) === -1) timesByLabel[label].push(time);
+    }
+    return { session, label };
+  });
+
+  const allDateLabels = dedupePreservingOrder(decorated.map(d => d.label));
+  const lunchDateLabels = dedupePreservingOrder(decorated
+    .filter(d => isLunchOfferedOn(d.session.date, d.session.location))
+    .map(d => d.label));
+
+  // THE DESCRIPTION'S OWN LINES, one per label above and in the same order,
+  // carrying the session's clock time between the date and the meal. Built
+  // here rather than recovered from a label later because only here is the
+  // session — and therefore its start and end — still in hand.
+  //
+  // TWO SITTINGS OF ONE PROGRAM ON ONE DAY share a label (a grid cannot carry
+  // two rows reading the same thing — see the dedupe above) and say BOTH their
+  // times on one line, which is the first time the form has been able to
+  // disclose the second sitting at all.
+  const lineFor = label => {
+    const times = timesByLabel[label];
+    const parts = partsByLabel[label];
+    if (!times || times.length === 0 || !parts) return label;
+    return `${parts.base}, ${times.join(' and ')}${parts.hint}${parts.capacityHint}`;
+  };
+
+  return {
+    allDateLabels,
+    lunchDateLabels,
+    allDateLines: allDateLabels.map(lineFor),
+    lunchDateLines: lunchDateLabels.map(lineFor)
+  };
 }
 
 /**
@@ -4693,6 +4788,32 @@ const TRANSIENT_FORM_ERROR_PATTERNS = [
 function isTransientFormError(err) {
   const text = String((err && err.message) || err || '');
   return TRANSIENT_FORM_ERROR_PATTERNS.some(p => p.test(text));
+}
+
+/**
+ * The errors that mean "this account is not allowed to touch that", by the
+ * words Google puts in them.
+ *
+ * Worth telling apart from every other failure because the FIX is different
+ * and specific: a permission error is not a bug in this script and will not
+ * come right on the next run — it is a file created by one account and read by
+ * another, and it stays broken until somebody opens the file up (see
+ * openUpFileToAnyoneWithLink()). Everything else deserves the ordinary "it
+ * failed, here is what it said".
+ */
+const PERMISSION_ERROR_PATTERNS = [
+  /permission/i,
+  /do(es)? not have access/i,
+  /access denied/i,
+  /not authorized/i,
+  /you are not allowed/i,
+  /protected (cell|range|sheet)/i,
+  /unable to open/i
+];
+
+function isPermissionError(err) {
+  const text = String((err && err.message) || err || '');
+  return PERMISSION_ERROR_PATTERNS.some(p => p.test(text));
 }
 
 /** Attempts before giving up, and the backoff between them (ms). */
@@ -6177,7 +6298,8 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   const formContext = buildFormSessionContext(formId, formRows, map, getSharedFormIdSet());
   if (formContext.sessions.length === 0) return nothing;
 
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(formContext.sessions, formContext);
+  const { allDateLabels, lunchDateLabels, allDateLines } =
+    buildDateLabelSets(formContext.sessions, formContext);
 
   // A menu edit is exactly how a form gains or loses its last lunch date, so
   // the question set is re-checked here, not just the row labels.
@@ -6204,7 +6326,7 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   // which are what a registration is matched back by.
   let descriptionWritten = false;
   try {
-    descriptionWritten = applyFormDescription(form, formContext, allDateLabels, lunchDateLabels);
+    descriptionWritten = applyFormDescription(form, formContext, allDateLabels, lunchDateLabels, allDateLines);
   } catch (err) {
     log(`⚠️ Could not rewrite the description on form ${formId} after a ${context} (${err}) — ` +
       `its dates and questions were still updated.`);
@@ -6233,13 +6355,14 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
  *
  * Returns true when the form was written to.
  */
-function applyFormDescription(form, context, allDateLabels, lunchDateLabels) {
+function applyFormDescription(form, context, allDateLabels, lunchDateLabels, dateLines) {
   const description = buildFormDescription(context.locations, allDateLabels, context.isFixed,
     (lunchDateLabels || []).length > 0, {
       isClub: context.isClub,
       programTitle: context.programTitle,
       isLunchOnly: context.isLunchOnly,
-      isAssistance: context.isAssistance
+      isAssistance: context.isAssistance,
+      dateLines
     });
   const wanted = applyDescriptionInjectionsToText(description, context);
   // RECORDED EVEN WHEN NOTHING IS WRITTEN. This is the same block
@@ -7059,24 +7182,136 @@ const TAB_GROUPS = [
   ] }
 ];
 
+// ----------------------------------------------------------------------------
+// 2a-ii. SAVED TAB ORDER  ("these tabs, in THIS order, always")
+// ----------------------------------------------------------------------------
+//
+// TAB_GROUPS above is this system's opinion about which tabs matter most, and
+// for a workbook nobody has opinions about yet it is the right one. It is not
+// the right one forever: the person who runs a serving day wants the two tabs
+// they touch every morning first, and which two those are depends on the
+// office rather than on the software.
+//
+// Dragging a tab works — until the next layout rebuild, which walks TAB_GROUPS
+// and puts everything back. That is the same trap saved column widths were dug
+// out of (section 2a-i), and it gets the same answer: the arrangement somebody
+// made by hand can be PROMOTED INTO THE DEFAULT. Drag the tabs into the order
+// you want, press the menu item, and every rebuild from then on honours it.
+//
+// SAVED AS A LIST OF NAMES, not positions: a tab that does not exist in this
+// workbook is skipped rather than leaving a hole, and a tab this version does
+// not know about yet keeps its place at the end instead of being shuffled
+// somewhere arbitrary.
+//
+// COLOURS ARE NOT PART OF IT. A tab's colour says what KIND of tab it is
+// (TODAY / SET UP / LISTS / ARCHIVE) and that does not change because somebody
+// moved it — so the group colours are applied either way, from the same
+// TAB_GROUPS list as before.
+// ----------------------------------------------------------------------------
+
+const TAB_ORDER_PROP_KEY = 'SHEET_TAB_ORDER_V1';
+
+/** The saved tab order, or [] when nobody has saved one. */
+function readSavedTabOrder() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(TAB_ORDER_PROP_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.map(n => String(n || '')).filter(Boolean) : [];
+  } catch (err) {
+    log(`ℹ️ Could not read the saved tab order (${err}) — using the built-in one.`);
+    return [];
+  }
+}
+
+function writeSavedTabOrder(names) {
+  const list = (names || []).map(n => String(n || '')).filter(Boolean);
+  if (list.length === 0) {
+    PropertiesService.getScriptProperties().deleteProperty(TAB_ORDER_PROP_KEY);
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty(TAB_ORDER_PROP_KEY, JSON.stringify(list));
+}
+
+/** Every tab name TAB_GROUPS positions, in its built-in order. */
+function builtInTabOrder() {
+  return TAB_GROUPS.reduce((names, group) => names.concat(group.names), []).filter(Boolean);
+}
+
+/**
+ * The order reorderTabs() should actually apply: the saved one when there is
+ * one, with any tab it does not mention appended in the built-in order.
+ *
+ * The append is what keeps an order saved today from stranding a tab a later
+ * version introduces — it lands at the end, visible, rather than wherever the
+ * spreadsheet happened to leave it.
+ */
+function resolveTabOrder() {
+  const saved = readSavedTabOrder();
+  if (saved.length === 0) return builtInTabOrder();
+  return dedupePreservingOrder(saved.concat(builtInTabOrder()));
+}
+
+/** { tabName: colour } from TAB_GROUPS — the colour is a fact about the tab, not about where it sits. */
+function tabColorsByName() {
+  const colors = {};
+  TAB_GROUPS.forEach(group => group.names.forEach(name => { colors[name] = group.color; }));
+  return colors;
+}
+
 function reorderTabs(ss) {
+  const colors = tabColorsByName();
   let position = 0;
-  TAB_GROUPS.forEach(group => {
-    group.names.forEach(name => {
-      const sheet = ss.getSheetByName(name);
-      if (!sheet) return;
-      position++;
-      ss.setActiveSheet(sheet);
-      ss.moveActiveSheet(position);
-      // Never fatal: a tab colour is the last thing worth failing a layout
-      // rebuild over.
-      try {
-        sheet.setTabColor(group.color);
-      } catch (err) {
-        log(`Could not colour the "${name}" tab (${err}).`);
-      }
-    });
+  resolveTabOrder().forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    position++;
+    ss.setActiveSheet(sheet);
+    ss.moveActiveSheet(position);
+    if (!colors[name]) return;
+    // Never fatal: a tab colour is the last thing worth failing a layout
+    // rebuild over.
+    try {
+      sheet.setTabColor(colors[name]);
+    } catch (err) {
+      log(`Could not colour the "${name}" tab (${err}).`);
+    }
   });
+}
+
+/**
+ * MENU ACTION: remember the tabs exactly as they sit right now.
+ *
+ * Every tab is recorded, hidden ones included — hiding is a separate decision
+ * and one this never touches, but a hidden tab still has a position and would
+ * otherwise be the one thing the next rebuild moved.
+ */
+function saveCurrentTabOrder() {
+  if (!requireAuthorizedAdmin('Save Tab Order')) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const names = ss.getSheets().map(sheet => sheet.getName());
+  writeSavedTabOrder(names);
+  const message = `Tab order saved ✅ — these ${names.length} tabs stay in this order from now on. ` +
+    `Drag them and press this again to change it.`;
+  toastIfPossible(message);
+  log(`saveCurrentTabOrder: ${names.join(' | ')}`);
+  return names.length;
+}
+
+/** MENU ACTION: forget it, and go back to the order this system ships with. */
+function clearSavedTabOrder() {
+  if (!requireAuthorizedAdmin('Reset Tab Order')) return false;
+  const had = readSavedTabOrder().length > 0;
+  writeSavedTabOrder([]);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Applied straight away rather than waiting for the next rebuild: somebody
+  // who pressed this wants to see the built-in order, now.
+  reorderTabs(ss);
+  const message = had
+    ? 'Saved tab order forgotten ✅ — the tabs are back in their built-in order.'
+    : 'There was no saved tab order — the tabs were already in their built-in order.';
+  toastIfPossible(message);
+  log(`clearSavedTabOrder: ${message}`);
+  return had;
 }
 
 function initPlaceholderSheet(ss, tabName, message) {
@@ -8955,6 +9190,14 @@ function buildAppMenu(ui, includeAdmin) {
       // Next to nothing else, because it belongs to nothing else: it is the
       // one place a width set by hand stops being undone by the next render.
       .addItem('📏 Column Widths…', 'showColumnWidthDialog')
+      // Its twin, and directly under it: the other arrangement somebody makes
+      // by hand and the next rebuild undoes. See section 2a-ii.
+      .addItem('🗂️ Save This Tab Order', 'saveCurrentTabOrder')
+      .addItem('Reset to the Built-In Tab Order', 'clearSavedTabOrder')
+      .addSeparator()
+      // THE ANSWER TO "REGISTRATIONS STOPPED ARRIVING FROM ONE FORM". Run as
+      // the account that made the forms — see openUpAllFormSharing().
+      .addItem('🔓 Open Up Form Sharing', 'openUpAllFormSharing')
       .addSeparator()
       .addSeparator()
       // THE ONE THAT ANSWERS "WHY ISN'T THIS TAG WORKING". Every other item on
@@ -14633,6 +14876,10 @@ function sessionsOfGroup(group) {
   if (group.lunchOnlySessions) return group.lunchOnlySessions;
   return group.sessions.map(s => ({
     date: s.event.getStartTime(),
+    // Carried so the form's description can say what TIME the session runs at
+    // — see sessionTimeRangeForDisplay(). Every other consumer of this shape
+    // ignores it.
+    end: s.event.getEndTime(),
     location: s.locationName,
     title: group.cleanTitle
   }));
@@ -15758,11 +16005,12 @@ function refreshFormForNewDates(formId, group, configInfo) {
   renameFormForGroup(form, group);
 
   const sessions = sessionsOfGroup(group);
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
+  const { allDateLabels, lunchDateLabels, allDateLines } =
+    buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
     { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
-      isAssistance: group.isAssistance }));
+      isAssistance: group.isAssistance, dateLines: allDateLines }));
   // Re-asserted on every refresh, not only at creation: [Club] can be added to
   // (or taken off) a program's calendar events at any time, and the sign-up
   // options are the only place a respondent can act on that.
@@ -15881,6 +16129,14 @@ function createRegistrationForm(group, configInfo) {
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
   const form = FormApp.openById(copiedFile.getId());
 
+  // OPENED UP AT BIRTH, so the account that syncs this workbook can read the
+  // form the account that created it just made. Drive gives a new file to its
+  // creator alone, and an hourly sync run by anybody else is then refused —
+  // silently, since a form that cannot be opened simply imports nothing. Never
+  // fatal: an unshared form still works for the people filling it in. See
+  // openUpFileToAnyoneWithLink().
+  openUpFileToAnyoneWithLink(form.getId(), `registration form "${formTitle}"`);
+
   // EVERYTHING PAST THE COPY IS GUARDED, and the copy is thrown away if any of
   // it fails. A half-configured form is not a usable registration form, and
   // leaving it in Drive means the folder fills with one abandoned copy per
@@ -15926,11 +16182,12 @@ function configureCopiedRegistrationForm(form, group, configInfo, formTitle) {
   applyRegistrationHorizonToNewForm(form, sessionsOfGroup(group), formTitle);
 
   const sessions = sessionsOfGroup(group);
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, { showLocation: group.isShared });
+  const { allDateLabels, lunchDateLabels, allDateLines } =
+    buildDateLabelSets(sessions, { showLocation: group.isShared });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
     { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
-      isAssistance: group.isAssistance }));
+      isAssistance: group.isAssistance, dateLines: allDateLines }));
   applyAttendanceModeChoices(form,
     { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle,
       isLunchOnly: group.isLunchOnly, isAssistance: group.isAssistance });
@@ -16334,8 +16591,15 @@ function syncRegistrations() {
   // already runs hourly on a trigger with nobody waiting on it — so the read
   // that used to be a wait at the sign-in desk is paid for in the background
   // instead. Outside the lock: this reads tabs, and holding the sync lock
-  // while it does would block the next sync for no reason.
-  warmQuickMarkIndexCache();
+  // while it does would block the next sync for no reason. Guarded like every
+  // step inside the sync: the registrations are already imported and written
+  // by the time this runs, and a cache that could not be warmed is only a
+  // slower first Quick Mark.
+  try {
+    warmQuickMarkIndexCache();
+  } catch (err) {
+    log(`⚠️ Could not rebuild the Quick Mark lists after the sync (${err}) — they will be built on demand.`);
+  }
 }
 
 function syncRegistrationsInternal() {
@@ -16355,6 +16619,9 @@ function syncRegistrationsInternal() {
   const existingRows = readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
   const existingRowIndex = getExistingRegistrantIndex(existingRows);
+  // What each session is already holding, so this run's waitlist decisions
+  // start from the truth rather than from zero — see seedRegistryOccupancy().
+  seedRegistryOccupancy(registryIndex, existingRows);
 
   const formIds = getDistinctFormIds(registrySheet, sessionRows);
   const newRows = [];
@@ -16367,26 +16634,82 @@ function syncRegistrationsInternal() {
   // slow and, on a busy sync, a lot of re-reads of a tab being changed.
   const collectors = { clubJoins: [], assistanceRequests: [] };
 
-  formIds.forEach(formId => {
-    let form;
+  // ONE STEP FAILING IS NOT THE RUN FAILING.
+  //
+  // Everything below this line is a step that can be skipped without making
+  // the others wrong: a dashboard render, a memory-tab refresh, a form's
+  // labels. They were unguarded, so a single throw — and the throw this was
+  // written for is a PERMISSION error, from a second account meeting a
+  // protected range or a file it does not own — ended the whole sync: every
+  // tab downstream of the failure was left as it was, the admin digest never
+  // went out, and the log said one line about one call.
+  //
+  // The one step that is NOT in this category is the write of the Registrants
+  // tab. It is still guarded, but its failure stops the sync clock — see
+  // `registrantsWritten` below.
+  //
+  // Each step now says what it could not do, in words that name the fix when
+  // the answer is "this account cannot touch that", and the run carries on.
+  const stepProblems = [];
+  const step = (label, fn) => {
     try {
-      form = FormApp.openById(formId);
+      return fn();
     } catch (err) {
-      log(`⚠️ Could not open form ${formId}: ${err}`);
-      // Worth an admin's attention: a form we can't open is one whose
-      // registrations are silently not being imported.
-      noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);
-      return;
+      stepProblems.push(label);
+      log(`⚠️ Registration sync: ${label} failed (${err}) — carrying on with the rest of the run.`);
+      noteForAdmin('Parts of the sync that could not run',
+        `${label} — ${err}.` + (isPermissionError(err)
+          ? ` That is a permissions failure, not a fault in the data: this account is not allowed to ` +
+            `change what it just tried to. Run the sync as the account that owns the workbook, or use ` +
+            `🔧 Admin ▸ 🔓 Open Up Form Sharing for a form it cannot reach.`
+          : ''));
+      return undefined;
     }
+  };
 
-    const responses = form.getResponses(lastSync);
-    if (responses.length === 0) return; // don't pay for an item index on a form with nothing new
-    const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
-    responses.forEach(response => {
-      const rowsForResponse = processFormResponse(formIndex, response, registryIndex, protectedKeys,
-        existingRowIndex, orderAheadDays, collectors);
-      newRows.push(...rowsForResponse.filter(Boolean));
-    });
+  formIds.forEach(formId => {
+    // THE WHOLE FORM IS INSIDE THE GUARD, not just the open.
+    //
+    // It used to be only FormApp.openById(), on the reasoning that opening is
+    // where access is decided — but getResponses() and getItems() are separate
+    // calls that reach the same file and can be refused on their own, and a
+    // refusal there was an uncaught throw that ended the ENTIRE sync. One form
+    // shared wrongly therefore stopped every OTHER form's registrations from
+    // being imported, stopped the dashboards being rebuilt, and left
+    // LAST_FORM_SYNC_TIME unadvanced so the next run did the same thing again.
+    // A form that cannot be read is one form's problem; it must not be the
+    // workbook's.
+    try {
+      const form = FormApp.openById(formId);
+      const responses = form.getResponses(lastSync);
+      if (responses.length === 0) return; // don't pay for an item index on a form with nothing new
+      const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
+      responses.forEach(response => {
+        const rowsForResponse = processFormResponse(formIndex, response, registryIndex, protectedKeys,
+          existingRowIndex, orderAheadDays, collectors);
+        newRows.push(...rowsForResponse.filter(Boolean));
+      });
+    } catch (err) {
+      log(`⚠️ Could not read form ${formId}: ${err}`);
+      // A PERMISSION FAILURE IS REPAIRABLE, and the repair is worth trying
+      // from here: this account may hold the file even though the call that
+      // failed did not go through Drive. When it works, the next run imports
+      // normally and nobody has to do anything. When it does not — because
+      // this is the account that cannot reach the file — the admin digest
+      // says which form and names the menu item that fixes it, run by the
+      // account that owns it.
+      if (isPermissionError(err)) {
+        const opened = openUpFileToAnyoneWithLink(formId, `registration form ${formId}`);
+        noteForAdmin('Forms that could not be read',
+          `${describeFormLink(formId)} refused this account (${err}). ` +
+          (opened.openedUp
+            ? `Its sharing has just been opened to anyone with the link, so the next sync should import it.`
+            : `Its sharing could NOT be changed from here. Sign in as the account that created it and run ` +
+              `🔧 Admin ▸ 🔓 Open Up Form Sharing. Until then this form's registrations are not being imported.`));
+      } else {
+        noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);
+      }
+    }
   });
 
   flushPersistentRegistries(); // one write for every all-dates entry recorded above
@@ -16394,7 +16717,7 @@ function syncRegistrationsInternal() {
   // The roster is updated BEFORE the catch-up below reads it, so somebody who
   // joined a club in this very sync is booked into its sessions on the same
   // run rather than waiting an hour for the next one.
-  upsertClubMembers(collectors.clubJoins);
+  step('updating the club roster', () => upsertClubMembers(collectors.clubJoins));
 
   // Guarded on its own: somebody asking for an appointment we cannot offer is
   // worth recording, and is never worth failing an import over.
@@ -16410,16 +16733,19 @@ function syncRegistrationsInternal() {
   // Deliberately AFTER the import loop above: bringing a form built on an
   // older template up to date replaces its questions, and a response that
   // hadn't been imported yet would lose its answers with them.
-  migrateFormsToCurrentTemplate(registrySheet, sessionRows);
+  step('bringing forms onto the current template', () =>
+    migrateFormsToCurrentTemplate(registrySheet, sessionRows));
 
   // Catch up "sign up for all dates" registrants on Grouped-series forms
   // whose date list has grown since they originally registered.
-  applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows);
+  step('catching up "every date" registrants', () =>
+    applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
   // ...and club members onto every upcoming session of their club, whichever
   // form now covers it. This is the step that makes a membership outlive the
   // form it was created on — see applyClubRosterCatchup().
-  applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows);
+  step('catching up club members', () =>
+    applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
   // BEFORE the tab is rewritten, not after: the instructors' shared sheets hold
   // marks made since the last run, and this is the pass that would otherwise
@@ -16434,26 +16760,39 @@ function syncRegistrationsInternal() {
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);
-  renderRegistrantsSheet(false, combinedRegistrantRows);
+  // THE ONE STEP WHOSE FAILURE STOPS THE CLOCK. Everything else here can be
+  // skipped and picked up next hour; this is the write that puts the imported
+  // registrations on the sheet, and if it does not land, advancing
+  // LAST_FORM_SYNC_TIME would mean those responses are never read again.
+  const registrantsWritten = step('writing the Registrants tab',
+    () => { renderRegistrantsSheet(false, combinedRegistrantRows); return true; }) === true;
 
   // combinedRegistrantRows IS what was just written to the Registrants tab,
   // so every consumer below can work from it instead of re-reading — except
   // where renderProgramDashboard()'s triage pass rewrites the tab, which it
   // reports back via registrantsMoved.
-  recomputeEventRegistryCounts(registrySheet, registrantsSheet, combinedRegistrantRows);
-  refreshFormShapeForAllForms(registrySheet);
+  step('recounting registrations against capacity', () =>
+    recomputeEventRegistryCounts(registrySheet, registrantsSheet, combinedRegistrantRows));
+  step("refreshing the forms' dates and lunch questions", () =>
+    refreshFormShapeForAllForms(registrySheet));
   // The appointment half of the same idea: capacity labels tell a date-based
   // form which dates are full, and this tells an appointment form which TIMES
   // are gone. Both run here, on fresh counts, for the same reason — a form
   // still offering a slot somebody took an hour ago is how two people end up
   // in one chair.
-  refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, combinedRegistrantRows);
+  step('refreshing the appointment times on forms', () =>
+    refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, combinedRegistrantRows));
 
-  const dashboardResult = renderProgramDashboard(false, { registrantRows: combinedRegistrantRows });
+  // A dashboard render that did not happen has moved nothing, so the rows read
+  // at the top are still the rows on the tab — which is exactly what
+  // `registrantsMoved: false` means to everything below.
+  const dashboardResult = step('rebuilding the program dashboard', () =>
+    renderProgramDashboard(false, { registrantRows: combinedRegistrantRows })) || { registrantsMoved: false };
   const reusableRows = dashboardResult.registrantsMoved ? null : combinedRegistrantRows;
-  updateMasterLunchDashboard(reusableRows);
-  refreshMemoryTabs(reusableRows, null);
-  renderClubMembersSheet(refreshClubMemberLabels(sessionRows));
+  step('rebuilding the lunch dashboard', () => updateMasterLunchDashboard(reusableRows));
+  step('refreshing the memory tabs', () => refreshMemoryTabs(reusableRows, null));
+  step('rebuilding the club roster tab', () =>
+    renderClubMembersSheet(refreshClubMemberLabels(sessionRows)));
 
   // The other half of the instructor round trip, and the reason this feature
   // needs NO TRIGGER OF ITS OWN: the rosters go back out on the same hourly
@@ -16477,10 +16816,17 @@ function syncRegistrationsInternal() {
   }
 
   flushPersistentRegistries();
-  setLastSyncTime(syncStartedAt);
+  // NOT ADVANCED WHEN THE ROWS DID NOT LAND: the next run re-reads the same
+  // responses and writes them again, which is the whole point of a sync clock.
+  if (registrantsWritten) setLastSyncTime(syncStartedAt);
   flushAdminDigest('Registration sync'); // no-op unless something above actually needed attention
-  toastIfPossible(`Registration sync complete ✅ — ${newRows.length} new row(s), ` +
-    `${combinedRegistrantRows.length} registrant row(s) total.`);
+  if (stepProblems.length === 0) {
+    toastIfPossible(`Registration sync complete ✅ — ${newRows.length} new row(s), ` +
+      `${combinedRegistrantRows.length} registrant row(s) total.`);
+  } else {
+    toastIfPossible(`Registration sync finished with problems ⚠️ — ${newRows.length} new row(s) imported, ` +
+      `but ${stepProblems.length} step(s) could not run: ${stepProblems.join('; ')}. See the log.`);
+  }
 }
 
 function getDistinctFormIds(registrySheet, sessionRows) {
@@ -16757,6 +17103,70 @@ function getProtectedRegistrantKeys(rows) {
  * duplicate imports and to locate the row a resubmission should patch or
  * supersede.
  */
+/**
+ * ONE SESSION'S LIVE OCCUPANCY, hung off its registry entry and shared by
+ * every row built against it during a run: how many people hold a place, and
+ * which appointment slots are spoken for.
+ *
+ * Created on first use so a caller that builds its own registry entry by hand
+ * (the sign-in desk's Quick Mark) needs to know nothing about it.
+ */
+function sessionOccupancy(registryEntry) {
+  if (!registryEntry.occupancy) {
+    registryEntry.occupancy = { people: 0, slots: new Set(), untimed: 0 };
+  }
+  return registryEntry.occupancy;
+}
+
+/**
+ * Starts every session's occupancy from the registrations ALREADY ON THE
+ * SHEET, so a cap means what it says across runs and not merely within one.
+ *
+ * WHAT IT WAS. The counter behind the waitlist decision started at zero on
+ * every execution, so it only ever saw the registrations that arrived in that
+ * one hour: a program capped at twelve took twelve MORE people every run, and
+ * "#13 is waitlisted automatically" was true only of a thirteenth who
+ * submitted inside the same sixty minutes as the other twelve. The
+ * Master_Program_Dashboard's own Status went red on schedule, which is why
+ * this was invisible — the sheet said Waitlist Only while the rows underneath
+ * it all said Active.
+ *
+ * Counted the way the session's capacity is written (see
+ * occupancyForSession()): heads for an ordinary session, distinct appointment
+ * slots for an assistance one, and one place for an assistance row carrying no
+ * time at all. Rows that are Cancelled, Superseded or already Waitlisted hold
+ * nothing.
+ *
+ * ONE OBJECT PER SESSION, not per index key: a day still typed as one calendar
+ * event per appointment puts several rows on the dashboard sharing an
+ * Event_ID, and two counters for one session would each let the cap be reached
+ * separately.
+ */
+function seedRegistryOccupancy(registryIndex, existingRows) {
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const byEventId = {};
+  (existingRows || []).forEach(row => {
+    if (String(row[map['Program_Status']] || '').trim() !== 'Active') return;
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    if (!eventId) return;
+    if (!byEventId[eventId]) byEventId[eventId] = { people: 0, slots: new Set(), untimed: 0 };
+    const entry = byEventId[eventId];
+    entry.people++;
+    const slot = appointmentStartLabelOf(row[map['Event_Time']]);
+    if (slot) entry.slots.add(slot); else entry.untimed++;
+  });
+
+  Object.keys(registryIndex || {}).forEach(key => {
+    const entry = registryIndex[key];
+    if (!entry || !entry.eventId) return;
+    if (!byEventId[entry.eventId]) {
+      byEventId[entry.eventId] = { people: 0, slots: new Set(), untimed: 0 };
+    }
+    entry.occupancy = byEventId[entry.eventId];
+  });
+  return registryIndex;
+}
+
 function getExistingRegistrantIndex(rows) {
   const map = getIndexMap(HEADERS.Registrant_Dash);
   const index = new Map();
@@ -17381,11 +17791,36 @@ function buildRegistrantRow(args) {
     // identity: keep the old row visible for the audit trail instead of
     // silently dropping this resubmission the way a plain duplicate-key
     // check used to.
+    //
+    // The place it held is given back before the new row asks for one: the
+    // seed below counted that row as Active, and leaving it counted would let
+    // somebody re-registering push their own session over its cap. Its
+    // appointment SLOT is left marked taken until the next sync recomputes
+    // from the rows themselves — the alternative is reference-counting a set
+    // for a case that resolves itself within the hour.
+    if (String(existingRow[map['Program_Status']] || '').trim() === 'Active') {
+      const held = sessionOccupancy(registryEntry);
+      held.people = Math.max(0, held.people - 1);
+    }
     supersedeRegistrantRow(existingRow, map, submittedAt);
   }
 
+  // HOW FULL THIS SESSION IS RIGHT NOW, in the unit its capacity is written
+  // in — heads for an ordinary session, appointment slots for an assistance
+  // one. See sessionOccupancy() and occupancyForSession(): a couple seeing the
+  // provider together take ONE appointment, and counting them as two waitlisted
+  // the next person while a time was still free on the form.
+  const occupancy = sessionOccupancy(registryEntry);
+  const slotLabel = registryEntry.isAssistance ? appointmentStartLabelOf(args.eventTimeOverride) : '';
+  // Joining an appointment somebody in this same party already holds takes no
+  // new place — it is the second seat at one appointment.
+  const takesAPlace = !slotLabel || !occupancy.slots.has(slotLabel);
+  const used = registryEntry.isAssistance
+    ? occupancy.slots.size + occupancy.untimed
+    : occupancy.people;
+
   const isCapped = registryEntry.maxCapacity > 0;
-  const programStatus = isCapped && registryEntry.activeCountSoFar >= registryEntry.maxCapacity
+  const programStatus = isCapped && takesAPlace && used >= registryEntry.maxCapacity
     ? 'Waitlisted' : 'Active';
   const lunchStatus = programStatus === 'Waitlisted'
     ? 'Waitlisted'
@@ -17398,7 +17833,11 @@ function buildRegistrantRow(args) {
       `${displayName} (${personType}) for ${formatDateLabel(registryEntry.eventDate)} — capacity ${registryEntry.maxCapacity} is full.`);
   }
 
-  registryEntry.activeCountSoFar = (registryEntry.activeCountSoFar || 0) + (programStatus === 'Active' ? 1 : 0);
+  if (programStatus === 'Active') {
+    occupancy.people++;
+    if (slotLabel) occupancy.slots.add(slotLabel);
+    else if (registryEntry.isAssistance) occupancy.untimed++;
+  }
 
   const row = new Array(HEADERS.Registrant_Dash.length).fill('');
 
@@ -17493,16 +17932,86 @@ function buildEventCountsFromRegistrants(registrantsSheet, registrantRows) {
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
     if (!eventId) return;
-    if (!counts[eventId]) counts[eventId] = { active: 0, waitlist: 0 };
-    if (row[map['Program_Status']] === 'Active') counts[eventId].active++;
-    if (row[map['Program_Status']] === 'Waitlisted') counts[eventId].waitlist++;
+    if (!counts[eventId]) {
+      counts[eventId] = {
+        active: 0, waitlist: 0,
+        // THE SAME TWO NUMBERS COUNTED IN SLOTS, for the sessions whose
+        // capacity is measured in slots rather than in chairs — see
+        // occupancyForSession(). Sets, because two rows on one appointment
+        // (a couple) are ONE slot, and Sets are how "how many different
+        // times are spoken for" is asked.
+        activeSlots: new Set(), waitlistSlots: new Set(),
+        // Rows carrying no time at all cannot be pooled with anything, so
+        // each is counted as a place of its own rather than silently
+        // vanishing from a slot tally.
+        activeUntimed: 0, waitlistUntimed: 0
+      };
+    }
+    const entry = counts[eventId];
+    const status = row[map['Program_Status']];
+    const slot = appointmentStartLabelOf(row[map['Event_Time']]);
+    if (status === 'Active') {
+      entry.active++;
+      if (slot) entry.activeSlots.add(slot); else entry.activeUntimed++;
+    }
+    if (status === 'Waitlisted') {
+      entry.waitlist++;
+      if (slot) entry.waitlistSlots.add(slot); else entry.waitlistUntimed++;
+    }
   });
   return counts;
+}
+
+/** The empty count entry, so every reader can assume the same shape. */
+function emptyEventCounts() {
+  return {
+    active: 0, waitlist: 0,
+    activeSlots: new Set(), waitlistSlots: new Set(),
+    activeUntimed: 0, waitlistUntimed: 0
+  };
+}
+
+/**
+ * HOW FULL ONE SESSION IS, in the unit its capacity is written in.
+ *
+ * An ordinary session's capacity is CHAIRS: three people in the room are three
+ * of them, and a party of two takes two. An appointment session's capacity is
+ * SLOTS — Max_Capacity is literally its slot count (resolveAppointmentCapacity())
+ * — and a slot holds an appointment, not a head. Heather sees a couple at 10:30
+ * and that is ONE appointment; the 11:00 and 11:30 slots are still free.
+ *
+ * Counting people on both was what made a three-slot afternoon read as full
+ * after two bookings: one person at 10:00, a couple at 10:30, three "registered"
+ * against a capacity of three, 🔴 Waitlist Only and "(FULL - Waitlist)" stamped
+ * on the date — with an empty 11:00 still being offered by the form itself,
+ * which has always worked in slots (buildAppointmentChoicesForContext() drops a
+ * time the moment anybody takes it). The form and the sheet disagreed, and the
+ * sheet was the one that was wrong.
+ *
+ * A row with no time on it is counted as a place of its own: it is somebody
+ * booked onto the session that no slot can be attributed to, and dropping it
+ * would under-count the day.
+ */
+function occupancyForSession(counts, isAppointmentSession) {
+  const entry = counts || emptyEventCounts();
+  if (!isAppointmentSession) return { active: entry.active || 0, waitlist: entry.waitlist || 0 };
+  const slots = set => (set && typeof set.size === 'number') ? set.size : 0;
+  return {
+    active: slots(entry.activeSlots) + (entry.activeUntimed || 0),
+    waitlist: slots(entry.waitlistSlots) + (entry.waitlistUntimed || 0)
+  };
 }
 
 function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, counts) {
   const eventIds = registrySheet.getRange(dataStart, regMap['Event_ID'], numRows, 1).getValues();
   const maxCaps = registrySheet.getRange(dataStart, regMap['Max_Capacity'], numRows, 1).getValues();
+  // WHICH SESSIONS COUNT IN SLOTS RATHER THAN IN PEOPLE — see
+  // occupancyForSession(). Read here rather than inferred from the count,
+  // because "three registered against a capacity of three" looks identical
+  // either way and only the session knows which it is.
+  const isAppointment = regMap['Personalized_Assistance'] === undefined
+    ? null
+    : registrySheet.getRange(dataStart, regMap['Personalized_Assistance'], numRows, 1).getValues();
 
   const activeOut = [], waitlistOut = [], remainingOut = [], statusOut = [];
   for (let i = 0; i < numRows; i++) {
@@ -17510,7 +18019,8 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
     const rawCap = maxCaps[i][0];
     const isUncapped = rawCap === '--' || rawCap === '' || Number(rawCap) <= 0;
     const maxCap = isUncapped ? 0 : Number(rawCap);
-    const c = counts[eventId] || { active: 0, waitlist: 0 };
+    const c = occupancyForSession(counts[eventId],
+      !!isAppointment && isAssistanceColumnValue(isAppointment[i][0]));
 
     activeOut.push([c.active]);
     if (isUncapped) {
@@ -17687,10 +18197,10 @@ function rebuildFormFromCurrentTemplate(form, context) {
   }
   addTemplateItemsToForm(form);
 
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
+  const { allDateLabels, lunchDateLabels, allDateLines } = buildDateLabelSets(context.sessions, context);
   form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0,
     { isClub: context.isClub, programTitle: context.programTitle, isLunchOnly: context.isLunchOnly,
-      isAssistance: context.isAssistance }));
+      isAssistance: context.isAssistance, dateLines: allDateLines }));
 
   // THE DATE LABELS ARE THE ONE STEP THAT CANNOT BE SKIPPED. A rebuilt form's
   // grids hold the template's placeholder row until they are written, so a
@@ -27469,16 +27979,47 @@ function getOrCreateInstructorSheetFolder() {
  * throws.
  */
 function ensureInstructorSheetAccess(file, describe) {
+  if (!file) return { openedUp: false, editors: [], problems: [] };
+  return openUpFileToAnyoneWithLink(file.getId(), describe || 'instructor sheet');
+}
+
+/**
+ * THE SHARING THIS SYSTEM NEEDS ON EVERY FILE IT OWNS AND LATER HAS TO READ
+ * BACK: the accounts that run it as named editors, and anyone with the link
+ * able to edit.
+ *
+ * WHY IT IS THE SAME ANSWER FOR A FORM AS FOR AN INSTRUCTOR SHEET. Both are
+ * created by whoever clicked the menu item — a real person, signed in as
+ * themselves — and both are read and written every hour by whoever owns the
+ * triggers, which is routinely a DIFFERENT account. Drive gives a new file to
+ * its creator and nobody else, so the hourly run opens it, is refused, and the
+ * work silently stops: an instructor's ticks never come back, or a form's
+ * registrations are never imported. Nothing in either case looks broken.
+ *
+ * LOW SECURITY HERE IS A DELIBERATE TRADE. A registration form is a public
+ * sign-up page and an instructor sheet is a roster of first names and ticks;
+ * the alternative, in practice, is a file nobody can open and a feature nobody
+ * uses. Anybody who wants it narrowed can change the sharing on the file
+ * itself — nothing re-opens it except a run that touches it again.
+ *
+ * NEVER THROWS. A file that cannot be shared is still a file, and losing a
+ * form or a roster over a Drive permission error is far worse than an unshared
+ * one. Returns { openedUp, editors, problems } for a caller that wants to say
+ * what happened.
+ */
+function openUpFileToAnyoneWithLink(fileId, describe) {
   const outcome = { openedUp: false, editors: [], problems: [] };
-  if (!file) return outcome;
-  const label = describe || 'instructor sheet';
+  if (!fileId) return outcome;
+  const label = describe || `file ${fileId}`;
 
   let driveFile = null;
   try {
-    driveFile = DriveApp.getFileById(file.getId());
+    driveFile = DriveApp.getFileById(fileId);
   } catch (err) {
     // Almost always "you do not have permission" — i.e. we are already the
-    // account that cannot reach it, and there is nothing to do from here.
+    // account that cannot reach it, and there is nothing to do from here. The
+    // repair has to be run by an account that CAN, which is what the admin
+    // menu item exists for (see openUpAllFormSharing()).
     outcome.problems.push(`could not be reached in Drive (${err})`);
     log(`ℹ️ Could not open the ${label} in Drive to check its sharing (${err}).`);
     return outcome;
@@ -27509,6 +28050,79 @@ function ensureInstructorSheetAccess(file, describe) {
     log(`⚠️ Could not open the ${label} to anyone with the link (${err}).`);
   }
   return outcome;
+}
+
+/**
+ * MENU ACTION: open every registration form (and the template behind them) to
+ * anyone with the link, and add the accounts that run this system as editors.
+ *
+ * THE FAILURE IT REPAIRS. Forms are created by whoever pressed the menu item
+ * and read every hour by whoever owns the triggers. When those are different
+ * accounts — which is the normal state of this office — Drive refuses the
+ * second one, and the symptom is not an error anybody sees: registrations for
+ * that form simply stop arriving on the Registrants tab. Since the sync
+ * guards each form separately (see syncRegistrationsInternal()), the rest of
+ * the workbook carries on looking perfectly healthy.
+ *
+ * RUN IT AS THE ACCOUNT THAT OWNS THE FORMS — usually whoever set the system
+ * up. An account that cannot reach a file cannot change its sharing either, so
+ * running this from the account that is being refused reports the problem
+ * rather than fixing it, and says so per form.
+ *
+ * New forms no longer need this: createRegistrationForm() and
+ * createFormFromSpec() open a form up the moment they make it. This is for
+ * every form that already exists.
+ */
+function openUpAllFormSharing() {
+  if (!requireAuthorizedAdmin('Open Up Form Sharing')) return 0;
+  if (!confirmConsequentialAction('Open up the registration forms?',
+    'Every registration form this workbook knows about is set to "anyone with the link can edit", and ' +
+    'the accounts that run this system are added as editors.\n\nThis is what lets an hourly sync run by ' +
+    'one account import registrations from forms created by another. A registration form is a public ' +
+    'sign-up page, so the link being open is not a change in who can see it.', true)) {
+    return 0;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
+  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const rows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const formIds = dedupePreservingOrder(rows.map(row => String(row[map['Form_ID']] || '').trim())
+    .filter(Boolean));
+
+  // The template too: every form is a copy of it, and a template the syncing
+  // account cannot open is a workbook that can never build another form.
+  let templateId = '';
+  try {
+    templateId = getOrCreateTemplateForm().getId();
+  } catch (err) {
+    log(`ℹ️ Could not reach the form template to open it up (${err}).`);
+  }
+
+  const targets = dedupePreservingOrder(formIds.concat(templateId ? [templateId] : []));
+  let opened = 0;
+  const refused = [];
+  targets.forEach(formId => {
+    const outcome = openUpFileToAnyoneWithLink(formId,
+      formId === templateId ? 'the form template' : `registration form ${formId}`);
+    if (outcome.openedUp) opened++;
+    else refused.push(formId);
+  });
+
+  refused.forEach(formId => {
+    noteForAdmin('Forms whose sharing could not be changed',
+      `${describeFormLink(formId)} — this account cannot change its sharing, which almost always means ` +
+      `it does not own the form. Sign in as the account that created it and run this again.`);
+  });
+  flushAdminDigest('Form sharing');
+
+  const message = refused.length === 0
+    ? `Form sharing opened ✅ — ${opened} form(s) can now be read by every account that runs this system.`
+    : `Form sharing opened for ${opened} form(s) ⚠️ — ${refused.length} refused this account. ` +
+      `Run it again signed in as whoever created those forms.`;
+  toastIfPossible(message);
+  log(`openUpAllFormSharing: ${message}`);
+  return opened;
 }
 
 /**
@@ -28386,6 +29000,9 @@ function createFormFromSpec(spec, formTitle, context) {
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
   const form = FormApp.openById(copiedFile.getId());
+  // The same opening-up createRegistrationForm() does, for the same reason:
+  // whoever syncs this workbook is routinely not whoever made the form.
+  openUpFileToAnyoneWithLink(form.getId(), `registration form "${formTitle}"`);
 
   try {
     withFormRetry(`configuring "${formTitle}"`, () => configureFormFromSpec(form, spec, sessions, formTitle, context));
@@ -28414,14 +29031,15 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
   }
   applyRegistrationHorizonToNewForm(form, sessions, formTitle);
 
-  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(sessions, {
+  const { allDateLabels, lunchDateLabels, allDateLines } = buildDateLabelSets(sessions, {
     showLocation: spec.showLocation,
     showTitle: spec.showTitle,
     capacityHints: spec.capacityHints
   });
 
   form.setDescription(buildFormDescription(locations, allDateLabels, spec.isFixed, lunchDateLabels.length > 0,
-    { isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly }));
+    { isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly,
+      dateLines: allDateLines }));
   applyAttendanceModeChoices(form,
     { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly });
   syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0, spec);

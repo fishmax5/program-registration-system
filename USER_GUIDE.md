@@ -254,6 +254,7 @@ appointment-based.
 | The form asks | which dates, who's coming, who eats | which appointment time, and whether they'd take an earlier one |
 | Capacity | `[Cap: N]`, or unlimited | **one person per slot** — so however many slots fit in the event. A *smaller* `[Cap: N]` still wins (keep the last half hour free); a bigger one is ignored, because a slot has no second chair; and `[Cap: 1]` means *one person per appointment*, not a session that fills on its first booking |
 | Lunch | asked as a grid — which dates, who eats | asked as **one yes/no**, about the day they just booked, and only where lunch is served on it |
+| Full when | every seat is taken | every **time** is taken — a couple at one appointment is one appointment, not two |
 | Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
 | Guest questions | yes | **yes** — "individual or couple" is a real answer for a will |
 
@@ -858,6 +859,23 @@ The **Status** column is computed for you:
 | 🟢 Open | Plenty of room |
 | 🟡 Almost Full | Within the last 15% of seats |
 | 🔴 Waitlist Only | Full — new sign-ups are waitlisted |
+
+**On an appointment program, `Active_Count` counts APPOINTMENTS, not heads.**
+Its capacity is a number of slots, so its occupancy has to be counted in the
+same unit: a couple seeing the provider together at 10:30 is **one**
+appointment, and the 11:00 slot beside it is still free. Counted as two people
+it was the arithmetic that closed a three-slot afternoon after two bookings —
+🔴 Waitlist Only on the sheet, *(FULL - Waitlist)* on the form, and an empty
+11:00 still being offered by the very same form, which has always worked in
+slots. A booking with no time on it still holds a place of its own.
+
+**A cap now holds across runs, not just within one.** The counter behind
+"#13 is waitlisted automatically" started from zero on every hourly run, so it
+only ever saw the sign-ups that arrived in that same hour — a program capped at
+twelve quietly took twelve more people every run while the Status column went
+red on schedule. It now starts from the registrations already on the sheet, so
+the cap means what this guide has always said it means. Nobody already
+registered is changed; it applies to sign-ups from here on.
 
 **Column order.** `Active_Count` sits right next to `Status` — how many signed
 up and whether it's full is the pair you read first. The three **capacity**
@@ -2068,6 +2086,18 @@ A few things worth knowing:
 - There's a dedicated **Allergies / Dietary Needs** field, and the "Anything
   Else?" box carries your location's own note as its instructions. (It used to
   be a bold heading floating above that question with nothing under it.)
+- **Every date says what time it runs**, in the description's list: *"Mon,
+  Sep 14, 2026, 10:00 AM – 11:30 AM — (Lunch: Chx Parm)"*. It used to say only
+  which day, which is half of what somebody deciding whether they can come is
+  asking. A program running **twice on one day** is one row on the grid (a grid
+  cannot carry two rows reading the same thing) and now says **both** its times
+  on that line — the first time the form has been able to mention the second
+  sitting at all. A date with no time on it (an all-day event) says nothing
+  rather than *"12:00 AM"*, and the lunch-only form never states a serving time,
+  because the noon it files its dates under is a placeholder, not the hour the
+  food goes out. The **grid rows themselves are unchanged** — a row label is the
+  key every registration is matched back by, so the time goes in the
+  description, not into it.
 - **Every form says where it is**, with the address: *"Location: Narberth — 100
   Conway Avenue, 2nd Floor, Narberth, PA"*. A form covering both buildings lists
   both. The name alone is the whole address to somebody who has been coming for
@@ -2253,6 +2283,10 @@ Everything else is grouped by the job it belongs to.
 | **🗑️ Delete Registrations…** | Permanently deletes the registrations on the sessions you tick, optionally the form responses behind them too. For test runs and duplicates — see [Deleting registrations](#deleting-registrations). Makes you type `DELETE` first |
 | **🩹 Rebuild Forms In Place (keeps links)…** | Rewrites every live form's questions from the current template, keeping each form's ID. **Every link already handed out goes on working** — see [Rebuild forms in place](#rebuild-forms-in-place) |
 | **💣 Destroy & Rebuild Forms…** | Throws every live form away and builds brand-new ones. **Breaks every link already handed out** — see [Destroy and rebuild forms](#destroy-and-rebuild-forms) |
+| **📏 Column Widths…** | Set a tab's column widths and promote them to defaults, so the next render stops undoing them |
+| **🗂️ Save This Tab Order** | Remembers the tabs exactly as they sit right now. Drag them into the order you want first; from then on every layout rebuild puts them back that way instead of into the built-in order. Hidden tabs are remembered too (hiding is a separate decision and this never changes it). A tab a later version adds lands at the end rather than being shuffled in somewhere |
+| **Reset to the Built-In Tab Order** | Forgets that, and puts the tabs back into the order this system ships with, straight away |
+| **🔓 Open Up Form Sharing** | Sets every registration form (and the template behind them) to *anyone with the link can edit*, and adds the accounts that run this system as editors. **Run it signed in as whoever created the forms** — an account that cannot reach a file cannot change its sharing either, and it says per form when that happens. This is the fix for "registrations stopped arriving from one form"; see [Troubleshooting](#troubleshooting) |
 | **🏷️ Read an Event's Tags…** | Read-only. Type part of a program name and it reads that program's calendar events with the sync's own parser: every `[bracket]` in the description, which ones became settings, which were left as notes and **why**, and whether the dashboard agrees. The tool to reach for whenever a tag "isn't working" — see [Why a tag isn't sticking](#why-a-tag-isnt-sticking) |
 | **Trigger Status** | Read-only. Shows what triggers your account holds, who Config says owns them, and which accounts have actually been firing them — the way to diagnose duplicates |
 | **Check Triggers** | Resets automation to exactly the expected triggers — 1 daily sync, 1 hourly sync, one per calendar, and the edit trigger that makes a `Club` / `No_Registration` / `Personalized_Assistance` tick reach the calendar straight away. Safe to press any time, clears out duplicates. **Trigger-owner account only** |
@@ -3481,6 +3515,42 @@ so a run whose only change was a `Form description` row wrote nothing and then
 reported that everything matched, which is the opposite of what had happened.
 Description rows are pushed by that menu item now, and counted in what it says
 afterwards.
+
+**Registrations stopped arriving from one form — and nothing looks broken**
+
+That is almost always a **permissions** problem, and it has one shape: forms are
+created by whoever pressed the menu item, and read every hour by whoever owns
+the triggers. Drive gives a new file to its creator and nobody else, so when
+those are two different accounts — the normal state of this office — the hourly
+run is refused. A form that cannot be opened imports nothing, silently.
+
+Three things now happen about it:
+
+- **New forms are opened up the moment they are made**, to *anyone with the
+  link can edit*, with the accounts that run this system added as named
+  editors. A registration form is a public sign-up page, so the link being open
+  is not a change in who can see it.
+- **One unreadable form no longer takes the whole sync down with it.** The read
+  of each form is guarded on its own; the rest of the forms import, the
+  dashboards rebuild, and the form that refused is named in the admin digest.
+  (Before this, one badly shared form stopped *every* form's registrations from
+  being imported and left the sync clock unadvanced, so the next run did the
+  same thing again.)
+- **For forms that already exist**, run **🔧 Admin ▸ 🔓 Open Up Form Sharing**
+  — signed in as the account that created them. Anything it could not change is
+  named, with what to do about it.
+
+**A step of the sync failed and I only found out from the log**
+
+Every step after the import — the dashboards, the memory tabs, the forms'
+labels — is guarded separately now. One failing is reported by name, in the
+toast *and* in the admin digest, and the run carries on with the rest instead of
+stopping there. A permissions failure says so in as many words, because its fix
+is different from every other kind.
+
+The one exception is the write of the **Registrants** tab itself: if that fails,
+the sync clock is deliberately **not** advanced, so the next run re-reads the
+same responses rather than losing them.
 
 **A new event didn't get a form**
 Check, in order: does the title start with `*` (tentative)? Is it an all-day
