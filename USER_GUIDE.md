@@ -1174,6 +1174,63 @@ lunch** — because somebody signing a person up for lunch today *and* putting
 them on every future session has usually described the whole arrangement, not
 half of it. Untick it if you meant only today's meal.
 
+#### 📱 The check-in page — the same thing on a tablet at the door
+
+Quick Mark lives inside the spreadsheet, which means the sign-in desk is
+wherever the laptop with the workbook open happens to be, operated by somebody
+with edit access to it. That is not most front doors.
+
+**🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ 📱 Check-In Page (link &
+PIN)…** gives you a web address for the same job. Open it on a tablet, add it
+to the home screen, and it is a sign-in list:
+
+- pick the location and the session — the **next** session is chosen for you,
+  since that is nearly always the one you are standing at;
+- every registered name is a row. **Tap one and they are marked present.** The
+  row turns green, and the heading counts *"14 of 30 checked in"*;
+- **tap a green row again to undo it** — it asks first. Big targets get hit by
+  accident, and a volunteer who cannot take a mistake back stops using the
+  page;
+- rows for somebody expecting a meal carry a narrow **Lunch** button, for the
+  desk that hands food over at the same table;
+- a search box appears once the list is long enough to need one;
+- somebody who has not arrived shows their **phone number** under their name.
+
+It writes into exactly the same cells Quick Mark writes into, at the same
+moment — there is no separate list to reconcile afterwards, and two people can
+work the door and the desk at once.
+
+**Setting it up** (once):
+
+1. **Extensions ▸ Apps Script**
+2. **Deploy ▸ New deployment ▸ Web app**
+3. **Execute as: Me.** **Who has access:** *Anyone within your organization* if
+   the tablets are signed into your Google accounts; *Anyone* if they are not.
+4. **Deploy**, then reopen **📱 Check-In Page** — the link is now listed there,
+   with **one link per building** underneath it. A per-building link opens
+   straight onto that building's sessions, so the Ashbridge tablet never asks a
+   volunteer which building they are standing in.
+
+> **Set a PIN if you deployed to *Anyone*.** That deployment makes the link
+> itself the permission — anyone it is forwarded to could mark attendance. The
+> PIN box in the same window closes that: each tablet is asked once and
+> remembers it. It is a door lock, not a safe; with *Anyone within your
+> organization* you don't need one, because Google has already asked who the
+> visitor is.
+
+**What it deliberately cannot do.** Registering a walk-in, standing club
+places, meal counts, moving an appointment — all of those ask follow-up
+questions (which club, how many meals, is a lunch even scheduled that day), and
+a door is not where those get asked. They stay in Quick Mark.
+
+> **The session list is a snapshot; the roster is live.** Which sessions exist,
+> and who is registered for them, comes off the same pre-built lists Quick Mark
+> uses, rebuilt on each sync — the page says at the top when they were built.
+> Who has *arrived* is read fresh from the sheet every time you pick a session,
+> and **Refresh list** re-reads it. So somebody who registered online ten
+> minutes ago may not be on the page yet; check them in from the workbook, or
+> run **🔄 Update Everything Now** first.
+
 #### Registering somebody at the desk or over the phone
 
 Somebody rings up, or stops at the front desk, and asks to be put down for
@@ -2273,6 +2330,8 @@ Everything else is grouped by the job it belongs to.
 | **Sync Registrations only** | Just the forms half: pulls in new responses and recomputes every count. Use this when you know nothing on the calendar has changed |
 | **Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
+| **Rebuild Quick Mark Lists** | Rebuilds the stored session and name lists Quick Mark and the check-in page both open with. The hourly sync does this anyway; this is for rebuilding them *before* you walk to the desk |
+| **📱 Check-In Page (link & PIN)…** | The web address of the tablet sign-in page, one link per building, plus the desk PIN. Says how to deploy it if it has never been published — see [The check-in page](#-the-check-in-page--the-same-thing-on-a-tablet-at-the-door) |
 
 **🔧 Admin (admin accounts only):**
 

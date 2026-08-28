@@ -89,6 +89,16 @@ It also:
   meal collected by somebody who never came in — and **signs somebody up for a
   future lunch** from the same dialog, recording the demand without claiming a
   meal was served;
+- puts that same sign-in **on a tablet at the door**, as a web page served by
+  this script (`doGet`) rather than a second system: `📱 Check-In Page` hands
+  over the link, one per building, and the page shows the session's roster —
+  every registered name as a row you tap once to mark present, ticked names
+  showing as checked in, a running "14 of 30", a second tap for a meal handed
+  over, and an undo for the tap that landed on the wrong row. It writes through
+  exactly the function Quick Mark writes through, under the same lock, into the
+  same cells — no copy of the data anywhere, and nothing new to authenticate
+  against. A PIN can be set for the deployment a shared tablet needs, where
+  nobody is signed into a Google account;
 - orders **more than one meal for the same person** — a standing order of four
   is a number in `Meals_Ordered` on one row, not four invented guests called
   "Extra Meal 1"; the kitchen's count adds meals rather than heads, the roster
