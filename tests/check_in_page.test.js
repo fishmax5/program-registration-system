@@ -284,5 +284,34 @@ ok('noon is not midnight', cmp('12:00 PM', '11:00 AM') > 0);
 ok('midnight is not noon', cmp('12:30 AM', '1:00 AM') < 0);
 ok('a blank sorts last', cmp('', '9:00 AM') > 0);
 
+// ---------------------------------------------------------------------------
+// 7. The /dev trap.
+// ---------------------------------------------------------------------------
+// getUrl() does not always hand back the published address — it often returns
+// the script editor's own /dev test URL, which opens fine for the script's
+// owner and fails for a tablet with "Sorry, unable to open the file at this
+// time." Presenting that as a shareable link is how a desk ends up with a
+// dead page, so the dialog has to tell the two apart.
+function infoWithUrl(url) {
+  sandbox.ScriptApp = { getService: () => ({ getUrl: () => url }) };
+  try { return sandbox.readCheckInPageInfo(); } finally { sandbox.ScriptApp = {}; }
+}
+ok('a /dev URL is flagged as the test address',
+  infoWithUrl('https://script.google.com/macros/s/ABC123/dev').isDev === true);
+ok('a /dev URL with a query string is still flagged',
+  infoWithUrl('https://script.google.com/macros/s/ABC123/dev?location=Narberth').isDev === true);
+ok('a published /exec URL is not flagged',
+  infoWithUrl('https://script.google.com/macros/s/ABC123/exec').isDev === false);
+// A script id that merely CONTAINS "dev" is not a dev URL — the check is the
+// path segment, not a substring anywhere in the address.
+ok('an /exec URL whose id contains "dev" is not flagged',
+  infoWithUrl('https://script.google.com/macros/s/AKfy_devXYZ/exec').isDev === false);
+ok('no deployment at all is not flagged as dev', infoWithUrl('').isDev === false);
+
+// And the dialog renders the warning rather than the link list.
+const devPage = sandbox.buildCheckInPageHtml({ url: 'https://x/dev', isDev: true, locations: ['Narberth'], pinSet: false });
+ok('the dialog warns about the test address', /not a published one/.test(devPage));
+ok('and names the error a tablet would show', /unable to open the file at this time/.test(devPage));
+
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 process.exit(fail ? 1 : 0);

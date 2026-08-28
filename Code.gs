@@ -38346,7 +38346,24 @@ function showCheckInPageDialog() {
   SpreadsheetApp.getUi().showModalDialog(html, 'Check-In Page');
 }
 
-/** { url, locations, pinSet } — everything the dialog above renders. */
+/**
+ * { url, isDev, locations, pinSet } — everything the dialog above renders.
+ *
+ * THE DEV-URL TRAP, and why isDev exists. getUrl() does not always hand back
+ * the published address: on a script whose head version has never been
+ * deployed — and sometimes even on one that has — it returns the script
+ * editor's own test address, the one ending in "/dev". That URL works
+ * perfectly for the person who owns the script, which is exactly what makes
+ * it dangerous: you copy it, it opens on your laptop, you send it to the
+ * desk, and the tablet gets
+ *
+ *     "Sorry, unable to open the file at this time."
+ *
+ * — because the test address is readable only by an account with EDIT access
+ * to the script, and a tablet has none. The published address ends in "/exec"
+ * instead, and only a real deployment produces one. So the dialog says which
+ * of the two it is holding rather than presenting them as the same link.
+ */
 function readCheckInPageInfo() {
   let url = '';
   try {
@@ -38354,7 +38371,12 @@ function readCheckInPageInfo() {
   } catch (err) {
     log(`Could not read the web app URL (${err}).`);
   }
-  return { url, locations: checkInLocations(), pinSet: isCheckInPinSet() };
+  return {
+    url,
+    isDev: /\/dev(\?|#|$)/.test(url),
+    locations: checkInLocations(),
+    pinSet: isCheckInPinSet()
+  };
 }
 
 /**
@@ -38431,6 +38453,23 @@ function buildCheckInPageHtml(info) {
         '<li>Execute as <b>Me</b>; Who has access <b>Anyone within your organization</b> ' +
         '(or <b>Anyone</b> if the tablets are not signed in — set a PIN below if so)</li>' +
         '<li>Deploy, then reopen this window for the link</li></ol>';
+      return;
+    }
+    // THE /dev URL IS NOT A LINK YOU CAN HAND OUT. It opens fine for whoever
+    // owns the script and fails for everybody else with "unable to open the
+    // file at this time" — which reads as a broken page rather than as a
+    // permission answer, so say it before the link rather than after it.
+    if (INFO.isDev) {
+      el.innerHTML = '<p class="hint"><b>This is the test address, not a published one.</b> ' +
+        'It ends in <code>/dev</code>, which only opens for accounts that can edit this script — ' +
+        'a tablet gets <i>"Sorry, unable to open the file at this time"</i>. To get a link that ' +
+        'works at the desk:</p><ol>' +
+        '<li>Extensions &rarr; Apps Script</li>' +
+        '<li>Deploy &rarr; <b>New deployment</b> &rarr; Web app</li>' +
+        '<li>Execute as <b>Me</b>; Who has access <b>Anyone within your organization</b> ' +
+        '(or <b>Anyone</b> if the tablets are not signed in — set a PIN below if so)</li>' +
+        '<li>Deploy, then reopen this window. The link will end in <code>/exec</code></li></ol>' +
+        '<div class="link"><b>Test address (you only)</b>' + esc(INFO.url) + '</div>';
       return;
     }
     var html = '<div class="link"><b>Any location (asks which)</b>' + esc(INFO.url) + '</div>';
