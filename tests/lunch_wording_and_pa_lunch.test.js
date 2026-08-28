@@ -124,12 +124,13 @@ check('a location we have no address for is left exactly as it was',
 const description = sandbox.buildFormDescription(['Narberth'], [hotLabel], false, true, {});
 check('the address is at the top of the form',
   description.indexOf('100 Conway Avenue') !== -1, true);
-check('and the dash is explained rather than left to be guessed at',
-  description.indexOf("THAT DAY'S LUNCH") !== -1, true);
-check('a form with no menu on any date says nothing about dashes',
-  sandbox.buildFormDescription(['Narberth'], ['Wed, Sep 16, 2026'], false, true, {})
-    .indexOf('follows the dash'), -1);
-check('a not-serving date still gets its footnote',
+// THE DESCRIPTION DOES NOT EXPLAIN THE DASH. It used to carry a paragraph
+// glossing "(Lunch: …)" and "(No Lunch Served)"; the brackets say what they
+// are, and a form that opens with a footnote about its own punctuation is a
+// form nobody reads to the bottom of.
+check('the description no longer glosses the meal hint',
+  description.indexOf('follows the dash'), -1);
+check('a not-serving date still says so beside the date itself',
   sandbox.buildFormDescription(['Narberth'], ['Tue, Sep 15, 2026 — (No Lunch Served)'], false, true, {})
     .indexOf('(No Lunch Served)') !== -1, true);
 

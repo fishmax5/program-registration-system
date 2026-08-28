@@ -3092,47 +3092,12 @@ function addLunchGridItem(form) {
 }
 
 /**
- * THE SENTENCE THAT EXPLAINS THE DASH.
- *
- * Every date on a form can carry what is being served that day, written by
- * formatDateLabelWithMeal() as "Tue 9/16/2026 — (Lunch: Chicken Parmesan)".
- * The brackets say what the words are; this says what they are FOR, once, in
- * the description, because the thing being misread is a date that appears to
- * have a second name — and the person misreading it is signing up for a
- * program, not for the dish.
- *
- * Returns '' — not a sentence about nothing — when no date on the form carries
- * a menu hint at all, which is every form at a location that does not cater
- * and every form whose month has no menu typed yet.
- */
-function buildLunchLegendNote(dateLabels) {
-  const labels = dateLabels || [];
-  const hasMenu = labels.some(l => String(l).indexOf('(Lunch: ') !== -1);
-  const hasNone = labels.some(l => String(l).indexOf(NO_LUNCH_HINT) !== -1);
-  if (!hasMenu && !hasNone) return '';
-  const parts = [];
-  if (hasMenu) {
-    parts.push(`what follows the dash on a date is THAT DAY'S LUNCH — "(Lunch: Chicken Parmesan)" ` +
-      `means chicken parmesan is on the menu that day, not that the session is about it`);
-  }
-  if (hasNone) parts.push(`a date marked "${NO_LUNCH_HINT}" has no lunch on it`);
-  return `Note: ${parts.join('; and ')}.`;
-}
-
-/** The legend as a description BLOCK — a blank line and the sentence, or nothing at all. */
-function appendLunchLegend(dateLabels) {
-  const note = buildLunchLegendNote(dateLabels);
-  return note ? `\n\n${note}` : '';
-}
-
-/**
  * Builds the form description, including the exact dates being registered
  * for — one date per line, not one long semicolon-separated line, and each
  * with the session's own start and end time on it (options.dateLines, from
- * buildDateLabelSets()). Adds a
- * note when any date is lunch-free, a line about club membership on a club
- * form, and — always, last — the assistance tagline, so every form ends with
- * a way to reach a person.
+ * buildDateLabelSets()). Adds a line when no date on the form serves lunch, a
+ * line about club membership on a club form, and — always, last — the
+ * assistance tagline, so every form ends with a way to reach a person.
  */
 function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, options) {
   options = options || {};
@@ -3155,7 +3120,7 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
   const dateList = lines.map(line => `• ${line}`).join('\n');
   const heading = list.length > 1
     ? `Locations:\n${list.map(loc => `• ${describeLocationWithAddress(loc)}`).join('\n')}\n` +
-      `(This program runs at more than one location — each date below says where.)`
+      `This program runs at more than one location; each date below says where.`
     : `Location: ${describeLocationWithAddress(list[0] || '')}`;
   // ONE DATE IS NOT "Dates". A one-off event's form led with a plural heading
   // over a list of one, which reads as a form that has lost most of its
@@ -3169,10 +3134,9 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     // registration form and is not one: there is no program behind these
     // dates, only a meal, and somebody who signs up expecting an activity has
     // been misled by a page they had every reason to trust.
-    description = `${heading}\n\nThis form is for LUNCH ONLY — it books you a meal, not a program. ` +
-      `To sign up for a class or an activity, use that program's own form.\n\n` +
+    description = `${heading}\n\nThis form is for lunch only. It reserves you a meal rather than a ` +
+      `place in a program — to join a class or an activity, please use that program's own form.\n\n` +
       `Lunch is served on:\n${dateList}\n\nPlease sign up below.` +
-      `${appendLunchLegend(dateLabels)}` +
       `\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
   }
@@ -3181,20 +3145,19 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     // this form looks like every other registration form and asks something
     // different. Somebody who reads "Dates" and stops has not yet been told
     // that they are booking one time slot within one of those days.
-    description = `${heading}\n\nThis is a one-to-one appointment — you book a TIME, not a day. ` +
-      `Appointments are offered on:\n${dateList}\n\nPick a time on the next page. Times already ` +
-      `taken are not shown; if none of the times work for you, say so and we will call you to ` +
-      `arrange another.`;
+    description = `${heading}\n\nThis is a one-to-one appointment, so you are booking a time rather ` +
+      `than a whole day. Appointments are offered on:\n${dateList}\n\nPlease choose a time on the ` +
+      `next page. Times already taken are not shown; if none of them suit you, tell us and we will ` +
+      `call to arrange another.`;
     // LUNCH IS SERVED ON SOME OF THESE DAYS, and an appointment form is now
     // allowed to ask about it — see syncAssistanceQuestionsOnForm(). Somebody
     // seeing a dish beside their appointment date needs telling that they are
     // welcome to stay for it, not left to assume the meal comes with the
     // appointment.
     if (hasLunchDates !== false) {
-      description += `\n\nLunch is served on some of these days. If you would like to stay for it, ` +
-        `say so under the time you pick and we will order you one.`;
+      description += `\n\nLunch is served on some of these days, and you are welcome to stay for it. ` +
+        `Say so under the time you pick and we will order one for you.`;
     }
-    description += appendLunchLegend(dateLabels);
     description += `\n\n${FORM_ASSISTANCE_TAGLINE}`;
     return description;
   }
@@ -3202,20 +3165,19 @@ function buildFormDescription(locations, dateLabels, isFixed, hasLunchDates, opt
     // Nothing on this form is catered, so the form isn't asking about lunch
     // at all (see syncLunchQuestionsOnForm()) — say so rather than leaving
     // its absence to be guessed at.
-    description += `\n\nNote: Lunch is not provided on any of these dates, so there is nothing to choose.`;
-  } else {
-    description += appendLunchLegend(dateLabels);
+    description += `\n\nLunch is not served on any of these dates, so this form does not ask about it.`;
   }
   if (options.isClub) {
     const title = String(options.programTitle || '').trim();
-    description += `\n\nThis is a club. You can sign up for ${title ? `all future ${title} meetings` : 'all future meetings'} ` +
-      `in one go — you will stay on the list from then on, and will not need to fill this in again each month.`;
+    description += `\n\nThis is a club, so you can sign up for ` +
+      `${title ? `all future ${title} meetings` : 'all future meetings'} at once. You will stay on ` +
+      `the list from then on, with no need to fill this in again each month.`;
   } else if (isFixed && !oneDate) {
     // Not on a one-date form: there is no first sign-up option on it to pick
     // (section 1g takes the question off), and "coming to every session?" of a
     // single session is a question with one possible answer.
-    description += `\n\nTip: Coming to every session? Pick the first sign-up option and you will only have to ` +
-      `tell us your lunch preference once.`;
+    description += `\n\nComing to every session? Pick the first sign-up option and you will only need ` +
+      `to tell us your lunch preference once.`;
   }
   description += `\n\n${FORM_ASSISTANCE_TAGLINE}`;
   return description;
@@ -18720,6 +18682,106 @@ function buildFixOneFormHtml(forms) {
 }
 
 /**
+ * WHY THIS FORM DOES OR DOES NOT ASK ABOUT LUNCH, written to the log in full.
+ *
+ * "Update one form" exists for the form that has gone wrong, and the commonest
+ * report is that a rebuilt form still has no lunch section. Every input to
+ * that decision is on a different sheet — the location's catering policy on
+ * Config, the day's menu row on Lunch_Schedule, the session rows on the
+ * program dashboard — and until now the only trace a rebuild left was a
+ * message naming the number of forms it touched. This prints the whole chain
+ * for ONE form, in the order the code reads it, so the answer is read rather
+ * than guessed at:
+ *
+ *   - WHICH form, by ID and by the title Drive shows, so the person looking at
+ *     a form in one tab can be sure it is the one that was rebuilt;
+ *   - the shape the context asks for (lunch-only, appointment, ordinary) —
+ *     an appointment form never carries the roster grids by design;
+ *   - each location's catering policy, because a "Never" location settles it
+ *     before any date is looked at;
+ *   - every session date with its own verdict and the menu row behind it, so
+ *     a By-exception location with no menu typed yet is distinguishable from
+ *     a day somebody marked "Not Serving".
+ *
+ * Diagnostics only: it reads, it never writes, and it must never be able to
+ * fail the rebuild it is describing.
+ */
+function logFormLunchDiagnostics(context, when) {
+  try {
+    const formId = context.formId || '(unknown)';
+    const sessions = context.sessions || [];
+    const locations = context.locations || [];
+    const { lunchDateLabels } = buildDateLabelSets(sessions, context);
+    const shape = formLunchShapeKey(context, lunchDateLabels.length > 0);
+    const asks = formWantsLunchQuestions(locations, lunchDateLabels.length > 0);
+
+    const policies = locations.map(loc => `${loc}="${getCateringPolicyForLocation(loc)}"`).join(', ');
+    log(`Lunch diagnosis (${when}) for form ${formId} — ${sessions.length} session(s) at ` +
+      `${describeLocations(locations)}; catering policy ${policies || '(no location on the sheet)'}; ` +
+      `flags lunchOnly=${!!context.isLunchOnly} appointment=${!!context.isAssistance} ` +
+      `club=${!!context.isClub} grouped=${!!context.isFixed}; shape "${shape}"; ` +
+      `${lunchDateLabels.length} of ${sessions.length} date(s) serve lunch; ` +
+      `roster lunch questions ${asks ? 'WANTED' : 'NOT wanted'}.`);
+
+    // ONE LINE PER DATE, capped: a year-long club would otherwise bury every
+    // other line in the log, and the first dozen dates already show the
+    // pattern that a wrong verdict follows.
+    sessions.slice(0, FIX_ONE_FORM_DIAGNOSTIC_DATE_LIMIT).forEach(session => {
+      const meal = getMealInfoForDate(session.date, session.location);
+      const offered = isLunchOfferedOn(session.date, session.location);
+      log(`  ${formatDateKey(session.date)} @ ${session.location || '(no location)'} — ` +
+        `lunch ${offered ? 'OFFERED' : 'not offered'}; menu row ` +
+        `${meal ? `"${meal.type}"${meal.shorthand ? ` (${meal.shorthand})` : ''}` : 'none typed yet'}.`);
+    });
+    if (sessions.length > FIX_ONE_FORM_DIAGNOSTIC_DATE_LIMIT) {
+      log(`  …and ${sessions.length - FIX_ONE_FORM_DIAGNOSTIC_DATE_LIMIT} further date(s) not listed.`);
+    }
+  } catch (err) {
+    log(`Lunch diagnosis (${when}) could not be produced (${err}) — the rebuild itself is unaffected.`);
+  }
+}
+
+/** How many of a form's dates the diagnosis above prints one line each for. */
+const FIX_ONE_FORM_DIAGNOSTIC_DATE_LIMIT = 12;
+
+/**
+ * WHAT THE LIVE FORM ACTUALLY CARRIES, read back off the form itself.
+ *
+ * The companion to the diagnosis above, and the half that settles the report
+ * it was written for: one says what the sheet asked for, this says what the
+ * document ended up with — including the grid's own rows, because a lunch grid
+ * still showing the template's placeholder row is a form with a lunch section
+ * that nobody can answer, and it looks nothing like a missing one.
+ */
+function logLunchQuestionsOnLiveForm(formId, when) {
+  try {
+    const form = FormApp.openById(formId);
+    const items = form.getItems();
+    const titles = items.map(it => it.getTitle());
+    // LUNCH_ONLY_GRID is in the list because on a lunch-only form the roster
+    // grid IS the lunch question, under its own title — a form that carries it
+    // has a lunch section, and reporting one as having none would send
+    // somebody hunting for a grid that is already there.
+    const present = [
+      TEMPLATE_ITEM_TITLES.LUNCH_GRID,
+      TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID,
+      TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+      TEMPLATE_ITEM_TITLES.EXTRA_MEALS,
+      TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH
+    ].filter(title => titles.indexOf(title) !== -1);
+    log(`Lunch questions on form ${formId} ("${form.getTitle()}") ${when}: ` +
+      (present.length ? present.map(t => `"${t}"`).join(', ') : 'NONE — the form has no lunch section.'));
+
+    items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID).forEach(it => {
+      const rows = it.asCheckboxGridItem().getRows();
+      log(`  the lunch grid offers ${rows.length} row(s): ${rows.join(' | ')}`);
+    });
+  } catch (err) {
+    log(`Could not read the lunch questions off form ${formId} ${when} (${err}).`);
+  }
+}
+
+/**
  * Called from the dialog. Imports outstanding registrations, then rebuilds
  * that one form in place from the current template.
  *
@@ -18744,18 +18806,26 @@ function fixOneFormNow(formRef) {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const describe = () => {
-    const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID')
-      .filter(row => String(row[map['Form_ID']] || '').trim() === formId);
-    if (rows.length === 0) return '';
-    const context = buildFormSessionContext(formId, rows, map, getSharedFormIdSet());
-    return `${context.titles.slice(0, 3).join(', ')} (${describeLocations(context.locations)})`;
-  };
-  const label = describe();
-  if (!label) {
+  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID')
+    .filter(row => String(row[map['Form_ID']] || '').trim() === formId);
+  if (rows.length === 0) {
+    log(`Update one form: no session on ${SHEET_NAMES.PROGRAM_DASHBOARD} carries Form_ID ${formId}.`);
     return `⚠️ No session on ${SHEET_NAMES.PROGRAM_DASHBOARD} uses form ${formId}. ` +
       `Only a form this workbook manages can be rebuilt from its template.`;
   }
+  // The context this rebuild will run on, kept rather than thrown away: the
+  // label below is one line of it, and the lunch diagnosis is the rest.
+  const context = buildFormSessionContext(formId, rows, map, getSharedFormIdSet());
+  const label = `${context.titles.slice(0, 3).join(', ')} (${describeLocations(context.locations)})`;
+
+  // BEFORE AND AFTER, both to the log. The report this exists to answer is
+  // "the form I am looking at came back without a lunch section", and the two
+  // halves of the answer are what the sheet asked for and what the document
+  // came out with — neither of which the old one-line "Updated form X" said.
+  log(`Update one form: ${formId} ("${label}") — ${rows.length} dashboard row(s), ` +
+    `template v${TEMPLATE_VERSION}.`);
+  logLunchQuestionsOnLiveForm(formId, 'before the rebuild');
+  logFormLunchDiagnostics(context, 'from the sheet');
 
   const outcome = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
     try {
@@ -18784,10 +18854,13 @@ function fixOneFormNow(formRef) {
   flushPersistentRegistries(); // the template version and link fingerprints written above
   flushAdminDigest('Update one form');
   if (outcome.rebuilt === 0) {
+    log(`Update one form: ${formId} ("${label}") was NOT rebuilt — migrateFormsToCurrentTemplate ` +
+      `returned 0, so the form was skipped or its rebuild failed; the lines above say which.`);
     return `⚠️ "${label}" could not be rebuilt — see the log for what the form itself reported. ` +
       `Its link and its registrations are unchanged.`;
   }
   log(`Updated form ${formId} ("${label}") in place from the menu.`);
+  logLunchQuestionsOnLiveForm(formId, 'after the rebuild');
   return `✅ "${label}" was rebuilt from the current template. Its registration link is unchanged, and ` +
     `its dates and questions now match the sheet.`;
 }
