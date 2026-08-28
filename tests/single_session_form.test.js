@@ -138,6 +138,33 @@ const ctx = extra => Object.assign({
   check('so members can still join from it', f.titles().indexOf(Q.ATTENDANCE_MODE) !== -1, true);
 }
 
+// --- a page break whose navigation was never set THROWS on getGoToPage() ---
+// This is real Google Forms behaviour: a fresh PageBreakItem straight out of
+// addTemplateItemsToForm() carries navigation type CONTINUE, not a page
+// target, and getGoToPage() throws rather than returning null when asked for
+// one. The bug this pins: that throw used to be caught by the same try/catch
+// guarding the FIX (setGoToPage(allDatesPage)), so the exception from the
+// READ silently skipped the WRITE — the mode question came off, but the page
+// was left with nowhere to go, and a respondent met Google Forms' own
+// "Submit" button standing in for what should have been "Next". See the
+// comment in collapseFormToSingleSession().
+{
+  const f = fakeForm(templateItems());
+  const modeItem = f.items.filter(i => i.title === T.MODE)[0];
+  modeItem.asPageBreakItem = () => ({
+    getId: () => modeItem.id,
+    getIndex: () => f.items.indexOf(modeItem),
+    setTitle: t => { modeItem.title = t; },
+    getGoToPage: () => { throw new Error('navigation type is not GO_TO_PAGE'); },
+    setGoToPage: p => { modeItem.goTo = p; }
+  });
+  const changed = sandbox.syncSessionCountShapeOnForm(f.form, ctx());
+  check('a page whose read throws is still changed', changed > 0, true);
+  check('and it still flows to the every-date page, not nowhere',
+    modeItem.goTo && modeItem.goTo.getId(),
+    f.items.filter(i => i.title === T.ALL_DATES)[0].id);
+}
+
 // --- an appointment form is left entirely alone ------------------------------
 {
   const f = fakeForm(templateItems());

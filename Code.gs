@@ -5193,14 +5193,34 @@ function collapseFormToSingleSession(form, context) {
   // the roster grid (syncAssistanceQuestionsOnForm sets it there), and the
   // grid branch is exactly where a form with no mode question must not send
   // people: nobody ever ticks its one row, so nobody is ever registered.
+  // THE READ AND THE WRITE ARE IN SEPARATE try BLOCKS ON PURPOSE. A page break
+  // that has never had setGoToPage() called on it — its default state, e.g.
+  // straight out of addTemplateItemsToForm() — carries navigation type
+  // CONTINUE, not a page target, and getGoToPage() THROWS rather than
+  // returning null when asked for one. That used to be caught by the same
+  // try/catch guarding the write below it, so the exception from the READ
+  // skipped the WRITE entirely: this page's navigation was silently left on
+  // its default, and a respondent who reached it — having just had the mode
+  // question taken off — met a page with nothing to send them anywhere,
+  // Google Forms' own "Submit" button standing in for a broken "Next". A
+  // failed read now only means "assume it needs fixing"; it can no longer
+  // swallow the fix.
+  let currentTargetId = null;
   try {
     const current = modePage.asPageBreakItem().getGoToPage();
-    if (!current || current.getId() !== allDatesPage.getId()) {
+    if (current) currentTargetId = current.getId();
+  } catch (err) {
+    // Not pointed at a page yet (still CONTINUE, or some other non-page
+    // navigation) — currentTargetId stays null, which the check below treats
+    // exactly like "needs fixing".
+  }
+  if (currentTargetId !== allDatesPage.getId()) {
+    try {
       modePage.asPageBreakItem().setGoToPage(allDatesPage.asPageBreakItem());
       changed++;
+    } catch (err) {
+      log(`Could not point the date page of form ${form.getId()} at the sign-up page (${err}).`);
     }
-  } catch (err) {
-    log(`Could not point the date page of form ${form.getId()} at the sign-up page (${err}).`);
   }
 
   if (changed > 0) {
