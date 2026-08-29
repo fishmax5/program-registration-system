@@ -641,6 +641,86 @@ const CALENDAR_MAP = {
   'ac990016bc9f04e0d7ef9da8b463367cd34b2aa5a137535d876af9ae4db2f675@group.calendar.google.com': 'Zoom'
 };
 
+// ============================================================================
+// THE PALETTE  (one place; every color in the workbook comes from here)
+// ============================================================================
+//
+// THREE LAYERS, SEPARATED BY SATURATION RATHER THAN BY HUE ALONE. That is the
+// whole idea, and it is what the previous arrangement got wrong.
+//
+// Colors used to be picked per feature, each one sensible on its own, with a
+// comment asserting that the location, month and status families were kept to
+// different hue bands. They were not: #D9EAD3 was simultaneously "Ashbridge",
+// "Open", "Active" and "Needed", and #FCE5CD was both "Narberth" and
+// "Waitlisted". So a green cell meant a place in one column and a state in the
+// next, and the peach on a Narberth row was the same peach that means somebody
+// did not get a seat. On a tab people scan rather than read, a color that means
+// two things is worse than no color: it is a fact that is wrong at a glance.
+//
+// The fix is not to move locations to new hues — staff know Narberth is the
+// peach one, and relearning that costs more than it buys. It is to give each
+// layer its own WEIGHT:
+//
+//   TINT   (locations, months) — very pale washes. A background band saying
+//          where and when. Never competes with text.
+//   SIGNAL (statuses) — saturated. The alert layer: full, waitlisted,
+//          cancelled. Meant to be found from across a desk.
+//   INK / SURFACE (banners, headers, stripes) — the structural neutrals.
+//
+// A pale green location band and a saturated green status chip are now
+// obviously different objects even though both are green, which is what lets
+// the hue keep its old meaning without the ambiguity.
+const PALETTE = {
+  // --- Structural neutrals ------------------------------------------------
+  // Banners deepened for contrast: white 13px on the old #3C78D8 sat around
+  // 3.4:1, which is under the 4.5:1 body-text bar and read as washed out on
+  // the projector the lunch dashboard gets shown on.
+  BANNER_HERO_BG: '#14448A',
+  BANNER_BG: '#2C6BC4',
+  HEADER_BG: '#33404D',   // slate, not near-black: a header band, not a rule
+  INK_STRONG: '#0B3D6B',
+  INK_MUTED: '#5F6B7A',
+  PAPER: '#FFFFFF',
+  // The zebra stripe. #F6F6F6 against white is a ~2% step — technically a
+  // stripe, invisible in practice, which is why rows still had to be traced
+  // with a finger. A cool 5% step reads as banding without becoming a block.
+  STRIPE: '#F0F4F8',
+  RULE: '#B7B7B7',
+  DISABLED: '#E4E7EB',    // "not applicable" / superseded — grey, never a hue
+
+  // --- TINT layer: locations (pale washes, hue kept from the old scheme) ---
+  LOC_PEACH: '#FDEFE3',
+  LOC_GREEN: '#E9F3E4',
+  LOC_LILAC: '#ECE8F5',
+  LOC_BLUE: '#E4EDF8',    // fallback band for a location not named below
+
+  // --- TINT layer: months (teal / gold / magenta, paler than any signal) ---
+  MONTH_TEAL_1: '#DFF1EE', MONTH_TEAL_2: '#CBE8E2', MONTH_TEAL_3: '#B7DFD4',
+  MONTH_GOLD_1: '#F8F4DC', MONTH_GOLD_2: '#F2EBC6', MONTH_GOLD_3: '#EBE1AE',
+  MONTH_MAGENTA_1: '#F7DEEE', MONTH_MAGENTA_2: '#F0C8E2', MONTH_MAGENTA_3: '#E8B2D6',
+
+  // --- SIGNAL layer: statuses (saturated; black text still clears 4.5:1) ---
+  SIGNAL_GREEN: '#A5D68F',
+  SIGNAL_GREEN_DEEP: '#7FC96A',
+  SIGNAL_AMBER: '#FFD466',
+  SIGNAL_ORANGE: '#FBC38A',
+  SIGNAL_RED: '#F09A9A',
+  SIGNAL_GOLD: '#FFD966',  // the order-ahead flag — a mark, not a state
+
+  // --- The hand-entry wash: the one place yellow means "type here" ---------
+  ENTRY_HEADER: '#FFF2CC',
+  ENTRY_TINT: '#FFFCF0',
+
+  // --- Tab strip. Deliberately a step STRONGER than anything on a sheet ----
+  // A tab is read against Sheets' own grey chrome, not against paper, so the
+  // tint layer disappears down there. These say TODAY / SET UP / LISTS /
+  // ARCHIVE at a glance — see TAB_GROUPS.
+  TAB_TODAY: '#93C47D',
+  TAB_SETUP: '#6FA8DC',
+  TAB_LISTS: '#FFD966',
+  TAB_ARCHIVE: '#B7B7B7'
+};
+
 /**
  * Hardcoded soft colors per "Month Year" label — used to tint the Event_Date
  * cell itself now (there is no separate Month column anywhere anymore).
@@ -649,20 +729,23 @@ const CALENDAR_MAP = {
  * green/red (status colors). Any month not listed falls back to
  * getMonthColor()'s deterministic generator, which draws from the same three
  * safe hue bands.
+ *
+ * These are the TINT layer (see PALETTE): they wash one cell behind a date and
+ * must never read as loudly as a status does.
  */
 const MONTH_COLOR_MAP = {
-  'January 2026': '#D6F0EC',
-  'February 2026': '#F7F2D2',
-  'March 2026': '#F5D6EC',
-  'April 2026': '#C2E8E0',
-  'May 2026': '#F2ECC0',
-  'June 2026': '#F0C2E0',
-  'July 2026': '#AEE0D4',
-  'August 2026': '#EDE6AE',
-  'September 2026': '#EBAED4',
-  'October 2026': '#9AD8C8',
-  'November 2026': '#E8E09C',
-  'December 2026': '#E69AC8'
+  'January 2026': PALETTE.MONTH_TEAL_1,
+  'February 2026': PALETTE.MONTH_GOLD_1,
+  'March 2026': PALETTE.MONTH_MAGENTA_1,
+  'April 2026': PALETTE.MONTH_TEAL_2,
+  'May 2026': PALETTE.MONTH_GOLD_2,
+  'June 2026': PALETTE.MONTH_MAGENTA_2,
+  'July 2026': PALETTE.MONTH_TEAL_3,
+  'August 2026': PALETTE.MONTH_GOLD_3,
+  'September 2026': PALETTE.MONTH_MAGENTA_3,
+  'October 2026': PALETTE.MONTH_TEAL_2,
+  'November 2026': PALETTE.MONTH_GOLD_3,
+  'December 2026': PALETTE.MONTH_MAGENTA_3
 };
 
 /**
@@ -680,28 +763,35 @@ const COLUMN_WIDTH_BUFFER_MULTIPLIER = 1.3;
 const MIN_COLUMN_WIDTH_PX = 60;
 const MAX_COLUMN_WIDTH_PX = 400;
 
-// Status color palettes (kept together for easy re-theming).
+// Status color palettes — the SIGNAL layer (see PALETTE). Saturated on
+// purpose: these are the cells somebody is looking FOR, and they used to be
+// the same pale washes as the location bands they sat beside.
 const EVENT_STATUS_COLORS = {
-  '🟢 Open': '#D9EAD3',
-  '🟡 Almost Full': '#FFF2CC',
-  '🔴 Waitlist Only': '#F4CCCC',
-  '🟢 Unlimited': '#B6D7A8'
+  '🟢 Open': PALETTE.SIGNAL_GREEN,
+  '🟡 Almost Full': PALETTE.SIGNAL_AMBER,
+  '🔴 Waitlist Only': PALETTE.SIGNAL_RED,
+  // A step deeper than Open, not a different hue: "unlimited" is "open, more
+  // so", and giving it a hue of its own would have implied a third state.
+  '🟢 Unlimited': PALETTE.SIGNAL_GREEN_DEEP
 };
 
 const REGISTRANT_STATUS_COLORS = {
-  'Cancelled': '#F4CCCC',
-  'Waitlisted': '#FCE5CD',
-  'Active': '#D9EAD3',
-  'Needed': '#D9EAD3',
+  'Cancelled': PALETTE.SIGNAL_RED,
+  // ORANGE, not the peach it used to be. That peach was Narberth's location
+  // color to the pixel, so a Narberth row and a waitlisted person were the
+  // same wash sitting two columns apart.
+  'Waitlisted': PALETTE.SIGNAL_ORANGE,
+  'Active': PALETTE.SIGNAL_GREEN,
+  'Needed': PALETTE.SIGNAL_GREEN,
   // A newer submission from the same person/event superseded this row — see
-  // buildRegistrantRow()/supersedeRegistrantRow(). Distinct grey (reused
-  // from NA_CELL_COLOR) so it reads as "historical," not cancelled/waitlisted.
-  'Superseded': '#E8E8E8'
+  // buildRegistrantRow()/supersedeRegistrantRow(). Grey (shared with
+  // NA_CELL_COLOR) so it reads as "historical," not cancelled/waitlisted.
+  'Superseded': PALETTE.DISABLED
 };
 
-const MANUAL_OVERRIDE_COLOR = '#D9D2E9';
-const ORDER_AHEAD_FLAG_COLOR = '#FFD966';
-const NA_CELL_COLOR = '#E8E8E8';
+const MANUAL_OVERRIDE_COLOR = PALETTE.LOC_LILAC;
+const ORDER_AHEAD_FLAG_COLOR = PALETTE.SIGNAL_GOLD;
+const NA_CELL_COLOR = PALETTE.DISABLED;
 /** Grey used on a Lunch_Schedule/Master_Lunch_Dashboard Type cell reading "Not Serving". */
 const NOT_SERVING_COLOR = '#D9D9D9';
 
@@ -758,8 +848,8 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration
  * for troubleshooting only.
  */
 const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month'];
-const MANUAL_ENTRY_HEADER_COLOR = '#FFF2CC';
-const MANUAL_ENTRY_CELL_TINT = '#FFFCF0';
+const MANUAL_ENTRY_HEADER_COLOR = PALETTE.ENTRY_HEADER;
+const MANUAL_ENTRY_CELL_TINT = PALETTE.ENTRY_TINT;
 /**
  * Prepended to a hand-entry column's HEADER CELL by labelManualEntryColumns().
  * Purely decorative — normalizeHeaderText() strips it back off, which is what
@@ -1384,9 +1474,13 @@ function isNoRegistrationColumnValue(value) {
  * buildLocationColorRules() / buildLocationRowTintRules().
  */
 const LOCATION_COLOR_MAP = {
-  'Narberth': '#FCE5CD',  // light orange
-  'Ashbridge': '#D9EAD3', // light green
-  'Zoom': '#D9D2E9'       // lavender
+  // THE TINT LAYER (see PALETTE): the same three hues these have always been,
+  // so nobody has to relearn which building is which — but paled off, because
+  // at their old strength they were indistinguishable from the status colors
+  // sitting in the next column. A location is context, not a signal.
+  'Narberth': PALETTE.LOC_PEACH,
+  'Ashbridge': PALETTE.LOC_GREEN,
+  'Zoom': PALETTE.LOC_LILAC
 };
 
 const SHEET_NAMES = {
@@ -3505,14 +3599,20 @@ function applyManualOverrideValidationBounded(sheet, colIndex, startRow, numRows
   applyValueListValidationBounded(sheet, colIndex, MANUAL_OVERRIDE_OPTIONS, startRow, numRows);
 }
 
-/** Deterministic color fallback for a location not in LOCATION_COLOR_MAP. */
+/**
+ * Deterministic color fallback for a location not in LOCATION_COLOR_MAP.
+ *
+ * Generated INTO the tint layer (see PALETTE) — pale enough to sit beside the
+ * named locations without a fourth building looking louder than the three that
+ * have colors of their own.
+ */
 function getLocationColor(locationName) {
   if (LOCATION_COLOR_MAP[locationName]) return LOCATION_COLOR_MAP[locationName];
   let hash = 0;
   for (let i = 0; i < locationName.length; i++) {
     hash = locationName.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return hslToPastelHex(hueAvoidingReservedColors(hash), 45, 85);
+  return hslToPastelHex(hueAvoidingReservedColors(hash), 40, 93);
 }
 
 /** Dropdown restricted to the current CALENDAR_MAP location names, from startRow to the end of the sheet. */
@@ -3662,7 +3762,9 @@ function getMonthColor(monthName) {
     hash = monthName.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hue = hueAvoidingReservedColors(hash);
-  return hslToPastelHex(hue, 55, 88);
+  // Tint layer, like the named months above it — a generated month must not
+  // arrive stronger than the twelve that were chosen by hand.
+  return hslToPastelHex(hue, 45, 92);
 }
 
 /**
@@ -3896,7 +3998,7 @@ function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows) {
   if (numRows < 1) return;
   const range = sheet.getRange(startRow, colIndex1Based, numRows, 1);
   const values = range.getValues();
-  const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : '#FFFFFF']; });
+  const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : PALETTE.PAPER]; });
   range.setBackgrounds(backgrounds);
   range.setNumberFormat(DATE_DISPLAY_FORMAT);
 }
@@ -7177,25 +7279,25 @@ function getLunchOnlyFormLinks() {
  *   ARCHIVE  grey    where things go when they stop being current.
  */
 const TAB_GROUPS = [
-  { color: '#93C47D', names: [
+  { color: PALETTE.TAB_TODAY, names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_DASHBOARD,
     SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.REGISTRANT_DASH
   ] },
-  { color: '#6FA8DC', names: [
+  { color: PALETTE.TAB_SETUP, names: [
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.CONFIG,
     SHEET_NAMES.PROGRAM_QUESTIONS
   ] },
-  { color: '#FFD966', names: [
+  { color: PALETTE.TAB_LISTS, names: [
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
     SHEET_NAMES.REGULAR_NEEDS,
     SHEET_NAMES.PROGRAM_OPTIONS,
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
-  { color: '#B7B7B7', names: [
+  { color: PALETTE.TAB_ARCHIVE, names: [
     SHEET_NAMES.TRIAGE
   ] }
 ];
@@ -7335,7 +7437,7 @@ function clearSavedTabOrder() {
 function initPlaceholderSheet(ss, tabName, message) {
   const sheet = getOrCreateSheet(ss, tabName);
   if (sheet.getLastRow() === 0) {
-    sheet.getRange(1, 1).setValue(message).setFontStyle('italic').setFontColor('#666666');
+    sheet.getRange(1, 1).setValue(message).setFontStyle('italic').setFontColor(TYPO.MUTED.color);
   }
   autosizeColumns(sheet);
 }
@@ -7352,8 +7454,8 @@ function setHeadersIfNeeded(sheet, headers) {
 function styleHeaderRow(sheet, numCols) {
   sheet.getRange(1, 1, 1, numCols)
     .setFontWeight('bold')
-    .setBackground('#434343')
-    .setFontColor('#FFFFFF')
+    .setBackground(TYPO.COLUMN_HEADER.background)
+    .setFontColor(TYPO.COLUMN_HEADER.color)
     .setVerticalAlignment('middle')
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 }
@@ -7369,19 +7471,33 @@ function styleHeaderRow(sheet, numCols) {
  * this workbook actually gets used on a serving day.
  */
 const TYPO = {
-  BANNER:        { size: 13, weight: 'bold', color: '#FFFFFF', background: '#3C78D8' },
-  BANNER_HERO:   { size: 18, weight: 'bold', color: '#FFFFFF', background: '#1155CC' },
-  COLUMN_HEADER: { size: 10, weight: 'bold', color: '#FFFFFF', background: '#434343' },
-  HERO_VALUE:    { size: 16, weight: 'bold', color: '#0B5394' },
-  HERO_LABEL:    { size: 11, weight: 'bold', color: '#434343' },
-  MUTED:         { size: 9,  weight: 'normal', color: '#666666' }
+  BANNER:        { size: 13, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.BANNER_BG },
+  BANNER_HERO:   { size: 18, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.BANNER_HERO_BG },
+  // 11, not 10. The column headers are the one row on a twenty-column tab that
+  // says what anything is, and they were set a full step below the data they
+  // label — the smallest type in the workbook doing its most load-bearing job.
+  COLUMN_HEADER: { size: 11, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.HEADER_BG },
+  HERO_VALUE:    { size: 16, weight: 'bold', color: PALETTE.INK_STRONG },
+  HERO_LABEL:    { size: 11, weight: 'bold', color: PALETTE.HEADER_BG },
+  // 10, not 9. Notes and "no rows yet" lines are read by people at a sign-in
+  // desk, often standing; 9px grey-on-white is where legibility gave out.
+  MUTED:         { size: 10, weight: 'normal', color: PALETTE.INK_MUTED }
 };
 
-/** Row heights that go with the scale above. */
+/**
+ * Row heights that go with the scale above.
+ *
+ * DATA is the one that matters most and did not exist before: every data row
+ * sat at Sheets' 21px default, which is tight enough that twenty columns of
+ * text form an unbroken block with no vertical rhythm to follow across. 24 is
+ * one comfortable step — about 12% more air per row, enough to track a row
+ * across a wide tab without doubling the rows a screen loses.
+ */
 const ROW_HEIGHTS = {
-  BANNER: 28,
-  BANNER_HERO: 40,
+  BANNER: 30,
+  BANNER_HERO: 42,
   HERO_DATA: 34,
+  DATA: 24,
   /**
    * Sheets' own default. Named because a render has to be able to put a row
    * BACK to it — see resetRowHeights().
@@ -7518,7 +7634,7 @@ function applyZebraStripingManualBounded(sheet, startRow, numRows, numCols) {
   if (numRows < 1 || numCols < 1) return;
   const backgrounds = [];
   for (let r = 0; r < numRows; r++) {
-    backgrounds.push(new Array(numCols).fill(r % 2 === 0 ? '#FFFFFF' : '#F6F6F6'));
+    backgrounds.push(new Array(numCols).fill(r % 2 === 0 ? PALETTE.PAPER : PALETTE.STRIPE));
   }
   sheet.getRange(startRow, 1, numRows, numCols).setBackgrounds(backgrounds);
 }
@@ -7531,8 +7647,10 @@ function applyZebraStripingBanding(sheet, startRow) {
   const numRows = Math.max(sheet.getMaxRows() - startRow + 1, 1);
   const range = sheet.getRange(startRow, 1, numRows, lastCol);
   const banding = range.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false);
-  banding.setFirstRowColor('#FFFFFF');
-  banding.setSecondRowColor('#F3F3F3');
+  banding.setFirstRowColor(PALETTE.PAPER);
+  // The same stripe the manual striper uses, so a flat tab and a sectioned one
+  // band identically — they sit next to each other in the tab strip.
+  banding.setSecondRowColor(PALETTE.STRIPE);
 }
 
 /**
@@ -19957,6 +20075,27 @@ function resetRowHeights(sheet, fromRow, toRow) {
   }
 }
 
+/**
+ * Gives a band of data rows the workbook's standard data height.
+ *
+ * ONE CALL FOR THE WHOLE BAND, which is the only reason this is affordable at
+ * all: setRowHeight() per row is one API call per row, and the session table
+ * runs to hundreds. setRowHeights() sets the run in one.
+ *
+ * Never fatal — a height is presentation, and a tab with tight rows is worth
+ * strictly less than a tab that failed to render.
+ */
+function setDataRowHeights(sheet, startRow, numRows) {
+  if (!startRow || numRows < 1) return;
+  const last = Math.min(startRow + numRows - 1, sheet.getMaxRows());
+  if (last < startRow) return;
+  try {
+    sheet.setRowHeights(startRow, last - startRow + 1, ROW_HEIGHTS.DATA);
+  } catch (err) {
+    log(`ℹ️ Could not set data row heights on "${sheet.getName()}" (${err}).`);
+  }
+}
+
 function showAllRows(sheet) {
   try {
     sheet.showRows(1, sheet.getMaxRows());
@@ -20095,6 +20234,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const upcomingDataStart = row;
   stampTextColumns(sheet, textCols, upcomingDataStart, upcomingRows.length);
   if (upcomingRows.length > 0) sheet.getRange(upcomingDataStart, 1, upcomingRows.length, numCols).setValues(upcomingRows);
+  setDataRowHeights(sheet, upcomingDataStart, upcomingRows.length);
   applyZebraStripingManualBounded(sheet, upcomingDataStart, upcomingRows.length, numCols);
   if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length);
   row += upcomingRows.length;
@@ -20109,6 +20249,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const pastDataStart = row;
   stampTextColumns(sheet, textCols, pastDataStart, pastRows.length);
   if (pastRows.length > 0) sheet.getRange(pastDataStart, 1, pastRows.length, numCols).setValues(pastRows);
+  setDataRowHeights(sheet, pastDataStart, pastRows.length);
   applyZebraStripingManualBounded(sheet, pastDataStart, pastRows.length, numCols);
   if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length);
   row += pastRows.length;
@@ -26737,10 +26878,10 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
       `No catered dates on ${SHEET_NAMES.LUNCH_SCHEDULE} yet — add a Hot or Cold row and the form builds itself on the next sync.`
     ]]);
     sheet.getRange(plan.signUpDataStart, 1, 1, LUNCH_SIGNUP_HEADERS.length)
-      .setFontStyle('italic').setFontColor('#666666').setVerticalAlignment('middle');
+      .setFontStyle('italic').setFontColor(TYPO.MUTED.color).setVerticalAlignment('middle');
     sheet.getRange(plan.signUpDataStart, linkCol, 1, 1)
       .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
-    sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
+    sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground(PALETTE.PAPER);
     return;
   }
 
@@ -26766,13 +26907,13 @@ function writeLunchSignUpBlock(sheet, plan, numCols, signUpRows) {
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
   if (values.length > shown.length) {
     sheet.getRange(plan.signUpDataStart + shown.length, 1, 1, LUNCH_SIGNUP_HEADERS.length)
-      .setFontStyle('italic').setFontColor('#666666');
+      .setFontStyle('italic').setFontColor(TYPO.MUTED.color);
   }
   // Striped across the WHOLE width, not just the five columns in use: the link
   // spills into the empty columns beside it, and a stripe that stopped at
   // column E would cut the text it is meant to sit behind in half.
   applyZebraStripingManualBounded(sheet, plan.signUpDataStart, values.length, numCols);
-  sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
+  sheet.getRange(plan.signUpSpacerRow, 1, 1, numCols).clearContent().setBackground(PALETTE.PAPER);
 }
 
 function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rollup, signUpRows) {
@@ -26872,7 +27013,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
     }
   }
   applyZebraStripingManualBounded(sheet, plan.todayDataStart, todayRows.length, TODAY_LUNCH_HEADERS.length);
-  sheet.getRange(plan.spacerRow, 1, 1, numCols).clearContent().setBackground('#FFFFFF');
+  sheet.getRange(plan.spacerRow, 1, 1, numCols).clearContent().setBackground(PALETTE.PAPER);
 
   const result = writeUpcomingPastSections(sheet, plan.scheduleStartRow, headers, upcoming, past, {
     upcomingLabel: '📊 Upcoming Lunch Schedule', pastLabel: '📊 Past Lunch Schedule'
@@ -28088,7 +28229,7 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
       .setValue('Nobody has signed up yet — this fills in by itself as registrations come in.')
       .setFontStyle('italic')
-      .setFontColor('#666666');
+      .setFontColor(TYPO.MUTED.color);
   }
 
   freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
