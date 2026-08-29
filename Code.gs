@@ -15121,15 +15121,13 @@ function getExistingRegistryState(registrySheet) {
     const formId = row[map['Form_ID']];
     if (!source || !title || !formId) return;
 
-    const d = coerceDate(row[map['Event_Date']]);
-    const month = d ? getMonthLabel(d) : '';
     // The ::FIXED group-key suffix is deliberately NOT renamed alongside the
     // Type_Tag vocabulary: it's an internal key already persisted in the
     // form registry (Script Properties) and matched against buildEventGroups()'
     // output. Renaming it would orphan every stored entry and duplicate every
     // grouped form. isGroupedTypeTag() reads both spellings of the VALUE,
-    // which is the part users see.
-    const key = isGroupedTypeTag(typeTag) ? `${source}::${title}::FIXED` : `${source}::${title}::${month}`;
+    // which is the part users see — see formSpanForRow().
+    const key = `${source}::${title}::${formSpanForRow(typeTag, row[map['Event_Date']])}`;
     if (!state.groupFormMap[key]) state.groupFormMap[key] = formId;
   });
 
@@ -15165,8 +15163,7 @@ function addSharedGroupKeysFromRows(state, rows, map) {
     if (!byForm[formId]) byForm[formId] = { title, sources: new Set(), keys: new Set() };
     byForm[formId].sources.add(source);
 
-    const d = coerceDate(row[map['Event_Date']]);
-    const span = isGroupedTypeTag(row[map['Type_Tag']]) ? 'FIXED' : (d ? getMonthLabel(d) : '');
+    const span = formSpanForRow(row[map['Type_Tag']], row[map['Event_Date']]);
     byForm[formId].keys.add(`${SHARED_LOCATION_SCOPE}::${title}::${span}`);
   });
 
@@ -18330,7 +18327,11 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
 function groupRegistryRowsByForm(rows, map) {
   const byForm = {};
   rows.forEach(row => {
-    const formId = row[map['Form_ID']];
+    // TRIMMED, like every other reader of this column. Both sides of this map
+    // used to be raw cell values, so nothing mismatched — but the key then
+    // travelled to FormApp.openById(), which would refuse a perfectly good
+    // form over a trailing space somebody never typed on purpose.
+    const formId = String(row[map['Form_ID']] || '').trim();
     if (!formId) return;
     if (!byForm[formId]) byForm[formId] = [];
     byForm[formId].push(row);
@@ -18625,7 +18626,7 @@ function updateRegistryFormLinks(registrySheet, urlByFormId) {
     const links = formulas.map((f, r) => [f[0] || values[r][0]]); // leave every other row exactly as it is
     let touched = false;
     idValues.forEach((idRow, r) => {
-      const url = urlByFormId[idRow[0]];
+      const url = urlByFormId[String(idRow[0] || '').trim()];
       if (!url) return;
       links[r] = [makeHyperlinkFormula(url, 'View Live Form')];
       touched = true;
