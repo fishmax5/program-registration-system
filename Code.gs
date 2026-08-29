@@ -3722,6 +3722,42 @@ function makeHyperlinkFormula(url, label) {
   return `=HYPERLINK("${url}","${label}")`;
 }
 
+/**
+ * THE FORM-SPAN A SESSION BELONGS TO — 'FIXED' for a [Grouped] series, which
+ * takes one form for its whole run, else the month label, because a Regular
+ * program takes one form per calendar month (see buildEventGroups()).
+ *
+ * WHY THIS IS A NAMED THING RATHER THAN AN EXPRESSION. A Form_ID is only
+ * meaningful alongside its span. "Chair Yoga on the Narberth calendar" names
+ * one form in September and a DIFFERENT one in October, so any map from a
+ * program to its form that is keyed on calendar + title alone cannot hold both
+ * — the second month written silently replaces the first, and every lookup
+ * afterwards answers one month's question with the other month's form. That is
+ * exactly how a session a month out ends up carrying this month's link.
+ *
+ * A FLAG is the opposite case and is deliberately NOT keyed this way: [Club],
+ * [No Registration] and [Personalized Assistance] are properties of the
+ * PROGRAM, true of every month of it at once — the rule
+ * unifyProgramFlagsAcrossGroups() exists to enforce. So those maps stay on
+ * `calendarId|title`, and only the form lookups carry a span.
+ */
+function formSpanForGroup(group) {
+  if (!group) return '';
+  return group.isFixed ? 'FIXED' : String(group.monthLabel || '');
+}
+
+/** The same span, read off a session ROW (its Type_Tag and its date) instead of a group. */
+function formSpanForRow(typeTag, date) {
+  if (isGroupedTypeTag(typeTag)) return 'FIXED';
+  const d = coerceDate(date);
+  return d ? getMonthLabel(d) : '';
+}
+
+/** Key for a `calendarId + title + span` -> Form_ID map. See formSpanForGroup(). */
+function programFormKey(calendarId, cleanTitle, span) {
+  return `${String(calendarId || '').trim()}|${String(cleanTitle || '').trim()}|${span}`;
+}
+
 function computeEventId(calendarId, cleanTitle, dateKey) {
   const raw = `${calendarId}|${cleanTitle}|${dateKey}`;
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
@@ -11032,7 +11068,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
 
   // The form-span this row belongs to — the same partition buildEventGroups()
   // uses, so re-pointing lands where the next import would have put it.
-  const spanOf = (typeTag, date) => isGroupedTypeTag(typeTag) ? 'FIXED' : getMonthLabel(date);
+  const spanOf = formSpanForRow;
 
   // Pass 1: read the zones once and work out which form survives in each span.
   const zones = [];
@@ -14440,6 +14476,16 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
     const formIds = sheetMap['Form_ID']
       ? registrySheet.getRange(zone.start, sheetMap['Form_ID'], zone.count, 1).getValues()
       : null;
+    // THE ROW'S OWN SPAN, for the form fallback below. A form belongs to one
+    // month of a Regular program, so restoring a link from a program-level
+    // lookup would hand every month of it whichever month's form was written
+    // last — see buildFormIdByProgram(). Read here rather than derived from
+    // the group, because the row is the only thing that knows which month it
+    // is in.
+    const dates = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1).getValues();
+    const typeTags = sheetMap['Type_Tag']
+      ? registrySheet.getRange(zone.start, sheetMap['Type_Tag'], zone.count, 1).getValues()
+      : null;
     // Read as VALUES but written CELL BY CELL. These columns hold =HYPERLINK()
     // formulas, which getValues() flattens to their display text — writing a
     // whole column back from that array would turn every link on it into the
@@ -14465,7 +14511,14 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
 
       if (!isBlocked) continue; // already showing its own links
       const rowFormId = formIds ? String(formIds[r][0] || '').trim() : '';
-      const formId = rowFormId || (formIdByProgram ? (formIdByProgram[key] || '') : '');
+      // The row's own form first — it is the only per-ROW fact here, so a row
+      // that kept its Form_ID through the tag needs no lookup at all. The
+      // fallback is for rows WRITTEN while the tag was on, which carry none;
+      // it is keyed by span so a row a month out gets its own month's form.
+      const spanKey = programFormKey(String(sources[r][0] || '').trim(),
+        String(titles[r][0] || '').trim(),
+        formSpanForRow(typeTags ? typeTags[r][0] : '', dates[r][0]));
+      const formId = rowFormId || (formIdByProgram ? (formIdByProgram[spanKey] || '') : '');
       const links = linksFor(formId);
       if (!links) continue; // no form to point at yet — the next sync builds one
       setCell('Form_Response_Link', makeHyperlinkFormula(links.publishedUrl, 'View Live Form'));
@@ -14479,15 +14532,28 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
   return changed;
 }
 
-/** `calendarId|title` -> Form_ID, from the persistent form registry, for these groups. */
+/**
+ * `calendarId|title|span` -> Form_ID, from the persistent form registry, for
+ * these groups.
+ *
+ * KEYED ON THE SPAN AS WELL AS THE PROGRAM, and that third component is the
+ * whole correctness of this map — see formSpanForGroup(). A Regular program is
+ * one GROUP per calendar month, each with its own form, so the September and
+ * October groups of "Chair Yoga" both used to write to `cal|Chair Yoga` and
+ * whichever ran last won. Every row of that program then restored the same
+ * link, so the sessions a month out were handed the near month's form: a live
+ * link, on the right row, to the wrong month — which reads as sign-ups
+ * silently landing on the wrong form rather than as an error.
+ */
 function buildFormIdByProgram(groups) {
   const registry = getPersistentFormRegistry();
   const out = {};
   (groups || []).forEach(group => {
     const formId = registry[group.groupKey];
     if (!formId) return;
+    const span = formSpanForGroup(group);
     group.sessions.forEach(session => {
-      out[`${session.calendarId}|${group.cleanTitle}`] = formId;
+      out[programFormKey(session.calendarId, group.cleanTitle, span)] = formId;
     });
   });
   return out;
