@@ -9356,6 +9356,15 @@ function buildAppMenu(ui, includeAdmin) {
       // ignored, and whether the dashboard agrees. See section 4c-bis.
       .addItem('\ud83c\udff7\ufe0f Read an Event\'s Tags\u2026', 'showEventTagInspectorDialog')
       .addSeparator()
+      // THE PAIR FOR A DASHBOARD WHOSE LINK COLUMNS HAVE SLID OFF THEIR ROWS.
+      // Read-only first, because the first question about a tab that looks
+      // wrong is "how wrong, and where", and answering it must not require
+      // agreeing to a write. Neither one reads a calendar or rebuilds a form,
+      // which is the whole reason they exist: the ordinary rebuild reads the
+      // shifted cells and writes them straight back.
+      .addItem('\ud83e\ude7a Check Dashboard Alignment (read-only)', 'checkDashboardAlignment')
+      .addItem('\ud83e\ude79 Repair Dashboard Links (no calendar read)\u2026', 'repairDashboardLinks')
+      .addSeparator()
       // ARRANGEMENTS SOMEBODY MAKES BY HAND that the next rebuild would
       // otherwise undo. They belong together because that is the one thing
       // they have in common. See section 2a-ii.
@@ -18633,6 +18642,331 @@ function updateRegistryFormLinks(registrySheet, urlByFormId) {
     });
     if (touched) linkRange.setValues(links);
   });
+}
+
+
+// ============================================================================
+// REPAIRING A DASHBOARD WHOSE LINK COLUMNS SLID OFF THEIR ROWS
+// ============================================================================
+//
+// WHY A NORMAL REBUILD CANNOT DO THIS. Every "rebuild" in this file — the
+// layout rebuild, the dashboard render, the sync — reads the session table,
+// sorts it, and writes it back. That is exactly right when the rows are
+// correct and exactly useless when they are not: a shifted link column is READ
+// shifted and WRITTEN shifted, so the repair launders the corruption into a
+// freshly formatted tab and the tab now looks deliberate. Rendering harder does
+// not help. The values have to come from somewhere that is not those cells.
+//
+// WHERE THEY COME FROM INSTEAD. Three columns can be re-derived from facts that
+// live somewhere other than the cell being fixed:
+//
+//   Form_ID              from the persistent groupKey -> Form_ID registry in
+//                        Script Properties, looked up by the row's OWN
+//                        identity (calendar + title + span).
+//   Form_Response_Link   from that form's published URL.
+//   Edit_Form_Link       from that form's edit URL.
+//
+// Nothing here reads a calendar. A form is opened only to learn its published
+// URL, once per DISTINCT form rather than once per row — and not even then when
+// some correctly-aligned row already carries that form's link, which is the
+// usual case and makes the common repair cost zero API calls beyond the sheet.
+//
+// HOW A SHIFTED ROW IS RECOGNIZED WITH NO NETWORK AT ALL. Event_ID is a pure
+// function of three other columns on the same row — computeEventId(
+// Calendar_Source, Clean_Title, dateKey) — so a row can be checked against
+// itself. If the recomputation matches, that row's identity columns are intact
+// and can be trusted to name the right form. If it does not, the row's identity
+// has moved too, this repair says so and REFUSES TO GUESS: writing a link
+// derived from a title that belongs to a different session would turn a visible
+// problem into an invisible one.
+// ============================================================================
+
+/**
+ * The identity columns a repair needs, read off one row, plus whether the row
+ * vouches for itself.
+ *
+ * `aligned` is the Event_ID self-check described above. A lunch-only row is
+ * checked against its own id shape (makeLunchOnlyEventId) rather than the
+ * calendar-derived digest, since it never came from a calendar.
+ */
+function readSessionRowIdentity(values, r) {
+  const at = name => (values[name] ? values[name][r][0] : '');
+  const date = coerceDate(at('Event_Date'));
+  const eventId = String(at('Event_ID') || '').trim();
+  const source = String(at('Calendar_Source') || '').trim();
+  const title = String(at('Clean_Title') || '').trim();
+  const location = String(at('Location') || '').trim();
+  const identity = {
+    date,
+    eventId,
+    source,
+    title,
+    location,
+    typeTag: at('Type_Tag'),
+    formId: String(at('Form_ID') || '').trim(),
+    link: String(at('Form_Response_Link') || '').trim(),
+    isLunchOnly: isLunchOnlyEventId(eventId),
+    aligned: false
+  };
+  if (!date || !eventId) return identity;
+  identity.aligned = identity.isLunchOnly
+    ? eventId === makeLunchOnlyEventId(formatDateKey(date), location)
+    : eventId === computeEventId(source, title, formatDateKey(date));
+  return identity;
+}
+
+/**
+ * The registry key naming the form this row SHOULD be on, derived only from
+ * the row's own identity columns.
+ *
+ * Returns '' for a row whose identity is incomplete — the caller treats that
+ * as "cannot be repaired from here" rather than as a miss.
+ */
+function registryKeyForSessionRow(identity) {
+  if (!identity.date) return '';
+  if (identity.isLunchOnly) {
+    return lunchOnlyGroupKey(identity.location, getMonthLabel(identity.date));
+  }
+  if (!identity.source || !identity.title) return '';
+  return `${identity.source}::${identity.title}::${formSpanForRow(identity.typeTag, identity.date)}`;
+}
+
+/**
+ * Works out, per row, which form it belongs on and what its two links should
+ * say — WITHOUT reading a calendar and without rebuilding anything.
+ *
+ * Returns { plan, stats }. `plan` is one entry per row that needs a write;
+ * `stats` is what the confirmation dialog reports. Pure inspection: this
+ * function writes nothing.
+ */
+function planDashboardLinkRepair(registrySheet) {
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  const stats = { scanned: 0, misaligned: 0, noKey: 0, noForm: 0, alreadyRight: 0,
+    blocked: 0, formsOpened: 0, willFix: 0 };
+  if (headerRows.length === 0) return { plan: [], stats };
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  const needed = ['Event_Date', 'Event_ID', 'Calendar_Source', 'Clean_Title', 'Location',
+    'Type_Tag', 'Form_ID', 'Form_Response_Link', 'Edit_Form_Link'];
+  if (needed.some(h => !sheetMap[h])) return { plan: [], stats };
+
+  const registry = getPersistentFormRegistry();
+  const shared = getSharedFormIdSet();
+  const plan = [];
+  // formId -> { publishedUrl, editUrl }. Seeded from rows that are ALREADY
+  // right, so a workbook whose links merely slid a few rows is repaired
+  // without opening a single form.
+  const urlByFormId = {};
+  const rowsToResolve = [];
+
+  headerRows.forEach((hRow, i) => {
+    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+    if (!zone) return;
+    const values = {};
+    needed.forEach(h => {
+      values[h] = registrySheet.getRange(zone.start, sheetMap[h], zone.count, 1).getValues();
+    });
+    // The link columns are read as FORMULAS too: a correct row's =HYPERLINK()
+    // is where a form's published URL is harvested from.
+    const viewFormulas = registrySheet
+      .getRange(zone.start, sheetMap['Form_Response_Link'], zone.count, 1).getFormulas();
+
+    for (let r = 0; r < zone.count; r++) {
+      const id = readSessionRowIdentity(values, r);
+      if (!id.date) continue;
+      stats.scanned++;
+      id.row = zone.start + r;
+      id.key = registryKeyForSessionRow(id);
+
+      // A row whose links were deliberately taken away by [No Registration]
+      // is not misaligned — it is saying what it is meant to say.
+      if (id.link === NO_REGISTRATION_LINK_LABEL) { stats.blocked++; continue; }
+
+      if (!id.aligned) { stats.misaligned++; continue; }
+
+      // ALIGNED, so its own Form_ID is trustworthy — harvest the URL it is
+      // already carrying before deciding anything.
+      const href = /HYPERLINK\("([^"]+)"/.exec(viewFormulas[r][0] || '');
+      if (id.formId && href && !urlByFormId[id.formId]) {
+        urlByFormId[id.formId] = { publishedUrl: href[1],
+          editUrl: `https://docs.google.com/forms/d/${id.formId}/edit` };
+      }
+      if (!id.key) { stats.noKey++; continue; }
+      rowsToResolve.push(id);
+    }
+  });
+
+  // WHICH FORM EACH ROW BELONGS ON. The registry is the authority; where it has
+  // no entry (a workbook that lost its Script Properties), the aligned rows of
+  // the same group vote, which is the same recovery findExistingFormIdFromEvents()
+  // makes from calendar descriptions — minus the calendar.
+  const votesByKey = {};
+  rowsToResolve.forEach(id => {
+    if (!id.formId) return;
+    if (!votesByKey[id.key]) votesByKey[id.key] = {};
+    votesByKey[id.key][id.formId] = (votesByKey[id.key][id.formId] || 0) + 1;
+  });
+  const majority = key => {
+    const v = votesByKey[key] || {};
+    return Object.keys(v).sort((a, b) => v[b] - v[a])[0] || '';
+  };
+
+  rowsToResolve.forEach(id => {
+    const wantedFormId = registry[id.key] || majority(id.key);
+    if (!wantedFormId) { stats.noForm++; return; }
+    let urls = urlByFormId[wantedFormId];
+    if (!urls) {
+      try {
+        const form = FormApp.openById(wantedFormId);
+        urls = { publishedUrl: buildRegistrationUrl(form), editUrl: form.getEditUrl() };
+        stats.formsOpened++;
+      } catch (err) {
+        log(`Repair links: could not open form ${wantedFormId} for "${id.title}" (${err}).`);
+        urls = null;
+      }
+      urlByFormId[wantedFormId] = urls;
+    }
+    if (!urls) { stats.noForm++; return; }
+
+    const wantedView = makeHyperlinkFormula(urls.publishedUrl, 'View Live Form');
+    const wantedEdit = makeHyperlinkFormula(urls.editUrl, 'Edit Form Settings');
+    if (id.formId === wantedFormId && id.link && id.link !== NO_REGISTRATION_LINK_LABEL &&
+      urlByFormId[id.formId] && urlByFormId[id.formId].publishedUrl === urls.publishedUrl) {
+      stats.alreadyRight++;
+      return;
+    }
+    stats.willFix++;
+    plan.push({ row: id.row, title: id.title, dateKey: formatDateKey(id.date),
+      wasFormId: id.formId, formId: wantedFormId, view: wantedView, edit: wantedEdit,
+      shared: shared.has(wantedFormId) });
+  });
+
+  return { plan, stats, sheetMap };
+}
+
+/**
+ * ADMIN ACTION — "Repair Dashboard Links (no calendar read)".
+ *
+ * Rewrites Form_ID and both link columns on Master_Program_Dashboard from the
+ * form registry, row by row, touching nothing else on the tab and reading no
+ * calendar. See the section comment above for why the ordinary rebuild cannot
+ * do this and what makes this safe.
+ *
+ * Reports before it writes, and refuses to guess on any row whose own identity
+ * columns disagree with its Event_ID.
+ */
+function repairDashboardLinks() {
+  if (!requireAuthorizedAdmin('Repair Dashboard Links')) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — nothing to repair.');
+    return null;
+  }
+
+  const { plan, stats } = planDashboardLinkRepair(registrySheet);
+  log(`Repair Dashboard Links: scanned ${stats.scanned} row(s) — ${stats.willFix} to fix, ` +
+    `${stats.alreadyRight} already right, ${stats.misaligned} with a broken Event_ID, ` +
+    `${stats.blocked} marked "${NO_REGISTRATION_LINK_LABEL}", ${stats.noForm} with no form to point at ` +
+    `(${stats.formsOpened} form(s) opened).`);
+
+  if (stats.willFix === 0) {
+    const message = stats.misaligned > 0
+      ? `No link needed fixing, but ${stats.misaligned} row(s) have an Event_ID that does not match their ` +
+        `own date/title/calendar. Those rows are shifted in their IDENTITY columns, which this repair will ` +
+        `not guess at — they need "Sync Cal only" to rebuild them from the calendar.`
+      : 'Every link on the dashboard already matches the form registry ✅ — nothing to repair.';
+    toastIfPossible(message);
+    return { fixed: 0, stats };
+  }
+
+  const sample = plan.slice(0, 5)
+    .map(p => `  row ${p.row}: ${p.dateKey} ${p.title || '(untitled)'} → form ${p.formId.substring(0, 8)}…`)
+    .join('\n');
+  if (!confirmConsequentialAction(`Repair ${stats.willFix} dashboard link(s)?`,
+    `Rewrites Form_ID, "View Live Form" and "Edit Form Settings" on ${stats.willFix} row(s) of ` +
+    `${SHEET_NAMES.PROGRAM_DASHBOARD}, taking each row's form from the form registry rather than from the ` +
+    `cells being replaced.\n\n` +
+    `NO calendar is read and NO form is rebuilt — every registration link stays the link it is, and every ` +
+    `response already collected is untouched. ${stats.formsOpened} form(s) were opened just to read their ` +
+    `address.\n\n` +
+    `First ${Math.min(5, plan.length)} of ${plan.length}:\n${sample}\n\n` +
+    (stats.misaligned > 0
+      ? `SKIPPED: ${stats.misaligned} row(s) whose Event_ID disagrees with their own date/title/calendar. ` +
+        `Their identity columns are shifted too, so nothing here can name their form safely — run ` +
+        `"Sync Cal only" to rebuild those from the calendar.\n\n`
+      : '') +
+    `Nothing else on the tab is touched: no counts, no dates, no ticks, no formatting.`,
+    false)) {
+    return null;
+  }
+
+  // WRITTEN CELL BY CELL, per planned row. Deliberately not a column write:
+  // a whole-column setValues() is the shape of operation that produced this
+  // mess, and the rows NOT in the plan must not be rewritten even with their
+  // own current values.
+  const sheetMap = getHeaderMapAt(registrySheet, findProgramSessionHeaderRows(registrySheet)[0]);
+  let fixed = 0;
+  plan.forEach(p => {
+    try {
+      registrySheet.getRange(p.row, sheetMap['Form_ID']).setValue(p.formId);
+      registrySheet.getRange(p.row, sheetMap['Form_Response_Link']).setFormula(p.view);
+      registrySheet.getRange(p.row, sheetMap['Edit_Form_Link']).setFormula(p.edit);
+      fixed++;
+    } catch (err) {
+      log(`Repair Dashboard Links: row ${p.row} could not be written (${err}).`);
+    }
+  });
+
+  log(`Repair Dashboard Links: rewrote ${fixed} row(s).`);
+  toastIfPossible(`Repaired ${fixed} dashboard link(s) ✅` +
+    (stats.misaligned > 0 ? ` — ${stats.misaligned} shifted row(s) skipped, see the log.` : ''));
+  return { fixed, stats };
+}
+
+/**
+ * ADMIN ACTION — "Check Dashboard Alignment (read-only)".
+ *
+ * The diagnosis on its own, changing nothing: how many session rows vouch for
+ * themselves, how many links disagree with the registry, and how many rows
+ * have slid far enough that their Event_ID no longer matches their own date,
+ * title and calendar.
+ *
+ * Worth having separately from the repair because the first question anybody
+ * asks about a tab that looks wrong is "how wrong, and where" — and the honest
+ * answer to that must not require agreeing to a write first.
+ */
+function checkDashboardAlignment() {
+  if (!requireAuthorizedAdmin('Check Dashboard Alignment')) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — nothing to check.');
+    return null;
+  }
+  const { stats } = planDashboardLinkRepair(registrySheet);
+  const lines = [
+    `${stats.scanned} session row(s) checked.`,
+    ``,
+    `${stats.alreadyRight} link(s) already correct.`,
+    `${stats.willFix} link(s) point at the wrong form, or at none — "Repair Dashboard Links" fixes these ` +
+      `without reading a calendar.`,
+    `${stats.blocked} row(s) deliberately say "${NO_REGISTRATION_LINK_LABEL}" and are left alone.`,
+    `${stats.noForm} row(s) have no form in the registry to point at.`,
+    ``,
+    `${stats.misaligned} row(s) FAIL the self-check: their Event_ID does not match the date, title and ` +
+      `calendar on the same row, so the identity columns themselves have shifted. No repair can name their ` +
+      `form safely — rebuild those from the calendar with "Sync Cal only".`
+  ];
+  const report = lines.join('\n');
+  log(`Check Dashboard Alignment:\n${report}`);
+  try {
+    SpreadsheetApp.getUi().alert('Dashboard alignment', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    toastIfPossible(`${stats.willFix} link(s) repairable, ${stats.misaligned} row(s) shifted — see the log.`);
+  }
+  return stats;
 }
 
 /**
