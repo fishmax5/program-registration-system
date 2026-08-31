@@ -71,6 +71,26 @@ It also:
   already has and no link, leaves the registry and the calendar alone, and says
   so in the admin digest. Replacing a form that really is gone stayed possible,
   as a decision somebody makes rather than one a trigger makes for them;
+- **puts every way a link can go wrong behind one menu item.** `🩺 Form & Link
+  Doctor` runs every check in one pass — the dashboard against itself, every
+  form against Drive, every calendar event against the dashboard — and lists
+  what it found in **the order to fix it**, each finding explained in plain
+  words and carrying its own button. The order is the point, and it is
+  dependency order: forms come out of the trash before anything is pointed at
+  them, replacements are decided before links are written (a replacement
+  changes the ID every later step would write), and the calendar is rewritten
+  last, because that step copies the dashboard onto every event. It replaced
+  four separate items that each answered a real question while none of them
+  answered "what is wrong with my links";
+- **finds a live link that goes to the wrong form even though everything else
+  looks right.** A form's public address is a separate identifier from its file
+  ID, so an "Edit Form Settings" link — built from the ID — stays correct while
+  the "View Live Form" beside it points at another form entirely. The repair
+  used to make this worse: it harvested a form's public address out of a link
+  cell on the tab it was repairing, so one bad cell seeded every other row of
+  that form, and the "already correct" test compared a harvested URL against
+  itself and reported nothing. A public address is now only ever read from the
+  form;
 - **tells you when the calendar and the dashboard have come to disagree.** A
   session's form is written in two places updated by different code — the
   dashboard's `Form_ID` column and the link inside the calendar event's
@@ -253,4 +273,5 @@ node tests/event_time_epoch.test.js
 node tests/appointment_review.test.js
 node tests/form_recovery.test.js
 node tests/form_replacement_guard.test.js
+node tests/form_link_doctor.test.js
 ```
