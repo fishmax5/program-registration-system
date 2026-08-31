@@ -59,6 +59,16 @@ It also:
   and they **stay** deleted: neither the sign-up-for-every-date registry, the
   club rosters, nor a re-import puts them back, while a genuinely new
   submission from the same person still comes through;
+- **recovers forms somebody deleted out of the Drive folder** — a deletion
+  leaves no mark on the workbook, so the dashboard keeps showing a link that
+  now says "File not found". `🗑️ Recover Deleted Forms…` asks Drive about every
+  form the workbook still depends on (the dashboard's links, the entries the
+  next sync would reuse, the lunch sign-up forms) and answers each state with
+  the smallest fix: a form in the trash is taken back out, keeping its ID, its
+  link and every response already collected; one that merely wandered out of
+  the folder is filed back; and only a file Drive can no longer produce at all
+  leads to a replacement — behind a second, separate prompt, because that is
+  the one outcome that changes a link;
 - follows a program through a **rename** — change the title on the calendar and
   the sessions, registrants, club roster, staff notes and form all move across
   with it, instead of the sessions being swept into triage and the club roster
@@ -221,4 +231,5 @@ node tests/multiple_meals.test.js
 node tests/standing_lunch.test.js
 node tests/event_time_epoch.test.js
 node tests/appointment_review.test.js
+node tests/form_recovery.test.js
 ```
