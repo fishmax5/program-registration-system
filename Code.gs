@@ -9363,6 +9363,11 @@ function buildAppMenu(ui, includeAdmin) {
       // which is the whole reason they exist: the ordinary rebuild reads the
       // shifted cells and writes them straight back.
       .addItem('\ud83e\ude7a Check Dashboard Alignment (read-only)', 'checkDashboardAlignment')
+      // THE OTHER HALF OF "WHICH LINK IS WRONG": the one above checks the tab
+      // against itself, this one checks the calendar against the tab. A
+      // disagreement between them is invisible from either side alone \u2014 see
+      // planEventLinkDrift(). "Rewrite Event Links" above is its fix.
+      .addItem('\ud83d\udd0d Check Event Links vs the Dashboard (read-only)', 'checkEventLinksAgainstDashboard')
       .addItem('\ud83e\ude79 Repair Dashboard Links (no calendar read)\u2026', 'repairDashboardLinks')
       // THE ANSWER TO "SOMEBODY DELETED FORMS OUT OF THE DRIVE FOLDER". Sits
       // with the pair above because it is the same kind of trouble \u2014 the
@@ -12840,7 +12845,7 @@ function importCalendarGroups(registrySheet, options) {
 
   const summary = {
     groupsTotal: work.length, groupsProcessed: 0, groupsFailed: 0,
-    formsCreated: 0, formsReused: 0, groupsWithoutForms: 0,
+    formsCreated: 0, formsReused: 0, groupsWithoutForms: 0, formsUnreachable: 0,
     eventsAdded: 0, remaining: 0, outOfTime: false
   };
 
@@ -12861,6 +12866,9 @@ function importCalendarGroups(registrySheet, options) {
       // "reused" would report forms this run never opened.
       if (result.formCreated) summary.formsCreated++;
       else if (result.noForm) summary.groupsWithoutForms++;
+      // Counted separately from "reused": nothing was opened, and reporting it
+      // as a reuse is how a program with no working link stays invisible.
+      else if (result.formUnreachable) summary.formsUnreachable++;
       else summary.formsReused++;
     } catch (err) {
       // One bad group must not cost the whole run — especially mid-bootstrap,
@@ -12942,6 +12950,9 @@ function describeImportSummary(summary) {
   if (summary.formsCreated > 0) parts.push(`${summary.formsCreated} new form(s)`);
   if (summary.formsReused > 0) parts.push(`${summary.formsReused} existing form(s) reused`);
   if (summary.groupsWithoutForms > 0) parts.push(`${summary.groupsWithoutForms} with no registration`);
+  if (summary.formsUnreachable > 0) {
+    parts.push(`⚠️ ${summary.formsUnreachable} form(s) could not be opened — nothing rebuilt, see the log`);
+  }
   if (summary.groupsFailed > 0) parts.push(`${summary.groupsFailed} failed`);
   return parts.join(', ');
 }
@@ -14800,11 +14811,8 @@ function processCalendarGroup(registrySheet, item, existingState) {
       log(`Reused form for ${describeGroup(group)} — added ${newSessions.length} new date(s) to ` +
         `${describeFormLink(formInfo.formId)}.`);
     } catch (err) {
-      log(`⚠️ ${describeGroup(group)} points at ${describeFormLink(existingFormId)}, which could not be ` +
-        `opened (${err}). Building a REPLACEMENT form — links already handed out for the old one will ` +
-        `stop working, so check the old form is really gone.`);
-      formInfo = createRegistrationForm(group, configInfo);
-      formCreated = true;
+      // NOT A REASON TO BUILD A SECOND FORM. See handleUnreachableGroupForm().
+      return handleUnreachableGroupForm(registrySheet, group, newSessions, existingState, existingFormId, err);
     }
   } else {
     formInfo = createRegistrationForm(group, configInfo);
@@ -14838,6 +14846,86 @@ function processCalendarGroup(registrySheet, item, existingState) {
   existingState.groupFormMap[group.groupKey] = formInfo.formId;
 
   return { formCreated, eventsAdded: newSessions.length };
+}
+
+/**
+ * WHAT AN UNOPENABLE FORM MEANS, AND WHAT IT DOES NOT.
+ *
+ * Until now, a form this group already had that could not be opened sent
+ * processCalendarGroup() straight into createRegistrationForm(): a brand-new
+ * form, a brand-new link, the registry and the dashboard repointed onto it,
+ * and every link already handed out left pointing at the old one. Done
+ * silently, on an hourly trigger, from a single caught exception.
+ *
+ * THE EXCEPTION DOES NOT SAY WHAT PEOPLE ASSUMED IT SAID. "Could not be
+ * opened" covers, indistinguishably:
+ *
+ *   • the form was deleted — the case the rebuild was written for;
+ *   • the form is in the Drive trash, where it is fully recoverable and still
+ *     holds every response;
+ *   • THE ACCOUNT RUNNING THIS SYNC CANNOT SEE THE FORM. Drive gives a new
+ *     file to its creator alone, and the forms in this workbook are made by
+ *     whichever member of staff put the event on the calendar. An hourly sync
+ *     run by somebody else is refused by a form that is in perfect health —
+ *     which is the entire reason openUpFileToAnyoneWithLink() and the "Open
+ *     Up Form Sharing" menu item exist;
+ *   • a transient Forms/Drive error, which the next run would not have had.
+ *
+ * Three of those four are temporary, and in all three the rebuild is the worst
+ * available answer: it costs a live form and its link, strands the responses
+ * already collected on it, and leaves a duplicate behind. Run hourly against a
+ * fault that does not fix itself, it produces one new form per sync — a folder
+ * of same-named twins, with the dashboard on one and the calendar events on
+ * another.
+ *
+ * So the sync no longer replaces a form it merely failed to open. It is the
+ * same rule the lunch-only path has always followed (see the catch in
+ * syncLunchOnlySessions(): "Replacing it silently would strand every link
+ * already handed out AND every response on it"), and the program path was
+ * simply the one place that had not adopted it.
+ *
+ * WHAT HAPPENS INSTEAD: the new dates are still written to the dashboard — the
+ * dashboard is what staff read to see what is on, and hiding a session because
+ * of a Drive fault helps nobody — carrying the form ID the group already has
+ * and empty link cells, since no URL could be read. The registry is left
+ * exactly as it is. The calendar descriptions are left exactly as they are,
+ * because whatever link they carry is at worst the one that was working
+ * yesterday. And it is reported to the admin digest, because the one thing
+ * this must never be is quiet.
+ *
+ * Replacing a form that really is gone is still available, deliberately as a
+ * decision somebody makes rather than one a trigger makes for them: "🗑️
+ * Recover Deleted Forms…" asks Drive which of the four cases each form is in,
+ * restores the recoverable ones with their links intact, and offers to rebuild
+ * only the ones nothing can bring back.
+ */
+function handleUnreachableGroupForm(registrySheet, group, newSessions, existingState, formId, err) {
+  log(`⚠️ ${describeGroup(group)} points at ${describeFormLink(formId)}, which this account could not open ` +
+    `(${err}). Its ${newSessions.length} new date(s) were written WITHOUT a link, and NO replacement form ` +
+    `was built — the form may be in the trash, or simply invisible to whoever is running this sync.`);
+  noteForAdmin('Programs whose form could not be opened',
+    `${group.cleanTitle} (${describeLocations(group.locations)}${group.monthLabel ? `, ${group.monthLabel}` : ''}) — ` +
+    `${describeFormLink(formId)} could not be opened (${err}). Nothing was rebuilt, so every link already handed ` +
+    `out still points where it did and every response on that form is still on it. Two things to try, in order: ` +
+    `run "🔓 Open Up Form Sharing" signed in as whoever created the form — an account that cannot reach a file ` +
+    `is much the commonest cause — and then "🗑️ Recover Deleted Forms…", which says whether the form is in the ` +
+    `Drive trash and takes it back out with its link and its responses intact.`);
+
+  // The dates go on the dashboard either way, carrying the form ID the group
+  // already has. No URLs were readable, so the link cells stay empty and
+  // "Repair Dashboard Links" fills them in on the first run after the form
+  // becomes reachable again.
+  const newSessionsGroup = Object.assign({}, group, {
+    sessions: newSessions,
+    events: newSessions.map(s => s.event)
+  });
+  writeEventRegistryRows(registrySheet, newSessionsGroup,
+    { formId, publishedUrl: '', editUrl: '' });
+
+  newSessions.forEach(s => existingState.eventIds.add(
+    computeEventId(s.calendarId, group.cleanTitle, formatDateKey(s.event.getStartTime()))));
+
+  return { formCreated: false, formUnreachable: true, eventsAdded: newSessions.length };
 }
 
 /**
@@ -16529,10 +16617,20 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
 
     // formInfo is null for a [No Registration] group — there is no form to
     // link to, and the link columns say so in words rather than sitting empty.
+    //
+    // A formInfo carrying an ID but NO URLs is the third case: the group has a
+    // form and we know which one, but this run could not open it to ask for
+    // its address (see handleUnreachableGroupForm()). The link cells are left
+    // EMPTY rather than filled with the [No Registration] words — that label
+    // is a statement that the program takes no registration, which would be a
+    // lie here, and "Repair Dashboard Links" deliberately skips every row
+    // carrying it. Empty is the honest shape: a row with a form and no link
+    // yet, which the repair will fill in the moment the form is reachable.
     row[map['Form_Response_Link']] = formInfo
-      ? makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form')
+      ? (formInfo.publishedUrl ? makeHyperlinkFormula(formInfo.publishedUrl, 'View Live Form') : '')
       : NO_REGISTRATION_LINK_LABEL;
-    row[map['Edit_Form_Link']] = formInfo ? makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings') : '';
+    row[map['Edit_Form_Link']] = formInfo && formInfo.editUrl
+      ? makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings') : '';
     row[map['Form_ID']] = formInfo ? formInfo.formId : '';
     row[map['Calendar_Synced?']] = true;
     row[map['Event_ID']] = eventId;
@@ -18974,6 +19072,158 @@ function checkDashboardAlignment() {
     toastIfPossible(`${stats.willFix} link(s) repairable, ${stats.misaligned} row(s) shifted — see the log.`);
   }
   return stats;
+}
+
+
+/**
+ * THE DISAGREEMENT NOTHING WAS WATCHING FOR.
+ *
+ * A session's form is written in two places that are updated by different
+ * code, on different occasions: the dashboard's Form_ID column, and the
+ * registration link inside the calendar event's description. They are supposed
+ * to name the same form, and for most of this system's life they did.
+ *
+ * They come apart whenever a group's form changes without its calendar events
+ * being rewritten — the old rebuild-on-a-caught-exception did exactly that (see
+ * handleUnreachableGroupForm(), which is why it no longer exists), and so does
+ * any hand edit that repoints one side. Once they have, NOTHING SAYS SO. Both
+ * sides look perfectly healthy on their own: the dashboard's link opens a form,
+ * the event's link opens a form, and only somebody who checks one against the
+ * other finds that a resident reading the calendar and a member of staff
+ * reading the dashboard are being sent to two different sign-up pages — with
+ * the registrations splitting between them.
+ *
+ * That is what took a week to notice, and the reason it took a week is that
+ * this comparison had never been written down anywhere. It is cheap: both
+ * sides are already read, by the two functions this borrows from.
+ *
+ * READ-ONLY, and paired with a fix that already exists — "🔗 Rewrite Event
+ * Links" rewrites every event description from the dashboard, which is exactly
+ * the repair for every row this reports. Kept separate from that for the same
+ * reason "Check Dashboard Alignment" is kept separate from the repair beside
+ * it: the first question anybody asks about a link that looks wrong is "how
+ * many, and which", and answering it must not require agreeing to a write.
+ */
+
+/** What one event's description says about its form, against what the sheet says. */
+function compareEventLinkToSession(found, session) {
+  if (!session || !session.formId) return 'noSession';
+  if (!found || !found.formId) return 'noLink';
+  return found.formId === session.formId ? 'agrees' : 'disagrees';
+}
+
+/**
+ * Every upcoming event whose description names a different form from the
+ * dashboard row for the same session. Reads both sides, writes neither.
+ */
+function planEventLinkDrift(registrySheet) {
+  const headers = HEADERS.Master_Program_Dashboard;
+  const map = getIndexMap(headers);
+  const todayKey = formatDateKey(new Date());
+  const stats = { scanned: 0, agrees: 0, disagrees: 0, noLink: 0, noSession: 0 };
+  const drift = [];
+
+  const sessionByEventId = {};
+  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!eventId || !d || formatDateKey(d) < todayKey) return;
+    sessionByEventId[eventId] = {
+      formId: String(row[map['Form_ID']] || '').trim(),
+      // A row deliberately marked [No Registration] is not in disagreement
+      // with an event that carries no link — it is agreeing with it.
+      blocked: String(row[map['Form_Response_Link']] || '').trim() === NO_REGISTRATION_LINK_LABEL,
+      cleanTitle: String(row[map['Clean_Title']] || '').trim()
+    };
+  });
+
+  const { start, end } = computeSyncDateRange();
+  const windowStart = parseDateKey(todayKey);
+  const eventsByCalendar = getCalendarEventsForWindow(start, end);
+
+  Object.keys(CALENDAR_MAP).forEach(calendarId => {
+    const events = eventsByCalendar[calendarId];
+    if (!events) return;
+    events.forEach(ev => {
+      if (ev.isAllDayEvent()) return;
+      const startTime = ev.getStartTime();
+      if (startTime < windowStart) return;
+      const parsed = parseEventTitle(ev.getTitle());
+      if (!parsed) return;
+      const dateKey = formatDateKey(startTime);
+      const session = sessionByEventId[computeEventId(calendarId, parsed.cleanTitle, dateKey)];
+      if (session && session.blocked) return;
+
+      stats.scanned++;
+      const found = findRegistrationLineInDescription(ev.getDescription() || '');
+      const verdict = compareEventLinkToSession(found, session);
+      stats[verdict]++;
+      if (verdict === 'disagrees') {
+        drift.push({ dateKey, title: parsed.cleanTitle, location: CALENDAR_MAP[calendarId],
+          eventFormId: found.formId, sheetFormId: session.formId });
+      }
+    });
+  });
+
+  drift.sort((a, b) => (a.dateKey + a.title).localeCompare(b.dateKey + b.title));
+  return { stats, drift };
+}
+
+/**
+ * ADMIN ACTION — "Check Event Links vs the Dashboard (read-only)".
+ */
+function checkEventLinksAgainstDashboard() {
+  if (!requireAuthorizedAdmin('Check Event Links vs the Dashboard')) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — nothing to compare.');
+    return null;
+  }
+
+  toastIfPossible('Reading every upcoming event and comparing its link…');
+  const { stats, drift } = planEventLinkDrift(registrySheet);
+
+  const byProgram = {};
+  drift.forEach(d => {
+    const key = `${d.title} (${d.location})`;
+    if (!byProgram[key]) byProgram[key] = { dates: [], eventFormId: d.eventFormId, sheetFormId: d.sheetFormId };
+    byProgram[key].dates.push(d.dateKey);
+  });
+  const names = Object.keys(byProgram).sort();
+  const sample = names.slice(0, 8).map(name => {
+    const p = byProgram[name];
+    return `• ${name} — ${p.dates.length} date(s): the calendar says form ${p.eventFormId.substring(0, 8)}…, ` +
+      `the dashboard says ${p.sheetFormId.substring(0, 8)}…`;
+  }).join('\n');
+
+  const lines = [
+    `${stats.scanned} upcoming event(s) checked against the session table.`,
+    ``,
+    `${stats.agrees} event(s) carry the same form the dashboard does ✅`,
+    `${stats.disagrees} event(s) name a DIFFERENT form from the dashboard` +
+      (names.length > 0 ? ` — ${names.length} program(s):` : '.'),
+    names.length > 0 ? sample + (names.length > 8 ? `\n…and ${names.length - 8} more` : '') : '',
+    ``,
+    `${stats.noLink} event(s) carry no registration link at all.`,
+    `${stats.noSession} event(s) have no session row with a form on the dashboard.`,
+    ``,
+    stats.disagrees > 0
+      ? `A disagreement means residents reading the calendar and staff reading the dashboard are being sent ` +
+        `to two different sign-up pages, and the registrations are splitting between them. "🔗 Rewrite Event ` +
+        `Links" rewrites every event description from the dashboard, which fixes all of these — check first ` +
+        `that the dashboard is naming the form you want kept, since that is the one everybody will be sent to.`
+      : `Nothing to fix here.`
+  ].filter(l => l !== '');
+
+  const report = lines.join('\n');
+  log(`Check Event Links vs the Dashboard:\n${report}`);
+  try {
+    SpreadsheetApp.getUi().alert('Event links vs the dashboard', report, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (err) {
+    toastIfPossible(`${stats.disagrees} event(s) disagree with the dashboard — see the log.`);
+  }
+  return { stats, drift };
 }
 
 /**
@@ -31164,17 +31414,49 @@ function planFormRecovery(refs, probeFn) {
 function restoreOneFormFile(formId, folder) {
   const file = DriveApp.getFileById(formId);
   file.setTrashed(false);
-  fileFormIntoFormsFolder(file, folder);
+  // ASKED AGAIN, AFTER THE RESTORE. Untrashing puts a file back where it came
+  // from, which for a form this system built is the forms folder already — so
+  // the ordinary case has nothing to move, and trying to move it anyway is
+  // what produced a "could not be filed" line under every single rescue.
+  if (!isFormFiledIn(file, folder)) fileFormIntoFormsFolder(file, folder);
   return true;
 }
 
+/** Is this file already a child of `folder`? Unreadable parents answer "yes" — see classifyFormFileState(). */
+function isFormFiledIn(file, folder) {
+  if (!folder) return true;
+  try {
+    const parents = file.getParents();
+    while (parents.hasNext()) {
+      if (parents.next().getId() === folder.getId()) return true;
+    }
+    return false;
+  } catch (err) {
+    return true;
+  }
+}
+
 /**
- * Adds the file to the forms folder, and takes it out of the Drive root if
- * that is where it was left. Other parents are deliberately not touched: a
- * form deliberately shared into somebody else's folder should stay there.
+ * Files the form into the forms folder.
+ *
+ * moveTo() FIRST, and addFile() only as the fallback. addFile()/removeFile()
+ * are the old Drive-v2 shape and they throw "Cannot use this operation on a
+ * shared drive item" outright — which is not an exotic case here: a workbook
+ * run by a center with a Google Workspace account keeps its forms on a shared
+ * drive, so on those setups EVERY rescue reported a filing failure it had no
+ * way to avoid. moveTo() is the operation that works in both places.
+ *
+ * A shared drive also has no "My Drive root" to take the file out of, so the
+ * root cleanup belongs with the fallback that needs it, not before the move.
  */
 function fileFormIntoFormsFolder(file, folder) {
   if (!folder) return;
+  try {
+    file.moveTo(folder);
+    return;
+  } catch (err) {
+    log(`ℹ️ Form ${file.getId()} could not be moved into "${FORMS_FOLDER_NAME}" (${err}) — trying the older Drive call.`);
+  }
   try {
     folder.addFile(file);
     const root = DriveApp.getRootFolder();
@@ -31185,7 +31467,8 @@ function fileFormIntoFormsFolder(file, folder) {
     }
     if (inRoot) root.removeFile(file);
   } catch (err) {
-    log(`ℹ️ Form ${file.getId()} could not be filed into "${FORMS_FOLDER_NAME}" (${err}) — it is otherwise fine.`);
+    log(`ℹ️ Form ${file.getId()} could not be filed into "${FORMS_FOLDER_NAME}" (${err}) — it is otherwise fine: ` +
+      `the form is out of the trash and its link works. Only which folder it sits in is unsettled.`);
   }
 }
 

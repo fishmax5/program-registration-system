@@ -59,6 +59,26 @@ It also:
   and they **stay** deleted: neither the sign-up-for-every-date registry, the
   club rosters, nor a re-import puts them back, while a genuinely new
   submission from the same person still comes through;
+- **never builds a second form for a program that already has one.** The
+  hourly sync used to answer a form it could not open by building a
+  replacement — but "could not be opened" covers a deleted form, a trashed one,
+  a form the syncing account simply cannot *see* (Drive gives a new file to its
+  creator alone, and staff create these forms between them), and a transient
+  Drive error. Three of those four are temporary, and in all three the rebuild
+  was the worst available answer: it cost a live form and its link, stranded
+  the responses on it, and left a twin behind — once per sync, for as long as
+  the fault stood. The sync now writes the new dates with the form ID the group
+  already has and no link, leaves the registry and the calendar alone, and says
+  so in the admin digest. Replacing a form that really is gone stayed possible,
+  as a decision somebody makes rather than one a trigger makes for them;
+- **tells you when the calendar and the dashboard have come to disagree.** A
+  session's form is written in two places updated by different code — the
+  dashboard's `Form_ID` column and the link inside the calendar event's
+  description — and when they come apart, nothing says so: both sides look
+  healthy alone, while residents reading the calendar and staff reading the
+  dashboard are sent to two different sign-up pages and the registrations split
+  between them. `🔍 Check Event Links vs the Dashboard` reads both sides and
+  names every program where they differ; `🔗 Rewrite Event Links` is the fix;
 - **recovers forms somebody deleted out of the Drive folder** — a deletion
   leaves no mark on the workbook, so the dashboard keeps showing a link that
   now says "File not found". `🗑️ Recover Deleted Forms…` asks Drive about every
@@ -232,4 +252,5 @@ node tests/standing_lunch.test.js
 node tests/event_time_epoch.test.js
 node tests/appointment_review.test.js
 node tests/form_recovery.test.js
+node tests/form_replacement_guard.test.js
 ```
