@@ -139,14 +139,15 @@ Line counts are a rough guide to what you are about to load.
 | `58_program_review.gs` | 1915 | Decide programs one at a time, apply them all at once. |
 | `59_appointment_review.gs` | 1559 | One month, one location, one form. |
 
-### The door (60–63)
+### The door (60–64)
 
 | File | | What is in it |
 |---|--:|---|
 | `60_check_in_page_server.gs` | 985 | `doGet`, the PIN gate, the roster read, and the mark/register handlers. |
 | `61_check_in_page_html.gs` | 1195 | `buildCheckInHtml` — the whole served page, one template literal. |
-| `62_walk_in_page.gs` | 1098 | The sign-in page for people who never registered. |
-| `63_check_in_store.gs` | 783 | The door's own store: a roster it reads, a queue it writes. |
+| `62_walk_in_page.gs` | 1253 | The sign-in page for people who never registered. |
+| `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
+| `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
 ## Conventions
 

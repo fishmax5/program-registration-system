@@ -44,6 +44,11 @@
 // shown, marked "by appointment", and left to staff — and it does not take a
 // membership. It takes an EMAIL, so the office can send the membership form
 // to somebody who is by then already inside and signed in.
+//
+// WHAT IT DOES NOT MAKE ANYBODY WAIT FOR. The day this page shows is inlined
+// into the page itself from a stored snapshot (section 16d) and drawn on the
+// first frame; the live read below runs behind it and replaces it. So the boot
+// has no spinner in it, and the list is still the sheet's a second later.
 // ============================================================================
 
 /**
@@ -80,21 +85,44 @@ function checkInRosterModeRequested(params) {
  *
  * Payload: { location, pin }. Returns { ok, message, day } — see
  * readWalkInDay() for the shape of `day`.
+ *
+ * THIS IS NOW THE BACKGROUND CALL. The page draws from the snapshot inlined
+ * into it (section 16d) and then makes this call silently to correct it, so
+ * what happens here is no longer what a volunteer is watching. Two things
+ * follow from that:
+ *
+ *   - The fresh day is folded back into the boot store on the way out
+ *     (rememberWalkInDay()). The read is already paid for; giving it to the
+ *     next tablet to boot costs one cache write on a call nobody is waiting on.
+ *   - A desk blocked by a forms sweep answers with the STORED day rather than
+ *     a refusal. The page has that day on screen already; replacing it with
+ *     "the workbook is busy" would be taking the door's list away over
+ *     something the door does not care about.
  */
 function walkInDay(payload) {
   const args = parseCheckInPayload(payload);
   if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
-  // Same judgement as the roster call: a forms sweep is no reason to shut the
-  // front door.
-  if (isDeskWorkBlocked()) return { ok: false, message: deskBusyMessage() };
   const location = matchCheckInLocation(args.location);
   if (!location) {
     return { ok: false, message: 'Choose a location first — nothing was read.' };
   }
+  // Same judgement as the roster call: a forms sweep is no reason to shut the
+  // front door — and now there is something to hand back instead of a refusal.
+  if (isDeskWorkBlocked()) {
+    const stored = storedWalkInDay(location);
+    if (stored) return { ok: true, day: stored, stale: true };
+    return { ok: false, message: deskBusyMessage() };
+  }
   try {
-    return { ok: true, day: readWalkInDay(location) };
+    const day = readWalkInDay(location);
+    rememberWalkInDay(day);
+    return { ok: true, day };
   } catch (err) {
     log(`walkInDay failed: ${err}`);
+    // The stored day is a worse answer than the live one and a far better
+    // answer than none: the tablet is standing at a door with a queue at it.
+    const stored = storedWalkInDay(location);
+    if (stored) return { ok: true, day: stored, stale: true };
     return { ok: false, message: `Could not read today's list (${err}).` };
   }
 }
@@ -117,12 +145,17 @@ function walkInDay(payload) {
  * so the page never has to know how a session is identified and there is no
  * second matching rule in this file to keep in step with the first.
  *
- * NOTHING HERE IS CACHED. The Quick Mark index is a snapshot built on a
- * trigger, which is exactly right for a dropdown of six months of sessions
- * and exactly wrong for a door: somebody who registered an hour ago has to be
- * on this list, and somebody already signed in has to show as signed in. One
- * location's single day is a small read, and it is made once per person at
- * the door rather than once per tap.
+ * NOTHING HERE IS READ FROM A CACHE. The Quick Mark index is a snapshot built
+ * on a trigger, which is exactly right for a dropdown of six months of
+ * sessions and exactly wrong for a door: somebody who registered an hour ago
+ * has to be on this list, and somebody already signed in has to show as signed
+ * in. One location's single day is a small read, and it is made once per
+ * person at the door rather than once per tap.
+ *
+ * What IS cached is what the page draws before this answers — the boot
+ * snapshot of section 16d, which is a copy of this function's own output and
+ * is replaced by it on every load. This function stays the truth; it simply is
+ * no longer the thing a volunteer waits on.
  *
  * `dateKeyOverride` is for the tests, which cannot move the clock.
  */
@@ -279,6 +312,22 @@ function readWalkInDay(location, dateKeyOverride) {
 }
 
 /**
+ * FOR THE LENGTH OF ONE EXECUTION, and no longer — the same contract as the
+ * memo caches in section 5a.
+ *
+ * The roll is the same list for every building, and buildWalkInDayStore()
+ * reads a day per building: without this, warming a workbook with four
+ * locations reads, dedupes and sorts four thousand names four times over and
+ * throws three of them away. Cleared by the one thing that changes the roll
+ * inside an execution (recordWalkInMember()).
+ */
+let walkInMembersMemo = null;
+
+function invalidateWalkInMembersMemo() {
+  walkInMembersMemo = null;
+}
+
+/**
  * Every name on Member_Roll, deduped and alphabetical, as { name, key }.
  *
  * NAMES ONLY. The page needs to find a person, not to know how to reach one,
@@ -286,6 +335,7 @@ function readWalkInDay(location, dateKeyOverride) {
  * everybody's phone number.
  */
 function readWalkInMembers() {
+  if (walkInMembersMemo) return walkInMembersMemo;
   const out = [];
   const seen = {};
   collectKnownMembers().forEach(name => {
@@ -295,7 +345,8 @@ function readWalkInMembers() {
     out.push({ name, key });
   });
   out.sort((a, b) => a.name.localeCompare(b.name));
-  return out.slice(0, WALK_IN_MAX_MEMBERS);
+  walkInMembersMemo = out.slice(0, WALK_IN_MAX_MEMBERS);
+  return walkInMembersMemo;
 }
 
 /**
@@ -542,6 +593,8 @@ function recordWalkInMember(entry) {
       }
       rows.sort((a, b) => String(a[map['Name']] || '').localeCompare(String(b[map['Name']] || '')));
       writeMemoryTab(sheet, headers, rows, memberRollTabOptions());
+      // The roll this execution memoized is now one name short of the truth.
+      invalidateWalkInMembersMemo();
       return note;
     } catch (err) {
       log(`recordWalkInMember failed: ${err}`);
@@ -556,19 +609,28 @@ const WALK_IN_MEMBERSHIP_NOTE = '📨 Signed in at the door — membership form 
 /**
  * The page. Inline, like every other page and dialog in this file.
  *
- * `options` is { location, pinRequired, locations, rosterUrl } — the location
- * pin from the query string, whether writes need a PIN, the buildings this
- * workbook has, and where the session roster lives for the link at the foot
- * of the page.
+ * `options` is { location, pinRequired, locations, rosterUrl, boot } — the
+ * location pin from the query string, whether writes need a PIN, the buildings
+ * this workbook has, where the session roster lives for the link at the foot
+ * of the page, and the day the page opens on.
  *
- * NOTHING BUT THE OPTIONS IS INLINED. The day itself is fetched on load,
- * because every fact on it — who has signed in already, who registered an
- * hour ago, what the kitchen is serving — is exactly the kind that must not be
- * a snapshot at a door. The page says when it read it, and reloads it after
- * every sign-in.
+ * THE DAY IS INLINED, AND IT IS ONLY EVER A STORED ONE. Every fact on it —
+ * who has signed in already, who registered an hour ago, what the kitchen is
+ * serving — is exactly the kind that must not be a snapshot at a door, so the
+ * page still reads the day live. What changed is WHEN: the stored copy is what
+ * the tablet draws on the first frame, and the live read happens behind it and
+ * replaces it (section 16d). The page says which of the two it is showing.
+ *
+ * NEVER A BUILD. walkInBootSnapshot() is a cache read that answers null when
+ * there is nothing stored, and null here means the page opens the way it
+ * always did — asking for the day and saying so. doGet() is the one path with
+ * a volunteer watching a blank tablet, and a page that reads two sectioned
+ * tabs before it returns its first byte is the failure this replaces, not a
+ * cheaper version of it.
  */
 function buildWalkInHtml(options) {
   const opts = options || {};
+  const boot = opts.boot === undefined ? walkInBootSnapshot() : opts.boot;
   // Stringified twice, for the reason buildCheckInHtml() gives: once to make
   // the data, once to make it a string literal that a location called
   // "St. Mary's </script>" cannot break out of.
@@ -576,7 +638,13 @@ function buildWalkInHtml(options) {
     location: String(opts.location || ''),
     pinRequired: !!opts.pinRequired,
     locations: opts.locations || checkInLocations(),
-    rosterUrl: String(opts.rosterUrl || '')
+    rosterUrl: String(opts.rosterUrl || ''),
+    // The date the page is being served ON, so the tablet can refuse a
+    // snapshot — inlined or its own — that belongs to another day. The page
+    // has no clock it can trust for this: a tablet by a door is as likely as
+    // not to be on the wrong timezone, or on no time at all.
+    todayKey: formatDateKey(new Date()),
+    boot: boot || null
   })).replace(/<\//g, '<\\/');
 
   return `
@@ -663,6 +731,7 @@ function buildWalkInHtml(options) {
 <script>
   var OPTS = JSON.parse(${inlineOptions});
   var DAY = null;          // today, as readWalkInDay() sent it
+  var PENDING = null;      // a background day held back until the screen is idle
   var STEP = 'who';        // who -> what -> done
   var PERSON = null;       // { name, key, isNew, phone, email }
   var PICKED = {};         // session value -> true
@@ -671,6 +740,54 @@ function buildWalkInHtml(options) {
   var busy = false;
   var pin = '';
   var location_ = OPTS.location || '';
+
+  // ------------------------------------------------------------------- locals
+  // WHAT THE PAGE KNOWS BEFORE IT ASKS ANYTHING. Two sources, both free:
+  // the snapshot the server inlined (section 16d) and the last day this
+  // particular tablet saw, kept in its own localStorage. Either one is drawn
+  // on the first frame; neither is ever the last word, because syncDay() is
+  // already running behind it.
+  //
+  // BOTH ARE GATED ON OPTS.todayKey — the date the SERVER is on. A tablet that
+  // has been awake since Tuesday, or one whose clock is simply wrong, must not
+  // open on a day that is not today: every program on it would be gone, every
+  // sign-in already ticked, and every tap would record nothing.
+  var DAY_CACHE_PREFIX = 'walkInDay:';
+
+  function bootDay(loc) {
+    if (!loc) return null;
+    var boot = OPTS.boot;
+    if (boot && boot.dateKey === OPTS.todayKey && boot.days && boot.days[loc]) {
+      var day = boot.days[loc];
+      // The roll is stored once for every building — see walkInBootSnapshot().
+      if (day && !day.members) day.members = boot.members || [];
+      if (day) { day.stale = true; day.storedAt = boot.builtAt || ''; }
+      return day;
+    }
+    return localDay(loc);
+  }
+
+  function localDay(loc) {
+    try {
+      var raw = window.localStorage.getItem(DAY_CACHE_PREFIX + loc);
+      if (!raw) return null;
+      var saved = JSON.parse(raw);
+      if (!saved || saved.dateKey !== OPTS.todayKey || !saved.day) return null;
+      saved.day.stale = true;
+      saved.day.storedAt = saved.day.readAt || '';
+      return saved.day;
+    } catch (err) {
+      return null;   // private browsing, a full quota, or a half-written entry
+    }
+  }
+
+  function rememberDay(loc, day) {
+    if (!loc || !day || day.dateKey !== OPTS.todayKey) return;
+    try {
+      window.localStorage.setItem(DAY_CACHE_PREFIX + loc,
+        JSON.stringify({ dateKey: day.dateKey, day: day }));
+    } catch (err) { /* a cache is an optimization; never let it stop a sign-in */ }
+  }
 
   function start() {
     try { pin = window.localStorage.getItem('checkInPin') || ''; } catch (err) { pin = ''; }
@@ -694,7 +811,25 @@ function buildWalkInHtml(options) {
     document.getElementById('pinbox').classList.add('hide');
     document.getElementById('app').classList.remove('hide');
     if (!location_) return draw();
-    loadDay();
+    openDay();
+  }
+
+  /**
+   * THE BOOT PATH, AND THE WHOLE OF WHY THIS PAGE NO LONGER WAITS.
+   *
+   * With something stored for this building we draw it immediately — no
+   * spinner, no status line, nothing on screen that says "wait" — and the live
+   * read runs behind the drawn page. With nothing stored (the first tablet
+   * after a redeploy, a building the warmer has not reached) the page opens the
+   * way it always did, saying so. Never both: a page that says "Reading..."
+   * over a list it is already showing is a page a volunteer will not touch.
+   */
+  function openDay(then) {
+    var known = bootDay(location_);
+    if (!known) return loadDay(then);
+    DAY = known;
+    draw();
+    syncDay(then);
   }
 
   function loadDay(then) {
@@ -704,7 +839,33 @@ function buildWalkInHtml(options) {
       setBusy(false);
       if (!res || !res.ok) { DAY = null; draw(); return handle(res); }
       DAY = res.day;
+      rememberDay(location_, res.day);
       hideStatus();
+      draw();
+      if (then) then();
+    });
+  }
+
+  /**
+   * THE SAME READ, SILENTLY. No busy state, no status line, and no redraw
+   * under somebody's finger.
+   *
+   * A failure here is not reported at all: the page has a list on it, the
+   * volunteer did not ask for this, and an error banner over a working screen
+   * is worse than being a few minutes out of date. The next sync — after the
+   * next sign-in — tries again.
+   */
+  function syncDay(then) {
+    call('walkInDay', { location: location_ }, function (res) {
+      if (!res || !res.ok || !res.day) return;
+      rememberDay(location_, res.day);
+      // MID-FLOW, THE FRESH DAY WAITS. Somebody who has tapped their name is
+      // looking at a screen of ticks; swapping the day out from under them
+      // would redraw it, and a tick that moves while a thumb is on its way to
+      // it is how the wrong thing gets recorded. It lands the moment the page
+      // is back at the name list — see draw().
+      if (STEP !== 'who' || PERSON) { PENDING = res.day; return; }
+      DAY = res.day;
       draw();
       if (then) then();
     });
@@ -712,6 +873,9 @@ function buildWalkInHtml(options) {
 
   // --------------------------------------------------------------------- draw
   function draw() {
+    // A background day held back while somebody was mid-sign-in lands here,
+    // the first time the page is idle again — see syncDay().
+    if (PENDING && STEP === 'who' && !PERSON) { DAY = PENDING; PENDING = null; }
     var main = document.getElementById('app');
     document.getElementById('subheading').textContent = DAY
       ? DAY.location + ' — ' + DAY.dateLabel
@@ -734,7 +898,7 @@ function buildWalkInHtml(options) {
   function drawLocations(main) {
     main.appendChild(el('h2', '', 'Where are you?'));
     (OPTS.locations || []).forEach(function (loc) {
-      main.appendChild(button('plain', loc, function () { location_ = loc; loadDay(); }));
+      main.appendChild(button('plain', loc, function () { location_ = loc; openDay(); }));
     });
   }
 
@@ -986,8 +1150,10 @@ function buildWalkInHtml(options) {
       draw();
       say(res.message, res.ok ? 'ok' : 'err');
       // The list is re-read rather than patched: the next person in the queue
-      // has to see this one as signed in, and the sheet is the truth.
-      loadDay(function () { if (STEP === 'done') draw(); });
+      // has to see this one as signed in, and the sheet is the truth. Quietly,
+      // though — the volunteer is reading the receipt this call would otherwise
+      // paper over, and the re-read lands when they tap "next person".
+      syncDay();
     });
   }
 
@@ -1010,7 +1176,16 @@ function buildWalkInHtml(options) {
 
   function footer() {
     var d = el('div', 'foot', '');
-    var when = DAY && DAY.readAt ? 'Read at ' + DAY.readAt + '. ' : '';
+    // WHICH LIST IS ON SCREEN, in words. A stored list is a few minutes old
+    // and about to be replaced, and a footer that claims it was read just now
+    // is the one thing that would make that dishonest.
+    var when = '';
+    if (DAY && DAY.stale) {
+      when = 'Showing the list stored at ' + (DAY.storedAt || DAY.readAt || 'today') +
+        ' — refreshing it now. ';
+    } else if (DAY && DAY.readAt) {
+      when = 'Read at ' + DAY.readAt + '. ';
+    }
     d.innerHTML = esc(when) + 'Staff: ' +
       (OPTS.rosterUrl
         ? '<a href="' + esc(OPTS.rosterUrl) + '" target="_top">open the session check-in list</a>'

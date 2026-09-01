@@ -248,7 +248,7 @@ mixed in with an unrelated static site — full development history preserved.
 ## Install
 
 The script lives in this repo as the numbered `.gs` files at the root —
-`00_overview.gs` through `63_check_in_store.gs`. They are ONE Apps Script
+`00_overview.gs` through `64_walk_in_day_store.gs`. They are ONE Apps Script
 project sharing one global scope, and Apps Script evaluates them in filename
 order, which is what the number prefixes are for. See
 [`CLAUDE.md`](./CLAUDE.md) for what lives in which file.
