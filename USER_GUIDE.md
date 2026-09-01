@@ -1174,15 +1174,83 @@ lunch** — because somebody signing a person up for lunch today *and* putting
 them on every future session has usually described the whole arrangement, not
 half of it. Untick it if you meant only today's meal.
 
-#### 📱 The check-in page — the same thing on a tablet at the door
+#### 📱 The door pages — the same thing on a tablet at the entrance
 
 Quick Mark lives inside the spreadsheet, which means the sign-in desk is
 wherever the laptop with the workbook open happens to be, operated by somebody
 with edit access to it. That is not most front doors.
 
-**🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ 📱 Check-In Page (link &
-PIN)…** gives you a web address for the same job. Open it on a tablet, add it
-to the home screen, and it is a sign-in list:
+**🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ 📱 Door Pages (links &
+PIN)…** gives you web addresses for the same job. There are **two pages, from
+one deployment**, and the window lists both for every building:
+
+| Link | Who taps it | What it shows |
+| --- | --- | --- |
+| **sign-in page** (the plain `?location=` link) | whoever walks in | Everybody signed up for anything here today as a card, then today's programs and lunch |
+| **check-in list** (`&mode=session`) | staff | One session at a time, its roster, and a Lunch button per row |
+
+Every link in that window is clickable, and has a **Copy** button beside it for
+getting the address onto a tablet.
+
+##### The sign-in page — what a person who walked in sees
+
+This is the one for the tablet by the entrance, and it is written for the
+visitor rather than for staff:
+
+1. **"Tap your name."** Everybody registered for anything at this building
+   today is a card, alphabetically — on an ordinary morning the person at the
+   door is one of them, and a card already signed in says so and turns green.
+   Underneath: a **search across the whole Member Roll** for the regular who
+   didn't register this time, and **"I'm new here — register"**, which asks for
+   a name and an email and nothing else.
+2. **"What are you here for?"** Every program on at this building today, and
+   the day's lunch at the bottom. Anything they are already registered for is
+   **ticked and labelled REGISTERED**; anything else is offered unticked and
+   labelled **NOT REGISTERED** — ticking it registers them on the spot, as an
+   ordinary walk-in row flagged *Manually Added*, exactly as Quick Mark would.
+3. **Sign in.** Every tick is reported back as its own line, then **Done — next
+   person** clears the screen.
+
+**Lunch is not just another tick.** Meals are ordered from the caterer days
+ahead against a count, so the page says which of two things is true:
+
+- **ORDERED FOR YOU** — they registered for it. Ticking it marks the meal
+  **handed over** (`Lunch_Served`, the same column the check-in list's Lunch
+  button sets), on the row that actually ordered the food rather than on
+  whichever program they happened to tick first. Leave it unticked if they are
+  not taking it today.
+- **NOT REGISTERED** — the line reads *tick this to be added to the list and
+  recorded as taking a meal, then check with a staff member that one is
+  available*. That writes **twice**, and the two say different things: the
+  sign-up is the **order** (`Lunch_Status` = `Needed`, which is what puts them
+  on the kitchen's list and on the dashboard's "lunch needed" line), and the
+  second is the **handover**. Without the first, the day would report a meal
+  served that nobody ever ordered. It still promises nothing: if staff say
+  there is no meal spare, untick the lunch on the check-in list.
+- A day the kitchen is shut, or a location that never caters, shows **NOT
+  TODAY** and cannot be ticked at all.
+
+**A brand-new member** gives a name and an email — the email is the one thing
+the page refuses to go on without, because it is the whole reason it asks. They
+land on **Member_Roll** with a `Staff_Notes` line reading *📨 Signed in at the
+door — membership form still to send*, so the office can find everybody who is
+waiting for one by searching that tab for "membership form".
+
+**What it deliberately does not do.** It never books a **[Personalized
+Assistance]** appointment: those programs are shown, marked **BY
+APPOINTMENT**, and left to staff, because choosing a slot is a conversation
+about which times are left. And it takes no membership, only an email to send
+the form to.
+
+**Everything on it is read live** — no snapshot. Somebody who registered an
+hour ago is on the cards, somebody already signed in shows as signed in, and
+the list is re-read after every sign-in so the next person in the queue sees
+the last one marked.
+
+##### The check-in list — the staff page
+
+The other link (the one ending `&mode=session`) is the session roster. Open it
+on a tablet, add it to the home screen, and it is a sign-in list:
 
 - pick the location and the session — the **next** session is chosen for you,
   since that is nearly always the one you are standing at;
@@ -1206,10 +1274,27 @@ work the door and the desk at once.
 2. **Deploy ▸ New deployment ▸ Web app**
 3. **Execute as: Me.** **Who has access:** *Anyone within your organization* if
    the tablets are signed into your Google accounts; *Anyone* if they are not.
-4. **Deploy**, then reopen **📱 Check-In Page** — the link is now listed there,
-   with **one link per building** underneath it. A per-building link opens
-   straight onto that building's sessions, so the Ashbridge tablet never asks a
-   volunteer which building they are standing in.
+4. **Deploy**, then reopen **📱 Door Pages** — the links are now listed there,
+   **two per building**: the sign-in page and the check-in list. A per-building
+   link opens straight onto that building's day, so the Ashbridge tablet never
+   asks a volunteer which building they are standing in.
+
+> **If a link says the page is not accessible, paste the real address.** Apps
+> Script does not reliably tell a script its own published address — on a
+> container-bound script it usually reports the **editor's test address**, the
+> one ending `/dev`, which opens perfectly for whoever owns the script and
+> answers everybody else with *"Sorry, unable to open the file at this time"*.
+> It can also keep reporting a deployment that has since been deleted. So the
+> same window has a **deployment address** box: open **Deploy ▸ Manage
+> deployments**, copy the **Web app** URL (it ends in `/exec`), paste it there,
+> and every link is built from that instead. A `/dev` address is refused rather
+> than saved.
+
+> **A deployment is pinned to a VERSION.** Pasting new code into the editor
+> changes nothing at the door until you publish: **Deploy ▸ Manage deployments
+> ▸ the pencil ▸ Version: New version ▸ Deploy**. Until then the tablets keep
+> serving whatever was published last — which is the other half of "the link
+> works but the page is wrong".
 
 > **Set a PIN if you deployed to *Anyone*.** That deployment makes the link
 > itself the permission — anyone it is forwarded to could mark attendance. The
@@ -1218,30 +1303,39 @@ work the door and the desk at once.
 > organization* you don't need one, because Google has already asked who the
 > visitor is.
 
-**What it deliberately cannot do.** Registering a walk-in, standing club
-places, meal counts, moving an appointment — all of those ask follow-up
-questions (which club, how many meals, is a lunch even scheduled that day), and
-a door is not where those get asked. They stay in Quick Mark.
+**What the check-in list deliberately cannot do.** Standing club places, meal
+counts, moving an appointment — all of those ask follow-up questions (which
+club, how many meals, is a lunch even scheduled that day), and a session roster
+is not where those get asked. They stay in Quick Mark. Registering somebody who
+never signed up is what the sign-in page above is for.
 
-> **The list is a snapshot; your own taps are always on it.** Which sessions
-> exist, who is registered for them, and who had arrived as of the last sync
-> all come off pre-built lists rebuilt on each sync — the page says above the
-> roster when the one you are looking at was built. That is what makes a
-> session open instantly instead of reading a year of registrations. Every mark
-> made on the page shows on it immediately whatever the snapshot says, and
-> **Refresh list** re-reads the sheet itself. So somebody who registered online
-> ten minutes ago may not be on the page yet: press **Refresh list**, check
-> them in from the workbook, or run **🔄 Update Everything Now** first.
+> **The session list is a snapshot; the roster is live.** Which sessions exist
+> comes off the same pre-built lists Quick Mark uses, rebuilt on each sync —
+> the page says at the top when they were built. Who has *arrived* is read
+> fresh from the sheet every time you pick a session, and **Refresh list**
+> re-reads it. So somebody who registered online ten minutes ago may not be in
+> the session list yet; run **🔄 Update Everything Now** first.
+>
+> **On a workbook that has never synced there are no stored lists at all**, and
+> the page used to say so and stop — which from a tablet is indistinguishable
+> from a page that does not work. It now falls back to reading the **next two
+> weeks** of sessions live, and says at the top that it has. The walk-in
+> sign-in page never uses the stored lists at all.
 
-> **A tap is recorded instantly and written a moment later.** Marks are queued
-> and applied to the registrations tab within a few minutes — by a trigger, by
-> the next time you change session, and at the start of every sync. That is
-> what stops an hourly sync locking the desk out mid-morning. If you are
-> looking at the tab and want this morning's ticks on it *now*, run **🗓️
-> Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ Write Queued Check-Ins Now**.
-> If a queued mark cannot be applied at all — the person's registration was
-> deleted in the meantime, say — the page tells you the next time a list is
-> loaded.
+> **A tap is recorded instantly and written a moment later.** Marks made on the
+> session roster are queued and applied to the registrations tab within a few
+> minutes — by a trigger, by the next time you change session, and at the start
+> of every sync. That is what stops an hourly sync locking the desk out
+> mid-morning, and it is why a tick shows on the page immediately whatever the
+> sheet says. If you are looking at the tab and want this morning's ticks on it
+> *now*, run **🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ Write Queued
+> Check-Ins Now**. If a queued mark cannot be applied at all — the person's
+> registration was deleted in the meantime, say — the page tells you the next
+> time a list is loaded.
+>
+> **The roster itself is served from a stored copy**, rebuilt on each sync, so
+> a session opens without reading a year of registrations. **Refresh list**
+> re-reads the sheet when you want to be sure.
 
 #### Registering somebody at the desk or over the phone
 
@@ -2343,8 +2437,9 @@ Everything else is grouped by the job it belongs to.
 | **Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 | **Write Queued Check-Ins Now** | Writes any marks the check-in page has queued straight to the registrations tab, instead of waiting for the trigger that does it every few minutes |
+| **Write Queued Check-Ins Now** | Writes any marks the check-in page has queued straight to the registrations tab, instead of waiting for the trigger that does it every few minutes |
 | **Rebuild Quick Mark Lists** | Rebuilds the stored session and name lists Quick Mark and the check-in page both open with. The hourly sync does this anyway; this is for rebuilding them *before* you walk to the desk |
-| **📱 Check-In Page (link & PIN)…** | The web address of the tablet sign-in page, one link per building, plus the desk PIN. Says how to deploy it if it has never been published — see [The check-in page](#-the-check-in-page--the-same-thing-on-a-tablet-at-the-door) |
+| **📱 Door Pages (links & PIN)…** | The web addresses of the two tablet pages — the walk-in sign-in page and the staff check-in list — two links per building, plus the desk PIN. Says how to deploy them if the script has never been published — see [The door pages](#-the-door-pages--the-same-thing-on-a-tablet-at-the-entrance) |
 
 **🔧 Admin (admin accounts only):**
 
