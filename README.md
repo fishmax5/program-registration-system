@@ -140,15 +140,45 @@ It also:
   future lunch** from the same dialog, recording the demand without claiming a
   meal was served;
 - puts that same sign-in **on a tablet at the door**, as a web page served by
-  this script (`doGet`) rather than a second system: `📱 Check-In Page` hands
-  over the link, one per building, and the page shows the session's roster —
-  every registered name as a row you tap once to mark present, ticked names
+  this script (`doGet`) rather than a second system: `📱 Door Pages` hands
+  over the links, two per building, and the check-in list shows a session's
+  roster — every registered name as a row you tap once to mark present, ticked names
   showing as checked in, a running "14 of 30", a second tap for a meal handed
   over, and an undo for the tap that landed on the wrong row. It writes through
   exactly the function Quick Mark writes through, under the same lock, into the
   same cells — no copy of the data anywhere, and nothing new to authenticate
   against. A PIN can be set for the deployment a shared tablet needs, where
   nobody is signed into a Google account;
+- **signs in the person who never registered** — the other page on the same
+  deployment, and the one the plain `?location=` link now opens on, because a
+  senior center's front door is mostly people who read the newsletter and
+  walked in. It asks the two questions a door asks: *who are you* — everybody
+  signed up for anything here today as a card, alphabetically, so tapping your
+  own name beats typing it, plus a search across the whole member roll and an
+  **I'm new here** that takes a name and an email — and *what are you here
+  for*: every program on at this building today with the ones they are already
+  registered for **ticked and labelled**, the rest offered unticked so ticking
+  one registers them on the spot, and any `[Personalized Assistance]` program
+  shown but left to staff, since a chair at a time is a conversation. It writes
+  through exactly the function Quick Mark writes through, and the new member
+  lands on `Member_Roll` with a staff note saying the membership form still has
+  to go out;
+- **tells a meal that is ordered from one that is merely wanted.** Lunch is the
+  last line of that page, and ticking it marks the meal handed over — on the
+  row that actually ordered the food, not on whichever program was ticked
+  first. What differs is what the page says beforehand and what it writes: a
+  registered meal is a handover and nothing else, while an unregistered one
+  writes the ORDER first (`Lunch_Status` = `Needed`, so the day never reports a
+  meal served that nobody ordered) under a line reading *check with a staff
+  member that one is available* — because that food was ordered from a caterer
+  three days ago against a count. A day the kitchen is shut cannot be ticked at
+  all, and says so;
+- **stops guessing its own web address.** `ScriptApp.getService().getUrl()`
+  hands back the script editor's `/dev` test address as often as the published
+  one — it opens for whoever owns the script and answers a tablet with "unable
+  to open the file at this time" — so `📱 Door Pages` takes the `/exec`
+  address from the Deploy screen once, refuses a `/dev` one, and builds every
+  link from what was pasted;
 - orders **more than one meal for the same person** — a standing order of four
   is a number in `Meals_Ordered` on one row, not four invented guests called
   "Extra Meal 1"; the kitchen's count adds meals rather than heads, the roster
@@ -274,4 +304,6 @@ node tests/appointment_review.test.js
 node tests/form_recovery.test.js
 node tests/form_replacement_guard.test.js
 node tests/form_link_doctor.test.js
+node tests/check_in_page.test.js
+node tests/walk_in_page.test.js
 ```
