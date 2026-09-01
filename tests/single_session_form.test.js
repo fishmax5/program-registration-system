@@ -21,6 +21,8 @@ const src = require('./helpers/source').readSource();
 
 const logs = [];
 const PAGE_BREAK = 'PAGE_BREAK';
+// Forms' third navigation type, alongside the two the script names by hand.
+const GO_TO_PAGE = 'GO_TO_PAGE';
 const sandbox = {
   console: { log: () => {} },
   Utilities: { formatDate: d => d.toISOString(), sleep: () => {} },
@@ -52,12 +54,20 @@ function check(name, actual, expected) {
 const T = sandbox.TEMPLATE_PAGE_TITLES;
 const Q = sandbox.TEMPLATE_ITEM_TITLES;
 
-// A form reduced to the two things this code touches: titles, and item types.
+// A form reduced to the three things this code touches: titles, item types,
+// and page navigation.
+//
+// NAVIGATION IS MODELLED AS FORMS SERVES IT, both halves. A break carries a
+// navigation TYPE (SUBMIT / CONTINUE / GO_TO_PAGE) alongside its target, and
+// getGoToPage() THROWS rather than returning null on a break whose type is not
+// GO_TO_PAGE — which is a fresh break's default state, and is the throw that
+// has twice swallowed the write meant to fix this page's routing.
 function fakeForm(spec) {
   let nextId = 1;
   const items = spec.map(s => {
     const item = {
       id: nextId++, title: s.title, type: s.type || 'LIST', goTo: s.goTo || null,
+      navType: s.goTo ? GO_TO_PAGE : 'CONTINUE',
       getTitle: () => item.title,
       getType: () => item.type,
       getId: () => item.id,
@@ -66,8 +76,15 @@ function fakeForm(spec) {
         getId: () => item.id,
         getIndex: () => items.indexOf(item),
         setTitle: t => { item.title = t; },
-        getGoToPage: () => item.goTo,
-        setGoToPage: p => { item.goTo = p; }
+        getPageNavigationType: () => item.navType,
+        getGoToPage: () => {
+          if (item.navType !== GO_TO_PAGE) throw new Error('navigation type is not GO_TO_PAGE');
+          return item.goTo;
+        },
+        setGoToPage: target => {
+          if (target === 'SUBMIT' || target === 'CONTINUE') { item.navType = target; item.goTo = null; }
+          else { item.navType = GO_TO_PAGE; item.goTo = target; }
+        }
       })
     };
     return item;
@@ -117,9 +134,16 @@ const ctx = extra => Object.assign({
   check('and its page says which date this is', f.titles().indexOf(T.SINGLE_DATE) !== -1, true);
   check('the branch pages are both still there',
     [T.ALL_DATES, T.SPECIFIC_DATES].map(t => f.titles().indexOf(t) !== -1), [true, true]);
+  // WHERE THE EXIT IS WRITTEN. A page break's navigation is the transition
+  // INTO it — see setNavigationAfterPage() — so what happens after the
+  // date page is read off the NEXT break down, the every-date page's own.
+  // It used to be written on the date page's break instead, which left the
+  // exit on the template's SUBMIT and ended the form before the questions.
   const single = f.items.filter(i => i.title === T.SINGLE_DATE)[0];
-  check('and it flows to the every-date page', single.goTo && single.goTo.getId(),
-    f.items.filter(i => i.title === T.ALL_DATES)[0].id);
+  const allDates = f.items.filter(i => i.title === T.ALL_DATES)[0];
+  check('the date page itself carries no exit of its own', single.navType, 'CONTINUE');
+  check('and it does NOT end the form there', allDates.navType === 'SUBMIT', false);
+  check('it flows on into the every-date page', allDates.navType, 'CONTINUE');
 }
 
 // --- and running again writes nothing ---------------------------------------
@@ -143,26 +167,26 @@ const ctx = extra => Object.assign({
 // addTemplateItemsToForm() carries navigation type CONTINUE, not a page
 // target, and getGoToPage() throws rather than returning null when asked for
 // one. The bug this pins: that throw used to be caught by the same try/catch
-// guarding the FIX (setGoToPage(allDatesPage)), so the exception from the
-// READ silently skipped the WRITE — the mode question came off, but the page
-// was left with nowhere to go, and a respondent met Google Forms' own
-// "Submit" button standing in for what should have been "Next". See the
-// comment in collapseFormToSingleSession().
+// guarding the FIX, so the exception from the READ silently skipped the WRITE
+// — the mode question came off, but the page was left with nowhere to go, and
+// a respondent met Google Forms' own "Submit" button standing in for what
+// should have been "Next". setNavigationAfterPage() now does the read in
+// pageBreakTargetId(), which answers "no target" instead of throwing, so a
+// failed read can only ever mean "assume it needs fixing".
 {
   const f = fakeForm(templateItems());
-  const modeItem = f.items.filter(i => i.title === T.MODE)[0];
-  modeItem.asPageBreakItem = () => ({
-    getId: () => modeItem.id,
-    getIndex: () => f.items.indexOf(modeItem),
-    setTitle: t => { modeItem.title = t; },
-    getGoToPage: () => { throw new Error('navigation type is not GO_TO_PAGE'); },
-    setGoToPage: p => { modeItem.goTo = p; }
+  // The break the exit is WRITTEN ON is the every-date page's, so that is the
+  // one whose read has to be made to throw for this to pin anything.
+  const allDates = f.items.filter(i => i.title === T.ALL_DATES)[0];
+  const real = allDates.asPageBreakItem;
+  allDates.asPageBreakItem = () => Object.assign(real(), {
+    getPageNavigationType: () => { throw new Error('unreadable'); },
+    getGoToPage: () => { throw new Error('navigation type is not GO_TO_PAGE'); }
   });
   const changed = sandbox.syncSessionCountShapeOnForm(f.form, ctx());
   check('a page whose read throws is still changed', changed > 0, true);
-  check('and it still flows to the every-date page, not nowhere',
-    modeItem.goTo && modeItem.goTo.getId(),
-    f.items.filter(i => i.title === T.ALL_DATES)[0].id);
+  check('and it still flows on to the every-date page, not nowhere',
+    allDates.navType, 'CONTINUE');
 }
 
 // --- an appointment form is left entirely alone ------------------------------

@@ -20,7 +20,23 @@
 // Back button instead of the browser's answer-destroying one
 // (GUEST_ORDER_REMINDER), and the guest columns say outright that a solo
 // registrant should ignore them (NO_GUESTS_NOTE).
-const TEMPLATE_VERSION = 7;
+//
+// v8 MOVES ONE NAVIGATION SETTING DOWN ONE PAGE, and it has to be a bump
+// because where a form sends people IS its structure: the setting lives on the
+// form, so a live v7 form goes on mis-routing until it is rebuilt. No item is
+// added, removed or renamed. The every-date page's break carried SUBMIT and
+// now carries CONTINUE, with the SUBMIT moved onto the roster page's break —
+// see setNavigationAfterPage() for the whole of the reason: a page break's
+// navigation is the transition INTO it, so a section's exit belongs on the
+// NEXT break, and writing it on the section's own break lands it one section
+// early. Nothing showed on a full form, because the mode question's per-answer
+// navigation overrides the section's own. It showed the moment that question
+// is absent — a one-date form and an appointment form, both of which take it
+// off on purpose — where the respondent met "Submit" at the end of the mode
+// page and the form ended before the branch page carrying Allergies, "Anything
+// Else?" and every question from Program_Questions.
+// See tests/form_page_routing.test.js.
+const TEMPLATE_VERSION = 8;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
@@ -359,6 +375,117 @@ const TEMPLATE_PAGE_TITLES = {
   SPECIFIC_DATES: 'Pick Your Dates'
 };
 
+// ---------------------------------------------------------------------------
+// PAGE NAVIGATION — the one Apps Script rule that reads backwards
+//
+// A PageBreakItem's navigation describes the transition INTO that break, not
+// out of the page it opens. The reference says so outright: setGoToPage()
+// "sets the page to jump to after completing the page BEFORE this page break
+// (that is, upon reaching this page break by normal linear progression through
+// the form)". So the setting that ENDS a section lives on the NEXT break down,
+// and `allDatesPage.setGoToPage(SUBMIT)` — which reads exactly like "the
+// every-date branch ends here" — actually says "submit after the page before
+// it", the mode page.
+//
+// Every navigation write in this project used to be spelled that way, and on a
+// complete form none of it mattered: the mode question is a required dropdown
+// whose choices carry their own per-answer navigation, and choice navigation
+// overrides the section's, so nobody ever fell through to the setting that was
+// one page out of place. What it cost is in TEMPLATE_VERSION's v8 note.
+//
+// Write navigation through the two functions below and the question does not
+// come up again: they take the page whose EXIT is being described, which is
+// what a caller means, and put the setting where Forms will read it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The page break that ENDS the section `page` opens — the next break after it
+ * in document order — or null when that section runs to the end of the form
+ * (where Forms submits on its own, and there is nothing to write).
+ *
+ * `page` may be null, meaning the form's first section: everything before the
+ * first page break.
+ */
+function pageBreakEndingSection(form, page) {
+  const items = form.getItems();
+  let start = -1;
+  if (page) {
+    const pageId = page.getId();
+    start = items.findIndex(it => it.getType() === FormApp.ItemType.PAGE_BREAK && it.getId() === pageId);
+    if (start === -1) return null; // not on this form (deleted, or never added)
+  }
+  for (let i = start + 1; i < items.length; i++) {
+    if (items[i].getType() === FormApp.ItemType.PAGE_BREAK) return items[i].asPageBreakItem();
+  }
+  return null;
+}
+
+/**
+ * What a page break currently points at, as an item id — or null when it
+ * carries no page target at all.
+ *
+ * NEVER THROWS, which is the point of it. A break that has not been given a
+ * page target answers getGoToPage() with an exception rather than with null,
+ * and a caller that reads inside the same try/catch as its own write loses the
+ * write to that exception. That has happened twice in this codebase already
+ * (see collapseFormToSingleSession() and syncAssistanceQuestionsOnForm()).
+ */
+function pageBreakTargetId(pageBreak) {
+  try {
+    const target = pageBreak.getGoToPage();
+    return target ? target.getId() : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Sets what happens AFTER the section that `page` opens — pass the page a
+ * respondent is finishing, not the one they are going to.
+ *
+ * `target` is another page (as a PageBreakItem or a plain Item) or one of
+ * FormApp.PageNavigationType.SUBMIT / CONTINUE. Returns 1 if it wrote, 0 if
+ * the setting was already right or there was nowhere to write it — this runs
+ * on every sync for every form, and a Forms write is a remote round trip and a
+ * new revision in the form's history.
+ */
+function setNavigationAfterPage(form, page, target) {
+  const closing = pageBreakEndingSection(form, page);
+  if (!closing) return 0; // the last section of a form ends by submitting anyway
+
+  // AS A PAGE BREAK, NOT AS AN ITEM — the same conversion applyAttendanceModeChoices()
+  // documents at length. form.getItems() hands back generic Items, and the
+  // navigation methods will not take one: they answer "The parameters
+  // (FormApp.Item) don't match the method signature". Callers holding a live
+  // form look their pages up by title and have exactly that, so the conversion
+  // belongs here rather than at each of them.
+  const targetPage = (target && typeof target.asPageBreakItem === 'function')
+    ? target.asPageBreakItem() : null;
+  // A JUMP INTO THE VERY SECTION THE FORM WAS ALREADY FALLING INTO IS NOT A
+  // JUMP. Said as CONTINUE it means the same thing to a respondent and stays
+  // true if that section is later renamed or moved, and it keeps a break from
+  // being handed itself as its own destination.
+  const wanted = !targetPage ? target
+    : (targetPage.getId() === closing.getId() ? FormApp.PageNavigationType.CONTINUE : targetPage);
+
+  const currentTargetId = pageBreakTargetId(closing);
+  if (wanted && typeof wanted.getId === 'function') {
+    if (currentTargetId === wanted.getId()) return 0;
+  } else if (currentTargetId === null && typeof closing.getPageNavigationType === 'function') {
+    // SUBMIT and CONTINUE are told apart by the navigation TYPE — both have no
+    // page target, so the id comparison above cannot see the difference.
+    try {
+      if (closing.getPageNavigationType() === wanted) return 0;
+    } catch (err) {
+      // Unreadable — fall through and write it. A redundant write is a wasted
+      // call; a skipped one is a form that sends people to the wrong place.
+    }
+  }
+
+  closing.setGoToPage(wanted);
+  return 1;
+}
+
 /**
  * Grid columns and all-dates lunch choices. FIXED at four entries on every
  * form: the roster grids are built once, at template time, and the guest-count
@@ -422,7 +549,7 @@ const TEMPLATE_GRID_PLACEHOLDER_ROW = '(dates will be filled in automatically)';
  * Returns THE template form — one template for every group. Built once and
  * reused forever after (keyed by TEMPLATE_VERSION).
  *
- * PAGE FLOW (v4):
+ * PAGE FLOW (v8):
  *
  *   Page 1  Name (required)
  *           Phone Number (required)
@@ -470,9 +597,10 @@ const TEMPLATE_GRID_PLACEHOLDER_ROW = '(dates will be filled in automatically)';
  * deep, and Forms silently falls through to the NEXT section in document order
  * whenever a jump is missing, so a missing jump anywhere put you on another
  * count's page. Here there is exactly one guest branch, every one of its
- * targets is a page whose own setGoToPage() points at the SAME mode page, and
- * the mode page is the next section in document order anyway — so the
- * fall-through case and the intended case are the same page. A dropped jump
+ * targets exits to the SAME mode page (see setNavigationAfterPage() for where
+ * that setting is actually stored), and the mode page is the next section in
+ * document order anyway — so the fall-through case and the intended case are
+ * the same page. A dropped jump
  * degrades to "you see one extra section", not "you are catered for the wrong
  * number of people". The old count/names mismatch is gone too, since a guest
  * page's name fields are REQUIRED: picking 3 and typing 2 names cannot submit.
@@ -553,7 +681,6 @@ function addTemplateItemsToForm(form) {
   addAllDatesLunchItem(form);
   addExtraMealsItem(form);
   addClosingQuestions(form);
-  allDatesPage.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
   // --- Branch B: per-date roster ----------------------------------------
   const specificPage = form.addPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
@@ -561,10 +688,25 @@ function addTemplateItemsToForm(form) {
   addLunchGridItem(form);
   addExtraMealsItem(form);
   addClosingQuestions(form);
-  specificPage.setGoToPage(FormApp.PageNavigationType.SUBMIT);
 
-  // Navigation, written last so every page it names already exists.
-  guestPages.forEach(page => page.setGoToPage(modePage));
+  // Navigation, written last so every page it names already exists — and
+  // written through setNavigationAfterPage(), which takes the page being
+  // FINISHED and puts the setting on the break Forms actually reads it off.
+  // Each line below is "after this page, go here".
+  //
+  // The first two are belt and braces: the guest-count question routes page 1
+  // by choice, and the mode question routes its own page the same way. What
+  // they buy is the fall-through — a form whose guest-count or mode question
+  // has been deleted (both happen: see collapseFormToSingleSession() and
+  // syncAssistanceQuestionsOnForm()) walks forward to the next page instead of
+  // hitting a Submit button that ends the form three questions early.
+  setNavigationAfterPage(form, null, modePage);
+  guestPages.forEach(page => setNavigationAfterPage(form, page, modePage));
+  setNavigationAfterPage(form, modePage, FormApp.PageNavigationType.CONTINUE);
+  // The every-date branch is where the form ends for the people who take it —
+  // otherwise they would fall on into the roster grid they just said they did
+  // not need. The roster branch is the last page and submits by itself.
+  setNavigationAfterPage(form, allDatesPage, FormApp.PageNavigationType.SUBMIT);
   const guestChoices = [guestCountItem.createChoice(GUEST_COUNT_NONE_LABEL, modePage)];
   for (let g = 1; g <= MAX_GUESTS; g++) {
     guestChoices.push(guestCountItem.createChoice(String(g), guestPages[g - 1]));

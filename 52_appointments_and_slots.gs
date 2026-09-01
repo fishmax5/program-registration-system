@@ -288,16 +288,23 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
       changed++;
     }
     if (specificPage) {
+      // THROUGH setNavigationAfterPage(), for both of the reasons that
+      // function exists. It puts the setting on the break Forms reads a
+      // section's EXIT off — the next one down — where the obvious spelling,
+      // modePage.setGoToPage(specificPage), set the transition INTO the
+      // appointment page instead and left its exit on the every-date page's
+      // SUBMIT: an appointment form ended the moment somebody picked a time,
+      // before "Anything Else?" and before any Program_Questions question. And
+      // it does its own read without a try/catch around the write, where the
+      // read here — getGoToPage() on a break that has never been given a page
+      // target THROWS rather than answering null — took the write down with it
+      // on every form built straight from the template.
+      //
+      // It also skips an identical write, which matters: this runs on every
+      // sync for every assistance form, and re-asserting navigation that never
+      // changed is a Forms round trip and a new form revision an hour.
       try {
-        // Only when it is not already pointed there. This runs on every sync
-        // for every assistance form, and re-asserting the same navigation
-        // would be one Forms write (and one new form revision) an hour for a
-        // change that never happened.
-        const current = modePage.asPageBreakItem().getGoToPage();
-        if (!current || current.getId() !== specificPage.getId()) {
-          modePage.asPageBreakItem().setGoToPage(specificPage.asPageBreakItem());
-          changed++;
-        }
+        changed += setNavigationAfterPage(form, modePage, specificPage);
       } catch (err) {
         log(`Could not re-point the appointment page of form ${form.getId()} (${err}).`);
       }

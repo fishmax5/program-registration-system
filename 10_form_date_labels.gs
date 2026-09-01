@@ -629,38 +629,24 @@ function collapseFormToSingleSession(form, context) {
   }
   // STRAIGHT ON TO THE EVERY-DATE PAGE, said out loud rather than left to
   // document order. Document order is right on a form built from the template
-  // — but a form that used to be an appointment form has this page pointed at
-  // the roster grid (syncAssistanceQuestionsOnForm sets it there), and the
-  // grid branch is exactly where a form with no mode question must not send
-  // people: nobody ever ticks its one row, so nobody is ever registered.
-  // THE READ AND THE WRITE ARE IN SEPARATE try BLOCKS ON PURPOSE. A page break
-  // that has never had setGoToPage() called on it — its default state, e.g.
-  // straight out of addTemplateItemsToForm() — carries navigation type
-  // CONTINUE, not a page target, and getGoToPage() THROWS rather than
-  // returning null when asked for one. That used to be caught by the same
-  // try/catch guarding the write below it, so the exception from the READ
-  // skipped the WRITE entirely: this page's navigation was silently left on
-  // its default, and a respondent who reached it — having just had the mode
-  // question taken off — met a page with nothing to send them anywhere,
-  // Google Forms' own "Submit" button standing in for a broken "Next". A
-  // failed read now only means "assume it needs fixing"; it can no longer
-  // swallow the fix.
-  let currentTargetId = null;
+  // — but a form that used to be an appointment form has this page's exit
+  // pointed at the roster grid (syncAssistanceQuestionsOnForm sets it there),
+  // and the grid branch is exactly where a form with no mode question must not
+  // send people: nobody ever ticks its one row, so nobody is ever registered.
+  //
+  // THROUGH setNavigationAfterPage(), which is what makes this land. Written
+  // as modePage.setGoToPage(allDatesPage) — the obvious spelling, and what
+  // this was for two goes at the bug — it set the transition INTO the date
+  // page rather than out of it, and the exit stayed on whatever the every-date
+  // page's own break said, which the template had on SUBMIT. So the mode
+  // question came off and the respondent met Google Forms' own "Submit" button
+  // standing in for the "Next" that should have carried them to the questions.
+  // The helper also swallows no writes: it never reads inside the same
+  // try/catch as its write, which is the OTHER way this same fix was lost.
   try {
-    const current = modePage.asPageBreakItem().getGoToPage();
-    if (current) currentTargetId = current.getId();
+    changed += setNavigationAfterPage(form, modePage, allDatesPage);
   } catch (err) {
-    // Not pointed at a page yet (still CONTINUE, or some other non-page
-    // navigation) — currentTargetId stays null, which the check below treats
-    // exactly like "needs fixing".
-  }
-  if (currentTargetId !== allDatesPage.getId()) {
-    try {
-      modePage.asPageBreakItem().setGoToPage(allDatesPage.asPageBreakItem());
-      changed++;
-    } catch (err) {
-      log(`Could not point the date page of form ${form.getId()} at the sign-up page (${err}).`);
-    }
+    log(`Could not point the date page of form ${form.getId()} at the sign-up page (${err}).`);
   }
 
   if (changed > 0) {
@@ -699,6 +685,19 @@ function restoreMultiSessionShapeOnForm(form) {
 
   singlePage.asPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.MODE);
   let changed = 1;
+
+  // THE EXIT GOES BACK TO THE MODE QUESTION'S. Collapsing pointed this page
+  // straight at the every-date branch, because with no question there was
+  // nothing to decide; restoring puts the question back, and its per-answer
+  // navigation is what should be deciding again. CONTINUE is the right
+  // fall-through under it — the every-date page is next in document order, and
+  // it must not be SUBMIT, which is the setting that ended the form early in
+  // the first place (see setNavigationAfterPage()).
+  try {
+    changed += setNavigationAfterPage(form, singlePage, FormApp.PageNavigationType.CONTINUE);
+  } catch (err) {
+    log(`Could not reset the sign-up page's navigation on form ${form.getId()} (${err}).`);
+  }
 
   const hasMode = items.some(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE &&
     it.getType() !== FormApp.ItemType.PAGE_BREAK);

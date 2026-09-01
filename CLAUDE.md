@@ -38,12 +38,12 @@ Line counts are a rough guide to what you are about to load.
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
 | `03_sheets_and_headers.gs` | 593 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
-| `05_form_template.gs` | 852 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals. **Bump `TEMPLATE_VERSION` when the form's structure changes.** |
+| `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
 | `07_dates_and_labels.gs` | 589 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
 | `08_execution_caches.gs` | 293 | The per-execution memo caches the sync hot paths use, and their invalidation. |
 | `09_lunch_schedule_lookup.gs` | 393 | Reading `Lunch_Schedule` by date × location. |
-| `10_form_date_labels.gs` | 724 | Fingerprinted writes of date labels onto a live form (`applyFormDateLabels`). |
+| `10_form_date_labels.gs` | 723 | Fingerprinted writes of date labels onto a live form (`applyFormDateLabels`). |
 | `11_menu_items_paste.gs` | 1103 | Adding menu items to `Lunch_Schedule` — paste CSV, in the sheet or a dialog. |
 
 ### Building the workbook (12–15)
@@ -125,7 +125,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `52_appointments_and_slots.gs` | 440 | Slot arithmetic, appointment choice labels, booked-time reads. |
+| `52_appointments_and_slots.gs` | 447 | Slot arithmetic, appointment choice labels, booked-time reads. |
 | `53_program_questions.gs` | 507 | The `Program_Questions` tab parsed into form items, and its refusals. |
 | `54_custom_questions.gs` | 439 | Putting those questions on a form and taking them back off — fingerprints and applied-title tracking. |
 | `55_assistance_sync_and_images.gs` | 1592 | Refreshing appointment slots across forms, appointment responses, the assistance report, and form images. |
