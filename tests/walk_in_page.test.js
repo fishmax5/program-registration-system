@@ -172,6 +172,63 @@ ok('and the dialog says the links came from it', savedInfo.fromSaved === true);
 ok('and stops warning about a /dev address it is no longer using', savedInfo.isDev === false);
 ok('while still reporting what the script claims, for comparison',
   savedInfo.scriptUrl === 'https://script.google.com/macros/s/WRONG/dev');
+// ---------------------------------------------------------------------------
+// 2c. THE /a/<domain>/ SPELLING — one deployment, two addresses, one of which
+//     dead-ends at the door.
+// ---------------------------------------------------------------------------
+// Reported as: the address in the Deploy screen opens, every link off the menu
+// answers "Sorry, unable to open the file at this time". Same workbook. The
+// menu's links came from getUrl(), which on a Workspace script returns the
+// domain-scoped spelling — it resolves against a signed-in account in that
+// domain, which a tablet does not have.
+const strip = sandbox.stripWebAppDomainSegment;
+ok('the /a/<domain>/ segment comes off',
+  strip('https://script.google.com/a/newhorizonsseniorcenter.org/macros/s/AKfy123/exec') ===
+  'https://script.google.com/macros/s/AKfy123/exec');
+ok('a plain address is untouched',
+  strip('https://script.google.com/macros/s/AKfy123/exec') ===
+  'https://script.google.com/macros/s/AKfy123/exec');
+// Only that one segment, and only in that one position: a domain appearing
+// anywhere else in the address is part of the address.
+ok('a deployment id containing "/a/"-looking text is left alone',
+  strip('https://script.google.com/macros/s/AKfy_a_123/exec') ===
+  'https://script.google.com/macros/s/AKfy_a_123/exec');
+ok('something that is not a web app address is untouched',
+  strip('https://example.com/a/x/macros/s/ABC/exec') === 'https://example.com/a/x/macros/s/ABC/exec');
+ok('and a blank stays blank', strip('') === '');
+
+// It is stripped where the address is READ...
+savedWebAppUrl = null;
+ok('the address the script reports is stripped before any link is built from it',
+  withUrl('https://script.google.com/a/newhorizonsseniorcenter.org/macros/s/AKfy123/exec',
+    () => sandbox.checkInPageUrl({ location: 'Ashbridge', mode: 'session' })) ===
+  'https://script.google.com/macros/s/AKfy123/exec?location=Ashbridge&mode=session');
+// ...and where one is PASTED, since a signed-in staff member copying out of
+// their own browser bar copies exactly the spelling that fails.
+ok('a pasted /a/<domain>/ address is saved in the form that opens for everyone',
+  norm('https://script.google.com/a/newhorizonsseniorcenter.org/macros/s/AKfy123/exec').url ===
+  'https://script.google.com/macros/s/AKfy123/exec');
+
+// The two spellings are the same DEPLOYMENT, so pasting one is not a conflict
+// with the other — but two different ids are, and the dialog says so.
+const D = sandbox.webAppDeploymentId;
+ok('the deployment id reads through either spelling',
+  D('https://script.google.com/a/x.org/macros/s/AKfy123/exec') === 'AKfy123' &&
+  D('https://script.google.com/macros/s/AKfy123/exec') === 'AKfy123');
+ok('and is empty for an address that names no deployment', D('https://example.com/') === '');
+
+savedWebAppUrl = null;
+sandbox.setCheckInWebAppUrl('https://script.google.com/a/x.org/macros/s/AKfy123/exec');
+const sameInfo = withUrl('https://script.google.com/a/x.org/macros/s/AKfy123/exec',
+  () => sandbox.readCheckInPageInfo());
+ok('two spellings of one deployment are not reported as two deployments', sameInfo.mismatch === false);
+const twoInfo = withUrl('https://script.google.com/a/x.org/macros/s/AKfyOTHER/exec',
+  () => sandbox.readCheckInPageInfo());
+ok('two different ids are', twoInfo.mismatch === true);
+ok('and the dialog says so above the links',
+  /Two deployments/.test(sandbox.buildCheckInPageHtml(twoInfo)));
+savedWebAppUrl = 'https://script.google.com/macros/s/REAL/exec';
+
 const clearedRes = sandbox.setCheckInWebAppUrl('');
 ok('a blank clears it', clearedRes.ok === true && savedWebAppUrl === null);
 ok('and the script-reported address is warned about again',

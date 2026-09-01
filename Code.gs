@@ -39625,11 +39625,54 @@ function readSavedCheckInWebAppUrl() {
 /** What the script says its own address is, or '' — never trusted on its own. */
 function readScriptReportedWebAppUrl() {
   try {
-    return String(ScriptApp.getService().getUrl() || '').trim();
+    return stripWebAppDomainSegment(String(ScriptApp.getService().getUrl() || '').trim());
   } catch (err) {
     log(`Could not read the web app URL (${err}).`);
     return '';
   }
+}
+
+/**
+ * THE /a/<domain>/ SEGMENT, and why it comes off every address this file
+ * touches. Google hands a Workspace account its web app addresses in two
+ * interchangeable spellings of the same deployment:
+ *
+ *   https://script.google.com/macros/s/AKfy…/exec              opens for anyone
+ *   https://script.google.com/a/example.org/macros/s/AKfy…/exec
+ *
+ * The second is not a harmless prefix. It tells the browser "serve this as
+ * example.org", so it resolves against whichever Google account that browser
+ * has in that domain — and a tablet signed into no account, or a laptop whose
+ * FIRST signed-in account is personal, is handed the account chooser or
+ *
+ *     "Sorry, unable to open the file at this time."
+ *
+ * while the plain spelling of the SAME deployment opens immediately. That is
+ * the difference between the link copied out of the Deploy screen and the one
+ * this dialog used to print: not the deployment, the spelling.
+ *
+ * getUrl() returns the domain-scoped form on a Workspace script, so the strip
+ * happens where the address is read as well as where one is pasted — a staff
+ * member pasting the /a/ form should not be re-saving the same fault.
+ *
+ * An address that is not an Apps Script web app URL is returned untouched:
+ * this function's job is one path segment, and refusing a shape is
+ * normalizeCheckInWebAppUrl()'s.
+ */
+function stripWebAppDomainSegment(url) {
+  return String(url || '').replace(
+    /^(https:\/\/script\.google\.com)\/a\/[^/]+(\/macros\/s\/)/i, '$1$2');
+}
+
+/**
+ * The deployment id out of a web app address, or '' — the part that says WHICH
+ * deployment, as opposed to which spelling of it. Two addresses that differ
+ * here are two different deployments, with their own "Who has access" settings
+ * and their own pinned versions; two that agree are the same one.
+ */
+function webAppDeploymentId(url) {
+  const match = String(url || '').match(/\/macros\/s\/([^/?#]+)/);
+  return match ? match[1] : '';
 }
 
 /**
@@ -39650,7 +39693,10 @@ function readScriptReportedWebAppUrl() {
 function normalizeCheckInWebAppUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return { ok: true, url: '', message: '' };
-  const cut = raw.split('#')[0].split('?')[0].trim();
+  // See stripWebAppDomainSegment(): the /a/<domain>/ spelling is the one that
+  // dead-ends on a tablet, and it is exactly the one a signed-in staff member
+  // copies out of their own browser bar.
+  const cut = stripWebAppDomainSegment(raw.split('#')[0].split('?')[0].trim());
   if (!/^https:\/\//i.test(cut)) {
     return { ok: false, url: '', message: 'That is not a web address — it should start with https://' };
   }
@@ -40583,6 +40629,15 @@ function readCheckInPageInfo() {
     // never be a /dev address (normalizeCheckInWebAppUrl() refuses those), so
     // the warning belongs to the fallback and would be a lie about the other.
     isDev: !savedUrl && /\/dev(\?|#|$)/.test(url),
+    // TWO DEPLOYMENTS, ONE WORKBOOK. The saved address and the one the script
+    // reports carry different ids — so they are not two spellings of one
+    // deployment (stripWebAppDomainSegment() has already settled that), they
+    // are two deployments with their own access settings and their own pinned
+    // versions. Worth saying above the links, because the only other symptom
+    // is a link that opens for whoever published it and for nobody else.
+    mismatch: !!(savedUrl && scriptUrl &&
+      webAppDeploymentId(savedUrl) && webAppDeploymentId(scriptUrl) &&
+      webAppDeploymentId(savedUrl) !== webAppDeploymentId(scriptUrl)),
     locations: checkInLocations(),
     pinSet: isCheckInPinSet()
   };
@@ -40713,6 +40768,12 @@ function buildCheckInPageHtml(info) {
     // page would try to open inside this 520px box), with a Copy button beside
     // it for the far more common job of getting the address onto a tablet.
     var html = '';
+    if (INFO.mismatch) {
+      html += '<p class="hint warn"><b>Two deployments.</b> The address you saved and the one this ' +
+        'script reports for itself are different deployments, with their own access settings and ' +
+        'their own published versions. The links below use the saved one. If the door starts ' +
+        'serving old behaviour, it is the other deployment that got the new version.</p>';
+    }
     (INFO.locations || []).forEach(function (loc) {
       html += linkRow(loc + ' — sign-in page (the door)',
         INFO.url + '?location=' + encodeURIComponent(loc),
@@ -40757,6 +40818,9 @@ function buildCheckInPageHtml(info) {
         INFO.fromSaved = !!res.savedUrl;
         INFO.url = res.savedUrl || INFO.scriptUrl;
         INFO.isDev = !res.savedUrl && /\/dev(\?|#|$)/.test(INFO.url || '');
+        INFO.mismatch = !!(res.savedUrl && INFO.scriptUrl &&
+          deploymentId(res.savedUrl) && deploymentId(INFO.scriptUrl) &&
+          deploymentId(res.savedUrl) !== deploymentId(INFO.scriptUrl));
         draw();
         drawUrl();
         var s2 = document.getElementById('status');
@@ -40831,6 +40895,14 @@ function buildCheckInPageHtml(info) {
 
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // The server's webAppDeploymentId(), repeated here for the one thing the
+  // dialog decides on its own: whether the address just saved is the same
+  // deployment as the one the script reports, without a second round trip.
+  function deploymentId(url) {
+    var m = String(url || '').match(/\/macros\/s\/([^/?#]+)/);
+    return m ? m[1] : '';
   }
 
   draw();
