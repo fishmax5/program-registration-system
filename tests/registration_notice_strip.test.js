@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console,
@@ -33,7 +33,7 @@ this.prependRegistrationLine = prependRegistrationLine;
 this.buildRegistrationLinkLine = buildRegistrationLinkLine;
 this.findRegistrationLineInDescription = findRegistrationLineInDescription;
 this.REGISTRATION_NOT_OPEN_LINE = REGISTRATION_NOT_OPEN_LINE;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

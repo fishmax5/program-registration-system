@@ -26,7 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 // The stored PIN, and the sheet the roster reads — both swapped per test below.
 let storedPin = null;
@@ -103,7 +103,7 @@ vm.createContext(sandbox);
 // the two constants this file has to reach into are handed over by name — the
 // same trick quick_mark_inline_index.test.js uses for its one function.
 vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP;',
-  sandbox, { filename: 'Code.gs' });
+  sandbox, { filename: 'program.gs' });
 
 let fail = 0;
 function ok(name, cond) {

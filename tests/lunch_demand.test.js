@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console: { log: () => {} },
@@ -57,7 +57,7 @@ this.buildRegistrantRow = buildRegistrantRow;
 this.updateMasterLunchDashboard = updateMasterLunchDashboard;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

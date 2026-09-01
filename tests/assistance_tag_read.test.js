@@ -23,7 +23,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const logLines = [];
 const sandbox = {
@@ -64,7 +64,7 @@ vm.runInContext(src + `
 this.ASSISTANCE_TAG = ASSISTANCE_TAG;
 this.ASSISTANCE_WORDS_REGEX = ASSISTANCE_WORDS_REGEX;
 this.APPOINTMENT_SLOT_MINUTES = APPOINTMENT_SLOT_MINUTES;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

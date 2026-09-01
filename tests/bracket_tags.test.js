@@ -15,7 +15,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   // Muted: the parser deliberately LOGS every bracket it declines to read, and
@@ -44,7 +44,7 @@ vm.runInContext(src + `
 ;this.parseSettingsBrackets = parseSettingsBrackets;
 this.isTagOnlyBracket = isTagOnlyBracket;
 this.parseEventTitle = parseEventTitle;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

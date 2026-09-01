@@ -25,7 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const NOW = new Date(2026, 8, 1, 9, 0, 0); // Tue 1 Sep 2026 — every date below is upcoming
 const RealDate = Date;
@@ -80,7 +80,7 @@ this.EXTRA_MEALS_NONE_LABEL = EXTRA_MEALS_NONE_LABEL;
 this.MAX_EXTRA_MEALS = MAX_EXTRA_MEALS;
 this.addQuickMarkMealCounts = addQuickMarkMealCounts;
 this.formatDateKey = formatDateKey;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

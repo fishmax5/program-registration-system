@@ -21,7 +21,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 // Dates are formatted through Utilities.formatDate in the real thing; a
 // deterministic stand-in keeps the month labels stable regardless of host zone.
@@ -53,7 +53,7 @@ this.formSpanForRow = formSpanForRow;
 this.programFormKey = programFormKey;
 this.__setRegistry = function (r) { getPersistentFormRegistry = function () { return r; }; };
 this.log = function () {};
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

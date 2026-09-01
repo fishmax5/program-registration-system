@@ -18,7 +18,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -69,7 +69,7 @@ vm.runInContext(src + `
 this.APPOINTMENT_LUNCH_CHOICES = APPOINTMENT_LUNCH_CHOICES;
 this.NO_LUNCH_HINT = NO_LUNCH_HINT;
 this.LOCATION_ADDRESSES = LOCATION_ADDRESSES;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 // The two things that would otherwise reach for the spreadsheet: the menu
 // index and the per-location catering policy.

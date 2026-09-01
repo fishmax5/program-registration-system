@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 const sandbox = {
   console:{log:()=>{}},
   Utilities:{formatDate:()=>'9:00 AM', getUuid:()=>'x', sleep:()=>{}, computeDigest:()=>[1], DigestAlgorithm:{MD5:'MD5'}},
@@ -24,7 +24,7 @@ const sandbox = {
   ScriptApp:{},MailApp:{},DocumentApp:{},UrlFetchApp:{},Calendar:{},CacheService:{}
 };
 vm.createContext(sandbox);
-vm.runInContext(src+';this.buildQuickMarkHtml=buildQuickMarkHtml;',sandbox,{filename:'Code.gs'});
+vm.runInContext(src+';this.buildQuickMarkHtml=buildQuickMarkHtml;',sandbox,{filename:'program.gs'});
 
 const nasty = 'O\'Brien </script><script>alert("x")</script> "quoted"';
 const index = {

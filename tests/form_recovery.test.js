@@ -22,7 +22,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const pad = n => String(n).padStart(2, '0');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -59,7 +59,7 @@ vm.runInContext(src + `
 this.classifyFormFileState = classifyFormFileState;
 this.planFormRecovery = planFormRecovery;
 this.log = function () {};
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

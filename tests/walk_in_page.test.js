@@ -27,7 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 let storedPin = null;
 
@@ -67,7 +67,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP;',
-  sandbox, { filename: 'Code.gs' });
+  sandbox, { filename: 'program.gs' });
 
 let fail = 0;
 function ok(name, cond) {

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 // Frozen "now" so "this month" is a fixed fact: September 2026.
 const NOW = new Date(2026, 8, 15, 9, 0, 0);
@@ -35,7 +35,7 @@ vm.createContext(sandbox);
 // Top-level `const`s are lexical and do not land on the sandbox object.
 vm.runInContext(src + `
 ;this.LUNCH_SIGNUP_HEADERS = LUNCH_SIGNUP_HEADERS;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

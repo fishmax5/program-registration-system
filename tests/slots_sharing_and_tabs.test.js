@@ -15,7 +15,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -65,7 +65,7 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.TAB_GROUPS = TAB_GROUPS;
 this.SHEET_NAMES = SHEET_NAMES;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 // Nothing here should reach a spreadsheet: no menu is configured, and no date
 // in these tests has a Lunch_Schedule row.

@@ -25,7 +25,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console: { log: () => {} },
@@ -75,7 +75,7 @@ this.noteFormsCarryingSeveralMonths = noteFormsCarryingSeveralMonths;
 this.ASSISTANCE_NO_TIME_CHOICE = ASSISTANCE_NO_TIME_CHOICE;
 this.REVIEW_LEVELS = REVIEW_LEVELS;
 this.CALENDAR_MAP = CALENDAR_MAP;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

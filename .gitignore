@@ -1,0 +1,4 @@
+# Build output of tools/bundle.js — the numbered .gs files are the source.
+Code.bundle.gs
+node_modules/
+.clasp.json

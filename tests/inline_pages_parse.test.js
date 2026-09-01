@@ -19,14 +19,14 @@
 // the regex, everything. Nothing calls draw(), so nothing is drawn, and nothing
 // anywhere says why.
 //
-// Reading the .gs file cannot catch it — Code.gs parses perfectly; it is the
+// Reading the .gs file cannot catch it — the script parses perfectly; it is the
 // string it produces that does not. So this compiles the script block out of
 // each generated page, which is the only place the damage is visible.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console: { log: () => {} },
@@ -50,7 +50,7 @@ const sandbox = {
   MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
 };
 vm.createContext(sandbox);
-vm.runInContext(src, sandbox, { filename: 'Code.gs' });
+vm.runInContext(src, sandbox, { filename: 'program.gs' });
 
 let fail = 0;
 function ok(name, cond) {

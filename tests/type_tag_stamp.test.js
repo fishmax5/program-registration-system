@@ -17,7 +17,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 const sandbox = {
   console: { log: () => {} },
   Utilities: { formatDate: d => d.toISOString().slice(0, 10), sleep: () => {}, computeDigest: () => [1],
@@ -38,7 +38,7 @@ this.setStubs = function (getEvents, range, invalidate) {
   computeSyncDateRange = range;
   invalidateCalendarEventsCache = invalidate;
 };
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

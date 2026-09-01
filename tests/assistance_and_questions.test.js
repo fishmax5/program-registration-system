@@ -5,7 +5,7 @@ const vm = require('vm');
 
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 function fmt(date, tz, pattern) {
   // Only the two patterns the code actually asks for.
@@ -48,7 +48,7 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.HEADERS = HEADERS;
 this.ASSISTANCE_NO_TIME_CHOICE = ASSISTANCE_NO_TIME_CHOICE;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

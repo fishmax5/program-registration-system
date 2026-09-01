@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const NOW = new Date(2026, 8, 16, 9, 0, 0); // Wed 16 Sep 2026
 const RealDate = Date;
@@ -48,7 +48,7 @@ this.orderQuickMarkChoices = orderQuickMarkChoices;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.QUICK_MARK_SESSION_KEY_SEPARATOR = QUICK_MARK_SESSION_KEY_SEPARATOR;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {

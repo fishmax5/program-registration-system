@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const props = {};
 const sandbox = {
@@ -39,7 +39,7 @@ this.savedColumnWidthsFor = savedColumnWidthsFor;
 this.findHeaderRowByNames = findHeaderRowByNames;
 this.MIN_COLUMN_WIDTH_PX = MIN_COLUMN_WIDTH_PX;
 this.MAX_SAVED_COLUMN_WIDTH_PX = MAX_SAVED_COLUMN_WIDTH_PX;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
 

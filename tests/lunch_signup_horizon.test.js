@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 // Frozen "now": 21 August 2026. Chosen because November is then ~72 days out —
 // past the calendar's 60-day lookahead, which is the bug this file exists for.
@@ -62,7 +62,7 @@ this.lunchOnlyRowTitle = lunchOnlyRowTitle;
 this.lunchOnlyProgramLabel = lunchOnlyProgramLabel;
 this.isLunchOnlyProgramTitle = isLunchOnlyProgramTitle;
 this.quickMarkTitleKey = quickMarkTitleKey;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -74,7 +74,7 @@ function check(name, actual, expected) {
 function checkThat(name, cond) { check(name, !!cond, true); }
 
 // --- the I/O boundary ------------------------------------------------------
-// Everything below is a function DECLARATION in Code.gs, so it lands on the
+// Everything below is a function DECLARATION in the script, so it lands on the
 // sandbox's global object and can be replaced from out here.
 let menuRows = [];
 let built = [];

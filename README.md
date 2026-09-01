@@ -247,25 +247,51 @@ mixed in with an unrelated static site — full development history preserved.
 
 ## Install
 
+The script lives in this repo as the numbered `.gs` files at the root —
+`00_overview.gs` through `63_check_in_store.gs`. They are ONE Apps Script
+project sharing one global scope, and Apps Script evaluates them in filename
+order, which is what the number prefixes are for. See
+[`CLAUDE.md`](./CLAUDE.md) for what lives in which file.
+
+**With [clasp](https://github.com/google/clasp)** (one command, and the way to
+do it more than once):
+
+```
+clasp clone <script id>   # or: clasp create --type sheets
+clasp push
+```
+
+**By hand, as one file.** The Apps Script editor cannot import a folder, so
+for a one-off install it is less work to paste a single bundle:
+
 1. Create a new Google Sheet.
 2. **Extensions ▸ Apps Script.**
-3. Delete the stub `Code.gs`, then add a new script file named `Code` and
-   paste in the contents of [`Code.gs`](./Code.gs).
-4. Save and reload the spreadsheet tab.
-5. See [`USER_GUIDE.md`](./USER_GUIDE.md) for first-run setup (there's a
-   dedicated **Import Everything (First Run)** path for calendars that
-   already have events on them) and day-to-day use.
+3. Run `node tools/bundle.js` here, which writes `Code.bundle.gs`.
+4. Delete the stub `Code.gs`, add a script file named `Code`, and paste the
+   bundle into it.
+5. Save and reload the spreadsheet tab.
+
+`Code.bundle.gs` is build output — it is gitignored, and edits belong in the
+numbered files, not in it.
+
+Either way, see [`USER_GUIDE.md`](./USER_GUIDE.md) for first-run setup
+(there's a dedicated **Import Everything (First Run)** path for calendars that
+already have events on them) and day-to-day use.
 
 ## Updating an existing workbook
 
-Paste the new [`Code.gs`](./Code.gs) over the old one, reload the spreadsheet,
-then run **🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)**. It redraws every
+`clasp push`, or paste a fresh `node tools/bundle.js` over the old script.
+Then reload the spreadsheet and run
+**🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)**. It redraws every
 tab from the rows already in the workbook — no calendar read, no form write,
 no trigger changes, and nothing can be removed. See
 [Updating to a new version](./USER_GUIDE.md#updating-to-a-new-version).
 
 ## Docs
 
+- [`CLAUDE.md`](./CLAUDE.md) — the code's own map: which `.gs` file holds what,
+  why the numeric prefixes are load-bearing, and the conventions to match when
+  editing.
 - [`USER_GUIDE.md`](./USER_GUIDE.md) — setup, the menu, each sheet/tab, what
   registrants see, old months, and troubleshooting.
 - [`SYSTEM_REVIEW.md`](./SYSTEM_REVIEW.md) — known failure modes, short and
@@ -279,8 +305,9 @@ no trigger changes, and nothing can be removed. See
 
 ## Tests
 
-The Apps Script services are stubbed and `Code.gs` is loaded into a Node `vm`
-context, so the pure helpers — appointment-slot arithmetic, the tag brackets,
+The Apps Script services are stubbed and the script — every `.gs` file, joined
+in the order Apps Script itself evaluates them, by `tests/helpers/source.js` —
+is loaded into a Node `vm` context, so the pure helpers — appointment-slot arithmetic, the tag brackets,
 the Program_Questions parser and its refusals — can be exercised without a
 spreadsheet:
 

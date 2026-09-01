@@ -13,7 +13,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const logs = [];
 const sandbox = {
@@ -41,7 +41,7 @@ vm.runInContext(src + `
 ;this.replaceOneForm = replaceOneForm;
 this.migrateFormsToCurrentTemplate = migrateFormsToCurrentTemplate;
 this.TEMPLATE_VERSION = TEMPLATE_VERSION;
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -53,7 +53,7 @@ function check(name, actual, expected) {
 
 const trashed = [];
 // The collaborators replaceOneForm() leans on, each reduced to the one answer
-// this test needs. They are plain function declarations in Code.gs, so
+// this test needs. They are plain function declarations in the script, so
 // reassigning them on the sandbox is what the call sites see.
 function stub(movedCount) {
   logs.length = 0;

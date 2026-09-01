@@ -22,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console: { log: () => {} },
@@ -61,7 +61,7 @@ this.getIndexMap = getIndexMap;
 this.log = function () {};
 this.noteForAdmin = function () {};
 this.getOrCreateSheet = function () { return { __name: 'Club_Members' }; };
-`, sandbox, { filename: 'Code.gs' });
+`, sandbox, { filename: 'program.gs' });
 
 sandbox.readClubMemberRows = () => ROSTER.map(r => r.slice());
 sandbox.renderClubMembersSheet = rows => { ROSTER = rows.map(r => r.slice()); };
@@ -234,7 +234,7 @@ const dialog = (() => {
     ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
   };
   vm.createContext(box);
-  vm.runInContext(src + ';this.buildQuickMarkHtml = buildQuickMarkHtml;', box, { filename: 'Code.gs' });
+  vm.runInContext(src + ';this.buildQuickMarkHtml = buildQuickMarkHtml;', box, { filename: 'program.gs' });
   return box.buildQuickMarkHtml(null);
 })();
 
