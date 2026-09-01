@@ -23688,6 +23688,10 @@ function applyQuickMarkLocked(args) {
       // without it would throw that away the moment it was collected.
       phone: String(args.phone || '').trim(),
       email: String(args.email || '').trim(),
+      // Blank on every existing caller, so the row reads 'Attendee' / 'Self'
+      // exactly as it always has. Only the check-in page's guest registrations
+      // send them.
+      personType: args.personType, primaryRegistrant: args.primaryRegistrant,
       confirmed: !!args.confirmWalkIn
     });
   }
@@ -24120,7 +24124,13 @@ function addQuickMarkWalkIn(sheet, args) {
   // Email is read as "we have no address" all over this file and a "-" is not.
   if (map['Phone'] !== undefined && args.phone) row[map['Phone']] = String(args.phone).trim();
   if (map['Email'] !== undefined && args.email) row[map['Email']] = String(args.email).trim();
-  row[map['Person_Type']] = 'Attendee';
+  // USUALLY 'Attendee'. A registration typed at the desk for somebody's GUEST
+  // carries 'Guest' and the member's name instead, which is the same shape a
+  // form response produces (buildResponsePeople()) — and what keeps the guest
+  // folded under the member on the door list rather than printed as a stranger
+  // of their own (nestCheckInGuests()).
+  const personType = String(args.personType || '').trim() || 'Attendee';
+  row[map['Person_Type']] = personType;
   // Wants a meal, whether it has been handed over yet (lunch) or not (signup):
   // both are Lunch_Status = Needed, and Lunch_Served above is the only thing
   // that separates them.
@@ -24145,7 +24155,7 @@ function addQuickMarkWalkIn(sheet, args) {
   if (map['Earlier_Appointment'] !== undefined && earlierAppointment) {
     row[map['Earlier_Appointment']] = earlierAppointment;
   }
-  row[map['Primary_Registrant']] = 'Self';
+  row[map['Primary_Registrant']] = String(args.primaryRegistrant || '').trim() || 'Self';
   row[map['Party_Size']] = 1;
   const how = signup ? 'Lunch sign-up'
     : (lunch && !attended ? 'Take-out walk-in'
@@ -24171,7 +24181,7 @@ function addQuickMarkWalkIn(sheet, args) {
   // Somebody standing at the desk outranks a past deletion of the same person
   // on the same session — lift the tombstone rather than leave the next sync
   // arguing with the row just typed in. See section 5c.
-  clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, 'Attendee'));
+  clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, personType));
 
   const existing = readAllSectionedRows(sheet, headers, 'Event_ID');
   existing.push(row);
@@ -39591,7 +39601,15 @@ function doGet(e) {
     // app has no toast to apologise with, and a volunteer looking at a spinner
     // assumes the page is broken. A workbook with no stored lists yet gets a
     // page that says so in words.
-    ? buildCheckInHtml(readyCheckInSessionIndex(), { location, pinRequired })
+    // ?page=register opens the roster page on its SECOND screen — the one
+    // that puts somebody on a future session. Deliberately not the default:
+    // the tablet is opened forty times a morning to mark people in and twice a
+    // week to register one, and the common case must not cost a tap. A link
+    // with this on it is the one a program director keeps for the desk phone.
+    ? buildCheckInHtml(readyCheckInSessionIndex(), {
+      location, pinRequired,
+      page: /^register$/i.test(String(params.page || '').trim()) ? 'register' : 'checkin'
+    })
     : buildWalkInHtml({
       location,
       pinRequired,
@@ -40045,6 +40063,105 @@ function checkInMark(payload) {
 }
 
 /**
+ * A REGISTRATION TYPED AT THE DESK — the check-in page's second screen.
+ *
+ * The door is where people actually ask: "can you put me down for the trip in
+ * October?", "do I have to fill this in every week?". Until now the only
+ * answer at a tablet was no — the page could mark a person present and nothing
+ * else, and the questions went home in somebody's head or onto a sticky note.
+ *
+ * It is deliberately NOT the default screen (see doGet's ?page=), because a
+ * queue at 9:55 wants one list and one tap; this is the screen the volunteer
+ * moves to once, for one person, and comes back from.
+ *
+ * Everything it does, the dialog already does — this is the same call under
+ * the same lock (applyQuickMarkFromDialog with register:true), plus the PIN:
+ *
+ *   - a place on one future session, at one appointment time where the
+ *     program books by time;
+ *   - a STANDING place on every future session of that program, with or
+ *     without the lunch (the Club_Members row, addStandingListMember());
+ *   - the same for GUESTS, one row each, carrying Person_Type 'Guest' and the
+ *     member's name — which is what keeps them folded under that member on
+ *     every door list from now on rather than listed as strangers.
+ *
+ * Payload: { location, session, name, appointmentTime, standing, standingLunch,
+ *            guests: ['Jane Cohen'], pin }.
+ *
+ * THE GUESTS ARE REGISTERED AFTER THE MEMBER AND REPORTED SEPARATELY. A guest
+ * row without its member is the one outcome worth avoiding, so the member goes
+ * first and a failure there stops the rest; a guest that fails afterwards is
+ * said out loud rather than swallowed, because the desk has to know which of
+ * the names it typed actually landed.
+ */
+function checkInRegister(payload) {
+  const args = parseCheckInPayload(payload);
+  if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
+  if (isDeskWorkBlocked()) return { ok: false, message: deskBusyMessage() };
+  const name = String(args.name || '').trim();
+  if (!name) return { ok: false, message: 'Type a name first — nothing was registered.' };
+  if (!String(args.session || '').trim()) {
+    return { ok: false, message: 'Pick a session first — nothing was registered.' };
+  }
+
+  const base = {
+    location: String(args.location || ''),
+    session: String(args.session || ''),
+    appointmentTime: String(args.appointmentTime || ''),
+    register: true,
+    // The page has already shown the person the session it is about to put
+    // them on, so the dialog's "are you sure this is a walk-in" question has
+    // been asked and answered by the screen itself.
+    confirmWalkIn: true
+  };
+
+  const first = applyQuickMarkFromDialog(Object.assign({}, base, {
+    name,
+    standing: !!args.standing,
+    standingLunch: !!args.standingLunch
+  }));
+  if (!first || !first.ok) return first || { ok: false, message: 'Nothing was registered.' };
+
+  const guestNames = (Array.isArray(args.guests) ? args.guests : [])
+    .map(g => String(g || '').trim()).filter(g => g);
+  const failed = [];
+  guestNames.forEach(guest => {
+    // NEVER a standing place for a guest. A club membership is a promise to
+    // one person about every future session, and "Ruth's daughter, once, in
+    // March" is not that person — carrying it forward would book somebody
+    // nobody can name into every meeting of the program for ever.
+    const res = applyQuickMarkFromDialog(Object.assign({}, base, {
+      name: guest, personType: 'Guest', primaryRegistrant: name
+    }));
+    if (!res || !res.ok) failed.push(guest);
+  });
+
+  const guestNote = guestNames.length
+    ? (failed.length
+      ? ` ${guestNames.length - failed.length} of ${guestNames.length} guests added — ` +
+        `${failed.join(', ')} did not go on. Try again or add them from the workbook.`
+      : ` With ${guestNames.length === 1 ? 'their guest' : guestNames.length + ' guests'}.`)
+    : '';
+  return {
+    ok: !failed.length,
+    message: String(first.message || 'Registered.').replace(/^\u2705\s*/, '') + guestNote
+  };
+}
+
+/**
+ * The sessions this page will offer to register somebody onto: upcoming only.
+ *
+ * The stored index carries past sessions too, because marking attendance on
+ * one that has already happened is an ordinary thing to do at a desk — and
+ * registering somebody for last Tuesday is not. Filtered here rather than in
+ * the browser so the rule has one home.
+ */
+function upcomingCheckInSessions(index) {
+  const todayKey = formatDateKey(new Date());
+  return ((index && index.sessions) || []).filter(s => s.dateKey && s.dateKey >= todayKey);
+}
+
+/**
  * THE UNDO — the one thing the dialog has no button for. Writes both day-of
  * columns back to false on the row the page is looking at.
  *
@@ -40168,6 +40285,16 @@ function readCheckInRoster(location, sessionValue) {
     rows.push({
       name,
       key: normalizeNameKey(name),
+      // WHO THIS ROW BELONGS TO. A guest is a row on this tab exactly like
+      // anybody else — Person_Type 'Guest', Primary_Registrant naming the
+      // member who brought them — and a door list that prints them as their
+      // own line is a door list where "Ruth Cohen" and "Ruth's daughter" look
+      // like two arrivals. So the shape is kept here and the nesting is done
+      // below (nestCheckInGuests()).
+      personType: map['Person_Type'] === undefined
+        ? '' : String(row[map['Person_Type']] || '').trim(),
+      primary: map['Primary_Registrant'] === undefined
+        ? '' : String(row[map['Primary_Registrant']] || '').trim(),
       time,
       attended: isTruthyCheckbox(row[map['Attended']]),
       lunch: isTruthyCheckbox(row[map['Lunch_Served']]),
@@ -40183,7 +40310,9 @@ function readCheckInRoster(location, sessionValue) {
     });
   });
 
-  return sortCheckInRosterRows(rows);
+  // NESTED FIRST, SORTED SECOND: guests fold into the member who brought them
+  // (nestCheckInGuests()), and what the door reads is the list of parties.
+  return sortCheckInRosterRows(nestCheckInGuests(rows));
 }
 
 /**
@@ -40203,6 +40332,57 @@ function sortCheckInRosterRows(rows) {
     return a.name.localeCompare(b.name);
   });
   return rows;
+}
+
+/**
+ * GUESTS FOLD INTO THE MEMBER WHO BROUGHT THEM.
+ *
+ * A party of three arrives at the door as ONE person to greet and three meals
+ * to count — not as three names to hunt for in an alphabetical list, two of
+ * which ("Guest of Ruth Cohen", or worse, a first name only) sort nowhere near
+ * the member and mean nothing to the volunteer holding the tablet.
+ *
+ * So a row whose Person_Type is Guest is attached to its Primary_Registrant's
+ * row on the SAME date and slot, as `guests: [...]`. Each guest keeps its own
+ * name, key and marks, because each guest is still its own sheet row and every
+ * mark still lands on that row — what changes is only how the list reads.
+ *
+ * A GUEST WHOSE HOST IS NOT ON THIS LIST STAYS A ROW OF ITS OWN. That happens
+ * when the member cancelled and the guest did not, or when a name was retyped
+ * on one row and not the other, and the one thing that must never happen at a
+ * door is a registered person who is on no list at all. It is labelled with
+ * whose guest it is rather than left to look like a stranger.
+ */
+function nestCheckInGuests(rows) {
+  const isGuest = r => /^guest$/i.test(String(r.personType || '').trim());
+  const hosts = [];
+  const byHostKey = {};
+  // COPIES, not the rows themselves. The stored rosters (section 16c) file one
+  // entry object under two lookups — the session's own date and the dateless
+  // "program only" one — so nesting in place would hang the same guests off
+  // the same object twice and print a party of six.
+  rows.forEach(row => {
+    if (isGuest(row)) return;
+    const r = Object.assign({}, row, { guests: [] });
+    hosts.push(r);
+    // Keyed on the host AND the session slot, so a member holding two
+    // appointment rows keeps each guest on the row they were booked with.
+    byHostKey[`${r.key}\u0000${r.dateKey}\u0000${r.time}`] = r;
+  });
+  rows.forEach(r => {
+    if (!isGuest(r)) return;
+    const hostKey = normalizeNameKey(r.primary);
+    const host = hostKey && byHostKey[`${hostKey}\u0000${r.dateKey}\u0000${r.time}`];
+    if (!host) {
+      hosts.push(Object.assign({}, r, { guests: [], guestOf: String(r.primary || '').trim() }));
+      return;
+    }
+    host.guests.push({
+      name: r.name, key: r.key, time: r.time, dateKey: r.dateKey,
+      attended: r.attended, lunch: r.lunch, wantsLunch: r.wantsLunch
+    });
+  });
+  return hosts;
 }
 
 /**
@@ -40312,7 +40492,10 @@ function buildCheckInHtml(preloadedIndex, options) {
   const inlineOptions = JSON.stringify(JSON.stringify({
     location: String(opts.location || ''),
     pinRequired: !!opts.pinRequired,
-    locations: checkInLocations()
+    page: opts.page === 'register' ? 'register' : 'checkin',
+    locations: checkInLocations(),
+    // Upcoming only, and decided on the server — see upcomingCheckInSessions().
+    upcoming: upcomingCheckInSessions(preloadedIndex)
   })).replace(/<\//g, '<\\/');
 
   return `
@@ -40372,11 +40555,48 @@ function buildCheckInHtml(preloadedIndex, options) {
   #pinbox button { width: 100%; margin-top: 12px; background: #1A73E8; color: #fff;
                    border: 0; border-radius: 8px; padding: 14px; font-size: 16px; cursor: pointer; }
   .hide { display: none !important; }
+
+  /* A GUEST IS PART OF A ROW, NOT A ROW. The member's name is the heading and
+     the people they brought sit under it in smaller type, each its own small
+     target so a party where only one guest turned up can still be marked
+     honestly. */
+  .party { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px 12px; }
+  button.guest { border: 1px solid #DADCE0; background: #fff; border-radius: 999px;
+                 padding: 8px 12px; font-size: 14px; color: #5F6368; cursor: pointer;
+                 min-height: 40px; }
+  button.guest.on { background: #E6F4EA; border-color: #B7DFC4; color: #188038; font-weight: 600; }
+  button.who .party-note { display: block; font-size: 13px; color: #5F6368; margin-top: 2px; }
+
+  /* The one question the door is the right place to ask, asked once, right
+     after the tap that answered "are you here". */
+  #prompt { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; z-index: 8;
+            border-top: 3px solid #1A73E8; padding: 16px; box-shadow: 0 -6px 18px rgba(0,0,0,.18); }
+  #prompt h2 { margin: 0 0 4px 0; font-size: 17px; }
+  #prompt p { margin: 0 0 12px 0; color: #5F6368; font-size: 14px; line-height: 1.4; }
+  #prompt button { width: 100%; margin-bottom: 8px; }
+  button.primary { background: #1A73E8; color: #fff; border: 0; border-radius: 8px;
+                   padding: 14px; font-size: 16px; cursor: pointer; min-height: 48px; }
+
+  nav.tabs { display: flex; gap: 8px; margin-top: 8px; }
+  nav.tabs button { flex: 1; border: 0; border-radius: 8px; padding: 10px; font-size: 14px;
+                    background: rgba(255,255,255,.18); color: #fff; cursor: pointer; min-height: 44px; }
+  nav.tabs button.on { background: #fff; color: #1A73E8; font-weight: 700; }
+  fieldset { border: 1px solid #E8EAED; border-radius: 10px; background: #fff; margin: 14px 0 0 0;
+             padding: 8px 14px 14px 14px; }
+  legend { font-weight: 600; font-size: 14px; color: #5F6368; padding: 0 4px; }
+  label.check { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 15px;
+                line-height: 1.35; }
+  label.check input { width: 22px; height: 22px; flex: none; }
+  .guest-inputs input { margin-top: 8px; }
 </style>
 
 <header>
   <h1 id="heading">Check In</h1>
   <div class="counts" id="counts"></div>
+  <nav class="tabs" id="tabs">
+    <button id="tab-checkin" onclick="showPage('checkin')">Check in</button>
+    <button id="tab-register" onclick="showPage('register')">Register someone</button>
+  </nav>
 </header>
 
 <div id="pinbox" class="hide">
@@ -40401,6 +40621,57 @@ function buildCheckInHtml(preloadedIndex, options) {
   </div>
 </main>
 
+<main id="regpage" class="hide">
+  <label class="field" for="reg-name">Who is registering</label>
+  <input type="text" id="reg-name" list="members" autocomplete="off" placeholder="Full name">
+  <datalist id="members"></datalist>
+
+  <label class="field" for="reg-location">Location</label>
+  <select id="reg-location" onchange="regLocationChanged()"></select>
+
+  <label class="field" for="reg-session">Session</label>
+  <select id="reg-session" onchange="regSessionChanged()" disabled></select>
+
+  <div id="reg-timewrap" class="hide">
+    <label class="field" for="reg-time">Appointment time</label>
+    <select id="reg-time"></select>
+  </div>
+
+  <fieldset>
+    <legend>Guests</legend>
+    <p class="hint" style="margin:0;color:#5F6368;font-size:13px;line-height:1.4">
+      Anybody they are bringing. Guests are booked under their name and show under it on the
+      door list — they never become a separate person to look up.
+    </p>
+    <div class="guest-inputs">
+      <input type="text" id="reg-guest-1" placeholder="Guest 1 name" autocomplete="off">
+      <input type="text" id="reg-guest-2" placeholder="Guest 2 name" autocomplete="off">
+      <input type="text" id="reg-guest-3" placeholder="Guest 3 name" autocomplete="off">
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Every time</legend>
+    <label class="check">
+      <input type="checkbox" id="reg-standing" onchange="standingChanged()">
+      <span>Keep them on the list for <b>every future date</b> of this program, so they never
+        have to sign up again.</span>
+    </label>
+    <label class="check" id="reg-standing-lunch-wrap" style="display:none">
+      <input type="checkbox" id="reg-standing-lunch">
+      <span>…and put them down for the lunch on each of those dates.</span>
+    </label>
+  </fieldset>
+
+  <div class="row-actions">
+    <button class="primary" id="reg-submit" onclick="submitRegistration()">Register</button>
+  </div>
+  <div class="row-actions">
+    <button class="plain" onclick="showPage('checkin')">Back to the door list</button>
+  </div>
+</main>
+
+<div id="prompt" class="hide"></div>
 <div id="status"></div>
 
 <script>
@@ -40462,6 +40733,7 @@ function buildCheckInHtml(preloadedIndex, options) {
       stale.classList.remove('hide');
     }
     fillLocations();
+    showPage(OPTS.page === 'register' ? 'register' : 'checkin');
   }
 
   function fillLocations() {
@@ -40560,12 +40832,28 @@ function buildCheckInHtml(preloadedIndex, options) {
     var needle = document.getElementById('search').value.trim().toLowerCase();
     list.innerHTML = '';
 
+    // A GUEST'S NAME STILL FINDS THE ROW. They are not a line of their own any
+    // more, so searching for one has to land on the member who brought them —
+    // otherwise the one thing folding guests in would have cost is the ability
+    // to look one up.
     var shown = ROWS.filter(function (r) {
-      return !needle || r.name.toLowerCase().indexOf(needle) !== -1;
+      if (!needle) return true;
+      if (r.name.toLowerCase().indexOf(needle) !== -1) return true;
+      return (r.guests || []).some(function (g) {
+        return g.name.toLowerCase().indexOf(needle) !== -1;
+      });
     });
-    var here = ROWS.filter(function (r) { return r.attended; }).length;
-    document.getElementById('counts').textContent = ROWS.length
-      ? here + ' of ' + ROWS.length + ' checked in'
+    // COUNTED IN PEOPLE, not in rows: a member with two guests is three people
+    // through the door, and a desk that has to order lunches reads this number
+    // as a headcount.
+    var total = 0, here = 0;
+    ROWS.forEach(function (r) {
+      total += 1 + (r.guests || []).length;
+      if (r.attended) here++;
+      (r.guests || []).forEach(function (g) { if (g.attended) here++; });
+    });
+    document.getElementById('counts').textContent = total
+      ? here + ' of ' + total + ' checked in'
       : '';
 
     if (!shown.length) {
@@ -40602,12 +40890,44 @@ function buildCheckInHtml(preloadedIndex, options) {
         meal.onclick = function () { tapLunch(r); };
         li.appendChild(meal);
       }
-      list.appendChild(li);
+
+      var wrap = document.createElement('div');
+      wrap.appendChild(li);
+
+      // THE PARTY. One chip per guest, under the member's name — a tap on the
+      // member marks the whole party (which is how a party arrives), and a tap
+      // on a chip marks or clears that guest alone (which is how a party
+      // actually turns up when one of them stayed home).
+      if ((r.guests || []).length) {
+        var party = document.createElement('div');
+        party.className = 'party';
+        r.guests.forEach(function (g) {
+          var chip = document.createElement('button');
+          chip.className = 'guest' + (g.attended ? ' on' : '');
+          chip.disabled = busy;
+          chip.textContent = (g.attended ? 'OK ' : '') + g.name;
+          chip.onclick = function () { tapGuest(r, g); };
+          party.appendChild(chip);
+        });
+        li.style.borderBottomLeftRadius = '0';
+        li.style.borderBottomRightRadius = '0';
+        li.style.marginBottom = '0';
+        party.style.background = r.attended ? '#E6F4EA' : '#fff';
+        party.style.border = '1px solid ' + (r.attended ? '#B7DFC4' : '#E8EAED');
+        party.style.borderTop = '0';
+        party.style.borderRadius = '0 0 10px 10px';
+        party.style.marginBottom = '8px';
+        wrap.appendChild(party);
+      }
+      list.appendChild(wrap);
     });
   }
 
   function subtitle(r) {
     var bits = [];
+    // Whose guest an ORPHAN guest is — one whose member is not on this list at
+    // all (see nestCheckInGuests()). Without it the row reads as a stranger.
+    if (r.guestOf) bits.push('guest of ' + escapeHtml(r.guestOf));
     // The slot, but ONLY where slots differ from row to row. Every session has
     // an Event_Time, so a class of thirty carries the same "10:00 AM" on all
     // thirty rows — thirty lines of subtitle saying what the heading already
@@ -40650,9 +40970,242 @@ function buildCheckInHtml(preloadedIndex, options) {
     // a question.
     if (r.attended) {
       if (!window.confirm('Clear the check-in for ' + r.name + '?')) return;
-      return mark(r, { clear: true });
+      return mark(r, { clear: true }, function () { clearParty(r); });
     }
-    mark(r, { attended: true });
+    mark(r, { attended: true }, function () { markParty(r); });
+  }
+
+  /**
+   * The guests who came WITH the member, marked behind the member's own tap.
+   * A party walks up together, so one tap is the honest record of it; the
+   * chips are there for the evening when only one of them came.
+   */
+  function markParty(r) {
+    var pending = (r.guests || []).filter(function (g) { return !g.attended; });
+    var i = 0;
+    (function next() {
+      if (i >= pending.length) return afterCheckIn(r);
+      var g = pending[i++];
+      mark(guestRow(r, g), { attended: true }, function () { g.attended = true; draw(); next(); });
+    })();
+  }
+
+  function clearParty(r) {
+    (r.guests || []).filter(function (g) { return g.attended || g.lunch; }).forEach(function (g) {
+      mark(guestRow(r, g), { clear: true }, function () { g.attended = false; g.lunch = false; draw(); });
+    });
+  }
+
+  function tapGuest(r, g) {
+    if (g.attended) {
+      if (!window.confirm('Clear the check-in for ' + g.name + '?')) return;
+      return mark(guestRow(r, g), { clear: true }, function () {
+        g.attended = false; g.lunch = false; draw();
+      });
+    }
+    mark(guestRow(r, g), { attended: true }, function () { g.attended = true; draw(); });
+  }
+
+  /**
+   * A guest as the SHEET sees it: their own name, on their own row, at the
+   * member's slot. The nesting is a property of this screen only — every mark
+   * still lands on the guest's own row, which is what keeps the meal counts
+   * and the attendance record per person.
+   */
+  function guestRow(r, g) {
+    return { name: g.name, time: g.time || r.time, attended: g.attended, lunch: g.lunch };
+  }
+
+  /**
+   * THE ONE QUESTION THE DOOR IS THE RIGHT PLACE TO ASK. Somebody has just
+   * been marked in; they are standing there, and this is the moment they will
+   * say "do I have to do this every week?" — so ask it for them, once, and
+   * offer the two answers the system can actually act on.
+   *
+   * It is a prompt and not a required step: the queue behind them is the
+   * reason this page exists, so "No thanks" is the biggest, easiest target and
+   * the panel closes on its own if it is ignored.
+   */
+  function afterCheckIn(r) {
+    var el = document.getElementById('prompt');
+    var program = sessionTitle();
+    el.innerHTML =
+      '<h2>' + escapeHtml(r.name) + ' is checked in.</h2>' +
+      '<p>While they are here — anything else?</p>' +
+      '<button class="primary" id="p-standing">Put them on the list for every ' +
+        escapeHtml(program) + '</button>' +
+      '<button class="plain" id="p-future">Register them for another date</button>' +
+      '<button class="plain" id="p-none">No thanks</button>';
+    el.classList.remove('hide');
+    document.getElementById('p-standing').onclick = function () {
+      closePrompt();
+      joinStanding(r);
+    };
+    document.getElementById('p-future').onclick = function () {
+      closePrompt();
+      document.getElementById('reg-name').value = r.name;
+      showPage('register');
+    };
+    document.getElementById('p-none').onclick = closePrompt;
+    if (promptTimer) window.clearTimeout(promptTimer);
+    // Long enough to read and answer, short enough that a volunteer who has
+    // already moved on to the next person is not looking at a panel over the
+    // list.
+    promptTimer = window.setTimeout(closePrompt, 12000);
+  }
+
+  var promptTimer = null;
+  function closePrompt() {
+    if (promptTimer) window.clearTimeout(promptTimer);
+    document.getElementById('prompt').classList.add('hide');
+  }
+
+  /** "Every week from now on" — the standing place, on the session in front of us. */
+  function joinStanding(r) {
+    var lunch = window.confirm('Put ' + r.name + ' down for the lunch on every one of those dates too?\\n\\n' +
+      'OK = the program and the lunch. Cancel = the program only.');
+    setBusy(true);
+    say('Adding ' + r.name + ' to the standing list...', '');
+    call('checkInRegister', {
+      location: document.getElementById('location').value,
+      session: document.getElementById('session').value,
+      name: r.name,
+      standing: true,
+      standingLunch: lunch
+    }, function (res) {
+      setBusy(false);
+      draw();
+      if (!res || !res.ok) return handle(res);
+      say(res.message || 'Added.', 'ok');
+    });
+  }
+
+  function sessionTitle() {
+    var value = document.getElementById('session').value;
+    var found = (INDEX.sessions || []).filter(function (s) { return s.value === value; })[0];
+    return (found && found.title) || 'this program';
+  }
+
+  // --------------------------------------------------------------------------
+  // The second screen: registering somebody for a future date
+  // --------------------------------------------------------------------------
+
+  function showPage(which) {
+    var register = which === 'register';
+    document.getElementById('app').classList.toggle('hide', register);
+    document.getElementById('regpage').classList.toggle('hide', !register);
+    document.getElementById('tab-checkin').className = register ? '' : 'on';
+    document.getElementById('tab-register').className = register ? 'on' : '';
+    document.getElementById('heading').textContent = register ? 'Register Someone' : 'Check In';
+    closePrompt();
+    if (register) fillRegister();
+  }
+
+  var registerFilled = false;
+  function fillRegister() {
+    if (registerFilled) return;
+    registerFilled = true;
+    var names = document.getElementById('members');
+    (INDEX.members || []).forEach(function (m) {
+      var o = document.createElement('option');
+      o.value = m.name;
+      names.appendChild(o);
+    });
+    var sel = document.getElementById('reg-location');
+    sel.innerHTML = '<option value="">Choose a location</option>';
+    (OPTS.locations || []).forEach(function (loc) {
+      var o = document.createElement('option');
+      o.value = loc; o.textContent = loc;
+      sel.appendChild(o);
+    });
+    // The building this tablet lives in, or the one the door list is already
+    // on — whichever is known. Registering somebody almost always starts from
+    // where you are standing.
+    sel.value = OPTS.location || document.getElementById('location').value || '';
+    regLocationChanged();
+  }
+
+  function regLocationChanged() {
+    var loc = document.getElementById('reg-location').value;
+    var sel = document.getElementById('reg-session');
+    sel.innerHTML = '<option value="">Choose a session</option>';
+    sel.disabled = !loc;
+    (OPTS.upcoming || []).filter(function (s) { return s.location === loc; })
+      .forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s.value; o.textContent = s.label;
+        sel.appendChild(o);
+      });
+    regSessionChanged();
+  }
+
+  function regSessionChanged() {
+    var found = regSession();
+    var wrap = document.getElementById('reg-timewrap');
+    var times = document.getElementById('reg-time');
+    times.innerHTML = '';
+    // AN APPOINTMENT PROGRAM IS BOOKED BY TIME, and only the free times are
+    // offered — the same list the public form is offering at this moment
+    // (freeAppointmentTimesForChoice()), so the desk and the website never
+    // hand out the same chair.
+    var slots = (found && found.byAppointment && found.times) || [];
+    wrap.classList.toggle('hide', !slots.length);
+    slots.forEach(function (t) {
+      var o = document.createElement('option');
+      o.value = t.value; o.textContent = t.label;
+      times.appendChild(o);
+    });
+    if (found && found.byAppointment && !slots.length) {
+      say('Every appointment on that date has gone — pick another date.', 'err');
+    }
+  }
+
+  function regSession() {
+    var value = document.getElementById('reg-session').value;
+    return (OPTS.upcoming || []).filter(function (s) { return s.value === value; })[0] || null;
+  }
+
+  function standingChanged() {
+    document.getElementById('reg-standing-lunch-wrap').style.display =
+      document.getElementById('reg-standing').checked ? 'flex' : 'none';
+  }
+
+  function submitRegistration() {
+    var name = document.getElementById('reg-name').value.trim();
+    var found = regSession();
+    if (!name) return say('Type a name first.', 'err');
+    if (!found) return say('Pick a session first.', 'err');
+    var guests = ['reg-guest-1', 'reg-guest-2', 'reg-guest-3'].map(function (id) {
+      return document.getElementById(id).value.trim();
+    }).filter(function (g) { return g; });
+    var payload = {
+      location: document.getElementById('reg-location').value,
+      session: found.value,
+      name: name,
+      appointmentTime: found.byAppointment ? document.getElementById('reg-time').value : '',
+      guests: guests,
+      standing: document.getElementById('reg-standing').checked,
+      standingLunch: document.getElementById('reg-standing-lunch').checked
+    };
+    document.getElementById('reg-submit').disabled = true;
+    say('Registering ' + name + '...', '');
+    call('checkInRegister', payload, function (res) {
+      document.getElementById('reg-submit').disabled = false;
+      if (!res || !res.ok) return handle(res);
+      say(res.message || 'Registered.', 'ok');
+      // Cleared so the next person typed in is not registered on top of the
+      // last one's guests — the commonest way a desk form goes wrong.
+      ['reg-name', 'reg-guest-1', 'reg-guest-2', 'reg-guest-3'].forEach(function (id) {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('reg-standing').checked = false;
+      document.getElementById('reg-standing-lunch').checked = false;
+      standingChanged();
+      // The stored lists on the server have been dropped by the write; the
+      // roster on the other screen is re-read when it is next chosen, and this
+      // page's session list is only ever dates, which have not changed.
+      if (!document.getElementById('app').classList.contains('hide')) refresh();
+    });
   }
 
   function tapLunch(r) {
@@ -40962,6 +41515,12 @@ function buildCheckInPageHtml(info) {
         'meals are handed over.');
     });
     html += linkRow('Any location (asks which)', INFO.url, '');
+    // The second screen of the staff list: registering somebody for a future
+    // date, with their guests, and onto a program's standing list. Not the
+    // default page anywhere, so it needs a link of its own or nobody finds it.
+    html += linkRow('Register someone (desk phone)', INFO.url + '?mode=session&page=register',
+      'Put a person on any upcoming session — with their guests, and on the every-week list ' +
+      'for that program if they never want to sign up again.');
     el.innerHTML = html +
       '<p class="hint">Open one on the tablet and add it to the home screen.' +
       (INFO.fromSaved
@@ -42455,7 +43014,13 @@ function buildCheckInStore() {
       wantsLunch: map['Lunch_Status'] !== undefined &&
         String(row[map['Lunch_Status']] || '').trim().toLowerCase() === 'needed',
       dateLabel: date ? formatDateLabel(date) : '',
-      dateKey
+      dateKey,
+      // Carried so the stored roster folds guests under their member exactly
+      // as the live read does — see nestCheckInGuests().
+      personType: map['Person_Type'] === undefined
+        ? '' : String(row[map['Person_Type']] || '').trim(),
+      primary: map['Primary_Registrant'] === undefined
+        ? '' : String(row[map['Primary_Registrant']] || '').trim()
     };
 
     const lookups = dateKey
@@ -42474,7 +43039,9 @@ function buildCheckInStore() {
     });
   });
 
-  Object.keys(sessions).forEach(key => sortCheckInRosterRows(sessions[key]));
+  Object.keys(sessions).forEach(key => {
+    sessions[key] = sortCheckInRosterRows(nestCheckInGuests(sessions[key]));
+  });
 
   return {
     schema: CHECK_IN_STORE_SCHEMA,
@@ -42825,21 +43392,36 @@ function applyCheckInOverlay(rows, location, sessionValue, store) {
   marks.forEach(mark => {
     if (mark.location && wantedLocation && mark.location !== wantedLocation) return;
     if (mark.titleKey && titleKey && mark.titleKey !== titleKey) return;
+    // GUESTS ARE MARKED TOO, and they are no longer rows of their own on this
+    // list — they hang off the member who brought them (nestCheckInGuests()).
+    // A queued tap on a guest that only ever looked at the top level would
+    // leave that chip un-ticked until the sheet caught up, which at a door
+    // reads as "the tap did nothing" and gets tapped again.
     rows.forEach(row => {
-      if (row.key !== mark.key) return;
-      // A dateless "program only" list spans several dates and a mark made
-      // from it does not name one, so it lands on every row for that name —
-      // which is what the sheet write does too.
-      if (mark.dateKey && row.dateKey && mark.dateKey !== row.dateKey) return;
-      if (mark.bookedTime && row.time && mark.bookedTime !== row.time) return;
-      if (mark.clear) { row.attended = false; row.lunch = false; return; }
-      // Lunch WITHOUT attended clears attended — the take-out case, and the
-      // same rule applyQuickMarkLocked() applies to the row itself.
-      if (mark.lunch) { row.lunch = true; row.attended = !!mark.attended; return; }
-      if (mark.attended) row.attended = true;
+      applyCheckInMarkToRow(row, mark);
+      (row.guests || []).forEach(guest => applyCheckInMarkToRow(guest, mark));
     });
   });
   return rows;
+}
+
+/**
+ * One queued or recently-written mark, laid over one person — a member or one
+ * of their guests. Split out of applyCheckInOverlay() only so both levels of
+ * the list get the identical rule rather than two copies of it that drift.
+ */
+function applyCheckInMarkToRow(row, mark) {
+  if (row.key !== mark.key) return;
+  // A dateless "program only" list spans several dates and a mark made from it
+  // does not name one, so it lands on every row for that name — which is what
+  // the sheet write does too.
+  if (mark.dateKey && row.dateKey && mark.dateKey !== row.dateKey) return;
+  if (mark.bookedTime && row.time && mark.bookedTime !== row.time) return;
+  if (mark.clear) { row.attended = false; row.lunch = false; return; }
+  // Lunch WITHOUT attended clears attended — the take-out case, and the same
+  // rule applyQuickMarkLocked() applies to the row itself.
+  if (mark.lunch) { row.lunch = true; row.attended = !!mark.attended; return; }
+  if (mark.attended) row.attended = true;
 }
 
 // ----------------------------------------------------------------------------
