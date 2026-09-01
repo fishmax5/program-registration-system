@@ -40994,7 +40994,13 @@ function buildCheckInPageHtml(info) {
         INFO.savedUrl = res.savedUrl;
         INFO.fromSaved = !!res.savedUrl;
         INFO.url = res.savedUrl || INFO.scriptUrl;
-        INFO.isDev = !res.savedUrl && /\/dev(\?|#|$)/.test(INFO.url || '');
+        // NO REGEX LITERAL HERE. This whole page is built inside a template
+        // literal, which eats the backslash in \/ on its way out — the emitted
+        // script then read //dev(?|#|$)/, a syntax error that killed the
+        // dialog's ENTIRE script block, which is why the links area was blank
+        // rather than wrong. A string test says the same thing and cannot be
+        // damaged in transit.
+        INFO.isDev = !res.savedUrl && isDevUrl(INFO.url);
         INFO.mismatch = !!(res.savedUrl && INFO.scriptUrl &&
           deploymentId(res.savedUrl) && deploymentId(INFO.scriptUrl) &&
           deploymentId(res.savedUrl) !== deploymentId(INFO.scriptUrl));
@@ -41077,9 +41083,18 @@ function buildCheckInPageHtml(info) {
   // The server's webAppDeploymentId(), repeated here for the one thing the
   // dialog decides on its own: whether the address just saved is the same
   // deployment as the one the script reports, without a second round trip.
+  function isDevUrl(url) {
+    var path = String(url || '').split('?')[0].split('#')[0];
+    return path.slice(-4) === '/dev';
+  }
+
   function deploymentId(url) {
-    var m = String(url || '').match(/\/macros\/s\/([^/?#]+)/);
-    return m ? m[1] : '';
+    // Split rather than matched, for the reason isDevUrl() gives: a regex
+    // literal written in here loses its backslashes on the way out of the
+    // template literal that builds this page.
+    var parts = String(url || '').split('/macros/s/');
+    if (parts.length < 2) return '';
+    return parts[1].split('/')[0].split('?')[0].split('#')[0];
   }
 
   draw();
