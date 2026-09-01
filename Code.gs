@@ -9337,6 +9337,10 @@ function buildAppMenu(ui, includeAdmin) {
       // The \u21bb link inside the Quick Mark dialog does the same thing. This is
       // for the other order \u2014 rebuild the lists first, THEN walk to the desk.
       .addItem('Rebuild Quick Mark Lists', 'rebuildQuickMarkListsNow')
+      // The check-in page queues its marks and a trigger writes them; this is
+      // the "write them NOW" for somebody standing over the tab wondering
+      // where this morning's ticks are. See flushCheckInQueue().
+      .addItem('Write Queued Check-Ins Now', 'flushCheckInQueueNow')
       .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
@@ -9532,6 +9536,13 @@ function writeTriggers(force, takingOwnership) {
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
   removed += resetTriggersForHandler('syncRegistrations', () =>
     ScriptApp.newTrigger('syncRegistrations').timeBased().everyHours(1).create());
+  // THE DOOR'S QUEUE, drained every five minutes. Check-in marks are written
+  // to a queue rather than to the sheet so that a tap at the desk never waits
+  // for the workbook (section 16b); this is what carries them across. Five
+  // minutes rather than one because nothing reads attendance in real time, and
+  // the desk's own roster loads flush it sooner anyway.
+  removed += resetTriggersForHandler('flushCheckInQueueTrigger', () =>
+    ScriptApp.newTrigger('flushCheckInQueueTrigger').timeBased().everyMinutes(5).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
@@ -9555,7 +9566,8 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 1 daily, 1 hourly, ${calendarResult.created} calendar-edit ✅`;
+    : `All triggers verified — 1 daily, 1 hourly, 1 check-in flush, ` +
+      `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
 }
@@ -16880,6 +16892,14 @@ function syncRegistrations() {
   // is bounded by LAST_FORM_SYNC_TIME, which the losing run has already
   // advanced. So the rows are simply gone until someone notices a name is
   // missing.
+  // THE DOOR'S QUEUE GOES IN FIRST, before this run takes the lock and starts
+  // rewriting the rows those marks land on. Queued marks are applied by row
+  // match, not row number, so ordering is not a correctness question — but a
+  // mark applied before the sync is one the sync's own reads can see, and one
+  // the roster rebuild at the end of this function will carry. See
+  // flushCheckInQueue().
+  flushCheckInQueue({ waitMs: SYNC_LOCK_WAIT_MS });
+
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('syncRegistrations: another sync is already running — skipping this run.');
@@ -22753,6 +22773,7 @@ function getQuickMarkIndex() {
 function rebuildQuickMarkListsNow() {
   const started = new Date();
   const index = refreshQuickMarkIndex();
+  warmCheckInStore(); // the door reads its own store — rebuild both or neither
   const seconds = ((new Date() - started) / 1000).toFixed(1);
   const message = `Quick Mark lists rebuilt: ${index.sessions.length} session(s), ` +
     `${index.members.length} name(s) — took ${seconds}s, and the dialog will now open instantly ✅`;
@@ -22783,6 +22804,11 @@ function warmQuickMarkIndexCache() {
   } catch (err) {
     log(`ℹ️ Could not pre-build the Quick Mark lists (${err}) — the dialog will build them when it opens.`);
   }
+  // The door's rosters, warmed at the same moment and for the same reason —
+  // the registrant rows have just changed and nobody is standing at the desk.
+  // Its own try/catch lives inside it; a failure here costs one slow roster
+  // load and nothing else. See section 16b.
+  warmCheckInStore();
 }
 
 /**
@@ -22795,6 +22821,10 @@ function warmQuickMarkIndexCache() {
  * nothing about the lists changed is the cost this cache exists to avoid.
  */
 function invalidateQuickMarkIndexCache() {
+  // The door's rosters go with them: they are built from the same rows, by the
+  // same events, and a stored roster missing a name somebody just registered
+  // is the same bug one screen over. See section 16b.
+  clearCheckInStore();
   // The durable copy first, and unconditionally: a workbook with no script
   // cache at all still has the tab, and returning early on a missing cache is
   // how the stale-tab bug survived its own invalidation.
@@ -39448,10 +39478,11 @@ function buildAssistanceReviewHtml(review) {
 //      a door list is a thing you look at. The page draws every registered
 //      name as a row with a large target, and a name already marked carries a
 //      tick — which is what stops one person being marked twice and what
-//      answers "has Ruth arrived yet" without anybody being asked. That needs
-//      LIVE state, which the cached index does not carry, so choosing a
-//      session costs one read of the registrants tab (readCheckInRoster()) —
-//      once per session, not once per person.
+//      answers "has Ruth arrived yet" without anybody being asked. That state
+//      is served from the door's own stored rosters, with the marks made since
+//      they were built laid over the top (section 16b), so choosing a session
+//      costs a cache read rather than a pass over a year of registrations.
+//      Refresh list reads the tab itself, for a desk that wants to insist.
 //   2. IT IS ONE TAP PER PERSON. Attended is what a door records. Lunch is a
 //      second tap on the same row, for the desk that hands meals over at the
 //      same table. Everything else Quick Mark can do — registering a walk-in,
@@ -39494,12 +39525,12 @@ const CHECK_IN_PIN_PROP_KEY = 'CHECK_IN_PIN';
 function doGet(e) {
   const params = (e && e.parameter) || {};
   const requested = String(params.location || params.loc || '').trim();
-  // Only ever a STORED index, never a build — the same rule the dialog
+  // Only ever a STORED list, never a build — the same rule the dialog
   // follows (readyQuickMarkIndex()), and for a stronger reason here: a web app
   // has no toast to apologise with, and a volunteer looking at a spinner
   // assumes the page is broken. A workbook with no stored lists yet gets a
   // page that says so in words.
-  const html = buildCheckInHtml(readyQuickMarkIndex(), {
+  const html = buildCheckInHtml(readyCheckInPageIndex(), {
     location: matchCheckInLocation(requested),
     pinRequired: isCheckInPinSet()
   });
@@ -39575,13 +39606,15 @@ function checkInPinRefusal() {
 /**
  * THE ROSTER FOR ONE SESSION, live off the registrants tab.
  *
- * The cached index says who is REGISTERED; it cannot say who has ARRIVED,
- * because it is built on a trigger hours earlier and attendance is the one
- * thing that changes minute by minute. So this reads the tab — once, when a
- * session is chosen — and the page marks and unmarks against what came back.
+ * Served from the door's stored rosters (section 16b) with the marks made
+ * since they were built laid over the top, so it costs a cache read rather
+ * than a pass over the whole registrants tab. A session the store does not
+ * cover — one outside its date window — falls back to reading the tab, and so
+ * does `fresh`, which is what the page's Refresh list button sends.
  *
- * Payload: { location, session, pin }.
- * Returns { ok, message, rows } — see readCheckInRoster() for a row's shape.
+ * Payload: { location, session, pin, fresh }.
+ * Returns { ok, message, rows, problems, builtAt, source } — see
+ * readCheckInRoster() for a row's shape.
  */
 function checkInRoster(payload) {
   const args = parseCheckInPayload(payload);
@@ -39589,10 +39622,35 @@ function checkInRoster(payload) {
   // isDeskWorkBlocked(), not isBootstrapActive(): a forms sweep is no reason to
   // shut the door desk, the same judgement showQuickMarkDialog() makes.
   if (isDeskWorkBlocked()) return { ok: false, message: deskBusyMessage() };
+  const location = String(args.location || '');
+  const session = String(args.session || '');
   try {
+    // CHANGING SESSION IS THE MOMENT NOBODY IS MID-TAP, so it is where the
+    // queued marks get written to the sheet — with a zero wait, because if the
+    // workbook is busy the trigger will do it in a minute and the volunteer
+    // must not be the one who waits for it. See flushCheckInQueue().
+    flushCheckInQueue({ waitMs: 0 });
+
+    // THE STORED ROSTER FIRST — one cache read instead of a pass over a tab
+    // holding a year of registrations (see section 16b). `fresh` is the page's
+    // pull-to-refresh: a desk that suspects the list is wrong can always ask
+    // for the tab itself.
+    const stored = args.fresh ? null : storedCheckInRoster(location, session);
+    const rows = stored
+      ? applyCheckInOverlay(stored.rows, location, session, stored.store)
+      : applyCheckInOverlay(readCheckInRoster(location, session), location, session, null);
+    // Marks that could not be applied at all, handed back where somebody is
+    // actually looking — a queued write fails after the volunteer has walked
+    // away, so this is the only place the failure can be said out loud.
+    const problems = readCheckInProblems();
     return {
       ok: true,
-      rows: readCheckInRoster(String(args.location || ''), String(args.session || ''))
+      rows,
+      problems: problems.map(problem => problem.message),
+      // What the page shows in its freshness line: a stored list carries the
+      // time it was built, a live one is by definition current.
+      builtAt: stored ? stored.store.builtAt : '',
+      source: stored ? 'stored' : 'sheet'
     };
   } catch (err) {
     log(`checkInRoster failed: ${err}`);
@@ -39600,8 +39658,17 @@ function checkInRoster(payload) {
   }
 }
 
+/** The page, having shown the failures, says so — and they stop being shown. */
+function checkInDismissProblems(payload) {
+  const args = parseCheckInPayload(payload);
+  if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
+  clearCheckInProblems();
+  return { ok: true };
+}
+
 /**
- * ONE MARK. Everything about what a tick MEANS lives in
+ * ONE MARK — queued, not written; see section 16b for why, and for what the
+ * page shows in the meantime. Everything about what a tick MEANS lives in
  * applyQuickMarkFromDialog() — the lock, the row match, the walk-in fallback,
  * the wording it answers with — and this is a doorway onto that, not a second
  * copy of it. The only thing added here is the PIN.
@@ -39613,6 +39680,27 @@ function checkInMark(payload) {
   const args = parseCheckInPayload(payload);
   if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
   if (isDeskWorkBlocked()) return { ok: false, message: deskBusyMessage() };
+
+  // QUEUED, NOT WRITTEN — the whole of what makes a tap instant. The mark goes
+  // into a durable queue guarded by a lock no sync ever holds, and reaches the
+  // sheet on the next flush (section 16b). What the desk sees is unaffected:
+  // the queued mark is laid over the roster on every read until the sheet
+  // itself carries it.
+  const queued = recordCheckInMark(args);
+  if (queued) {
+    return {
+      ok: true,
+      queued: true,
+      message: args.clear
+        ? `Cleared ${args.name}.`
+        : `${args.name} — ${args.lunch ? 'lunch' : 'checked in'}.`
+    };
+  }
+
+  // The queue could not be reached at all (no Properties service, or a lock
+  // that would not come). A mark that goes nowhere is the one outcome a door
+  // cannot have, so this falls back to the blocking write it replaced.
+  log('checkInMark: the queue could not be written — writing to the sheet directly.');
   if (args.clear) return clearCheckInMark(args);
   return applyQuickMarkFromDialog({
     location: args.location,
@@ -39642,24 +39730,32 @@ function checkInMark(payload) {
  * would send the clear to whichever row had moved into that position.
  */
 function clearCheckInMark(args) {
-  return withScriptLock(DESK_LOCK_WAIT_MS, () => {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-    if (!sheet) return { ok: false, message: 'There is no registrants tab yet.' };
-    const map = getIndexMap(HEADERS.Registrant_Dash);
-    const target = findCheckInRow(sheet, map, args);
-    if (!target) {
-      return {
-        ok: false,
-        message: `${args.name || 'That person'} is not on this list any more — nothing changed.`
-      };
-    }
-    if (map['Attended'] !== undefined) sheet.getRange(target, map['Attended'] + 1).setValue(false);
-    if (map['Lunch_Served'] !== undefined) sheet.getRange(target, map['Lunch_Served'] + 1).setValue(false);
-    return { ok: true, cleared: true, message: `Cleared ${args.name}.` };
-  }, {
+  return withScriptLock(DESK_LOCK_WAIT_MS, () => clearCheckInMarkLocked(args), {
     ok: false,
     message: 'The workbook is mid-update — nothing was changed. Try again in a moment.'
   });
+}
+
+/**
+ * The body of clearCheckInMark(), which holds the lock for it — split out for
+ * the same reason applyQuickMarkLocked() is: the queue flush applies a whole
+ * batch of marks under ONE lock (see flushCheckInQueue()), and a function that
+ * takes the lock for itself cannot be one of them.
+ */
+function clearCheckInMarkLocked(args) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  if (!sheet) return { ok: false, message: 'There is no registrants tab yet.' };
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const target = findCheckInRow(sheet, map, args);
+  if (!target) {
+    return {
+      ok: false,
+      message: `${args.name || 'That person'} is not on this list any more — nothing changed.`
+    };
+  }
+  if (map['Attended'] !== undefined) sheet.getRange(target, map['Attended'] + 1).setValue(false);
+  if (map['Lunch_Served'] !== undefined) sheet.getRange(target, map['Lunch_Served'] + 1).setValue(false);
+  return { ok: true, cleared: true, message: `Cleared ${args.name}.` };
 }
 
 /**
@@ -39761,6 +39857,19 @@ function readCheckInRoster(location, sessionValue) {
     });
   });
 
+  return sortCheckInRosterRows(rows);
+}
+
+/**
+ * A door list in the order a door reads it, sorted in place.
+ *
+ * APPOINTMENT SESSIONS SORT BY TIME and everything else by name — see
+ * readCheckInRoster(). Split out because the stored rosters (section 16b) are
+ * built by a different pass over the same tab and have to come out in the same
+ * order: a list that changes its shape depending on which of two code paths
+ * built it is a list a volunteer cannot learn.
+ */
+function sortCheckInRosterRows(rows) {
   const anyTimes = rows.some(r => r.time);
   rows.sort((a, b) => {
     if (a.dateKey !== b.dateKey) return a.dateKey < b.dateKey ? -1 : 1;
@@ -39821,6 +39930,38 @@ function parseCheckInPayload(payload) {
  * `options` is { location, pinRequired } — the location pin from the query
  * string, and whether writes need a PIN.
  */
+/**
+ * THE PART OF QUICK MARK'S INDEX THE DOOR ACTUALLY USES: the session list, and
+ * the time it was built.
+ *
+ * The dialog needs the names on every session, the whole member roll and the
+ * standing needs, because it can register a walk-in and answer questions about
+ * one. The door page can do neither: it shows a roster it fetches live for the
+ * one session on screen. Everything else in that index is payload a tablet on
+ * a slow connection downloads before it can draw anything — which is a wait in
+ * front of a queue, for data that is never read.
+ *
+ * Each session keeps only the five fields the page reads: its value, its
+ * label, its group heading, its location and whether it is dated. The session
+ * LIST itself is not trimmed — a desk marking yesterday's class, or a session
+ * three weeks out, has to find it in the dropdown, and a roster the stored
+ * copy does not cover is read live off the tab instead (checkInRoster()).
+ */
+function checkInPageIndex(index) {
+  if (!index || !Array.isArray(index.sessions)) return null;
+  return {
+    builtAt: index.builtAt || '',
+    sessions: index.sessions
+      .map(session => ({
+        value: session.value,
+        label: session.label,
+        group: session.group,
+        location: session.location,
+        dateKey: session.dateKey
+      }))
+  };
+}
+
 function buildCheckInHtml(preloadedIndex, options) {
   const opts = options || {};
   // JSON.stringify TWICE over: once to make the data, once to make it a STRING
@@ -39829,8 +39970,14 @@ function buildCheckInHtml(preloadedIndex, options) {
   // script tag, would otherwise end the page in the middle of a sentence and
   // leave a tablet showing half a screen that does nothing at all. The
   // <\/ escape is what handles the second of those.
-  const inlineIndex = preloadedIndex
-    ? JSON.stringify(JSON.stringify(preloadedIndex)).replace(/<\//g, '<\\/')
+  // ONLY THE SESSION LIST TRAVELS, not the whole Quick Mark index — see
+  // checkInPageIndex(). The dialog's index also carries every name on every
+  // session, the entire member roll and the standing needs, which on a
+  // workbook with a year of history is hundreds of kilobytes the door page
+  // downloads and never once reads.
+  const pageIndex = checkInPageIndex(preloadedIndex);
+  const inlineIndex = pageIndex
+    ? JSON.stringify(JSON.stringify(pageIndex)).replace(/<\//g, '<\\/')
     : 'null';
   const inlineOptions = JSON.stringify(JSON.stringify({
     location: String(opts.location || ''),
@@ -39920,7 +40067,7 @@ function buildCheckInHtml(preloadedIndex, options) {
   <ul class="roster" id="roster"></ul>
   <p class="empty" id="empty"></p>
   <div class="row-actions">
-    <button class="plain" onclick="refresh()">Refresh list</button>
+    <button class="plain" onclick="refresh(true)">Refresh list</button>
   </div>
 </main>
 
@@ -39971,12 +40118,11 @@ function buildCheckInHtml(preloadedIndex, options) {
     // a trigger — so somebody registered ten minutes ago is not on this page
     // until the next sync, and a volunteer hunting for a name that is not
     // there deserves to know that rather than to conclude the page is broken.
-    if (INDEX.builtAt) {
-      var stale = document.getElementById('stale');
-      stale.textContent = 'Session list built at ' + INDEX.builtAt + '. Somebody who registered ' +
-        'since then will not be on it yet - check them in from the workbook.';
-      stale.classList.remove('hide');
-    }
+    // The freshness line belongs to the ROSTER now (showFreshness()), which is
+    // the list a volunteer is actually reading and the one that can be
+    // refreshed from the page. A second sentence about the session dropdown
+    // over the top of it was two ages on screen at once, neither of them the
+    // one being asked about.
     fillLocations();
   }
 
@@ -40030,7 +40176,14 @@ function buildCheckInHtml(preloadedIndex, options) {
     refresh();
   }
 
-  function refresh() {
+  /**
+   * A truthy 'fresh' is the Refresh button: it makes the server read the
+   * registrants tab
+   * instead of the stored rosters. Choosing a session does NOT ask for that —
+   * the stored copy is the whole reason a session opens instantly — but a desk
+   * that thinks the list is wrong needs a way to insist, and this is it.
+   */
+  function refresh(fresh) {
     var loc = document.getElementById('location').value;
     var session = document.getElementById('session').value;
     if (!loc || !session) return;
@@ -40041,14 +40194,44 @@ function buildCheckInHtml(preloadedIndex, options) {
     // list in the second before the new one lands.
     draw();
     say('Loading the list...', '');
-    call('checkInRoster', { location: loc, session: session }, function (res) {
+    call('checkInRoster', { location: loc, session: session, fresh: !!fresh }, function (res) {
       setBusy(false);
       if (!res || !res.ok) return handle(res);
       ROWS = res.rows || [];
       document.getElementById('search').classList.toggle('hide', ROWS.length < 12);
+      showFreshness(res);
+      showProblems(res.problems || []);
       hideStatus();
       draw();
     });
+  }
+
+  /**
+   * The one line that says how old the list is. A stored roster carries the
+   * time it was built; a list read live off the tab says so instead, because
+   * "as of 9:04" and "as of now" are different promises to a volunteer.
+   */
+  function showFreshness(res) {
+    var stale = document.getElementById('stale');
+    if (res.source === 'stored' && res.builtAt) {
+      stale.textContent = 'List as of ' + res.builtAt + '. Anybody who registered since then ' +
+        'is not on it - press Refresh list to read the sheet.';
+      stale.classList.remove('hide');
+    } else {
+      stale.textContent = '';
+      stale.classList.add('hide');
+    }
+  }
+
+  /**
+   * Marks the sheet refused after the fact. A queued mark is written a minute
+   * later, by which time the volunteer has moved on, so this is the only place
+   * a failure can be said out loud - and it is said once, then dismissed.
+   */
+  function showProblems(problems) {
+    if (!problems.length) return;
+    say(problems.join(' '), 'err');
+    call('checkInDismissProblems', {}, function () {});
   }
 
   function draw() {
@@ -40434,4 +40617,764 @@ function buildCheckInPageHtml(info) {
   draw();
   drawPin();
 </script>`;
+}
+
+// ============================================================================
+// 16b. THE DOOR'S OWN STORE  (a roster it reads, and a queue it writes)
+// ============================================================================
+// Section 16 made the door a URL. This makes it fast, by taking the two things
+// a volunteer waits on off the spreadsheet entirely.
+//
+// WHAT THE DESK WAS WAITING ON:
+//
+//   1. CHOOSING A SESSION READ THE WHOLE REGISTRANTS TAB. readCheckInRoster()
+//      is one pass over a tab holding a year of registrations, run every time
+//      somebody picks a session — and a tablet at a door picks a session at
+//      least once a morning, often several times. On a busy workbook that is
+//      seconds of blank screen with a queue behind it.
+//   2. EVERY TAP WAITED FOR THE SCRIPT LOCK. A mark scanned the tab again to
+//      find one row, and it did it holding the same lock the hourly
+//      registrations sync holds — so a sync landing mid-morning turned every
+//      tap into "the workbook is mid-update, press it again", which at a door
+//      is indistinguishable from broken.
+//
+// WHAT REPLACES THEM:
+//
+//   THE STORE is every door-relevant session's roster, denormalized into one
+//   packed blob and kept in CacheService with a durable copy in Script
+//   Properties — built by the same registrations sync that already rebuilds
+//   Quick Mark's lists (warmQuickMarkIndexCache()), so the read is paid for on
+//   a trigger with nobody standing there. Picking a session is then a cache
+//   read, not a tab scan. It is deliberately WINDOWED to the days a door can
+//   actually be standing in (see CHECK_IN_STORE_DAYS_BACK/AHEAD): last
+//   spring's rosters are a real answer to a question nobody asks at a front
+//   door, and carrying them is what would make the blob too big to store.
+//
+//   THE QUEUE is where a tap goes. checkInMark() writes the mark into a
+//   durable queue and answers immediately; flushCheckInQueue() applies the
+//   queue to the sheet the next time the workbook is free — from a trigger,
+//   from the next roster load, and from the head of the next sync. A sync
+//   running mid-morning no longer locks the desk out of anything: it delays a
+//   write nobody is watching by a minute.
+//
+//   WHAT THE DESK SEES MEANWHILE. A queued mark is not on the sheet yet, so a
+//   roster read alone would show it unticked and invite a second tap on the
+//   same person. Every mark is therefore also recorded as a local DELTA, and
+//   both the deltas and the still-pending queue are laid over the stored
+//   roster on the way out (applyCheckInOverlay()). Deltas older than the
+//   store's own build are dropped: by then the sheet itself carries them.
+//
+// THE HONEST COST. A queued mark is eventually consistent. Somebody reading
+// the registrants tab in the minute after a tap sees the old value, and a mark
+// that turns out to be impossible (a name nobody registered, with no walk-in
+// confirmation behind it) fails after the volunteer has walked away instead of
+// in front of them. So failures are not swallowed: they are kept and handed
+// back on the next roster load, which is where somebody is looking.
+//
+// THE QUEUE IS GUARDED BY THE DOCUMENT LOCK, NOT THE SCRIPT LOCK — deliberately
+// and load-bearingly. The script lock is the one every sync holds; taking it to
+// append to the queue would reintroduce the exact blocking this section exists
+// to remove. The two locks are independent, and nothing but the door touches
+// the queue.
+// ============================================================================
+
+/** The shape of a stored roster blob. Bump when a row grows a field the page uses. */
+const CHECK_IN_STORE_SCHEMA = 1;
+const CHECK_IN_STORE_CACHE_KEY = 'CHECK_IN_STORE_V1';
+const CHECK_IN_STORE_PROP_KEY = 'CHECK_IN_STORE_V1';
+const CHECK_IN_STORE_CACHE_SECONDS = 21600;
+/** CacheService caps one value at 100KB; a Script Property at 9KB. */
+const CHECK_IN_STORE_CACHE_CHUNK_CHARS = 90000;
+const CHECK_IN_STORE_MAX_CACHE_CHUNKS = 20;
+const CHECK_IN_STORE_PROP_CHUNK_CHARS = 8000;
+const CHECK_IN_STORE_MAX_PROP_CHUNKS = 30;
+
+/**
+ * HOW WIDE THE DOOR'S WINDOW IS. Yesterday and the day before, because a desk
+ * finishes marking the morning after it; and the week ahead, because that is
+ * as far forward as anybody checks somebody in. Everything else is a question
+ * for the workbook, and the page still falls back to reading the tab for it.
+ */
+const CHECK_IN_STORE_DAYS_BACK = 2;
+const CHECK_IN_STORE_DAYS_AHEAD = 8;
+
+/**
+ * THE PAGE'S OWN SESSION LIST, stored separately from Quick Mark's index.
+ *
+ * doGet() used to read the whole dialog index — every name on every session,
+ * the member roll, the standing needs — ungzip it, and throw all but the
+ * session list away before serving the page. That read is on the one path
+ * where somebody is watching a blank tablet, so what is stored here is the
+ * projection itself (checkInPageIndex()), which is a fraction of the size.
+ */
+const CHECK_IN_PAGE_INDEX_CACHE_KEY = 'CHECK_IN_PAGE_INDEX_V1';
+const CHECK_IN_PAGE_INDEX_PROP_KEY = 'CHECK_IN_PAGE_INDEX_V1';
+
+const CHECK_IN_QUEUE_PROP_KEY = 'CHECK_IN_QUEUE_V1';
+const CHECK_IN_DELTA_PROP_KEY = 'CHECK_IN_DELTAS_V1';
+const CHECK_IN_PROBLEM_PROP_KEY = 'CHECK_IN_PROBLEMS_V1';
+const CHECK_IN_QUEUE_CHUNK_CHARS = 8000;
+const CHECK_IN_QUEUE_MAX_CHUNKS = 20;
+/** How many marks one flush applies. A batch, so one lock covers a rush. */
+const CHECK_IN_FLUSH_BATCH = 40;
+/** A queued mark that keeps failing is reported rather than retried forever. */
+const CHECK_IN_QUEUE_MAX_TRIES = 3;
+const CHECK_IN_QUEUE_MAX = 500;
+const CHECK_IN_DELTA_MAX = 500;
+const CHECK_IN_PROBLEM_MAX = 12;
+/** The queue's own lock. Short: nothing under it does more than parse JSON. */
+const CHECK_IN_QUEUE_LOCK_WAIT_MS = 5 * 1000;
+/** The separator every denormalized lookup key is joined on. */
+const CHECK_IN_KEY_SEPARATOR = ' ';
+
+// ----------------------------------------------------------------------------
+// Chunked Script Properties — a durable store for things bigger than 9KB
+// ----------------------------------------------------------------------------
+
+/**
+ * Writes `text` across `baseKey` (a manifest) and `baseKey_0..n`.
+ *
+ * The manifest is written LAST, so a reader can never find one pointing at
+ * chunks that are not there yet — the same rule writeCachedQuickMarkIndex()
+ * follows, and for the same reason: half a blob is not a blob.
+ *
+ * Returns false, having written nothing, when the text needs more chunks than
+ * `maxChunks`. Properties are a small, shared, quota'd store, and filling it
+ * with one oversized blob would break everything else that keeps a property.
+ */
+function writeChunkedScriptProperty(baseKey, text, chunkChars, maxChunks) {
+  const props = tryGetScriptProperties();
+  if (!props) return false;
+  const packed = String(text || '');
+  const count = Math.ceil(packed.length / chunkChars) || 0;
+  if (count > maxChunks) {
+    log(`ℹ️ ${baseKey} is too large to keep in Script Properties (${packed.length} chars) — skipping it.`);
+    clearChunkedScriptProperty(baseKey);
+    return false;
+  }
+  try {
+    const values = {};
+    for (let i = 0; i < count; i++) {
+      values[`${baseKey}_${i}`] = packed.substring(i * chunkChars, (i + 1) * chunkChars);
+    }
+    if (count > 0) props.setProperties(values);
+    props.setProperty(baseKey, JSON.stringify({ chunks: count }));
+    return true;
+  } catch (err) {
+    log(`ℹ️ Could not store ${baseKey} in Script Properties (${err}).`);
+    return false;
+  }
+}
+
+/** The text written by writeChunkedScriptProperty(), or '' for anything unreadable. */
+function readChunkedScriptProperty(baseKey) {
+  const props = tryGetScriptProperties();
+  if (!props) return '';
+  try {
+    const manifest = props.getProperty(baseKey);
+    if (!manifest) return '';
+    const chunks = (JSON.parse(manifest) || {}).chunks || 0;
+    if (chunks < 1) return '';
+    let text = '';
+    for (let i = 0; i < chunks; i++) {
+      const part = props.getProperty(`${baseKey}_${i}`);
+      // A chunk gone missing means the blob is gone, not that it is shorter.
+      if (part === null || part === undefined) return '';
+      text += part;
+    }
+    return text;
+  } catch (err) {
+    log(`ℹ️ Could not read ${baseKey} from Script Properties (${err}).`);
+    return '';
+  }
+}
+
+/** Removes a chunked property and every chunk it names. */
+function clearChunkedScriptProperty(baseKey) {
+  const props = tryGetScriptProperties();
+  if (!props) return;
+  try {
+    const manifest = props.getProperty(baseKey);
+    const chunks = manifest ? ((JSON.parse(manifest) || {}).chunks || 0) : 0;
+    props.deleteProperty(baseKey);
+    for (let i = 0; i < chunks; i++) props.deleteProperty(`${baseKey}_${i}`);
+  } catch (err) { /* a store that cannot be cleared is rebuilt over anyway */ }
+}
+
+/**
+ * PropertiesService is unavailable in a few execution contexts and throws when
+ * asked there — the same hazard tryGetScriptCache() exists for.
+ */
+function tryGetScriptProperties() {
+  try {
+    return PropertiesService.getScriptProperties();
+  } catch (err) {
+    return null;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// The store
+// ----------------------------------------------------------------------------
+
+/** The lookup one session's roster is filed under. Blank dateKey = "program only". */
+function checkInStoreKey(location, titleKey, dateKey) {
+  return [String(location || '').trim(), titleKey || '', dateKey || '']
+    .join(CHECK_IN_KEY_SEPARATOR);
+}
+
+/** The days the store covers, as { fromKey, toKey } date keys. */
+function checkInStoreDateWindow() {
+  const from = new Date();
+  from.setDate(from.getDate() - CHECK_IN_STORE_DAYS_BACK);
+  const to = new Date();
+  to.setDate(to.getDate() + CHECK_IN_STORE_DAYS_AHEAD);
+  return { fromKey: formatDateKey(from), toKey: formatDateKey(to) };
+}
+
+/**
+ * EVERY DOOR-RELEVANT ROSTER, IN ONE PASS over the registrants tab.
+ *
+ * Filed twice, exactly as buildQuickMarkIndex() files its names: once under
+ * the session's own date, and once under the dateless "program only" lookup a
+ * desk picks when it does not matter which date. Same rows either way — the
+ * dateless list simply spans several dates, and each row carries its own.
+ */
+function buildCheckInStore() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
+  const headers = HEADERS.Registrant_Dash;
+  const map = getIndexMap(headers);
+  const window = checkInStoreDateWindow();
+  const sessions = {};
+  const seen = {};
+
+  (sheet ? readAllSectionedRowValues(sheet, headers, 'Event_ID') : []).forEach(row => {
+    const name = String(row[map['Name']] || '').trim();
+    if (!name) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    const dateKey = date ? formatDateKey(date) : '';
+    // A row with no date at all is kept: it is a registration nobody can file,
+    // and a door that cannot see it cannot mark it either.
+    if (dateKey && (dateKey < window.fromKey || dateKey > window.toKey)) return;
+
+    const location = String(row[map['Location']] || '').trim();
+    const titleKey = quickMarkTitleKey(row[map['Event']]);
+    const time = map['Event_Time'] === undefined
+      ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
+    const entry = {
+      name,
+      key: normalizeNameKey(name),
+      time,
+      attended: isTruthyCheckbox(row[map['Attended']]),
+      lunch: isTruthyCheckbox(row[map['Lunch_Served']]),
+      phone: map['Phone'] === undefined ? '' : String(row[map['Phone']] || '').trim(),
+      wantsLunch: map['Lunch_Status'] !== undefined &&
+        String(row[map['Lunch_Status']] || '').trim().toLowerCase() === 'needed',
+      dateLabel: date ? formatDateLabel(date) : '',
+      dateKey
+    };
+
+    const lookups = dateKey
+      ? [checkInStoreKey(location, titleKey, dateKey), checkInStoreKey(location, titleKey, '')]
+      : [checkInStoreKey(location, titleKey, '')];
+    lookups.forEach(lookup => {
+      // DEDUPED ON NAME AND SLOT TOGETHER, the same rule readCheckInRoster()
+      // and buildQuickMarkIndex() follow: two rows for one name on a class are
+      // a duplicate registration, and two genuine appointments on an
+      // assistance one.
+      const dedupe = [lookup, entry.key, time, dateKey].join(CHECK_IN_KEY_SEPARATOR);
+      if (seen[dedupe]) return;
+      seen[dedupe] = true;
+      if (!sessions[lookup]) sessions[lookup] = [];
+      sessions[lookup].push(entry);
+    });
+  });
+
+  Object.keys(sessions).forEach(key => sortCheckInRosterRows(sessions[key]));
+
+  return {
+    schema: CHECK_IN_STORE_SCHEMA,
+    builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a'),
+    builtAtMs: new Date().getTime(),
+    fromKey: window.fromKey,
+    toKey: window.toKey,
+    sessions
+  };
+}
+
+/** Whether a stored blob is one THIS version of the script can serve. */
+function isCurrentCheckInStore(store) {
+  return !!store && store.schema === CHECK_IN_STORE_SCHEMA && !!store.sessions;
+}
+
+/** Builds the store and puts it in both places. */
+function refreshCheckInStore() {
+  const store = buildCheckInStore();
+  writeCheckInStore(store);
+  return store;
+}
+
+/**
+ * Rebuilds the door's roster store off the hot path.
+ *
+ * Called wherever Quick Mark's lists are warmed, for the same reason and at
+ * the same moment: the registrant rows have just changed and nobody is
+ * standing at the door. Never allowed to throw — a store that could not be
+ * built costs one slow roster load (the live read is still there), and a
+ * warmer that broke a sync would be far worse.
+ */
+function warmCheckInStore() {
+  try {
+    const store = refreshCheckInStore();
+    // The session list the page is served with, projected once here rather
+    // than on every page load — see CHECK_IN_PAGE_INDEX_CACHE_KEY.
+    storeCheckInPageIndex(checkInPageIndex(readyQuickMarkIndex()));
+    // The deltas are the marks the sheet had not caught up with. It has now.
+    dropCheckInDeltasBefore(store.builtAtMs);
+    log(`warmCheckInStore: ${Object.keys(store.sessions).length} door roster(s) stored — ` +
+      `the check-in page opens a session without reading the tab.`);
+  } catch (err) {
+    log(`ℹ️ Could not pre-build the check-in rosters (${err}) — the page will read the tab instead.`);
+  }
+}
+
+/** Stores the blob in the cache and in Script Properties. */
+function writeCheckInStore(store) {
+  const packed = packCachedText(JSON.stringify(store));
+  const cache = tryGetScriptCache();
+  if (cache) {
+    try {
+      const chunks = Math.ceil(packed.length / CHECK_IN_STORE_CACHE_CHUNK_CHARS);
+      if (chunks > CHECK_IN_STORE_MAX_CACHE_CHUNKS) {
+        log(`ℹ️ The door rosters are too large to cache (${packed.length} chars).`);
+      } else {
+        const values = {};
+        for (let i = 0; i < chunks; i++) {
+          values[`${CHECK_IN_STORE_CACHE_KEY}_${i}`] = packed.substring(
+            i * CHECK_IN_STORE_CACHE_CHUNK_CHARS, (i + 1) * CHECK_IN_STORE_CACHE_CHUNK_CHARS);
+        }
+        if (chunks > 0) cache.putAll(values, CHECK_IN_STORE_CACHE_SECONDS);
+        // The manifest LAST — see writeChunkedScriptProperty().
+        cache.put(CHECK_IN_STORE_CACHE_KEY, JSON.stringify({ chunks }), CHECK_IN_STORE_CACHE_SECONDS);
+      }
+    } catch (err) {
+      log(`ℹ️ Could not cache the door rosters (${err}).`);
+    }
+  }
+  // The durable half. A cache entry expires in six hours and is dropped by a
+  // redeploy; the first door of the morning is exactly the one that would find
+  // it gone, which is the failure the Script Property copy exists to prevent.
+  writeChunkedScriptProperty(CHECK_IN_STORE_PROP_KEY, packed,
+    CHECK_IN_STORE_PROP_CHUNK_CHARS, CHECK_IN_STORE_MAX_PROP_CHUNKS);
+}
+
+/** The stored rosters — cache first, then Script Properties — or null. */
+function readCheckInStore() {
+  const cached = readCachedCheckInStore();
+  if (cached) return cached;
+  try {
+    const packed = readChunkedScriptProperty(CHECK_IN_STORE_PROP_KEY);
+    if (!packed) return null;
+    const store = JSON.parse(unpackCachedText(packed));
+    if (!isCurrentCheckInStore(store)) return null;
+    store.fromProperties = true;
+    return store;
+  } catch (err) {
+    log(`ℹ️ Could not read the stored door rosters (${err}) — reading the tab instead.`);
+    return null;
+  }
+}
+
+function readCachedCheckInStore() {
+  const cache = tryGetScriptCache();
+  if (!cache) return null;
+  try {
+    const manifest = cache.get(CHECK_IN_STORE_CACHE_KEY);
+    if (!manifest) return null;
+    const chunks = (JSON.parse(manifest) || {}).chunks || 0;
+    if (chunks < 1) return null;
+    const keys = [];
+    for (let i = 0; i < chunks; i++) keys.push(`${CHECK_IN_STORE_CACHE_KEY}_${i}`);
+    const parts = cache.getAll(keys);
+    let packed = '';
+    for (let i = 0; i < chunks; i++) {
+      // A chunk can expire on its own, and half a store is not a store.
+      if (parts[keys[i]] === undefined || parts[keys[i]] === null) return null;
+      packed += parts[keys[i]];
+    }
+    const store = JSON.parse(unpackCachedText(packed));
+    if (!isCurrentCheckInStore(store)) return null;
+    store.fromCache = true;
+    return store;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Drops the stored rosters. Called by everything that can add a NAME or a
+ * SESSION — the same events invalidateQuickMarkIndexCache() answers to.
+ */
+function clearCheckInStore() {
+  clearCheckInPageIndex();
+  clearChunkedScriptProperty(CHECK_IN_STORE_PROP_KEY);
+  const cache = tryGetScriptCache();
+  if (!cache) return;
+  try {
+    const manifest = cache.get(CHECK_IN_STORE_CACHE_KEY);
+    cache.remove(CHECK_IN_STORE_CACHE_KEY);
+    const chunks = manifest ? ((JSON.parse(manifest) || {}).chunks || 0) : 0;
+    const keys = [];
+    for (let i = 0; i < chunks; i++) keys.push(`${CHECK_IN_STORE_CACHE_KEY}_${i}`);
+    if (keys.length) cache.removeAll(keys);
+  } catch (err) { /* a cache is an optimization; never let it decide anything */ }
+}
+
+/** Keeps the page's session list where doGet() can pick it up in one read. */
+function storeCheckInPageIndex(pageIndex) {
+  if (!pageIndex) return;
+  const packed = packCachedText(JSON.stringify(pageIndex));
+  const cache = tryGetScriptCache();
+  if (cache) {
+    try {
+      cache.put(CHECK_IN_PAGE_INDEX_CACHE_KEY, packed, CHECK_IN_STORE_CACHE_SECONDS);
+    } catch (err) { /* too big for one cache entry — the property copy stands */ }
+  }
+  writeChunkedScriptProperty(CHECK_IN_PAGE_INDEX_PROP_KEY, packed,
+    CHECK_IN_STORE_PROP_CHUNK_CHARS, CHECK_IN_STORE_MAX_PROP_CHUNKS);
+}
+
+/**
+ * THE SESSION LIST doGet() SERVES. The stored projection when there is one,
+ * and the whole Quick Mark index projected on the spot when there is not —
+ * never a build, which is the same rule readyQuickMarkIndex() follows and for
+ * the same reason: a web app has no toast to apologise with.
+ */
+function readyCheckInPageIndex() {
+  try {
+    const cache = tryGetScriptCache();
+    const packed = (cache ? cache.get(CHECK_IN_PAGE_INDEX_CACHE_KEY) : null) ||
+      readChunkedScriptProperty(CHECK_IN_PAGE_INDEX_PROP_KEY);
+    if (packed) {
+      const index = JSON.parse(unpackCachedText(packed));
+      if (index && Array.isArray(index.sessions)) return index;
+    }
+  } catch (err) {
+    log(`ℹ️ Could not read the stored check-in session list (${err}) — projecting it instead.`);
+  }
+  return checkInPageIndex(readyQuickMarkIndex());
+}
+
+/** Drops the stored session list. Goes with the rosters — see clearCheckInStore(). */
+function clearCheckInPageIndex() {
+  clearChunkedScriptProperty(CHECK_IN_PAGE_INDEX_PROP_KEY);
+  const cache = tryGetScriptCache();
+  if (!cache) return;
+  try { cache.remove(CHECK_IN_PAGE_INDEX_CACHE_KEY); } catch (err) { /* non-fatal */ }
+}
+
+/**
+ * One session's roster out of the store as { store, rows }, or null when the
+ * store cannot answer — no stored copy, or a session outside the window it
+ * covers. Null is the signal to read the tab; an empty rows array is a real
+ * answer meaning "nobody is registered".
+ */
+function storedCheckInRoster(location, sessionValue) {
+  const store = readCheckInStore();
+  if (!store) return null;
+  const selection = parseQuickMarkProgramChoice(sessionValue);
+  if (!selection.title) return null;
+  const rows = store.sessions[
+    checkInStoreKey(location, quickMarkTitleKey(selection.title), selection.dateKey || '')];
+  if (!rows) return null;
+  // Copies, so the overlay cannot edit the blob every other reader shares.
+  return {
+    store,
+    rows: rows.map(row => {
+      const copy = {};
+      Object.keys(row).forEach(field => { copy[field] = row[field]; });
+      return copy;
+    })
+  };
+}
+
+// ----------------------------------------------------------------------------
+// The queue, the deltas, and the problems — the door's three small lists
+// ----------------------------------------------------------------------------
+
+/**
+ * Runs `fn` holding the DOCUMENT lock — see the section note. Falls through
+ * unlocked rather than refusing when there is no lock service at all: losing
+ * one concurrent mark to a race is a worse outcome than losing every mark.
+ *
+ * Returns null when the lock could not be taken, which every caller treats as
+ * "the queue could not be reached".
+ */
+function withCheckInQueueLock(fn) {
+  let lock = null;
+  try { lock = LockService.getDocumentLock(); } catch (err) { lock = null; }
+  if (!lock) return fn();
+  if (!lock.tryLock(CHECK_IN_QUEUE_LOCK_WAIT_MS)) return null;
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function readCheckInList(key) {
+  try {
+    const text = readChunkedScriptProperty(key);
+    if (!text) return [];
+    const list = JSON.parse(text);
+    return Array.isArray(list) ? list : [];
+  } catch (err) {
+    log(`ℹ️ Could not read ${key} (${err}) — treating it as empty.`);
+    return [];
+  }
+}
+
+function writeCheckInList(key, list, cap) {
+  // Newest kept when the cap bites: an old queued mark that never applied is
+  // already a problem being reported, and a new one is somebody standing there.
+  const kept = list.length > cap ? list.slice(list.length - cap) : list;
+  if (!kept.length) {
+    clearChunkedScriptProperty(key);
+    return true;
+  }
+  return writeChunkedScriptProperty(key, JSON.stringify(kept),
+    CHECK_IN_QUEUE_CHUNK_CHARS, CHECK_IN_QUEUE_MAX_CHUNKS);
+}
+
+function readCheckInQueue() { return readCheckInList(CHECK_IN_QUEUE_PROP_KEY); }
+function readCheckInDeltas() { return readCheckInList(CHECK_IN_DELTA_PROP_KEY); }
+function readCheckInProblems() { return readCheckInList(CHECK_IN_PROBLEM_PROP_KEY); }
+
+/** Forgets the deltas the sheet has caught up with. See warmCheckInStore(). */
+function dropCheckInDeltasBefore(builtAtMs) {
+  withCheckInQueueLock(() => {
+    const kept = readCheckInDeltas().filter(delta => Number(delta.at || 0) > Number(builtAtMs || 0));
+    writeCheckInList(CHECK_IN_DELTA_PROP_KEY, kept, CHECK_IN_DELTA_MAX);
+  });
+}
+
+/**
+ * A tap, written down. Returns the queued entry, or null when the queue could
+ * not be reached at all — the caller then falls back to writing the sheet
+ * directly, because a mark that goes nowhere is the one outcome a door cannot
+ * have.
+ */
+function recordCheckInMark(args) {
+  const selection = parseQuickMarkProgramChoice(args.session);
+  const entry = {
+    id: `${new Date().getTime()}-${Math.floor(Math.random() * 1e6)}`,
+    at: new Date().getTime(),
+    tries: 0,
+    location: String(args.location || '').trim(),
+    session: String(args.session || ''),
+    titleKey: quickMarkTitleKey(selection.title),
+    dateKey: selection.dateKey || '',
+    name: String(args.name || '').trim(),
+    key: normalizeNameKey(args.name),
+    bookedTime: appointmentStartLabelOf(args.bookedTime),
+    attended: !!args.attended,
+    lunch: !!args.lunch,
+    clear: !!args.clear,
+    confirmWalkIn: !!args.confirmWalkIn
+  };
+  const written = withCheckInQueueLock(() => {
+    const queue = readCheckInQueue();
+    queue.push(entry);
+    if (!writeCheckInList(CHECK_IN_QUEUE_PROP_KEY, queue, CHECK_IN_QUEUE_MAX)) return false;
+    // The DELTA outlives the queue entry: the queue is emptied the moment the
+    // sheet has the mark, and the store will not carry it until it is rebuilt.
+    const deltas = readCheckInDeltas();
+    deltas.push(entry);
+    writeCheckInList(CHECK_IN_DELTA_PROP_KEY, deltas, CHECK_IN_DELTA_MAX);
+    return true;
+  });
+  return written ? entry : null;
+}
+
+/** Keeps a failed mark where the next roster load will find it. */
+function recordCheckInProblem(entry, message) {
+  withCheckInQueueLock(() => {
+    const problems = readCheckInProblems();
+    problems.push({
+      at: new Date().getTime(),
+      name: entry.name,
+      session: entry.session,
+      message: String(message || 'It could not be marked.')
+    });
+    writeCheckInList(CHECK_IN_PROBLEM_PROP_KEY, problems, CHECK_IN_PROBLEM_MAX);
+  });
+}
+
+/** Clears the reported failures — the page asks for this once it has shown them. */
+function clearCheckInProblems() {
+  withCheckInQueueLock(() => clearChunkedScriptProperty(CHECK_IN_PROBLEM_PROP_KEY));
+}
+
+/**
+ * Lays the queued marks and the recent deltas over a stored roster, so the
+ * page shows what the desk has actually done rather than what the sheet has
+ * caught up with. Oldest first, so the last tap on a row wins.
+ */
+function applyCheckInOverlay(rows, location, sessionValue, store) {
+  const selection = parseQuickMarkProgramChoice(sessionValue);
+  const titleKey = quickMarkTitleKey(selection.title);
+  const wantedLocation = String(location || '').trim();
+  const since = store ? Number(store.builtAtMs || 0) : 0;
+  const pendingIds = {};
+  const marks = [];
+  readCheckInQueue().forEach(entry => { pendingIds[entry.id] = true; marks.push(entry); });
+  // A delta whose queue entry is still pending would otherwise be applied
+  // twice — harmless, since the marks are idempotent, but it makes the
+  // ordering below mean nothing.
+  readCheckInDeltas().forEach(delta => {
+    if (pendingIds[delta.id]) return;
+    if (Number(delta.at || 0) <= since) return;
+    marks.push(delta);
+  });
+  marks.sort((a, b) => Number(a.at || 0) - Number(b.at || 0));
+
+  marks.forEach(mark => {
+    if (mark.location && wantedLocation && mark.location !== wantedLocation) return;
+    if (mark.titleKey && titleKey && mark.titleKey !== titleKey) return;
+    rows.forEach(row => {
+      if (row.key !== mark.key) return;
+      // A dateless "program only" list spans several dates and a mark made
+      // from it does not name one, so it lands on every row for that name —
+      // which is what the sheet write does too.
+      if (mark.dateKey && row.dateKey && mark.dateKey !== row.dateKey) return;
+      if (mark.bookedTime && row.time && mark.bookedTime !== row.time) return;
+      if (mark.clear) { row.attended = false; row.lunch = false; return; }
+      // Lunch WITHOUT attended clears attended — the take-out case, and the
+      // same rule applyQuickMarkLocked() applies to the row itself.
+      if (mark.lunch) { row.lunch = true; row.attended = !!mark.attended; return; }
+      if (mark.attended) row.attended = true;
+    });
+  });
+  return rows;
+}
+
+// ----------------------------------------------------------------------------
+// The flush
+// ----------------------------------------------------------------------------
+
+/**
+ * APPLIES THE QUEUE TO THE SHEET, when the workbook is free to be written.
+ *
+ * One lock for the whole batch rather than one lock per tap in front of a
+ * person: a morning's rush of thirty check-ins arrives here as one locked pass
+ * with nobody waiting on it.
+ *
+ * Options: { waitMs } — how long to wait for the script lock. Zero from the
+ * desk (if the workbook is busy the trigger will do it in a minute), a real
+ * wait from the trigger and from the sync.
+ *
+ * Never throws. It is called from a trigger, from a sync and from the middle
+ * of serving a page, and none of those has anywhere to put an exception.
+ */
+function flushCheckInQueue(options) {
+  const opts = options || {};
+  try {
+    const queue = readCheckInQueue();
+    if (!queue.length) return { ok: true, applied: 0, pending: 0 };
+    // The one job that genuinely rewrites the registrations table underneath
+    // this. Applying a mark by row number while it does is how a tick lands on
+    // somebody else — see applyQuickMarkFromDialog().
+    if (isDeskWorkBlocked()) return { ok: false, applied: 0, pending: queue.length };
+
+    const batch = queue.slice(0, CHECK_IN_FLUSH_BATCH);
+    const waitMs = opts.waitMs === undefined ? DESK_LOCK_WAIT_MS : opts.waitMs;
+    const outcomes = withScriptLock(waitMs, () => batch.map(entry => {
+      try {
+        return { entry, result: applyQueuedCheckInMark(entry) };
+      } catch (err) {
+        // THREW, rather than answered — a transient failure worth retrying.
+        // The distinction is made here, not below, because it is the only
+        // place the two are still telling apart.
+        return { entry, threw: true, result: { ok: false, message: String(err) } };
+      }
+    }), null);
+    if (outcomes === null) return { ok: false, applied: 0, pending: queue.length, busy: true };
+
+    let applied = 0;
+    const retry = {};
+    outcomes.forEach(outcome => {
+      const result = outcome.result;
+      if (result && result.ok) { applied++; return; }
+      const message = (result && result.message) || 'It could not be marked.';
+      // A mark that is REFUSED rather than broken — a name nobody registered,
+      // with no walk-in confirmation behind it — has been given an ANSWER, and
+      // the answer will be the same in five minutes. Retrying it would hold the
+      // queue up and delay the report by a quarter of an hour, so a refusal is
+      // reported at once and only a thrown error is retried.
+      const tries = Number(outcome.entry.tries || 0) + 1;
+      if (!outcome.threw || tries >= CHECK_IN_QUEUE_MAX_TRIES) {
+        recordCheckInProblem(outcome.entry, message);
+        log(`flushCheckInQueue: giving up on ${outcome.entry.name} — ${message}`);
+        return;
+      }
+      retry[outcome.entry.id] = tries;
+    });
+
+    const done = {};
+    batch.forEach(entry => { if (retry[entry.id] === undefined) done[entry.id] = true; });
+    const remaining = withCheckInQueueLock(() => {
+      // Re-read inside the lock: a tap can have been queued while the batch was
+      // being written, and rewriting the list from a stale copy would drop it.
+      const kept = readCheckInQueue()
+        .filter(entry => !done[entry.id])
+        .map(entry => {
+          if (retry[entry.id] !== undefined) entry.tries = retry[entry.id];
+          return entry;
+        });
+      writeCheckInList(CHECK_IN_QUEUE_PROP_KEY, kept, CHECK_IN_QUEUE_MAX);
+      return kept.length;
+    });
+
+    if (applied) {
+      log(`flushCheckInQueue: applied ${applied} queued check-in mark(s); ` +
+        `${remaining === null ? 'an unknown number' : remaining} still queued.`);
+    }
+    return { ok: true, applied, pending: remaining === null ? queue.length : remaining };
+  } catch (err) {
+    log(`ℹ️ Could not flush the check-in queue (${err}) — the marks stay queued.`);
+    return { ok: false, applied: 0, pending: 0 };
+  }
+}
+
+/** One queued mark, applied. Called with the script lock already held. */
+function applyQueuedCheckInMark(entry) {
+  if (entry.clear) return clearCheckInMarkLocked(entry);
+  return applyQuickMarkLocked({
+    location: entry.location,
+    session: entry.session,
+    name: entry.name,
+    bookedTime: entry.bookedTime,
+    attended: !!entry.attended,
+    lunch: !!entry.lunch,
+    confirmWalkIn: !!entry.confirmWalkIn
+  });
+}
+
+/** The trigger handler. Its own name, so resetTriggersForHandler() can find it. */
+function flushCheckInQueueTrigger() {
+  flushCheckInQueue({ waitMs: SYNC_LOCK_WAIT_MS });
+}
+
+/** Menu-friendly: apply everything the door has queued, and say what happened. */
+function flushCheckInQueueNow() {
+  const result = flushCheckInQueue({ waitMs: SYNC_LOCK_WAIT_MS });
+  const message = result.applied
+    ? `Wrote ${result.applied} queued check-in mark(s) to the registrations tab ✅` +
+      (result.pending ? ` — ${result.pending} still queued.` : '')
+    : (result.pending
+      ? `Nothing could be written yet — ${result.pending} mark(s) are still queued (the workbook is busy).`
+      : 'Nothing was queued — every check-in is already on the tab.');
+  log(`flushCheckInQueueNow: ${message}`);
+  toastIfPossible(message);
 }

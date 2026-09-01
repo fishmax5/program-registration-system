@@ -31,6 +31,7 @@ const src = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
 // The stored PIN, and the sheet the roster reads — both swapped per test below.
 let storedPin = null;
 let registrantRows = [];
+let props = {};
 
 // Event_ID is the MARKER the sectioned reader finds a header row by, so a
 // stub without it is a tab the reader sees no tables on at all.
@@ -55,13 +56,31 @@ const sandbox = {
       return '9:00 AM';
     },
     getUuid: () => 'x', sleep: () => {},
-    computeDigest: () => [1], DigestAlgorithm: { MD5: 'MD5' }
+    computeDigest: () => [1], DigestAlgorithm: { MD5: 'MD5' },
+    // Section 16b packs its stores with gzip + base64 (packCachedText). What
+    // matters here is the ROUND TRIP, not the compression, so these stand in
+    // for both halves of it.
+    newBlob: data => ({ getBytes: () => data, getDataAsString: () => String(data) }),
+    gzip: blob => blob,
+    ungzip: blob => blob,
+    base64Encode: bytes => Buffer.from(String(bytes)).toString('base64'),
+    base64Decode: text => Buffer.from(String(text), 'base64').toString()
   },
+  // A real (in-memory) property store, because section 16b keeps the door's
+  // queue, its deltas and its roster store in Script Properties — chunked,
+  // since one property holds 9KB.
   PropertiesService: {
     getScriptProperties: () => ({
-      getProperty: key => (key === 'CHECK_IN_PIN' ? storedPin : null),
-      setProperty: (key, value) => { if (key === 'CHECK_IN_PIN') storedPin = value; },
-      deleteProperty: key => { if (key === 'CHECK_IN_PIN') storedPin = null; }
+      getProperty: key => (key === 'CHECK_IN_PIN'
+        ? storedPin
+        : (props[key] === undefined ? null : props[key])),
+      setProperty: (key, value) => {
+        if (key === 'CHECK_IN_PIN') storedPin = value; else props[key] = String(value);
+      },
+      setProperties: values => { Object.keys(values).forEach(k => { props[k] = String(values[k]); }); },
+      deleteProperty: key => {
+        if (key === 'CHECK_IN_PIN') storedPin = null; else delete props[key];
+      }
     })
   },
   SpreadsheetApp: { getActiveSpreadsheet: () => null },
@@ -71,6 +90,13 @@ const sandbox = {
     getEffectiveUser: () => ({ getEmail: () => 'a@b.c' })
   },
   ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
+};
+// The queue's lock is the DOCUMENT lock, deliberately — the script lock is the
+// one every sync holds, and taking it to append to the queue would reintroduce
+// the blocking section 16b exists to remove.
+sandbox.LockService = {
+  getDocumentLock: () => ({ tryLock: () => true, releaseLock: () => {} }),
+  getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} })
 };
 vm.createContext(sandbox);
 // `const` declarations do not become properties of the context's global, so
@@ -92,7 +118,7 @@ const nasty = 'O\'Brien </script><script>alert("x")</script> "quoted"';
 const index = {
   builtAt: '9:00 AM',
   sessions: [{
-    value: 'Chair Yoga · Wed, Sep 16, 2026', label: 'Chair Yoga · Wed, Sep 16, 2026', location: 'Narberth',
+    value: 'Chair Yoga · Wed, Sep 16, 2026', label: nasty + ' · Wed, Sep 16, 2026', location: 'Narberth',
     title: 'Chair Yoga', dateKey: '2026-09-16', byAppointment: false, times: [], group: 'Upcoming'
   }],
   namesBySession: { 'Narberth|~|Chair Yoga · Wed, Sep 16, 2026': { names: [nasty], keys: ['x'], times: [''] } },
@@ -108,7 +134,16 @@ const literal = /var INDEX = ("(?:[^"\\]|\\.)*") \? JSON\.parse/.exec(page);
 ok('the lists are inlined as a single string literal', !!literal);
 if (literal) {
   const parsed = JSON.parse(JSON.parse(literal[1]));
-  ok('the literal parses back to the same lists', parsed.members[0].name === nasty);
+  ok('the literal parses back to the same lists', parsed.sessions[0].label.indexOf(nasty) === 0);
+  // ONLY THE SESSION LIST TRAVELS (checkInPageIndex()). The roll, the names on
+  // every session and the standing needs are hundreds of kilobytes a tablet
+  // downloads before it can draw anything and then never reads — which is a
+  // wait in front of a queue, for data the door page cannot use.
+  ok('the member roll does not travel with the door page', parsed.members === undefined);
+  ok('nor do the per-session name lists', parsed.namesBySession === undefined);
+  ok('nor the standing needs', parsed.needs === undefined);
+  ok('and a session keeps only what the page draws',
+    Object.keys(parsed.sessions[0]).sort().join(',') === 'dateKey,group,label,location,value');
 }
 // The options ride the same way, and carry the location pin the URL asked for.
 const optsLiteral = /var OPTS = JSON\.parse\(("(?:[^"\\]|\\.)*")\);/.exec(page);
@@ -312,6 +347,110 @@ ok('no deployment at all is not flagged as dev', infoWithUrl('').isDev === false
 const devPage = sandbox.buildCheckInPageHtml({ url: 'https://x/dev', isDev: true, locations: ['Narberth'], pinSet: false });
 ok('the dialog warns about the test address', /not a published one/.test(devPage));
 ok('and names the error a tablet would show', /unable to open the file at this time/.test(devPage));
+
+// ---------------------------------------------------------------------------
+// 8. Section 16b — the store the door reads, and the queue it writes.
+// ---------------------------------------------------------------------------
+// What this pins is the two promises the speed work rests on: a session opens
+// WITHOUT reading the registrants tab, and a tap is written down WITHOUT
+// waiting for the workbook. Both are silent when they break — a stale roster
+// looks like a roster, and a dropped mark looks like a check-in.
+props = {};
+
+const today = new Date();
+const dayKey = offset => {
+  const date = new Date(today.getTime());
+  date.setDate(date.getDate() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-` +
+    `${String(date.getDate()).padStart(2, '0')}`;
+};
+const dayDate = offset => new Date(dayKey(offset) + 'T12:00:00');
+
+const storeRows = [
+  [dayDate(0), 'Narberth', 'Chair Yoga', '10:00 AM – 11:00 AM', 'Ruth Klein', false, false, 'evt1'],
+  [dayDate(0), 'Narberth', 'Chair Yoga', '10:00 AM – 11:00 AM', 'Al Morris', true, false, 'evt1'],
+  // Well outside the window the door covers — a roster nobody at a front door
+  // is ever standing in front of, and the thing that would make the blob too
+  // big to keep if it were carried.
+  [dayDate(120), 'Narberth', 'Chair Yoga', '10:00 AM – 11:00 AM', 'Bea Stone', false, false, 'evt1']
+];
+const todayLabel = `Chair Yoga · ${sandbox.formatDateLabel(dayDate(0))}`;
+const farLabel = `Chair Yoga · ${sandbox.formatDateLabel(dayDate(120))}`;
+
+withStubSheet(storeRows, () => sandbox.refreshCheckInStore());
+ok('the door store is kept in Script Properties, not only in a cache',
+  Object.keys(props).some(key => key.indexOf('CHECK_IN_STORE_V1') === 0));
+
+// THE POINT OF ALL OF IT: the sheet is gone, and a session still opens.
+sandbox.SpreadsheetApp.getActiveSpreadsheet = () => null;
+const stored = sandbox.storedCheckInRoster('Narberth', todayLabel);
+ok('a session opens off the store with no sheet read at all', !!stored && stored.rows.length === 2);
+ok('and the rows carry what a door reads',
+  !!stored && stored.rows[0].name === 'Al Morris' && stored.rows[1].name === 'Ruth Klein');
+ok('a session outside the stored window answers null, not an empty list',
+  sandbox.storedCheckInRoster('Narberth', farLabel) === null);
+ok('and so does a location the store has never heard of',
+  sandbox.storedCheckInRoster('Zoom', todayLabel) === null);
+
+// A tap: queued, and answered without the sheet — which is still not there.
+const marked = sandbox.checkInMark(JSON.stringify({
+  location: 'Narberth', session: todayLabel, name: 'Ruth Klein', attended: true
+}));
+ok('a mark is answered immediately rather than written', marked.ok === true && marked.queued === true);
+ok('and it is queued durably', sandbox.readCheckInQueue().length === 1);
+ok('and recorded as a delta, which outlives the queue entry',
+  sandbox.readCheckInDeltas().length === 1);
+
+// The overlay is what stops the desk seeing its own tap come back unticked.
+const overlaid = sandbox.applyCheckInOverlay(
+  sandbox.storedCheckInRoster('Narberth', todayLabel).rows,
+  'Narberth', todayLabel, { builtAtMs: 0 });
+ok('a queued mark shows on the roster before the sheet has it',
+  overlaid.filter(r => r.name === 'Ruth Klein')[0].attended === true);
+ok('and it does not tick anybody else',
+  overlaid.filter(r => r.name === 'Al Morris')[0].attended === true);
+
+// The undo, through the same queue.
+sandbox.checkInMark(JSON.stringify({
+  location: 'Narberth', session: todayLabel, name: 'Al Morris', clear: true
+}));
+const cleared2 = sandbox.applyCheckInOverlay(
+  sandbox.storedCheckInRoster('Narberth', todayLabel).rows,
+  'Narberth', todayLabel, { builtAtMs: 0 });
+ok('a queued clear unticks somebody the sheet still has ticked',
+  cleared2.filter(r => r.name === 'Al Morris')[0].attended === false);
+
+// A delta the sheet has caught up with is dropped, or every roster would carry
+// this morning's marks forever.
+const queuedIds = sandbox.readCheckInQueue().map(entry => entry.id);
+sandbox.dropCheckInDeltasBefore(new Date().getTime() + 1000);
+ok('deltas older than the store build are forgotten', sandbox.readCheckInDeltas().length === 0);
+ok('but the queue itself is untouched — those marks are not on the sheet yet',
+  sandbox.readCheckInQueue().map(entry => entry.id).join('|') === queuedIds.join('|'));
+
+// A failure has to reach somebody. The volunteer has walked away by the time a
+// queued mark is applied, so the next roster load is the only place left.
+sandbox.recordCheckInProblem({ name: 'Ruth Klein', session: todayLabel }, 'Nobody by that name.');
+const problems = sandbox.checkInRoster(JSON.stringify({ location: 'Narberth', session: todayLabel }));
+ok('a failed mark is reported on the next roster load',
+  problems.ok === true && problems.problems.join(' ').indexOf('Nobody by that name') !== -1);
+ok('and the roster came from the store, and says so', problems.source === 'stored');
+sandbox.clearCheckInProblems();
+ok('and it is only said once', sandbox.readCheckInProblems().length === 0);
+
+// Chunking, because a Script Property holds 9KB and a store does not.
+const long = 'x'.repeat(20000);
+ok('a value longer than one property round-trips', (() => {
+  sandbox.writeChunkedScriptProperty('TEST_CHUNKED', long, 8000, 10);
+  return sandbox.readChunkedScriptProperty('TEST_CHUNKED') === long;
+})());
+ok('and one too large to hold is refused rather than half-written', (() => {
+  const ok2 = sandbox.writeChunkedScriptProperty('TEST_BIG', long, 8000, 1);
+  return ok2 === false && sandbox.readChunkedScriptProperty('TEST_BIG') === '';
+})());
+sandbox.clearChunkedScriptProperty('TEST_CHUNKED');
+ok('and clearing it takes the chunks with it',
+  Object.keys(props).every(key => key.indexOf('TEST_CHUNKED') !== 0));
 
 console.log(fail ? `\n${fail} FAILED` : '\nall passed');
 process.exit(fail ? 1 : 0);

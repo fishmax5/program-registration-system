@@ -1223,13 +1223,25 @@ places, meal counts, moving an appointment — all of those ask follow-up
 questions (which club, how many meals, is a lunch even scheduled that day), and
 a door is not where those get asked. They stay in Quick Mark.
 
-> **The session list is a snapshot; the roster is live.** Which sessions exist,
-> and who is registered for them, comes off the same pre-built lists Quick Mark
-> uses, rebuilt on each sync — the page says at the top when they were built.
-> Who has *arrived* is read fresh from the sheet every time you pick a session,
-> and **Refresh list** re-reads it. So somebody who registered online ten
-> minutes ago may not be on the page yet; check them in from the workbook, or
-> run **🔄 Update Everything Now** first.
+> **The list is a snapshot; your own taps are always on it.** Which sessions
+> exist, who is registered for them, and who had arrived as of the last sync
+> all come off pre-built lists rebuilt on each sync — the page says above the
+> roster when the one you are looking at was built. That is what makes a
+> session open instantly instead of reading a year of registrations. Every mark
+> made on the page shows on it immediately whatever the snapshot says, and
+> **Refresh list** re-reads the sheet itself. So somebody who registered online
+> ten minutes ago may not be on the page yet: press **Refresh list**, check
+> them in from the workbook, or run **🔄 Update Everything Now** first.
+
+> **A tap is recorded instantly and written a moment later.** Marks are queued
+> and applied to the registrations tab within a few minutes — by a trigger, by
+> the next time you change session, and at the start of every sync. That is
+> what stops an hourly sync locking the desk out mid-morning. If you are
+> looking at the tab and want this morning's ticks on it *now*, run **🗓️
+> Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ Write Queued Check-Ins Now**.
+> If a queued mark cannot be applied at all — the person's registration was
+> deleted in the meantime, say — the page tells you the next time a list is
+> loaded.
 
 #### Registering somebody at the desk or over the phone
 
@@ -2330,6 +2342,7 @@ Everything else is grouped by the job it belongs to.
 | **Sync Registrations only** | Just the forms half: pulls in new responses and recomputes every count. Use this when you know nothing on the calendar has changed |
 | **Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
+| **Write Queued Check-Ins Now** | Writes any marks the check-in page has queued straight to the registrations tab, instead of waiting for the trigger that does it every few minutes |
 | **Rebuild Quick Mark Lists** | Rebuilds the stored session and name lists Quick Mark and the check-in page both open with. The hourly sync does this anyway; this is for rebuilding them *before* you walk to the desk |
 | **📱 Check-In Page (link & PIN)…** | The web address of the tablet sign-in page, one link per building, plus the desk PIN. Says how to deploy it if it has never been published — see [The check-in page](#-the-check-in-page--the-same-thing-on-a-tablet-at-the-door) |
 
