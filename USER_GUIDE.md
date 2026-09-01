@@ -1214,14 +1214,19 @@ visitor rather than for staff:
 **Lunch is not just another tick.** Meals are ordered from the caterer days
 ahead against a count, so the page says which of two things is true:
 
-- **ORDERED FOR YOU** — they registered for it; the line reads *collect it at
-  the counter* and nothing is re-ordered.
-- **NOT REGISTERED** — the line reads *tick this to be added to the list, then
-  check with a staff member that a meal is available*. Ticking it records the
-  **demand** (`Lunch_Status` = `Needed`, the same sign-up the desk dialog
-  makes), which puts them on the kitchen's list and on the dashboard's "lunch
-  needed" line. It never claims a meal was served, and it never promises there
-  is one.
+- **ORDERED FOR YOU** — they registered for it. Ticking it marks the meal
+  **handed over** (`Lunch_Served`, the same column the check-in list's Lunch
+  button sets), on the row that actually ordered the food rather than on
+  whichever program they happened to tick first. Leave it unticked if they are
+  not taking it today.
+- **NOT REGISTERED** — the line reads *tick this to be added to the list and
+  recorded as taking a meal, then check with a staff member that one is
+  available*. That writes **twice**, and the two say different things: the
+  sign-up is the **order** (`Lunch_Status` = `Needed`, which is what puts them
+  on the kitchen's list and on the dashboard's "lunch needed" line), and the
+  second is the **handover**. Without the first, the day would report a meal
+  served that nobody ever ordered. It still promises nothing: if staff say
+  there is no meal spare, untick the lunch on the check-in list.
 - A day the kitchen is shut, or a location that never caters, shows **NOT
   TODAY** and cannot be ticked at all.
 
@@ -1231,12 +1236,11 @@ land on **Member_Roll** with a `Staff_Notes` line reading *📨 Signed in at the
 door — membership form still to send*, so the office can find everybody who is
 waiting for one by searching that tab for "membership form".
 
-**What it deliberately does not do.** It never hands a meal over — that is
-`Lunch_Served`, a tap at the counter on the check-in list below. It never books
-a **[Personalized Assistance]** appointment: those programs are shown, marked
-**BY APPOINTMENT**, and left to staff, because choosing a slot is a
-conversation about which times are left. And it takes no membership, only an
-email to send the form to.
+**What it deliberately does not do.** It never books a **[Personalized
+Assistance]** appointment: those programs are shown, marked **BY
+APPOINTMENT**, and left to staff, because choosing a slot is a conversation
+about which times are left. And it takes no membership, only an email to send
+the form to.
 
 **Everything on it is read live** — no snapshot. Somebody who registered an
 hour ago is on the cards, somebody already signed in shows as signed in, and
@@ -1275,6 +1279,23 @@ work the door and the desk at once.
    link opens straight onto that building's day, so the Ashbridge tablet never
    asks a volunteer which building they are standing in.
 
+> **If a link says the page is not accessible, paste the real address.** Apps
+> Script does not reliably tell a script its own published address — on a
+> container-bound script it usually reports the **editor's test address**, the
+> one ending `/dev`, which opens perfectly for whoever owns the script and
+> answers everybody else with *"Sorry, unable to open the file at this time"*.
+> It can also keep reporting a deployment that has since been deleted. So the
+> same window has a **deployment address** box: open **Deploy ▸ Manage
+> deployments**, copy the **Web app** URL (it ends in `/exec`), paste it there,
+> and every link is built from that instead. A `/dev` address is refused rather
+> than saved.
+
+> **A deployment is pinned to a VERSION.** Pasting new code into the editor
+> changes nothing at the door until you publish: **Deploy ▸ Manage deployments
+> ▸ the pencil ▸ Version: New version ▸ Deploy**. Until then the tablets keep
+> serving whatever was published last — which is the other half of "the link
+> works but the page is wrong".
+
 > **Set a PIN if you deployed to *Anyone*.** That deployment makes the link
 > itself the permission — anyone it is forwarded to could mark attendance. The
 > PIN box in the same window closes that: each tablet is asked once and
@@ -1288,13 +1309,18 @@ club, how many meals, is a lunch even scheduled that day), and a session roster
 is not where those get asked. They stay in Quick Mark. Registering somebody who
 never signed up is what the sign-in page above is for.
 
-> **The session list is a snapshot; the roster is live.** Which sessions exist,
-> and who is registered for them, comes off the same pre-built lists Quick Mark
-> uses, rebuilt on each sync — the page says at the top when they were built.
-> Who has *arrived* is read fresh from the sheet every time you pick a session,
-> and **Refresh list** re-reads it. So somebody who registered online ten
-> minutes ago may not be on the page yet; check them in from the workbook, or
-> run **🔄 Update Everything Now** first.
+> **The session list is a snapshot; the roster is live.** Which sessions exist
+> comes off the same pre-built lists Quick Mark uses, rebuilt on each sync —
+> the page says at the top when they were built. Who has *arrived* is read
+> fresh from the sheet every time you pick a session, and **Refresh list**
+> re-reads it. So somebody who registered online ten minutes ago may not be in
+> the session list yet; run **🔄 Update Everything Now** first.
+>
+> **On a workbook that has never synced there are no stored lists at all**, and
+> the page used to say so and stop — which from a tablet is indistinguishable
+> from a page that does not work. It now falls back to reading the **next two
+> weeks** of sessions live, and says at the top that it has. The walk-in
+> sign-in page never uses the stored lists at all.
 
 #### Registering somebody at the desk or over the phone
 

@@ -38181,6 +38181,31 @@ function buildAssistanceReviewHtml(review) {
 const CHECK_IN_PIN_PROP_KEY = 'CHECK_IN_PIN';
 
 /**
+ * Script Property holding THE ADDRESS STAFF ACTUALLY PASTED, and why it has to
+ * exist.
+ *
+ * ScriptApp.getService().getUrl() is not reliably the published address, and
+ * the ways it is wrong are all silent:
+ *
+ *   - on a container-bound script it commonly hands back the script editor's
+ *     own test address, the one ending "/dev", which opens perfectly for
+ *     whoever owns the script and answers everybody else with "Sorry, unable
+ *     to open the file at this time" or a Google sign-in wall;
+ *   - after a deployment is deleted and remade it can keep reporting the OLD
+ *     deployment's id, which is an /exec address that looks completely
+ *     ordinary and 404s;
+ *   - and it says nothing at all about which VERSION a deployment is pinned
+ *     to, so a link that works can still be serving code from six weeks ago.
+ *
+ * None of that is guessable from inside the script. What is knowable is what
+ * the Deploy screen says, and a person is standing in front of it when they
+ * publish — so the dialog asks them to paste it once, and every link this file
+ * hands out is built from that. getUrl() stays as the fallback and as the
+ * thing the dialog compares against, never as the last word.
+ */
+const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
+
+/**
  * THE WEB APP ENTRY POINT. Serves ONE OF TWO PAGES:
  *
  *   (default)      the walk-in sign-in page — section 16b, the door.
@@ -38209,7 +38234,7 @@ function doGet(e) {
     // app has no toast to apologise with, and a volunteer looking at a spinner
     // assumes the page is broken. A workbook with no stored lists yet gets a
     // page that says so in words.
-    ? buildCheckInHtml(readyQuickMarkIndex(), { location, pinRequired })
+    ? buildCheckInHtml(readyCheckInSessionIndex(), { location, pinRequired })
     : buildWalkInHtml({
       location,
       pinRequired,
@@ -38240,18 +38265,200 @@ function doGet(e) {
  */
 function checkInPageUrl(options) {
   const opts = options || {};
-  let base = '';
-  try {
-    base = String(ScriptApp.getService().getUrl() || '');
-  } catch (err) {
-    return '';
-  }
+  const base = readCheckInBaseUrl();
   if (!base) return '';
   const parts = [];
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
   if (opts.mode) parts.push(`mode=${encodeURIComponent(opts.mode)}`);
   if (!parts.length) return base;
   return `${base}${base.indexOf('?') === -1 ? '?' : '&'}${parts.join('&')}`;
+}
+
+/**
+ * THE ADDRESS EVERY LINK IS BUILT FROM: what staff pasted, else what the
+ * script reports. See CHECK_IN_WEB_APP_URL_PROP_KEY for why those are two
+ * different things.
+ */
+function readCheckInBaseUrl() {
+  const saved = readSavedCheckInWebAppUrl();
+  if (saved) return saved;
+  return readScriptReportedWebAppUrl();
+}
+
+/** What staff pasted, or ''. */
+function readSavedCheckInWebAppUrl() {
+  try {
+    return String(PropertiesService.getScriptProperties()
+      .getProperty(CHECK_IN_WEB_APP_URL_PROP_KEY) || '').trim();
+  } catch (err) {
+    log(`Could not read the saved web app URL (${err}).`);
+    return '';
+  }
+}
+
+/** What the script says its own address is, or '' — never trusted on its own. */
+function readScriptReportedWebAppUrl() {
+  try {
+    return String(ScriptApp.getService().getUrl() || '').trim();
+  } catch (err) {
+    log(`Could not read the web app URL (${err}).`);
+    return '';
+  }
+}
+
+/**
+ * A pasted deployment address, tidied and judged: { ok, url, message }.
+ *
+ * THE QUERY STRING IS CUT OFF. What gets copied is very often a link that has
+ * already been opened once — "…/exec?location=Narberth" — and building
+ * "?location=X" onto that gives an address with the parameter twice, where
+ * whichever one Apps Script reads last wins. Cutting at the "?" makes a
+ * copy-paste from the browser bar work exactly like one from the Deploy
+ * screen.
+ *
+ * A /dev address is REFUSED rather than saved with a warning beside it. It is
+ * the single most common way to end up with a link that works for the person
+ * who set it up and for nobody else, and saving it would be this dialog
+ * carefully recording the exact mistake it exists to prevent.
+ */
+function normalizeCheckInWebAppUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return { ok: true, url: '', message: '' };
+  const cut = raw.split('#')[0].split('?')[0].trim();
+  if (!/^https:\/\//i.test(cut)) {
+    return { ok: false, url: '', message: 'That is not a web address — it should start with https://' };
+  }
+  if (/\/dev$/i.test(cut)) {
+    return {
+      ok: false,
+      url: '',
+      message: 'That is the test address (it ends in /dev). It opens only for accounts that can ' +
+        'edit this script — a tablet gets "unable to open the file at this time". Use Deploy ▸ ' +
+        'Manage deployments and copy the Web app URL, which ends in /exec.'
+    };
+  }
+  if (!/\/exec$/i.test(cut)) {
+    return {
+      ok: false,
+      url: '',
+      message: 'A published web app address ends in /exec. Copy the one under Deploy ▸ Manage ' +
+        'deployments ▸ Web app.'
+    };
+  }
+  return { ok: true, url: cut, message: '' };
+}
+
+/**
+ * Saves (or clears) the deployment address the links are built from. Called
+ * from the dialog.
+ */
+function setCheckInWebAppUrl(url) {
+  const judged = normalizeCheckInWebAppUrl(url);
+  if (!judged.ok) return { ok: false, savedUrl: readSavedCheckInWebAppUrl(), message: `⚠️ ${judged.message}` };
+  const props = PropertiesService.getScriptProperties();
+  if (!judged.url) {
+    props.deleteProperty(CHECK_IN_WEB_APP_URL_PROP_KEY);
+    return {
+      ok: true,
+      savedUrl: '',
+      message: 'Cleared. The links now use whatever address the script reports, which is not ' +
+        'always the published one.'
+    };
+  }
+  props.setProperty(CHECK_IN_WEB_APP_URL_PROP_KEY, judged.url);
+  return { ok: true, savedUrl: judged.url, message: `Saved. Every link below is now built from ${judged.url}` };
+}
+
+/**
+ * THE SESSION LIST FOR THE CHECK-IN PAGE, and the fallback that stops the page
+ * being blank.
+ *
+ * The stored Quick Mark lists are the fast path and the right one: they carry
+ * six months of sessions, and they cost nothing to serve. But they only exist
+ * once something has built them — a sync, or ⚡ Rebuild Quick Mark Lists — and
+ * a workbook that has been deployed before it has ever been synced serves a
+ * page reading "the lists have not been built yet", which from a tablet is
+ * indistinguishable from a page that does not work. THAT is what "it opens but
+ * there are no names on it" is.
+ *
+ * So when there are no stored lists, the sessions are read live instead. It is
+ * a much smaller question than the one buildQuickMarkIndex() answers — the
+ * next fortnight, off the session table, with no names attached, because the
+ * roster is fetched per session anyway (see checkInRoster()) — and it is
+ * bounded, so it cannot become the slow path by accident.
+ */
+function readyCheckInSessionIndex() {
+  const stored = readyQuickMarkIndex();
+  if (stored && stored.sessions && stored.sessions.length) return stored;
+  log('ℹ️ The check-in page found no stored session lists — reading the next two weeks live.');
+  try {
+    return buildLiveCheckInSessionIndex();
+  } catch (err) {
+    log(`ℹ️ The live session read failed too (${err}) — serving the page with no lists.`);
+    return null;
+  }
+}
+
+/** How far ahead the live fallback looks. A door is not a planning tool. */
+const CHECK_IN_LIVE_SESSION_DAYS = 14;
+
+/**
+ * An index-shaped object carrying ONLY what the check-in page reads from one:
+ * `sessions` and `builtAt`. The dialog's index carries names, the member roll
+ * and the standing needs as well; this page uses none of them (it reads its
+ * roster live), so none of them is built.
+ */
+function buildLiveCheckInSessionIndex() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+  const sessions = [];
+  if (dash) {
+    const headers = HEADERS.Master_Program_Dashboard;
+    const map = getIndexMap(headers);
+    const todayKey = formatDateKey(new Date());
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + CHECK_IN_LIVE_SESSION_DAYS);
+    const horizonKey = formatDateKey(horizon);
+    const seen = {};
+    readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
+      const title = String(row[map['Clean_Title']] || '').trim();
+      const location = String(row[map['Location']] || '').trim();
+      const date = coerceDate(row[map['Event_Date']]);
+      if (!title || !date) return;
+      const dateKey = formatDateKey(date);
+      if (dateKey < todayKey || dateKey > horizonKey) return;
+      const label = `${title}${LOCATION_LABEL_SEPARATOR}${formatDateLabel(date)}`;
+      const key = `${location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${label}`;
+      if (seen[key]) return;
+      seen[key] = true;
+      sessions.push({
+        value: label,
+        label,
+        group: dateKey === todayKey ? 'Today' : 'Coming up',
+        location,
+        title,
+        dateKey,
+        // Never offered for booking from this page, so the appointment facts
+        // the dialog carries would be dead weight — and the page only reads
+        // them to decide whether to show a time dropdown it does not have.
+        byAppointment: false,
+        times: [],
+        sortKey: `${dateKey} ${date.getHours()}${date.getMinutes()} ${label}`
+      });
+    });
+    sessions.sort((a, b) => (a.sortKey < b.sortKey ? -1 : (a.sortKey > b.sortKey ? 1 : 0)));
+  }
+  return {
+    schema: QUICK_MARK_INDEX_SCHEMA,
+    sessions,
+    namesBySession: {},
+    members: [],
+    needs: [],
+    // What the page says about itself — see the note it renders.
+    live: true,
+    liveDays: CHECK_IN_LIVE_SESSION_DAYS,
+    builtAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
+  };
 }
 
 /**
@@ -38713,8 +38920,15 @@ function buildCheckInHtml(preloadedIndex, options) {
     // there deserves to know that rather than to conclude the page is broken.
     if (INDEX.builtAt) {
       var stale = document.getElementById('stale');
-      stale.textContent = 'Session list built at ' + INDEX.builtAt + '. Somebody who registered ' +
-        'since then will not be on it yet - check them in from the workbook.';
+      // A LIVE list is not a stale one, and saying it is teaches volunteers to
+      // distrust a page that is telling them the truth. See
+      // readyCheckInSessionIndex(): the stored lists are a snapshot rebuilt on
+      // a trigger, and the fallback is read at the moment the page is served.
+      stale.textContent = INDEX.live
+        ? 'Sessions read just now, live. Only the next ' + (INDEX.liveDays || 14) +
+          ' days are listed - open the workbook for anything further out.'
+        : 'Session list built at ' + INDEX.builtAt + '. Somebody who registered ' +
+          'since then will not be on it yet - check them in from the workbook.';
       stale.classList.remove('hide');
     }
     fillLocations();
@@ -39006,7 +39220,7 @@ function showCheckInPageDialog() {
     // a three-location workbook needs the room to show six without the PIN
     // box being scrolled off the bottom.
     .setWidth(560)
-    .setHeight(660);
+    .setHeight(760);
   SpreadsheetApp.getUi().showModalDialog(html, 'Door Pages');
 }
 
@@ -39029,15 +39243,20 @@ function showCheckInPageDialog() {
  * of the two it is holding rather than presenting them as the same link.
  */
 function readCheckInPageInfo() {
-  let url = '';
-  try {
-    url = ScriptApp.getService().getUrl() || '';
-  } catch (err) {
-    log(`Could not read the web app URL (${err}).`);
-  }
+  const savedUrl = readSavedCheckInWebAppUrl();
+  const scriptUrl = readScriptReportedWebAppUrl();
+  const url = savedUrl || scriptUrl;
   return {
     url,
-    isDev: /\/dev(\?|#|$)/.test(url),
+    savedUrl,
+    scriptUrl,
+    // Which of the two the links above are built from, so the dialog can say
+    // so rather than presenting a guess as a fact.
+    fromSaved: !!savedUrl,
+    // Only ever describes the SCRIPT-REPORTED address now: a pasted one can
+    // never be a /dev address (normalizeCheckInWebAppUrl() refuses those), so
+    // the warning belongs to the fallback and would be a lie about the other.
+    isDev: !savedUrl && /\/dev(\?|#|$)/.test(url),
     locations: checkInLocations(),
     pinSet: isCheckInPinSet()
   };
@@ -39087,6 +39306,8 @@ function buildCheckInPageHtml(info) {
                 padding: 3px 8px; font-size: 11px; margin-left: 6px; vertical-align: 1px; }
   ol { padding-left: 20px; line-height: 1.6; }
   input[type=text] { width: 140px; padding: 6px; font-size: 13px; }
+  input#weburl { width: 100%; margin-bottom: 6px; font-family: monospace; font-size: 12px; }
+  code { background: #F1F3F4; border-radius: 3px; padding: 0 3px; }
   button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
            font-size: 13px; cursor: pointer; }
   #status { margin-top: 10px; min-height: 16px; font-weight: bold; line-height: 1.5; }
@@ -39103,6 +39324,20 @@ function buildCheckInPageHtml(info) {
   name to mark them present and tap Lunch as meals are handed over.
 </p>
 <div id="links"></div>
+
+<fieldset>
+  <legend>The deployment address</legend>
+  <p class="hint" id="urlstate"></p>
+  <input type="text" id="weburl" placeholder="https://script.google.com/…/exec">
+  <button onclick="saveUrl()">Save</button>
+  <p class="hint">
+    <b>If a link above says the page is not accessible, this is the box that fixes it.</b>
+    Apps Script does not reliably tell a script its own published address — it often reports the
+    editor's test address (ending <code>/dev</code>), which opens only for people who can edit
+    this script. Open <b>Deploy ▸ Manage deployments</b>, copy the <b>Web app</b> URL (it ends in
+    <code>/exec</code>), and paste it here once. Clear the box and save to go back to guessing.
+  </p>
+</fieldset>
 
 <fieldset>
   <legend>Desk PIN</legend>
@@ -39140,7 +39375,7 @@ function buildCheckInPageHtml(info) {
         '<li>Deploy &rarr; <b>New deployment</b> &rarr; Web app</li>' +
         '<li>Execute as <b>Me</b>; Who has access <b>Anyone within your organization</b> ' +
         '(or <b>Anyone</b> if the tablets are not signed in — set a PIN below if so)</li>' +
-        '<li>Deploy, then reopen this window. The link will end in <code>/exec</code></li></ol>' +
+        '<li>Deploy, then paste the <code>/exec</code> address into the box below</li></ol>' +
         '<div class="link"><b>Test address (you only)</b>' +
         '<a href="' + esc(INFO.url) + '" target="_blank" rel="noopener">' + esc(INFO.url) + '</a></div>';
       return;
@@ -39164,7 +39399,50 @@ function buildCheckInPageHtml(info) {
     });
     html += linkRow('Any location (asks which)', INFO.url, '');
     el.innerHTML = html +
-      '<p class="hint">Open one on the tablet and add it to the home screen.</p>';
+      '<p class="hint">Open one on the tablet and add it to the home screen.' +
+      (INFO.fromSaved
+        ? ' Built from the address you saved below.'
+        : ' Built from the address the script reports, which is not always the published one — ' +
+          'if these give an error, paste the real one below.') +
+      '</p>' +
+      // THE OTHER HALF OF "the link works but the page is out of date". A
+      // deployment is pinned to a VERSION, so editing the script changes
+      // nothing at the door until a new version is published. It is invisible
+      // from here — there is no API for it — so it is said every time.
+      '<p class="hint"><b>After pasting new code:</b> Deploy &rarr; Manage deployments &rarr; ' +
+      'the pencil &rarr; Version: <b>New version</b> &rarr; Deploy. Until you do, the tablets ' +
+      'keep serving the version that was published last, whatever the script now says.</p>';
+  }
+
+  function drawUrl() {
+    var box = document.getElementById('weburl');
+    if (!box.value) box.value = INFO.savedUrl || INFO.scriptUrl || '';
+    document.getElementById('urlstate').textContent = INFO.savedUrl
+      ? 'Saved — every link above is built from this.'
+      : (INFO.scriptUrl
+        ? 'Nothing saved. The links above use the address the script reports: ' + INFO.scriptUrl
+        : 'Nothing saved, and the script reports no address at all — it has never been deployed.');
+  }
+
+  function saveUrl() {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        INFO.savedUrl = res.savedUrl;
+        INFO.fromSaved = !!res.savedUrl;
+        INFO.url = res.savedUrl || INFO.scriptUrl;
+        INFO.isDev = !res.savedUrl && /\/dev(\?|#|$)/.test(INFO.url || '');
+        draw();
+        drawUrl();
+        var s2 = document.getElementById('status');
+        s2.textContent = res.message;
+        s2.className = res.ok ? 'ok' : 'warn';
+      })
+      .withFailureHandler(function (err) {
+        var s2 = document.getElementById('status');
+        s2.textContent = String(err && err.message ? err.message : err);
+        s2.className = 'warn';
+      })
+      .setCheckInWebAppUrl(document.getElementById('weburl').value);
   }
 
   /** One labelled, clickable, copyable address. */
@@ -39230,6 +39508,7 @@ function buildCheckInPageHtml(info) {
   }
 
   draw();
+  drawUrl();
   drawPin();
 </script>`;
 }
@@ -39436,7 +39715,12 @@ function readWalkInDay(location, dateKeyOverride) {
           // than as a rider on a program they signed up for. It is the
           // difference between having something to mark them present against
           // and having nothing — see walkInSignIn().
-          lunchRegistered: false, lunchOnly: false, lunchServed: false, here: false
+          //
+          // lunchOn: the session value of the row that actually carries the
+          // meal, so the handover is marked on THAT row rather than on
+          // whichever program happened to be ticked first. One person can hold
+          // three rows today and only one of them ordered food.
+          lunchRegistered: false, lunchOnly: false, lunchOn: '', lunchServed: false, here: false
         };
         peopleByKey[key] = person;
         people.push(person);
@@ -39450,14 +39734,19 @@ function readWalkInDay(location, dateKeyOverride) {
       // that decides what the lunch line says. Read off any of the day's rows
       // — a lunch is counted once per person per day however many of that
       // day's programs they ticked it on (see countLunchMeals()).
+      const rowTitle = String(row[map['Event']] || '').trim();
       if (map['Lunch_Status'] !== undefined &&
         String(row[map['Lunch_Status']] || '').trim().toLowerCase() === 'needed') {
         person.lunchRegistered = true;
+        if (!person.lunchOn && rowTitle) {
+          person.lunchOn = isLunchOnlyProgramTitle(rowTitle)
+            ? sessionValue(lunchTitle) : sessionValue(rowTitle);
+        }
       }
       if (map['Lunch_Served'] !== undefined && isTruthyCheckbox(row[map['Lunch_Served']])) {
         person.lunchServed = true;
       }
-      const title = String(row[map['Event']] || '').trim();
+      const title = rowTitle;
       if (!title || isLunchOnlyProgramTitle(title)) {
         if (title) person.lunchOnly = true;
         return;
@@ -39629,21 +39918,29 @@ function walkInSignIn(payload) {
   if (wantsLunch) {
     const dish = day.lunch.dish ? ` (${day.lunch.dish})` : '';
     if (person && person.lunchRegistered) {
-      const ordered = `🍽️ Lunch${dish} is already ordered for you — collect it at the counter.`;
-      // SOMEBODY WHOSE WHOLE VISIT IS THE MEAL still walked through the door,
-      // and their attendance has to land somewhere or the page records
-      // nothing at all for them. It lands on the lunch row they already hold
-      // — matched by shape, so a row written under last week's spelling of
-      // the dish is still theirs (see quickMarkTitleKey()).
-      if (person.lunchOnly) {
-        const res = applyQuickMarkFromDialog({
-          location, session: day.lunch.value, name, attended: true
-        });
-        lines.push(res && res.ok ? `${res.message} ${ordered}` : ((res && res.message) || ordered));
-        if (res && res.ok) done++;
-      } else {
-        lines.push(ordered);
-      }
+      // A MEAL ALREADY ORDERED, MARKED AS HANDED OVER. The door is where the
+      // meal is collected in this building, so the tick is the handover —
+      // Lunch_Served, the same column the check-in list's Lunch button sets,
+      // and the same one the counter unticks if it turns out the meal was not
+      // taken after all.
+      //
+      // ON THE ROW THAT ORDERED THE FOOD (person.lunchOn), not on whichever
+      // program sorted first: one person can hold three rows today and only
+      // one of them is the meal. `attended` rides along because a lunch tick
+      // on its own is the TAKE-OUT case, which clears attendance — see
+      // applyQuickMarkLocked() — and somebody standing at the door plainly
+      // came in.
+      const res = applyQuickMarkFromDialog({
+        location,
+        session: person.lunchOn || firstProgramValue || day.lunch.value,
+        name,
+        attended: true,
+        lunch: true
+      });
+      lines.push(res && res.ok
+        ? `${res.message} 🍽️ Lunch${dish} was already ordered for you and is marked handed over.`
+        : ((res && res.message) || `🍽️ Lunch${dish} is already ordered for you — collect it at the counter.`));
+      if (res && res.ok) done++;
     } else if (!day.lunch.offered) {
       lines.push(day.lunch.ruledOut
         ? `⚠️ No lunch is being served at ${location} today, so none was added.`
@@ -39656,20 +39953,36 @@ function walkInSignIn(payload) {
       // thing as a second lunch-only row and says it in one row instead of
       // two. With no program ticked there is nothing to attach it to, and the
       // day's own lunch session is what the meal belongs to.
+      const lunchSession = firstProgramValue || day.lunch.value;
       const res = applyQuickMarkFromDialog({
         location,
-        session: firstProgramValue || day.lunch.value,
+        session: lunchSession,
         name,
         signup: true,
         confirmWalkIn: true,
         phone,
         email
       });
-      lines.push(res && res.ok
-        ? `${res.message} ⚠️ Today's meals were ordered in advance — check with a staff member ` +
-          'that there is one spare.'
-        : ((res && res.message) || '⚠️ The lunch could not be added.'));
-      if (res && res.ok) done++;
+      if (res && res.ok) {
+        done++;
+        // TWO WRITES, AND THEY SAY DIFFERENT THINGS. The sign-up above is the
+        // ORDER — it is what puts the meal on the kitchen's count and on the
+        // dashboard's "lunch needed" line, and it has to exist even for a meal
+        // handed over a minute later, or the day reports a meal served that
+        // nobody ever ordered. This second write is the HANDOVER.
+        //
+        // They cannot be one call: applyQuickMarkLocked() treats a sign-up and
+        // a served tick as mutually exclusive on purpose, because one is a
+        // meal expected and the other a meal already gone.
+        const handed = applyQuickMarkFromDialog({
+          location, session: lunchSession, name, attended: true, lunch: true
+        });
+        lines.push(`${res.message} ${handed && handed.ok ? 'Marked handed over. ' : ''}` +
+          "⚠️ Today's meals were ordered in advance — check with a staff member that there is " +
+          'one spare. If there is not, untick the lunch on the check-in list.');
+      } else {
+        lines.push((res && res.message) || '⚠️ The lunch could not be added.');
+      }
     }
   }
 
@@ -39970,6 +40283,15 @@ function buildWalkInHtml(options) {
     results.style.marginTop = '10px';
     main.appendChild(results);
 
+    // A WORKBOOK THAT HAS NEVER SYNCED HAS NO MEMBER ROLL, and a search box
+    // that silently finds nobody reads as a broken search rather than as an
+    // empty directory. Say which it is, and say what fills it.
+    if (!(DAY.members || []).length) {
+      main.appendChild(el('p', 'hint',
+        'The member directory is empty — run "Update Everything Now" in the workbook to build ' +
+        'it. Anybody can still be registered as new below.'));
+    }
+
     main.appendChild(button('plain', "I'm new here — register", function () {
       STEP = 'new';
       drawNew(document.getElementById('app'));
@@ -40135,16 +40457,19 @@ function buildWalkInHtml(options) {
         : '<span class="tag no">NOT REGISTERED</span>');
     var meta = [];
     if (lunch.type && lunch.type !== 'Not Serving') meta.push(lunch.type);
-    if (registered) meta.push('Your meal is already ordered — collect it at the counter.');
-    else if (locked) {
+    if (registered) {
+      meta.push('Your meal is ordered. Ticking this records it as handed to you — ' +
+        'leave it unticked if you are not taking it today.');
+    } else if (locked) {
       meta.push(lunch.ruledOut
         ? 'No lunch is served here today.'
         : 'Today\\'s menu has not been set. Ask a staff member.');
     } else {
       // THE SENTENCE THIS WHOLE SECTION EXISTS FOR. Meals are ordered days
-      // ahead against a count, so a tick here is a request, not a meal.
-      meta.push('You are not signed up for lunch. Tick this to be added to the list, ' +
-        'then check with a staff member that a meal is available.');
+      // ahead against a count, so a tick here is a request for one that may
+      // not exist — recorded, and never promised.
+      meta.push('You are not signed up for lunch. Tick this to be added to the list and ' +
+        'recorded as taking a meal, then check with a staff member that one is available.');
     }
     what.innerHTML = tag + '<span class="title">' + esc(title) + '</span>' +
       '<span class="meta' + (registered || locked ? '' : ' warn') + '">' +

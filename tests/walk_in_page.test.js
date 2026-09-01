@@ -94,6 +94,16 @@ ok('nonsense is the door, not an error', sandbox.checkInRosterModeRequested({ mo
 // ---------------------------------------------------------------------------
 // 2. The URLs the dialog hands out.
 // ---------------------------------------------------------------------------
+let savedWebAppUrl = null;
+sandbox.PropertiesService = {
+  getScriptProperties: () => ({
+    getProperty: key => (key === 'CHECK_IN_PIN' ? storedPin
+      : (key === 'CHECK_IN_WEB_APP_URL' ? savedWebAppUrl : null)),
+    setProperty: (key, value) => { if (key === 'CHECK_IN_WEB_APP_URL') savedWebAppUrl = value; },
+    deleteProperty: key => { if (key === 'CHECK_IN_WEB_APP_URL') savedWebAppUrl = null; }
+  })
+};
+
 function withUrl(url, fn) {
   sandbox.ScriptApp = { getService: () => ({ getUrl: () => url }) };
   try { return fn(); } finally { sandbox.ScriptApp = {}; }
@@ -114,6 +124,58 @@ withUrl('https://script.google.com/macros/s/ABC/exec', () => {
 ok('an undeployed script has no link rather than a broken one',
   withUrl('', () => sandbox.checkInPageUrl({ location: 'Narberth' })) === '');
 ok('and a script that throws on getUrl has none either', sandbox.checkInPageUrl({}) === '');
+
+// ---------------------------------------------------------------------------
+// 2b. The pasted deployment address — the fix for "the link is not accessible".
+// ---------------------------------------------------------------------------
+// getUrl() is not reliably the published address: on a bound script it
+// commonly reports the editor's /dev test address, which opens for the script
+// owner and refuses everybody else. So staff paste the real one, and every
+// link is built from that instead.
+const norm = sandbox.normalizeCheckInWebAppUrl;
+ok('a published address is accepted',
+  norm('https://script.google.com/macros/s/ABC/exec').url === 'https://script.google.com/macros/s/ABC/exec');
+ok('and is trimmed', norm('  https://script.google.com/macros/s/ABC/exec  ').ok === true);
+// What actually gets pasted is very often a link that has been opened once,
+// and building "?location=X" onto that would give the parameter twice.
+ok('a query string is cut off, not kept',
+  norm('https://script.google.com/macros/s/ABC/exec?location=Narberth').url ===
+  'https://script.google.com/macros/s/ABC/exec');
+ok('and so is a fragment',
+  norm('https://script.google.com/macros/s/ABC/exec#top').url ===
+  'https://script.google.com/macros/s/ABC/exec');
+// THE ONE THIS BOX EXISTS FOR. Saving a /dev address would be the dialog
+// carefully recording the exact mistake it is there to prevent.
+const dev = norm('https://script.google.com/macros/s/ABC/dev');
+ok('the test address is refused', dev.ok === false && dev.url === '');
+ok('and the refusal names the error a tablet shows',
+  /unable to open the file at this time/i.test(dev.message));
+ok('an address that ends in neither is refused',
+  norm('https://script.google.com/macros/s/ABC/').ok === false);
+ok('and so is something that is not a URL at all', norm('paste it here').ok === false);
+ok('a blank is not a refusal — it clears the setting', norm('   ').ok === true);
+
+// Saved, and then used by every link.
+savedWebAppUrl = null;
+const savedRes = sandbox.setCheckInWebAppUrl('https://script.google.com/macros/s/REAL/exec');
+ok('saving stores the address', savedRes.ok === true && savedWebAppUrl === 'https://script.google.com/macros/s/REAL/exec');
+ok('a refused address is not stored',
+  sandbox.setCheckInWebAppUrl('https://script.google.com/macros/s/OTHER/dev').ok === false &&
+  savedWebAppUrl === 'https://script.google.com/macros/s/REAL/exec');
+// THE WHOLE POINT: the saved one beats whatever getUrl() claims.
+ok('the saved address wins over the one the script reports',
+  withUrl('https://script.google.com/macros/s/WRONG/dev',
+    () => sandbox.checkInPageUrl({ location: 'Narberth' })) ===
+  'https://script.google.com/macros/s/REAL/exec?location=Narberth');
+const savedInfo = withUrl('https://script.google.com/macros/s/WRONG/dev', () => sandbox.readCheckInPageInfo());
+ok('and the dialog says the links came from it', savedInfo.fromSaved === true);
+ok('and stops warning about a /dev address it is no longer using', savedInfo.isDev === false);
+ok('while still reporting what the script claims, for comparison',
+  savedInfo.scriptUrl === 'https://script.google.com/macros/s/WRONG/dev');
+const clearedRes = sandbox.setCheckInWebAppUrl('');
+ok('a blank clears it', clearedRes.ok === true && savedWebAppUrl === null);
+ok('and the script-reported address is warned about again',
+  withUrl('https://script.google.com/macros/s/WRONG/dev', () => sandbox.readCheckInPageInfo()).isDev === true);
 
 // ---------------------------------------------------------------------------
 // 3. The page's inlined options.
@@ -142,7 +204,14 @@ try { new vm.Script(inner); } catch (err) { parses = false; }
 ok('the page script parses as JavaScript', parses);
 // The sentence the whole lunch section exists for.
 ok('the page warns that an unregistered lunch is not a promised meal',
-  /check with a staff member that a meal is available/i.test(page));
+  /check with a staff member that one is available/i.test(page));
+// The tick IS the handover now, on both sides of the registered/not line —
+// the door is where the food is collected, so a meal ticked here is marked
+// served (Lunch_Served), and the page has to say that before it is ticked.
+ok('and says a tick records the meal as taken',
+  /recorded as taking a meal/i.test(page) && /records it as handed to you/i.test(page));
+ok('and offers the way out of a mistaken tick',
+  /leave it unticked if you are not taking it today/i.test(page));
 
 // ---------------------------------------------------------------------------
 // 4. The day, read off stub tabs.
@@ -287,6 +356,37 @@ ok('and no program ticked, because a meal is not one', bea.registered.length ===
 // present against — otherwise a visit that is only lunch records nothing.
 ok('a lunch-only registration is known to be one', bea.lunchOnly === true);
 ok('while a meal ridden on a program registration is not', ruth.lunchOnly === false);
+// WHICH ROW ORDERED THE FOOD. The handover is marked on that row and not on
+// whichever program sorted first: Al holds two rows today and neither of them
+// is a meal, and marking a served lunch on a row that ordered none is a meal
+// the day cannot account for.
+ok('the row carrying the meal is named', bea.lunchOn === day.lunch.value);
+ok('and for a meal ridden on a program, it is that program\'s row',
+  ruth.lunchOn === yoga.value);
+ok('somebody with no meal has no row carrying one', al.lunchOn === '');
+
+// ---------------------------------------------------------------------------
+// 4b. The live session list — the fallback that stops the staff page being
+//     blank on a workbook that has never synced.
+// ---------------------------------------------------------------------------
+// The stored Quick Mark lists only exist once something has built them, and a
+// page reading "the lists have not been built yet" is indistinguishable, from
+// a tablet, from a page that does not work.
+const live = withWorkbook({ dash: dashRows, reg: regRows }, () => sandbox.buildLiveCheckInSessionIndex());
+ok('the live list says it is live', live.live === true);
+ok('and how far ahead it looked', live.liveDays === 14);
+ok('and carries no names, because the roster is read per session',
+  JSON.stringify(live.namesBySession) === '{}');
+// The stub rows are dated 2026 and the clock is real, so what this pins is the
+// WINDOW, not the contents: a session outside it is never listed.
+ok('sessions outside the next fortnight are not listed',
+  live.sessions.every(entry => entry.dateKey >= sandbox.formatDateKey(new Date())));
+ok('every entry parses back to its own session',
+  live.sessions.every(entry => sandbox.parseQuickMarkProgramChoice(entry.value).title === entry.title));
+// And an empty workbook is an empty list rather than a throw.
+const liveEmpty = withWorkbook({ dash: [], reg: [] }, () => sandbox.buildLiveCheckInSessionIndex());
+ok('a workbook with no session table has no live sessions', liveEmpty.sessions.length === 0);
+ok('and is still a well-formed index', liveEmpty.live === true && !!liveEmpty.builtAt);
 
 ok('the day names its own date', day.dateKey === TODAY);
 ok('and says which building it is', day.location === 'Narberth');

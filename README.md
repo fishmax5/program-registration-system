@@ -114,12 +114,21 @@ It also:
   lands on `Member_Roll` with a staff note saying the membership form still has
   to go out;
 - **tells a meal that is ordered from one that is merely wanted.** Lunch is the
-  last line of that page, and it says which: a registered meal reads *already
-  ordered for you — collect it at the counter*, while an unregistered one reads
-  *tick this to be added to the list, then check with a staff member that a
-  meal is available* — recording the demand (`Lunch_Status` = `Needed`) without
-  ever promising food that was ordered from a caterer three days ago against a
-  count. A day the kitchen is shut cannot be ticked at all, and says so;
+  last line of that page, and ticking it marks the meal handed over — on the
+  row that actually ordered the food, not on whichever program was ticked
+  first. What differs is what the page says beforehand and what it writes: a
+  registered meal is a handover and nothing else, while an unregistered one
+  writes the ORDER first (`Lunch_Status` = `Needed`, so the day never reports a
+  meal served that nobody ordered) under a line reading *check with a staff
+  member that one is available* — because that food was ordered from a caterer
+  three days ago against a count. A day the kitchen is shut cannot be ticked at
+  all, and says so;
+- **stops guessing its own web address.** `ScriptApp.getService().getUrl()`
+  hands back the script editor's `/dev` test address as often as the published
+  one — it opens for whoever owns the script and answers a tablet with "unable
+  to open the file at this time" — so `📱 Door Pages` takes the `/exec`
+  address from the Deploy screen once, refuses a `/dev` one, and builds every
+  link from what was pasted;
 - orders **more than one meal for the same person** — a standing order of four
   is a number in `Meals_Ordered` on one row, not four invented guests called
   "Extra Meal 1"; the kitchen's count adds meals rather than heads, the roster
