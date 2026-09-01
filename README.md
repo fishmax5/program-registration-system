@@ -128,6 +128,26 @@ It also:
   session on the hourly pass, or a session you pick from the menu — and
   un-invites them if they cancel.
 
+- **reports a MONTH rather than a total.** The dashboard's metrics block used to
+  read Total Programs, Total Sessions, Total Registrations, Unique Participants,
+  Avg Fill Rate — five numbers counted over every row the workbook had ever
+  held. Each was true and none could be acted on: they only ever go up, and by
+  the second year two adjacent months are indistinguishable. The fill rate was
+  the worst of them, averaging sessions that had already finished at whatever
+  they finished at against sessions six months out that nobody had been told
+  about yet — a settled 95% and an unopened 0% averaging to a figure describing
+  no session that exists, while the question it looked like it was answering
+  ("what should I be promoting this week?") was the one it could not. It is now
+  two period-bounded tables: **the next 7 and 30 days** — sessions, sign-ups,
+  how full the capped ones are, how many chairs are left to sell and how many
+  people are being turned away — and **this month against last, like for like**,
+  September 1–16 against August 1–16 rather than against the whole of August, so
+  a change is not negative for three weeks out of four merely because the month
+  is young. Underneath it: how many PEOPLE those sign-ups were, how many had
+  never been here before, how many were here last month too, and what share of
+  those who registered actually turned up. A fill rate is blank rather than 0%
+  where nothing has a cap, an attendance figure is blank rather than 0% where
+  nobody ticked, and one person spelled three ways is one participant;
 - **reviews itself, program by program** — every rule here is enforced on
   the way IN, when a sync runs or a box is ticked, and none of them on the way
   out; so after a season of editing nothing says which of forty programs are
@@ -221,4 +241,5 @@ node tests/multiple_meals.test.js
 node tests/standing_lunch.test.js
 node tests/event_time_epoch.test.js
 node tests/appointment_review.test.js
+node tests/program_metrics.test.js
 ```
