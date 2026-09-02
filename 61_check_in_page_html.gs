@@ -1325,34 +1325,34 @@ function buildCheckInPageHtml(info) {
         'their own published versions. The links below use the saved one. If the door starts ' +
         'serving old behaviour, it is the other deployment that got the new version.</p>';
     }
-    // ONE LINK FOR EVERY DOOR. The app asks each tablet, once, which building
-    // and which day it is standing at and remembers the answer — so there is
-    // no per-location address to hand out any more, and no way to put a
-    // tablet on the wrong one. The links below it are the two STAFF tools,
-    // which are different jobs rather than the same page pinned differently.
-    html += linkRow('The sign-in app (every door)', INFO.url,
-      'Put this on every tablet. The first time it opens it asks which building and which ' +
-      'day; after that it goes straight to the name list. "Change setup" at the top changes ' +
-      'the answer.');
-    (INFO.locations || []).forEach(function (loc) {
-      html += linkRow(loc + ' — check-in list (staff)',
-        INFO.url + '?location=' + encodeURIComponent(loc) + '&mode=session',
-        'One session at a time: tap a registered name to mark them present, tap Lunch as ' +
-        'meals are handed over.');
-    });
-    // The second screen of the staff list: registering somebody for a future
-    // date, with their guests, and onto a program's standing list. Not the
-    // default page anywhere, so it needs a link of its own or nobody finds it.
-    html += linkRow('Register someone (desk phone)', INFO.url + '?mode=session&page=register',
-      'Put a person on any upcoming session — with their guests, and on the every-week list ' +
-      'for that program if they never want to sign up again.');
+    // ONE LINK, AND NOTHING ELSE. The app asks each tablet, once, which
+    // building and which day it is standing at and remembers the answer, so
+    // there is no per-location address to hand out and no second page to pick
+    // between. A dialog that lists five links is a dialog somebody copies the
+    // wrong one out of — and a tablet on the wrong link is a tablet nobody can
+    // tell is on the wrong link.
+    //
+    // The staff pages have not gone anywhere; they are ?mode=session and
+    // ?mode=session&page=register on this same address, said in the sentence
+    // under the link rather than handed out as addresses of their own.
+    html += linkRow('The sign-in app', INFO.url,
+      'Put this on every tablet and every desk. The first time it opens it asks which ' +
+      'building and which day; after that it goes straight to the name list. "Change setup" ' +
+      'at the top changes the answer.');
     el.innerHTML = html +
-      '<p class="hint">Open one on the tablet and add it to the home screen.' +
+      '<p class="hint">Open it on the tablet and add it to the home screen.' +
       (INFO.fromSaved
         ? ' Built from the address you saved below.'
         : ' Built from the address the script reports, which is not always the published one — ' +
-          'if these give an error, paste the real one below.') +
+          'if it gives an error, paste the real one below.') +
       '</p>' +
+      // The staff pages, named rather than listed: somebody who needs one adds
+      // the mode to the address above, and nobody at a door is offered a
+      // second link they might open by mistake.
+      '<p class="hint"><b>Staff pages</b>, on the same address: add ' +
+      '<code>?mode=session</code> for the session check-in list (marking meals as they are ' +
+      'handed over), or <code>?mode=session&amp;page=register</code> to put somebody on an ' +
+      'upcoming session from the desk phone.</p>' +
       // THE OTHER HALF OF "the link works but the page is out of date". A
       // deployment is pinned to a VERSION, so editing the script changes
       // nothing at the door until a new version is published. It is invisible

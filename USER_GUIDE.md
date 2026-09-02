@@ -1264,18 +1264,20 @@ wherever the laptop with the workbook open happens to be, operated by somebody
 with edit access to it. That is not most front doors.
 
 **🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ 📱 Door Pages (links &
-PIN)…** gives you web addresses for the same job:
+PIN)…** gives you the web address for the same job. **There is one link**, with
+a **Copy** button beside it: the sign-in app. It asks each tablet, the first
+time it opens, which building and which day it is standing at and remembers the
+answer, so every door and every desk gets the same address and no tablet can be
+put on the wrong one.
 
-| Link | Who taps it | What it shows |
+The two **staff pages** are that same address with a mode on the end, named in
+the dialog rather than listed as links of their own:
+
+| Address | Who opens it | What it shows |
 | --- | --- | --- |
-| **the sign-in app** (the plain address, no query string) | whoever walks in | Everybody expected at this building on this day, A–Z, then a walk-in sign-up under them |
-| **check-in list** (`&mode=session`) | staff | One session at a time, its roster, and a Lunch button per row |
-
-**There is one sign-in link now, not one per building.** The app asks each
-tablet, the first time it opens, which building and which day it is standing
-at, and remembers the answer on that tablet — so every door gets the same
-address and no tablet can be on the wrong link. Every link in the window is
-clickable and has a **Copy** button beside it.
+| the plain link | whoever walks in, and the desk | Everybody expected at this building on this day, A–Z, then a walk-in sign-up under them |
+| `?mode=session` | staff | One session at a time, its roster, and a Lunch button per row |
+| `?mode=session&page=register` | staff, usually on the desk phone | Put somebody on an upcoming session, with guests and a standing place |
 
 ##### The sign-in app — what a person who walked in sees
 
@@ -1385,10 +1387,10 @@ work the door and the desk at once.
 2. **Deploy ▸ New deployment ▸ Web app**
 3. **Execute as: Me.** **Who has access:** *Anyone within your organization* if
    the tablets are signed into your Google accounts; *Anyone* if they are not.
-4. **Deploy**, then reopen **📱 Door Pages** — the links are now listed there:
-   **one sign-in app** for every door, and a check-in list per building for
-   staff. Open the sign-in app on each tablet, add it to the home screen, and
-   answer its setup screen once; that tablet never asks again.
+4. **Deploy**, then reopen **📱 Door Pages** — **the one link** is listed
+   there. Open it on each tablet, add it to the home screen, and answer its
+   setup screen once; that tablet never asks again. The staff pages are the
+   same address with `?mode=session` on the end.
 
 > **If a link says the page is not accessible, paste the real address.** Apps
 > Script does not reliably tell a script its own published address — on a

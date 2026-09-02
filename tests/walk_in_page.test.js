@@ -549,14 +549,21 @@ const dialog = sandbox.buildCheckInPageHtml({
 ok('the dialog builds its links as anchors', /<a href="' \+ esc\(url\) \+ '" target="_blank"/.test(dialog));
 ok('and offers a copy button beside each one', /function copyLink\(/.test(dialog));
 ok('with a fallback for browsers with no clipboard API', /execCommand\('copy'\)/.test(dialog));
-// ONE LINK FOR EVERY DOOR now — the app asks each tablet which building it is
-// standing at, so there is no per-location address to get wrong (section 16e).
-ok('the sign-in app is offered as one link', /The sign-in app \(every door\)/.test(dialog));
+// ONE LINK, AND NOTHING ELSE. The app asks each tablet which building and
+// which day it is standing at, so there is no per-location address and no
+// second page to pick between — and a dialog that lists five links is a dialog
+// somebody copies the wrong one out of.
+ok('the sign-in app is offered as one link', /'The sign-in app'/.test(dialog));
 ok('and it is the bare deployment address, with nothing pinned onto it',
-  /linkRow\('The sign-in app \(every door\)', INFO\.url,/.test(dialog) ||
-  /'The sign-in app \(every door\)'[\s\S]{0,40}INFO\.url/.test(dialog));
-ok('and the staff roster is offered beside it, with its mode',
-  /mode=session/.test(dialog) && /check-in list \(staff\)/.test(dialog));
+  /linkRow\('The sign-in app', INFO\.url,/.test(dialog));
+ok('no per-location door link is handed out any more',
+  !/check-in list \(staff\)/.test(dialog) && !/sign-in page \(the door\)/.test(dialog));
+ok('and no second link for the register screen',
+  !/linkRow\('Register someone/.test(dialog));
+// The staff pages have not gone anywhere — they are said in a sentence rather
+// than handed out as addresses of their own.
+ok('the staff modes are still named, on the same address',
+  /\?mode=session/.test(dialog) && /page=register/.test(dialog));
 // The test address is not a link you can hand out, but it IS one the script's
 // owner opens — so it is clickable too, under the warning that explains it.
 const devDialog = sandbox.buildCheckInPageHtml({
