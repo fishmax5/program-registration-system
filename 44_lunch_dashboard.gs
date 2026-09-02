@@ -678,8 +678,13 @@ function updateMasterLunchDashboard(registrantRows) {
     if (r.carriedOver > 0) put('Carried_Over', r.carriedOver);
   });
 
-  writeMasterLunchDashboardSheet(sheet, plan, headers,
-    dropNotServingRows(existingTable, map, rollup), rollup, signUpRows);
+  const tableRows = dropNotServingRows(existingTable, map, rollup);
+  // The printed sheet for that day and building, if one has been built — a
+  // derived cell recomputed on every render, never read back (see
+  // 67_generated_file_links.gs). No leader sheet here: a meal has no leader.
+  stampGeneratedFileLinks(tableRows, map, {});
+
+  writeMasterLunchDashboardSheet(sheet, plan, headers, tableRows, rollup, signUpRows);
 
   // Same rollup, the other half of the same question: the dashboard says how
   // many meals, this says whose. Rendered from the same object in the same
@@ -1110,7 +1115,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
       'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge', 'Carried_Over',
       // Config owns these now — typing over one is overwritten on the next
       // render, and the warning says where to change it instead.
-      'Standard_Buffer', 'Tester_Buffer'],
+      'Standard_Buffer', 'Tester_Buffer',
+      'Sign_In_Sheet_Link'],
     zones);
 
   // Nothing on this tab is an internal key, so nothing is hidden — but the
