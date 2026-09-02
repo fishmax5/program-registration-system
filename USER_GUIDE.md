@@ -1264,35 +1264,62 @@ wherever the laptop with the workbook open happens to be, operated by somebody
 with edit access to it. That is not most front doors.
 
 **🗓️ Calendar & Form Manager ▸ ⚙️ Settings & Fixes ▸ 📱 Door Pages (links &
-PIN)…** gives you web addresses for the same job. There are **two pages, from
-one deployment**, and the window lists both for every building:
+PIN)…** gives you web addresses for the same job:
 
 | Link | Who taps it | What it shows |
 | --- | --- | --- |
-| **sign-in page** (the plain `?location=` link) | whoever walks in | Everybody signed up for anything here today as a card, then today's programs and lunch |
+| **the sign-in app** (the plain address, no query string) | whoever walks in | Everybody expected at this building on this day, A–Z, then a walk-in sign-up under them |
 | **check-in list** (`&mode=session`) | staff | One session at a time, its roster, and a Lunch button per row |
 
-Every link in that window is clickable, and has a **Copy** button beside it for
-getting the address onto a tablet.
+**There is one sign-in link now, not one per building.** The app asks each
+tablet, the first time it opens, which building and which day it is standing
+at, and remembers the answer on that tablet — so every door gets the same
+address and no tablet can be on the wrong link. Every link in the window is
+clickable and has a **Copy** button beside it.
 
-##### The sign-in page — what a person who walked in sees
+##### The sign-in app — what a person who walked in sees
 
 This is the one for the tablet by the entrance, and it is written for the
 visitor rather than for staff:
 
-1. **"Tap your name."** Everybody registered for anything at this building
-   today is a card, alphabetically — on an ordinary morning the person at the
-   door is one of them, and a card already signed in says so and turns green.
-   Underneath: a **search across the whole Member Roll** for the regular who
-   didn't register this time, and **"I'm new here — register"**, which asks for
-   a name and an email and nothing else.
-2. **"What are you here for?"** Every program on at this building today, and
-   the day's lunch at the bottom. Anything they are already registered for is
-   **ticked and labelled REGISTERED**; anything else is offered unticked and
-   labelled **NOT REGISTERED** — ticking it registers them on the spot, as an
-   ordinary walk-in row flagged *Manually Added*, exactly as Quick Mark would.
-3. **Sign in.** Every tick is reported back as its own line, then **Done — next
+1. **Setup, once.** Which building, and which day (today, unless you are
+   setting a tablet up ahead). It is stored on the tablet; **Change setup** at
+   the top of every screen changes it. A tablet left on yesterday's date snaps
+   forward to today by itself — a date in the future is kept, and the screen
+   says in words that it is not today.
+2. **"Tap your name."** Everybody registered for anything at this building
+   that day, in **one alphabetical list under letter headings**, sorted by
+   surname — one card per person however many programs they are in. A card
+   already signed in says so and turns green. Underneath the list: a **search
+   across the whole Member Roll** for the regular who didn't register this
+   time.
+3. **The personal screen.** Tapping a name opens everything they are down for
+   that day, lunch included, **already ticked**. They confirm it, or change
+   what is wrong first and then confirm.
+4. **The walk-in box**, immediately under the name list and never behind a tap
+   of its own — for the person who isn't on it. It asks, in order:
+   - **what they are here for**: every program on that day as a card, with the
+     same REGISTERED / NOT REGISTERED / BY APPOINTMENT labels, plus the day's
+     lunch and its warning;
+   - **who they are**: a name, and **an email _or_ a phone number** — whichever
+     they have. Plenty of members have never had an address, and one of the two
+     is all the office needs to follow up;
+   - **are you coming back?** — *just today*, *the rest of this month* (they
+     are registered for every later session of what they ticked, this month),
+     or *every time* (a standing place on the **club list**, which then carries
+     them onto future sessions as those are added). A program booked **by
+     appointment** takes no standing place, and says so rather than failing
+     quietly;
+   - **are you a member?** — *yes* changes nothing else; *not yet* records a
+     membership follow-up for the office (see below).
+5. **Sign in.** Every tick is reported back as its own line, then **Done — next
    person** clears the screen.
+
+> **The membership email is not sent yet.** "Not yet a member" writes the
+> person onto the Member Roll with the staff note *"Signed in at the door —
+> membership form still to send"* and adds them to the admin digest under
+> **Membership forms to send**. Nothing is emailed until the office decides
+> what that email says.
 
 **Lunch is not just another tick.** Meals are ordered from the caterer days
 ahead against a count, so the page says which of two things is true:
@@ -1310,12 +1337,13 @@ ahead against a count, so the page says which of two things is true:
   second is the **handover**. Without the first, the day would report a meal
   served that nobody ever ordered. It still promises nothing: if staff say
   there is no meal spare, untick the lunch on the check-in list.
-- A day the kitchen is shut, or a location that never caters, shows **NOT
-  TODAY** and cannot be ticked at all.
+- A day the kitchen is shut, or a location that never caters, shows **NOT THAT
+  DAY** and cannot be ticked at all.
 
-**A brand-new member** gives a name and an email — the email is the one thing
-the page refuses to go on without, because it is the whole reason it asks. They
-land on **Member_Roll** with a `Staff_Notes` line reading *📨 Signed in at the
+**A brand-new member** gives a name and **either an email or a phone number** —
+having some way to reach them is the one thing the page refuses to go on
+without, because following up is the whole reason it asks. They land on
+**Member_Roll** with a `Staff_Notes` line reading *📨 Signed in at the
 door — membership form still to send*, so the office can find everybody who is
 waiting for one by searching that tab for "membership form".
 
@@ -1357,10 +1385,10 @@ work the door and the desk at once.
 2. **Deploy ▸ New deployment ▸ Web app**
 3. **Execute as: Me.** **Who has access:** *Anyone within your organization* if
    the tablets are signed into your Google accounts; *Anyone* if they are not.
-4. **Deploy**, then reopen **📱 Door Pages** — the links are now listed there,
-   **two per building**: the sign-in page and the check-in list. A per-building
-   link opens straight onto that building's day, so the Ashbridge tablet never
-   asks a volunteer which building they are standing in.
+4. **Deploy**, then reopen **📱 Door Pages** — the links are now listed there:
+   **one sign-in app** for every door, and a check-in list per building for
+   staff. Open the sign-in app on each tablet, add it to the home screen, and
+   answer its setup screen once; that tablet never asks again.
 
 > **If a link says the page is not accessible, paste the real address.** Apps
 > Script does not reliably tell a script its own published address — on a

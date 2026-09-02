@@ -353,7 +353,13 @@ function readWalkInMembers() {
  * ONE PERSON, SIGNED IN — the page's only write.
  *
  * Payload: { location, name, phone, email, newMember, programs: [value…],
- *            lunch, pin }.
+ *            lunch, pin, dateKey, recurring, member }.
+ *
+ * The last three are the door app's (section 16e) and are all optional, so
+ * the old page's payload still means exactly what it meant: `dateKey` is the
+ * day this sign-in is against (blank = today), `recurring` is 'none' | 'month'
+ * | 'club' (see applyDoorRecurring()), and `member` is 'yes' | 'no' — only
+ * 'no' does anything, and what it does is start the membership hand-off.
  *
  * Every mark goes through applyQuickMarkFromDialog(), one session at a time:
  * same lock, same row matching, same walk-in row, same wording. What is added
@@ -377,24 +383,37 @@ function walkInSignIn(payload) {
   const newMember = !!args.newMember;
   const wanted = (args.programs || []).map(v => String(v || ''));
   const wantsLunch = !!args.lunch;
+  // WHICH DAY THIS SIGN-IN IS AGAINST. Blank means today, which is every
+  // sign-in made at a door; the door app (section 16e) can be set up on
+  // another date, and a tick made on that screen has to land on that date's
+  // rows rather than on today's.
+  const dateKey = String(args.dateKey || '').trim() || formatDateKey(new Date());
+  // 'none' | 'month' | 'club' — see applyDoorRecurring().
+  const recurring = String(args.recurring || '').trim().toLowerCase();
+  // 'yes' | 'no' | '' — whether they told us they are a member already. Only
+  // 'no' does anything: it is what starts the membership hand-off.
+  const memberStatus = String(args.member || '').trim().toLowerCase();
   if (!wanted.length && !wantsLunch) {
     return { ok: false, message: 'Tick what you are here for first — nothing was signed in.' };
   }
-  // A NEW MEMBER WITHOUT AN EMAIL IS THE ONE REFUSAL. The whole reason the
+  // A NEW MEMBER WE CANNOT REACH IS THE ONE REFUSAL. The whole reason the
   // page asks a stranger for anything at all is so the office can send them a
-  // membership form afterwards; a row with no address on it is a person we
-  // have quietly lost. Everything else about them can wait.
-  if (newMember && !isPlausibleEmail(email)) {
+  // membership form afterwards; a row with no way to reach them on it is a
+  // person we have quietly lost. EITHER an email or a phone number will do —
+  // a good number of members have never had an address, and refusing their
+  // sign-in over one is the door turning away the people it is there for.
+  // Everything else about them can wait.
+  if (newMember && !hasDoorContact(email, phone)) {
     return {
       ok: false,
-      message: 'An email address is needed so the office can send the membership form. ' +
-        'Nothing was signed in.'
+      message: 'An email address or a phone number is needed so the office can send the ' +
+        'membership form. Nothing was signed in.'
     };
   }
 
   let day;
   try {
-    day = readWalkInDay(location);
+    day = readWalkInDay(location, dateKey);
   } catch (err) {
     log(`walkInSignIn could not read the day: ${err}`);
     return { ok: false, message: `Could not read today's list (${err}) — nothing was signed in.` };
@@ -420,8 +439,13 @@ function walkInSignIn(payload) {
 
   let firstProgramValue = '';
   let done = 0;
+  // What was actually ticked, kept for the recurring pass at the foot of this
+  // function: "and the rest of the month" is a statement about these programs
+  // and no others.
+  const pickedPrograms = [];
   day.programs.forEach(program => {
     if (wanted.indexOf(program.value) === -1) return;
+    pickedPrograms.push(program);
     const already = !!(person && person.registered.indexOf(program.value) !== -1);
     // An appointment is a chair at a time (see ASSISTANCE_TAG), and choosing
     // one is a conversation about which times are left. The page shows the
@@ -519,6 +543,28 @@ function walkInSignIn(payload) {
         lines.push((res && res.message) || '⚠️ The lunch could not be added.');
       }
     }
+  }
+
+  // A STANDING PLACE, AFTER THE DAY ITSELF IS SAFE. Today's ticks are what the
+  // person at the door is waiting on; the rest of the month is a promise about
+  // dates nobody is standing on, and a failure to make it must not be able to
+  // cost the sign-in that already worked.
+  if (done && recurring && recurring !== 'none') {
+    applyDoorRecurring({
+      location, name, dateKey, phone, email,
+      lunch: wantsLunch,
+      choice: recurring,
+      programs: pickedPrograms
+    }).forEach(line => lines.push(line));
+  }
+
+  // THE MEMBERSHIP HAND-OFF, last and never fatal. Somebody who has just told
+  // the door they are not a member yet is already inside and signed in; what
+  // is left is the office's to do, and it is recorded rather than sent — see
+  // sendMembershipEmail().
+  if (memberStatus === 'no') {
+    const note = sendMembershipEmail({ name, email, phone, location });
+    if (note) lines.push(note);
   }
 
   const message = done

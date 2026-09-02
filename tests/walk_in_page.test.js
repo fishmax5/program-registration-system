@@ -20,9 +20,10 @@
 //   4. THE OPTIONS ARE AN INLINE LITERAL. Same hazard as the check-in page's
 //      (check_in_page.test.js): a location name carrying the two characters
 //      that end a script tag would end the page mid-sentence.
-//   5. THE REFUSALS HOLD. A new member with no email is the one thing the page
-//      turns away, because the email is the entire reason it asks a stranger
-//      for anything.
+//   5. THE REFUSALS HOLD. A new member the office has no way to reach — no
+//      email AND no phone — is the one thing the page turns away, because
+//      being able to follow up is the entire reason it asks a stranger for
+//      anything. Either detail on its own is enough.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -488,16 +489,25 @@ const nothing = sign({ location: 'Narberth', name: 'Ruth Klein', programs: [], l
 ok('ticking nothing at all is a refusal', nothing.ok === false);
 ok('and says what to do about it', /Tick what you are here for/.test(nothing.message));
 
-// THE ONE THING A STRANGER IS TURNED AWAY FOR. The email is the entire reason
-// the page asks a new member for anything, so a row without one is a person
-// the office has quietly lost.
-const noEmail = sign({
-  location: 'Narberth', name: 'New Person', newMember: true, email: '', programs: ['x']
+// THE ONE THING A STRANGER IS TURNED AWAY FOR. Some way to reach them is the
+// entire reason the page asks a new member for anything, so a row with neither
+// an email nor a phone number on it is a person the office has quietly lost.
+// EITHER will do: plenty of members have a phone and no address at all.
+const noContact = sign({
+  location: 'Narberth', name: 'New Person', newMember: true, email: '', phone: '', programs: ['x']
 });
-ok('a new member with no email is refused', noEmail.ok === false);
-ok('and told why', /membership form/.test(noEmail.message));
-ok('a new member with junk for an email is refused too',
-  sign({ location: 'Narberth', name: 'New Person', newMember: true, email: 'not-an-email', programs: ['x'] }).ok === false);
+ok('a new member with no way to reach them is refused', noContact.ok === false);
+ok('and told why', /membership form/.test(noContact.message));
+ok('a new member with junk for an email and no phone is refused too',
+  sign({ location: 'Narberth', name: 'New Person', newMember: true, email: 'not-an-email',
+    programs: ['x'] }).ok === false);
+ok('and an extension number is not a phone number either',
+  sign({ location: 'Narberth', name: 'New Person', newMember: true, phone: '204',
+    programs: ['x'] }).ok === false);
+// That a phone number ALONE gets past this refusal is the whole point of it
+// being either, and is pinned next door (door_app.test.js) on hasDoorContact()
+// rather than here: getting past it means reaching the write path, and the
+// write path is a lock and a sheet this file does not stand up.
 
 // The PIN gate covers both of the page's calls, exactly as it covers the
 // roster's — a gate on one door and not the other is not a gate.
@@ -520,7 +530,12 @@ const dialog = sandbox.buildCheckInPageHtml({
 ok('the dialog builds its links as anchors', /<a href="' \+ esc\(url\) \+ '" target="_blank"/.test(dialog));
 ok('and offers a copy button beside each one', /function copyLink\(/.test(dialog));
 ok('with a fallback for browsers with no clipboard API', /execCommand\('copy'\)/.test(dialog));
-ok('the door page is offered per location', /sign-in page \(the door\)/.test(dialog));
+// ONE LINK FOR EVERY DOOR now — the app asks each tablet which building it is
+// standing at, so there is no per-location address to get wrong (section 16e).
+ok('the sign-in app is offered as one link', /The sign-in app \(every door\)/.test(dialog));
+ok('and it is the bare deployment address, with nothing pinned onto it',
+  /linkRow\('The sign-in app \(every door\)', INFO\.url,/.test(dialog) ||
+  /'The sign-in app \(every door\)'[\s\S]{0,40}INFO\.url/.test(dialog));
 ok('and the staff roster is offered beside it, with its mode',
   /mode=session/.test(dialog) && /check-in list \(staff\)/.test(dialog));
 // The test address is not a link you can hand out, but it IS one the script's

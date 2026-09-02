@@ -1034,17 +1034,21 @@ function buildCheckInPageHtml(info) {
         'their own published versions. The links below use the saved one. If the door starts ' +
         'serving old behaviour, it is the other deployment that got the new version.</p>';
     }
+    // ONE LINK FOR EVERY DOOR. The app asks each tablet, once, which building
+    // and which day it is standing at and remembers the answer — so there is
+    // no per-location address to hand out any more, and no way to put a
+    // tablet on the wrong one. The links below it are the two STAFF tools,
+    // which are different jobs rather than the same page pinned differently.
+    html += linkRow('The sign-in app (every door)', INFO.url,
+      'Put this on every tablet. The first time it opens it asks which building and which ' +
+      'day; after that it goes straight to the name list. "Change setup" at the top changes ' +
+      'the answer.');
     (INFO.locations || []).forEach(function (loc) {
-      html += linkRow(loc + ' — sign-in page (the door)',
-        INFO.url + '?location=' + encodeURIComponent(loc),
-        'Everyone signed up today, then today\\'s programs and lunch. Put this one on the ' +
-        'tablet by the entrance.');
       html += linkRow(loc + ' — check-in list (staff)',
         INFO.url + '?location=' + encodeURIComponent(loc) + '&mode=session',
         'One session at a time: tap a registered name to mark them present, tap Lunch as ' +
         'meals are handed over.');
     });
-    html += linkRow('Any location (asks which)', INFO.url, '');
     // The second screen of the staff list: registering somebody for a future
     // date, with their guests, and onto a program's standing list. Not the
     // default page anywhere, so it needs a link of its own or nobody finds it.

@@ -92,6 +92,9 @@ const pages = [
   ['the walk-in sign-in page', () => sandbox.buildWalkInHtml({
     location: '', pinRequired: false, locations: ['Narberth'], rosterUrl: 'https://example.org/exec'
   })],
+  ['the door app page', () => sandbox.buildDoorAppHtml({
+    location: '', pinRequired: false, locations: ['Narberth'], todayKey: '2025-09-02'
+  })],
   ['the Quick Mark dialog', () => sandbox.buildQuickMarkHtml(null)]
 ];
 

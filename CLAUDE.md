@@ -149,6 +149,19 @@ Line counts are a rough guide to what you are about to load.
 | `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
 | `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
+### The door app (67–68)
+
+One deployment, one link. The setup screen (building + day, stored on the
+tablet), the A–Z name list, the personal confirm screen, and the walk-in
+sign-up that used to be three separate URLs. `doGet` in `60` serves this by
+default; `?mode=session` is still the staff roster and `?mode=walkin` the
+previous door page.
+
+| File | | What is in it |
+|---|--:|---|
+| `67_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
+| `68_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
+
 ### Program leaders (65–66)
 
 Numbered after the door rather than beside `46_program_leader_sheets.gs`,

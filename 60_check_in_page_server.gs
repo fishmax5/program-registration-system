@@ -84,13 +84,25 @@ const CHECK_IN_PIN_PROP_KEY = 'CHECK_IN_PIN';
 const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
 
 /**
- * THE WEB APP ENTRY POINT. Serves ONE OF TWO PAGES:
+ * THE WEB APP ENTRY POINT — ONE APP, ONE LINK.
  *
- *   (default)      the walk-in sign-in page — section 16c, the door.
- *   ?mode=session  the session check-in roster — section 16, for staff.
+ * The door app (section 16e) is what this deployment serves. It asks, once per
+ * tablet, which building and which day it is standing at, remembers the answer
+ * in that tablet's own storage, and never asks again — which is the whole
+ * reason it exists. There used to be three links for three screens and a
+ * volunteer had to be handed the right one; a tablet on the wrong link is a
+ * tablet showing the wrong page, and nobody at a door can tell that is what
+ * happened.
  *
- * ?location=Narberth pins either of them to one building (see the section
- * note). Anything else in the query string is ignored rather than refused — a
+ * THE OLD PAGES ARE STILL REACHABLE, by name, because they are not the same
+ * tool: ?mode=session is the staff session roster (section 16) that marks
+ * meals as they are handed over at the counter, and ?mode=walkin is the
+ * previous door page, kept for one release so a bookmark that has not been
+ * changed yet still opens something that works rather than nothing.
+ *
+ * ?location=Narberth still pins the app to one building — it seeds the setup
+ * screen rather than skipping it, so what is on screen is always what somebody
+ * chose. Anything else in the query string is ignored rather than refused: a
  * URL that has been through a QR code generator and back tends to collect
  * parameters.
  */
@@ -99,40 +111,42 @@ function doGet(e) {
   const requested = String(params.location || params.loc || '').trim();
   const location = matchCheckInLocation(requested);
   const pinRequired = isCheckInPinSet();
+  const mode = String(params.mode || params.view || '').trim().toLowerCase();
 
-  // TWO PAGES, ONE DEPLOYMENT. ?mode=session is the staff-facing session
-  // roster (section 16); everything else is the door (section 16c), because
-  // the door is what the link on the tablet by the entrance is for and a
-  // volunteer should not have to choose a page before they can use one.
-  // A deployment cannot be re-published per page, so the mode rides in the
-  // query string alongside the location pin.
-  const html = checkInRosterModeRequested(params)
-    // Only ever a STORED index, never a build — the same rule the dialog
-    // follows (readyQuickMarkIndex()), and for a stronger reason here: a web
-    // app has no toast to apologise with, and a volunteer looking at a spinner
-    // assumes the page is broken. A workbook with no stored lists yet gets a
-    // page that says so in words.
-    // ?page=register opens the roster page on its SECOND screen — the one
-    // that puts somebody on a future session. Deliberately not the default:
-    // the tablet is opened forty times a morning to mark people in and twice a
-    // week to register one, and the common case must not cost a tap. A link
-    // with this on it is the one a program director keeps for the desk phone.
-    ? buildCheckInHtml(readyCheckInSessionIndex(), {
+  let html;
+  let title;
+  if (checkInRosterModeRequested(params)) {
+    // THE STAFF ROSTER, unchanged. Only ever a STORED index, never a build:
+    // a web app has no toast to apologise with, and a volunteer looking at a
+    // spinner assumes the page is broken.
+    html = buildCheckInHtml(readyCheckInSessionIndex(), {
       location, pinRequired,
       page: /^register$/i.test(String(params.page || '').trim()) ? 'register' : 'checkin'
-    })
-    : buildWalkInHtml({
+    });
+    title = 'Check In';
+  } else if (mode === 'walkin' || mode === 'walk-in' || mode === 'legacy') {
+    html = buildWalkInHtml({
       location,
       pinRequired,
       locations: checkInLocations(),
       rosterUrl: checkInPageUrl({ location, mode: 'session' })
     });
+    title = 'Sign In';
+  } else {
+    html = buildDoorAppHtml({
+      location,
+      pinRequired,
+      locations: checkInLocations(),
+      todayKey: formatDateKey(new Date())
+    });
+    title = 'Sign In';
+  }
   // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). This page writes to the
   // workbook, and letting any site frame it is what turns a tap on somebody
   // else's page into a check-in on this one. Nothing needs to embed it — it is
   // opened on a tablet, not built into another site.
   return HtmlService.createHtmlOutput(html)
-    .setTitle(checkInRosterModeRequested(params) ? 'Check In' : 'Sign In')
+    .setTitle(title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
