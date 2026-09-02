@@ -191,7 +191,7 @@ either.
 
 | File | | What is in it |
 |---|--:|---|
-| `68_form_state_migrations.gs` | 387 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`); and the Admin item that forces it now. Behavior only, loading after everything it reads. |
+| `68_form_state_migrations.gs` | 665 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`), which opens only the forms a pending migration is `targets`-ed at; and the Admin item that forces it now, slicing itself across executions until every form has been looked at. Behavior only, loading after everything it reads. |
 
 ### Links to the files this system makes (69)
 
@@ -259,7 +259,9 @@ previous door page.
   has been quiet for six months runs all of them in order on its next sync. A
   migration must be **idempotent** and must return 0 when the form is already
   right — it runs hourly, and a redundant Forms write is a round trip and a new
-  revision in the form's history. Rebuilding the form is the fallback for a
+  revision in the form's history. Give it a `targets` predicate whenever the
+  change only reaches some shapes: judged from the dashboard rows, it keeps the
+  sweep from opening a form the repair would write nothing to. Rebuilding the form is the fallback for a
   shape no migration recognizes, not the first answer.
 - **Script Properties keys are versioned** (`..._V1`). Changing a stored
   shape means a new key, not a silent reinterpretation of the old one. The

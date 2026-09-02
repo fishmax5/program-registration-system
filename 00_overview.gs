@@ -336,7 +336,12 @@
  *      writing only what is wrong on each live form and stamping the form
  *      current when its migrations cover the whole of that version. What is
  *      left for the rebuild pass is the forms a migration could not recognize.
- *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep.
+ *      A migration also says WHICH forms it is for, from the dashboard rows
+ *      alone: the v8 routing repair is aimed at the single-session and
+ *      appointment forms, the only two shapes whose respondents could ever
+ *      meet the misplaced setting, so no other form is opened at all.
+ *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep,
+ *      and hands itself on until every form has been looked at.
  *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —
