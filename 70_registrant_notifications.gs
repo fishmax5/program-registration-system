@@ -361,11 +361,23 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
         return;
       }
       try {
-        MailApp.sendEmail(email,
-          buildRegistrantReminderSubject(item.session, offset),
-          buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset, item.daysAway));
+        // BCC'd to the archive address, like every other message this workbook
+        // sends outside the organization — a reminder about somebody's
+        // appointment is a record of what they were told, and the desk needs
+        // to be able to find it. Blank means copy nobody. A BCC costs its own
+        // message against the daily quota this loop is rationing, so it is
+        // counted rather than treated as free.
+        const archiveCopy = getArchiveCopyEmail();
+        const options = {
+          to: email,
+          subject: buildRegistrantReminderSubject(item.session, offset),
+          body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
+            item.daysAway)
+        };
+        if (archiveCopy) options.bcc = archiveCopy;
+        MailApp.sendEmail(options);
         result.sent++;
-        quota--;
+        quota -= archiveCopy ? 2 : 1;
         sentFor[stamp] = true;
         ledger[eventId] = sentFor;
         __reminderLedgerDirty = true;

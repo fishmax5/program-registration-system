@@ -149,22 +149,19 @@ Line counts are a rough guide to what you are about to load.
 | `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
 | `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
-### Program leaders and registrant notifications (65–67)
+### Program leaders (65–66)
 
 Numbered after the door rather than beside `46_program_leader_sheets.gs`,
 because renumbering an existing file is the one edit this project cannot make
 (see above). Both files hold behavior only — their schema (`SHEET_NAMES`,
 `HEADERS.Program_Leaders`, `PROGRAM_LEADERS_STAFF_COLUMNS`) lives in `03`, so
 nothing earlier reads them at load time, and neither reads `64` at load time
-either. `67` is the same shape: its schema (the two `Program_Options` columns)
-is in `03`, everything it exposes to `33` and `40` is a hoisted function, and
-its own top-level `const`s stand alone.
+either.
 
 | File | | What is in it |
 |---|--:|---|
 | `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
 | `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
-| `70_registrant_notifications.gs` | 505 | How often each program writes to its registrants: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
 
 ### Two months at the door (67)
 
@@ -187,6 +184,16 @@ time. Its two columns live in `03` like every other schema.
 | File | | What is in it |
 |---|--:|---|
 | `69_generated_file_links.gs` | 236 | Live links to the files this system makes outside the workbook: the printed sign-in PDF registry (and its one-time folder backfill), and the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
+
+### How often registrants hear from us (70)
+
+Behavior only, and last for the usual reason: its two columns live in `03`
+like every other schema, everything `33` and `40` call into it is a hoisted
+function, and its own top-level `const`s stand alone.
+
+| File | | What is in it |
+|---|--:|---|
+| `70_registrant_notifications.gs` | 516 | How often each program writes to the people signed up for it: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites (`33`) and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
 
 
 ## Conventions
