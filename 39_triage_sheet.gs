@@ -29,13 +29,13 @@ function renderTriageSheet(force, allRows) {
  * means yours" holds across every tab in the workbook (same wash as the lunch
  * dashboard's hand-entry columns, via labelManualEntryColumns()).
  */
-const REGISTRANT_EDITABLE_COLUMNS = [
+defineLazyGlobal_('REGISTRANT_EDITABLE_COLUMNS', () => ([
   'Attended', 'Lunch_Served',
   'Meals_Ordered',
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
   'Meal_Source',
   'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment', 'Admin_Notes'
-].concat(LEADER_OWNED_COLUMNS);
+].concat(LEADER_OWNED_COLUMNS)));
 
 /**
  * Columns that only ever matter when something has gone wrong — internal keys

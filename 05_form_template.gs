@@ -40,7 +40,7 @@ const TEMPLATE_VERSION = 8;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
-const TEMPLATE_ITEM_TITLES = {
+defineLazyGlobal_('TEMPLATE_ITEM_TITLES', () => ({
   NAME: 'Name',
   PHONE: 'Phone Number',
   GUEST_COUNT: 'How many guests are you bringing?',
@@ -112,7 +112,7 @@ const TEMPLATE_ITEM_TITLES = {
    * string in the retitle.
    */
   LUNCH_ONLY_GRID: 'Who Needs Lunch on Each Date?'
-};
+}));
 
 /** Both titles the per-date roster grid can carry — see LUNCH_ONLY_GRID. */
 const ROSTER_GRID_TITLES = [

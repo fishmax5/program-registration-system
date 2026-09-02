@@ -3,7 +3,7 @@
  * Master_Lunch_Dashboard) for the whole row band — see
  * buildLocationColorRules() / buildLocationRowTintRules().
  */
-const LOCATION_COLOR_MAP = {
+defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
   // THE TINT LAYER (see PALETTE): the same three hues these have always been,
   // so nobody has to relearn which building is which — but paled off, because
   // at their old strength they were indistinguishable from the status colors
@@ -11,7 +11,7 @@ const LOCATION_COLOR_MAP = {
   'Narberth': PALETTE.LOC_PEACH,
   'Ashbridge': PALETTE.LOC_GREEN,
   'Zoom': PALETTE.LOC_LILAC
-};
+}));
 
 const SHEET_NAMES = {
   CONFIG: 'Config',
@@ -65,7 +65,7 @@ const LEGACY_SHEET_RENAMES = {
  * Manual_Override column at all; the other date-bearing tabs keep it as
  * the second column.
  */
-const HEADERS = {
+defineLazyGlobal_('HEADERS', () => ({
   // The per-session table inside Master_Program_Dashboard (section C).
   //
   // Active_Count sits directly beside Status — "how many signed up" and "is it
@@ -515,7 +515,7 @@ const HEADERS = {
     'Received', 'Program', 'Location', 'Name', 'Phone', 'Email', 'Answers',
     'Status', 'Scheduled_For', 'Staff_Notes', 'Request_ID'
   ]
-};
+}));
 
 /** Assistance_Requests columns the importer must never overwrite — the staff's own follow-up. */
 const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Notes'];

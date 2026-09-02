@@ -27,7 +27,7 @@ const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
  * one it contains ("Max Per Month: 1" before "Monthly" would match nothing,
  * but "Cap: 12" must go before a bare number could confuse anything).
  */
-const RECOGNIZED_TAG_PATTERNS = [
+defineLazyGlobal_('RECOGNIZED_TAG_PATTERNS', () => ([
   /Cap:\s*\d+/i,
   /Max\s*Per\s*Month:\s*\d+/i,
   /Slots?:\s*\d+/i,
@@ -37,7 +37,7 @@ const RECOGNIZED_TAG_PATTERNS = [
   ASSISTANCE_WORDS_REGEX,
   /\b(Grouped|Fixed)\b/i,
   /\b(Monthly|Regular)\b/i
-];
+]));
 
 /**
  * Is this bracket's contents ENTIRELY tags this system understands?

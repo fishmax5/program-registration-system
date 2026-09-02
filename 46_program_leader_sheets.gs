@@ -143,8 +143,8 @@ const LEADER_SHEET_DERIVED_COLUMNS = [
  * leaves the yellow hand-entry columns as the only saturated thing on the page,
  * which is the one place a leader's eye should be pulled.
  */
-const LEADER_SHEET_BAND_BG = PALETTE.LOC_BLUE;
-const LEADER_SHEET_BAND_INK = PALETTE.INK_STRONG;
+defineLazyGlobal_('LEADER_SHEET_BAND_BG', () => PALETTE.LOC_BLUE);
+defineLazyGlobal_('LEADER_SHEET_BAND_INK', () => PALETTE.INK_STRONG);
 
 
 // --- the registry -----------------------------------------------------------

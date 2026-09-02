@@ -9,21 +9,38 @@ to a tablet at the door. There is no framework, no build step, and no
 ## The one thing to know before editing
 
 **Every `.gs` file at the root is ONE Apps Script project sharing ONE global
-scope, and Apps Script evaluates the files in filename order.** The numeric
-prefixes exist to make that order deterministic — they are not decoration.
+scope.** The numeric prefixes ask the project to evaluate them in filename
+order, and `tests/helpers/source.js` reproduces that order — but nothing
+*enforces* it. Apps Script evaluates files in whatever order the project has
+them stored, and a GitHub-sync browser extension that writes files back
+most-recently-edited-first will happily evaluate `03_sheets_and_headers`
+before `02_palette_and_tags`.
 
-A good number of top-level `const`s are computed from an earlier one
-(`MANUAL_OVERRIDE_COLOR` from `PALETTE`, `LUNCH_ONLY_TYPE_TAG` from
-`EVENT_TYPES`, `TIMEZONE` from the live spreadsheet). So:
+That used to be fatal, and was: a top-level `const` computed from another
+file's constant threw `ReferenceError: PALETTE is not defined` on open, for
+every user, with a dialog nobody could dismiss their way out of. There were 34
+such cross-file reads across 15 constants.
 
-- **Renumbering a file, or moving a top-level `const` to a later-sorting file,
-  is a load-time `ReferenceError`, not a runtime bug.** It fails on open, for
-  every user, with a dialog nobody can dismiss their way out of.
+**That is fixed, and the fix is the rule to follow.** Any constant whose
+initializer mentions a constant from a *different file* is declared through
+`defineLazyGlobal_` (see `01a_lazy_globals.gs`) instead of `const`: the name
+binds at load, the value is computed on first read — by which point every file
+has evaluated, whatever order they came in.
+
+- **Load order no longer matters.** Renumbering a file, or moving a top-level
+  `const` to a later-sorting file, is safe. Keep the prefixes anyway: they are
+  how a reader finds things, and how the tables below are organized.
+- A constant whose initializer is self-contained (`PALETTE`, `SHEET_NAMES`,
+  `EVENT_TYPES`) stays an ordinary `const`. Nothing it needs can be missing.
+- **A top-level statement that *reads* a lazy global is the same hazard
+  wearing a different hat.** `PROGRAM_FORM_TYPES.forEach(...)` at file scope
+  forces the getter at load time; fold that work into the factory instead.
+- `tests/load_order.test.js` is what holds the line. It loads the whole project
+  in reverse filename order and in 60 shuffles, and checks every derived global
+  reads back identically. A failure there is not a broken test — it is a new
+  eager cross-file read. Wrap it in `defineLazyGlobal_`.
 - Function *declarations* are hoisted across the whole project, so a function
-  may freely call one defined in any other file. Only top-level
-  initialization order is constrained.
-- New file? Give it a prefix that puts it after everything it reads at load
-  time. When in doubt, put constants low-numbered and behavior high-numbered.
+  may freely call one defined in any other file — `defineLazyGlobal_` included.
 
 ## Where things are
 
@@ -35,6 +52,7 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `00_overview.gs` | 446 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
 | `01_logging_and_access.gs` | 209 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
+| `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
 | `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
@@ -196,8 +214,10 @@ node tests/check_in_page.test.js        # one file
 for f in tests/*.test.js; do node "$f"; done
 ```
 
-`tests/helpers/source.js` sorts by filename — the same rule the Apps Script
-runtime applies — so a test sees exactly the load order production does.
+`tests/helpers/source.js` sorts by filename — the order the project asks for —
+so a test sees the same load order a correctly-ordered deployment does.
+`tests/load_order.test.js` deliberately does the opposite: it loads the project
+reversed and shuffled, because a real deployment's order is not guaranteed.
 
 **Known pre-existing failure:** `tests/appointment_review.test.js` reports 2
 failures ("duplicate rows do not duplicate the times", "and the escape hatch is
@@ -210,8 +230,11 @@ passes.
 they go into the Apps Script project unchanged — via a GitHub-sync browser
 extension in the editor, or `clasp push`.
 
-The only invariant that matters on the way in is that **filenames survive
-intact**, because the prefixes are the load order (see the top of this file).
+Filenames should survive intact — the prefixes are how the project is
+organized and how these tables are indexed. They are no longer *load-bearing*
+(see the top of this file), so a sync tool that reorders files in the project
+is no longer a load-time crash; but a renamed file still costs you every
+cross-reference in this document.
 Do not rename a file to fit a deployment, and do not merge files to reduce
 their number.
 

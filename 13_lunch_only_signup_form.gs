@@ -44,7 +44,7 @@
 // ============================================================================
 
 /** Type_Tag for the generated lunch sessions — 'Regular' = one form per calendar month. */
-const LUNCH_ONLY_TYPE_TAG = EVENT_TYPES.REGULAR;
+defineLazyGlobal_('LUNCH_ONLY_TYPE_TAG', () => EVENT_TYPES.REGULAR);
 
 /** Group key for a lunch-only form, in the persistent groupKey -> Form_ID registry. */
 function lunchOnlyGroupKey(location, monthLabel) {
@@ -540,7 +540,7 @@ function getLunchOnlyFormLinks() {
  *                    appointment.
  *   ARCHIVE  grey    where things go when they stop being current.
  */
-const TAB_GROUPS = [
+defineLazyGlobal_('TAB_GROUPS', () => ([
   { color: PALETTE.TAB_TODAY, names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
     SHEET_NAMES.LUNCH_DASHBOARD,
@@ -565,7 +565,7 @@ const TAB_GROUPS = [
   { color: PALETTE.TAB_ARCHIVE, names: [
     SHEET_NAMES.TRIAGE
   ] }
-];
+]));
 
 // ----------------------------------------------------------------------------
 // 2a-ii. SAVED TAB ORDER  ("these tabs, in THIS order, always")
@@ -735,7 +735,7 @@ function styleHeaderRow(sheet, numCols) {
  * a genuine size step is legible at a glance from across a desk, which is how
  * this workbook actually gets used on a serving day.
  */
-const TYPO = {
+defineLazyGlobal_('TYPO', () => ({
   BANNER:        { size: 13, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.BANNER_BG },
   BANNER_HERO:   { size: 18, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.BANNER_HERO_BG },
   // 11, not 10. The column headers are the one row on a twenty-column tab that
@@ -754,7 +754,7 @@ const TYPO = {
   // 10, not 9. Notes and "no rows yet" lines are read by people at a sign-in
   // desk, often standing; 9px grey-on-white is where legibility gave out.
   MUTED:         { size: 10, weight: 'normal', color: PALETTE.INK_MUTED }
-};
+}));
 
 /**
  * Row heights that go with the scale above.
