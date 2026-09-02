@@ -367,7 +367,12 @@ function bootPage(html) {
           withSuccessHandler(fn) { this._ok = fn; return this; },
           withFailureHandler(fn) { this._err = fn; return this; },
           walkInDay(json) { calls.push({ fn: 'walkInDay', payload: JSON.parse(json), ok: this._ok }); },
-          walkInSignIn(json) { calls.push({ fn: 'walkInSignIn', payload: JSON.parse(json), ok: this._ok }); }
+          walkInSignIn(json) { calls.push({ fn: 'walkInSignIn', payload: JSON.parse(json), ok: this._ok }); },
+          // The "coming up" section's live read of this month and next. It is
+          // fired the first time somebody reaches step 2, so a stub without it
+          // is a page that throws on a tap rather than a page that is missing
+          // a list.
+          deskMonthSessions(json) { calls.push({ fn: 'deskMonthSessions', payload: JSON.parse(json), ok: this._ok }); }
         }
       }
     }
