@@ -82,6 +82,7 @@ function styleConfigSheet(sheet) {
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
   seedAdminNotificationRow(sheet);
+  seedArchiveCopyRow(sheet);
   seedCateringPolicyRows(sheet);
   seedLinkDisplayRow(sheet);
   seedAutomationRow(sheet);
@@ -183,6 +184,28 @@ function seedAdminNotificationRow(sheet) {
     cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
       + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
   }
+}
+
+/**
+ * Seeds the archive copy address — the one seeded default in this section,
+ * because "copy the office on what we send out" is the answer the office
+ * asked for and an empty cell would quietly copy nobody. Only ever written
+ * into an EMPTY cell: a workbook whose staff cleared it, or pointed it
+ * somewhere else, is left exactly as they left it.
+ */
+function seedArchiveCopyRow(sheet) {
+  const section = CONFIG_LAYOUT.ARCHIVE_COPY;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_ARCHIVE_COPY_EMAIL);
+    log(`Seeded default Archive Copy Address ("${DEFAULT_ARCHIVE_COPY_EMAIL}") on "${SHEET_NAMES.CONFIG}".`);
+  }
+  cell.setNote('One address copied on everything this system sends outside the organization:\n'
+    + '  • BCC on every program leader roster-change email.\n'
+    + '  • Added as a guest on any calendar event registrants are invited to.\n'
+    + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
+    + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
+    + 'which receives the internal per-sync digest and nothing else.');
 }
 
 /** Seeds "Show link" and explains the trade-off in the cell note. */
@@ -702,6 +725,33 @@ function getAdminNotificationEmail() {
     email = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
   }
   __adminNotificationEmailCache = email;
+  return email;
+}
+
+/**
+ * The address in Config's "🗄️ Archive Copy Address" section, or '' when
+ * blank. Every caller treats '' as "copy nobody", so an empty cell is a
+ * perfectly valid way to turn the copies off — and a Config tab that cannot
+ * be read at all (no spreadsheet in this context, tab mid-rebuild) reads the
+ * same way, which is the safe direction: a failure here must never mail an
+ * address nobody could confirm.
+ */
+function getArchiveCopyEmail() {
+  if (__archiveCopyEmailCache !== null) return __archiveCopyEmailCache;
+  let email = '';
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      const section = CONFIG_LAYOUT.ARCHIVE_COPY;
+      email = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
+    }
+  } catch (err) {
+    log(`\u26a0\ufe0f Could not read the Archive Copy Address from Config (${err}) — nothing was copied.`);
+    email = '';
+  }
+  if (email.indexOf('@') <= 0) email = '';
+  __archiveCopyEmailCache = email;
   return email;
 }
 

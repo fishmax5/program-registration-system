@@ -163,6 +163,29 @@ either.
 | `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
 | `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
 
+### Two months at the door (67)
+
+| File | | What is in it |
+|---|--:|---|
+| `67_desk_month_sessions.gs` | 130 | `deskMonthSessions` — every session at one location from today to the end of NEXT month, grouped by day. The live read behind the day picker and the session boxes on both tablet pages (`61`, `62`), and behind the club place a walk-in can take at the door. Behavior only; nothing earlier reads it at load time. |
+
+### Migrations (68)
+
+| File | | What is in it |
+|---|--:|---|
+| `68_form_state_migrations.gs` | 387 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`); and the Admin item that forces it now. Behavior only, loading after everything it reads. |
+
+### Links to the files this system makes (69)
+
+Numbered last for the usual reason: it is behavior only, and its own
+constants are the only ones it defines, so nothing earlier reads it at load
+time. Its two columns live in `03` like every other schema.
+
+| File | | What is in it |
+|---|--:|---|
+| `69_generated_file_links.gs` | 236 | Live links to the files this system makes outside the workbook: the printed sign-in PDF registry (and its one-time folder backfill), and the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
+
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
@@ -174,6 +197,20 @@ either.
 - **Constants over literals.** Colors come from `PALETTE`, tab names from
   `SHEET_NAMES`, columns from `HEADERS`. A bare string that duplicates one of
   those is a bug waiting for a rename.
+- **A change to a live shape ships its migration in the same commit.** A
+  template fix reaches forms created *afterwards* and nobody else: a group's
+  form is created once and reused for as long as the group runs. A version bump
+  says "this is different now"; the migration is what makes it different for
+  everyone already holding the old thing. So when a change moves the shape of
+  something already out in the world — a form's page navigation, its questions,
+  a stored registry's fields — write the state A → state B repair beside it,
+  register it in `FORM_STATE_MIGRATIONS` (`68_form_state_migrations.gs`) with
+  its own never-reused id, and leave the earlier entries alone: a workbook that
+  has been quiet for six months runs all of them in order on its next sync. A
+  migration must be **idempotent** and must return 0 when the form is already
+  right — it runs hourly, and a redundant Forms write is a round trip and a new
+  revision in the form's history. Rebuilding the form is the fallback for a
+  shape no migration recognizes, not the first answer.
 - **Script Properties keys are versioned** (`..._V1`). Changing a stored
   shape means a new key, not a silent reinterpretation of the old one. The
   converse is worth knowing too: a key whose stored shape has NOT changed keeps

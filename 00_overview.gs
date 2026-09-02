@@ -39,7 +39,9 @@
  *      Upcoming/Past sub-tables like every other date-bearing tab.
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
- *      an optional Admin Notification Email + Lunch Service by Location +
+ *      an optional Admin Notification Email + an Archive Copy Address (the
+ *      one address copied on everything sent outside the organization) +
+ *      Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
  *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
@@ -313,6 +315,15 @@
  *      current template are stamped and thereafter skipped without an API
  *      call. Run recheckAllRegistrationForms() from the editor to force a
  *      re-check (e.g. after hand-editing a form).
+ *    - AND REPAIRED IN PLACE BEFORE THEY ARE REBUILT. A rebuild is the
+ *      sledgehammer: every question replaced, every pre-checked box
+ *      regenerated, five forms an execution. Most template changes move far
+ *      less than that — v8 moved page-navigation settings and nothing else —
+ *      so runFormStateMigrations() (68_form_state_migrations.gs) runs first,
+ *      writing only what is wrong on each live form and stamping the form
+ *      current when its migrations cover the whole of that version. What is
+ *      left for the rebuild pass is the forms a migration could not recognize.
+ *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep.
  *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —
