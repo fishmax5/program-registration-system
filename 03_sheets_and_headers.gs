@@ -36,7 +36,13 @@ const SHEET_NAMES = {
   ASSISTANCE_REQUESTS: 'Assistance_Requests',
   // The standing facts about a person that a sign-in desk would otherwise
   // have to already know — see section 6e.
-  REGULAR_NEEDS: 'Regular_Needs'
+  REGULAR_NEEDS: 'Regular_Needs',
+  // One row per calendar month, written once and then left alone — see
+  // 74_monthly_metrics.gs. It is the only tab in this workbook that is a
+  // RECORD rather than a projection of the current data: the registrant rows
+  // a month was counted from are eventually archived, and a stored row is
+  // what still answers "how did last September compare to the one before".
+  METRICS: 'Metrics'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -523,6 +529,47 @@ defineLazyGlobal_('HEADERS', () => ({
    *               Ignored by the text types.
    *   Sort        the order they appear in. Ties fall back to the row order.
    */
+  /**
+   * Metrics — ONE ROW PER MONTH, AND WHY IT IS STORED RATHER THAN COMPUTED.
+   *
+   * Every other number in this workbook is derived on demand from the rows
+   * that are still on the tabs. That is right for "how full is next week" and
+   * wrong for a year-over-year comparison, because the rows a year-old month
+   * was counted from are exactly the rows that get archived (see
+   * collapseOldPastMonths) or deleted. A comparison whose baseline quietly
+   * empties out is worse than no comparison: it reports a collapse that only
+   * happened to the storage.
+   *
+   * So a month is COUNTED once and then WRITTEN DOWN, and the year-over-year
+   * block on this tab reads these rows rather than the registrant tab. A month
+   * still present in the data can be recounted at any time (the menu item does
+   * exactly that, and the monthly trigger recounts the month just ended); a
+   * month whose rows are gone keeps the numbers it was captured with.
+   *
+   * Month is the key — 'YYYY-MM', sortable as text — and Month_Label is the
+   * same month spelled for a human. Captured_On says when the row was last
+   * counted, which is what tells a reader whether a thin-looking month is a
+   * quiet month or one captured mid-way through.
+   *
+   * Notes is the one staff-owned column: it is carried across every recount,
+   * so "closed for renovations" typed against March 2026 survives the row
+   * being recounted.
+   *
+   * The two rate columns hold FRACTIONS (0.63) formatted as percentages, the
+   * same as every other percentage cell in this workbook. Anything reading
+   * them back for a comparison wants percentage POINTS — see
+   * metricsRateToPoints().
+   */
+  Metrics: [
+    'Month', 'Month_Label',
+    'Sessions', 'Programs', 'Locations', 'Club_Sessions', 'Assistance_Sessions',
+    'Drop_In_Sessions', 'Lunch_Sessions',
+    'Registrations', 'Avg_Per_Session', 'Participants', 'New_People', 'Guests',
+    'Waitlisted', 'Cancellations',
+    'Attended', 'Attendance_Rate', 'Seats_Filled_Rate', 'Empty_Seats',
+    'Meals_Ordered', 'Meals_Served', 'Meals_Consumed', 'Lunch_Only_Signups',
+    'Captured_On', 'Notes'
+  ],
   Program_Questions: [
     'Program', 'Location', 'Match_Keywords', 'Question', 'Type', 'Choices', 'Help_Text',
     'Required', 'Sort', 'Active'
@@ -571,6 +618,9 @@ const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', '
  * reporting back, and refreshProgramLeadersTab() is careful to be the only
  * thing that ever writes them.
  */
+/** The one column on Metrics a person types into. Carried across every recount. */
+const METRICS_STAFF_COLUMNS = ['Notes'];
+
 const PROGRAM_LEADERS_STAFF_COLUMNS = ['Leader_Name', 'Email', 'Program', 'Location',
   'Notify_Roster_Changes', 'Staff_Notes'];
 

@@ -47,6 +47,15 @@
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
  *      first-column/month-tint treatment as Registrant_Dash.
+ *    - Metrics                  : one row per calendar MONTH, and the only
+ *      tab that is a record rather than a projection of the rows still on
+ *      the other tabs. A month is counted once and written down (on the 2nd
+ *      of the following month, or from Settings & Fixes -> "Update Metrics
+ *      Now"), because the registrant rows a month was counted from are
+ *      eventually archived and a year-over-year comparison outlives them.
+ *      The block above the monthly rows is that comparison: the last twelve
+ *      complete months against the twelve before them, plus the month
+ *      running against the same month a year ago. See section 74.
  *
  *  Notable behaviors:
  *    - All-day calendar events are skipped entirely.

@@ -563,7 +563,10 @@ defineLazyGlobal_('TAB_GROUPS', () => ([
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
   { color: PALETTE.TAB_ARCHIVE, names: [
-    SHEET_NAMES.TRIAGE
+    SHEET_NAMES.TRIAGE,
+    // The record of months that are over, which is the archive shelf even
+    // though nothing was moved there — see 74_monthly_metrics.gs.
+    SHEET_NAMES.METRICS
   ] }
 ]));
 

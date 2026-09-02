@@ -236,6 +236,16 @@ previous door page.
 | `72_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
 | `73_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
 
+### One row per month (74)
+
+Behavior only, and last for the usual reason: its schema (`SHEET_NAMES.METRICS`,
+`HEADERS.Metrics`, `METRICS_STAFF_COLUMNS`) lives in `03`, and everything it
+calls into `34`, `40` and `43` is a hoisted function.
+
+| File | | What is in it |
+|---|--:|---|
+| `74_monthly_metrics.gs` | 708 | The `Metrics` tab: one stored row per calendar month, and the year-over-year block built on those rows rather than on `Registrant_Dash`. **The rule the file exists for:** a month whose registrant rows have been archived recounts to `null`, not to zero — overwriting a captured month with a count of nothing would report a collapse that never happened. Counted through the same readers `43` uses, so the two blocks cannot disagree about what a registration is. Runs monthly (`captureMonthlyMetricsTrigger`, the 2nd at 4am) and on demand (`refreshMetricsTabNow`, under Settings & Fixes). |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
