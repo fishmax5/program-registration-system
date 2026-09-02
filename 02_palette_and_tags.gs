@@ -680,7 +680,7 @@ function isAssistanceColumnValue(value) {
  *   regex    every spelling it READS back out of one
  *   groupKey the field buildEventGroups() carries it on
  */
-const PROGRAM_FLAG_COLUMNS = [
+defineLazyGlobal_('PROGRAM_FLAG_COLUMNS', () => ([
   {
     column: 'Club',
     tag: CLUB_TAG,
@@ -736,7 +736,7 @@ const PROGRAM_FLAG_COLUMNS = [
       `lunch grids back and stops asking for a time. Appointments already booked keep their times on ` +
       `the Registrants tab.\n\n[${ASSISTANCE_TAG}] is removed from its calendar events.`
   }
-];
+]));
 
 /** The flag definition for one dashboard column name, or null. */
 function getProgramFlagByColumn(columnName) {

@@ -9,21 +9,38 @@ to a tablet at the door. There is no framework, no build step, and no
 ## The one thing to know before editing
 
 **Every `.gs` file at the root is ONE Apps Script project sharing ONE global
-scope, and Apps Script evaluates the files in filename order.** The numeric
-prefixes exist to make that order deterministic — they are not decoration.
+scope.** The numeric prefixes ask the project to evaluate them in filename
+order, and `tests/helpers/source.js` reproduces that order — but nothing
+*enforces* it. Apps Script evaluates files in whatever order the project has
+them stored, and a GitHub-sync browser extension that writes files back
+most-recently-edited-first will happily evaluate `03_sheets_and_headers`
+before `02_palette_and_tags`.
 
-A good number of top-level `const`s are computed from an earlier one
-(`MANUAL_OVERRIDE_COLOR` from `PALETTE`, `LUNCH_ONLY_TYPE_TAG` from
-`EVENT_TYPES`, `TIMEZONE` from the live spreadsheet). So:
+That used to be fatal, and was: a top-level `const` computed from another
+file's constant threw `ReferenceError: PALETTE is not defined` on open, for
+every user, with a dialog nobody could dismiss their way out of. There were 34
+such cross-file reads across 15 constants.
 
-- **Renumbering a file, or moving a top-level `const` to a later-sorting file,
-  is a load-time `ReferenceError`, not a runtime bug.** It fails on open, for
-  every user, with a dialog nobody can dismiss their way out of.
+**That is fixed, and the fix is the rule to follow.** Any constant whose
+initializer mentions a constant from a *different file* is declared through
+`defineLazyGlobal_` (see `01a_lazy_globals.gs`) instead of `const`: the name
+binds at load, the value is computed on first read — by which point every file
+has evaluated, whatever order they came in.
+
+- **Load order no longer matters.** Renumbering a file, or moving a top-level
+  `const` to a later-sorting file, is safe. Keep the prefixes anyway: they are
+  how a reader finds things, and how the tables below are organized.
+- A constant whose initializer is self-contained (`PALETTE`, `SHEET_NAMES`,
+  `EVENT_TYPES`) stays an ordinary `const`. Nothing it needs can be missing.
+- **A top-level statement that *reads* a lazy global is the same hazard
+  wearing a different hat.** `PROGRAM_FORM_TYPES.forEach(...)` at file scope
+  forces the getter at load time; fold that work into the factory instead.
+- `tests/load_order.test.js` is what holds the line. It loads the whole project
+  in reverse filename order and in 60 shuffles, and checks every derived global
+  reads back identically. A failure there is not a broken test — it is a new
+  eager cross-file read. Wrap it in `defineLazyGlobal_`.
 - Function *declarations* are hoisted across the whole project, so a function
-  may freely call one defined in any other file. Only top-level
-  initialization order is constrained.
-- New file? Give it a prefix that puts it after everything it reads at load
-  time. When in doubt, put constants low-numbered and behavior high-numbered.
+  may freely call one defined in any other file — `defineLazyGlobal_` included.
 
 ## Where things are
 
@@ -35,6 +52,7 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `00_overview.gs` | 446 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
 | `01_logging_and_access.gs` | 209 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
+| `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
 | `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
@@ -163,11 +181,47 @@ either.
 | `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
 | `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
 
-### Cancellation (67)
+### Two months at the door (67)
 
 | File | | What is in it |
 |---|--:|---|
-| `67_cancellation.gs` | 749 | **One writer, three doors.** `cancelRegistrantRows()` is the only place a booking becomes a cancellation — four cells, not one (`Program_Status`, `Lunch_Status`, `Manual_Override`, an `Admin_Notes` stamp), and the `Manual_Override` is what stops the next hourly sync re-deriving the row from its form response and quietly un-cancelling it. The doors: the check-in page's cancel button (`checkInCancel`), a program leader's `Dropped` tick (`applyLeaderDropsAsCancellations`, called from the import right after the leader merge), and the member's own cancel page (`buildCancelPageHtml`, served at `?mode=cancel&form=…` from the link in the calendar invite). Numbered last: behavior only, reads the door pages' vocabulary, declares nothing anything else derives from. |
+| `67_desk_month_sessions.gs` | 130 | `deskMonthSessions` — every session at one location from today to the end of NEXT month, grouped by day. The live read behind the day picker and the session boxes on both tablet pages (`61`, `62`), and behind the club place a walk-in can take at the door. Behavior only; nothing earlier reads it at load time. |
+
+### Migrations (68)
+
+| File | | What is in it |
+|---|--:|---|
+| `68_form_state_migrations.gs` | 387 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`); and the Admin item that forces it now. Behavior only, loading after everything it reads. |
+
+### Links to the files this system makes (69)
+
+Numbered last for the usual reason: it is behavior only, and its own
+constants are the only ones it defines, so nothing earlier reads it at load
+time. Its two columns live in `03` like every other schema.
+
+| File | | What is in it |
+|---|--:|---|
+| `69_generated_file_links.gs` | 236 | Live links to the files this system makes outside the workbook: the printed sign-in PDF registry (and its one-time folder backfill), and the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
+
+### How often registrants hear from us (70)
+
+Behavior only, and last for the usual reason: its two columns live in `03`
+like every other schema, everything `33` and `40` call into it is a hoisted
+function, and its own top-level `const`s stand alone.
+
+| File | | What is in it |
+|---|--:|---|
+| `70_registrant_notifications.gs` | 516 | How often each program writes to the people signed up for it: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites (`33`) and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
+
+### Cancellation (71)
+
+Behavior only, and numbered last so it is clear of `67`–`70`: it reads the
+door pages' vocabulary and declares nothing anything else derives from.
+
+| File | | What is in it |
+|---|--:|---|
+| `71_cancellation.gs` | 749 | **One writer, three doors.** `cancelRegistrantRows()` is the only place a booking becomes a cancellation — four cells, not one (`Program_Status`, `Lunch_Status`, `Manual_Override`, an `Admin_Notes` stamp), and the `Manual_Override` is what stops the next hourly sync re-deriving the row from its form response and quietly un-cancelling it. The doors: the check-in page's cancel button (`checkInCancel`), a program leader's `Dropped` tick (`applyLeaderDropsAsCancellations`, called from the import right after the leader merge), and the member's own cancel page (`buildCancelPageHtml`, served at `?mode=cancel&form=…` from the link in the calendar invite). |
+
 
 ## Conventions
 
@@ -180,6 +234,20 @@ either.
 - **Constants over literals.** Colors come from `PALETTE`, tab names from
   `SHEET_NAMES`, columns from `HEADERS`. A bare string that duplicates one of
   those is a bug waiting for a rename.
+- **A change to a live shape ships its migration in the same commit.** A
+  template fix reaches forms created *afterwards* and nobody else: a group's
+  form is created once and reused for as long as the group runs. A version bump
+  says "this is different now"; the migration is what makes it different for
+  everyone already holding the old thing. So when a change moves the shape of
+  something already out in the world — a form's page navigation, its questions,
+  a stored registry's fields — write the state A → state B repair beside it,
+  register it in `FORM_STATE_MIGRATIONS` (`68_form_state_migrations.gs`) with
+  its own never-reused id, and leave the earlier entries alone: a workbook that
+  has been quiet for six months runs all of them in order on its next sync. A
+  migration must be **idempotent** and must return 0 when the form is already
+  right — it runs hourly, and a redundant Forms write is a round trip and a new
+  revision in the form's history. Rebuilding the form is the fallback for a
+  shape no migration recognizes, not the first answer.
 - **Script Properties keys are versioned** (`..._V1`). Changing a stored
   shape means a new key, not a silent reinterpretation of the old one. The
   converse is worth knowing too: a key whose stored shape has NOT changed keeps
@@ -202,8 +270,10 @@ node tests/check_in_page.test.js        # one file
 for f in tests/*.test.js; do node "$f"; done
 ```
 
-`tests/helpers/source.js` sorts by filename — the same rule the Apps Script
-runtime applies — so a test sees exactly the load order production does.
+`tests/helpers/source.js` sorts by filename — the order the project asks for —
+so a test sees the same load order a correctly-ordered deployment does.
+`tests/load_order.test.js` deliberately does the opposite: it loads the project
+reversed and shuffled, because a real deployment's order is not guaranteed.
 
 **Known pre-existing failure:** `tests/appointment_review.test.js` reports 2
 failures ("duplicate rows do not duplicate the times", "and the escape hatch is
@@ -216,8 +286,11 @@ passes.
 they go into the Apps Script project unchanged — via a GitHub-sync browser
 extension in the editor, or `clasp push`.
 
-The only invariant that matters on the way in is that **filenames survive
-intact**, because the prefixes are the load order (see the top of this file).
+Filenames should survive intact — the prefixes are how the project is
+organized and how these tables are indexed. They are no longer *load-bearing*
+(see the top of this file), so a sync tool that reorders files in the project
+is no longer a load-time crash; but a renamed file still costs you every
+cross-reference in this document.
 Do not rename a file to fit a deployment, and do not merge files to reduce
 their number.
 

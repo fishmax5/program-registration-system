@@ -39,7 +39,9 @@
  *      Upcoming/Past sub-tables like every other date-bearing tab.
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
- *      an optional Admin Notification Email + Lunch Service by Location +
+ *      an optional Admin Notification Email + an Archive Copy Address (the
+ *      one address copied on everything sent outside the organization) +
+ *      Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
  *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
@@ -197,6 +199,19 @@
  *      trigger. Replaces Program_Options' old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
  *      a sync runs (migrateProgramLeaderAddresses()).
+ *    - REGISTRANT NOTIFICATIONS (Program_Options' Notify_Mode and
+ *      Reminder_Days, section 9e): how often each PROGRAM writes to the
+ *      people signed up for it. Two channels under one dropdown — the
+ *      calendar invite that puts them on the real event's guest list, and a
+ *      reminder email this workbook sends N days before, comma-separated,
+ *      0 meaning the morning of. Left blank a program keeps its kind's usual
+ *      behavior: everything ordinary is invited and nothing more, exactly as
+ *      before these columns existed, while a Personalized Assistance program
+ *      also emails the person their OWN appointment time — when they book,
+ *      and again the day before. That time can only be said in mail: a
+ *      calendar event has one description shared by every guest. Every send
+ *      is ledgered per person per offset, so an hourly sync never repeats
+ *      one. Config's "Calendar Invitations" switch still wins over any row.
  *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:
@@ -313,6 +328,15 @@
  *      current template are stamped and thereafter skipped without an API
  *      call. Run recheckAllRegistrationForms() from the editor to force a
  *      re-check (e.g. after hand-editing a form).
+ *    - AND REPAIRED IN PLACE BEFORE THEY ARE REBUILT. A rebuild is the
+ *      sledgehammer: every question replaced, every pre-checked box
+ *      regenerated, five forms an execution. Most template changes move far
+ *      less than that — v8 moved page-navigation settings and nothing else —
+ *      so runFormStateMigrations() (68_form_state_migrations.gs) runs first,
+ *      writing only what is wrong on each live form and stamping the form
+ *      current when its migrations cover the whole of that version. What is
+ *      left for the rebuild pass is the forms a migration could not recognize.
+ *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep.
  *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —

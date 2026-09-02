@@ -43,9 +43,34 @@ const CONFIG_LAYOUT = {
     title: '🚧 Registration Open Through',
     startCol: 21,
     headers: ['Registration_Open_Through']
+  },
+  ARCHIVE_COPY: {
+    title: '🗄️ Archive Copy Address',
+    startCol: 23,
+    headers: ['Archive_Copy_Email']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
+
+/**
+ * WHY AN ARCHIVE COPY EXISTS AT ALL. Everything this system sends leaves the
+ * organization: a roster alert goes to a program leader who is not on staff, a
+ * calendar invitation goes to whoever typed an address into a registration
+ * form, a leader's roster sheet is shared out of the workbook by link. None of
+ * it lands anywhere the office can look at later — the trigger owner's Sent
+ * folder is one particular person's mailbox, and routinely not the person who
+ * has to answer for what was sent.
+ *
+ * So one address gets a copy of all three: BCC'd on leader alerts, added as a
+ * guest on any event registrants are invited to, and made an editor of every
+ * file this system shares. It is a Config cell rather than a constant so the
+ * office can repoint or empty it without a code change — BLANK means "copy
+ * nobody", exactly like the admin notification address above it.
+ *
+ * The default below is seeded on a fresh Config tab only; a workbook whose
+ * cell has already been cleared by hand stays cleared.
+ */
+const DEFAULT_ARCHIVE_COPY_EMAIL = 'admin@newhorizonsseniorcenter.org';
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 

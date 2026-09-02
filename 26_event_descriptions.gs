@@ -22,8 +22,7 @@
 // ============================================================================
 
 /** Every occurrence of our anchor format, not just the first. */
-const REGISTRATION_ANCHOR_REGEX_GLOBAL =
-  new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi');
+defineLazyGlobal_('REGISTRATION_ANCHOR_REGEX_GLOBAL', () => new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi'));
 /** Every occurrence of the pre-anchor "Registration Link: ... [Form ID: ...]" line. */
 const LEGACY_REGISTRATION_LINE_REGEX_GLOBAL =
   /^.*Registration Link:\s*\S+\s*\[Form ID:\s*[a-zA-Z0-9_-]+\].*$/gim;
@@ -133,7 +132,7 @@ const ORPHAN_FORM_MARKER_REGEX =
  * which is how an event ends up saying registration is not open on the day it
  * opens.
  */
-const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
+defineLazyGlobal_('REGISTRATION_NOT_OPEN_NOTICE_PATTERNS', () => ([
   // Alone on its line — how this script writes it — however it ends up
   // indented, quoted, or wrapped in tags by a later edit.
   new RegExp(`^(?:[\\s>]|&nbsp;|&#0*160;|&#x0*a0;)*(?:<[^>]+>\\s*)*(?:${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*)?` +
@@ -147,7 +146,7 @@ const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
   // on their own could plausibly be something a person typed, but "🚧 " in
   // front of them is this script's stamp.
   new RegExp(`${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*${REGISTRATION_NOT_OPEN_TEXT}`, 'gi')
-];
+]));
 
 /**
  * Removes every registration link from a description and reports how many

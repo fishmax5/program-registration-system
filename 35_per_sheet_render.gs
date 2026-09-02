@@ -8,6 +8,9 @@ function renderRegistrantsSheet(force, allRows) {
   const headers = HEADERS.Registrant_Dash;
   const rows = allRows || readAllSectionedRows(sheet, headers, 'Event_ID');
   backfillRegistrantEventTimes(ss, headers, rows);
+  // Same derived pair as the session table, keyed off this row's own program
+  // and day — see 69_generated_file_links.gs.
+  stampGeneratedFileLinks(rows, getIndexMap(headers), { titleColumn: 'Event' });
   return renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',

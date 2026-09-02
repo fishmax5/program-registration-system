@@ -222,6 +222,20 @@ function refreshProgramOptions(ss, sessionRows) {
   });
 
   writeMemoryTab(sheet, headers, outRows, programOptionsTabOptions());
+
+  // The dropdowns run past the last row so the blank line under it has them
+  // too (see MEMORY_TAB_SPARE_ROWS). Notify_Mode is a CLOSED list — every
+  // legal answer is known, and a typo there would quietly change who gets
+  // told about their appointment. Reminder_Days is open: the suggestions are
+  // the cadences anyone actually asks for, and "14, 7, 1" is still valid.
+  applyMemoryTabValidation(sheet, headers, outRows.length, {
+    lists: { Notify_Mode: NOTIFY_MODE_LIST },
+    openLists: { Reminder_Days: REMINDER_DAYS_SUGGESTIONS }
+  });
+  // The tab those settings are read from has just been rewritten; anything
+  // asking again in this execution must see the rows as they now stand.
+  invalidateNotificationPolicyCache();
+
   log(`Program_Options refreshed: ${outRows.length} program(s).`);
 }
 
