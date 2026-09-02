@@ -164,7 +164,7 @@ its own top-level `const`s stand alone.
 |---|--:|---|
 | `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
 | `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
-| `67_registrant_notifications.gs` | 505 | How often each program writes to its registrants: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
+| `70_registrant_notifications.gs` | 505 | How often each program writes to its registrants: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
 
 ## Conventions
 
