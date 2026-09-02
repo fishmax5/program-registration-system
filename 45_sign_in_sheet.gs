@@ -318,7 +318,7 @@ function createSignInSheetPdf(sessionValue, include) {
   const file = renderSignInSheetPdf(data);
   // REMEMBERED, not just returned. The dialog hands back a link that is gone
   // the moment it closes; the registry is what puts that same file on the
-  // session's row on every tab that has one — see 67_generated_file_links.gs.
+  // session's row on every tab that has one — see 69_generated_file_links.gs.
   recordSignInSheetPdf(dateKey, location, file);
   flushPersistentRegistries();
   const message = `✅ ${data.rows.length} name(s) on the sheet ` +

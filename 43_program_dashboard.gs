@@ -65,7 +65,7 @@ function renderProgramDashboard(force, options) {
   const metrics = computeProgramMetrics(programSessionRows, map, registrantScan);
 
   // The links to this session's own files, recomputed from the registries on
-  // every render (see 67_generated_file_links.gs): whatever is in these two
+  // every render (see 69_generated_file_links.gs): whatever is in these two
   // cells now is last render's answer, and a file may have been built or
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });

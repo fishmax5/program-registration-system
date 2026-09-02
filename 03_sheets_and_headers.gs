@@ -117,7 +117,7 @@ const HEADERS = {
   // — the spreadsheet a program leader marks up, and the printed sign-in PDF
   // for that day and building. Both are DERIVED: every render recomputes them
   // from the registries and overwrites whatever is in the cell, so a link can
-  // never outlive the file it points at. See 67_generated_file_links.gs.
+  // never outlive the file it points at. See 69_generated_file_links.gs.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
@@ -224,7 +224,7 @@ const HEADERS = {
   // Leader_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
   // session table carries, repeated here so the day's roster is one click
   // from the sheet the leader is marking and the PDF the desk printed — see
-  // 67_generated_file_links.gs.
+  // 69_generated_file_links.gs.
   Registrant_Dash: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Meals_Ordered',
@@ -285,7 +285,7 @@ const HEADERS = {
   // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
   // the printed sheet for that date x location (there is no leader sheet for a
   // meal), derived on every render from the registry in
-  // 67_generated_file_links.gs. Its position is free to move for the same
+  // 69_generated_file_links.gs. Its position is free to move for the same
   // reason the buffers' is — the formulas build their A1 refs from this array.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',

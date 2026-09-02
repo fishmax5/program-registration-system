@@ -37,6 +37,14 @@
 // kitchen's list and on the dashboard's "lunch needed" line, and it never
 // claims a meal was served.
 //
+//   3. AND ARE YOU COMING BACK? Under those two questions: every session at
+//      this building in this month and the next (deskMonthSessions()), as a
+//      day picker and a box per program. Ticking one REGISTERS them for that
+//      date — never marks them present at it — and one further tick makes
+//      those club places, on every future date of the programs picked. It is
+//      the question a front desk is asked all day and could not answer from a
+//      tablet: "what have you got next month, and can I put my name down now".
+//
 // WHAT IT DELIBERATELY DOES NOT DO. It does not hand meals over
 // (Lunch_Served is a tap at the counter, on the check-in page, where the food
 // is), it does not book appointments — a [Personalized Assistance] slot is a
@@ -377,7 +385,13 @@ function walkInSignIn(payload) {
   const newMember = !!args.newMember;
   const wanted = (args.programs || []).map(v => String(v || ''));
   const wantsLunch = !!args.lunch;
-  if (!wanted.length && !wantsLunch) {
+  // THE DATES THEY PICKED OFF THE "COMING UP" SECTION — sessions in this month
+  // or next (deskMonthSessions()), which are a REGISTRATION and never an
+  // attendance: nobody is present at a class in three weeks' time.
+  const upcoming = (Array.isArray(args.upcoming) ? args.upcoming : [])
+    .map(v => String(v || '').trim()).filter(v => v);
+  const upcomingStanding = !!args.upcomingStanding;
+  if (!wanted.length && !wantsLunch && !upcoming.length) {
     return { ok: false, message: 'Tick what you are here for first — nothing was signed in.' };
   }
   // A NEW MEMBER WITHOUT AN EMAIL IS THE ONE REFUSAL. The whole reason the
@@ -520,6 +534,37 @@ function walkInSignIn(payload) {
       }
     }
   }
+
+  // THE FUTURE DATES, AFTER EVERYTHING ABOUT TODAY. A person standing at the
+  // door is here for today first; a booking for the 14th that fails must not
+  // be able to cost them the sign-in they came for, so it happens last and its
+  // failure is a line rather than a return.
+  //
+  // register, and never attended,: these rows are a place on a list, and a
+  // door that could tick somebody present for a session three weeks out is a
+  // door that quietly inflates every attendance number the workbook reports.
+  //
+  // standing is the CLUB PLACE — the same one the desk's register screen
+  // offers (checkInRegister()), which is a Club_Members row and a place on
+  // every future date of that program rather than on this one date.
+  upcoming.forEach(session => {
+    const res = applyQuickMarkFromDialog({
+      location,
+      session,
+      name,
+      register: true,
+      confirmWalkIn: true,
+      phone,
+      email,
+      standing: upcomingStanding,
+      // Never a standing LUNCH from the door: a meal on every future date is a
+      // standing order with the caterer, and it is not a thing to sign
+      // somebody up for at a tablet without asking the kitchen.
+      standingLunch: false
+    });
+    lines.push((res && res.message) || `⚠️ ${session} — nothing came back.`);
+    if (res && res.ok) done++;
+  });
 
   const message = done
     ? `✅ Signed in — ${name}.`
@@ -693,6 +738,17 @@ function buildWalkInHtml(options) {
   .tag.grey { background: #F1F3F4; color: #5F6368; }
   .warn { color: #B06000; }
 
+  /* THE COMING-UP BOXES. Same size and same shape as the name cards above —
+     a date on this page is a dropdown (one ordered choice), and the programs
+     on that date are boxes, because that is the choice a thumb has to hit. */
+  button.pick { background: #fff; border: 1px solid #DADCE0; border-radius: 10px;
+                padding: 14px 12px; font-size: 17px; text-align: left; cursor: pointer;
+                color: #202124; min-height: 62px; }
+  button.pick .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px;
+                      line-height: 1.35; }
+  button.pick.on { background: #E8F0FE; border-color: #1A73E8; font-weight: 600; }
+  button.pick.on .meta { color: #1967D2; }
+
   button.big { width: 100%; background: #1A73E8; color: #fff; border: 0; border-radius: 10px;
                padding: 16px; font-size: 18px; font-weight: 600; cursor: pointer; margin-top: 16px; }
   button.big[disabled] { opacity: .5; }
@@ -736,6 +792,15 @@ function buildWalkInHtml(options) {
   var PERSON = null;       // { name, key, isNew, phone, email }
   var PICKED = {};         // session value -> true
   var LUNCH = false;
+  // THE LATER DATES. UPCOMING is this month and next at this building, read
+  // once per visit (deskMonthSessions()); the rest is what the person has
+  // picked off it — sessions to be REGISTERED for, and whether those are club
+  // places on every future date rather than on the one date shown.
+  var UPCOMING = null;     // [ { dateKey, dateLabel, monthLabel, sessions } ] once read
+  var UPCOMING_ASKED = false;
+  var UP_DAY = '';
+  var UP_PICKED = {};
+  var UP_CLUB = false;
   var RESULT = null;
   var busy = false;
   var pin = '';
@@ -1041,12 +1106,14 @@ function buildWalkInHtml(options) {
     lunchList.appendChild(lunchItem());
     main.appendChild(lunchList);
 
+    drawUpcoming(main);
+
     var go = button('big', 'Sign in', submit);
     go.id = 'go';
     go.disabled = busy;
     main.appendChild(go);
     main.appendChild(button('plain', 'Not you? Pick another name', function () {
-      PERSON = null; STEP = 'who'; draw();
+      PERSON = null; STEP = 'who'; UP_PICKED = {}; UP_CLUB = false; draw();
     }));
   }
 
@@ -1128,9 +1195,135 @@ function buildWalkInHtml(options) {
     return li;
   }
 
+  // --------------------------------------------------------------------------
+  // COMING UP — the same door, asked about a date that is not today
+  // --------------------------------------------------------------------------
+  //
+  // The question a front desk is asked after "am I signed in" is "what have
+  // you got next month, and can I put my name down now". Until this section
+  // the answer from the tablet was to go and find a member of staff.
+  //
+  // IT IS A REGISTRATION, NOT A SIGN-IN. Nothing here marks anybody present —
+  // see walkInSignIn(), which writes these as places on a list. The club
+  // toggle underneath is the same club place the desk's register screen
+  // offers: every future date of the programs picked, rather than the one
+  // date on the box.
+  //
+  // IT IS ALSO THE ONE THING ON THIS PAGE THAT IS NOT FREE. Today's list is
+  // inlined into the page; two months of dates is a live read, so it is asked
+  // for once, the first time somebody reaches this screen, and the page is
+  // perfectly usable while it is in flight.
+  function drawUpcoming(main) {
+    main.appendChild(el('h2', '', 'Coming up at ' + (DAY ? DAY.location : location_)));
+    if (!UPCOMING) {
+      main.appendChild(el('p', 'hint', 'Reading the coming dates...'));
+      loadUpcoming();
+      return;
+    }
+    if (!UPCOMING.length) {
+      main.appendChild(el('p', 'hint',
+        'Nothing else is on the calendar here this month or next.'));
+      return;
+    }
+    main.appendChild(el('p', 'hint',
+      'Signing up for a later date? Pick a day, then tap what you want a place on. ' +
+      'These are bookings — you are not being marked as here for them.'));
+
+    var label = el('label', 'field', 'Day');
+    label.setAttribute('for', 'up-day');
+    main.appendChild(label);
+    var sel = document.createElement('select');
+    sel.id = 'up-day';
+    UPCOMING.forEach(function (day) {
+      var o = document.createElement('option');
+      o.value = day.dateKey;
+      o.textContent = day.monthLabel + '  —  ' + day.dateLabel + '  (' + day.sessions.length +
+        (day.sessions.length === 1 ? ' program)' : ' programs)');
+      sel.appendChild(o);
+    });
+    if (!upDay()) UP_DAY = UPCOMING[0].dateKey;
+    sel.value = UP_DAY;
+    sel.onchange = function () { UP_DAY = sel.value; draw(); };
+    main.appendChild(sel);
+
+    var boxes = el('div', 'cards', '');
+    (upDay() || { sessions: [] }).sessions.forEach(function (session) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pick' + (UP_PICKED[session.value] ? ' on' : '');
+      // An appointment is a chair at a time and picking one is a conversation
+      // — the same rule today's list follows. Shown so it is plainly not
+      // missing, and handed to staff.
+      var meta = session.byAppointment
+        ? 'By appointment — see a staff member to book a time.'
+        : (UP_PICKED[session.value] ? 'You will be put on the list for this date.' : '');
+      b.innerHTML = '<span>' + esc(session.title) + '</span>' +
+        (meta ? '<span class="meta">' + esc(meta) + '</span>' : '');
+      b.disabled = !!session.byAppointment || busy;
+      b.onclick = function () {
+        if (UP_PICKED[session.value]) delete UP_PICKED[session.value];
+        else UP_PICKED[session.value] = true;
+        draw();
+      };
+      boxes.appendChild(b);
+    });
+    main.appendChild(boxes);
+
+    // THE CLUB TICK, and it only appears once something is picked: a question
+    // about "every future date" of nothing at all is a question nobody can
+    // answer.
+    if (!Object.keys(UP_PICKED).length) return;
+    var list = el('ul', 'list', '');
+    var li = el('li', 'item' + (UP_CLUB ? ' on' : ''), '');
+    var lab = document.createElement('label');
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = UP_CLUB;
+    box.disabled = busy;
+    box.onchange = function () { UP_CLUB = box.checked; draw(); };
+    var what = el('div', 'what', '');
+    what.innerHTML = '<span class="tag grey">CLUB</span>' +
+      '<span class="title">Every future date, not just this one</span>' +
+      '<span class="meta">Keeps you on the list for every future date of the programs you ' +
+      'picked, so you never have to sign up for them again. Lunch is not included — ask at ' +
+      'the desk for that.</span>';
+    lab.appendChild(box);
+    lab.appendChild(what);
+    li.appendChild(lab);
+    list.appendChild(li);
+    main.appendChild(list);
+  }
+
+  function upDay() {
+    for (var i = 0; i < (UPCOMING || []).length; i++) {
+      if (UPCOMING[i].dateKey === UP_DAY) return UPCOMING[i];
+    }
+    return null;
+  }
+
+  function loadUpcoming() {
+    if (UPCOMING_ASKED || !location_) return;
+    UPCOMING_ASKED = true;
+    call('deskMonthSessions', { location: location_ }, function (res) {
+      if (!res || !res.ok) {
+        // Quietly: today's sign-in is what the person is standing there for,
+        // and it is unaffected. An empty list says the same thing to them as
+        // an error would, without a red bar over the button they came to press.
+        UPCOMING = [];
+        if (STEP === 'what') draw();
+        return;
+      }
+      UPCOMING = res.days || [];
+      if (STEP === 'what') draw();
+    });
+  }
+
   function submit() {
     var programs = Object.keys(PICKED);
-    if (!programs.length && !LUNCH) return say('Tick what you are here for first.', 'err');
+    var later = Object.keys(UP_PICKED);
+    if (!programs.length && !LUNCH && !later.length) {
+      return say('Tick what you are here for first.', 'err');
+    }
     setBusy(true);
     draw();
     say('Signing you in...', '');
@@ -1141,7 +1334,9 @@ function buildWalkInHtml(options) {
       email: PERSON.email || '',
       newMember: !!PERSON.isNew,
       programs: programs,
-      lunch: !!LUNCH
+      lunch: !!LUNCH,
+      upcoming: later,
+      upcomingStanding: !!UP_CLUB
     }, function (res) {
       setBusy(false);
       if (!res) { draw(); return handle(res); }
@@ -1168,6 +1363,7 @@ function buildWalkInHtml(options) {
     main.appendChild(list);
     var next = button('big', 'Done — next person', function () {
       PERSON = null; RESULT = null; PICKED = {}; LUNCH = false; STEP = 'who';
+      UP_PICKED = {}; UP_CLUB = false;
       hideStatus();
       draw();
     });
