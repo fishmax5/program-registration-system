@@ -185,5 +185,23 @@ const routeSolo = form => walk(form, { [Q.GUEST_COUNT]: sandbox.GUEST_COUNT_NONE
     sandbox.repairFormPageRouting(fresh, null).changed, 0);
 }
 
+// --- WHICH FORMS THE SWEEP OPENS AT ALL --------------------------------------
+// Only the two shapes built without the mode question can mis-route, so those
+// are the only forms the v8 migration is aimed at.
+{
+  const ctx = (sessions, flags) => Object.assign({ sessions: new Array(sessions).fill({}) }, flags || {});
+  check('a one-session form is a target',
+    sandbox.isRoutingAffectedFormContext(ctx(1)), true);
+  check('so is an appointment form, however many dates it covers',
+    sandbox.isRoutingAffectedFormContext(ctx(6, { isAssistance: true })), true);
+  check('a one-session CLUB form is not — it keeps its mode question',
+    sandbox.isRoutingAffectedFormContext(ctx(1, { isClub: true })), false);
+  check('nor is an ordinary multi-date form',
+    sandbox.isRoutingAffectedFormContext(ctx(4)), false);
+  check('and nothing at all is not a target',
+    sandbox.isRoutingAffectedFormContext(null), false);
+
+}
+
 console.log(failures === 0 ? '\nAll form migration checks passed.' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
