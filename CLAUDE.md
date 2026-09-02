@@ -163,11 +163,17 @@ either.
 | `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
 | `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
 
-### Migrations (67)
+### Two months at the door (67)
 
 | File | | What is in it |
 |---|--:|---|
-| `67_form_state_migrations.gs` | 387 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`); and the Admin item that forces it now. |
+| `67_desk_month_sessions.gs` | 130 | `deskMonthSessions` — every session at one location from today to the end of NEXT month, grouped by day. The live read behind the day picker and the session boxes on both tablet pages (`61`, `62`), and behind the club place a walk-in can take at the door. Behavior only; nothing earlier reads it at load time. |
+
+### Migrations (68)
+
+| File | | What is in it |
+|---|--:|---|
+| `68_form_state_migrations.gs` | 387 | `FORM_STATE_MIGRATIONS` — the registry of in-place repairs that carry a LIVE form from the shape it was built with to the shape the code now expects, without rebuilding it; the ledger of which have run on which form; the hourly sweep (`runFormStateMigrations`, ahead of `migrateFormsToCurrentTemplate`); and the Admin item that forces it now. Behavior only, loading after everything it reads. |
 
 ## Conventions
 
@@ -187,7 +193,7 @@ either.
   everyone already holding the old thing. So when a change moves the shape of
   something already out in the world — a form's page navigation, its questions,
   a stored registry's fields — write the state A → state B repair beside it,
-  register it in `FORM_STATE_MIGRATIONS` (`67_form_state_migrations.gs`) with
+  register it in `FORM_STATE_MIGRATIONS` (`68_form_state_migrations.gs`) with
   its own never-reused id, and leave the earlier entries alone: a workbook that
   has been quiet for six months runs all of them in order on its next sync. A
   migration must be **idempotent** and must return 0 when the form is already

@@ -317,7 +317,7 @@
  *      sledgehammer: every question replaced, every pre-checked box
  *      regenerated, five forms an execution. Most template changes move far
  *      less than that — v8 moved page-navigation settings and nothing else —
- *      so runFormStateMigrations() (67_form_state_migrations.gs) runs first,
+ *      so runFormStateMigrations() (68_form_state_migrations.gs) runs first,
  *      writing only what is wrong on each live form and stamping the form
  *      current when its migrations cover the whole of that version. What is
  *      left for the rebuild pass is the forms a migration could not recognize.

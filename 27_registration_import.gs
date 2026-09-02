@@ -202,7 +202,7 @@ function syncRegistrationsInternal() {
   // rebuild pass below skips it entirely — and the five rebuilds an execution
   // can afford are left for the forms that genuinely need one. Ordering it the
   // other way round would rebuild a form this could have fixed with four
-  // writes. See 67_form_state_migrations.gs for the standing rule.
+  // writes. See 68_form_state_migrations.gs for the standing rule.
   step('repairing forms in place', () =>
     runFormStateMigrations(registrySheet, sessionRows));
 
