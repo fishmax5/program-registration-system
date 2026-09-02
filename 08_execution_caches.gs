@@ -27,6 +27,7 @@ let __mealInfoIndexCache = null;
 let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
 let __adminNotificationEmailCache = null;
+let __archiveCopyEmailCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
@@ -206,6 +207,7 @@ function invalidateConfigCaches() {
   __mealBufferIndexCache = null;
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
+  __archiveCopyEmailCache = null;
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;

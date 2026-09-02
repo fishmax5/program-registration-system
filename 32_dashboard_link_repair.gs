@@ -597,6 +597,18 @@ const IN_PLACE_REBUILD_WATCHDOG_DELAY_MS = IN_PLACE_REBUILD_SLICE_BUDGET_MS + 2.
 /** A ceiling on slices, so a sweep that cannot make progress ends rather than running forever. */
 const IN_PLACE_REBUILD_MAX_SLICES = 60;
 
+/**
+ * Slices in a row that end in an EXCEPTION before the sweep gives up.
+ *
+ * More than one, because the failure this exists for is Apps Script's own
+ * INTERNAL engine error: it strikes a run rather than a form, it does not
+ * repeat, and ending a ninety-form sweep on the first of them is how a
+ * template migration stops half-applied — some forms routing people to the
+ * current pages and the rest still on the layout the migration was meant to
+ * replace.
+ */
+const IN_PLACE_REBUILD_MAX_ERROR_SLICES = 3;
+
 /** Slices in a row that rebuild nothing before the sweep gives up and says so. */
 const IN_PLACE_REBUILD_MAX_STALLED_SLICES = 2;
 
@@ -728,7 +740,7 @@ function rebuildAllFormsInPlace() {
   }
 
   saveInPlaceRebuildState({
-    startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0, stalledSlices: 0,
+    startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0, stalledSlices: 0, errorSlices: 0,
     confirmed: plan.map(item => item.oldFormId), done: [], rebuilt: 0
   });
   log(`In-place rebuild started for ${plan.length} form(s).`);
@@ -1146,6 +1158,9 @@ function runInPlaceRebuildSlice() {
       return;
     }
 
+    // A slice that got this far did not fail, whatever it did or did not
+    // rebuild — so the consecutive-error count starts again from here.
+    state.errorSlices = 0;
     state.stalledSlices = processedThisSlice > 0 ? 0 : (state.stalledSlices || 0) + 1;
     saveInPlaceRebuildState(state);
     if (state.stalledSlices >= IN_PLACE_REBUILD_MAX_STALLED_SLICES) {
@@ -1157,10 +1172,43 @@ function runInPlaceRebuildSlice() {
       `Next batch starts in ${Math.round(IN_PLACE_REBUILD_RESUME_DELAY_MS / 1000)}s.`);
     armInPlaceRebuildResume(IN_PLACE_REBUILD_RESUME_DELAY_MS); // replaces the watchdog with a prompt hand-off
   } catch (err) {
-    // An exception, unlike a timeout, is ours to handle: end the sweep tidily
-    // rather than leaving its state to block the next click for two hours.
-    log(`⚠️ In-place rebuild run failed (${err}).`);
-    finishInPlaceRebuild(state, `stopped after an error: ${err}`);
+    // AN ERROR IS NOT THE END OF THE SWEEP. This used to call
+    // finishInPlaceRebuild() on any exception, which threw away a sweep with
+    // ninety forms still in it because one slice hit something transient —
+    // and the commonest thing it hits is not ours at all: Apps Script's own
+    // "the JavaScript engine reported an unexpected error, error code
+    // INTERNAL", which lands on whatever slice happens to be running and is
+    // gone on the next one. The forms already rebuilt stay done (each is
+    // recorded under the lock as it finishes), so a retry costs nothing and
+    // resumes where this slice stopped.
+    //
+    // A sweep that cannot get past its error still ends: after
+    // IN_PLACE_REBUILD_MAX_ERROR_SLICES failures IN A ROW it stops and says
+    // so, rather than handing itself on forever. The count is reset by any
+    // slice that completes, so an error every so often through a long sweep
+    // never accumulates into a stop.
+    const errorSlices = ((state && state.errorSlices) || 0) + 1;
+    log(`⚠️ In-place rebuild run failed (${err}) — failure ${errorSlices} of ` +
+      `${IN_PLACE_REBUILD_MAX_ERROR_SLICES} in a row.`);
+    if (!state || errorSlices >= IN_PLACE_REBUILD_MAX_ERROR_SLICES) {
+      finishInPlaceRebuild(state || { confirmed: [], done: [], rebuilt: 0 },
+        `stopped after ${errorSlices} run(s) in a row ended in an error, the last of them: ${err}`);
+      return;
+    }
+    state.errorSlices = errorSlices;
+    try {
+      saveInPlaceRebuildState(state);
+    } catch (saveErr) {
+      // The state is what the next slice resumes from. If it cannot be
+      // written the sweep has nothing to come back to, so end it here rather
+      // than leaving a hand-off pointing at a stale plan.
+      log(`⚠️ In-place rebuild could not record its progress (${saveErr}).`);
+      finishInPlaceRebuild(state, `stopped after an error it could not record: ${err}`);
+      return;
+    }
+    // Replaces the watchdog armed at the head of this slice with a prompt
+    // hand-off, exactly as the ordinary end-of-slice path does.
+    armInPlaceRebuildResume(IN_PLACE_REBUILD_RESUME_DELAY_MS);
   }
 }
 
