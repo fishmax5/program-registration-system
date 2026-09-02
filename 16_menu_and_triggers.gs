@@ -1,7 +1,5 @@
-// ============================================================================
-// 3. MENU & TRIGGER HOOKS
-// ============================================================================
-
+// =====================================================================// 3. MENU & TRIGGER HOOKS
+// =====================================================================
 /**
  * TWO MENUS, NOT ONE.
  *
@@ -170,7 +168,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
       .addSeparator()
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
-      .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog'))
+      .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')
+      // Beside the invitations because they are the two channels one
+      // Notify_Mode cell governs, and this is the one that can say "your
+      // appointment is at 2:15". See section 9e.
+      .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
       // else here is worth pressing. Everything below acts on one program;
@@ -256,6 +258,15 @@ function buildAppMenu(ui, includeAdmin) {
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
       .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
+      // ONE-TIME, and only worth pressing on a workbook that was printing
+      // sign-in sheets before those links existed: it reads the PDF folder
+      // once and teaches the registry about what is already in it. New PDFs
+      // register themselves as they are built. See backfillSignInSheetRegistry().
+      .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+      // NOT under "Destructive": it replaces no question and moves no link —
+      // it writes only the page-navigation settings that are wrong. It is the
+      // thing to reach for BEFORE "Rebuild Forms In Place", not after.
+      .addItem('\ud83e\udded Fix Form Page Routing (no rebuild)', 'repairFormRoutingNow')
       .addSeparator()
       // ARRANGEMENTS SOMEBODY MAKES BY HAND that the next rebuild would
       // otherwise undo. They belong together because that is the one thing

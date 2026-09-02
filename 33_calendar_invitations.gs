@@ -24,7 +24,9 @@
 //   update worth notifying about.
 //
 // Governed by Config's "📧 Calendar Invitations" switch (see
-// CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op.
+// CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op. Under
+// that switch, each PROGRAM says whether it wants invitations at all, in
+// Program_Options' Notify_Mode column — see section 9e.
 // ============================================================================
 
 /** Who we have already put on which event's guest list: { Event_ID: [email...] }. */
@@ -117,11 +119,17 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     if (!eventId || !date || !calendarId) return;
     if (formatDateKey(date) < todayKey) return; // upcoming only
     if (onlyEventIds && !onlyEventIds.has(eventId)) return;
-    sessionByEventId[eventId] = {
+    const session = {
       eventId, date, calendarId,
       title: String(row[regMap['Clean_Title']] || '').trim(),
-      location: String(row[regMap['Location']] || '').trim()
+      location: String(row[regMap['Location']] || '').trim(),
+      isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
+    // THE PROGRAM'S OWN SETTING, under the Config switch already checked
+    // above: a program whose Notify_Mode says reminders only, or nothing at
+    // all, keeps its guest list empty. See section 9e.
+    if (!notificationPolicyForSession(session).invite) return;
+    sessionByEventId[eventId] = session;
   });
   if (Object.keys(sessionByEventId).length === 0) return result;
 
@@ -134,6 +142,12 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessionByEventId);
   const ledger = getCalendarInviteLedger();
   const eventIds = Object.keys(sessionByEventId);
+  // The office's copy of what goes out. Blank = copy nobody (see
+  // getArchiveCopyEmail). It is added as a guest of any event a REGISTRANT is
+  // invited to and never on its own: an event with nobody on it is not
+  // something the office needs a Google invitation for, and inviting it to
+  // every event on the calendar would bury the ones that matter.
+  const archiveCopy = getArchiveCopyEmail().toLowerCase();
 
   for (const eventId of eventIds) {
     const already = new Set(ledger[eventId] || []);
@@ -141,7 +155,13 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     const drop = unwanted[eventId] || new Set();
 
     const toAdd = Array.from(want).filter(email => !already.has(email));
-    const toRemove = Array.from(drop).filter(email => already.has(email) && !want.has(email));
+    // Once the archive address is on an event it stays on it — a session
+    // whose last registrant cancels is exactly the change the office wants
+    // to see, and Google would otherwise mail them a cancellation for a
+    // session that is still happening.
+    if (archiveCopy && want.size > 0 && !already.has(archiveCopy)) toAdd.push(archiveCopy);
+    const toRemove = Array.from(drop).filter(email =>
+      already.has(email) && !want.has(email) && email !== archiveCopy);
     if (toAdd.length === 0 && toRemove.length === 0) continue;
 
     if (result.eventsTouched >= MAX_INVITE_EVENTS_PER_RUN) {
@@ -303,11 +323,16 @@ function listInvitableSessions() {
     if (!eventId || !date || !calendarId) return;
     const dateKey = formatDateKey(date);
     if (dateKey < todayKey) return;
-    sessions[eventId] = {
+    const session = {
       eventId, date, dateKey,
       title: String(row[regMap['Clean_Title']] || '').trim(),
-      location: String(row[regMap['Location']] || '').trim()
+      location: String(row[regMap['Location']] || '').trim(),
+      isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
+    // Offering a session this workbook would refuse to send for would be
+    // offering a no-op — the same filter the send itself applies.
+    if (!notificationPolicyForSession(session).invite) return;
+    sessions[eventId] = session;
   });
   if (Object.keys(sessions).length === 0) return [];
 
