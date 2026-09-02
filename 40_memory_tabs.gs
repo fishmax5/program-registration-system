@@ -32,7 +32,21 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
     refreshMemberRoll(ss, registrantRows);
-    refreshProgramOptions(ss, sessionRows);
+    // Resolved ONCE for the two tabs that want it. Both used to fall back to
+    // reading the session table themselves when handed null, which is the
+    // whole tab read twice per sync for the same rows.
+    const sessions = sessionRows ||
+      readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
+        HEADERS.Master_Program_Dashboard, 'Event_ID');
+    // BEFORE refreshProgramOptions(), and that order is load-bearing on a
+    // workbook that has not migrated yet: refreshProgramLeadersTab() carries
+    // Program_Options' old Instructor_Email column onto its own tab, reading
+    // it off the live sheet — and the Program_Options refresh below is the
+    // write that finally rewrites that tab without the column. The other way
+    // round, every address a site has been keeping is gone before anything
+    // reads it. See migrateProgramLeaderAddresses().
+    refreshProgramLeadersTab(ss, sessions);
+    refreshProgramOptions(ss, sessions);
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
     // reference material, not the system of record.

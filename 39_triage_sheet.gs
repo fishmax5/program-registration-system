@@ -35,7 +35,7 @@ const REGISTRANT_EDITABLE_COLUMNS = [
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
   'Meal_Source',
   'Phone', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment', 'Admin_Notes'
-].concat(INSTRUCTOR_OWNED_COLUMNS);
+].concat(LEADER_OWNED_COLUMNS);
 
 /**
  * Columns that only ever matter when something has gone wrong — internal keys
@@ -73,7 +73,7 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     }
     // Real checkboxes, not free text: a tick is one click and reads back as a
     // boolean, which is what Served_Confirmed counts.
-    REGISTRANT_DAYOF_COLUMNS.concat(INSTRUCTOR_FLAG_COLUMNS).forEach(h => {
+    REGISTRANT_DAYOF_COLUMNS.concat(LEADER_FLAG_COLUMNS).forEach(h => {
       if (map[h] === undefined) return;
       sheet.getRange(z.start, map[h] + 1, z.count, 1)
         .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())

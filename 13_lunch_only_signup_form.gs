@@ -557,6 +557,9 @@ const TAB_GROUPS = [
     SHEET_NAMES.CLUB_MEMBERS,
     SHEET_NAMES.REGULAR_NEEDS,
     SHEET_NAMES.PROGRAM_OPTIONS,
+    // Beside Program_Options, which is the tab it was carved out of and the
+    // one somebody is already on when they go looking for who leads a class.
+    SHEET_NAMES.PROGRAM_LEADERS,
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
   { color: PALETTE.TAB_ARCHIVE, names: [

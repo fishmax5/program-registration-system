@@ -211,16 +211,16 @@ function syncRegistrationsInternal() {
   step('catching up club members', () =>
     applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
-  // BEFORE the tab is rewritten, not after: the instructors' shared sheets hold
+  // BEFORE the tab is rewritten, not after: the leaders' shared sheets hold
   // marks made since the last run, and this is the pass that would otherwise
   // overwrite them with the copy the workbook already had. See
-  // pullInstructorSheetEdits() for how a touched cell is told from an untouched
-  // one. Guarded, because a shared sheet somebody trashed must not be able to
-  // stop the registration import.
+  // pullProgramLeaderSheetEdits() for how a touched cell is told from an
+  // untouched one. Guarded, because a shared sheet somebody trashed must not
+  // be able to stop the registration import.
   try {
-    pullInstructorSheetEdits(existingRows);
+    pullProgramLeaderSheetEdits(existingRows);
   } catch (err) {
-    log(`⚠️ Could not read instructor sheets back in this run (${err}) — the registrations themselves are fine.`);
+    log(`⚠️ Could not read program leader sheets back in this run (${err}) — the registrations themselves are fine.`);
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);
@@ -258,15 +258,29 @@ function syncRegistrationsInternal() {
   step('rebuilding the club roster tab', () =>
     renderClubMembersSheet(refreshClubMemberLabels(sessionRows)));
 
-  // The other half of the instructor round trip, and the reason this feature
-  // needs NO TRIGGER OF ITS OWN: the rosters go back out on the same hourly
-  // pass that just imported into them. Reaches outside the workbook, so it sits
-  // down here with the invitations and carries its own guard.
+  // The other half of the program leader round trip, and the reason this
+  // feature needs NO TRIGGER OF ITS OWN: the rosters go back out on the same
+  // hourly pass that just imported into them. Reaches outside the workbook, so
+  // it sits down here with the invitations and carries its own guard.
+  const settledRegistrantRows = reusableRows ||
+    readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
   try {
-    pushInstructorSignUpSheets(sessionRows, reusableRows ||
-      readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID'));
+    pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
   } catch (err) {
-    log(`⚠️ Could not refresh the instructor sheets this run (${err}).`);
+    log(`⚠️ Could not refresh the program leader sheets this run (${err}).`);
+  }
+
+  // AFTER the push, deliberately. The alert email links to the shared sheet
+  // and tells a leader what moved on it, and a leader who follows that link
+  // within the minute should find the sheet already saying the same thing.
+  // Sending first would put "Mary Ray is no longer on the roster" in an inbox
+  // beside a sheet that still lists her.
+  //
+  // Sends nothing at all when nothing changed — see section 9d.
+  try {
+    notifyProgramLeadersOfRosterChanges(sessionRows, settledRegistrantRows);
+  } catch (err) {
+    log(`⚠️ Could not send the roster-change alerts this run (${err}) — the registrations themselves are fine.`);
   }
 
   // LAST, on purpose: this is the only step that reaches outside the workbook

@@ -23,6 +23,12 @@ const SHEET_NAMES = {
   TRIAGE: 'Deleted_Event_Triage',
   MEMBER_ROLL: 'Member_Roll',
   PROGRAM_OPTIONS: 'Program_Options',
+  // Who leads what, where to write to them, and whether they want to hear
+  // about it when their roster moves — see section 9c. Separate from
+  // Program_Options because a leader is a PERSON who may lead three programs
+  // at two sites, and an address column on a program row could only ever
+  // answer that question in one direction.
+  PROGRAM_LEADERS: 'Program_Leaders',
   CLUB_MEMBERS: 'Club_Members',
   // The two tabs behind [Personalized Assistance] and the per-program extra
   // questions — see ASSISTANCE_TAG and section 6g.
@@ -214,7 +220,7 @@ const HEADERS = {
     'Meal_Source',
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
-    'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
+    'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
@@ -334,7 +340,7 @@ const HEADERS = {
     'Meal_Source',
     'Phone', 'Email',
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
-    'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
+    'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
     'Deleted_Event_Title', 'Deleted_Event_Location', 'Flagged_Date', 'Triage_Notes'
@@ -396,10 +402,43 @@ const HEADERS = {
    * Program_Options — one row per unique PROGRAM (Clean_Title x Location),
    * same split: the left columns are recomputed, the right columns are the
    * staff's own standing notes about how that program actually runs.
+   *
+   * Instructor_Email USED TO LIVE HERE and no longer does. It answered "who
+   * leads this program" and nothing else, which is the wrong half of the
+   * question the moment you want to write to a person rather than to a
+   * program: one address column on a program row cannot say that Jane leads
+   * three of these, cannot carry whether Jane wants to be emailed, and gives
+   * a leader who moves sites three cells to find. Program_Leaders holds it
+   * now, one row per leader-and-program, and migrateProgramLeaderAddresses()
+   * carries the old column's values across before this layout drops it.
    */
   Program_Options: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Instructor_Email', 'Staff_Notes'
+    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'
+  ],
+  /**
+   * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
+   *
+   * One row per leader-and-program-at-a-location, which is the normalized
+   * shape and the only one that answers the question in both directions: a
+   * leader's programs are their rows, and a program's leaders are the rows
+   * naming it. A leader with three classes has three rows, sorted together
+   * because the tab sorts by name.
+   *
+   * NO WILDCARDS, deliberately. A blank Program meaning "everything at this
+   * site" would be a convenient row to type and a quiet way to hand somebody
+   * every roster in a building. The privacy boundary for a shared sheet is
+   * one program at one location (see section 9b) and this tab is held to
+   * exactly the same grain, so the two can never disagree about who may read
+   * what.
+   *
+   * Staff own everything except Sheet_Link and Last_Notified, which are the
+   * tab reporting back: whether that program's shared sheet exists yet, and
+   * when a roster-change alert last went out for it.
+   */
+  Program_Leaders: [
+    'Leader_Name', 'Email', 'Program', 'Location',
+    'Notify_Roster_Changes', 'Sheet_Link', 'Last_Notified', 'Staff_Notes'
   ],
   /**
    * Program_Questions — THE TAB THAT MAKES A FORM ASK SOMETHING EXTRA.
@@ -494,7 +533,19 @@ const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Instructor_Email', 'Staff_Notes'];
+  'Staff_Notes'];
+
+/**
+ * Program_Leaders columns the staff own — which is nearly all of them.
+ *
+ * The tab is a form somebody fills in, not a table the sync derives: nothing
+ * in this workbook knows who leads a class, and nothing ever will. The two
+ * columns NOT listed here (Sheet_Link, Last_Notified) are the refresh
+ * reporting back, and refreshProgramLeadersTab() is careful to be the only
+ * thing that ever writes them.
+ */
+const PROGRAM_LEADERS_STAFF_COLUMNS = ['Leader_Name', 'Email', 'Program', 'Location',
+  'Notify_Roster_Changes', 'Staff_Notes'];
 
 /**
  * Club_Members columns the roster refresh must never overwrite — the staff's
@@ -509,23 +560,23 @@ const CLUB_LUNCH_OPTIONS = ['Yes - Lunch', 'No Lunch'];
 
 /** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
 /**
- * THE FIVE COLUMNS THE INSTRUCTOR OWNS, in the order they appear on both
+ * THE FIVE COLUMNS THE PROGRAM LEADER OWNS, in the order they appear on both
  * Registrant_Dash and the shared sheet. This one array drives the checkbox
  * formatting, the yellow wash, the snapshot encoding and the merge — they can
- * never disagree about what is instructor-owned, which is the kind of drift
- * that turns a merge into data loss.
+ * never disagree about what is leader-owned, which is the kind of drift that
+ * turns a merge into data loss.
  *
  * Waitlisted is deliberately SEPARATE from Program_Status's own "Waitlisted"
  * value. They answer different questions: Program_Status is what the system
- * decided from Max_Capacity, and this is what the instructor decided about a
+ * decided from Max_Capacity, and this is what the leader decided about a
  * person they have actually spoken to. Ticking one does not move the other —
- * Program_Status rides along on the shared sheet, read-only, so the instructor
+ * Program_Status rides along on the shared sheet, read-only, so the leader
  * can see both.
  */
-const INSTRUCTOR_OWNED_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes'];
+const LEADER_OWNED_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes'];
 
-/** The first four of those are real checkboxes; Instructor_Notes is free text. */
-const INSTRUCTOR_FLAG_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
+/** The first four of those are real checkboxes; Leader_Notes is free text. */
+const LEADER_FLAG_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
 
 const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
 
@@ -575,7 +626,13 @@ const MEAL_COUNT_TO_DASHBOARD_COLUMN = {
  */
 const LEGACY_HEADER_ALIASES = {
   Day1_Dined_In: ['Dine_In_Count'],
-  Subs_Dined_In: ['Subs_Count']
+  Subs_Dined_In: ['Subs_Count'],
+  // "Instructor" became "program leader" everywhere the workbook says it, and
+  // this is the one rename that would otherwise cost data: the column holds
+  // notes typed by a person about a person, which nothing can regenerate. The
+  // alias means a workbook rendered by the old version reads its notes into
+  // the new column on the first render rather than showing an empty one.
+  Leader_Notes: ['Instructor_Notes']
 };
 
 /** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */

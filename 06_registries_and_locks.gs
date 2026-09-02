@@ -104,9 +104,9 @@ function flushPersistentRegistries() {
     props.setProperty(FORM_LABEL_FINGERPRINT_PROP_KEY, JSON.stringify(__formLabelFingerprintCache));
     __formLabelFingerprintDirty = false;
   }
-  if (__instructorSheetRegistryDirty && __instructorSheetRegistryCache) {
-    props.setProperty(INSTRUCTOR_SHEET_REGISTRY_PROP_KEY, JSON.stringify(__instructorSheetRegistryCache));
-    __instructorSheetRegistryDirty = false;
+  if (__leaderSheetRegistryDirty && __leaderSheetRegistryCache) {
+    props.setProperty(LEADER_SHEET_REGISTRY_PROP_KEY, JSON.stringify(__leaderSheetRegistryCache));
+    __leaderSheetRegistryDirty = false;
   }
   if (__formTemplateVersionDirty && __formTemplateVersionCache) {
     props.setProperty(FORM_TEMPLATE_VERSION_PROP_KEY, JSON.stringify(__formTemplateVersionCache));

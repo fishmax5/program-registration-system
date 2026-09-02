@@ -161,10 +161,13 @@ function buildAppMenu(ui, includeAdmin) {
       // it is edited by the same people who keep the rosters.
       .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', 'openRegularNeedsTab')
       .addSeparator()
-      // The two halves of one job, adjacent: hand a sheet out, then keep it
-      // current.
-      .addItem('Share a Sign-Up Sheet with an Instructor\u2026', 'showInstructorSheetDialog')
-      .addItem('Refresh Instructor Sheets Now', 'refreshInstructorSignUpSheetsNow')
+      // The three halves of one job, adjacent: hand a sheet out, keep it
+      // current, and tell the leader what moved on it. The last two both ride
+      // the hourly sync already — these are for when somebody does not want to
+      // wait an hour.
+      .addItem('Share a Sign-Up Sheet with a Program Leader\u2026', 'showProgramLeaderSheetDialog')
+      .addItem('Refresh Program Leader Sheets Now', 'refreshProgramLeaderSheetsNow')
+      .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
       .addSeparator()
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
       .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog'))

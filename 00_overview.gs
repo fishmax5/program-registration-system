@@ -185,6 +185,18 @@
  *      sync covering only things needing a human — waitlisted registrants,
  *      forms that couldn't be opened, events sent to triage. A sync with
  *      nothing to report sends nothing. Blank address = disabled.
+ *    - PROGRAM LEADERS (Program_Leaders, sections 9c/9d): who leads each
+ *      program, where to write to them, and whether they want to hear about
+ *      it. One row per leader per program-at-a-location — the same privacy
+ *      grain as the shared sign-up sheets, so the two can never disagree
+ *      about who may read what. Tick Notify_Roster_Changes and that leader
+ *      gets ONE email per sync naming what actually moved on their rosters:
+ *      who signed up, who is gone, who came off the waitlist, whose party
+ *      grew. A sync where nothing changed sends nothing at all. Rides the
+ *      same hourly registration sync as everything else here — no new
+ *      trigger. Replaces Program_Options' old Instructor_Email column, whose
+ *      addresses are carried onto the new tab automatically the first time
+ *      a sync runs (migrateProgramLeaderAddresses()).
  *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:

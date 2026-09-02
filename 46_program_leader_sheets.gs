@@ -1,24 +1,28 @@
 // ============================================================================
-// 9b. INSTRUCTOR SIGN-UP SHEETS  (a live roster, shared out of the workbook)
+// 9b. PROGRAM LEADER SIGN-UP SHEETS  (a live roster, shared out of the workbook)
 // ============================================================================
 //
-// THE PROBLEM. An instructor wants to know who is coming to their class, and
+// THE PROBLEM. A program leader wants to know who is coming to their class, and
 // they want to know it now — not off a PDF printed on Monday. Sharing this
 // workbook with them is not an answer: it holds every location's registrations,
 // every phone number, the catering order and the tabs that break if you type in
 // the wrong cell.
 //
 // So each program gets its OWN small spreadsheet in Drive, holding nothing but
-// that program's roster, which the instructor is added to as an editor. It is
+// that program's roster, which the leader is added to as an editor. It is
 // refreshed by the hourly registration sync — the same pass that imports the
 // form responses in the first place — so it costs NO NEW TRIGGER. That matters:
 // Apps Script allows twenty installable triggers per account and this project
 // already spends one per calendar, so a design that needed one per program
 // would stop working somewhere around the twentieth class.
 //
+// WHO GETS ONE is Program_Leaders (section 9c), which is where a leader's name,
+// their address and whether they want to be emailed all live. This file knows
+// only how to build the sheet and how to move marks across it.
+//
 // WHY NOT IMPORTRANGE. A formula-driven mirror is live and needs no code at
 // all, and that was the first plan. It cannot work here, because these sheets
-// are not read-only: the instructor marks who they have CONTACTED, who has
+// are not read-only: the leader marks who they have CONTACTED, who has
 // CONFIRMED, who is WAITLISTED, who has DROPPED. An IMPORTRANGE (or QUERY)
 // result spills into the cells beneath it, so the moment a new registration
 // lands the roster grows by a row and every hand-typed mark below the insertion
@@ -27,102 +31,154 @@
 // code instead, each carrying a hidden Row_Key, and the marks are matched back
 // by that key rather than by position.
 //
-// WHICH WAY THE FIVE INSTRUCTOR COLUMNS FLOW. Both ways, resolved per cell
+// WHICH WAY THE FIVE LEADER COLUMNS FLOW. Both ways, resolved per cell
 // against a snapshot:
 //
 //   Every push writes a hidden Pushed_Snapshot beside each row — the five
 //   values exactly as they were sent out. Every pull compares the sheet's
 //   current values against that snapshot, cell by cell. A cell that DIFFERS is
-//   something the instructor typed since the last refresh, and it wins. A cell
+//   something the leader typed since the last refresh, and it wins. A cell
 //   that MATCHES was never touched, so whatever the workbook says now wins,
 //   and a correction made on Registrant_Dash is not clobbered by a stale copy
 //   sitting in a browser tab.
 //
-// That is a real three-way merge and it is why staff and instructor can work on
+// That is a real three-way merge and it is why staff and leader can work on
 // the same roster at once. Without it the last writer would win by accident and
 // the loser would never know.
 //
+// THE SHEET IS BANDED BY SESSION, not a flat list of rows. A class list is read
+// one class at a time — "who is coming on Thursday" — and a leader with twelve
+// dates on one sheet was reading a four-hundred-row block whose only marker for
+// where Thursday started was the date repeating in column A. Each session now
+// opens with its own band naming the date, the time and the headcount, and its
+// registrants sit under it.
+//
+// THE BANDS ARE INVISIBLE TO THE MERGE, and that is load-bearing rather than
+// incidental: a band row carries no Row_Key and no Pushed_Snapshot, and
+// pullProgramLeaderSheetEdits() skips any row missing either. So the layout can
+// grow another band, a subtotal or a spacer without the pull needing to learn
+// about it, and — the failure that matters — a band row can never be mistaken
+// for a registrant whose marks were all just cleared.
+//
 // THE PRIVACY BOUNDARY is one program AT ONE LOCATION — the same grain as
-// Program_Options, and the reason the key carries both. Somebody teaching Chair
-// Yoga at Narberth has no business reading Ashbridge's roster, and a per-title
-// sheet would hand it to them.
+// Program_Options and Program_Leaders, and the reason the key carries both.
+// Somebody teaching Chair Yoga at Narberth has no business reading Ashbridge's
+// roster, and a per-title sheet would hand it to them.
 // ============================================================================
 
-/** Drive folder the per-program sheets live in, so they don't litter My Drive. */
-const INSTRUCTOR_SHEET_FOLDER_NAME = 'Instructor Sign-Up Sheets';
-
-/** programKey -> { fileId, title, location, createdAt }. See getInstructorSheetRegistry(). */
-const INSTRUCTOR_SHEET_REGISTRY_PROP_KEY = 'INSTRUCTOR_SHEET_REGISTRY_V1';
-
-/** The one tab in an instructor's spreadsheet. Named, not indexed, so a stray extra tab can't be mistaken for it. */
-const INSTRUCTOR_SHEET_TAB_NAME = 'Sign_Up_Sheet';
+/**
+ * Drive folder the per-program sheets live in, so they don't litter My Drive.
+ *
+ * The folder these sheets used to live in was called "Instructor Sign-Up
+ * Sheets". getOrCreateProgramLeaderSheetFolder() RENAMES that one rather than
+ * creating a second: two folders, one holding every sheet made before the
+ * rename and one holding every sheet made after, is a filing system nobody
+ * asked for and the kind of thing only noticed a year later.
+ */
+const LEADER_SHEET_FOLDER_NAME = 'Program Leader Sign-Up Sheets';
+const LEGACY_LEADER_SHEET_FOLDER_NAME = 'Instructor Sign-Up Sheets';
 
 /**
- * The window a shared sheet covers. Backward as well as forward because an
- * instructor marking up last week's class is the normal case on a Monday, and
+ * programKey -> { fileId, title, location, createdAt }. See
+ * getProgramLeaderSheetRegistry().
+ *
+ * THE VALUE IS DELIBERATELY STILL SPELLED "INSTRUCTOR". Script Property keys
+ * are versioned here because a changed stored SHAPE needs a new key — and this
+ * shape did not change, only the words this project uses for it. Renaming the
+ * key would hand every existing workbook an empty registry: every live shared
+ * sheet would look unregistered, the next menu press would build a second file
+ * beside each one, and the marks sitting in the first would stop coming back.
+ * A stale-looking constant value is a much smaller cost than that.
+ */
+const LEADER_SHEET_REGISTRY_PROP_KEY = 'INSTRUCTOR_SHEET_REGISTRY_V1';
+
+/**
+ * The one tab in a leader's spreadsheet. Named, not indexed, so a stray extra
+ * tab can't be mistaken for it — and unchanged by the rename for the same
+ * reason the registry key is: getOrCreateSheet() would make a second, empty
+ * tab beside every existing roster and the marks on the first would be orphaned.
+ */
+const LEADER_SHEET_TAB_NAME = 'Sign_Up_Sheet';
+
+/**
+ * The window a shared sheet covers. Backward as well as forward because a
+ * leader marking up last week's class is the normal case on a Monday, and
  * a roster that dropped a session the moment it started would be useless for
  * exactly the marking it exists to collect.
  */
-const INSTRUCTOR_SHEET_BACK_DAYS = 14;
-const INSTRUCTOR_SHEET_FORWARD_DAYS = 90;
+const LEADER_SHEET_BACK_DAYS = 14;
+const LEADER_SHEET_FORWARD_DAYS = 90;
 
 /** Backstop on one sheet's size — the window already bounds this; a runaway roster shouldn't blow the write. */
-const INSTRUCTOR_SHEET_MAX_ROWS = 3000;
+const LEADER_SHEET_MAX_ROWS = 3000;
 
 /**
  * The shared sheet's own columns. A SUBSET of Registrant_Dash plus two hidden
  * machine columns — deliberately not the whole row: Lunch_Type, the meal
  * counts, Admin_Notes and the internal keys are staff business, and every
- * column left out here is one an instructor cannot see.
+ * column left out here is one a program leader cannot see.
  */
-const INSTRUCTOR_SHEET_HEADERS = [
+const LEADER_SHEET_HEADERS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
   'Phone', 'Email', 'Program_Status',
-  'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Instructor_Notes',
+  'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
   'Row_Key', 'Pushed_Snapshot'
 ];
 
-/** Machine columns on the shared sheet. Hidden, never typed in — see writeInstructorSignUpTab(). */
-const INSTRUCTOR_SHEET_HIDDEN_COLUMNS = ['Row_Key', 'Pushed_Snapshot'];
+/** Machine columns on the shared sheet. Hidden, never typed in — see writeProgramLeaderSheetTab(). */
+const LEADER_SHEET_HIDDEN_COLUMNS = ['Row_Key', 'Pushed_Snapshot'];
 
-/** What the shared sheet shows but the instructor may not change — everything the sync owns. */
-const INSTRUCTOR_SHEET_DERIVED_COLUMNS = [
+/** What the shared sheet shows but the leader may not change — everything the sync owns. */
+const LEADER_SHEET_DERIVED_COLUMNS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status'
 ];
+
+/**
+ * The background a session band is drawn in, and the ink on it.
+ *
+ * The TINT layer rather than the banner blue (see PALETTE): a band here is
+ * separating one class from the next INSIDE a table, not announcing a section
+ * of the workbook, and a full-strength blue strip every eight rows turns a
+ * roster into a barcode. Slate ink on a pale wash reads as structure and
+ * leaves the yellow hand-entry columns as the only saturated thing on the page,
+ * which is the one place a leader's eye should be pulled.
+ */
+const LEADER_SHEET_BAND_BG = PALETTE.LOC_BLUE;
+const LEADER_SHEET_BAND_INK = PALETTE.INK_STRONG;
 
 
 // --- the registry -----------------------------------------------------------
 
-let __instructorSheetRegistryCache = null;
-let __instructorSheetRegistryDirty = false;
+let __leaderSheetRegistryCache = null;
+let __leaderSheetRegistryDirty = false;
 
 /**
  * Which programs have a shared sheet, and where it lives. Read once per
  * execution and written back by flushPersistentRegistries(), like every other
  * persistent registry in this project.
  */
-function getInstructorSheetRegistry() {
-  if (__instructorSheetRegistryCache) return __instructorSheetRegistryCache;
-  const raw = PropertiesService.getScriptProperties().getProperty(INSTRUCTOR_SHEET_REGISTRY_PROP_KEY);
-  __instructorSheetRegistryCache = raw ? JSON.parse(raw) : {};
-  return __instructorSheetRegistryCache;
+function getProgramLeaderSheetRegistry() {
+  if (__leaderSheetRegistryCache) return __leaderSheetRegistryCache;
+  const raw = PropertiesService.getScriptProperties().getProperty(LEADER_SHEET_REGISTRY_PROP_KEY);
+  __leaderSheetRegistryCache = raw ? JSON.parse(raw) : {};
+  return __leaderSheetRegistryCache;
 }
 
-function saveInstructorSheetRegistryEntry(programKey, entry) {
-  const registry = getInstructorSheetRegistry();
+function saveProgramLeaderSheetRegistryEntry(programKey, entry) {
+  const registry = getProgramLeaderSheetRegistry();
   registry[programKey] = entry;
-  __instructorSheetRegistryDirty = true;
+  __leaderSheetRegistryDirty = true;
 }
 
-function removeInstructorSheetRegistryEntry(programKey) {
-  const registry = getInstructorSheetRegistry();
+function removeProgramLeaderSheetRegistryEntry(programKey) {
+  const registry = getProgramLeaderSheetRegistry();
   if (registry[programKey] === undefined) return;
   delete registry[programKey];
-  __instructorSheetRegistryDirty = true;
+  __leaderSheetRegistryDirty = true;
 }
 
 /** Program identity: title AND location, which is the privacy boundary — see the section header. */
-function instructorProgramKey(title, location) {
+function leaderProgramKey(title, location) {
   return `${normalizeNameKey(title)}|${normalizeNameKey(location)}`;
 }
 
@@ -136,74 +192,74 @@ function instructorProgramKey(title, location) {
  * row is written under is the key it is read back under even if somebody
  * retypes the name with a double space.
  */
-function instructorRowKey(eventId, partyId, name) {
+function leaderRowKey(eventId, partyId, name) {
   return `${String(eventId || '').trim()}|${String(partyId || '').trim()}|${normalizeNameKey(name)}`;
 }
 
 /** A checkbox cell, however Sheets hands it back (boolean from a tick, text from a paste). */
-function normalizeInstructorFlag(value) {
+function normalizeLeaderFlag(value) {
   if (value === true) return true;
   return String(value === null || value === undefined ? '' : value).trim().toUpperCase() === 'TRUE';
 }
 
-/** A free-text instructor cell. */
-function normalizeInstructorNote(value) {
+/** A free-text program leader cell. */
+function normalizeLeaderNote(value) {
   return String(value === null || value === undefined ? '' : value).trim();
 }
 
-/** The five instructor values off a row, normalized — the unit both the snapshot and the merge work in. */
-function readInstructorValues(row, map) {
-  return INSTRUCTOR_OWNED_COLUMNS.map(name => {
+/** The five program leader values off a row, normalized — the unit both the snapshot and the merge work in. */
+function readLeaderValues(row, map) {
+  return LEADER_OWNED_COLUMNS.map(name => {
     const raw = map[name] === undefined ? '' : row[map[name]];
-    return INSTRUCTOR_FLAG_COLUMNS.indexOf(name) === -1
-      ? normalizeInstructorNote(raw)
-      : normalizeInstructorFlag(raw);
+    return LEADER_FLAG_COLUMNS.indexOf(name) === -1
+      ? normalizeLeaderNote(raw)
+      : normalizeLeaderFlag(raw);
   });
 }
 
 /**
  * The five values as one hidden cell. JSON rather than a delimiter join
- * because Instructor_Notes is free text and any separator worth reading is
+ * because Leader_Notes is free text and any separator worth reading is
  * one somebody will eventually type into a note.
  */
-function encodeInstructorSnapshot(values) {
+function encodeLeaderSnapshot(values) {
   return JSON.stringify(values);
 }
 
-function decodeInstructorSnapshot(cell) {
+function decodeLeaderSnapshot(cell) {
   const raw = String(cell === null || cell === undefined ? '' : cell).trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length === INSTRUCTOR_OWNED_COLUMNS.length ? parsed : null;
+    return Array.isArray(parsed) && parsed.length === LEADER_OWNED_COLUMNS.length ? parsed : null;
   } catch (err) {
-    return null; // an unreadable snapshot means "assume nothing" — see pullInstructorSheetEdits()
+    return null; // an unreadable snapshot means "assume nothing" — see pullProgramLeaderSheetEdits()
   }
 }
 
 
-// --- reading the instructors' edits back in ---------------------------------
+// --- reading the program leaders' edits back in ---------------------------------
 
 /**
- * Folds every shared sheet's instructor columns back into `registrantRows`
+ * Folds every shared sheet's program leader columns back into `registrantRows`
  * IN PLACE, and reports how many cells actually moved.
  *
  * Called from syncRegistrationsInternal() BEFORE the Registrants tab is
- * rewritten, so an instructor's ticks survive the same pass that imports new
+ * rewritten, so a program leader's ticks survive the same pass that imports new
  * registrations rather than being overwritten by it.
  *
- * PER CELL, against Pushed_Snapshot: a cell the instructor changed wins, a
+ * PER CELL, against Pushed_Snapshot: a cell the program leader changed wins, a
  * cell they never touched leaves the workbook's own value alone. A row with NO
  * readable snapshot (hand-pasted, or written by a version before this existed)
  * is treated as untouched — the safe direction, since claiming an edit that
  * never happened would overwrite real data with blanks.
  */
-function pullInstructorSheetEdits(registrantRows) {
-  const registry = getInstructorSheetRegistry();
+function pullProgramLeaderSheetEdits(registrantRows) {
+  const registry = getProgramLeaderSheetRegistry();
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0 || !registrantRows || registrantRows.length === 0) return 0;
 
-  const sheetMap = getIndexMap(INSTRUCTOR_SHEET_HEADERS);
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const edits = {}; // rowKey -> { values: [...], changed: [bool...] }
 
   programKeys.forEach(programKey => {
@@ -212,29 +268,29 @@ function pullInstructorSheetEdits(registrantRows) {
     let rows;
     try {
       const file = SpreadsheetApp.openById(entry.fileId);
-      const tab = file.getSheetByName(INSTRUCTOR_SHEET_TAB_NAME);
+      const tab = file.getSheetByName(LEADER_SHEET_TAB_NAME);
       if (!tab) {
-        log(`ℹ️ Instructor sheet for "${entry.title}" has no "${INSTRUCTOR_SHEET_TAB_NAME}" tab — nothing to read back.`);
+        log(`ℹ️ Program leader sheet for "${entry.title}" has no "${LEADER_SHEET_TAB_NAME}" tab — nothing to read back.`);
         return;
       }
-      rows = readSimpleTable(tab, INSTRUCTOR_SHEET_HEADERS);
+      rows = readSimpleTable(tab, LEADER_SHEET_HEADERS);
     } catch (err) {
       // Deleted, trashed, or unreachable. NOT unregistered automatically: a
       // permission blip would otherwise silently detach a live sheet and the
       // next push would build a second one. NOT re-thrown either — see the
       // push half.
-      log(`⚠️ Could not read the instructor sheet for "${entry.title}" (${err}).`);
-      noteForAdmin('Instructor sheets that could not be read',
-        describeInstructorAccessFailure(entry, programKey, err));
+      log(`⚠️ Could not read the program leader sheet for "${entry.title}" (${err}).`);
+      noteForAdmin('Program leader sheets that could not be read',
+        describeLeaderSheetAccessFailure(entry, programKey, err));
       return;
     }
 
     rows.forEach(row => {
       const rowKey = String(row[sheetMap['Row_Key']] || '').trim();
       if (!rowKey) return;
-      const snapshot = decodeInstructorSnapshot(row[sheetMap['Pushed_Snapshot']]);
+      const snapshot = decodeLeaderSnapshot(row[sheetMap['Pushed_Snapshot']]);
       if (!snapshot) return;
-      const current = readInstructorValues(row, sheetMap);
+      const current = readLeaderValues(row, sheetMap);
       const changed = current.map((value, i) => value !== snapshot[i]);
       if (changed.indexOf(true) === -1) return;
       // Two sheets claiming the same row key would mean the same session was
@@ -249,23 +305,23 @@ function pullInstructorSheetEdits(registrantRows) {
   const map = getIndexMap(HEADERS.Registrant_Dash);
   let applied = 0;
   registrantRows.forEach(row => {
-    const rowKey = instructorRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
+    const rowKey = leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
     const edit = edits[rowKey];
     if (!edit) return;
-    INSTRUCTOR_OWNED_COLUMNS.forEach((name, i) => {
+    LEADER_OWNED_COLUMNS.forEach((name, i) => {
       if (!edit.changed[i] || map[name] === undefined) return;
       row[map[name]] = edit.values[i];
       applied++;
     });
   });
 
-  if (applied > 0) log(`Instructor sheets: merged ${applied} instructor-edited cell(s) back into the Registrants tab.`);
+  if (applied > 0) log(`Program leader sheets: merged ${applied} leader-edited cell(s) back into the Registrants tab.`);
   return applied;
 }
 
 
 /**
- * What to say when an instructor sheet cannot be opened — and, when the reason
+ * What to say when a program leader sheet cannot be opened — and, when the reason
  * is a permission, WHO has to do WHAT about it.
  *
  * "Sign_Up — Tai Chi (Narberth) — Exception: You do not have permission to
@@ -274,7 +330,7 @@ function pullInstructorSheetEdits(registrantRows) {
  * needing access is the one running the triggers rather than the one reading
  * the email.
  */
-function describeInstructorAccessFailure(entry, programKey, err) {
+function describeLeaderSheetAccessFailure(entry, programKey, err) {
   const name = (entry && entry.title) ? `${entry.title}${entry.location ? ` (${entry.location})` : ''}` : programKey;
   const text = String((err && err.message) || err || '');
   const fileRef = (entry && entry.fileId) ? `\nThe file is: https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '';
@@ -282,10 +338,10 @@ function describeInstructorAccessFailure(entry, programKey, err) {
     const runningAs = getCurrentUserEmail() || 'the account running the sync';
     return `${name} — this workbook cannot open its shared sheet: ${text}\n\n` +
       `This run is signed in as ${runningAs}, and that account is not on the file. Nothing is lost — the ` +
-      `sheet and everything on it are fine — but the instructor's ticks are not coming back into the ` +
+      `sheet and everything on it are fine — but the leader's ticks are not coming back into the ` +
       `workbook and the workbook's rows are not going out to them.\n\n` +
       `To fix it: open the file, press Share, and either add ${runningAs} as an editor or set "Anyone with ` +
-      `the link" to Editor. Then run "Refresh Instructor Sheets Now" once. A sheet made from this menu now ` +
+      `the link" to Editor. Then run "Refresh Program Leader Sheets Now" once. A sheet made from this menu now ` +
       `does both of those automatically.${fileRef}`;
   }
   return `${name} — ${text}${fileRef}`;
@@ -295,56 +351,56 @@ function describeInstructorAccessFailure(entry, programKey, err) {
 // --- writing the sheets back out --------------------------------------------
 
 /**
- * Refreshes every registered instructor sheet from the settled picture.
+ * Refreshes every registered program leader sheet from the settled picture.
  *
  * Only sheets ALREADY in the registry are touched. Creating one is a
- * deliberate menu action (createInstructorSignUpSheet()) — a sync that
+ * deliberate menu action (createProgramLeaderSheet()) — a sync that
  * conjured a spreadsheet per program would produce sixty files nobody asked
  * for and share none of them.
  */
-function pushInstructorSignUpSheets(sessionRows, registrantRows) {
-  const registry = getInstructorSheetRegistry();
+function pushProgramLeaderSheets(sessionRows, registrantRows) {
+  const registry = getProgramLeaderSheetRegistry();
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0) return 0;
 
-  const byProgram = buildInstructorRowsByProgram(sessionRows, registrantRows);
+  const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
   let pushed = 0;
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
     try {
       const file = SpreadsheetApp.openById(entry.fileId);
-      const tab = getOrCreateSheet(file, INSTRUCTOR_SHEET_TAB_NAME);
-      writeInstructorSignUpTab(tab, entry, byProgram[programKey] || []);
+      const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
+      writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
       pushed++;
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
-      // ensureInstructorSheetAccess() existed was shared with its creator and
+      // ensureProgramLeaderSheetAccess() existed was shared with its creator and
       // nobody else, which is what stopped this whole round trip working when
       // the syncs moved to another account. Repaired here because this is the
       // pass that proves we can still open it; the flag on the registry entry
       // is what keeps it from being three Drive calls every hour thereafter.
       if (!entry.accessOpened) {
-        const access = ensureInstructorSheetAccess(file, `instructor sheet for "${entry.title}"`);
+        const access = ensureProgramLeaderSheetAccess(file, `program leader sheet for "${entry.title}"`);
         if (access.openedUp || access.editors.length > 0) {
-          saveInstructorSheetRegistryEntry(programKey, Object.assign({}, entry, { accessOpened: true }));
+          saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, { accessOpened: true }));
         }
       }
     } catch (err) {
       // NEVER RE-THROWN. The registration sync calls this at the very end, on
-      // a settled picture, and an instructor's spreadsheet being unreachable
+      // a settled picture, and a program leader's spreadsheet being unreachable
       // is not a reason to fail a run that has already imported every
       // registration correctly.
-      log(`⚠️ Could not refresh the instructor sheet for "${entry.title}" (${err}).`);
-      noteForAdmin('Instructor sheets that could not be refreshed',
-        describeInstructorAccessFailure(entry, programKey, err));
+      log(`⚠️ Could not refresh the program leader sheet for "${entry.title}" (${err}).`);
+      noteForAdmin('Program leader sheets that could not be refreshed',
+        describeLeaderSheetAccessFailure(entry, programKey, err));
     }
   });
-  if (pushed > 0) log(`Instructor sheets: refreshed ${pushed} shared sheet(s).`);
+  if (pushed > 0) log(`Program leader sheets: refreshed ${pushed} shared sheet(s).`);
   return pushed;
 }
 
 /**
- * { programKey: [instructor sheet row, ...] } for every program in the
+ * { programKey: [program leader sheet row, ...] } for every program in the
  * registry's window, built ONCE from the rows the caller already has in hand
  * rather than re-reading either tab per program.
  *
@@ -352,11 +408,11 @@ function pushInstructorSignUpSheets(sessionRows, registrantRows) {
  * the session table is what knows a session's title and location, and a
  * renamed program's older registrant rows still carry the old title.
  */
-function buildInstructorRowsByProgram(sessionRows, registrantRows) {
+function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
   const today = parseDateKey(formatDateKey(new Date()));
-  const from = formatDateKey(new Date(today.getTime() - INSTRUCTOR_SHEET_BACK_DAYS * 86400000));
-  const to = formatDateKey(new Date(today.getTime() + INSTRUCTOR_SHEET_FORWARD_DAYS * 86400000));
+  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
   const programByEventId = {};
   (sessionRows || []).forEach(row => {
@@ -366,11 +422,11 @@ function buildInstructorRowsByProgram(sessionRows, registrantRows) {
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
     programByEventId[eventId] =
-      instructorProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+      leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
   });
 
   const map = getIndexMap(HEADERS.Registrant_Dash);
-  const sheetMap = getIndexMap(INSTRUCTOR_SHEET_HEADERS);
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const byProgram = {};
 
   (registrantRows || []).forEach(row => {
@@ -379,11 +435,11 @@ function buildInstructorRowsByProgram(sessionRows, registrantRows) {
     if (!programKey) return;
     // Superseded rows are bookkeeping — a registration that a later submission
     // replaced. Showing them would list the same person twice with no way for
-    // an instructor to tell which one is real.
+    // a program leader to tell which one is real.
     if (String(row[map['Program_Status']] || '').trim() === 'Superseded') return;
 
-    const values = readInstructorValues(row, map);
-    const out = new Array(INSTRUCTOR_SHEET_HEADERS.length).fill('');
+    const values = readLeaderValues(row, map);
+    const out = new Array(LEADER_SHEET_HEADERS.length).fill('');
     out[sheetMap['Event_Date']] = row[map['Event_Date']];
     out[sheetMap['Event_Time']] = eventTimeLabelOf(row[map['Event_Time']]);
     out[sheetMap['Location']] = row[map['Location']] || '';
@@ -392,29 +448,37 @@ function buildInstructorRowsByProgram(sessionRows, registrantRows) {
     out[sheetMap['Phone']] = row[map['Phone']] || '';
     out[sheetMap['Email']] = row[map['Email']] || '';
     out[sheetMap['Program_Status']] = row[map['Program_Status']] || '';
-    INSTRUCTOR_OWNED_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
+    LEADER_OWNED_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
     out[sheetMap['Row_Key']] =
-      instructorRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
+      leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
     // Written in the same breath as the values it describes — that identity is
     // what the next pull's per-cell comparison rests on.
-    out[sheetMap['Pushed_Snapshot']] = encodeInstructorSnapshot(values);
+    out[sheetMap['Pushed_Snapshot']] = encodeLeaderSnapshot(values);
 
     if (!byProgram[programKey]) byProgram[programKey] = [];
     byProgram[programKey].push(out);
   });
 
-  // Date first, then name: the order an instructor reads a class list in.
+  // Date, then TIME, then name: the order a program leader reads a class list
+  // in, and — since writeProgramLeaderSheetTab() bands the sheet by session —
+  // the order that makes grouping a single scan rather than a second pass.
+  // Time is in the key because a program CAN run twice in a day (a morning and
+  // an afternoon sitting of the same class), and sorting on the date alone
+  // would interleave the two into one band that belonged to neither.
   Object.keys(byProgram).forEach(programKey => {
     byProgram[programKey].sort((a, b) => {
       const da = coerceDate(a[sheetMap['Event_Date']]);
       const db = coerceDate(b[sheetMap['Event_Date']]);
       if (da && db && da.getTime() !== db.getTime()) return da - db;
+      const ta = String(a[sheetMap['Event_Time']] || '');
+      const tb = String(b[sheetMap['Event_Time']] || '');
+      if (ta !== tb) return ta.localeCompare(tb);
       return normalizeNameKey(a[sheetMap['Name']]).localeCompare(normalizeNameKey(b[sheetMap['Name']]));
     });
-    if (byProgram[programKey].length > INSTRUCTOR_SHEET_MAX_ROWS) {
-      log(`⚠️ Instructor sheet for ${programKey} would hold ` +
-        `${byProgram[programKey].length} rows — trimmed to ${INSTRUCTOR_SHEET_MAX_ROWS}.`);
-      byProgram[programKey] = byProgram[programKey].slice(0, INSTRUCTOR_SHEET_MAX_ROWS);
+    if (byProgram[programKey].length > LEADER_SHEET_MAX_ROWS) {
+      log(`⚠️ Program leader sheet for ${programKey} would hold ` +
+        `${byProgram[programKey].length} rows — trimmed to ${LEADER_SHEET_MAX_ROWS}.`);
+      byProgram[programKey] = byProgram[programKey].slice(0, LEADER_SHEET_MAX_ROWS);
     }
   });
 
@@ -422,15 +486,91 @@ function buildInstructorRowsByProgram(sessionRows, registrantRows) {
 }
 
 /**
- * Draws one shared sheet: banner, header, rows, and the yellow "this is yours"
- * wash on exactly the five instructor columns.
+ * Groups a program's rows into the sessions they belong to, in the order they
+ * are already sorted into.
+ *
+ * A "session" is one date at one time — see the sort in
+ * buildLeaderSheetRowsByProgram() for why the time is part of that and not
+ * just the date. Rows arrive grouped already, so this is a single scan rather
+ * than a bucket-and-re-sort: the grouping cannot disagree with the order the
+ * rows are written in, which is the drift that would put a band above the
+ * wrong people.
+ *
+ * Each group carries the counts its band reports. They are counted HERE, off
+ * Program_Status, rather than being read back off the sheet: the numbers a
+ * band states have to be the system's own answer, because the four tick
+ * columns beside them are the leader's answer and a band mixing the two would
+ * be telling them their own marks back as though the workbook had decided them.
+ */
+function groupLeaderSheetRowsBySession(rows, sheetMap) {
+  const groups = [];
+  let current = null;
+
+  (rows || []).forEach(row => {
+    const date = coerceDate(row[sheetMap['Event_Date']]);
+    const dateKey = date ? formatDateKey(date) : '';
+    const timeLabel = String(row[sheetMap['Event_Time']] || '');
+    const sessionKey = `${dateKey}|${timeLabel}`;
+
+    if (!current || current.sessionKey !== sessionKey) {
+      current = {
+        sessionKey, date, timeLabel,
+        rows: [], active: 0, waitlisted: 0, cancelled: 0
+      };
+      groups.push(current);
+    }
+    current.rows.push(row);
+
+    const status = String(row[sheetMap['Program_Status']] || '').trim();
+    if (status === 'Waitlisted') current.waitlisted++;
+    else if (status === 'Cancelled') current.cancelled++;
+    else current.active++; // Active, and anything a hand-added desk row left blank
+  });
+
+  return groups;
+}
+
+/**
+ * What one session's band says: when it is, and how it stands.
+ *
+ * Only the counts that are NOT zero are named. "6 signed up · 0 waitlisted ·
+ * 0 cancelled" on every band of a twelve-week class is three facts of which
+ * two are noise, repeated twelve times, and the one number that matters stops
+ * standing out. A waitlist that exists is worth a word; one that does not is
+ * worth nothing.
+ */
+function leaderSheetSessionBandLabel(group) {
+  const when = group.date ? formatDateLabel(group.date) : 'Date not set';
+  const parts = [group.timeLabel ? `${when} · ${group.timeLabel}` : when];
+  parts.push(`${group.active} signed up`);
+  if (group.waitlisted > 0) parts.push(`${group.waitlisted} waitlisted`);
+  if (group.cancelled > 0) parts.push(`${group.cancelled} cancelled`);
+  return parts.join('  ·  ');
+}
+
+/**
+ * Draws one shared sheet: banner, header, a band per session with its roster
+ * under it, and the yellow "this is yours" wash on exactly the five leader
+ * columns.
  *
  * Laid out on the memory-tab rows (banner 1, header 2, data 3) so
  * readSimpleTable() can read it straight back on the next pull without a
  * second layout to keep in step.
+ *
+ * THE BANDS COST THE PULL NOTHING. A band row is written with a label in
+ * column A and every other cell blank — no Row_Key, no Pushed_Snapshot — and
+ * pullProgramLeaderSheetEdits() skips any row without both. That is the whole
+ * contract between the two halves, and it is why this function is free to
+ * change the layout without the merge having to be told.
+ *
+ * ONE setValues AND ONE setBackgrounds for the whole block, bands included.
+ * The obvious shape — write each session, then style it — is a handful of API
+ * calls per session, and a leader with a year of weekly classes has fifty of
+ * them. That was slow enough on a real roster to push the hourly sync toward
+ * its execution limit, which is a strange way to lose a registration import.
  */
-function writeInstructorSignUpTab(sheet, entry, rows) {
-  const headers = INSTRUCTOR_SHEET_HEADERS;
+function writeProgramLeaderSheetTab(sheet, entry, rows) {
+  const headers = LEADER_SHEET_HEADERS;
   const numCols = headers.length;
   const map = getIndexMap(headers);
 
@@ -442,75 +582,168 @@ function writeInstructorSignUpTab(sheet, entry, rows) {
   const stamp = Utilities.formatDate(new Date(),
     Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
   // The program and where it runs. The refresh stamp and the "tick the
-  // yellow columns" instruction are a note: this sheet goes to an instructor
+  // yellow columns" instruction are a note: this sheet goes to a program leader
   // who reads the top line to check they have opened the right one, and a
   // heading that is three facts joined by bullets is not a top line.
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols,
     `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`,
-    { note: `Refreshed ${stamp}.\n\nTick the yellow columns; everything else fills in by itself.` });
+    { note: `Refreshed ${stamp}.\n\nEach class has its own blue band. Tick the yellow columns; ` +
+        `everything else fills in by itself.` });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
-  labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, INSTRUCTOR_OWNED_COLUMNS);
+  labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
 
-  if (rows.length > 0) {
-    // Before the values, never after — a bare "10:00 AM" that Sheets is
-    // allowed to read as a time stops being those words. See
-    // stampTextColumns().
-    stampTextColumns(sheet, [map['Event_Time'] + 1], MEMORY_TAB_DATA_ROW, rows.length);
-    sheet.getRange(MEMORY_TAB_DATA_ROW, 1, rows.length, numCols).setValues(rows);
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Event_Date'] + 1, rows.length, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
-    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Party_Size'] + 1, rows.length, 1).setNumberFormat('0');
-    applyZebraStripingManualBounded(sheet, MEMORY_TAB_DATA_ROW, rows.length, numCols);
-    tintManualEntryColumns(sheet, MEMORY_TAB_DATA_ROW, rows.length, headers, INSTRUCTOR_OWNED_COLUMNS);
-    // Real checkboxes, so a mark is one click and reads back as a boolean —
-    // which is what the snapshot comparison in pullInstructorSheetEdits()
-    // expects to be comparing.
-    INSTRUCTOR_FLAG_COLUMNS.forEach(name => {
-      sheet.getRange(MEMORY_TAB_DATA_ROW, map[name] + 1, rows.length, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
-    });
-    // Warning-only, like everywhere else in this project: an instructor who
-    // really must correct a misspelled name should be told it will be
-    // overwritten, not stopped and left with no way to say so.
-    protectDerivedColumns(sheet, headers, INSTRUCTOR_SHEET_DERIVED_COLUMNS,
-      [{ start: MEMORY_TAB_DATA_ROW, count: rows.length }]);
-  } else {
+  if (rows.length === 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
       .setValue('Nobody has signed up yet — this fills in by itself as registrations come in.')
       .setFontStyle('italic')
       .setFontColor(TYPO.MUTED.color);
+    freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
+    applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
+    autosizeColumns(sheet, { minCols: numCols, force: true });
+    applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
+    freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, numCols));
+    return;
   }
 
+  // The grid to write, and — built in the same pass — where the bands landed
+  // and which stretches of it are registrants. Everything after this works off
+  // those three, so the layout is decided exactly once.
+  const grid = [];
+  const bandRowNumbers = [];
+  const runs = [];
+  groupLeaderSheetRowsBySession(rows, map).forEach(group => {
+    const band = new Array(numCols).fill('');
+    band[map['Event_Date']] = leaderSheetSessionBandLabel(group);
+    bandRowNumbers.push(MEMORY_TAB_DATA_ROW + grid.length);
+    grid.push(band);
+
+    runs.push({ start: MEMORY_TAB_DATA_ROW + grid.length, count: group.rows.length });
+    group.rows.forEach(row => grid.push(row));
+  });
+
+  // Before the values, never after — a bare "10:00 AM" that Sheets is
+  // allowed to read as a time stops being those words. See stampTextColumns().
+  stampTextColumns(sheet, [map['Event_Time'] + 1], MEMORY_TAB_DATA_ROW, grid.length);
+  sheet.getRange(MEMORY_TAB_DATA_ROW, 1, grid.length, numCols).setValues(grid);
+
+  // Zebra on the registrant rows, the band wash on the bands, in ONE write.
+  // A band row is not part of the stripe sequence — striping straight through
+  // them puts an arbitrary light/dark boundary on a row that is supposed to
+  // BE the boundary.
+  const bandRowSet = {};
+  bandRowNumbers.forEach(r => { bandRowSet[r] = true; });
+  const backgrounds = [];
+  let stripe = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const rowNumber = MEMORY_TAB_DATA_ROW + i;
+    if (bandRowSet[rowNumber]) {
+      backgrounds.push(new Array(numCols).fill(LEADER_SHEET_BAND_BG));
+      stripe = 0; // each class starts its own stripe sequence, so week two looks like week one
+    } else {
+      backgrounds.push(new Array(numCols).fill(stripe % 2 === 0 ? PALETTE.PAPER : PALETTE.STRIPE));
+      stripe++;
+    }
+  }
+  sheet.getRange(MEMORY_TAB_DATA_ROW, 1, grid.length, numCols).setBackgrounds(backgrounds);
+
+  bandRowNumbers.forEach(rowNumber => {
+    sheet.getRange(rowNumber, 1, 1, numCols)
+      .setFontWeight('bold')
+      .setFontColor(LEADER_SHEET_BAND_INK)
+      .setVerticalAlignment('middle');
+    // OVERFLOW, not wrap: the label is longer than the Event_Date column and
+    // is meant to run across the blank cells beside it. Wrapping would fold it
+    // into a three-line cell and push the band to triple height.
+    sheet.getRange(rowNumber, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
+    try { sheet.setRowHeight(rowNumber, ROW_HEIGHTS.BANNER); } catch (err) { /* row may not exist yet */ }
+  });
+
+  runs.forEach(run => {
+    sheet.getRange(run.start, map['Event_Date'] + 1, run.count, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
+    sheet.getRange(run.start, map['Party_Size'] + 1, run.count, 1).setNumberFormat('0');
+    tintManualEntryColumns(sheet, run.start, run.count, headers, LEADER_OWNED_COLUMNS);
+    // Real checkboxes, so a mark is one click and reads back as a boolean —
+    // which is what the snapshot comparison in pullProgramLeaderSheetEdits()
+    // expects to be comparing. Never on a band row: a checkbox there is an
+    // invitation to tick something that goes nowhere.
+    LEADER_FLAG_COLUMNS.forEach(name => {
+      sheet.getRange(run.start, map[name] + 1, run.count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    });
+  });
+
+  // Warning-only, like everywhere else in this project: a program leader who
+  // really must correct a misspelled name should be told it will be
+  // overwritten, not stopped and left with no way to say so.
+  //
+  // ONE ZONE covering the bands as well as the rows, rather than one per run.
+  // protectDerivedColumns() creates a protection per column per zone, and a
+  // year of weekly classes is fifty zones — four hundred protection objects on
+  // a sheet holding one class list, built one API call at a time. The bands
+  // being protected too costs nothing: their derived cells are blank and
+  // nobody types in them.
+  protectDerivedColumns(sheet, headers, LEADER_SHEET_DERIVED_COLUMNS,
+    [{ start: MEMORY_TAB_DATA_ROW, count: grid.length }]);
+
   freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
-  applyColumnVisibility(sheet, headers, INSTRUCTOR_SHEET_HIDDEN_COLUMNS);
+  applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
   autosizeColumns(sheet, { minCols: numCols, force: true });
   // After the autosize, which would otherwise size the two hidden machine
   // columns back into view on some sheets.
-  applyColumnVisibility(sheet, headers, INSTRUCTOR_SHEET_HIDDEN_COLUMNS);
+  applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
   freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, numCols));
 }
 
 
 // --- creating and sharing one ------------------------------------------------
 
-function getOrCreateInstructorSheetFolder() {
-  const folders = DriveApp.getFoldersByName(INSTRUCTOR_SHEET_FOLDER_NAME);
+/**
+ * The Drive folder these sheets are filed in, renaming the one they used to
+ * live in rather than creating a second beside it.
+ *
+ * Every existing sheet is reached by fileId out of the registry, so nothing
+ * would BREAK if this made a new folder — the old files would just sit in a
+ * folder named after a word this project no longer uses, with new ones
+ * arriving somewhere else, and the only person who ever noticed would be
+ * whoever went looking for a sheet a year from now. Renaming costs one Drive
+ * call on the first pass after the rename and none afterwards.
+ */
+function getOrCreateProgramLeaderSheetFolder() {
+  const folders = DriveApp.getFoldersByName(LEADER_SHEET_FOLDER_NAME);
   if (folders.hasNext()) return folders.next();
-  const folder = DriveApp.createFolder(INSTRUCTOR_SHEET_FOLDER_NAME);
-  log(`Created Drive folder "${INSTRUCTOR_SHEET_FOLDER_NAME}" for shared instructor rosters.`);
+
+  const legacy = DriveApp.getFoldersByName(LEGACY_LEADER_SHEET_FOLDER_NAME);
+  if (legacy.hasNext()) {
+    const folder = legacy.next();
+    try {
+      folder.setName(LEADER_SHEET_FOLDER_NAME);
+      log(`Renamed Drive folder "${LEGACY_LEADER_SHEET_FOLDER_NAME}" to "${LEADER_SHEET_FOLDER_NAME}".`);
+      return folder;
+    } catch (err) {
+      // Somebody else's folder, or a Drive that said no. The sheets in it are
+      // still reachable by id, so this is a cosmetic loss — use it as it is
+      // rather than starting a second folder over a failed rename.
+      log(`ℹ️ Could not rename "${LEGACY_LEADER_SHEET_FOLDER_NAME}" (${err}) — filing new sheets there anyway.`);
+      return folder;
+    }
+  }
+
+  const folder = DriveApp.createFolder(LEADER_SHEET_FOLDER_NAME);
+  log(`Created Drive folder "${LEADER_SHEET_FOLDER_NAME}" for shared program leader rosters.`);
   return folder;
 }
 
 /**
  * OPENS THE SHEET UP so that everyone who has to touch it can.
  *
- * THE FAILURE THIS EXISTS FOR. An instructor sheet is created by whoever
+ * THE FAILURE THIS EXISTS FOR. A program leader sheet is created by whoever
  * clicked the menu item — a real person, signed in as themselves — and it is
  * then read and written every hour by whoever owns the triggers, which is
  * routinely a DIFFERENT account. Drive shares a new file with its creator and
  * nobody else, so the hourly sync opens it, is refused, and the sheet silently
- * stops round-tripping: the instructor's ticks never come back into the
- * workbook, and the workbook's rows never go out to the instructor. Both sides
+ * stops round-tripping: the leader's ticks never come back into the
+ * workbook, and the workbook's rows never go out to the program leader. Both sides
  * carry on looking like they are working.
  *
  * Three things are done about it here, cheapest first:
@@ -518,7 +751,7 @@ function getOrCreateInstructorSheetFolder() {
  *   THE ADMINS AND THE TRIGGER OWNER are added as editors by name, so the
  *     accounts that actually run this system can always open the file.
  *   ANYONE WITH THE LINK CAN EDIT. This is a roster of first names, times and
- *     ticks, handed to instructors who are not in the organization's directory
+ *     ticks, handed to program leaders who are not in the organization's directory
  *     and who should not have to have accounts at all — and the alternative,
  *     in practice, is a sheet nobody can open and a feature nobody uses. Low
  *     security here is a deliberate trade, not an oversight. Anybody who wants
@@ -532,9 +765,9 @@ function getOrCreateInstructorSheetFolder() {
  * Returns { openedUp, editors, problems } for the caller to report; never
  * throws.
  */
-function ensureInstructorSheetAccess(file, describe) {
+function ensureProgramLeaderSheetAccess(file, describe) {
   if (!file) return { openedUp: false, editors: [], problems: [] };
-  return openUpFileToAnyoneWithLink(file.getId(), describe || 'instructor sheet');
+  return openUpFileToAnyoneWithLink(file.getId(), describe || 'program leader sheet');
 }
 
 /**
@@ -542,16 +775,16 @@ function ensureInstructorSheetAccess(file, describe) {
  * BACK: the accounts that run it as named editors, and anyone with the link
  * able to edit.
  *
- * WHY IT IS THE SAME ANSWER FOR A FORM AS FOR AN INSTRUCTOR SHEET. Both are
+ * WHY IT IS THE SAME ANSWER FOR A FORM AS FOR A PROGRAM LEADER SHEET. Both are
  * created by whoever clicked the menu item — a real person, signed in as
  * themselves — and both are read and written every hour by whoever owns the
  * triggers, which is routinely a DIFFERENT account. Drive gives a new file to
  * its creator and nobody else, so the hourly run opens it, is refused, and the
- * work silently stops: an instructor's ticks never come back, or a form's
+ * work silently stops: a program leader's ticks never come back, or a form's
  * registrations are never imported. Nothing in either case looks broken.
  *
  * LOW SECURITY HERE IS A DELIBERATE TRADE. A registration form is a public
- * sign-up page and an instructor sheet is a roster of first names and ticks;
+ * sign-up page and a program leader sheet is a roster of first names and ticks;
  * the alternative, in practice, is a file nobody can open and a feature nobody
  * uses. Anybody who wants it narrowed can change the sharing on the file
  * itself — nothing re-opens it except a run that touches it again.
@@ -680,75 +913,21 @@ function openUpAllFormSharing() {
 }
 
 /**
- * The instructor addresses recorded for one program, off Program_Options'
- * Instructor_Email column. Several are allowed, comma- or semicolon-separated,
- * because a class with a lead and an assistant is ordinary.
- *
- * Returns [] when the column is blank — createInstructorSignUpSheet() then
- * makes the file and hands back a link to share by hand, rather than refusing
- * to build anything over a missing address.
- */
-function getInstructorEmailsForProgram(title, location) {
-  return buildInstructorEmailIndex()[instructorProgramKey(title, location)] || [];
-}
-
-/**
- * { programKey: [address, ...] } for every program that names one.
- *
- * ONE read of Program_Options for the whole execution, cached: the dialog asks
- * this per program, and a tab read apiece turned listing sixty programs into
- * sixty full-tab round trips — slow enough to be felt before the dropdown even
- * appeared.
- */
-let __instructorEmailIndexCache = null;
-
-function buildInstructorEmailIndex() {
-  if (__instructorEmailIndexCache) return __instructorEmailIndexCache;
-  const index = {};
-  __instructorEmailIndexCache = index;
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
-  if (!sheet) return index;
-  const headers = HEADERS.Program_Options;
-  const map = getIndexMap(headers);
-  let rows;
-  try {
-    rows = readSimpleTable(sheet, headers);
-  } catch (err) {
-    log(`ℹ️ Could not read ${SHEET_NAMES.PROGRAM_OPTIONS} for instructor addresses (${err}).`);
-    return index;
-  }
-
-  rows.forEach(row => {
-    const key = instructorProgramKey(row[map['Event']], row[map['Location']]);
-    if (!index[key]) index[key] = [];
-    // Comma, semicolon or whitespace: staff type addresses however they type
-    // them, and rejecting a list over its separator would be a silent no-share.
-    String(row[map['Instructor_Email']] || '')
-      .split(/[,;\s]+/)
-      .map(part => part.trim())
-      .filter(part => part.indexOf('@') > 0)
-      .forEach(email => { if (index[key].indexOf(email) === -1) index[key].push(email); });
-  });
-  return index;
-}
-
-/**
  * MENU ACTION (via the dialog): make a shared sheet for one program, fill it,
- * and add whoever Program_Options names as its instructor.
+ * and add whoever Program_Leaders names as its leader.
  *
  * Idempotent by program key — pressing it again for a program that already has
  * one refreshes that sheet and returns the SAME link rather than building a
  * second copy nobody would know to share.
  */
-function createInstructorSignUpSheet(programValue) {
+function createProgramLeaderSheet(programValue) {
   const parts = String(programValue || '').split('|||');
   const title = String(parts[0] || '').trim();
   const location = String(parts[1] || '').trim();
   if (!title || !location) throw new Error('Pick a program first.');
 
-  const programKey = instructorProgramKey(title, location);
-  const registry = getInstructorSheetRegistry();
+  const programKey = leaderProgramKey(title, location);
+  const registry = getProgramLeaderSheetRegistry();
   const existing = registry[programKey];
 
   let file = null;
@@ -758,8 +937,8 @@ function createInstructorSignUpSheet(programValue) {
     } catch (err) {
       // Registered but gone — trashed by hand, most likely. Build a fresh one
       // rather than failing the action the person actually asked for.
-      log(`ℹ️ Registered instructor sheet for "${title}" could not be opened (${err}) — creating a new one.`);
-      removeInstructorSheetRegistryEntry(programKey);
+      log(`ℹ️ Registered program leader sheet for "${title}" could not be opened (${err}) — creating a new one.`);
+      removeProgramLeaderSheetRegistryEntry(programKey);
       file = null;
     }
   }
@@ -771,10 +950,10 @@ function createInstructorSignUpSheet(programValue) {
     // folder of these is what keeps them findable a year from now.
     try {
       const driveFile = DriveApp.getFileById(file.getId());
-      getOrCreateInstructorSheetFolder().addFile(driveFile);
+      getOrCreateProgramLeaderSheetFolder().addFile(driveFile);
       DriveApp.getRootFolder().removeFile(driveFile);
     } catch (err) {
-      log(`ℹ️ Could not file the new instructor sheet into "${INSTRUCTOR_SHEET_FOLDER_NAME}" (${err}) — it is in My Drive.`);
+      log(`ℹ️ Could not file the new program leader sheet into "${LEADER_SHEET_FOLDER_NAME}" (${err}) — it is in My Drive.`);
     }
   }
 
@@ -784,7 +963,7 @@ function createInstructorSignUpSheet(programValue) {
     location,
     createdAt: (existing && existing.createdAt) || new Date().toISOString()
   };
-  saveInstructorSheetRegistryEntry(programKey, entry);
+  saveProgramLeaderSheetRegistryEntry(programKey, entry);
   flushPersistentRegistries(); // registered before the fill, so a timeout mid-write still leaves a findable sheet
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -792,20 +971,20 @@ function createInstructorSignUpSheet(programValue) {
     getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
   const registrantRows = readAllSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
-  const byProgram = buildInstructorRowsByProgram(sessionRows, registrantRows);
+  const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
 
-  const tab = getOrCreateSheet(file, INSTRUCTOR_SHEET_TAB_NAME);
-  writeInstructorSignUpTab(tab, entry, byProgram[programKey] || []);
+  const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
+  writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
   // A brand-new spreadsheet arrives with an empty "Sheet1" beside ours.
-  removeDefaultSheetIfIdle(file, INSTRUCTOR_SHEET_TAB_NAME);
+  removeDefaultSheetIfIdle(file, LEADER_SHEET_TAB_NAME);
 
-  // BEFORE the named instructors, and on every run rather than only the first:
+  // BEFORE the named program leaders, and on every run rather than only the first:
   // this is what keeps the file openable by the account that syncs it, and a
   // sheet created before this existed is repaired the next time somebody
-  // presses the menu item. See ensureInstructorSheetAccess().
-  const access = ensureInstructorSheetAccess(file, `instructor sheet for "${title}"`);
+  // presses the menu item. See ensureProgramLeaderSheetAccess().
+  const access = ensureProgramLeaderSheetAccess(file, `program leader sheet for "${title}"`);
 
-  const emails = getInstructorEmailsForProgram(title, location);
+  const emails = getProgramLeaderEmailsForProgram(title, location);
   const shared = [];
   emails.forEach(email => {
     try {
@@ -816,14 +995,14 @@ function createInstructorSignUpSheet(programValue) {
       // (a typo, a personal address a Workspace policy will not share with) is
       // exactly the case where the link still works and somebody should be
       // told to send it by hand.
-      log(`⚠️ Could not share the instructor sheet for "${title}" with ${email} (${err}).`);
-      noteForAdmin('Instructor sheets that could not be shared',
+      log(`⚠️ Could not share the program leader sheet for "${title}" with ${email} (${err}).`);
+      noteForAdmin('Program leader sheets that could not be shared',
         `"${title}" (${location}) could not be shared with ${email} — ${err}. The sheet exists and ` +
         `anyone with its link can open it, so sending them the link by hand works.`);
     }
   });
 
-  log(`Instructor sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
+  log(`Program leader sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
     `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es), ` +
     `link sharing ${access.openedUp ? 'on' : 'NOT on'}.`);
 
@@ -861,27 +1040,27 @@ function removeDefaultSheetIfIdle(file, keepName) {
 // --- the menu -----------------------------------------------------------------
 
 /** MENU ENTRY: pick a program, get a shareable live roster. */
-function showInstructorSheetDialog() {
-  const options = listInstructorProgramOptions();
+function showProgramLeaderSheetDialog() {
+  const options = listProgramLeaderProgramOptions();
   if (options.length === 0) {
     toastIfPossible('No programs to share yet — run Sync Cal first.');
     return;
   }
-  const html = HtmlService.createHtmlOutput(buildInstructorSheetHtml(options))
+  const html = HtmlService.createHtmlOutput(buildProgramLeaderSheetHtml(options))
     .setWidth(560)
     .setHeight(500);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Instructor Sign-Up Sheets');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Program Leader Sign-Up Sheets');
 }
 
 /**
  * Every program (title x location) with a session in the window, marked with
- * whether it already has a shared sheet and whether Program_Options names an
- * instructor for it.
+ * whether it already has a shared sheet and whether Program_Leaders names a
+ * leader for it.
  *
  * Both facts are on the option itself so the dialog can say "already shared"
- * and "no instructor email on file" without a round trip per selection.
+ * and "no leader on file" without a round trip per selection.
  */
-function listInstructorProgramOptions() {
+function listProgramLeaderProgramOptions() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!dash) return [];
@@ -889,8 +1068,8 @@ function listInstructorProgramOptions() {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const today = parseDateKey(formatDateKey(new Date()));
-  const from = formatDateKey(new Date(today.getTime() - INSTRUCTOR_SHEET_BACK_DAYS * 86400000));
-  const to = formatDateKey(new Date(today.getTime() + INSTRUCTOR_SHEET_FORWARD_DAYS * 86400000));
+  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
   const byKey = {};
   readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
@@ -900,26 +1079,26 @@ function listInstructorProgramOptions() {
     if (!title || !location || !date) return;
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
-    const key = instructorProgramKey(title, location);
+    const key = leaderProgramKey(title, location);
     if (!byKey[key]) byKey[key] = { key, title, location, sessions: 0, nextDate: null };
     byKey[key].sessions++;
     if (!byKey[key].nextDate || date < byKey[key].nextDate) byKey[key].nextDate = date;
   });
 
-  const registry = getInstructorSheetRegistry();
+  const registry = getProgramLeaderSheetRegistry();
   return Object.keys(byKey)
     .map(k => byKey[k])
     .sort((a, b) => a.location.localeCompare(b.location) || a.title.localeCompare(b.title))
     .map(entry => {
       const existing = registry[entry.key];
-      const emails = getInstructorEmailsForProgram(entry.title, entry.location);
+      const emails = getProgramLeaderEmailsForProgram(entry.title, entry.location);
       return {
         value: `${entry.title}|||${entry.location}`,
         title: entry.title,
         location: entry.location,
         label: `${entry.title}  •  ${entry.sessions} session(s), next ${formatDateLabel(entry.nextDate)}` +
           (existing ? '  •  already shared' : '') +
-          (emails.length > 0 ? `  •  ${emails.join(', ')}` : '  •  no instructor email on file'),
+          (emails.length > 0 ? `  •  ${emails.join(', ')}` : '  •  no leader on Program_Leaders'),
         alreadyShared: !!existing,
         url: existing && existing.fileId ? `https://docs.google.com/spreadsheets/d/${existing.fileId}/edit` : '',
         emails
@@ -932,10 +1111,10 @@ function listInstructorProgramOptions() {
  * rosters out again — the same two halves the hourly sync does, for when
  * somebody does not want to wait an hour for them.
  */
-function refreshInstructorSignUpSheetsNow() {
-  const registry = getInstructorSheetRegistry();
+function refreshProgramLeaderSheetsNow() {
+  const registry = getProgramLeaderSheetRegistry();
   if (Object.keys(registry).length === 0) {
-    toastIfPossible('No instructor sheets have been created yet — use "Share a Sign-Up Sheet…" first.');
+    toastIfPossible('No program leader sheets have been created yet — use "Share a Sign-Up Sheet…" first.');
     return;
   }
   // The same lock syncRegistrations() takes: this reads the whole Registrants
@@ -964,23 +1143,23 @@ function refreshInstructorSignUpSheetsNow() {
     let pushed = 0;
     const failures = [];
     try {
-      merged = pullInstructorSheetEdits(registrantRows);
+      merged = pullProgramLeaderSheetEdits(registrantRows);
       if (merged > 0) renderRegistrantsSheet(false, registrantRows);
     } catch (err) {
-      log(`⚠️ Could not read the instructor sheets back in (${err}).`);
-      failures.push(`the instructors' own edits could not be read back in (${err})`);
+      log(`⚠️ Could not read the program leader sheets back in (${err}).`);
+      failures.push(`the program leaders' own edits could not be read back in (${err})`);
     }
     try {
-      pushed = pushInstructorSignUpSheets(sessionRows, registrantRows);
+      pushed = pushProgramLeaderSheets(sessionRows, registrantRows);
     } catch (err) {
-      log(`⚠️ Could not push the instructor sheets out (${err}).`);
+      log(`⚠️ Could not push the program leader sheets out (${err}).`);
       failures.push(`the rosters could not be sent out (${err})`);
     }
 
-    flushAdminDigest('Instructor sheet refresh');
+    flushAdminDigest('Program leader sheet refresh');
     const trouble = failures.length === 0 ? '' : ` ⚠️ ${failures.join('; ')}.`;
-    toastIfPossible(`Instructor sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
-      `${pushed} sheet(s) out, ${merged} instructor edit(s) in.${trouble}`);
+    toastIfPossible(`Program leader sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
+      `${pushed} sheet(s) out, ${merged} program leader edit(s) in.${trouble}`);
   } finally {
     lock.releaseLock();
   }
@@ -994,7 +1173,7 @@ function refreshInstructorSignUpSheetsNow() {
  * building. The program list is filtered in the BROWSER from a JSON copy, so
  * changing location is instant rather than a round trip.
  */
-function buildInstructorSheetHtml(options) {
+function buildProgramLeaderSheetHtml(options) {
   const locations = [];
   options.forEach(o => { if (locations.indexOf(o.location) === -1) locations.push(o.location); });
   locations.sort();
@@ -1024,10 +1203,10 @@ function buildInstructorSheetHtml(options) {
 <h3>Share a live sign-up sheet</h3>
 <p class="hint">
   Makes a small spreadsheet in Drive holding just this program's roster at this location, and adds
-  whoever <b>Program_Options</b> names in <b>Instructor_Email</b> as an editor. It refreshes itself on
+  whoever <b>Program_Leaders</b> names as its leader as an editor. It refreshes itself on
   the hourly registration sync — no printing, no new trigger.
-  The instructor ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
-  types in <b>Instructor_Notes</b>; those come back into the Registrants tab on the same sync.
+  The program leader ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
+  types in <b>Leader_Notes</b>; those come back into the Registrants tab on the same sync.
 </p>
 <label for="location">Location</label>
 <select id="location" onchange="fillPrograms()">${locationTags}</select>
@@ -1087,13 +1266,13 @@ function buildInstructorSheetHtml(options) {
         el.className = 'ok';
         var shared = res.shared.length > 0
           ? 'Shared with ' + res.shared.join(', ') + '.'
-          : 'No instructor address on file — copy the link and share it yourself, or fill in ' +
-            'Instructor_Email on Program_Options and press this again.';
+          : 'No leader address on file — copy the link and share it yourself, or add a row on ' +
+            'the Program_Leaders tab and press this again.';
         var failed = res.unshared.length > 0
           ? '<br>Could not share with ' + res.unshared.join(', ') + '.'
           : '';
         // SAID OUT LOUD, both ways. Anyone with the link can edit this sheet —
-        // which is what makes it work for instructors who have no account here
+        // which is what makes it work for program leaders who have no account here
         // and what keeps the hourly sync able to read their ticks back — and
         // somebody about to paste that link into an email is entitled to know
         // it. When it could NOT be opened up, that is the more urgent half:
@@ -1110,7 +1289,7 @@ function buildInstructorSheetHtml(options) {
         document.getElementById('go').disabled = false;
         say('Failed: ' + err.message, 'err');
       })
-      .createInstructorSignUpSheet(chosen.value);
+      .createProgramLeaderSheet(chosen.value);
   }
 
   function say(msg, cls) {

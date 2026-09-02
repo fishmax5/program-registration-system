@@ -823,7 +823,7 @@ clickable "📝 Register for …" link. Leave it alone; the system keeps it curr
 
 ## The tabs
 
-Twelve tabs is a lot to meet at once, so **the tab colours group them** — in
+Thirteen tabs is a lot to meet at once, so **the tab colours group them** — in
 the order they are worth looking at, left to right along the bottom of the
 window:
 
@@ -831,7 +831,7 @@ window:
 |---|---|---|---|
 | 🟩 green | **Today** | Master_Program_Dashboard, Master_Lunch_Dashboard, Lunch_Roster, Registrant_Dash | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
-| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who is waiting for an appointment |
+| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, who is waiting for an appointment |
 | ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
 
 **Which cells may I type in?** That is a question about *columns*, not tabs, so
@@ -1395,7 +1395,7 @@ chairs earliest first — *"12:30 PM – 1:00 PM"*. Pick a name, pick a time, ti
 #### Standing lists — somebody who comes to everything
 
 Plenty of people have come to the same class every week for years and have
-never filled in a form in their lives. The instructor still needs their name
+never filled in a form in their lives. The program leader still needs their name
 and their email.
 
 Tick **Register them for this session** and then **…and every future session of
@@ -1550,20 +1550,20 @@ are backfilled from the session table the next time this tab is drawn.
 | ✍️ `Earlier_Appointment` | **Appointment programs only.** `☎️ Call if earlier` · `Keeping this time` · blank. From the form's own question, or type it in when they tell you on the phone — it's what the [call list](#personalized-assistance-appointments) is built from. Blank means **no**: nobody unasked gets rung about moving their appointment |
 | ✍️ `Contacted` | Tick — this person has been reached out to |
 | ✍️ `Confirmed` | Tick — they said they're coming |
-| ✍️ `Waitlisted` | Tick — the instructor's own waitlist, separate from `Program_Status` above |
+| ✍️ `Waitlisted` | Tick — the program leader's own waitlist, separate from `Program_Status` above |
 | ✍️ `Dropped` | Tick — they said they're not coming |
-| ✍️ `Instructor_Notes` | Anything else worth knowing about them for this session |
+| ✍️ `Leader_Notes` | Anything else worth knowing about them for this session |
 | `Primary_Registrant` | `Self`, or the name of whoever brought them |
 | `Party_Size` | Headcount on that submission — "party of 3, one no-show" |
 | `Order_Ahead_Flag` | Highlighted when someone registered too late to order for |
 | ✍️ `Admin_Notes` | Allergies/dietary needs, plus anything they typed |
 | `Manual_Override` | Turns purple when a row has been hand-edited, so the sync leaves it alone |
 
-Those last five are the columns an instructor fills in on their own shared copy
-of the roster — see [Instructor sign-up sheets](#instructor-sign-up-sheets).
+Those last five are the columns a program leader fills in on their own shared
+copy of the roster — see [Program leader sign-up sheets](#program-leader-sign-up-sheets).
 They're editable here too, and each hourly sync merges the two **cell by cell**,
-so a correction you make here isn't clobbered by a stale copy open in an
-instructor's browser tab, and theirs isn't clobbered by yours.
+so a correction you make here isn't clobbered by a stale copy open in a
+leader's browser tab, and theirs isn't clobbered by yours.
 
 **✍️ and yellow means yours to fill in** — the same convention as every other
 tab. Everything without it came from a form or is worked out automatically, and
@@ -1828,10 +1828,10 @@ change out to the forms**, exactly like hand-editing a row does.
 Neither needs an authorized admin account — adding a menu row this way is the
 same capability as hand-editing the tab, just faster.
 
-### 6. Member_Roll and Program_Options — your own notes
+### 6. Member_Roll, Program_Options and Program_Leaders — your own notes
 
-These two tabs are the only ones holding knowledge the system can't work out for
-itself. Each is split down the middle:
+These three tabs are the only ones holding knowledge the system can't work out
+for itself. Each is split down the middle:
 
 - **The left columns are recomputed** every sync. Don't hand-edit them; they'll
   be overwritten.
@@ -1854,13 +1854,30 @@ the recomputed history shows them attending.
 
 | Recomputed | Yours |
 |---|---|
-| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup`, `Instructor_Email`, `Staff_Notes` |
+| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup`, `Staff_Notes` |
 
 "Needs the big room." "Usually 8 even though it's capped at 12."
 
-`Instructor_Email` is who this program's shared sign-up sheet gets handed to —
-several addresses are fine, separated by commas. See
-[Instructor sign-up sheets](#instructor-sign-up-sheets).
+Who **leads** this program used to be a column here (`Instructor_Email`). It has
+its own tab now, for the reason below.
+
+**Program_Leaders** — one row per leader per program per location:
+
+| Recomputed | Yours |
+|---|---|
+| `Sheet_Link`, `Last_Notified` | `Leader_Name`, `Email`, `Program`, `Location`, `Notify_Roster_Changes`, `Staff_Notes` |
+
+This one is further to the "yours" end than the other two: nothing here is
+recomputed from anything, because the workbook has no way of knowing who leads
+a class. It never adds a row and never removes one.
+
+A leader is a **person**, who may run three classes at two sites — which is
+exactly what a single address column on a program row could not say, and why
+this moved off Program_Options. **Your existing addresses are carried across
+automatically; nothing needs re-typing.**
+
+Full detail, including the roster-change emails it can send: see
+**[Program leaders](#program-leaders)**.
 
 ### 7. Config
 Eight small settings blocks:
@@ -2408,8 +2425,9 @@ Everything else is grouped by the job it belongs to.
 
 | Item | What it does |
 |---|---|
-| **Share a Sign-Up Sheet with an Instructor…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its instructor — see [Instructor sign-up sheets](#instructor-sign-up-sheets) |
-| **Refresh Instructor Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
+| **Share a Sign-Up Sheet with a Program Leader…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its leader — see [Program leader sign-up sheets](#program-leader-sign-up-sheets) |
+| **Refresh Program Leader Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
+| **Send Roster Change Alerts Now** | Emails every leader who asked for them whatever has moved on their rosters since the last check — see [Roster change alerts](#roster-change-alerts) |
 | **Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
 | **Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 
@@ -2602,27 +2620,44 @@ PDFs are filed in a Drive folder called **Printed Sign-In Sheets**.
 
 ---
 
-## Instructor sign-up sheets
+## Program leader sign-up sheets
 
-**👩‍🏫 Share a Sign-Up Sheet with an Instructor…** on the menu. Pick a
+**👩‍🏫 Share a Sign-Up Sheet with a Program Leader…** on the menu. Pick a
 **location**, then a **program**, and you get a **small spreadsheet in Drive**
 holding nothing but that program's roster at that location — shared with the
-instructor, and **refreshing itself every hour**.
+leader, and **refreshing itself every hour**.
 
 This is the live alternative to a printed sheet. Nobody has to reprint anything
 and nobody has to be given this workbook.
+
+> **This used to be called "instructor sign-up sheets."** Same feature, same
+> files, same links — the workbook now says *program leader* throughout,
+> because the people who run these sessions are not all instructors. Nothing
+> you already shared needs re-sharing. The one thing that moved is where the
+> addresses live: see [Program leaders](#program-leaders) below.
 
 ### Why not just share this workbook
 
 Because this workbook holds **every location's registrations**, every phone
 number, the catering order, and a dozen tabs that misbehave if you type in the
-wrong cell. An instructor needs one class list. So they get one file, containing
+wrong cell. A leader needs one class list. So they get one file, containing
 one class list, and nothing else.
 
 **The boundary is one program at one location.** Somebody teaching Chair Yoga at
 Narberth gets Narberth's roster. They do not get Ashbridge's.
 
-### What the instructor sees
+### What the leader sees
+
+**One band per class, with its roster under it.** Each session opens with a blue
+strip naming the date, the time and how it stands — `Thu, Sep 18, 2026 · 10:00 AM ·
+6 signed up · 2 waitlisted` — and the people signed up for it sit directly
+beneath. A leader with twelve dates on one sheet reads twelve short lists
+instead of one four-hundred-row block.
+
+The counts on a band are the **system's** answer, not the leader's: they come
+from `Program_Status`, so ticking the yellow columns never moves them. A count
+that is zero is left off the band entirely rather than printed as "0
+waitlisted" on every strip.
 
 | Column | |
 |---|---|
@@ -2633,15 +2668,15 @@ Narberth gets Narberth's roster. They do not get Ashbridge's.
 | **✍️ Confirmed** | tick — they told me they are coming |
 | **✍️ Waitlisted** | tick — no seat for them yet |
 | **✍️ Dropped** | tick — they told me they are not coming |
-| **✍️ Instructor_Notes** | anything else worth knowing |
+| **✍️ Leader_Notes** | anything else worth knowing |
 
-The five **yellow** columns are the instructor's. Everything else fills in by
+The five **yellow** columns are the leader's. Everything else fills in by
 itself, and typing over it gets a warning — a correction typed into `Name` does
 not move the registration, it just gets overwritten at the next refresh.
 
 **Waitlisted is not the same as `Program_Status: Waitlisted`.** They answer
 different questions. `Program_Status` is what the system worked out from
-`Max_Capacity`. The tick is what the instructor decided about somebody they have
+`Max_Capacity`. The tick is what the leader decided about somebody they have
 actually spoken to. Ticking one does not move the other — both are on the sheet
 so you can see both.
 
@@ -2649,31 +2684,35 @@ so you can see both.
 
 Every hourly registration sync reads each shared sheet's five columns back into
 **Registrant_Dash**, where they are five real columns on every registrant row.
-So the instructor's ticks show up in the workbook, and staff can see who has
+So the leader's ticks show up in the workbook, and staff can see who has
 been contacted without opening anything.
 
-**Staff and the instructor can both work on the same roster at once.** Each
+**Staff and the leader can both work on the same roster at once.** Each
 refresh remembers exactly what it sent out. On the way back:
 
-- a cell the instructor **changed** wins;
+- a cell the leader **changed** wins;
 - a cell they **never touched** leaves the workbook's own value alone.
 
 So a status you fix on Registrant_Dash is not clobbered by a stale copy sitting
 open in somebody's browser tab, and unticking a box works as an undo rather than
 being ignored as "empty".
 
-### Getting the instructor onto it
+**The session bands are invisible to all of this.** A band is a row with no
+hidden row key on it, and the read-back skips any row without one — which is
+also why the layout can change again later without the marks being at risk.
 
-Fill in **Instructor_Email** on the **Program_Options** tab — the same row that
-already holds `Room_Or_Setup` and your standing notes for that program. When you
-create the sheet, whoever is named there is added as an **editor**. Several
-addresses are fine, separated by commas.
+### Getting the leader onto it
+
+Add a row on the **Program_Leaders** tab naming them, their address, and which
+program at which location — see [Program leaders](#program-leaders) below. When
+you create the sheet, everyone named there for that program is added as an
+**editor**.
 
 Leave it blank and the sheet is still made; the dialog just hands you the link
 to share yourself.
 
 **Anyone with the link can open and edit these sheets.** That is deliberate.
-They are rosters of first names, times and ticks, handed to instructors who
+They are rosters of first names, times and ticks, handed to leaders who
 often have no account here at all — and the alternative in practice is a sheet
 nobody can open. The dialog tells you either way, and if link sharing could not
 be turned on it says so, because that is the more urgent half.
@@ -2683,7 +2722,7 @@ this fixes. A sheet is created by whoever clicked the menu item; it is then read
 and written every hour by whoever owns the triggers, which is routinely a
 *different* account. Drive shares a new file with its creator and nobody else,
 so the hourly pass was refused and the round trip silently stopped: the
-instructor's ticks never came back, and the workbook's rows never went out —
+leader's ticks never came back, and the workbook's rows never went out —
 both sides still looking like they worked.
 
 Now the admins and the trigger owner are added as editors when the sheet is
@@ -2710,9 +2749,115 @@ themselves were never at risk.
 - **Superseded rows are left off** — those are registrations a later submission
   replaced, and showing them would list the same person twice with no way to
   tell which is real.
-- The files live in a Drive folder called **Instructor Sign-Up Sheets**.
+- The files live in a Drive folder called **Program Leader Sign-Up Sheets**.
+  (If yours is still called *Instructor Sign-Up Sheets*, the next sync renames
+  it — the sheets inside are not moved or touched.)
 - **Deleting the file** is how you stop sharing. The next sync will note it
   couldn't be read; create it again from the menu if that was a mistake.
+
+---
+
+## Program leaders
+
+The **Program_Leaders** tab is who leads what. **One row per leader per
+program** — somebody who runs three classes has three rows, and the tab sorts
+by name so their three rows sit together.
+
+| Column | |
+|---|---|
+| ✍️ **Leader_Name** | who they are. Used to address their emails |
+| ✍️ **Email** | where their sheet and their alerts go. Several are fine, separated by commas |
+| ✍️ **Program** | the program title, exactly as it appears on Master_Program_Dashboard. The cell offers a dropdown of what the calendar has actually produced |
+| ✍️ **Location** | which site. **Both** this and Program are required — see below |
+| ✍️ **Notify_Roster_Changes** | tick to email this person when this program's roster moves — see [Roster change alerts](#roster-change-alerts) |
+| `Sheet_Link` | fills in by itself: the shared sign-up sheet for this program, once one exists |
+| `Last_Notified` | fills in by itself: when an alert last went out for this program |
+| ✍️ **Staff_Notes** | anything else |
+
+**Nothing here is guessed.** The workbook does not know who leads a class and
+never will, so the refresh never invents a row and never deletes one. It fills
+in the two grey columns and otherwise leaves the tab exactly as you typed it.
+A row naming a program that has stopped running keeps everything on it — it is
+still the record of who used to lead it.
+
+**A row needs both a Program and a Location.** A blank Program does *not* mean
+"every class at this site". That would be an easy row to type and a quiet way to
+hand somebody every roster in a building, and the whole point of a shared
+sign-up sheet is that it is one program at one location. A row missing either
+one is simply not matched to anything.
+
+### Where the addresses went
+
+This tab replaces **Program_Options' old `Instructor_Email` column**, and the
+first sync after this upgrade **carries every address across automatically**.
+Nothing is lost. The carried-over rows arrive with the address filled in, the
+name blank (the old column never held one) and a note in Staff_Notes asking you
+to add it.
+
+**Notifications are NOT turned on by the migration.** Every carried-over row
+arrives with `Notify_Roster_Changes` clear. Switching forty people onto a new
+email as a side effect of an upgrade is a mail-out nobody consented to, so
+somebody ticks each box on purpose.
+
+If a program is renamed on the calendar, its leader rows follow it onto the new
+name — the same as Program_Options and everything else keyed by program title.
+
+---
+
+## Roster change alerts
+
+Tick **Notify_Roster_Changes** on a Program_Leaders row, and that person gets an
+email when their roster actually moves.
+
+The shared sign-up sheet answers *"who is coming?"* and is always right, which
+is exactly why nobody opens it. This answers the other question — *"what changed
+since I last looked?"* — and that is the one worth an interruption.
+
+### What it says
+
+One email per leader per sync, covering **all** their programs, grouped by
+program and then by session date:
+
+```
+Chair Yoga — Narberth
+
+  Thu, Sep 18, 2026
+    + Eve Park — signed up
+    - Bob Jones — no longer on the roster
+    ~ Dee Lee — Waitlisted → Active
+    ~ Cyd Ray — party of 2 → party of 4
+
+  Your sign-up sheet: https://docs.google.com/…
+```
+
+Four kinds of change: somebody **signed up**, somebody is **gone**, somebody's
+**status moved** (on or off the waitlist, or cancelled), or somebody's **party
+size changed** — which is a change you set out chairs for.
+
+### Things to know
+
+- **A quiet sync is a quiet inbox.** No changes means no email at all. That is
+  the only thing that keeps an alert like this worth reading.
+- **The first time is silent.** A program that has never been checked before
+  records where it stands and says nothing. Otherwise switching this on would
+  mail somebody their entire roster as forty brand-new registrations.
+- **The same applies when you tick the box.** A leader who has just been switched
+  on gets their first email at the *next* change, not immediately.
+- **Sessions from today out to 60 days ahead** are watched. Forward-only, unlike
+  the sheet's own 14-day look-back: nobody can act on a cancellation for a class
+  that has already happened. **Today is included**, because a cancellation for
+  this afternoon is the single most useful thing this sends.
+- **A class rolling out of that window is not "everybody dropped out."** This is
+  the obvious way to get it wrong and it is specifically guarded against.
+- **It costs no new trigger** either — it rides the same hourly registration
+  sync, right after the shared sheets are refreshed, so a leader who follows the
+  link in the email finds the sheet already saying the same thing.
+- **A failed send is not a lost one.** If the email bounces, or the daily mail
+  quota is reached, those changes are reported again on the next sync rather
+  than silently written off. The admin digest says when this happened.
+- **One email, not three.** A leader running three programs gets one message
+  covering all of them.
+- **To stop them**, untick the box. There is nothing else to turn off.
 
 ---
 

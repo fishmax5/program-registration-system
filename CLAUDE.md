@@ -33,10 +33,10 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `00_overview.gs` | 434 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
+| `00_overview.gs` | 446 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
 | `01_logging_and_access.gs` | 209 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
-| `03_sheets_and_headers.gs` | 593 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
+| `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
@@ -51,7 +51,7 @@ Line counts are a rough guide to what you are about to load.
 | File | | What is in it |
 |---|--:|---|
 | `12_sheet_setup.gs` | 213 | `initSheet` and the `Lunch_Schedule` tab's own setup. |
-| `13_lunch_only_signup_form.gs` | 995 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. |
+| `13_lunch_only_signup_form.gs` | 998 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. |
 | `14_saved_column_widths.gs` | 462 | "This column should be this wide, always." |
 | `15_config_sheet.gs` | 923 | Drawing and validating the Config tab. |
 
@@ -59,7 +59,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `16_menu_and_triggers.gs` | 571 | `onOpen`, the menu tree, trigger installation. |
+| `16_menu_and_triggers.gs` | 574 | `onOpen`, the menu tree, trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
 | `18_edit_handlers.gs` | 1621 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, Config edits, Registrants edits, catering recount. |
 
@@ -70,7 +70,7 @@ Line counts are a rough guide to what you are about to load.
 | `19_calendar_incremental_sync.gs` | 245 | `onCalendarChange` and sync tokens. |
 | `20_calendar_sync.gs` | 341 | `syncCalendars` — the entry point and its shape. |
 | `21_description_tag_readers.gs` | 824 | What the system reads out of a calendar event's description, and the tag inspector. |
-| `22_renamed_programs.gs` | 686 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. |
+| `22_renamed_programs.gs` | 687 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. |
 | `23_reconcile_sessions.gs` | 993 | Reconciling session times, assistance settings, club tags, No-Registration effects, and the registration horizon against the calendar. |
 | `24_calendar_groups.gs` | 516 | `buildEventGroups` / `processCalendarGroup` — grouping events into the thing that gets one form. |
 | `25_bootstrap.gs` | 526 | `bootstrapCalendars` — the sliced first import, for setups too large for one execution. |
@@ -80,7 +80,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `27_registration_import.gs` | 384 | `syncRegistrations` — the entry point. |
+| `27_registration_import.gs` | 398 | `syncRegistrations` — the entry point. |
 | `28_deletion_tombstones.gs` | 433 | Why a deleted registration stays deleted. |
 | `29_form_response_processing.gs` | 561 | `processFormResponse` — one response into registrant rows, guests and meals included. |
 | `30_registry_counts.gs` | 144 | Active / waitlist / remaining-seat counts. |
@@ -98,7 +98,7 @@ Line counts are a rough guide to what you are about to load.
 | `37_regular_needs.gs` | 586 | The standing notes a desk would otherwise have to memorize. |
 | `38_quick_mark_index.gs` | 1739 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions. |
 | `39_triage_sheet.gs` | 387 | Sessions the calendar stopped mentioning. |
-| `40_memory_tabs.gs` | 489 | `Member_Roll` / `Program_Options`. |
+| `40_memory_tabs.gs` | 503 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). |
 | `41_club_rosters.gs` | 448 | `Club_Members`. |
 | `42_legacy_tab_merge.gs` | 381 | Merging tabs from older layouts. |
 
@@ -109,7 +109,7 @@ Line counts are a rough guide to what you are about to load.
 | `43_program_dashboard.gs` | 552 | `renderProgramDashboard`. |
 | `44_lunch_dashboard.gs` | 1124 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 646 | The landscape PDF to mark up by hand. |
-| `46_instructor_sheets.gs` | 1126 | A live roster shared out of the workbook to an instructor. |
+| `46_program_leader_sheets.gs` | 1305 | A live roster shared out of the workbook to a program leader, banded by session. |
 
 ### Repair and last resorts (47–51)
 
@@ -149,6 +149,20 @@ Line counts are a rough guide to what you are about to load.
 | `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
 | `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
+### Program leaders (65–66)
+
+Numbered after the door rather than beside `46_program_leader_sheets.gs`,
+because renumbering an existing file is the one edit this project cannot make
+(see above). Both files hold behavior only — their schema (`SHEET_NAMES`,
+`HEADERS.Program_Leaders`, `PROGRAM_LEADERS_STAFF_COLUMNS`) lives in `03`, so
+nothing earlier reads them at load time, and neither reads `64` at load time
+either.
+
+| File | | What is in it |
+|---|--:|---|
+| `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
+| `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
@@ -161,7 +175,11 @@ Line counts are a rough guide to what you are about to load.
   `SHEET_NAMES`, columns from `HEADERS`. A bare string that duplicates one of
   those is a bug waiting for a rename.
 - **Script Properties keys are versioned** (`..._V1`). Changing a stored
-  shape means a new key, not a silent reinterpretation of the old one.
+  shape means a new key, not a silent reinterpretation of the old one. The
+  converse is worth knowing too: a key whose stored shape has NOT changed keeps
+  its value even when the words around it are renamed —
+  `LEADER_SHEET_REGISTRY_PROP_KEY` is still spelled
+  `'INSTRUCTOR_SHEET_REGISTRY_V1'`, and the comment above it says why.
 - **Anything served to a browser is a template literal.** Values interpolated
   into a page's inline `<script>` must be escaped — a member named O'Brien, or
   a program title containing `</script>`, otherwise ends the page mid-sentence.

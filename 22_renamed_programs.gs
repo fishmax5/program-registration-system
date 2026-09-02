@@ -305,6 +305,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameTombstoneKeys(combined);
   renameClubRosterKeys(ss, renames);
   renameProgramOptionRows(ss, renames);
+  renameProgramLeaderRows(ss, renames);
 
   renames.forEach(rename => {
     const message = `"${rename.oldTitle}" was renamed to "${rename.newTitle}" on the calendar — moved ` +
