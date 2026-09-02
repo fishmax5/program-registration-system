@@ -208,6 +208,27 @@ It also:
   session on the hourly pass, or a session you pick from the menu — and
   un-invites them if they cancel.
 
+- **reports a MONTH rather than a total.** The dashboard's metrics block used to
+  read Total Programs, Total Sessions, Total Registrations, Unique Participants,
+  Avg Fill Rate — five numbers counted over every row the workbook had ever
+  held. Each was true and none could be acted on: they only ever go up, and by
+  the second year two adjacent months are indistinguishable. The fill rate was
+  the worst of them, averaging sessions that had already finished at whatever
+  they finished at against sessions six months out that nobody had been told
+  about yet — a settled 95% and an unopened 0% averaging to a figure describing
+  no session that exists, while the question it looked like it was answering
+  ("what should I be promoting this week?") was the one it could not. It is now
+  two period-bounded tables: **the next 7 and 30 days** — sessions, sign-ups,
+  how full the capped ones are, how many chairs are left to sell and how many
+  people are being turned away — and **this month against last, like for like**,
+  September 1–16 against August 1–16 rather than against the whole of August, so
+  a change is not negative for three weeks out of four merely because the month
+  is young. Underneath it: how many PEOPLE those sign-ups were, how many had
+  never been here before, how many were here last month too, and what share of
+  those who registered actually turned up. A fill rate is blank rather than 0%
+  where nothing has a cap, an attendance figure is blank rather than 0% where
+  nobody ticked, and one person spelled three ways is one participant.
+
 - **reviews itself, program by program** — every rule here is enforced on
   the way IN, when a sync runs or a box is ticked, and none of them on the way
   out; so after a season of editing nothing says which of forty programs are
@@ -248,40 +269,56 @@ mixed in with an unrelated static site — full development history preserved.
 ## Install
 
 The script lives in this repo as the numbered `.gs` files at the root —
-`00_overview.gs` through `64_walk_in_day_store.gs`. They are ONE Apps Script
-project sharing one global scope, and Apps Script evaluates them in filename
-order, which is what the number prefixes are for. See
+`00_overview.gs` through `66_program_leader_notifications.gs`. They are ONE
+Apps Script project sharing one global scope, and Apps Script evaluates them in
+filename order, which is what the number prefixes are for. See
 [`CLAUDE.md`](./CLAUDE.md) for what lives in which file.
 
+**The files go into the script project as they are.** There is no build step
+and nothing to compile: what is in this repo is what runs. Whichever of the
+three ways below you use, the one thing that matters is that **the filenames
+survive the trip** — the prefixes are the load order, and a file renamed on the
+way in is a `ReferenceError` when the workbook opens.
+
+**With a GitHub-sync browser extension.** Several extensions add a GitHub
+button to the Apps Script editor and pull a repo's files straight into the
+project. Point one at this repo and the numbered files land as numbered script
+files, which is all this project needs. Nothing else to run.
+
 **With [clasp](https://github.com/google/clasp)** (one command, and the way to
-do it more than once):
+do it from a terminal more than once):
 
 ```
 clasp clone <script id>   # or: clasp create --type sheets
 clasp push
 ```
 
-**By hand, as one file.** The Apps Script editor cannot import a folder, so
-for a one-off install it is less work to paste a single bundle:
+**By hand.** The Apps Script editor cannot import a folder, so this means
+adding a script file per source file and pasting each one in — tedious at
+sixty-odd files, but it works and needs no tooling. Create a new Google Sheet,
+open **Extensions ▸ Apps Script**, and keep every file's name exactly as it is
+here.
 
-1. Create a new Google Sheet.
-2. **Extensions ▸ Apps Script.**
-3. Run `node tools/bundle.js` here, which writes `Code.bundle.gs`.
-4. Delete the stub `Code.gs`, add a script file named `Code`, and paste the
-   bundle into it.
-5. Save and reload the spreadsheet tab.
+<details>
+<summary>Or, as a single pasted file</summary>
 
-`Code.bundle.gs` is build output — it is gitignored, and edits belong in the
-numbered files, not in it.
+`node tools/bundle.js` writes `Code.bundle.gs` — every source file
+concatenated in load order — which can be pasted into one script file called
+`Code`. This exists for a one-off install where neither of the first two
+options is available; it is not the normal path, and it costs you the file
+layout in the editor. `Code.bundle.gs` is build output: it is gitignored, and
+edits belong in the numbered files, never in it.
 
-Either way, see [`USER_GUIDE.md`](./USER_GUIDE.md) for first-run setup
+</details>
+
+Whichever way, see [`USER_GUIDE.md`](./USER_GUIDE.md) for first-run setup
 (there's a dedicated **Import Everything (First Run)** path for calendars that
 already have events on them) and day-to-day use.
 
 ## Updating an existing workbook
 
-`clasp push`, or paste a fresh `node tools/bundle.js` over the old script.
-Then reload the spreadsheet and run
+Pull the repo in again the same way you installed it — the GitHub extension's
+sync, or `clasp push`. Then reload the spreadsheet and run
 **🔧 Admin ▸ 🧱 Rebuild Layout (no calendar sync)**. It redraws every
 tab from the rows already in the workbook — no calendar read, no form write,
 no trigger changes, and nothing can be removed. See
@@ -325,6 +362,7 @@ node tests/column_widths.test.js
 node tests/regular_needs.test.js
 node tests/quick_mark_inline_index.test.js
 node tests/multiple_meals.test.js
+node tests/program_metrics.test.js
 node tests/standing_lunch.test.js
 node tests/event_time_epoch.test.js
 node tests/appointment_review.test.js

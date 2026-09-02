@@ -26,8 +26,9 @@ const COLUMN_WIDTH_PROP_KEY = 'SHEET_COLUMN_WIDTHS_V1';
 
 /**
  * How far down a tab a header row can be before this stops looking for it.
- * Master_Program_Dashboard's is around row 11 (a hero block and a metrics
- * block sit above it); nothing in this workbook is anywhere near 60.
+ * Master_Program_Dashboard's is around row 17 (a hero block and a metrics
+ * block of two small tables sit above it); nothing in this workbook is
+ * anywhere near 60.
  */
 const HEADER_ROW_SEARCH_DEPTH = 60;
 

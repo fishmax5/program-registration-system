@@ -206,6 +206,17 @@ passes.
 
 ## Deploying
 
-`clasp push`, or `node tools/bundle.js` and paste the single `Code.bundle.gs`
-into one script file. `Code.bundle.gs` is build output and gitignored — never
-edit it, and never treat it as the source.
+**There is no build step. The numbered `.gs` files ARE the deliverable**, and
+they go into the Apps Script project unchanged — via a GitHub-sync browser
+extension in the editor, or `clasp push`.
+
+The only invariant that matters on the way in is that **filenames survive
+intact**, because the prefixes are the load order (see the top of this file).
+Do not rename a file to fit a deployment, and do not merge files to reduce
+their number.
+
+`tools/bundle.js` still exists and still works — it writes a single
+`Code.bundle.gs` for a one-off paste-install where neither of the above is
+available. It is not part of the normal loop: **do not run it as a build step,
+and do not treat its output as the source.** `Code.bundle.gs` is gitignored;
+edits belong in the numbered files.

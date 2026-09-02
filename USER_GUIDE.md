@@ -848,8 +848,91 @@ list, use **⚡ Quick Mark**.
 Your at-a-glance view. Three sections stacked top to bottom:
 
 - **📍 Today at Each Location** — what's running today and how many are signed up
-- **📈 Program Participation Metrics** — totals and average fill rate
+- **📈 Program Metrics** — what's coming, and how this month compares to last
 - **🔜 Upcoming Sessions / 🕓 Past Sessions** — every session, with links
+
+#### 📈 Program Metrics
+
+**Nothing in this block is a running total.** It used to be — Total Programs,
+Total Sessions, Total Registrations, Unique Participants, Avg Fill Rate, all
+counted over every row the workbook had ever held. Every one of those numbers
+was true and none of them could be acted on: they only ever went up, and by the
+second year two adjacent months looked identical. The fill rate was the worst
+of them, averaging past sessions that had already finished at whatever they
+finished at against sessions six months out that nobody had been told about
+yet — so a program filling nicely next week and a January date at zero averaged
+to a number describing no session that existed.
+
+It is now **two small tables**, and every number in both is bounded by a
+period. **Hover any column heading** for what it counts.
+
+**The top table — what's coming.** One row for the next 7 days, one for the
+next 30, each saying the date it runs to:
+
+| Column | What it is |
+|---|---|
+| **Sessions** | Every program session in the window, drop-ins included |
+| **Registered** | Active registrations across them (waitlisted people are the last column) |
+| **Seats Filled** | Seats taken ÷ seats offered, **across capped sessions only** |
+| **Empty Seats** | Unsold seats — the number a phone call can still change |
+| **Waitlisted** | People being turned away |
+
+**Seats Filled and Empty Seats are blank when nothing in the window has a
+cap.** Most programs here are uncapped, and "0% full" would be a lie about a
+week of open-door sessions. Seats Filled can read over 100% where a session
+took more than its cap; that session's Empty Seats is 0, and its overflow
+doesn't cancel out an empty room somewhere else.
+
+**The bottom table — how the month is going.** Three rows: this month, last
+month, and the change between them.
+
+**The comparison is like for like.** On the 16th, it is **September 1–16
+against August 1–16** — *not* against the whole of August. Comparing a
+fortnight against a full month would make every change read negative for the
+first three weeks of every month. Each row says the span it covers, so you can
+check it rather than take it on trust. A 31st compared against February clamps
+to the 28th, and the label says so.
+
+| Column | What it is |
+|---|---|
+| **Sessions** | Every program session dated in the span, drop-ins included |
+| **Registered** | Active registrations on them — **sign-ups**, so somebody at four sessions counts four times |
+| **Participants** | **People** behind those registrations — somebody at four sessions counts once |
+| **New People** | Participants with no earlier registration anywhere in this workbook |
+| **Returning** | Share of this span's participants who were also here **last month** |
+| **Avg / Session** | Registrations ÷ the sessions that take registration |
+| **Attendance** | Share of registrations ticked Attended, on sessions that have **already happened** |
+
+Four things worth knowing about that table:
+
+- **New People and Returning are not opposites.** New means never seen before.
+  Returning means here last month specifically. Somebody last seen in June is
+  neither — they came back after a gap, which is a third thing and is left
+  unnamed rather than folded into one of the two.
+- **`[No Registration]` drop-ins count as sessions but not as divisors.** A
+  drop-in coffee hour is a session you genuinely ran, so it's in Sessions — but
+  its zero registrations are structural, and counting it in Avg / Session would
+  make a healthy month of drop-ins read as a collapse in demand.
+- **Attendance goes blank when nothing in the span was ticked.** A month in
+  which not one person was marked present is overwhelmingly a desk that didn't
+  tick, not a center nobody walked into — and "0%" is a far more confident
+  claim than that.
+- **People are matched by name the way the rest of the workbook matches them**,
+  so "Jane Smith", "jane smith" and "Jane&nbsp;&nbsp;Smith" are one
+  participant. The old all-time count treated them as three.
+
+The **Change** row uses arrows rather than colour — ▲ / ▼ / — — because this
+workbook's material gets printed in black and white, and because a colour has
+to decide that up is *good*, which isn't true of every column here. A month
+with more sessions in it is not self-evidently a better month. Percentages move
+in **points**: 58% to 61% is ▲ 3 pts.
+
+**Sessions later this month aren't in the month table.** They're the pipeline,
+which is what the top table is for — the bottom one is the record of what has
+happened.
+
+**Lunch is not here.** A meal is not a program, and the lunch numbers live on
+[Master_Lunch_Dashboard](#2-master_lunch_dashboard).
 
 The **Status** column is computed for you:
 

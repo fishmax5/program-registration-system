@@ -22,6 +22,8 @@ function fmt(date, tz, pattern) {
   if (pattern === 'yyyy-MM-dd') return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
   if (pattern === 'MMMM yyyy') return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
   if (pattern === 'EEE, MMM d') return `${MONTHS[date.getMonth()].slice(0, 3)} ${date.getDate()}`;
+  if (pattern === 'MMM d') return `${MONTHS[date.getMonth()].slice(0, 3)} ${date.getDate()}`;
+  if (pattern === 'd') return String(date.getDate());
   return date.toISOString();
 }
 
@@ -270,11 +272,16 @@ check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
 // their contents, a workbook that ever ran the old code has to be told to show
 // them again explicitly, on every render.
 const progMap = vm.runInContext('getIndexMap(HEADERS.Master_Program_Dashboard)', sandbox);
-const sessionRow = (eventId, title) => {
+// Dated inside the metrics block's near-term window, since every number it
+// reports is now bounded by a period — an undated row would sit outside all of
+// them and make the check below pass for the wrong reason.
+const sessionRow = (eventId, title, date) => {
   const row = new Array(vm.runInContext('HEADERS.Master_Program_Dashboard.length', sandbox)).fill('');
   row[progMap['Event_ID']] = eventId;
   row[progMap['Clean_Title']] = title;
   row[progMap['Location']] = 'Narberth';
+  row[progMap['Event_Date']] = date || new Date(2026, 7, 22);
+  row[progMap['Max_Capacity']] = '--';
   return row;
 };
 const lunchId = k => sandbox.makeLunchOnlyEventId(k, 'Narberth');
@@ -305,12 +312,24 @@ check('and consecutive ones go in one call, not one each', shownBands, ['10+2', 
 // counting thirty lunches is a number nobody can use, and the Today block
 // names what is RUNNING at a location — the meal has its own count on the
 // lunch dashboard.
-const scan = { countsByEventId: {}, activeNamesByEventId: {} };
+const scan = { countsByEventId: {}, activePeopleByEventId: {}, monthsByPerson: {}, earliestMonthByPerson: {} };
 const programOnly = upcomingRows.filter(r => !sandbox.isLunchOnlyEventId(r[progMap['Event_ID']]));
+const metricsOf = rows => sandbox.computeProgramMetrics(rows, progMap, scan, NOW);
 check('a lunch date is not a program session',
-  sandbox.computeProgramMetrics(programOnly, progMap, scan).totalSessions, 1);
-check('and never gets listed as what is on today',
-  sandbox.computeProgramMetrics(programOnly, progMap, scan).totalPrograms, 1);
+  metricsOf(programOnly).windows[0].sessions, 1);
+// And the filter is doing real work rather than the dates missing the window:
+// unfiltered, all four of those rows fall inside it.
+check('all four rows are in the window; three are meals',
+  metricsOf(upcomingRows).windows[0].sessions, 4);
+
+// The same has to hold of the month block, which looks BACKWARD from today —
+// so these are dated earlier in the month rather than into next week.
+const alreadyHappened = upcomingRows.map((r, i) =>
+  sessionRow(r[progMap['Event_ID']], r[progMap['Clean_Title']], new Date(2026, 7, 10 + i)));
+check('a lunch date is not one of the month\u2019s sessions either',
+  metricsOf(alreadyHappened.filter(r => !sandbox.isLunchOnlyEventId(r[progMap['Event_ID']]))).months.current.sessions, 1);
+check('...and all four of those are inside the span',
+  metricsOf(alreadyHappened).months.current.sessions, 4);
 
 // --- a lunch row says WHICH lunch ------------------------------------------
 // "🥡 Lunch Only (no program)" named the row by what it isn't, which is only

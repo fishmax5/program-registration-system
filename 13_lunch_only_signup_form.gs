@@ -744,6 +744,13 @@ const TYPO = {
   COLUMN_HEADER: { size: 11, weight: 'bold', color: PALETTE.PAPER, background: PALETTE.HEADER_BG },
   HERO_VALUE:    { size: 16, weight: 'bold', color: PALETTE.INK_STRONG },
   HERO_LABEL:    { size: 11, weight: 'bold', color: PALETTE.HEADER_BG },
+  // One step below HERO_VALUE, and the step exists because the two numbers are
+  // read from different distances. The Today block is read standing up, on the
+  // way past, and earns 16pt. The metrics block underneath it is read sitting
+  // down, a dozen numbers at a time, when somebody is asking how the month is
+  // going — at 16pt that many figures shout, and the block stops being a
+  // table and becomes a wall.
+  METRIC_VALUE:  { size: 12, weight: 'bold', color: PALETTE.INK_STRONG },
   // 10, not 9. Notes and "no rows yet" lines are read by people at a sign-in
   // desk, often standing; 9px grey-on-white is where legibility gave out.
   MUTED:         { size: 10, weight: 'normal', color: PALETTE.INK_MUTED }
