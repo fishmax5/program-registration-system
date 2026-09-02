@@ -293,6 +293,16 @@ function syncRegistrationsInternal() {
     log(`⚠️ Could not send calendar invitations this run (${err}) — the registrations themselves are fine.`);
   }
 
+  // The other half of the same question, and after the invitations because an
+  // appointment's confirmation should not reach somebody before the calendar
+  // entry it is about. Per-program, ledgered, and a no-op for every program
+  // still on the default — see section 9e.
+  try {
+    sendRegistrantReminders(sessionRows, reusableRows);
+  } catch (err) {
+    log(`⚠️ Could not send registrant reminders this run (${err}) — the registrations themselves are fine.`);
+  }
+
   flushPersistentRegistries();
   // NOT ADVANCED WHEN THE ROWS DID NOT LAND: the next run re-reads the same
   // responses and writes them again, which is the whole point of a sync clock.

@@ -411,10 +411,18 @@ const HEADERS = {
    * a leader who moves sites three cells to find. Program_Leaders holds it
    * now, one row per leader-and-program, and migrateProgramLeaderAddresses()
    * carries the old column's values across before this layout drops it.
+   *
+   * Notify_Mode and Reminder_Days are the staff's answer to "how often does
+   * this program write to the people signed up for it?" — a dropdown and a
+   * list of day counts, both read by section 9e. Left blank, a program is
+   * notified the way its KIND normally is, which for everything except
+   * Personalized Assistance is exactly what this workbook did before the two
+   * columns existed.
    */
   Program_Options: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'
+    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
+    'Notify_Mode', 'Reminder_Days', 'Staff_Notes'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
@@ -533,7 +541,7 @@ const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Staff_Notes'];
+  'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

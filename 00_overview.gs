@@ -197,6 +197,19 @@
  *      trigger. Replaces Program_Options' old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
  *      a sync runs (migrateProgramLeaderAddresses()).
+ *    - REGISTRANT NOTIFICATIONS (Program_Options' Notify_Mode and
+ *      Reminder_Days, section 9e): how often each PROGRAM writes to the
+ *      people signed up for it. Two channels under one dropdown — the
+ *      calendar invite that puts them on the real event's guest list, and a
+ *      reminder email this workbook sends N days before, comma-separated,
+ *      0 meaning the morning of. Left blank a program keeps its kind's usual
+ *      behavior: everything ordinary is invited and nothing more, exactly as
+ *      before these columns existed, while a Personalized Assistance program
+ *      also emails the person their OWN appointment time — when they book,
+ *      and again the day before. That time can only be said in mail: a
+ *      calendar event has one description shared by every guest. Every send
+ *      is ledgered per person per offset, so an hourly sync never repeats
+ *      one. Config's "Calendar Invitations" switch still wins over any row.
  *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:

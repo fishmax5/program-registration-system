@@ -170,7 +170,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
       .addSeparator()
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
-      .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog'))
+      .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')
+      // Beside the invitations because they are the two channels one
+      // Notify_Mode cell governs, and this is the one that can say "your
+      // appointment is at 2:15". See section 9e.
+      .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
       // else here is worth pressing. Everything below acts on one program;

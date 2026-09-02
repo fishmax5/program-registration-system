@@ -24,7 +24,9 @@
 //   update worth notifying about.
 //
 // Governed by Config's "📧 Calendar Invitations" switch (see
-// CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op.
+// CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op. Under
+// that switch, each PROGRAM says whether it wants invitations at all, in
+// Program_Options' Notify_Mode column — see section 9e.
 // ============================================================================
 
 /** Who we have already put on which event's guest list: { Event_ID: [email...] }. */
@@ -117,11 +119,17 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     if (!eventId || !date || !calendarId) return;
     if (formatDateKey(date) < todayKey) return; // upcoming only
     if (onlyEventIds && !onlyEventIds.has(eventId)) return;
-    sessionByEventId[eventId] = {
+    const session = {
       eventId, date, calendarId,
       title: String(row[regMap['Clean_Title']] || '').trim(),
-      location: String(row[regMap['Location']] || '').trim()
+      location: String(row[regMap['Location']] || '').trim(),
+      isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
+    // THE PROGRAM'S OWN SETTING, under the Config switch already checked
+    // above: a program whose Notify_Mode says reminders only, or nothing at
+    // all, keeps its guest list empty. See section 9e.
+    if (!notificationPolicyForSession(session).invite) return;
+    sessionByEventId[eventId] = session;
   });
   if (Object.keys(sessionByEventId).length === 0) return result;
 
@@ -303,11 +311,16 @@ function listInvitableSessions() {
     if (!eventId || !date || !calendarId) return;
     const dateKey = formatDateKey(date);
     if (dateKey < todayKey) return;
-    sessions[eventId] = {
+    const session = {
       eventId, date, dateKey,
       title: String(row[regMap['Clean_Title']] || '').trim(),
-      location: String(row[regMap['Location']] || '').trim()
+      location: String(row[regMap['Location']] || '').trim(),
+      isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
+    // Offering a session this workbook would refuse to send for would be
+    // offering a no-op — the same filter the send itself applies.
+    if (!notificationPolicyForSession(session).invite) return;
+    sessions[eventId] = session;
   });
   if (Object.keys(sessions).length === 0) return [];
 
