@@ -186,6 +186,18 @@ const strip = sandbox.stripWebAppDomainSegment;
 ok('the /a/<domain>/ segment comes off',
   strip('https://script.google.com/a/newhorizonsseniorcenter.org/macros/s/AKfy123/exec') ===
   'https://script.google.com/macros/s/AKfy123/exec');
+// THE SECOND SPELLING, and the one a Workspace deployment hands out today:
+// the domain sits INSIDE /macros/ rather than before it. It was not
+// recognised, so it survived every tidy-up untouched — the menu published a
+// domain-scoped link and a tablet outside the domain got "unable to open the
+// file at this time" from an address that looked exactly like the one in the
+// Deploy screen, because it was.
+ok('the /a/macros/<domain>/ spelling comes off too',
+  strip('https://script.google.com/a/macros/newhorizonsseniorcenter.org/s/AKfy123/exec') ===
+  'https://script.google.com/macros/s/AKfy123/exec');
+ok('and it is normalized when pasted, not stored as it was typed',
+  norm('https://script.google.com/a/macros/newhorizonsseniorcenter.org/s/AKfy123/exec').url ===
+  'https://script.google.com/macros/s/AKfy123/exec');
 ok('a plain address is untouched',
   strip('https://script.google.com/macros/s/AKfy123/exec') ===
   'https://script.google.com/macros/s/AKfy123/exec');
@@ -213,9 +225,16 @@ ok('a pasted /a/<domain>/ address is saved in the form that opens for everyone',
 // The two spellings are the same DEPLOYMENT, so pasting one is not a conflict
 // with the other — but two different ids are, and the dialog says so.
 const D = sandbox.webAppDeploymentId;
-ok('the deployment id reads through either spelling',
+ok('the deployment id reads through every spelling',
   D('https://script.google.com/a/x.org/macros/s/AKfy123/exec') === 'AKfy123' &&
+  D('https://script.google.com/a/macros/x.org/s/AKfy123/exec') === 'AKfy123' &&
   D('https://script.google.com/macros/s/AKfy123/exec') === 'AKfy123');
+// Reading it out of only one spelling is how the dialog came to announce two
+// deployments where there is one: the unread spelling compared as "no
+// deployment at all".
+ok('so two spellings of one deployment agree',
+  D('https://script.google.com/a/macros/x.org/s/AKfy123/exec') ===
+  D('https://script.google.com/macros/s/AKfy123/exec'));
 ok('and is empty for an address that names no deployment', D('https://example.com/') === '');
 
 savedWebAppUrl = null;

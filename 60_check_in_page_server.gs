@@ -83,44 +83,6 @@ const CHECK_IN_PIN_PROP_KEY = 'CHECK_IN_PIN';
  */
 const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
 
-// ============================================================================
-// TEMPORARY DEPLOYMENT CANARY — DELETE THIS BLOCK WHEN THE TEST IS DONE.
-// ============================================================================
-// Nothing here is a feature. It exists to answer ONE question that no amount
-// of reading the pages can answer from the outside: is the address on the
-// tablet actually serving THIS code, or a version the deployment is still
-// pinned to? Both pages are short-circuited to a single word, so a page that
-// still draws program cards is, by definition, old code.
-//
-// Flip to false (or delete the block and the early return in doGet()) to put
-// the real pages back.
-const CHECK_IN_CANARY = true;
-
-/** The word both pages are replaced with while the canary is on. */
-const CHECK_IN_CANARY_TEXT = 'CANARY';
-
-/**
- * The canary page: the word, and the few facts that make it worth loading.
- *
- * The mode and location are echoed back because a deployment that serves the
- * WRONG PAGE looks identical to one serving old code until you can see which
- * branch of doGet() ran. The timestamp proves the response was generated now
- * rather than pulled from a browser or proxy cache.
- */
-function buildCheckInCanaryHtml(mode, location) {
-  const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-<body style="margin:0;display:flex;align-items:center;justify-content:center;
-             min-height:100vh;font-family:Roboto,Arial,sans-serif;text-align:center">
-  <div>
-    <div style="font-size:56px;font-weight:700;letter-spacing:2px">${CHECK_IN_CANARY_TEXT}</div>
-    <div style="margin-top:14px;font-size:14px;color:#5F6368">
-      page: ${mode} &middot; location: ${location || 'all'}<br>served: ${stamp}
-    </div>
-  </div>
-</body></html>`;
-}
-
 /**
  * THE WEB APP ENTRY POINT — ONE APP, ONE LINK.
  *
@@ -150,20 +112,6 @@ function buildCheckInCanaryHtml(mode, location) {
  */
 function doGet(e) {
   const params = (e && e.parameter) || {};
-
-  // TEMPORARY: see the canary block above. Deliberately the FIRST thing doGet()
-  // does — before the location match, before the PIN check, before either page
-  // is built — so that nothing downstream (a stored index, the sign-in page's
-  // boot snapshot, a PIN gate) can be what you are actually looking at.
-  if (CHECK_IN_CANARY) {
-    return HtmlService
-      .createHtmlOutput(buildCheckInCanaryHtml(
-        checkInRosterModeRequested(params) ? 'check-in (mode=session)' : 'sign-in (door)',
-        String(params.location || params.loc || '').trim()
-      ))
-      .setTitle(CHECK_IN_CANARY_TEXT)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-  }
 
   const requested = String(params.location || params.loc || '').trim();
   const location = matchCheckInLocation(requested);
@@ -311,8 +259,17 @@ function readScriptReportedWebAppUrl() {
  * normalizeCheckInWebAppUrl()'s.
  */
 function stripWebAppDomainSegment(url) {
-  return String(url || '').replace(
-    /^(https:\/\/script\.google\.com)\/a\/[^/]+(\/macros\/s\/)/i, '$1$2');
+  return String(url || '')
+    // .../a/<domain>/macros/s/<id>/exec
+    .replace(/^(https:\/\/script\.google\.com)\/a\/[^/]+(\/macros\/s\/)/i, '$1$2')
+    // .../a/macros/<domain>/s/<id>/exec — the OTHER spelling, and the one a
+    // Workspace deployment actually hands out today. It was not recognised
+    // here, so it survived every tidy-up untouched: the menu published a
+    // domain-scoped link, a tablet outside the domain got "Sorry, unable to
+    // open the file at this time", and the address looked perfectly ordinary
+    // next to the one in the Deploy screen because it WAS the one in the
+    // Deploy screen.
+    .replace(/^(https:\/\/script\.google\.com)\/a\/macros\/[^/]+\/s\//i, '$1/macros/s/');
 }
 
 /**
@@ -322,7 +279,11 @@ function stripWebAppDomainSegment(url) {
  * and their own pinned versions; two that agree are the same one.
  */
 function webAppDeploymentId(url) {
-  const match = String(url || '').match(/\/macros\/s\/([^/?#]+)/);
+  // BOTH DOMAIN SPELLINGS, and the plain one. "/macros/s/<id>" and
+  // "/macros/<domain>/s/<id>" name the same deployment; reading the id out of
+  // only the first meant the second compared as "no deployment at all", and
+  // the dialog announced two deployments where there was one.
+  const match = String(url || '').match(/\/macros\/(?:[^/?#]+\/)?s\/([^/?#]+)/);
   return match ? match[1] : '';
 }
 
