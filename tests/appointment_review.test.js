@@ -86,7 +86,17 @@ function check(name, actual, expected) {
 }
 
 const CAL = Object.keys(sandbox.CALENDAR_MAP)[0];
-const on = (day, h, m) => new Date(2026, 8, day, h, m, 0); // September 2026
+// ALWAYS A FUTURE MONTH. buildAppointmentChoicesForContext() drops any session
+// that has already started, so a hard-coded month silently stops offering its
+// times the moment the calendar passes it — which is exactly how section 5's
+// two checks came to fail on every branch, long after they were written. The
+// month after next is far enough ahead that every day in it is still to come.
+const FIXTURE_MONTH = (() => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + 2, 1);
+})();
+const on = (day, h, m) =>
+  new Date(FIXTURE_MONTH.getFullYear(), FIXTURE_MONTH.getMonth(), day, h, m, 0);
 const label = d => sandbox.Utilities.formatDate(d, '', 'h:mm a');
 
 /** One calendar event, reduced to what the expectation builder reads off it. */
@@ -104,7 +114,8 @@ function group(title, events) {
   return { cleanTitle: title, sessions: events.map(e => ({ event: e, calendarId: CAL, locationName: 'Narberth' })) };
 }
 
-const keyFor = (title, day) => sandbox.sessionTimeKey(CAL, title, `2026-09-0${day}`);
+const keyFor = (title, day) =>
+  sandbox.sessionTimeKey(CAL, title, sandbox.Utilities.formatDate(on(day, 0, 0), '', 'yyyy-MM-dd'));
 
 // ---------------------------------------------------------------------------
 // 1. ONE EVENT PER DAY — the row simply follows it

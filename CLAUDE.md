@@ -290,10 +290,11 @@ so a test sees the same load order a correctly-ordered deployment does.
 `tests/load_order.test.js` deliberately does the opposite: it loads the project
 reversed and shuffled, because a real deployment's order is not guaranteed.
 
-**Known pre-existing failure:** `tests/appointment_review.test.js` reports 2
-failures ("duplicate rows do not duplicate the times", "and the escape hatch is
-still last"). It predates the split into multiple files; every other test
-passes.
+All tests pass. If one starts failing on a date-bearing fixture, check whether
+the fixture's month has simply gone past: `buildAppointmentChoicesForContext()`
+and friends drop sessions that have already started, so a hard-coded month
+expires. `tests/appointment_review.test.js` builds its month relative to today
+for that reason.
 
 ## Deploying
 
