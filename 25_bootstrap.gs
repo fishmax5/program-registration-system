@@ -491,8 +491,43 @@ function buildRegistrationLinkLine(group, formInfo) {
     ? `📝 Register for ${group.cleanTitle}`
     : `📝 Register for ${group.cleanTitle} — ${group.monthLabel}`;
   const href = `${formInfo.publishedUrl}#${REGISTRATION_LINK_FRAGMENT_KEY}=${formInfo.formId}`;
-  return `<a href="${href}">${label}</a>`;
+  return `<a href="${href}">${label}</a>${buildCancelLinkLine(formInfo.formId)}`;
 }
+
+/**
+ * THE OTHER HALF OF THE SENTENCE: "…and if you cannot come, tell us here."
+ *
+ * Rides on the SAME line as the register link, in the same description, for
+ * one reason — this is the only text this project puts in front of a member
+ * that they are guaranteed to still have when they need it. The registration
+ * form is a thing you visit once; the calendar invitation sits in their diary
+ * next to the appointment itself, which is exactly where somebody is looking
+ * on the morning they realise they cannot make it. See section 67 for why the
+ * link is scoped to the FORM rather than to the person.
+ *
+ * RETURNS EMPTY WHEN THE SCRIPT HAS NEVER BEEN DEPLOYED. checkInPageUrl()
+ * gives '' in that case, and a description carrying "Cancel here" over a dead
+ * href is worse than one that says nothing: the person clicks, gets an error,
+ * and assumes their cancellation went through.
+ *
+ * Written as a `&nbsp;·&nbsp;` separator rather than a second line because
+ * Google Calendar collapses and re-encodes description whitespace on every
+ * edit (see the stamp notes in 26), and a separator that survives that is one
+ * that never depended on a line break.
+ */
+function buildCancelLinkLine(formId) {
+  if (!formId) return '';
+  const base = checkInPageUrl({ mode: 'cancel' });
+  if (!base) return '';
+  const href = `${base}&form=${encodeURIComponent(formId)}`;
+  return `&nbsp;·&nbsp;<a href="${href}">${CANCEL_LINK_LABEL}</a>`;
+}
+
+/**
+ * The words on the cancel link, in one place because 26 has to be able to
+ * RECOGNISE them to strip the link back out again.
+ */
+const CANCEL_LINK_LABEL = '🚫 Cannot make it? Cancel here';
 
 /** Matches our anchor, capturing (1) the URL without fragment and (2) the form ID. */
 const REGISTRATION_ANCHOR_REGEX =

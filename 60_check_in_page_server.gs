@@ -106,6 +106,24 @@ function doGet(e) {
   // volunteer should not have to choose a page before they can use one.
   // A deployment cannot be re-published per page, so the mode rides in the
   // query string alongside the location pin.
+  // THE CANCEL PAGE COMES FIRST, because it is the only one of the three that
+  // is opened by a MEMBER rather than by staff — from the link inside the
+  // calendar invitation they were sent (see buildRegistrationLinkLine). It
+  // carries its own ?form= and needs no location pin and no PIN: a person
+  // cancelling their own booking is not standing at the door, and a page that
+  // asks a ninety-year-old for a four-digit staff code is a page that gets a
+  // phone call instead. It identifies them from their own contact details
+  // instead — see the section note in 67.
+  const cancelForm = String(params.form || '').trim();
+  if (/^cancel$/i.test(String(params.mode || '').trim()) && cancelForm) {
+    return HtmlService.createHtmlOutput(buildCancelPageHtml({
+      formId: cancelForm,
+      programLabel: cancelPageProgramLabel(cancelForm)
+    }))
+      .setTitle('Cancel Your Place')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+
   const html = checkInRosterModeRequested(params)
     // Only ever a STORED index, never a build — the same rule the dialog
     // follows (readyQuickMarkIndex()), and for a stronger reason here: a web
@@ -817,7 +835,12 @@ function readCheckInRoster(location, sessionValue) {
       wantsLunch: map['Lunch_Status'] !== undefined &&
         String(row[map['Lunch_Status']] || '').trim().toLowerCase() === 'needed',
       dateLabel: date ? formatDateLabel(date) : '',
-      dateKey
+      dateKey,
+      // THE ROW'S OWN IDENTITY, carried so the page can cancel it. Every other
+      // action here is addressed by location + session + name, which is enough
+      // to FIND a row; a cancellation gives a seat back and is worth
+      // addressing by the thing that cannot be two rows at once.
+      eventId: map['Event_ID'] === undefined ? '' : String(row[map['Event_ID']] || '').trim()
     });
   });
 

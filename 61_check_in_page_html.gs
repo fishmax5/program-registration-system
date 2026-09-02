@@ -62,7 +62,14 @@ function buildCheckInHtml(preloadedIndex, options) {
   button.lunch { width: 76px; border: 0; border-left: 1px solid #E8EAED; background: #fff;
                  font-size: 12px; color: #5F6368; cursor: pointer; }
   button.lunch.on { background: #FEF7E0; color: #B06000; font-weight: 700; }
-  button.who[disabled], button.lunch[disabled] { opacity: .45; }
+  /* THE CANCEL BUTTON IS NARROW AND GREY ON PURPOSE. It sits beside two
+     buttons a volunteer presses forty times a morning, and it is the one that
+     gives a seat away — it must be reachable without being in the path of a
+     thumb going for "Lunch". It turns red only once it is being pressed. */
+  button.cancel { width: 40px; border: 0; border-left: 1px solid #E8EAED; background: #fff;
+                  font-size: 17px; color: #9AA0A6; cursor: pointer; }
+  button.cancel:active { background: #FCE8E6; color: #C5221F; }
+  button.who[disabled], button.lunch[disabled], button.cancel[disabled] { opacity: .45; }
 
   p.empty { color: #5F6368; text-align: center; padding: 32px 12px; line-height: 1.5; }
   /* The status line sits at the BOTTOM of the screen, pinned. A volunteer's
@@ -421,6 +428,21 @@ function buildCheckInHtml(preloadedIndex, options) {
         li.appendChild(meal);
       }
 
+      // "SHE RANG TO SAY SHE CAN'T COME" — the third thing that happens at a
+      // door, and the one this page had no way to record. Only on rows that
+      // are not already checked in: somebody standing in the room has not
+      // cancelled, and a cancel button beside a ticked name is a button that
+      // can only be pressed by mistake.
+      if (!r.attended && r.eventId) {
+        var off = document.createElement('button');
+        off.className = 'cancel';
+        off.disabled = busy;
+        off.title = 'Cancel ' + r.name + "'s place";
+        off.textContent = '\u2715';
+        off.onclick = function () { tapCancel(r); };
+        li.appendChild(off);
+      }
+
       var wrap = document.createElement('div');
       wrap.appendChild(li);
 
@@ -491,6 +513,43 @@ function buildCheckInHtml(preloadedIndex, options) {
     var value = document.getElementById('session').value;
     var found = (INDEX.sessions || []).filter(function (s) { return s.value === value; })[0];
     return !!(found && found.dateKey);
+  }
+
+  /**
+   * ASKS, THEN ASKS AGAIN FOR A REASON. The confirm is because this gives a
+   * seat away and cannot be undone from this page; the reason box is optional
+   * and empty is a perfectly good answer, which is why it is a prompt the
+   * volunteer can dismiss rather than a field they must fill.
+   *
+   * Removes the row from the list on success rather than redrawing it greyed
+   * out: the desk's list is "who is still to come", and somebody who cancelled
+   * is not still to come.
+   */
+  function tapCancel(r) {
+    var party = (r.guests || []).length
+      ? ' (and their ' + ((r.guests || []).length === 1 ? 'guest' : 'guests') + ')'
+      : '';
+    if (!window.confirm('Cancel ' + r.name + party + " for this session?\\n\\n" +
+      'Their seat goes back to the waiting list. This cannot be undone here.')) return;
+    var reason = window.prompt('Anything to note? (optional — leave blank and press OK)', '');
+    if (reason === null) return;
+
+    setBusy(true);
+    draw();
+    call('checkInCancel', {
+      location: document.getElementById('location').value,
+      session: document.getElementById('session').value,
+      name: r.name,
+      eventId: r.eventId,
+      reason: reason
+    }, function (res) {
+      setBusy(false);
+      if (!res || !res.ok) { draw(); return handle(res); }
+      var at = ROWS.indexOf(r);
+      if (at !== -1) ROWS.splice(at, 1);
+      say(res.message || 'Cancelled.', 'ok');
+      draw();
+    });
   }
 
   function tapName(r) {

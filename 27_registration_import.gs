@@ -219,6 +219,12 @@ function syncRegistrationsInternal() {
   // be able to stop the registration import.
   try {
     pullProgramLeaderSheetEdits(existingRows);
+    // IMMEDIATELY AFTER THE MERGE, on the rows it just touched: a leader's
+    // "Dropped" tick is a cancellation, and until it became one it was a
+    // column nothing read while the seat stayed full. See
+    // applyLeaderDropsAsCancellations() for why it stamps these rows rather
+    // than going through cancelRegistrantRows() — the tab is written below.
+    applyLeaderDropsAsCancellations(existingRows);
   } catch (err) {
     log(`⚠️ Could not read program leader sheets back in this run (${err}) — the registrations themselves are fine.`);
   }

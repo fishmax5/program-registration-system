@@ -352,6 +352,24 @@
  *      inserts the new row as the live truth. 'Superseded' rows are
  *      excluded from every active/waitlist count automatically, the same
  *      way 'Cancelled' already was.
+ *    - CANCELLATION HAS THREE DOORS AND ONE WRITER (section 67). Setting
+ *      Program_Status = 'Cancelled' has always been how a seat comes back,
+ *      and for a long time the only way to say it was to type it into the
+ *      dropdown on the Registrants tab — which meant the people who actually
+ *      LEARN that somebody is not coming had no way to record it. Now:
+ *        * the check-in page has a cancel button beside each unticked name;
+ *        * a program leader's "Dropped" tick on their shared sheet becomes a
+ *          cancellation on the next sync (applyLeaderDropsAsCancellations(),
+ *          run inside syncRegistrations() right after the leader merge);
+ *        * the member cancels their own place from the link this system now
+ *          writes into the calendar event description beside the register
+ *          link — ?mode=cancel&form=<formId> on the web app, identified by
+ *          their name plus the phone or email already on their row.
+ *      All three end at cancelRegistrantRows(), which writes FOUR cells:
+ *      Program_Status, Lunch_Status, Manual_Override (without which the next
+ *      hourly import re-derives the row from its form response and reverses
+ *      the cancellation), and an Admin_Notes stamp naming the door, the date
+ *      and any reason given. A member's guests are cancelled with them.
  *    - CAPACITY IS VISIBLE ON THE FORM: whenever a capped session hits 0
  *      Remaining_Seats, its date label on both roster grids gets a
  *      CAPACITY_HINT_SUFFIX ("(FULL - Waitlist)") appended — see
