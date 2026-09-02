@@ -33,7 +33,7 @@
  * having to grow a debug mode. The patterns are the same constants, so the two
  * cannot disagree about what matches — only about what to say about it.
  */
-const DESCRIPTION_TAG_READERS = [
+defineLazyGlobal_('DESCRIPTION_TAG_READERS', () => ([
   {
     key: 'capacity', label: 'Cap: N', pattern: /Cap:\s*(\d+)/i, numeric: true,
     describe: v => `Max_Capacity is ${v}. Above that, registrations go on the waitlist.`
@@ -73,7 +73,7 @@ const DESCRIPTION_TAG_READERS = [
     describe: () => 'One form per calendar month — the default, stated explicitly (which is how it ' +
       'overrides a [Grouped] left behind in the event TITLE).'
   }
-];
+]));
 
 /**
  * READS a description exactly as the sync does, and says what it saw.

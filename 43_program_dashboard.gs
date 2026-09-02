@@ -64,6 +64,12 @@ function renderProgramDashboard(force, options) {
   const todayData = buildTodayAtLocations(programSessionRows, map, registrantScan);
   const metrics = computeProgramMetrics(programSessionRows, map, registrantScan);
 
+  // The links to this session's own files, recomputed from the registries on
+  // every render (see 69_generated_file_links.gs): whatever is in these two
+  // cells now is last render's answer, and a file may have been built or
+  // deleted since.
+  stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
+
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
   return { registrantsMoved: triageResult.registrantsMoved };
 }
@@ -948,7 +954,8 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // not the color. Everything else keeps its warning protection.
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
-      'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source'],
+      'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
+      'Leader_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);

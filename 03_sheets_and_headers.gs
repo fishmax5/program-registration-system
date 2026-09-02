@@ -3,7 +3,7 @@
  * Master_Lunch_Dashboard) for the whole row band — see
  * buildLocationColorRules() / buildLocationRowTintRules().
  */
-const LOCATION_COLOR_MAP = {
+defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
   // THE TINT LAYER (see PALETTE): the same three hues these have always been,
   // so nobody has to relearn which building is which — but paled off, because
   // at their old strength they were indistinguishable from the status colors
@@ -11,7 +11,7 @@ const LOCATION_COLOR_MAP = {
   'Narberth': PALETTE.LOC_PEACH,
   'Ashbridge': PALETTE.LOC_GREEN,
   'Zoom': PALETTE.LOC_LILAC
-};
+}));
 
 const SHEET_NAMES = {
   CONFIG: 'Config',
@@ -65,7 +65,7 @@ const LEGACY_SHEET_RENAMES = {
  * Manual_Override column at all; the other date-bearing tabs keep it as
  * the second column.
  */
-const HEADERS = {
+defineLazyGlobal_('HEADERS', () => ({
   // The per-session table inside Master_Program_Dashboard (section C).
   //
   // Active_Count sits directly beside Status — "how many signed up" and "is it
@@ -111,10 +111,18 @@ const HEADERS = {
   // with the hidden machine columns because it is an input to the slot
   // arithmetic rather than something staff read: it is how the form layer
   // rebuilds a session's appointment times without going back to the calendar.
+  // Leader_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
+  // because they are the same kind of thing: somewhere else to click through
+  // to. They point at the two files this system produces OUTSIDE the workbook
+  // — the spreadsheet a program leader marks up, and the printed sign-in PDF
+  // for that day and building. Both are DERIVED: every render recomputes them
+  // from the registries and overwrites whatever is in the cell, so a link can
+  // never outlive the file it points at. See 69_generated_file_links.gs.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
     'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
+    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
     'Max_Per_Month'
@@ -213,6 +221,10 @@ const HEADERS = {
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
+  // Leader_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
+  // session table carries, repeated here so the day's roster is one click
+  // from the sheet the leader is marking and the PDF the desk printed — see
+  // 69_generated_file_links.gs.
   Registrant_Dash: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Meals_Ordered',
@@ -222,6 +234,7 @@ const HEADERS = {
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
+    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
   // Registered_Count (what the forms say) and Served_Confirmed (what was
@@ -269,13 +282,19 @@ const HEADERS = {
   // numbers rather than adding to the total. A row reading 40 ordered, 14
   // takeaway, 8 carried over means eight of that fourteen left the building
   // on a later day.
+  // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
+  // the printed sheet for that date x location (there is no leader sheet for a
+  // meal), derived on every render from the registry in
+  // 69_generated_file_links.gs. Its position is free to move for the same
+  // reason the buffers' is — the formulas build their A1 refs from this array.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
     'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
     'Carried_Over',
     'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
-    'Standard_Buffer', 'Tester_Buffer'
+    'Standard_Buffer', 'Tester_Buffer',
+    'Sign_In_Sheet_Link'
   ],
   /**
    * Lunch_Roster - WHO is eating, one row per PERSON per date+location.
@@ -411,10 +430,18 @@ const HEADERS = {
    * a leader who moves sites three cells to find. Program_Leaders holds it
    * now, one row per leader-and-program, and migrateProgramLeaderAddresses()
    * carries the old column's values across before this layout drops it.
+   *
+   * Notify_Mode and Reminder_Days are the staff's answer to "how often does
+   * this program write to the people signed up for it?" — a dropdown and a
+   * list of day counts, both read by section 9e. Left blank, a program is
+   * notified the way its KIND normally is, which for everything except
+   * Personalized Assistance is exactly what this workbook did before the two
+   * columns existed.
    */
   Program_Options: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'
+    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
+    'Notify_Mode', 'Reminder_Days', 'Staff_Notes'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
@@ -515,7 +542,7 @@ const HEADERS = {
     'Received', 'Program', 'Location', 'Name', 'Phone', 'Email', 'Answers',
     'Status', 'Scheduled_For', 'Staff_Notes', 'Request_ID'
   ]
-};
+}));
 
 /** Assistance_Requests columns the importer must never overwrite — the staff's own follow-up. */
 const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Notes'];
@@ -533,7 +560,7 @@ const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Staff_Notes'];
+  'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

@@ -43,7 +43,7 @@
  * `settings` is the complete state of all four controls, so applying a kind
  * never has to reason about what to leave alone.
  */
-const PROGRAM_FORM_TYPES = [
+defineLazyGlobal_('PROGRAM_FORM_TYPES', () => ([
   {
     key: 'MONTHLY',
     label: 'Monthly sign-up',
@@ -83,17 +83,19 @@ const PROGRAM_FORM_TYPES = [
     settings: { typeTag: EVENT_TYPES.REGULAR, isClub: false, noRegistration: false, isAssistance: false,
       noRegistrationOverride: true }
   }
-];
-
-// DROP_IN's settings are spelled out above with the override flag rather than
-// noRegistration: true, purely so the object reads as "everything else off, and
-// registration off" — normalizeProgramFormTypeSettings() folds the two.
-PROGRAM_FORM_TYPES.forEach(type => {
+].map(type => {
+  // DROP_IN's settings are spelled out above with the override flag rather than
+  // noRegistration: true, purely so the object reads as "everything else off,
+  // and registration off" — normalizeProgramFormTypeSettings() folds the two.
+  // Folded here inside the factory rather than by a top-level .forEach on the
+  // finished list, because a statement outside the factory would read
+  // PROGRAM_FORM_TYPES at load time and put the load-order hazard straight back.
   if (type.settings.noRegistrationOverride) {
     type.settings.noRegistration = true;
     delete type.settings.noRegistrationOverride;
   }
-});
+  return type;
+})));
 
 /** The kind with this key, or null. */
 function getProgramFormType(key) {

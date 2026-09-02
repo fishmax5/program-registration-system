@@ -83,10 +83,48 @@ const CHECK_IN_PIN_PROP_KEY = 'CHECK_IN_PIN';
  */
 const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
 
+// ============================================================================
+// TEMPORARY DEPLOYMENT CANARY — DELETE THIS BLOCK WHEN THE TEST IS DONE.
+// ============================================================================
+// Nothing here is a feature. It exists to answer ONE question that no amount
+// of reading the pages can answer from the outside: is the address on the
+// tablet actually serving THIS code, or a version the deployment is still
+// pinned to? Both pages are short-circuited to a single word, so a page that
+// still draws program cards is, by definition, old code.
+//
+// Flip to false (or delete the block and the early return in doGet()) to put
+// the real pages back.
+const CHECK_IN_CANARY = true;
+
+/** The word both pages are replaced with while the canary is on. */
+const CHECK_IN_CANARY_TEXT = 'CANARY';
+
+/**
+ * The canary page: the word, and the few facts that make it worth loading.
+ *
+ * The mode and location are echoed back because a deployment that serves the
+ * WRONG PAGE looks identical to one serving old code until you can see which
+ * branch of doGet() ran. The timestamp proves the response was generated now
+ * rather than pulled from a browser or proxy cache.
+ */
+function buildCheckInCanaryHtml(mode, location) {
+  const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;display:flex;align-items:center;justify-content:center;
+             min-height:100vh;font-family:Roboto,Arial,sans-serif;text-align:center">
+  <div>
+    <div style="font-size:56px;font-weight:700;letter-spacing:2px">${CHECK_IN_CANARY_TEXT}</div>
+    <div style="margin-top:14px;font-size:14px;color:#5F6368">
+      page: ${mode} &middot; location: ${location || 'all'}<br>served: ${stamp}
+    </div>
+  </div>
+</body></html>`;
+}
+
 /**
  * THE WEB APP ENTRY POINT — ONE APP, ONE LINK.
  *
- * The door app (section 16e) is what this deployment serves. It asks, once per
+ * The door app (section 16f) is what this deployment serves. It asks, once per
  * tablet, which building and which day it is standing at, remembers the answer
  * in that tablet's own storage, and never asks again — which is the whole
  * reason it exists. There used to be three links for three screens and a
@@ -100,6 +138,10 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * previous door page, kept for one release so a bookmark that has not been
  * changed yet still opens something that works rather than nothing.
  *
+ * AND ONE PAGE IS NOT A DOOR PAGE AT ALL: ?mode=cancel&form=<id> is the link
+ * inside a member's own calendar invitation, opened by the member, gated by
+ * nothing (see section 71). It is answered before anything else here.
+ *
  * ?location=Narberth still pins the app to one building — it seeds the setup
  * screen rather than skipping it, so what is on screen is always what somebody
  * chose. Anything else in the query string is ignored rather than refused: a
@@ -108,17 +150,52 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  */
 function doGet(e) {
   const params = (e && e.parameter) || {};
+
+  // TEMPORARY: see the canary block above. Deliberately the FIRST thing doGet()
+  // does — before the location match, before the PIN check, before either page
+  // is built — so that nothing downstream (a stored index, the sign-in page's
+  // boot snapshot, a PIN gate) can be what you are actually looking at.
+  if (CHECK_IN_CANARY) {
+    return HtmlService
+      .createHtmlOutput(buildCheckInCanaryHtml(
+        checkInRosterModeRequested(params) ? 'check-in (mode=session)' : 'sign-in (door)',
+        String(params.location || params.loc || '').trim()
+      ))
+      .setTitle(CHECK_IN_CANARY_TEXT)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+
   const requested = String(params.location || params.loc || '').trim();
   const location = matchCheckInLocation(requested);
   const pinRequired = isCheckInPinSet();
   const mode = String(params.mode || params.view || '').trim().toLowerCase();
+
+  // THE CANCEL PAGE COMES FIRST, because it is the only one of these that is
+  // opened by a MEMBER rather than by staff — from the link inside the
+  // calendar invitation they were sent (see buildRegistrationLinkLine). It
+  // carries its own ?form= and needs no location pin and no PIN: a person
+  // cancelling their own booking is not standing at the door, and a page that
+  // asks a ninety-year-old for a four-digit staff code is a page that gets a
+  // phone call instead. It identifies them from their own contact details
+  // instead — see the section note in 71.
+  const cancelForm = String(params.form || '').trim();
+  if (/^cancel$/i.test(mode) && cancelForm) {
+    return HtmlService.createHtmlOutput(buildCancelPageHtml({
+      formId: cancelForm,
+      programLabel: cancelPageProgramLabel(cancelForm)
+    }))
+      .setTitle('Cancel Your Place')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
 
   let html;
   let title;
   if (checkInRosterModeRequested(params)) {
     // THE STAFF ROSTER, unchanged. Only ever a STORED index, never a build:
     // a web app has no toast to apologise with, and a volunteer looking at a
-    // spinner assumes the page is broken.
+    // spinner assumes the page is broken. ?page=register opens it on its
+    // SECOND screen — the one that puts somebody on a future session, which a
+    // program director keeps on the desk phone.
     html = buildCheckInHtml(readyCheckInSessionIndex(), {
       location, pinRequired,
       page: /^register$/i.test(String(params.page || '').trim()) ? 'register' : 'checkin'
@@ -831,7 +908,12 @@ function readCheckInRoster(location, sessionValue) {
       wantsLunch: map['Lunch_Status'] !== undefined &&
         String(row[map['Lunch_Status']] || '').trim().toLowerCase() === 'needed',
       dateLabel: date ? formatDateLabel(date) : '',
-      dateKey
+      dateKey,
+      // THE ROW'S OWN IDENTITY, carried so the page can cancel it. Every other
+      // action here is addressed by location + session + name, which is enough
+      // to FIND a row; a cancellation gives a seat back and is worth
+      // addressing by the thing that cannot be two rows at once.
+      eventId: map['Event_ID'] === undefined ? '' : String(row[map['Event_ID']] || '').trim()
     });
   });
 

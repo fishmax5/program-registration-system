@@ -1,9 +1,9 @@
 // ============================================================================
-// 16f. THE DOOR APP'S PAGE  (setup, the name list, the person, the walk-in)
+// 16g. THE DOOR APP'S PAGE  (setup, the name list, the person, the walk-in)
 // ============================================================================
 //
 // One served page with four screens and one address. What each screen is for
-// is in the section note of 67_door_app.gs; what is worth knowing HERE is why
+// is in the section note of 72_door_app.gs; what is worth knowing HERE is why
 // it is one page rather than four:
 //
 //   - A door has one tablet and one queue. Every screen change is a redraw of

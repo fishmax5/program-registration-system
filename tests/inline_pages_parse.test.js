@@ -95,7 +95,13 @@ const pages = [
   ['the door app page', () => sandbox.buildDoorAppHtml({
     location: '', pinRequired: false, locations: ['Narberth'], todayKey: '2025-09-02'
   })],
-  ['the Quick Mark dialog', () => sandbox.buildQuickMarkHtml(null)]
+  ['the Quick Mark dialog', () => sandbox.buildQuickMarkHtml(null)],
+  // The one page in this project a MEMBER sees, and the one nobody on staff
+  // would notice was blank. A program title is interpolated straight into its
+  // heading, so it is exactly the shape this file exists to catch.
+  ['the cancel page', () => sandbox.buildCancelPageHtml({
+    formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
+  })]
 ];
 
 pages.forEach(([name, build]) => {

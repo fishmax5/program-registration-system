@@ -143,8 +143,8 @@ const LEADER_SHEET_DERIVED_COLUMNS = [
  * leaves the yellow hand-entry columns as the only saturated thing on the page,
  * which is the one place a leader's eye should be pulled.
  */
-const LEADER_SHEET_BAND_BG = PALETTE.LOC_BLUE;
-const LEADER_SHEET_BAND_INK = PALETTE.INK_STRONG;
+defineLazyGlobal_('LEADER_SHEET_BAND_BG', () => PALETTE.LOC_BLUE);
+defineLazyGlobal_('LEADER_SHEET_BAND_INK', () => PALETTE.INK_STRONG);
 
 
 // --- the registry -----------------------------------------------------------
@@ -588,7 +588,15 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols,
     `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`,
     { note: `Refreshed ${stamp}.\n\nEach class has its own blue band. Tick the yellow columns; ` +
-        `everything else fills in by itself.` });
+        `everything else fills in by itself.\n\n` +
+        // SAID OUT LOUD, because it is the one tick with a consequence outside
+        // this sheet. A leader who thinks Dropped is a private note will use it
+        // to mean "chase this person"; a leader who is told what it does will
+        // use it to free a seat, which is what it now actually does. See
+        // applyLeaderDropsAsCancellations().
+        `Ticking Dropped CANCELS that person's place — their seat and their lunch go back, ` +
+        `and anything you type in Leader_Notes goes with it as the reason. Untick it before the ` +
+        `next hour is up if you did not mean to; after that, ring the office.` });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
 
@@ -814,8 +822,12 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
 
   // The people this system runs as. Named editors survive a link-sharing
   // setting later being tightened by hand, which is the point of doing both.
+  // The archive copy address joins the accounts that run this system as a
+  // named editor: the office asked to be on everything shared out of the
+  // workbook, and a named editor survives the link sharing below being
+  // tightened by hand later. Blank = nobody extra (see getArchiveCopyEmail).
   const wanted = listAuthorizedAdminEmails()
-    .concat([getTriggerOwner(), getCurrentUserEmail()])
+    .concat([getTriggerOwner(), getCurrentUserEmail(), getArchiveCopyEmail()])
     .map(e => String(e || '').trim().toLowerCase())
     .filter(e => e.indexOf('@') > 0);
   dedupePreservingOrder(wanted).forEach(email => {
@@ -1207,6 +1219,8 @@ function buildProgramLeaderSheetHtml(options) {
   the hourly registration sync — no printing, no new trigger.
   The program leader ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
   types in <b>Leader_Notes</b>; those come back into the Registrants tab on the same sync.
+  <b>Dropped is a cancellation</b> — the seat and the lunch go back on the next sync, and the
+  leader's note rides along as the reason.
 </p>
 <label for="location">Location</label>
 <select id="location" onchange="fillPrograms()">${locationTags}</select>

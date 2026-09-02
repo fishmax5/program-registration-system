@@ -62,7 +62,14 @@ function buildCheckInHtml(preloadedIndex, options) {
   button.lunch { width: 76px; border: 0; border-left: 1px solid #E8EAED; background: #fff;
                  font-size: 12px; color: #5F6368; cursor: pointer; }
   button.lunch.on { background: #FEF7E0; color: #B06000; font-weight: 700; }
-  button.who[disabled], button.lunch[disabled] { opacity: .45; }
+  /* THE CANCEL BUTTON IS NARROW AND GREY ON PURPOSE. It sits beside two
+     buttons a volunteer presses forty times a morning, and it is the one that
+     gives a seat away — it must be reachable without being in the path of a
+     thumb going for "Lunch". It turns red only once it is being pressed. */
+  button.cancel { width: 40px; border: 0; border-left: 1px solid #E8EAED; background: #fff;
+                  font-size: 17px; color: #9AA0A6; cursor: pointer; }
+  button.cancel:active { background: #FCE8E6; color: #C5221F; }
+  button.who[disabled], button.lunch[disabled], button.cancel[disabled] { opacity: .45; }
 
   p.empty { color: #5F6368; text-align: center; padding: 32px 12px; line-height: 1.5; }
   /* The status line sits at the BOTTOM of the screen, pinned. A volunteer's
@@ -118,6 +125,22 @@ function buildCheckInHtml(preloadedIndex, options) {
                 line-height: 1.35; }
   label.check input { width: 22px; height: 22px; flex: none; }
   .guest-inputs input { margin-top: 8px; }
+
+  /* SESSIONS ARE BOXES, NOT A DROPDOWN LINE. A dropdown is a target the size
+     of one line of text that then covers the screen with more of them, and
+     this page is used standing up with a thumb: the DAY is a dropdown (a
+     date is a single, ordered, obvious choice) and the sessions on that day
+     are cards the size of the name cards on the door page. */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+           gap: 8px; margin-top: 8px; }
+  button.pick { background: #fff; border: 1px solid #DADCE0; border-radius: 10px;
+                padding: 14px 12px; font-size: 17px; text-align: left; cursor: pointer;
+                color: #202124; min-height: 64px; }
+  button.pick .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px;
+                      line-height: 1.35; }
+  button.pick.on { background: #E8F0FE; border-color: #1A73E8; font-weight: 600; }
+  button.pick.on .meta { color: #1967D2; }
+  button.pick[disabled] { opacity: .5; }
 </style>
 
 <header>
@@ -139,8 +162,15 @@ function buildCheckInHtml(preloadedIndex, options) {
   <label class="field" for="location">Location</label>
   <select id="location" onchange="locationChanged()"></select>
 
-  <label class="field" for="session">Session</label>
-  <select id="session" onchange="sessionChanged()" disabled></select>
+  <label class="field" for="day">Day</label>
+  <select id="day" onchange="dayChanged()" disabled></select>
+
+  <!-- The chosen session, kept in a hidden field rather than in a variable:
+       every write on this page reads it by id (refresh(), joinStanding(),
+       mark()), and one place holding the answer is what stops a box that
+       LOOKS picked from being a different session than the one written to. -->
+  <div class="cards" id="session-boxes"></div>
+  <input type="hidden" id="session">
 
   <input type="text" id="search" placeholder="Search for a name" oninput="draw()" class="hide">
   <div id="stale" class="hide"></div>
@@ -159,8 +189,10 @@ function buildCheckInHtml(preloadedIndex, options) {
   <label class="field" for="reg-location">Location</label>
   <select id="reg-location" onchange="regLocationChanged()"></select>
 
-  <label class="field" for="reg-session">Session</label>
-  <select id="reg-session" onchange="regSessionChanged()" disabled></select>
+  <label class="field" for="reg-day">Day</label>
+  <select id="reg-day" onchange="regDayChanged()" disabled></select>
+  <div class="cards" id="reg-session-boxes"></div>
+  <input type="hidden" id="reg-session">
 
   <div id="reg-timewrap" class="hide">
     <label class="field" for="reg-time">Appointment time</label>
@@ -181,11 +213,11 @@ function buildCheckInHtml(preloadedIndex, options) {
   </fieldset>
 
   <fieldset>
-    <legend>Every time</legend>
+    <legend>Club place — every date</legend>
     <label class="check">
       <input type="checkbox" id="reg-standing" onchange="standingChanged()">
-      <span>Keep them on the list for <b>every future date</b> of this program, so they never
-        have to sign up again.</span>
+      <span>Make this a <b>club place</b>: keep them on the list for <b>every future date</b> of
+        this program, so they never have to sign up again.</span>
     </label>
     <label class="check" id="reg-standing-lunch-wrap" style="display:none">
       <input type="checkbox" id="reg-standing-lunch">
@@ -280,40 +312,184 @@ function buildCheckInHtml(preloadedIndex, options) {
     if (OPTS.location) { sel.value = OPTS.location; locationChanged(); }
   }
 
+  /**
+   * The days on the check-in screen, in the order the index gave them:
+   * [ { dateKey, label, group, sessions: [...] } ]. Rebuilt whenever the
+   * location changes, and nothing else reads the index for a session again.
+   */
+  var DAYS = [];
+
   function locationChanged() {
     var loc = document.getElementById('location').value;
-    var sel = document.getElementById('session');
     ROWS = [];
+    setSession('');
     draw();
-    sel.innerHTML = '<option value="">Choose a session</option>';
-    sel.disabled = !loc;
-    if (!loc) return;
-    var group = '';
-    var holder = sel;
-    (INDEX.sessions || []).filter(function (s) { return s.location === loc; })
-      .forEach(function (s) {
-        if (s.group && s.group !== group) {
-          group = s.group;
-          holder = document.createElement('optgroup');
-          holder.label = group;
-          sel.appendChild(holder);
-        }
-        var o = document.createElement('option');
-        o.value = s.value; o.textContent = s.label;
-        holder.appendChild(o);
-      });
-    // ONE SESSION, OR THE NEXT ONE. The list is sorted soonest-first, so the
-    // first entry is the one a door is almost always standing at — choosing it
-    // saves the volunteer a pick they were going to make anyway, and the
+    DAYS = groupSessionsByDay((INDEX.sessions || []).filter(function (s) {
+      return s.location === loc;
+    }));
+    var sel = document.getElementById('day');
+    fillDaySelect(sel, DAYS, 'group');
+    sel.disabled = !loc || !DAYS.length;
+    document.getElementById('session-boxes').innerHTML = '';
+    if (!loc || !DAYS.length) return;
+    // THE SOONEST DAY, CHOSEN FOR THEM. The list is sorted soonest-first, so
+    // the first day is the one a door is almost always standing in — picking
+    // it saves the volunteer a tap they were going to make anyway, and the
     // dropdown is right there when it is the wrong guess.
-    var first = sel.querySelector('option[value]:not([value=""])');
-    if (first) { sel.value = first.value; sessionChanged(); }
+    sel.value = DAYS[0].dateKey;
+    dayChanged();
+  }
+
+  /**
+   * One day's sessions, as BOXES. The day above them is a dropdown because a
+   * date is one ordered choice out of many; the sessions are cards because
+   * "which class" is the choice a thumb actually has to hit, and there are
+   * rarely more than a handful on any one day.
+   */
+  function dayChanged() {
+    var day = dayFor(DAYS, document.getElementById('day').value);
+    ROWS = [];
+    // One session on the day: it is the answer, so it is given rather than
+    // made into a list of one to tap through.
+    setSession(day && day.sessions.length === 1 ? day.sessions[0].value : '');
+    dayChanged.redraw(day);
+    if (document.getElementById('session').value) return sessionChanged();
+    draw();
+  }
+
+  /** Repaints the boxes so the picked one is the one that looks picked. */
+  dayChanged.redraw = function (day) {
+    drawSessionBoxes('session-boxes', day, function (session) {
+      setSession(session.value);
+      dayChanged.redraw(day);
+      sessionChanged();
+    });
+  };
+
+  function setSession(value) {
+    document.getElementById('session').value = value || '';
   }
 
   function sessionChanged() {
     ROWS = [];
     draw();
     refresh();
+  }
+
+  // --------------------------------------------------------------------------
+  // The day picker and the session boxes, shared by both screens
+  // --------------------------------------------------------------------------
+
+  /**
+   * Sessions in, days out — keeping the order they arrived in, which is the
+   * order the server sorted them into (soonest first). A session with no date
+   * on it at all still needs somewhere to live, so it gets its own day with a
+   * blank key and a heading that says what it is.
+   */
+  function groupSessionsByDay(sessions) {
+    var days = [];
+    var byKey = {};
+    sessions.forEach(function (s) {
+      var key = s.dateKey || '';
+      var day = byKey[key];
+      if (!day) {
+        day = {
+          dateKey: key,
+          label: key ? dayLabel(key) : 'Program only (no date)',
+          group: s.group || (key ? '' : 'No date'),
+          monthLabel: key ? monthLabel(key) : 'No date',
+          sessions: []
+        };
+        byKey[key] = day;
+        days.push(day);
+      }
+      day.sessions.push(s);
+    });
+    return days;
+  }
+
+  /** Every day as one option, headed by the day field named ('group' or 'monthLabel'). */
+  function fillDaySelect(sel, days, field) {
+    sel.innerHTML = '<option value="">Choose a day</option>';
+    var heading = '';
+    var holder = sel;
+    days.forEach(function (day) {
+      var head = day[field] || '';
+      if (head && head !== heading) {
+        heading = head;
+        holder = document.createElement('optgroup');
+        holder.label = head;
+        sel.appendChild(holder);
+      }
+      var o = document.createElement('option');
+      o.value = day.dateKey;
+      // The count belongs on the day, not inside it: "3 programs" is what
+      // tells somebody scrolling the dropdown that a day is worth opening.
+      o.textContent = day.label + '  (' + day.sessions.length +
+        (day.sessions.length === 1 ? ' program)' : ' programs)');
+      holder.appendChild(o);
+    });
+  }
+
+  function dayFor(days, dateKey) {
+    for (var i = 0; i < days.length; i++) {
+      if (days[i].dateKey === dateKey) return days[i];
+    }
+    return null;
+  }
+
+  /**
+   * A box per session on the day, with the picked one marked. onPick is
+   * given the session object; a null day empties the container, which is what
+   * happens between a location change and the day landing.
+   */
+  function drawSessionBoxes(containerId, day, onPick) {
+    var box = document.getElementById(containerId);
+    box.innerHTML = '';
+    if (!day) return;
+    var picked = containerId === 'session-boxes'
+      ? document.getElementById('session').value
+      : document.getElementById('reg-session').value;
+    day.sessions.forEach(function (session) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pick' + (session.value === picked ? ' on' : '');
+      var meta = [];
+      if (session.byAppointment) {
+        meta.push(session.times && session.times.length
+          ? session.times.length + ' appointment ' +
+            (session.times.length === 1 ? 'time left' : 'times left')
+          : 'every appointment has gone');
+      }
+      b.innerHTML = '<span>' + escapeHtml(session.title || session.label) + '</span>' +
+        (meta.length ? '<span class="meta">' + escapeHtml(meta.join(' — ')) + '</span>' : '');
+      b.onclick = function () { if (onPick) onPick(session); };
+      box.appendChild(b);
+    });
+  }
+
+  /** 'yyyy-MM-dd' as a person reads it, without asking a Date to parse it. */
+  var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+    'August', 'September', 'October', 'November', 'December'];
+  var WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function dayParts(dateKey) {
+    var bits = String(dateKey || '').split('-');
+    // Built from the three NUMBERS, never from the string: new Date('2026-09-02')
+    // is parsed as UTC and lands on the 1st for every tablet west of London.
+    return new Date(Number(bits[0]), Number(bits[1]) - 1, Number(bits[2]));
+  }
+
+  function dayLabel(dateKey) {
+    var d = dayParts(dateKey);
+    if (isNaN(d.getTime())) return String(dateKey || '');
+    return WEEKDAY_NAMES[d.getDay()] + ' ' + MONTH_NAMES[d.getMonth()].slice(0, 3) + ' ' + d.getDate();
+  }
+
+  function monthLabel(dateKey) {
+    var d = dayParts(dateKey);
+    if (isNaN(d.getTime())) return String(dateKey || '');
+    return MONTH_NAMES[d.getMonth()] + ' ' + d.getFullYear();
   }
 
   /**
@@ -421,6 +597,21 @@ function buildCheckInHtml(preloadedIndex, options) {
         li.appendChild(meal);
       }
 
+      // "SHE RANG TO SAY SHE CAN'T COME" — the third thing that happens at a
+      // door, and the one this page had no way to record. Only on rows that
+      // are not already checked in: somebody standing in the room has not
+      // cancelled, and a cancel button beside a ticked name is a button that
+      // can only be pressed by mistake.
+      if (!r.attended && r.eventId) {
+        var off = document.createElement('button');
+        off.className = 'cancel';
+        off.disabled = busy;
+        off.title = 'Cancel ' + r.name + "'s place";
+        off.textContent = '\u2715';
+        off.onclick = function () { tapCancel(r); };
+        li.appendChild(off);
+      }
+
       var wrap = document.createElement('div');
       wrap.appendChild(li);
 
@@ -491,6 +682,43 @@ function buildCheckInHtml(preloadedIndex, options) {
     var value = document.getElementById('session').value;
     var found = (INDEX.sessions || []).filter(function (s) { return s.value === value; })[0];
     return !!(found && found.dateKey);
+  }
+
+  /**
+   * ASKS, THEN ASKS AGAIN FOR A REASON. The confirm is because this gives a
+   * seat away and cannot be undone from this page; the reason box is optional
+   * and empty is a perfectly good answer, which is why it is a prompt the
+   * volunteer can dismiss rather than a field they must fill.
+   *
+   * Removes the row from the list on success rather than redrawing it greyed
+   * out: the desk's list is "who is still to come", and somebody who cancelled
+   * is not still to come.
+   */
+  function tapCancel(r) {
+    var party = (r.guests || []).length
+      ? ' (and their ' + ((r.guests || []).length === 1 ? 'guest' : 'guests') + ')'
+      : '';
+    if (!window.confirm('Cancel ' + r.name + party + " for this session?\\n\\n" +
+      'Their seat goes back to the waiting list. This cannot be undone here.')) return;
+    var reason = window.prompt('Anything to note? (optional — leave blank and press OK)', '');
+    if (reason === null) return;
+
+    setBusy(true);
+    draw();
+    call('checkInCancel', {
+      location: document.getElementById('location').value,
+      session: document.getElementById('session').value,
+      name: r.name,
+      eventId: r.eventId,
+      reason: reason
+    }, function (res) {
+      setBusy(false);
+      if (!res || !res.ok) { draw(); return handle(res); }
+      var at = ROWS.indexOf(r);
+      if (at !== -1) ROWS.splice(at, 1);
+      say(res.message || 'Cancelled.', 'ok');
+      draw();
+    });
   }
 
   function tapName(r) {
@@ -655,18 +883,76 @@ function buildCheckInHtml(preloadedIndex, options) {
     regLocationChanged();
   }
 
+  /**
+   * TWO MONTHS OF DATES, ASKED FOR ONCE PER LOCATION.
+   *
+   * The list inlined in the page (OPTS.upcoming) is the door's own week — it
+   * is what makes this screen usable on the first frame, and it is nowhere
+   * near an answer to "have you got anything in October". deskMonthSessions()
+   * reads this month and next live off the workbook; it lands a moment later
+   * and replaces the week, and it is kept per location so switching back and
+   * forth does not re-read anything.
+   */
+  var REG_MONTHS = {};      // location -> days, once it has been read
+  var REG_DAYS = [];        // the days on screen now
+  var REG_MONTHS_ASKED = {};
+
   function regLocationChanged() {
     var loc = document.getElementById('reg-location').value;
-    var sel = document.getElementById('reg-session');
-    sel.innerHTML = '<option value="">Choose a session</option>';
-    sel.disabled = !loc;
-    (OPTS.upcoming || []).filter(function (s) { return s.location === loc; })
-      .forEach(function (s) {
-        var o = document.createElement('option');
-        o.value = s.value; o.textContent = s.label;
-        sel.appendChild(o);
-      });
+    document.getElementById('reg-session').value = '';
+    document.getElementById('reg-session-boxes').innerHTML = '';
+    // The inlined week first, so the screen is never empty while the months
+    // are being read.
+    REG_DAYS = REG_MONTHS[loc] || groupSessionsByDay(
+      (OPTS.upcoming || []).filter(function (s) { return s.location === loc; }));
+    drawRegDays();
+    if (loc && !REG_MONTHS[loc] && !REG_MONTHS_ASKED[loc]) loadRegMonths(loc);
+  }
+
+  function loadRegMonths(loc) {
+    REG_MONTHS_ASKED[loc] = true;
+    call('deskMonthSessions', { location: loc }, function (res) {
+      if (!res || !res.ok) {
+        // NOT AN ERROR THE VOLUNTEER HAS TO ACT ON: the week is still on
+        // screen and still registers people. Said quietly, and the read is
+        // allowed to be tried again by re-picking the location.
+        REG_MONTHS_ASKED[loc] = false;
+        return say((res && res.message) || 'The coming months could not be read — ' +
+          'the next few days are still listed.', 'err');
+      }
+      REG_MONTHS[res.location || loc] = res.days || [];
+      if (document.getElementById('reg-location').value !== loc) return;
+      var chosen = document.getElementById('reg-day').value;
+      REG_DAYS = REG_MONTHS[loc];
+      drawRegDays(chosen);
+    });
+  }
+
+  /** The day dropdown, headed by month — "October 2026" is the thing being asked for. */
+  function drawRegDays(keepDateKey) {
+    var sel = document.getElementById('reg-day');
+    fillDaySelect(sel, REG_DAYS, 'monthLabel');
+    sel.disabled = !REG_DAYS.length;
+    var wanted = keepDateKey && dayFor(REG_DAYS, keepDateKey) ? keepDateKey
+      : (REG_DAYS.length ? REG_DAYS[0].dateKey : '');
+    sel.value = wanted;
+    regDayChanged();
+  }
+
+  function regDayChanged() {
+    var day = dayFor(REG_DAYS, document.getElementById('reg-day').value);
+    document.getElementById('reg-session').value =
+      day && day.sessions.length === 1 ? day.sessions[0].value : '';
+    redrawRegSessions(day);
     regSessionChanged();
+  }
+
+  function redrawRegSessions(day) {
+    drawSessionBoxes('reg-session-boxes', day, function (session) {
+      document.getElementById('reg-session').value = session.value;
+      redrawRegSessions(day);
+      regSessionChanged();
+    });
   }
 
   function regSessionChanged() {
@@ -692,7 +978,12 @@ function buildCheckInHtml(preloadedIndex, options) {
 
   function regSession() {
     var value = document.getElementById('reg-session').value;
-    return (OPTS.upcoming || []).filter(function (s) { return s.value === value; })[0] || null;
+    if (!value) return null;
+    var day = dayFor(REG_DAYS, document.getElementById('reg-day').value);
+    var found = (day ? day.sessions : []).filter(function (s) { return s.value === value; })[0];
+    // The inlined week is still the fallback: a page whose month read failed
+    // registers people off it exactly as it did before.
+    return found || (OPTS.upcoming || []).filter(function (s) { return s.value === value; })[0] || null;
   }
 
   function standingChanged() {

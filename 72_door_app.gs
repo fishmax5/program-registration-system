@@ -1,5 +1,5 @@
 // ============================================================================
-// 16e. THE DOOR APP  (one deployment, one link, one page — set up per tablet)
+// 16f. THE DOOR APP  (one deployment, one link, one page — set up per tablet)
 // ============================================================================
 //
 // Before this file there were three links to keep straight: the session
@@ -35,7 +35,7 @@
 //
 // WHAT LIVES HERE AND WHAT DOES NOT. This file is the SERVER half — the day
 // read, the recurring-registration writes, the membership hand-off. The page
-// itself is section 16f (68_door_app_html.gs). Both are behavior only: they
+// itself is section 16g (73_door_app_html.gs). Both are behavior only: they
 // read no constant at load time that is not already defined by section 03, so
 // their numbering is free and nothing earlier depends on them.
 // ============================================================================
@@ -119,39 +119,33 @@ function hasDoorContact(email, phone) {
 /**
  * EVERY LATER SESSION OF ONE PROGRAM, at one building, within one month.
  *
- * Read off the program dashboard rather than the Quick Mark index, for the
- * reason readWalkInDay() gives about the day itself: the index is a snapshot
- * built on a trigger, and a session added this morning has to be in this list.
+ * Read through readDeskMonthSessions() (section 16e) rather than off the
+ * dashboard again: that function already answers "what is on at this building
+ * between today and the end of next month", it already drops lunch-only
+ * sessions and it already builds the session VALUE every write is keyed on. A
+ * second reader of the same tabs is a second set of rules to keep in step with
+ * the first, and the one that drifts is the one nobody is looking at.
  *
  * `title` is the CLEAN title (what a session choice carries before the
- * separator). Returns session choice values — the same strings every write in
- * this file is made against — for dates strictly after `fromDateKey` and no
- * later than the last day of `fromDateKey`'s month.
+ * separator). Returns the sessions strictly after `fromDateKey` and no later
+ * than the last day of `fromDateKey`'s month — "the rest of THIS month" is the
+ * promise the door makes, and next month is a different one.
  */
 function doorRemainingMonthSessions(location, title, fromDateKey) {
   const from = parseDateKey(fromDateKey);
   if (!from || !title) return [];
-  const monthEnd = new Date(from.getFullYear(), from.getMonth() + 1, 0);
+  const monthKey = fromDateKey.slice(0, 7);
   const wanted = normalizeNameKey(title);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
-  if (!dash) return [];
-  const headers = HEADERS.Master_Program_Dashboard;
-  const map = getIndexMap(headers);
   const out = [];
   const seen = {};
-  readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
-    if (String(row[map['Location']] || '').trim() !== location) return;
-    const rowTitle = String(row[map['Clean_Title']] || '').trim();
-    if (!rowTitle || normalizeNameKey(rowTitle) !== wanted) return;
-    const d = coerceDate(row[map['Event_Date']]);
-    if (!d) return;
-    const key = formatDateKey(d);
-    if (key <= fromDateKey || formatDateKey(d) > formatDateKey(monthEnd)) return;
-    const value = `${rowTitle}${LOCATION_LABEL_SEPARATOR}${formatDateLabel(d)}`;
-    if (seen[value]) return;
-    seen[value] = true;
-    out.push({ value, dateKey: key, title: rowTitle });
+  (readDeskMonthSessions(location) || []).forEach(day => {
+    if (day.monthKey !== monthKey || day.dateKey <= fromDateKey) return;
+    (day.sessions || []).forEach(session => {
+      if (normalizeNameKey(session.title) !== wanted) return;
+      if (seen[session.value]) return;
+      seen[session.value] = true;
+      out.push({ value: session.value, dateKey: day.dateKey, title: session.title });
+    });
   });
   out.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
   return out.slice(0, DOOR_RECURRING_MAX_SESSIONS);

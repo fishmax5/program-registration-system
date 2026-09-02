@@ -22,13 +22,13 @@
 // ============================================================================
 
 /** Every occurrence of our anchor format, not just the first. */
-const REGISTRATION_ANCHOR_REGEX_GLOBAL =
-  new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi');
+defineLazyGlobal_('REGISTRATION_ANCHOR_REGEX_GLOBAL', () => new RegExp(`<a[^>]*href="[^"]*#${REGISTRATION_LINK_FRAGMENT_KEY}=[a-zA-Z0-9_-]+"[^>]*>[\\s\\S]*?</a>`, 'gi'));
 /** Every occurrence of the pre-anchor "Registration Link: ... [Form ID: ...]" line. */
 const LEGACY_REGISTRATION_LINE_REGEX_GLOBAL =
   /^.*Registration Link:\s*\S+\s*\[Form ID:\s*[a-zA-Z0-9_-]+\].*$/gim;
 /** Any anchor pointing at a Google Form — the shape a mangled/duplicated link usually survives as. */
 const ANY_FORMS_ANCHOR_REGEX = /<a[^>]*href="[^"]*docs\.google\.com\/forms\/[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+
 /** A bare Google Forms URL with no anchor around it — what Calendar leaves behind when it flattens one. */
 const BARE_FORMS_URL_REGEX = /https?:\/\/docs\.google\.com\/forms\/\S*/gi;
 /**
@@ -53,6 +53,39 @@ const REGISTER_LABEL_STAMP = '(?:📝|&#0*128221;|&#x0*1f4dd;)';
 /** An orphaned "📝 Register for ..." label, left when the anchor around it was flattened away. */
 const ORPHAN_REGISTER_LABEL_REGEX =
   new RegExp(`^${DESCRIPTION_HTML_SPACE}*${REGISTER_LABEL_STAMP}${DESCRIPTION_HTML_SPACE}*Register for .*$`, 'gim');
+
+/**
+ * OUR CANCEL LINK, and the separator that carries it.
+ *
+ * IT MUST BE STRIPPABLE OR IT MULTIPLIES. Every pattern above matches a
+ * docs.google.com/forms URL, and the cancel link is a script.google.com one —
+ * so without this it would survive stripAllRegistrationLines() and the next
+ * rewrite would prepend a second copy beside it, then a third. An event
+ * description with four identical "Cancel here" links is how a member
+ * concludes the system is broken and rings instead.
+ *
+ * Matched by the LABEL rather than by the URL, because a deployment that has
+ * been re-published has a different /exec address and the links written before
+ * it must still come off. Matched with and without the emoji and with the
+ * separator either side of it, for the reason DESCRIPTION_HTML_SPACE exists:
+ * what Google Calendar hands back is not what this script wrote.
+ *
+ * NOT COUNTED as a registration link found — see stripAllRegistrationLines().
+ * It is debris that rides on a link, like the orphan label patterns, and
+ * counting it would make a single-link event report two.
+ */
+const CANCEL_LINK_LABEL_STAMP = '(?:\ud83d\udeab|&#0*128683;|&#x0*1f6ab;)';
+const CANCEL_ANCHOR_REGEX_GLOBAL = new RegExp(
+  `(?:${DESCRIPTION_HTML_SPACE}|&middot;|·)*` +
+  // DOUBLED BACKSLASHES, and they are not a typo. This is a template literal:
+  // `[\s\S]` reaches the RegExp constructor as `[sS]`, which matches the
+  // letters s and S and nothing else. See tests/inline_pages_parse.test.js for
+  // the same bug with a browser on the other end of it.
+  `<a[^>]*href="[^"]*[?&]mode=cancel[^"]*"[^>]*>[\\s\\S]*?<\\/a>`, 'gi');
+/** The same anchor found by its wording, for links whose deployment URL has since changed. */
+const CANCEL_ANCHOR_BY_LABEL_REGEX_GLOBAL = new RegExp(
+  `(?:${DESCRIPTION_HTML_SPACE}|&middot;|·)*` +
+  `<a[^>]*>${CANCEL_LINK_LABEL_STAMP}?${DESCRIPTION_HTML_SPACE}*Cannot make it\\?[\\s\\S]*?<\\/a>`, 'gi');
 
 /**
  * THE LINE AN EARLIER SYSTEM WROTE WHILE THE LINK WAS HIDDEN.
@@ -99,7 +132,7 @@ const ORPHAN_FORM_MARKER_REGEX =
  * which is how an event ends up saying registration is not open on the day it
  * opens.
  */
-const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
+defineLazyGlobal_('REGISTRATION_NOT_OPEN_NOTICE_PATTERNS', () => ([
   // Alone on its line — how this script writes it — however it ends up
   // indented, quoted, or wrapped in tags by a later edit.
   new RegExp(`^(?:[\\s>]|&nbsp;|&#0*160;|&#x0*a0;)*(?:<[^>]+>\\s*)*(?:${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*)?` +
@@ -113,7 +146,7 @@ const REGISTRATION_NOT_OPEN_NOTICE_PATTERNS = [
   // on their own could plausibly be something a person typed, but "🚧 " in
   // front of them is this script's stamp.
   new RegExp(`${REGISTRATION_NOTICE_STAMP}${DESCRIPTION_HTML_SPACE}*${REGISTRATION_NOT_OPEN_TEXT}`, 'gi')
-];
+]));
 
 /**
  * Removes every registration link from a description and reports how many
@@ -152,6 +185,10 @@ function stripAllRegistrationLines(description) {
   });
   // Labels and markers are debris, not links — cleared, but never counted as a
   // link found, or an event with a flattened anchor would report two.
+  // BEFORE the orphan sweeps and never counted: the cancel link is part of the
+  // registration line rather than a link of its own (see buildCancelLinkLine).
+  text = text.replace(CANCEL_ANCHOR_REGEX_GLOBAL, '');
+  text = text.replace(CANCEL_ANCHOR_BY_LABEL_REGEX_GLOBAL, '');
   text = text.replace(ORPHAN_REGISTER_LABEL_REGEX, '');
   text = text.replace(ORPHAN_FORM_MARKER_REGEX, '');
 

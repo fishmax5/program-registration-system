@@ -1,4 +1,4 @@
-// THE DOOR APP (sections 16e and 16f) — one deployment, one link, one page.
+// THE DOOR APP (sections 16f and 16g) — one deployment, one link, one page.
 //
 // What this file pins is the handful of things that break SILENTLY on a page
 // members of the public tap unsupervised:
@@ -120,33 +120,29 @@ ok('and half an email is not', sandbox.hasDoorContact('joan@', '') === false);
 // ---------------------------------------------------------------------------
 // 4. "The rest of this month."
 // ---------------------------------------------------------------------------
-const dashRows = [
-  ['Chair Yoga', '2025-09-02'],   // the day itself — already being signed in
-  ['Chair Yoga', '2025-09-09'],
-  ['Chair Yoga', '2025-09-16'],
-  ['Chair Yoga', '2025-10-07'],   // next month — not this promise
-  ['Chair Yoga', '2025-08-26'],   // already gone
-  ['Bingo', '2025-09-09'],        // another program
-  ['Chair Yoga', '2025-09-23']    // another building, filtered below
-];
-const map = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
-sandbox.SpreadsheetApp = { getActiveSpreadsheet: () => ({ getSheetByName: () => ({}) }) };
-sandbox.readAllSectionedRowValues = () => dashRows.map(([title, key], i) => {
-  const row = new Array(sandbox.HEADERS.Master_Program_Dashboard.length).fill('');
-  row[map['Clean_Title']] = title;
-  row[map['Event_Date']] = new Date(key + 'T09:00:00');
-  row[map['Location']] = i === 6 ? 'Ashbridge' : 'Narberth';
-  return row;
-});
+// Read through readDeskMonthSessions() (section 16e), which is stubbed here:
+// what this pins is the MONTH BOUNDARY and the title match, not that function's
+// own read, which has its own test.
+sandbox.readDeskMonthSessions = () => ([
+  { dateKey: '2025-09-02', monthKey: '2025-09', sessions: [
+    { value: 'Chair Yoga · Tue, Sep 2, 2025', title: 'Chair Yoga' }] },
+  { dateKey: '2025-09-09', monthKey: '2025-09', sessions: [
+    { value: 'Chair Yoga · Tue, Sep 9, 2025', title: 'Chair Yoga' },
+    { value: 'Bingo · Tue, Sep 9, 2025', title: 'Bingo' }] },
+  { dateKey: '2025-09-16', monthKey: '2025-09', sessions: [
+    { value: 'Chair Yoga · Tue, Sep 16, 2025', title: 'Chair Yoga' }] },
+  { dateKey: '2025-10-07', monthKey: '2025-10', sessions: [
+    { value: 'Chair Yoga · Tue, Oct 7, 2025', title: 'Chair Yoga' }] }
+]);
 const later = sandbox.doorRemainingMonthSessions('Narberth', 'Chair Yoga', '2025-09-02');
 ok('the later sessions this month are found', later.length === 2);
 ok('and they are in date order',
   later[0].dateKey === '2025-09-09' && later[1].dateKey === '2025-09-16');
-ok('the day itself is not one of them',
-  later.every(s => s.dateKey !== '2025-09-02'));
+// The day itself is already being signed in; next month is a different promise
+// from the one the door made.
+ok('the day itself is not one of them', later.every(s => s.dateKey !== '2025-09-02'));
 ok('next month is not either', later.every(s => s.dateKey.indexOf('2025-10') !== 0));
-ok('nor is a date already gone', later.every(s => s.dateKey !== '2025-08-26'));
-ok('another building is not this list', later.every(s => s.dateKey !== '2025-09-23'));
+ok('and another program on the same day is not', later.every(s => s.title === 'Chair Yoga'));
 // Every write is made against a Quick Mark session choice, so the value has to
 // parse back to the same title and date — a value that does not is a mark that
 // lands on the wrong session, or on none.
