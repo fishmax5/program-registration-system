@@ -814,8 +814,12 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
 
   // The people this system runs as. Named editors survive a link-sharing
   // setting later being tightened by hand, which is the point of doing both.
+  // The archive copy address joins the accounts that run this system as a
+  // named editor: the office asked to be on everything shared out of the
+  // workbook, and a named editor survives the link sharing below being
+  // tightened by hand later. Blank = nobody extra (see getArchiveCopyEmail).
   const wanted = listAuthorizedAdminEmails()
-    .concat([getTriggerOwner(), getCurrentUserEmail()])
+    .concat([getTriggerOwner(), getCurrentUserEmail(), getArchiveCopyEmail()])
     .map(e => String(e || '').trim().toLowerCase())
     .filter(e => e.indexOf('@') > 0);
   dedupePreservingOrder(wanted).forEach(email => {

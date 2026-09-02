@@ -477,9 +477,17 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     }
 
     try {
-      MailApp.sendEmail(leader.email, buildLeaderAlertSubject(programs), buildLeaderAlertBody(leader, programs));
+      // BCC, not CC: the leader is being told about their own roster, and a
+      // visible office address on it invites a reply-all thread nobody at the
+      // desk wants. Blank means copy nobody. Every BCC'd recipient costs a
+      // message against the same MailApp daily quota this loop is rationing,
+      // so it is counted below rather than treated as free.
+      const archiveCopy = getArchiveCopyEmail();
+      const options = { to: leader.email, subject: buildLeaderAlertSubject(programs), body: buildLeaderAlertBody(leader, programs) };
+      if (archiveCopy) options.bcc = archiveCopy;
+      MailApp.sendEmail(options);
       sent++;
-      quota--;
+      quota -= archiveCopy ? 2 : 1;
       programs.forEach(program => { told[program.key] = true; });
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
         `${programs.reduce((sum, p) => sum + p.changes.length, 0)} change(s).`);
