@@ -197,6 +197,15 @@ function syncRegistrationsInternal() {
   // Deliberately AFTER the import loop above: bringing a form built on an
   // older template up to date replaces its questions, and a response that
   // hadn't been imported yet would lose its answers with them.
+  // FIRST THE REPAIRS, THEN THE REBUILDS. A form whose only problem is one a
+  // migration can write in place is fixed here and stamped current, so the
+  // rebuild pass below skips it entirely — and the five rebuilds an execution
+  // can afford are left for the forms that genuinely need one. Ordering it the
+  // other way round would rebuild a form this could have fixed with four
+  // writes. See 67_form_state_migrations.gs for the standing rule.
+  step('repairing forms in place', () =>
+    runFormStateMigrations(registrySheet, sessionRows));
+
   step('bringing forms onto the current template', () =>
     migrateFormsToCurrentTemplate(registrySheet, sessionRows));
 
