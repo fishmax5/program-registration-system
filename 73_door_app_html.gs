@@ -451,8 +451,19 @@ function buildDoorAppHtml(options) {
       return m.name.toLowerCase().indexOf(needle) !== -1;
     }).slice(0, 24);
     if (!hits.length) {
-      box.appendChild(el('p', 'hint', 'No member matches "' + typed +
-        '". Sign in as a walk-in below.'));
+      box.appendChild(el('p', 'hint', 'No member matches "' + typed + '".'));
+      // ONE TAP INTO THE WALK-IN FORM, NAME ALREADY IN IT. The old path made
+      // someone who typed a name and got no match scroll to the walk-in box,
+      // tap it, and retype the name they had just typed — WALKIN.name was
+      // reset to '' on that tap regardless of what was in the search box.
+      // Carrying the typed text straight into WALKIN here is what removes that.
+      box.appendChild(button('big', 'Sign in as a walk-in: ' + typed, function () {
+        PERSON = null; PICKED = {}; LUNCH = false; RECURRING = 'none'; MEMBER = '';
+        WALKIN = { name: typed, email: '', phone: '' };
+        STEP = 'walkin';
+        draw();
+        window.scrollTo(0, 0);
+      }));
       return;
     }
     hits.forEach(function (m) {
