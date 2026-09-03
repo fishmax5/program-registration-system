@@ -161,7 +161,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `60_check_in_page_server.gs` | 1052 | `doGet`, the PIN gate, the roster read, and the mark/register handlers. |
+| `60_check_in_page_server.gs` | 1168 | `doGet` and `DOOR_ROUTES` — the ordered table of every page this one deployment serves (cancel first, the door app last and matching everything, including a retired `?mode=walkin`/`walk-in`/`legacy` bookmark), which `checkInPageUrl` also builds its `?mode=` from so a link and the router cannot drift. Plus `checkInRosterModeRequested`, the PIN gate, the roster read, and the mark/register handlers. |
 | `61_check_in_page_html.gs` | 1195 | `buildCheckInHtml` — the whole served page, one template literal. |
 | `62_walk_in_page.gs` | 36 | **Retired (September 2026) — a banner and nothing else.** The sign-in page for people who never registered; replaced by the door app (`73`). Kept, empty, because a file here is never renumbered or removed. Its server half is `74`; `checkInRosterModeRequested` went to `60`. |
 | `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
