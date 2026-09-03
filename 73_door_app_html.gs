@@ -1,8 +1,8 @@
 // ============================================================================
-// 16g. THE DOOR APP'S PAGE  (setup, the name list, the person, the walk-in)
+// 16g. THE DOOR APP'S PAGE  (setup, names, the person, the walk-in, membership)
 // ============================================================================
 //
-// One served page with four screens and one address. What each screen is for
+// One served page with five screens and one address. What each screen is for
 // is in the section note of 72_door_app.gs; what is worth knowing HERE is why
 // it is one page rather than four:
 //
@@ -18,6 +18,12 @@
 //     twice or through esc(), because a member called O'Brien and a program
 //     called "Movie Night </script>" are both real and both end the page
 //     mid-sentence otherwise. See tests/check_in_page.test.js.
+//   - The membership screen (screen 5) is drawn from a form the OFFICE writes,
+//     so its question titles, help text and choices are somebody else's words
+//     arriving at runtime. They are never interpolated into this file's
+//     markup: they come back as data from doorMembershipForm() and every one
+//     of them is written with textContent. That screen uses no innerHTML at
+//     all, and tests/door_app.test.js holds that line.
 // ============================================================================
 
 /**
@@ -161,6 +167,16 @@ function buildDoorAppHtml(options) {
   // filled in would be the page losing their answer for them.
   var WALKIN = { name: '', email: '', phone: '' };
   var MEMBER = '';         // yes | no
+  // THE MEMBERSHIP APPLICATION (screen 5). The form as the server described it,
+  // and what has been answered so far — held out here rather than in the DOM
+  // for the same reason WALKIN is: this screen is redrawn whole, and a redraw
+  // that emptied a half-filled application would lose somebody's afternoon.
+  var MEMBERSHIP = null;   // { ok, usable, title, description, url, items[] }
+  var MEMBER_ANSWERS = {}; // item id -> string | string[]
+  var MEMBER_OTHER = {};   // item id -> what was typed into an "Other" box
+  // Who is applying, carried off the sign-in they just did so the application
+  // does not ask them to type their own name a second time.
+  var APPLICANT = { name: '', email: '', phone: '' };
   var RESULT = null;
   var busy = false;
   var pin = '';
@@ -274,6 +290,9 @@ function buildDoorAppHtml(options) {
     if (STEP === 'setup' || !SETUP) { setupBtn.classList.add('hide'); return drawSetup(main); }
     setupBtn.classList.remove('hide');
     if (STEP === 'done') return drawDone(main);
+    // BEFORE the day guard: the application is about a person, not about a day's
+    // list, and a day that failed to re-read must not be able to shut it.
+    if (STEP === 'membership') return drawMembership(main);
     if (!DAY) return drawEmpty(main);
     if (STEP === 'person') return drawPerson(main);
     if (STEP === 'walkin') return drawWalkIn(main);
@@ -544,7 +563,8 @@ function buildDoorAppHtml(options) {
       'You are added to today\\'s list and nothing else changes.',
       MEMBER === 'yes', function (v) { MEMBER = v; }));
     mem.appendChild(radioItem('member', 'no', 'Not yet',
-      'You can sign in and join today either way — the office will send you the membership form.',
+      'You can sign in and join today either way. After you sign in you can fill the ' +
+      'membership application in on this tablet.',
       MEMBER === 'no', function (v) { MEMBER = v; }));
     main.appendChild(mem);
 
@@ -665,6 +685,355 @@ function buildDoorAppHtml(options) {
     return li;
   }
 
+
+  // SCREEN 5 — the membership application, drawn from the live form.
+  //
+  // NOTHING BELOW KNOWS WHAT THE FORM ASKS. The server sends a description of
+  // the office's own form (doorMembershipForm) and every field on this screen
+  // is built from it, so the day somebody adds a question to the application
+  // the door starts asking it. What this screen owns is only HOW a question is
+  // drawn, and what happens to a question it cannot draw: named, with the real
+  // form's link beside it, never silently dropped.
+  //
+  // EVERY STRING HERE IS SOMEBODY ELSE'S TEXT — question titles, help text,
+  // choices, all typed into a Google Form by the office. It arrives as data
+  // rather than as markup and is written with textContent, so a question
+  // called "Fees </" + "script>" is a question, not the end of the page (written
+  // split here for the same reason). There is no innerHTML anywhere on this
+  // screen, deliberately.
+  function openMembership() {
+    MEMBERSHIP = null;
+    MEMBER_ANSWERS = {};
+    MEMBER_OTHER = {};
+    STEP = 'membership';
+    setBusy(true);
+    draw();
+    say('Opening the membership application...', '');
+    call('doorMembershipForm', {}, function (res) {
+      setBusy(false);
+      if (!res || res.needsPin) { draw(); return handle(res); }
+      MEMBERSHIP = res;
+      prefillMembership();
+      hideStatus();
+      draw();
+      window.scrollTo(0, 0);
+    });
+  }
+
+  /**
+   * WHAT THEY JUST TYPED, PUT BACK IN FRONT OF THEM. Somebody who has spelled
+   * their name and their phone number into the sign-in a moment ago should not
+   * have to do it twice, and a form nobody wants to start twice is a form that
+   * gets abandoned at the door.
+   *
+   * A GUESS, and only ever a guess: matched on what the question is CALLED,
+   * because the form is the office's and nothing here is allowed to assume its
+   * shape. Every prefilled box is an ordinary editable field — a wrong guess
+   * costs a person one correction, and a missed one costs them nothing.
+   */
+  function prefillMembership() {
+    if (!MEMBERSHIP || !MEMBERSHIP.items) return;
+    MEMBERSHIP.items.forEach(function (item) {
+      if (item.kind !== 'field' || item.type !== 'TEXT') return;
+      var title = String(item.title || '').toLowerCase();
+      if (/e.?mail/.test(title)) { if (APPLICANT.email) MEMBER_ANSWERS[item.id] = APPLICANT.email; return; }
+      if (/phone|mobile|cell|telephone/.test(title)) {
+        if (APPLICANT.phone) MEMBER_ANSWERS[item.id] = APPLICANT.phone;
+        return;
+      }
+      if (/name/.test(title) && APPLICANT.name) MEMBER_ANSWERS[item.id] = APPLICANT.name;
+    });
+  }
+
+  function drawMembership(main) {
+    if (!MEMBERSHIP) {
+      main.appendChild(el('p', 'hint', busy
+        ? 'Opening the membership application...'
+        : 'The application has not opened yet.'));
+      main.appendChild(button('plain', 'Try again', openMembership));
+      main.appendChild(membershipBack());
+      return;
+    }
+    main.appendChild(el('h2', '', MEMBERSHIP.title || 'Membership Application'));
+    if (MEMBERSHIP.description) main.appendChild(el('p', 'hint', MEMBERSHIP.description));
+    if (MEMBERSHIP.message) main.appendChild(el('div', 'banner', MEMBERSHIP.message));
+
+    // THE HONEST DEGRADE. The form could not be opened, or it asks something
+    // this screen cannot ask — either way the person gets the real form rather
+    // than a screen that would lose their answers.
+    if (!MEMBERSHIP.ok || !MEMBERSHIP.usable) {
+      if (MEMBERSHIP.url) main.appendChild(membershipLink('Open the membership application'));
+      main.appendChild(membershipBack());
+      return;
+    }
+
+    main.appendChild(el('p', 'hint',
+      'Fill this in here and it goes straight to the office. A staff member can help.'));
+    var list = el('ul', 'list', '');
+    (MEMBERSHIP.items || []).forEach(function (item) {
+      var drawn = membershipItem(item);
+      if (drawn) list.appendChild(drawn);
+    });
+    main.appendChild(list);
+
+    var go = button('big', 'Send my application', submitMembership);
+    go.id = 'go';
+    go.disabled = busy;
+    main.appendChild(go);
+    if (MEMBERSHIP.url) main.appendChild(membershipLink('Open the full form instead'));
+    main.appendChild(membershipBack());
+  }
+
+  function membershipBack() {
+    return button('plain', 'Not now — back to the name list', function () {
+      MEMBERSHIP = null; MEMBER_ANSWERS = {}; MEMBER_OTHER = {};
+      PERSON = null; RESULT = null; PICKED = {}; LUNCH = false;
+      RECURRING = 'none'; MEMBER = '';
+      WALKIN = { name: '', email: '', phone: '' };
+      STEP = 'names';
+      hideStatus();
+      draw();
+      window.scrollTo(0, 0);
+    });
+  }
+
+  /** The form's own link, as a button-shaped anchor. */
+  function membershipLink(text) {
+    var a = document.createElement('a');
+    a.className = 'plain';
+    a.href = MEMBERSHIP.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = text;
+    a.style.display = 'block';
+    a.style.textAlign = 'center';
+    a.style.textDecoration = 'none';
+    a.style.padding = '13px 14px';
+    a.style.marginTop = '8px';
+    a.style.border = '1px solid #DADCE0';
+    a.style.borderRadius = '8px';
+    a.style.background = '#fff';
+    a.style.color = '#1A73E8';
+    return a;
+  }
+
+  /** One item of the application: a heading, a field, or a question we cannot ask. */
+  function membershipItem(item) {
+    if (item.kind === 'display') {
+      var note = el('li', 'item', '');
+      var body = el('div', 'what', '');
+      body.style.padding = '14px 12px';
+      if (item.title) body.appendChild(el('span', 'title', item.title));
+      if (item.help) body.appendChild(el('span', 'meta', item.help));
+      if (!item.title && !item.help) return null;
+      note.appendChild(body);
+      return note;
+    }
+    if (item.kind === 'unsupported') {
+      var off = el('li', 'item off', '');
+      var offBody = el('div', 'what', '');
+      offBody.style.padding = '14px 12px';
+      offBody.appendChild(el('span', 'title', item.title || 'A question on the form'));
+      offBody.appendChild(el('span', 'meta warn',
+        'This one can only be answered on the full form — use the link at the bottom, ' +
+        'or ask a staff member.'));
+      off.appendChild(offBody);
+      return off;
+    }
+    var li = el('li', 'item', '');
+    var wrap = el('div', 'what', '');
+    wrap.style.padding = '14px 12px';
+    var label = el('label', 'field', item.title + (item.required ? ' *' : ''));
+    label.style.margin = '0 0 4px 0';
+    wrap.appendChild(label);
+    if (item.help) wrap.appendChild(el('p', 'hint', item.help));
+    membershipField(item).forEach(function (node) { wrap.appendChild(node); });
+    li.appendChild(wrap);
+    return li;
+  }
+
+  /** The input(s) for one answerable item — nodes only, in order. */
+  function membershipField(item) {
+    var id = 'mq' + item.id;
+    var value = MEMBER_ANSWERS[item.id];
+    if (item.type === 'PARAGRAPH_TEXT') {
+      var area = document.createElement('textarea');
+      area.id = id;
+      area.rows = 3;
+      area.style.width = '100%';
+      area.style.padding = '13px';
+      area.style.fontSize = '16px';
+      area.style.fontFamily = 'inherit';
+      area.style.border = '1px solid #DADCE0';
+      area.style.borderRadius = '8px';
+      area.value = value == null ? '' : String(value);
+      area.onchange = function () { MEMBER_ANSWERS[item.id] = area.value; };
+      return [area];
+    }
+    if (item.type === 'TEXT' || item.type === 'DATE' || item.type === 'TIME') {
+      var input = document.createElement('input');
+      input.id = id;
+      input.type = item.type === 'DATE' ? 'date' : (item.type === 'TIME' ? 'time' : 'text');
+      input.autocomplete = 'off';
+      input.value = value == null ? '' : String(value);
+      input.onchange = function () { MEMBER_ANSWERS[item.id] = input.value; };
+      return [input];
+    }
+    if (item.type === 'LIST' || item.type === 'SCALE') {
+      var select = document.createElement('select');
+      select.id = id;
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = item.type === 'SCALE' ? 'Pick a number' : 'Choose one';
+      select.appendChild(blank);
+      membershipChoices(item).forEach(function (choice) {
+        var option = document.createElement('option');
+        option.value = choice;
+        option.textContent = choice;
+        if (String(value) === choice) option.selected = true;
+        select.appendChild(option);
+      });
+      select.onchange = function () { MEMBER_ANSWERS[item.id] = select.value; };
+      var nodes = [select];
+      var ends = membershipScaleLabels(item);
+      if (ends) nodes.push(el('p', 'hint', ends));
+      return nodes;
+    }
+    if (item.type === 'MULTIPLE_CHOICE' || item.type === 'CHECKBOX') {
+      var many = item.type === 'CHECKBOX';
+      var picked = many
+        ? (Array.isArray(value) ? value.slice() : [])
+        : (value == null ? '' : String(value));
+      var boxes = [];
+      var group = el('div', '', '');
+      (item.choices || []).forEach(function (choice) {
+        group.appendChild(membershipChoiceRow(item, choice, many, picked, boxes, false));
+      });
+      if (item.hasOther) {
+        group.appendChild(membershipChoiceRow(item, 'Other', many, picked, boxes, true));
+        var other = document.createElement('input');
+        other.type = 'text';
+        other.id = id + 'other';
+        other.placeholder = 'Other — type it here';
+        other.value = MEMBER_OTHER[item.id] || '';
+        other.onchange = function () {
+          MEMBER_OTHER[item.id] = other.value;
+          // The typed words ARE the answer: Forms stores an "Other" response
+          // as whatever was written, not as the word "Other".
+          membershipCollectChoices(item, many, boxes);
+        };
+        group.appendChild(other);
+      }
+      return [group];
+    }
+    // Nothing else reaches here — describeMembershipItem() would have called it
+    // unsupported — but a field with no input at all must never look answerable.
+    return [el('p', 'hint', 'This question can only be answered on the full form.')];
+  }
+
+  /** One radio or checkbox line, wired back into MEMBER_ANSWERS. */
+  function membershipChoiceRow(item, choice, many, picked, boxes, isOther) {
+    var row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.padding = '8px 0';
+    row.style.fontWeight = 'normal';
+    var box = document.createElement('input');
+    box.type = many ? 'checkbox' : 'radio';
+    box.name = 'mq' + item.id;
+    box.value = choice;
+    box.setAttribute('data-other', isOther ? '1' : '');
+    box.style.width = '24px';
+    box.style.height = '24px';
+    box.checked = many
+      ? picked.indexOf(choice) !== -1
+      : picked === choice;
+    box.disabled = busy;
+    boxes.push({ box: box, choice: choice, isOther: isOther });
+    box.onchange = function () { membershipCollectChoices(item, many, boxes); };
+    row.appendChild(box);
+    row.appendChild(el('span', '', choice));
+    return row;
+  }
+
+  /** What is ticked right now, "Other" resolved to the words in its box. */
+  function membershipCollectChoices(item, many, boxes) {
+    var chosen = [];
+    boxes.forEach(function (entry) {
+      if (!entry.box.checked) return;
+      var text = entry.isOther ? String(MEMBER_OTHER[item.id] || '').trim() : entry.choice;
+      if (text) chosen.push(text);
+    });
+    MEMBER_ANSWERS[item.id] = many ? chosen : (chosen.length ? chosen[0] : '');
+  }
+
+  /** A scale's numbers, or a list's choices. */
+  function membershipChoices(item) {
+    if (item.type !== 'SCALE') return (item.choices || []).slice();
+    var out = [];
+    var low = Number(item.lowerBound);
+    var high = Number(item.upperBound);
+    if (isNaN(low) || isNaN(high) || high < low) return out;
+    for (var n = low; n <= high; n++) out.push(String(n));
+    return out;
+  }
+
+  function membershipScaleLabels(item) {
+    if (item.type !== 'SCALE') return '';
+    var bits = [];
+    if (item.lowerLabel) bits.push(item.lowerBound + ' = ' + item.lowerLabel);
+    if (item.upperLabel) bits.push(item.upperBound + ' = ' + item.upperLabel);
+    return bits.join('   ·   ');
+  }
+
+  /**
+   * Sent whole, and checked again on the server against the form's own items —
+   * what is refused here is only what can be refused without a round trip, so
+   * a required box nobody filled in is said at the door rather than after a
+   * wait. The server is what actually decides, because the form may have been
+   * edited since this screen opened.
+   */
+  function submitMembership() {
+    if (!MEMBERSHIP || !MEMBERSHIP.ok || !MEMBERSHIP.usable) return;
+    var answers = [];
+    var missing = '';
+    (MEMBERSHIP.items || []).forEach(function (item) {
+      if (item.kind !== 'field') return;
+      var value = MEMBER_ANSWERS[item.id];
+      var empty = value === undefined || value === null || value === '' ||
+        (Array.isArray(value) && !value.length);
+      if (empty) {
+        if (item.required && !missing) missing = item.title;
+        return;
+      }
+      answers.push({ id: item.id, value: value });
+    });
+    if (missing) return say('"' + missing + '" still needs an answer.', 'err');
+    if (!answers.length) return say('Fill the application in first.', 'err');
+    setBusy(true);
+    draw();
+    say('Sending your application...', '');
+    call('doorMembershipSubmit', {
+      name: APPLICANT.name,
+      location: SETUP ? SETUP.location : '',
+      answers: answers
+    }, function (res) {
+      setBusy(false);
+      if (!res || res.needsPin) { draw(); return handle(res); }
+      if (!res.ok) { draw(); return say(res.message || 'The application was not sent.', 'err'); }
+      RESULT = { ok: true, name: APPLICANT.name, message: res.message, lines: [] };
+      MEMBERSHIP = null;
+      MEMBER_ANSWERS = {};
+      MEMBER_OTHER = {};
+      MEMBER = '';
+      STEP = 'done';
+      draw();
+      window.scrollTo(0, 0);
+      say(res.message, 'ok');
+    });
+  }
+
   // ------------------------------------------------------------------ writes
   function submit() {
     var programs = Object.keys(PICKED);
@@ -722,6 +1091,11 @@ function buildDoorAppHtml(options) {
   function send(payload) {
     payload.location = SETUP.location;
     payload.dateKey = SETUP.dateKey;
+    APPLICANT = {
+      name: payload.name || '',
+      email: payload.email || '',
+      phone: payload.phone || ''
+    };
     setBusy(true);
     draw();
     say('Signing you in...', '');
@@ -746,10 +1120,24 @@ function buildDoorAppHtml(options) {
     var list = el('ul', 'result', '');
     ((RESULT && RESULT.lines) || []).forEach(function (line) { list.appendChild(el('li', '', line)); });
     main.appendChild(list);
+    // THE MEMBERSHIP APPLICATION, OFFERED WHERE THE ANSWER WAS GIVEN. Somebody
+    // who has just said "not a member yet" is standing here, signed in, with
+    // the tablet in their hands — which is the only moment the application is
+    // ever going to get filled in. Offered AFTER the sign-in rather than
+    // before it, because being on today's list is what they came for and a
+    // membership form must never be the thing standing between them and it.
+    if (RESULT && RESULT.ok && MEMBER === 'no') {
+      main.appendChild(el('p', 'hint',
+        'Not a member yet? You can fill the membership application in right here — ' +
+        'it goes straight to the office.'));
+      main.appendChild(button('big', 'Fill in the membership application', openMembership));
+    }
     main.appendChild(button('big', 'Done — next person', function () {
       PERSON = null; RESULT = null; PICKED = {}; LUNCH = false;
       RECURRING = 'none'; MEMBER = '';
       WALKIN = { name: '', email: '', phone: '' };
+      MEMBERSHIP = null; MEMBER_ANSWERS = {}; MEMBER_OTHER = {};
+      APPLICANT = { name: '', email: '', phone: '' };
       STEP = 'names';
       hideStatus();
       draw();

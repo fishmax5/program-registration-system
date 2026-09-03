@@ -88,6 +88,7 @@ function styleConfigSheet(sheet) {
   seedAutomationRow(sheet);
   seedCalendarInviteRow(sheet);
   seedRegistrationHorizonRow(sheet);
+  seedMembershipFormRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -206,6 +207,28 @@ function seedArchiveCopyRow(sheet) {
     + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
     + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
     + 'which receives the internal per-sync digest and nothing else.');
+}
+
+/**
+ * Seeds the membership application's form id, and says in the cell note what
+ * the cell is for and what an empty one means. Only ever written into an EMPTY
+ * cell — a workbook pointed at a different application, or deliberately
+ * cleared so the door stops offering one, is left as staff left it.
+ */
+function seedMembershipFormRow(sheet) {
+  const section = CONFIG_LAYOUT.MEMBERSHIP_FORM;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(DEFAULT_MEMBERSHIP_FORM_ID);
+    log(`Seeded the default Membership Application form id on "${SHEET_NAMES.CONFIG}".`);
+  }
+  cell.setNote('The Google Form the door app shows to somebody who says they are not a member yet.\n\n'
+    + 'Paste either the form id or its whole edit URL. The door reads the form\'s questions LIVE, '
+    + 'so editing the form is how the door\'s membership screen changes — no code change is needed.\n\n'
+    + 'Leave blank to stop offering the application at the door; a walk-in who is not a member is then '
+    + 'recorded for the office to follow up, and nothing else happens.\n\n'
+    + 'The account this script runs as must have EDIT access to the form, which is what the Forms API '
+    + 'requires to open it. Without that the door shows a plain message and a link to the form itself.');
 }
 
 /** Seeds "Show link" and explains the trade-off in the cell note. */
@@ -753,6 +776,34 @@ function getArchiveCopyEmail() {
   if (email.indexOf('@') <= 0) email = '';
   __archiveCopyEmailCache = email;
   return email;
+}
+
+/**
+ * The membership application's form id, or '' when the cell is blank, holds
+ * something that is not an id, or cannot be read at all.
+ *
+ * '' is a complete answer everywhere it is used: the door simply does not
+ * offer the application. Reading fails the same way for the same reason
+ * getArchiveCopyEmail() does — a Config tab mid-rebuild must not be able to
+ * point the door at a form nobody chose.
+ */
+function getMembershipFormId() {
+  if (__membershipFormIdCache !== null) return __membershipFormIdCache;
+  let id = '';
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      const section = CONFIG_LAYOUT.MEMBERSHIP_FORM;
+      id = parseFormIdFromConfigValue(
+        sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue());
+    }
+  } catch (err) {
+    log(`\u26a0\ufe0f Could not read the Membership Application form id from Config (${err}) — the door will not offer it.`);
+    id = '';
+  }
+  __membershipFormIdCache = id;
+  return id;
 }
 
 /**

@@ -32,9 +32,15 @@
 //              as cards, takes a name and a way to reach them, asks about a
 //              standing place and about membership, and signs them in through
 //              the same one write path.
+//   MEMBERSHIP The application itself, for the walk-in who has just said they
+//              are not a member yet — built from the live questions of a
+//              Google Form the office owns, and submitted back into that
+//              form's own responses. Offered AFTER the sign-in, never as a
+//              gate in front of it. See the membership section at the foot of
+//              this file.
 //
 // WHAT LIVES HERE AND WHAT DOES NOT. This file is the SERVER half — the day
-// read, the recurring-registration writes, the membership hand-off. The page
+// read, the recurring-registration writes, the membership application. The page
 // itself is section 16g (73_door_app_html.gs). Both are behavior only: they
 // read no constant at load time that is not already defined by section 03, so
 // their numbering is free and nothing earlier depends on them.
@@ -237,30 +243,461 @@ function applyDoorRecurring(args) {
  * THE MEMBERSHIP HAND-OFF — for somebody who signed in at the door and said
  * they are not a member yet.
  *
- * DELIBERATELY NOT AN EMAIL YET. What the office sends a new member — the
- * form, the welcome, the sender it goes out as — is a decision nobody has
- * made in this repo, and a half-guessed template mailed to a real person is
- * worse than no mail at all. So this records the request where staff already
- * look for it (the Member_Roll staff note recordWalkInMember() writes, and the
- * admin digest) and returns the line the receipt shows.
+ * WHAT THIS IS NOW, AND WHAT IT NO LONGER IS. It used to be the whole answer:
+ * a staff note, a TODO, and a promise that somebody in the office would post a
+ * form. The application is now filled in at the door instead (see the section
+ * below), on the screen this sign-in hands them straight to.
  *
- * TODO: send the membership form. When the template exists, send it from here
- * and change the line below to say it was sent — every caller goes through
- * this one function, so nothing else has to change.
+ * So this is the SECOND record rather than the only one, and it is still worth
+ * writing. The person may put the tablet down and walk off; the older walk-in
+ * page (section 16b) has no membership screen at all; and the application form
+ * may be unreachable from this tablet. In every one of those cases the office
+ * still has to know a real person asked, and where they can be reached — which
+ * is what this writes, in the place staff already look (the Member_Roll staff
+ * note recordWalkInMember() writes, and the admin digest).
+ *
+ * Renamed from sendMembershipEmail(): it never sent mail, and a name that says
+ * it does is a name somebody eventually believes.
  */
-function sendMembershipEmail(entry) {
+function recordMembershipHandoff(entry) {
   const name = String((entry && entry.name) || '').trim();
   const email = String((entry && entry.email) || '').trim();
   const phone = String((entry && entry.phone) || '').trim();
   const location = String((entry && entry.location) || '').trim();
   if (!name) return '';
   const reach = email || phone || 'no contact details';
-  log(`sendMembershipEmail (not yet sending): ${name} — ${reach}${location ? ` at ${location}` : ''}`);
+  log(`recordMembershipHandoff: ${name} — ${reach}${location ? ` at ${location}` : ''}`);
   noteForAdmin('Membership forms to send',
     `${name} signed in at the door${location ? ` at ${location}` : ''} and is not a member yet — ` +
-    `send them the membership form (${reach}).`);
+    `check whether they filled the application in at the door, and follow up if not (${reach}).`);
   return email
-    ? `📨 ${name} is not a member yet — the office has been told to send the membership form to ${email}.`
+    ? `📨 ${name} is not a member yet — the office has been told, and can reach them at ${email}.`
     : `📨 ${name} is not a member yet — the office has been told to follow up` +
       (phone ? ` on ${phone}.` : '. There is no email or phone on file, so tell a staff member.');
+}
+
+// ----------------------------------------------------------------------------
+// THE MEMBERSHIP APPLICATION  (a form the OFFICE owns, filled in at the door)
+// ----------------------------------------------------------------------------
+//
+// WHAT REPLACED WHAT. This used to be a TODO: a walk-in said "not a member
+// yet", the door wrote a staff note, and somebody in the office was supposed
+// to post them a form. A door that silently drops a membership request is
+// worse than one that never offered it, so the application is now filled in
+// where the person is standing — on the tablet, before they walk away.
+//
+// NOTHING HERE KNOWS WHAT THE FORM ASKS. The application is a Google Form the
+// office owns and edits; its id is one Config cell (see
+// DEFAULT_MEMBERSHIP_FORM_ID) and its QUESTIONS are read live off the form on
+// every open. Hardcoding "name, address, date of birth, fee" here would mean
+// the day the office adds a question, the door quietly stops collecting it and
+// nobody finds out until a stack of half-filled applications turns up. So the
+// screen is built from whatever the form currently holds, and editing the form
+// IS how the door's membership screen changes.
+//
+// AND THE ANSWERS GO BACK THROUGH THE FORM ITSELF — form.createResponse(),
+// one item response per answer, .submit(). Not a scraped entry.NNNN POST at
+// the form's public endpoint: that is an undocumented shape that breaks
+// silently on a form edit, and it bypasses everything the form itself does on
+// submit. Going through the API puts the answer in the form's own response
+// sheet, which is where whoever processes memberships already looks, and where
+// a response submitted on paper-day from a laptop lands too.
+//
+// THE PIN. This sits behind the same gate as every other door screen, which is
+// the tablet's gate, not the applicant's: the door app asks for the desk PIN
+// ONCE per tablet and then serves members all day. Putting the application in
+// FRONT of that gate would mean a second PIN posture on one page — and asking
+// an 82-year-old filling in a membership form for a staff code is how the
+// tablet gets handed back. Both endpoints below still check the PIN
+// themselves, exactly like doorDay() and doorSignIn(), because an endpoint is
+// reachable directly whatever screen is meant to call it, and an ungated
+// "submit this form" endpoint is a spam target with the centre's name on it.
+//
+// NO FORM_STATE_MIGRATIONS ENTRY, deliberately. That registry carries a LIVE
+// form from the shape it was BUILT with to the shape this code now expects —
+// it is for the registration forms this system generates. Nothing here changes
+// the shape of any generated form: the membership application is not generated
+// (it is read, never written), and no stored registry shape changed. A
+// migration would have nothing to repair.
+
+/** Item types the membership screen can draw as a real field, and answer. */
+const MEMBERSHIP_FIELD_TYPES = [
+  'TEXT', 'PARAGRAPH_TEXT', 'MULTIPLE_CHOICE', 'LIST', 'CHECKBOX', 'SCALE', 'DATE', 'TIME'
+];
+
+/** Item types that ask nothing — shown as words on the screen, never answered. */
+const MEMBERSHIP_DISPLAY_TYPES = ['SECTION_HEADER', 'IMAGE', 'VIDEO', 'PAGE_BREAK'];
+
+/**
+ * What somebody is shown when the form cannot be opened at all. Said in plain
+ * words with the form's own link under it, because the person is standing
+ * there either way and "Exception: You do not have permission" is not a thing
+ * to put in front of them.
+ */
+const MEMBERSHIP_NO_ACCESS_MESSAGE =
+  'The membership application could not be opened on this tablet. ' +
+  'Use the link below, or ask a staff member for a paper form.';
+
+/**
+ * THE FORM AS THE DOOR SEES IT — { ok, formId, url, title, description,
+ * items[], usable, message }, serializable, read ONCE per execution.
+ *
+ * The item read is a remote call (form.getItems()), and the screen asks for it
+ * on open and again after a failed submit, so it is memoized the way
+ * getFormItemIndex() memoizes the same call for registration forms. The
+ * REFUSAL is cached too: a form this executing user cannot open will not
+ * become openable halfway through one execution, and paying a second remote
+ * timeout to re-learn that is time the person at the door spends watching a
+ * spinner.
+ *
+ * `items` never carries a live Item object — only the description a page can
+ * render. Every answer is matched back to a live item by id at submit time,
+ * off a fresh read, so nothing the browser sends decides what an item IS.
+ */
+function membershipFormShape() {
+  if (__membershipFormShapeCache) return __membershipFormShapeCache.shape;
+  const shape = readMembershipFormShape();
+  __membershipFormShapeCache = { shape };
+  return shape;
+}
+
+function readMembershipFormShape() {
+  const formId = getMembershipFormId();
+  if (!formId) {
+    return {
+      ok: false, usable: false, formId: '', url: '', items: [],
+      message: 'No membership application is set up in this workbook. ' +
+        'Add its form id to the Config tab, or ask a staff member for a paper form.'
+    };
+  }
+  // THE FAILURE THIS CATCH IS FOR, and it is the likely one: the application
+  // lives in a SHARED drive and is shared WITH the workbook's owner rather
+  // than owned by them. FormApp.openById() needs EDIT access as the executing
+  // user — view access is not enough, and neither is being able to open the
+  // form in a browser as yourself. When that access is missing this throws,
+  // and on a tablet an uncaught throw is a blank screen with a stack trace in
+  // a log nobody reads.
+  //
+  // WHAT FIXES IT: grant the account this script runs as (the trigger owner /
+  // whoever deployed the web app) edit access to the form, or copy the form
+  // into the workbook's own forms folder and put the copy's id in Config.
+  // Until then the door says so in words and hands over the form's link.
+  let form;
+  try {
+    form = FormApp.openById(formId);
+  } catch (err) {
+    log(`⚠️ The membership application (${formId}) could not be opened: ${err}. ` +
+      'FormApp.openById needs EDIT access as the executing user — grant it, ' +
+      'or copy the form into this workbook\'s forms folder and point Config at the copy.');
+    return {
+      ok: false, usable: false, formId, url: membershipFallbackUrl(formId), items: [],
+      message: MEMBERSHIP_NO_ACCESS_MESSAGE
+    };
+  }
+  try {
+    const items = form.getItems().map(describeMembershipItem).filter(Boolean);
+    // A REQUIRED question this screen cannot draw makes the whole screen a
+    // lie: every field would be filled in and the submit would be refused by
+    // the form itself. Better to hand the person the real form up front than
+    // to take five minutes of typing and then lose it.
+    const blocking = items.filter(item => item.kind === 'unsupported' && item.required);
+    return {
+      ok: true,
+      usable: !blocking.length,
+      formId,
+      url: form.getPublishedUrl() || membershipFallbackUrl(formId),
+      title: form.getTitle() || 'Membership Application',
+      description: form.getDescription() || '',
+      items,
+      message: blocking.length
+        ? 'This application has a question that cannot be filled in on the tablet ' +
+          `(${blocking[0].title}). Use the link below, or ask a staff member.`
+        : ''
+    };
+  } catch (err) {
+    log(`⚠️ The membership application (${formId}) could not be read: ${err}`);
+    return {
+      ok: false, usable: false, formId, url: membershipFallbackUrl(formId), items: [],
+      message: MEMBERSHIP_NO_ACCESS_MESSAGE
+    };
+  }
+}
+
+/**
+ * A link to the form when we could not open it to ask for its published one.
+ * The viewform address is what a form's own link looks like; somebody who can
+ * open the form at all can open this.
+ */
+function membershipFallbackUrl(formId) {
+  return formId ? `https://docs.google.com/forms/d/${formId}/viewform` : '';
+}
+
+/**
+ * ONE ITEM, as much of it as a page can draw — { id, type, kind, title, help,
+ * required, ... }. `kind` is the only thing the page branches on:
+ *
+ *   'field'       something to answer, drawn as a native input.
+ *   'display'     a heading, a notice, an image, a page break: words on the
+ *                 screen, no answer.
+ *   'unsupported' a question this screen has no honest way to ask — a grid, a
+ *                 file upload, a duration. Shown BY NAME with the form's link
+ *                 beside it rather than skipped, because a question quietly
+ *                 missing from a membership application is an answer the
+ *                 office thinks it collected.
+ *
+ * Every string here is the office's own text and reaches a browser: it is
+ * carried as data (google.script.run, JSON) and drawn with textContent, never
+ * interpolated into the page's markup. See buildMembershipFields().
+ */
+function describeMembershipItem(item) {
+  let type = '';
+  try {
+    type = String(item.getType());
+  } catch (err) {
+    return null;
+  }
+  const base = {
+    id: item.getId(),
+    type,
+    title: String(item.getTitle() || ''),
+    help: String(item.getHelpText() || ''),
+    required: false,
+    kind: 'unsupported'
+  };
+  if (MEMBERSHIP_DISPLAY_TYPES.indexOf(type) !== -1) {
+    base.kind = 'display';
+    return base;
+  }
+  if (MEMBERSHIP_FIELD_TYPES.indexOf(type) === -1) return base;
+
+  base.kind = 'field';
+  try {
+    if (type === 'TEXT') {
+      base.required = item.asTextItem().isRequired();
+    } else if (type === 'PARAGRAPH_TEXT') {
+      base.required = item.asParagraphTextItem().isRequired();
+    } else if (type === 'MULTIPLE_CHOICE' || type === 'CHECKBOX') {
+      const typed = type === 'CHECKBOX' ? item.asCheckboxItem() : item.asMultipleChoiceItem();
+      base.required = typed.isRequired();
+      base.choices = typed.getChoices().map(choice => String(choice.getValue()));
+      // "Other" is a text box wearing a choice's clothes, and a form that
+      // offers it usually needs it (an address type, a referral source). The
+      // page draws the extra box; createResponse() accepts the typed value
+      // only because the item allows it.
+      base.hasOther = !!typed.hasOtherOption();
+    } else if (type === 'LIST') {
+      const typed = item.asListItem();
+      base.required = typed.isRequired();
+      base.choices = typed.getChoices().map(choice => String(choice.getValue()));
+      base.hasOther = false;
+    } else if (type === 'SCALE') {
+      const typed = item.asScaleItem();
+      base.required = typed.isRequired();
+      base.lowerBound = typed.getLowerBound();
+      base.upperBound = typed.getUpperBound();
+      base.lowerLabel = String(typed.getLeftLabel() || '');
+      base.upperLabel = String(typed.getRightLabel() || '');
+    } else if (type === 'DATE') {
+      const typed = item.asDateItem();
+      base.required = typed.isRequired();
+      // A date question with the year switched off cannot take a year in its
+      // response, so the page is told which shape this one is.
+      base.includesYear = typed.includesYear ? !!typed.includesYear() : true;
+    } else if (type === 'TIME') {
+      base.required = item.asTimeItem().isRequired();
+    }
+  } catch (err) {
+    // An item that will not describe itself is not one to guess at.
+    log(`⚠️ Membership item "${base.title}" (${type}) could not be read: ${err}`);
+    base.kind = 'unsupported';
+  }
+  return base;
+}
+
+/**
+ * THE MEMBERSHIP SCREEN'S READ. Payload: { pin }. Returns the shape above.
+ *
+ * Gated on the desk PIN like every other endpoint on this page — see the
+ * section note for why the gate is the tablet's rather than the applicant's.
+ */
+function doorMembershipForm(payload) {
+  const args = parseCheckInPayload(payload);
+  if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
+  return membershipFormShape();
+}
+
+/**
+ * THE APPLICATION ITSELF, submitted. Payload:
+ *
+ *   { pin, name, location, answers: [{ id, value }] }
+ *
+ * `value` is a string for text, choice and date/time fields, an array for
+ * checkboxes, a number for a scale. `name` and `location` are for the log line
+ * only — who was at which door — never for the form, whose own questions ask
+ * for whatever the office decided to ask for.
+ *
+ * READ FRESH AND MATCHED BY ID. The live items are re-read here rather than
+ * trusted from the page: a form edited between the open and the submit would
+ * otherwise have answers written against the questions it USED to have, which
+ * is the one failure mode worse than dropping the application. An id the form
+ * no longer has is refused in words rather than quietly skipped.
+ *
+ * ALL OR NOTHING. Every item response is built BEFORE anything is submitted,
+ * so a value one item refuses stops the whole submission instead of filing
+ * half an application that looks complete to whoever reads it.
+ */
+function doorMembershipSubmit(payload) {
+  const args = parseCheckInPayload(payload);
+  if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
+
+  const formId = getMembershipFormId();
+  if (!formId) {
+    return { ok: false, message: 'No membership application is set up in this workbook — nothing was sent.' };
+  }
+  let form;
+  try {
+    form = FormApp.openById(formId);
+  } catch (err) {
+    log(`⚠️ Membership application (${formId}) could not be opened to submit: ${err}`);
+    return { ok: false, url: membershipFallbackUrl(formId), message: MEMBERSHIP_NO_ACCESS_MESSAGE };
+  }
+
+  const answers = Array.isArray(args.answers) ? args.answers : [];
+  const built = buildMembershipItemResponses(form, answers);
+  if (built.problems.length) {
+    return { ok: false, message: built.problems[0], problems: built.problems };
+  }
+
+  try {
+    let response = form.createResponse();
+    built.responses.forEach(itemResponse => { response = response.withItemResponse(itemResponse); });
+    response.submit();
+  } catch (err) {
+    log(`⚠️ A membership application could not be submitted (${formId}): ${err}`);
+    return {
+      ok: false,
+      url: membershipFallbackUrl(formId),
+      message: 'The application could not be sent from this tablet. ' +
+        'Nothing was recorded — ask a staff member, or use the link below.'
+    };
+  }
+
+  const name = String(args.name || '').trim();
+  const location = String(args.location || '').trim();
+  log(`Membership application submitted at the door${location ? ` (${location})` : ''}` +
+    `${name ? ` by ${name}` : ''}.`);
+  // THE APPLICATION ITSELF IS THE RECORD — it is in the form's own responses,
+  // where memberships are processed, and that is true whether or not anything
+  // below is ever read. The digest note rides the same collector the rest of
+  // the door's notes do (see noteForAdmin), so it reaches the office on the
+  // next sync that flushes one; the log line above is what is there
+  // immediately.
+  noteForAdmin('Membership applications from the door',
+    `${name || 'Somebody'} filled in the membership application at the door` +
+    `${location ? ` at ${location}` : ''} — it is in the application form's responses.`);
+  return {
+    ok: true,
+    message: name
+      ? `✅ Thank you, ${name} — your membership application has been sent to the office.`
+      : '✅ Your membership application has been sent to the office.'
+  };
+}
+
+/**
+ * The answers, turned into ItemResponses against the form's LIVE items.
+ *
+ * Returns { responses, problems }. A problem is a sentence for the person at
+ * the door, not a stack trace: a required question left blank, an answer the
+ * item refuses, a question the form no longer has. The first one is what the
+ * screen says; all of them come back so a page can mark every field at once.
+ *
+ * A blank OPTIONAL answer is left out entirely rather than submitted as '' —
+ * an empty item response is refused by Forms, and "they did not answer" is
+ * exactly what leaving it out means.
+ */
+function buildMembershipItemResponses(form, answers) {
+  const byId = {};
+  form.getItems().forEach(item => { byId[String(item.getId())] = item; });
+  const given = {};
+  (answers || []).forEach(answer => {
+    if (answer && answer.id !== undefined && answer.id !== null) given[String(answer.id)] = answer.value;
+  });
+
+  const responses = [];
+  const problems = [];
+  Object.keys(given).forEach(id => {
+    if (!byId[id]) {
+      problems.push('This application has changed since it was opened. ' +
+        'Start it again, or ask a staff member.');
+    }
+  });
+  if (problems.length) return { responses, problems };
+
+  form.getItems().forEach(item => {
+    const described = describeMembershipItem(item);
+    if (!described || described.kind === 'display') return;
+    const value = given[String(item.getId())];
+    const empty = value === undefined || value === null || value === '' ||
+      (Array.isArray(value) && !value.length);
+    if (described.kind === 'unsupported') {
+      if (described.required) {
+        problems.push(`"${described.title}" cannot be filled in on the tablet. ` +
+          'Use the link to the full form, or ask a staff member.');
+      }
+      return;
+    }
+    if (empty) {
+      if (described.required) problems.push(`"${described.title}" is required.`);
+      return;
+    }
+    try {
+      responses.push(membershipItemResponse(item, described, value));
+    } catch (err) {
+      // The item itself refused the answer — a choice that is not on its list,
+      // a scale value out of range, a date that will not parse. Reported
+      // against the question it belongs to.
+      problems.push(`"${described.title}" was not accepted (${err}).`);
+    }
+  });
+  return { responses, problems };
+}
+
+/** One answer against one live item. Throws whatever the item throws. */
+function membershipItemResponse(item, described, value) {
+  switch (described.type) {
+    case 'TEXT':
+      return item.asTextItem().createResponse(String(value));
+    case 'PARAGRAPH_TEXT':
+      return item.asParagraphTextItem().createResponse(String(value));
+    case 'MULTIPLE_CHOICE':
+      return item.asMultipleChoiceItem().createResponse(String(value));
+    case 'LIST':
+      return item.asListItem().createResponse(String(value));
+    case 'CHECKBOX':
+      return item.asCheckboxItem().createResponse(
+        (Array.isArray(value) ? value : [value]).map(v => String(v)));
+    case 'SCALE': {
+      const num = Number(value);
+      if (isNaN(num)) throw new Error('that is not a number');
+      return item.asScaleItem().createResponse(num);
+    }
+    case 'DATE': {
+      // parseDateKey() hands back an Invalid Date rather than a null for
+      // anything it cannot read, so the shape is checked before the value.
+      const text = String(value);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error('that is not a date');
+      const date = parseDateKey(text);
+      if (isNaN(date.getTime())) throw new Error('that is not a date');
+      return item.asDateItem().createResponse(date);
+    }
+    case 'TIME': {
+      const parts = String(value).split(':');
+      const hour = Number(parts[0]);
+      const minute = Number(parts[1]);
+      if (isNaN(hour) || isNaN(minute)) throw new Error('that is not a time');
+      return item.asTimeItem().createResponse(hour, minute);
+    }
+    default:
+      throw new Error(`${described.type} cannot be filled in on the tablet`);
+  }
 }
