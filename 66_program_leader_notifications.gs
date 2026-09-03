@@ -96,8 +96,23 @@ const LEADER_ALERT_FORWARD_DAYS = 60;
  */
 const LEADER_ALERT_MAX_EMAILS_PER_RUN = 25;
 
-/** Leave this much of the daily mail quota for everything else that sends. */
-const LEADER_ALERT_QUOTA_RESERVE = 10;
+/**
+ * The floor this pass will not dig the day's mail quota below — the `reserve`
+ * sendRationedEmail() is given (section 9f).
+ *
+ * HALF THE CONSUMER ALLOWANCE, and deliberately not the same number as
+ * REMINDER_QUOTA_RESERVE, because THIS PASS RUNS FIRST: the registration
+ * import calls it and then, twenty lines later, calls the reminder pass in
+ * the same execution off the same hundred messages. A roster alert says
+ * something changed and is worth reading tomorrow if it has to wait; a
+ * reminder names the time somebody is expected somewhere and is worth
+ * nothing at all the day after. So the pass that goes first stops well short
+ * and leaves the rest for the one that follows — whatever is held back here
+ * keeps its old snapshot and goes out on the next sync.
+ *
+ * On a Workspace account (1500 a day) neither number is ever reached.
+ */
+const LEADER_ALERT_QUOTA_RESERVE = 50;
 
 /** How many changed lines one program contributes before the email summarizes instead. */
 const LEADER_ALERT_MAX_LINES_PER_PROGRAM = 40;
@@ -442,7 +457,6 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     diffs[key] = diffLeaderAlertRosters(stored.roster, rosters[key] || {}, window);
   });
 
-  let quota = leaderAlertRemainingQuota();
   let sent = 0;
   // A program is re-baselined only once NOBODY is still owed its current
   // changes. Any leader who was skipped or whose mail bounced puts every
@@ -470,35 +484,45 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     });
     if (programs.length === 0) return;
 
-    if (sent >= LEADER_ALERT_MAX_EMAILS_PER_RUN || quota <= LEADER_ALERT_QUOTA_RESERVE) {
+    if (sent >= LEADER_ALERT_MAX_EMAILS_PER_RUN) {
       programs.forEach(program => { stillOwed[program.key] = true; });
       skipped.push(leader.email);
       return;
     }
 
-    try {
-      // BCC, not CC: the leader is being told about their own roster, and a
-      // visible office address on it invites a reply-all thread nobody at the
-      // desk wants. Blank means copy nobody. Every BCC'd recipient costs a
-      // message against the same MailApp daily quota this loop is rationing,
-      // so it is counted below rather than treated as free.
-      const archiveCopy = getArchiveCopyEmail();
-      const options = { to: leader.email, subject: buildLeaderAlertSubject(programs), body: buildLeaderAlertBody(leader, programs) };
-      if (archiveCopy) options.bcc = archiveCopy;
-      MailApp.sendEmail(options);
+    // The quota, the archive BCC, the send itself and the refused-address rule
+    // are section 9f's — this pass decides only WHO is written to, what the
+    // message says, and how much of a scarce quota it may spend (`reserve`).
+    const outcome = sendRationedEmail({
+      to: leader.email,
+      subject: buildLeaderAlertSubject(programs),
+      body: buildLeaderAlertBody(leader, programs),
+      reserve: LEADER_ALERT_QUOTA_RESERVE
+    });
+
+    if (outcome.status === 'sent') {
       sent++;
-      quota -= archiveCopy ? 2 : 1;
       programs.forEach(program => { told[program.key] = true; });
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
         `${programs.reduce((sum, p) => sum + p.changes.length, 0)} change(s).`);
-    } catch (err) {
-      // The snapshot stays put, so these changes are reported again next hour
-      // rather than lost. Told to the admin because an address that bounces
-      // off MailApp will keep bouncing until somebody corrects the row.
-      programs.forEach(program => { stillOwed[program.key] = true; });
-      log(`⚠️ Could not send the roster alert to ${leader.email} (${err}).`);
+      return;
+    }
+
+    // Nothing went out, whatever the reason: the snapshot stays put, so these
+    // changes are reported again next hour rather than lost.
+    programs.forEach(program => { stillOwed[program.key] = true; });
+    if (outcome.status === 'held') {
+      skipped.push(leader.email);
+      return;
+    }
+    log(`⚠️ Could not send the roster alert to ${leader.email} (${outcome.error}).`);
+    if (outcome.status === 'failed') {
+      // Told to the admin because an address that bounces off MailApp will keep
+      // bouncing until somebody corrects the row. Only on the refusal itself:
+      // a message suppressed because that address was already refused this run
+      // has been reported once already, and twice is noise.
       noteForAdmin('Roster alerts that could not be sent',
-        `${leader.email} could not be emailed (${err}). The changes are not lost — they will be ` +
+        `${leader.email} could not be emailed (${outcome.error}). The changes are not lost — they will be ` +
         `reported again on the next sync. Check the address on the ${SHEET_NAMES.PROGRAM_LEADERS} tab.`);
     }
   });
@@ -547,25 +571,6 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       `next sync.`);
   }
   return sent;
-}
-
-/**
- * How many more messages MailApp will accept today.
- *
- * Guarded and optimistic on failure: the quota call itself can throw (an
- * authorization scope not yet granted, most often on the very first run after
- * a deploy), and refusing to send anything because we could not ASK about the
- * quota would turn a permissions hiccup into silence. A real over-quota send
- * throws on the send instead, which is handled.
- */
-function leaderAlertRemainingQuota() {
-  try {
-    const remaining = MailApp.getRemainingDailyQuota();
-    return typeof remaining === 'number' ? remaining : LEADER_ALERT_MAX_EMAILS_PER_RUN;
-  } catch (err) {
-    log(`ℹ️ Could not read the remaining mail quota (${err}) — sending up to the per-run cap anyway.`);
-    return LEADER_ALERT_MAX_EMAILS_PER_RUN;
-  }
 }
 
 

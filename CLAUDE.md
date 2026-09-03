@@ -265,6 +265,17 @@ was a design goal, not an accident.
 |---|--:|---|
 | `75_sliced_jobs.gs` | 312 | `runSlicedJob` — the state machine every multi-execution job in this project runs on: the watchdog armed before work starts, the deadline, the slice counter, stall and consecutive-error detection, and the hand-off trigger. `runSlicedItems` is the one-item-one-lock-hold inner loop the two form sweeps (`32`, `49`) share. Behavior only; the four callers supply their own state, their own budgets, and every word the person reads. |
 
+### Every email this workbook sends (74)
+
+Numbered last, and for the usual reason: it is behavior only, it defines two
+constants nothing else derives from, it reads no other file's constants at load
+time, and `66` and `70` reach it through a hoisted function declaration — so
+whatever order the project's files come in, it is there when they call it.
+
+| File | | What is in it |
+|---|--:|---|
+| `74_rationed_mailer.gs` | 226 | `sendRationedEmail` — the plumbing every send to somebody outside the workbook shares: the once-per-execution read of `MailApp.getRemainingDailyQuota()` and the floor each caller refuses to dig below, the archive BCC (counted as its own message, because it is one), the send, the refused address remembered so the run stops paying to be told no twice, and the caller's ledger written only once the message is away. **The policies stay with their callers** — who is written to, what it says, how often, and how much of the day's hundred messages a pass may spend live in `66` and `70`. `notifyAdmin` (`15`) deliberately does not come through here; the banner says why. |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is

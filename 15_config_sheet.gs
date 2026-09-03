@@ -961,6 +961,13 @@ function claimTriggerOwnership(email) {
 /**
  * Sends one admin email, if an address is configured. Never throws — a
  * failed notification must not take down the sync that triggered it.
+ *
+ * DELIBERATELY NOT RATIONED. Every other send in this workbook goes through
+ * sendRationedEmail() (section 9f) and stops short of a floor; this one is the
+ * floor's reason for existing. It is one message to one address saying
+ * something went wrong — quite possibly that mail is over quota — and holding
+ * back the message that reports the shortage is exactly backwards. It is small
+ * and it is rare; the rationed callers leave room for it.
  */
 function notifyAdmin(subject, body) {
   const email = getAdminNotificationEmail();
