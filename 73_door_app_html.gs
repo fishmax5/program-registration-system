@@ -435,9 +435,18 @@ function buildDoorAppHtml(options) {
     main.appendChild(footer());
   }
 
-  /** Sorted and headed on the LAST word of the name — the surname, usually. */
+  /**
+   * Sorted and headed on the LAST WORD OF THE NAME — the surname, usually.
+   *
+   * A TRAILING PARENTHETICAL IS NOT PART OF THE NAME. Somebody typed into a
+   * registration as "Robert Klein (wheelchair)" or "Jane Doe (grandmother)"
+   * still surnames Klein and Doe — the parenthetical is a note that rode along
+   * on the name field, and without stripping it first, sortKey() would read it
+   * as the last word and file the card under "(" instead of under K or D.
+   */
   function sortKey(name) {
-    var parts = String(name || '').trim().split(/\\s+/);
+    var stripped = String(name || '').replace(/\\s*\\([^()]*\\)\\s*$/, '').trim();
+    var parts = (stripped || String(name || '').trim()).split(/\\s+/);
     return (parts.length ? parts[parts.length - 1] : String(name || '')).toUpperCase();
   }
 
@@ -472,6 +481,16 @@ function buildDoorAppHtml(options) {
     if (p.here) bits.push('Already signed in');
     if ((p.registered || []).length) bits.push((p.registered || []).map(titleOf).join(', '));
     if (p.lunchRegistered) bits.push('lunch ordered');
+    // GUESTS LIVE UNDER THE MEMBER WHO BROUGHT THEM (see readWalkInDay()'s
+    // guest-folding), not as cards of their own — one line here says who else
+    // is in the party, and tapping this card signs the whole party in.
+    if ((p.guests || []).length) {
+      bits.push('with ' + (p.guests.length === 1 ? 'guest' : 'guests') + ': ' +
+        p.guests.map(function (g) { return g.name; }).join(', '));
+    }
+    // AN ORPHAN GUEST — the host is not expected today, so there is no party
+    // to fold this card into. Labelled rather than left to read as a stranger.
+    if (p.guestOf) bits.push('guest of ' + p.guestOf);
     b.innerHTML = esc(p.name) + (bits.length ? '<span class="meta">' + esc(bits.join(' · ')) + '</span>' : '');
     b.onclick = function () { choose(p); };
     return b;
@@ -499,6 +518,13 @@ function buildDoorAppHtml(options) {
     main.appendChild(el('p', 'hint',
       'This is what you are down for on ' + DAY.dateLabel +
       '. Change anything that is wrong, then confirm.'));
+    // CONFIRMING FOR THE WHOLE PARTY. A guest nested under this person has no
+    // screen of their own — tapping "Confirm and sign in" below signs them in
+    // too, for whatever they are down for with this person (see walkInSignIn()).
+    if ((PERSON.guests || []).length) {
+      main.appendChild(el('p', 'hint',
+        'Signing in with ' + PERSON.guests.map(function (g) { return g.name; }).join(', ') + '.'));
+    }
 
     var list = el('ul', 'list', '');
     (DAY.programs || []).forEach(function (program) { list.appendChild(programItem(program)); });

@@ -99,7 +99,10 @@ function walkInDay(payload) {
  *     programs: [{ value, title, time, byAppointment, noRegistration }],
  *     lunch:    { offered, ruledOut, type, dish, title, value },
  *     people:   [{ name, key, phone, registered[], attended[], lunchRegistered,
- *                  lunchServed, here }],
+ *                  lunchServed, here, guests[], guestOf }] — `guests` is the
+ *               same shape, nested under whoever brought them; `guestOf` only
+ *               ever appears on a guest whose own host is not expected today
+ *               (see the guest-folding pass below),
  *     members:  [{ name, key }]
  *   }
  *
@@ -201,10 +204,24 @@ function readWalkInDay(location, dateKeyOverride) {
           // meal, so the handover is marked on THAT row rather than on
           // whichever program happened to be ticked first. One person can hold
           // three rows today and only one of them ordered food.
-          lunchRegistered: false, lunchOnly: false, lunchOn: '', lunchServed: false, here: false
+          lunchRegistered: false, lunchOnly: false, lunchOn: '', lunchServed: false, here: false,
+          // WHETHER THIS ROW IS ITSELF A GUEST, and of whom — filled in below
+          // and used only by the guest-folding pass at the end of this
+          // function to decide whether this entry hangs off a host or stays a
+          // card of its own. Every other field on a guest's entry means
+          // exactly what it means on anybody else's: their own programs,
+          // their own meal.
+          isGuest: false, primaryOf: ''
         };
         peopleByKey[key] = person;
         people.push(person);
+      }
+      if (map['Person_Type'] !== undefined &&
+        /^guest$/i.test(String(row[map['Person_Type']] || '').trim())) {
+        person.isGuest = true;
+        if (map['Primary_Registrant'] !== undefined) {
+          person.primaryOf = String(row[map['Primary_Registrant']] || '').trim();
+        }
       }
       const attended = map['Attended'] !== undefined && isTruthyCheckbox(row[map['Attended']]);
       if (attended) person.here = true;
@@ -245,9 +262,34 @@ function readWalkInDay(location, dateKeyOverride) {
     });
   }
 
+  // GUESTS FOLD INTO WHOEVER BROUGHT THEM, so the door greets a party rather
+  // than making a volunteer hunt three names on an alphabetical list — the
+  // same judgement nestCheckInGuests() (60_check_in_page_server.gs) makes for
+  // the staff roster. Folded in a pass of its own, after every row is read,
+  // because a host's own row can come before OR after a guest's in the sheet.
+  //
+  // A GUEST WHOSE HOST IS NOT ALSO EXPECTED TODAY stays a card of its own —
+  // the host cancelled and the guest did not, or a name was retyped on one
+  // row and not the other — labelled with whose guest they are (guestOf)
+  // rather than left to look like a stranger.
+  const hosted = [];
+  people.forEach(person => {
+    if (!person.isGuest) { hosted.push(person); return; }
+    const hostKey = person.primaryOf && person.primaryOf !== 'Self'
+      ? normalizeNameKey(person.primaryOf) : '';
+    const host = hostKey ? peopleByKey[hostKey] : null;
+    if (!host || host.isGuest || host === person) {
+      person.guestOf = person.primaryOf;
+      hosted.push(person);
+      return;
+    }
+    host.guests = host.guests || [];
+    host.guests.push(person);
+  });
+
   const meal = getMealInfoForDate(date, loc);
   const mealType = meal ? String(meal.type || '').trim() : '';
-  people.sort((a, b) => a.name.localeCompare(b.name));
+  hosted.sort((a, b) => a.name.localeCompare(b.name));
   programs.sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title));
 
   return {
@@ -269,7 +311,7 @@ function readWalkInDay(location, dateKeyOverride) {
       title: lunchTitle,
       value: sessionValue(lunchTitle)
     },
-    people,
+    people: hosted,
     members: readWalkInMembers(),
     readAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
   };
@@ -441,6 +483,21 @@ function walkInSignIn(payload) {
     if (res && res.ok) {
       done++;
       if (!firstProgramValue) firstProgramValue = program.value;
+      // THE PARTY ARRIVES TOGETHER. A guest nested under this person (see
+      // readWalkInDay()'s guest-folding) has no card of their own to tap — they
+      // are at the door because the person who brought them is — so marking
+      // the host present for a program marks whoever is down for that same
+      // program with them, too. Only for the programs the guest is ALSO
+      // registered for: a guest never gets a program the host merely ticked
+      // for themselves.
+      (person && person.guests || []).forEach(guest => {
+        if (guest.registered.indexOf(program.value) === -1) return;
+        const guestRes = applyQuickMarkFromDialog({
+          location, session: program.value, name: guest.name, attended: true, register: false
+        });
+        lines.push((guestRes && guestRes.message)
+          ? `${guest.name}: ${guestRes.message}` : `⚠️ ${guest.name} — nothing came back.`);
+      });
     }
   });
 
