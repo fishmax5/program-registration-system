@@ -55,7 +55,7 @@ Line counts are a rough guide to what you are about to load.
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
 | `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
-| `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
+| `04_settings_and_config.gs` | 498 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off, and the Admin Notification Emails table (`ADMIN_NOTIFICATION_CATEGORIES`: who in the office is copied on which outbound mail, replacing the retired single Admin Notification / Archive Copy cells) — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
 | `07_dates_and_labels.gs` | 589 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
@@ -69,9 +69,9 @@ Line counts are a rough guide to what you are about to load.
 | File | | What is in it |
 |---|--:|---|
 | `12_sheet_setup.gs` | 213 | `initSheet` and the `Lunch_Schedule` tab's own setup. |
-| `13_lunch_only_signup_form.gs` | 998 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. |
+| `13_lunch_only_signup_form.gs` | 1032 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. Also the shared sheet-shaping helpers it grew around: `autosizeColumns`, and `ensureSheetColumns` (a layout that outgrows a tab's column count is a throw, not a resize). |
 | `14_saved_column_widths.gs` | 462 | "This column should be this wide, always." |
-| `15_config_sheet.gs` | 923 | Drawing and validating the Config tab. |
+| `15_config_sheet.gs` | 1130 | Drawing and validating the Config tab, reading its settings back (`getAdminNotificationRows` / `adminEmailsForCategory` among them), and `notifyAdmin`. |
 
 ### Menus, triggers, and edits (16–18)
 
@@ -276,7 +276,7 @@ it is there when they call it.
 
 | File | | What is in it |
 |---|--:|---|
-| `76_rationed_mailer.gs` | 226 | `sendRationedEmail` — the plumbing every send to somebody outside the workbook shares: the once-per-execution read of `MailApp.getRemainingDailyQuota()` and the floor each caller refuses to dig below, the archive BCC (counted as its own message, because it is one), the send, the refused address remembered so the run stops paying to be told no twice, and the caller's ledger written only once the message is away. **The policies stay with their callers** — who is written to, what it says, how often, and how much of the day's hundred messages a pass may spend live in `66` and `70`. `notifyAdmin` (`15`) deliberately does not come through here; the banner says why. |
+| `76_rationed_mailer.gs` | 254 | `sendRationedEmail` — the plumbing every send to somebody outside the workbook shares: the once-per-execution read of `MailApp.getRemainingDailyQuota()` and the floor each caller refuses to dig below, the office BCC the caller resolves from its own Config category (each address counted as its own message, because it is one), the send, the refused address remembered so the run stops paying to be told no twice, and the caller's ledger written only once the message is away. **The policies stay with their callers** — who is written to, what it says, how often, and how much of the day's hundred messages a pass may spend live in `66` and `70`. `notifyAdmin` (`15`) deliberately does not come through here; the banner says why. |
 
 ## Conventions
 

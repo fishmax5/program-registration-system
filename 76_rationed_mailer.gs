@@ -5,7 +5,7 @@
 // Two passes in this workbook send mail to people outside it — the roster
 // alerts (section 9d) and the registrant reminders (section 9e) — and they
 // each grew the same four pieces of plumbing around MailApp.sendEmail:
-// ask what quota is left, add the archive BCC, send, and record it so the
+// ask what quota is left, add the office's BCC, send, and record it so the
 // next hourly sync does not send it again. Two copies of that is two places
 // for the same bug, and they had already drifted: one counted a refused
 // address against the run, the other retried it once per message.
@@ -30,8 +30,9 @@
 //   1. ONE ESTIMATE, SHARED. The remaining quota is read once per execution
 //      and decremented as messages go out, so the reminder pass starts from
 //      what the alert pass actually left rather than from its own hopeful
-//      re-read. A BCC is its own message against the same allowance, so it
-//      is counted at two, not one.
+//      re-read. Every BCC'd office address is its own message against the same
+//      allowance, so a send is counted at one plus however many of them there
+//      are, never at one.
 //
 //   2. EACH CALLER NAMES A FLOOR IT WILL NOT DIG BELOW (`reserve`), and the
 //      pass that runs first names a floor high enough to leave the second one
@@ -132,6 +133,27 @@ function resetRationedMailState() {
 }
 
 /**
+ * The `bcc` a caller handed over, as a list this can actually send and count:
+ * an array or a comma-separated string in, deduped lowercase addresses out.
+ *
+ * Anything with no "@" in it is dropped rather than sent to — a typo'd office
+ * address would otherwise cost a message per send to be told no, and the
+ * refusal would be remembered against a name nobody meant to use.
+ */
+function normalizeBccList(bcc) {
+  const raw = Array.isArray(bcc) ? bcc : String(bcc === null || bcc === undefined ? '' : bcc).split(',');
+  const seen = {};
+  const list = [];
+  raw.forEach(entry => {
+    const address = String(entry || '').trim().toLowerCase();
+    if (address.indexOf('@') <= 0 || seen[address]) return;
+    seen[address] = true;
+    list.push(address);
+  });
+  return list;
+}
+
+/**
  * Sends one message, if the day's quota can afford it and the address has not
  * already been refused this run.
  *
@@ -140,11 +162,16 @@ function resetRationedMailState() {
  *   subject      }
  *   body         } plain text — see buildRegistrantReminderBody() for why.
  *   reserve      the floor this caller will not dig the day's quota below.
- *   archiveCopy  false to send to `to` alone. Otherwise the configured archive
- *                address is BCC'd — BCC and not CC, because these messages
- *                tell one person about their own registration and a visible
- *                office address on them invites a reply-all thread nobody at
- *                the desk wants. Blank in Config means copy nobody.
+ *   bcc          who in the office is copied on this one: an array of
+ *                addresses, a comma-separated string, or nothing at all for a
+ *                message to `to` alone. The CALLER resolves it, because which
+ *                addresses those are is a policy question its own category on
+ *                Config answers — adminEmailsForCategory('leaderRosterAlerts')
+ *                for section 9d, ('registrantReminders') for 9e — and an empty
+ *                list means copy nobody, exactly as a blank cell used to.
+ *                BCC and not CC, because these messages tell one person about
+ *                their own registration and a visible office address on them
+ *                invites a reply-all thread nobody at the desk wants.
  *   alreadySent  optional () => boolean: the caller's ledger, consulted before
  *                the send. A caller may well have checked it already; this is
  *                the check that is guaranteed to have run.
@@ -186,11 +213,12 @@ function sendRationedEmail(request) {
     return result;
   }
 
-  const archiveCopy = req.archiveCopy === false
-    ? '' : String(getArchiveCopyEmail() || '').trim();
-  // A BCC'd recipient costs its own message against the same daily quota this
-  // is rationing, so it is counted rather than treated as free.
-  const cost = archiveCopy ? 2 : 1;
+  const bccList = normalizeBccList(req.bcc);
+  // EACH BCC'd recipient costs its own message against the same daily quota
+  // this is rationing, so they are counted rather than treated as free — a
+  // three-name office list makes every send cost four, and a pass that ignored
+  // that would spend four times its share of a hundred.
+  const cost = 1 + bccList.length;
   const reserve = Number(req.reserve) || 0;
   if (rationedMailRemainingQuota() - cost < reserve) {
     result.status = 'held';
@@ -203,7 +231,7 @@ function sendRationedEmail(request) {
     subject: String(req.subject === null || req.subject === undefined ? '' : req.subject),
     body: String(req.body === null || req.body === undefined ? '' : req.body)
   };
-  if (archiveCopy) options.bcc = archiveCopy;
+  if (bccList.length > 0) options.bcc = bccList.join(',');
 
   try {
     MailApp.sendEmail(options);

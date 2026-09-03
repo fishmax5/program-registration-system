@@ -14,11 +14,6 @@ const CONFIG_LAYOUT = {
     startCol: 6,
     headers: ['Order_Ahead_Days']
   },
-  ADMIN_NOTIFICATIONS: {
-    title: '📧 Admin Notifications',
-    startCol: 8,
-    headers: ['Admin_Notification_Email']
-  },
   CATERING_POLICY: {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
@@ -44,38 +39,105 @@ const CONFIG_LAYOUT = {
     startCol: 21,
     headers: ['Registration_Open_Through']
   },
-  ARCHIVE_COPY: {
-    title: '🗄️ Archive Copy Address',
-    startCol: 23,
-    headers: ['Archive_Copy_Email']
-  },
   MEMBERSHIP_FORM: {
     title: '🪪 Membership Application Form',
     startCol: 25,
     headers: ['Membership_Form_Id']
+  },
+  // Deliberately last and off on its own past MEMBERSHIP_FORM rather than
+  // widened in place at its old column 8: every section between there and
+  // MEMBERSHIP_FORM (Catering Policy, Link Display, Automation, Calendar
+  // Invitations, Registration Horizon) is a LIVE setting on every workbook
+  // already running this project, keyed by column. Reflowing them to make
+  // room for four new checkbox columns would silently move
+  // Automation_Enabled, Trigger_Owner and the rest to columns nothing has
+  // written data into yet — which reads as blank, and a blank
+  // Automation_Enabled reads as "on" (see DEFAULT_AUTOMATION_ENABLED). That
+  // is a live-system safety hazard for one column count problem, so this
+  // table gets fresh columns instead and the two retired single-cell
+  // sections (see RETIRED_ADMIN_NOTIFICATION_COL / RETIRED_ARCHIVE_COPY_COL
+  // below) are read where they stand and then cleared, never shifted.
+  ADMIN_NOTIFICATIONS: {
+    title: '📧 Admin Notification Emails',
+    startCol: 27,
+    headers: ['Email', 'Sync_Digest', 'Leader_Roster_Alerts', 'Registrant_Reminders', 'Calendar_Invite_Guest']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24];
+// The blank columns between the blocks above. Columns 8 and 23 are blank too,
+// but they are not spacers — they are where the two retired sections stood
+// until the migration cleared them (RETIRED_ADMIN_NOTIFICATION_COL /
+// RETIRED_ARCHIVE_COPY_COL), and naming them here would invite somebody to
+// close the gap by moving a live section into one.
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26];
 
 /**
- * WHY AN ARCHIVE COPY EXISTS AT ALL. Everything this system sends leaves the
+ * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the
  * organization: a roster alert goes to a program leader who is not on staff, a
- * calendar invitation goes to whoever typed an address into a registration
- * form, a leader's roster sheet is shared out of the workbook by link. None of
- * it lands anywhere the office can look at later — the trigger owner's Sent
- * folder is one particular person's mailbox, and routinely not the person who
- * has to answer for what was sent.
+ * reminder goes to a member, a calendar invitation goes to whoever typed an
+ * address into a registration form. None of it lands anywhere the office can
+ * look at later — the trigger owner's Sent folder is one particular person's
+ * mailbox, and routinely not the person who has to answer for what was sent.
  *
- * So one address gets a copy of all three: BCC'd on leader alerts, added as a
- * guest on any event registrants are invited to, and made an editor of every
- * file this system shares. It is a Config cell rather than a constant so the
- * office can repoint or empty it without a code change — BLANK means "copy
- * nobody", exactly like the admin notification address above it.
+ * This was two single-address Config cells: Admin_Notification_Email (the
+ * per-sync digest) and Archive_Copy_Email (copied on everything else). One
+ * address each, the same address on all of it, and no way to say "the lunch
+ * coordinator wants the leader alerts but not the sync digest". The table
+ * replacing them (CONFIG_LAYOUT.ADMIN_NOTIFICATIONS) is that sentence: one row
+ * per person, one checkbox per category they are copied on.
  *
- * The default below is seeded on a fresh Config tab only; a workbook whose
- * cell has already been cleared by hand stays cleared.
+ * NOTHING IS SEEDED INTO IT. An address nobody typed is an address nobody
+ * asked to hear from, so a fresh table means "tell nobody" — every category
+ * reads an empty list as "copy nobody", exactly as a blank cell always did.
+ * The two old cells are the one exception: a workbook that already had them
+ * filled in gets them carried across, ticked for the categories they used to
+ * cover (see migrateLegacyAdminNotificationColumns()).
  */
-const DEFAULT_ARCHIVE_COPY_EMAIL = 'admin@newhorizonsseniorcenter.org';
+const ADMIN_NOTIFICATION_MAX_ROWS = 5;
+
+/**
+ * The categories a row in that table can be ticked for, and where each
+ * checkbox sits relative to CONFIG_LAYOUT.ADMIN_NOTIFICATIONS.startCol (the
+ * Email column is offset 0). `key` is what the row object reads back as —
+ * see getAdminNotificationRows() and adminEmailsForCategory().
+ *
+ *   SYNC_DIGEST            The per-sync digest notifyAdmin() sends: waitlisted
+ *                          registrants, forms that failed to open, triaged
+ *                          events, a door sign-in that did not complete. Was
+ *                          Admin_Notification_Email.
+ *   LEADER_ROSTER_ALERTS   BCC on the roster-change email a program leader
+ *                          gets (section 9d). Was Archive_Copy_Email.
+ *   REGISTRANT_REMINDERS   BCC on the reminder a registrant gets (section 9e).
+ *                          Was Archive_Copy_Email.
+ *   CALENDAR_INVITE_GUEST  Added as a GUEST on any event a registrant is
+ *                          invited to (section 5b). Was Archive_Copy_Email.
+ *                          A guest, not a CC — Google mails them the invitation
+ *                          itself — so it is a tick per person, not a BCC line.
+ *
+ * BEING AN EDITOR of the leader sheets and forms this system shares is
+ * deliberately NOT a category. It is not mail at all, it is standing access to
+ * a file, and a fifth checkbox for one Drive grant would suggest otherwise.
+ * Every address in the table gets it, ticked or not, which is what
+ * Archive_Copy_Email always did — see openUpFileToAnyoneWithLink().
+ */
+const ADMIN_NOTIFICATION_CATEGORIES = [
+  { key: 'syncDigest', header: 'Sync_Digest', offset: 1 },
+  { key: 'leaderRosterAlerts', header: 'Leader_Roster_Alerts', offset: 2 },
+  { key: 'registrantReminders', header: 'Registrant_Reminders', offset: 3 },
+  { key: 'calendarInviteGuest', header: 'Calendar_Invite_Guest', offset: 4 }
+];
+
+/**
+ * RETIRED (September 2026), and named here only so the one-time migration can
+ * find them: the two single-address cells the table above replaced, at the
+ * columns they have always occupied. Nothing else reads these positions any
+ * more, and migrateLegacyAdminNotificationColumns() clears them once it has
+ * carried their values across — but only when the banner above the column
+ * still says what it said, so a column somebody has since repurposed by hand
+ * is left alone.
+ */
+const RETIRED_ADMIN_NOTIFICATION_COL = { title: '📧 Admin Notifications', col: 8 };
+const RETIRED_ARCHIVE_COPY_COL = { title: '🗄️ Archive Copy Address', col: 23 };
+
 /**
  * THE MEMBERSHIP APPLICATION THE DOOR HANDS OUT.
  *

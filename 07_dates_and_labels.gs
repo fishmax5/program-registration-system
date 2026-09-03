@@ -155,6 +155,17 @@ function applyValueListValidationBounded(sheet, colIndex, options, startRow, num
 }
 
 /**
+ * Same idea for a YES/NO cell: a checkbox, which is TRUE or FALSE and cannot
+ * be typed into as "y", "yes please" or a stray space. Every tick box in the
+ * workbook is built on this one implementation.
+ */
+function applyCheckboxValidationBounded(sheet, colIndex, startRow, numRows) {
+  if (!colIndex || colIndex < 1 || numRows < 1) return;
+  const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
+}
+
+/**
  * Same, but SUGGESTING rather than restricting: the list drops down, and a
  * value that isn't on it is still accepted. For cells where the list is a
  * convenience and the vocabulary is genuinely open — a walk-in's name, a

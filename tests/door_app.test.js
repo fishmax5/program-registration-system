@@ -195,10 +195,14 @@ ok('"just today" writes nothing at all',
 // 6. doorSignIn() — the app does not wait on it (see 73's send()), so this is
 //    the only place a failed sign-in is ever going to be seen. It has to
 //    catch everything walkInSignIn() can do and turn it into one admin email,
-//    same address notifyAdmin() already uses everywhere else — except a wrong
-//    PIN, which the app still catches and re-prompts for itself.
+//    to the same people notifyAdmin() already reaches everywhere else — the
+//    Sync_Digest ticks on Config's Admin Notification Emails table — except a
+//    wrong PIN, which the app still catches and re-prompts for itself.
 // ---------------------------------------------------------------------------
-sandbox.getAdminNotificationEmail = () => 'admin@example.org';
+sandbox.getAdminNotificationRows = () => [
+  { email: 'admin@example.org', syncDigest: true, leaderRosterAlerts: false,
+    registrantReminders: false, calendarInviteGuest: false }
+];
 const sentMail = [];
 sandbox.MailApp.sendEmail = (to, subject, body) => sentMail.push({ to, subject, body });
 
