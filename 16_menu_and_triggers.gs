@@ -430,6 +430,12 @@ function writeTriggers(force, takingOwnership) {
   let removed = 0;
   removed += resetTriggersForHandler('syncCalendars', () =>
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
+  // AN HOUR AFTER THE CALENDAR SYNC, not alongside it: this reads
+  // Registrant_Dash and the dashboard, and wants that hour's syncCalendars()
+  // run — whatever it moved or added overnight — reflected before it prints,
+  // not raced against it. See autoCreateTodaysSignInSheets() (45).
+  removed += resetTriggersForHandler('autoCreateTodaysSignInSheets', () =>
+    ScriptApp.newTrigger('autoCreateTodaysSignInSheets').timeBased().everyDays(1).atHour(6).create());
   removed += resetTriggersForHandler('syncRegistrations', () =>
     ScriptApp.newTrigger('syncRegistrations').timeBased().everyHours(1).create());
   // THE DOOR'S QUEUE, drained every five minutes. Check-in marks are written
@@ -462,7 +468,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 1 daily, 1 hourly, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);

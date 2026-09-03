@@ -337,6 +337,85 @@ function createSignInSheetPdf(sessionValue, include) {
 }
 
 /**
+ * SCHEDULED ENTRY POINT: prints one sign-in sheet PDF per location that has a
+ * session or catered lunch TODAY, unattended — see writeTriggers() (16) for
+ * the early-morning trigger that calls this. The desk should never have to
+ * remember to press "Print Sign-In Sheet" before the first person walks in.
+ *
+ * Behind the same kill switch as syncCalendars() / syncRegistrations() (see
+ * MANAGED_AUTOMATION_HANDLERS in 04) — this runs on its own, at its own time,
+ * while nobody is watching, which is exactly what that switch exists to stop.
+ *
+ * SAME LOCK AND SAME REASON AS syncRegistrations(): building a sheet reads
+ * Registrant_Dash and then read-modify-writes the sign-in sheet registry (a
+ * single Script Property everything else that prints one also touches), so
+ * two overlapping runs racing that property is worse than one waiting a few
+ * seconds for the other.
+ *
+ * "Active registrations only" — the dialog's own recommended default — since
+ * an unattended run has nobody there to choose "include cancelled/waitlisted".
+ * A location with nothing to print (no active roster and no catered lunch) is
+ * skipped without complaint, exactly like createSignInSheetPdf()'s own guard.
+ */
+function autoCreateTodaysSignInSheets() {
+  if (!automationGateAllows('Auto Sign-In Sheets')) return;
+  recordHandlerRun('autoCreateTodaysSignInSheets');
+
+  if (isBootstrapActive()) {
+    log('autoCreateTodaysSignInSheets: a large-setup import or forms-rebuild sweep is in progress — skipping this run.');
+    return;
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+    log('autoCreateTodaysSignInSheets: another sync is already running — skipping this run.');
+    return;
+  }
+  try {
+    autoCreateTodaysSignInSheetsInternal();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function autoCreateTodaysSignInSheetsInternal() {
+  const todayKey = formatDateKey(new Date());
+  // listSignInSheetOptions() already covers today (its window runs 7 days
+  // back to 45 forward) and already answers the two-source question this
+  // needs — where is somebody expected, where is lunch being served — so this
+  // reuses it rather than re-reading the dashboard and the menu itself.
+  const todays = listSignInSheetOptions().filter(o => o.dateKey === todayKey);
+  if (todays.length === 0) {
+    log(`autoCreateTodaysSignInSheets: nothing scheduled for ${todayKey} — no sheets to print.`);
+    return;
+  }
+
+  const built = [];
+  const skipped = [];
+  todays.forEach(option => {
+    try {
+      const data = collectSignInSheetData(option.dateKey, option.location, false);
+      if (data.rows.length === 0 && !data.meal) {
+        skipped.push(option.location);
+        return;
+      }
+      const file = renderSignInSheetPdf(data);
+      recordSignInSheetPdf(option.dateKey, option.location, file);
+      built.push(`${option.location} (${data.rows.length} name(s))`);
+    } catch (err) {
+      log(`⚠️ autoCreateTodaysSignInSheets: failed to build a sheet for ${option.location} on ${todayKey} (${err}).`);
+    }
+  });
+  flushPersistentRegistries();
+
+  const summary = built.length > 0
+    ? `autoCreateTodaysSignInSheets: built ${built.length} sheet(s) for ${todayKey} — ${built.join('; ')}` +
+      (skipped.length > 0 ? `. Skipped (nothing to print): ${skipped.join(', ')}.` : '.')
+    : `autoCreateTodaysSignInSheets: nothing to print for ${todayKey} (${skipped.length} location(s) had no active registrations or lunch).`;
+  log(summary);
+}
+
+/**
  * Gathers everything one printed sheet needs: the day's meal, the people, and
  * the counts the kitchen is working to.
  *

@@ -337,7 +337,7 @@ const DEFAULT_AUTOMATION_ENABLED = true;
  * next unpause would deliver a pile of changes nobody remembers making. It is
  * still listed by showTriggerStatus() as a trigger the workbook expects.
  */
-const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange'];
+const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange', 'autoCreateTodaysSignInSheets'];
 
 /** Every trigger writeTriggers() maintains — the automation ones plus the edit handler. */
 const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgramFlagEditInstallable']);
