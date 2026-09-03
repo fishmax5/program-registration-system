@@ -604,10 +604,11 @@ function walkInSignIn(payload) {
 
   // THE MEMBERSHIP HAND-OFF, last and never fatal. Somebody who has just told
   // the door they are not a member yet is already inside and signed in; what
-  // is left is the office's to do, and it is recorded rather than sent — see
-  // sendMembershipEmail().
+  // is left is the office's to do. The door app hands them the application
+  // itself on the next screen (see doorMembershipForm); this is the record
+  // that survives them not filling it in — see recordMembershipHandoff().
   if (memberStatus === 'no') {
-    const note = sendMembershipEmail({ name, email, phone, location });
+    const note = recordMembershipHandoff({ name, email, phone, location });
     if (note) lines.push(note);
   }
 

@@ -28,6 +28,12 @@ let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
 let __adminNotificationEmailCache = null;
 let __archiveCopyEmailCache = null;
+let __membershipFormIdCache = null;
+// The door's membership application, read once per execution — see
+// membershipFormShape(). Wrapped ({ shape }) so a form that could NOT be
+// opened is cached as the refusal it is, rather than re-attempting a remote
+// call that has already failed once in this execution.
+let __membershipFormShapeCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
@@ -208,6 +214,8 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationEmailCache = null;
   __archiveCopyEmailCache = null;
+  __membershipFormIdCache = null;
+  __membershipFormShapeCache = null;
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;

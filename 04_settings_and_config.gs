@@ -48,9 +48,14 @@ const CONFIG_LAYOUT = {
     title: '🗄️ Archive Copy Address',
     startCol: 23,
     headers: ['Archive_Copy_Email']
+  },
+  MEMBERSHIP_FORM: {
+    title: '🪪 Membership Application Form',
+    startCol: 25,
+    headers: ['Membership_Form_Id']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24];
 
 /**
  * WHY AN ARCHIVE COPY EXISTS AT ALL. Everything this system sends leaves the
@@ -71,6 +76,50 @@ const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
  * cell has already been cleared by hand stays cleared.
  */
 const DEFAULT_ARCHIVE_COPY_EMAIL = 'admin@newhorizonsseniorcenter.org';
+/**
+ * THE MEMBERSHIP APPLICATION THE DOOR HANDS OUT.
+ *
+ * A Google Form that belongs to the OFFICE, not to this script: it is not one
+ * of the forms this system generates, nothing here decides its questions, and
+ * whoever processes memberships reads its answers in its own response sheet.
+ * The door app reads its items live and draws them as native fields (see
+ * membershipFormShape()), so editing the form is how the door's membership
+ * screen changes — there is no code edit and no redeploy in that loop.
+ *
+ * A CONFIG CELL RATHER THAN A CONSTANT for the usual reason: the office
+ * replaces this form eventually — a new season, a new fee table, a form
+ * somebody rebuilt because the old one filled up — and the replacement is a
+ * new file with a new id. Pasting an id (or the form's whole edit URL, which
+ * is what a browser hands you) into one cell must be the whole operation.
+ *
+ * BLANK MEANS NO APPLICATION AT THE DOOR. The membership screen is not
+ * offered, and a walk-in who says they are not a member yet is recorded for
+ * the office exactly as they were before this existed — which is the behavior
+ * every workbook had, and therefore the only safe reading of an empty cell.
+ *
+ * The default below is seeded onto a fresh Config tab only; a workbook whose
+ * cell has been cleared or repointed by hand stays as staff left it.
+ */
+const DEFAULT_MEMBERSHIP_FORM_ID = '1WCL32W4h3bgbgv4KrKEpnEXKO219lezypNAZ1XXGusk';
+
+/**
+ * A form id out of whatever is actually in that cell.
+ *
+ * Staff paste what their browser gave them, which is an edit URL
+ * ("https://docs.google.com/forms/d/<id>/edit") rather than a bare id — and a
+ * cell holding a URL that reads as "not configured" is a membership screen
+ * that silently never appears. Both shapes are accepted; anything with no
+ * id-shaped run of characters in it returns '' and is treated as blank.
+ */
+function parseFormIdFromConfigValue(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const fromUrl = text.match(/\/forms\/(?:u\/\d+\/)?d\/(?:e\/)?([A-Za-z0-9_-]{10,})/);
+  if (fromUrl) return fromUrl[1];
+  const bare = text.match(/^[A-Za-z0-9_-]{10,}$/);
+  return bare ? bare[0] : '';
+}
+
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 
