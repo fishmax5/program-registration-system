@@ -68,6 +68,17 @@ const PALETTE = {
   ENTRY_HEADER: '#FFF2CC',
   ENTRY_TINT: '#FFFCF0',
 
+  // --- HANDLING washes: what happens to somebody's MEAL (45_sign_in_sheet) --
+  // Two, and only two, because a sign-in sheet with five colours on it has
+  // none. Yellow is "this meal leaves the building", purple is "this meal
+  // needs doing something with here" (fridge, freezer, collected by somebody
+  // else). Both are pale enough that 11pt black over them still clears 4.5:1,
+  // because these wash a WHOLE ROW of a document somebody reads standing up.
+  // Distinct from ENTRY_HEADER's yellow, which means "type here" on a sheet
+  // and never appears on the same page as these.
+  HANDLING_TAKEOUT: '#FFF3B0',
+  HANDLING_SPECIAL: '#E7DBF3',
+
   // --- Tab strip. Deliberately a step STRONGER than anything on a sheet ----
   // A tab is read against Sheets' own grey chrome, not against paper, so the
   // tint layer disappears down there. These say TODAY / SET UP / LISTS /

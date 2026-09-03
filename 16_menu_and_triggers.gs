@@ -133,7 +133,7 @@ function buildAppMenu(ui, includeAdmin) {
   const menu = ui.createMenu(APP_MENU_NAME)
     // --- A SERVING DAY. The whole of ordinary use, at the top, unnested. ---
     .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', 'showQuickMarkDialog')
-    .addItem('\ud83d\udda8\ufe0f Print Sign-In Sheet (PDF)\u2026', 'showSignInSheetDialog')
+    .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', 'showSignInSheetDialog')
     // The tablet at the door is the other half of Quick Mark (section 16), and
     // it is used on exactly the days those two are.
     .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', 'showCheckInPageDialog')

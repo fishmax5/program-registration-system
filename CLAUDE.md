@@ -126,7 +126,7 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `43_program_dashboard.gs` | 552 | `renderProgramDashboard`. |
 | `44_lunch_dashboard.gs` | 1124 | `updateMasterLunchDashboard` and the catering counts. |
-| `45_sign_in_sheet.gs` | 646 | The landscape PDF to mark up by hand. |
+| `45_sign_in_sheet.gs` | 1231 | The desk's sheet for one day and one building — a **live Google Doc**, rebuilt in place so the link never goes stale, filed in `Sign-In Sheets`. Lunch on page one, everybody on page two. One row per PERSON (`signInPersonKey` / `dedupeSignInEntries`: a duplicate's meals take the MAXIMUM, a guest's ADD), and two washes for how a meal is handled — yellow it leaves the building, purple it needs doing something with here. It used to export a PDF and throw the document away; `getOrCreateSignInSheetFolder()` is all that is left of that, for the backfill in `69`. |
 | `46_program_leader_sheets.gs` | 1305 | A live roster shared out of the workbook to a program leader, banded by session. |
 
 ### Repair and last resorts (47–51)
@@ -201,7 +201,7 @@ time. Its two columns live in `03` like every other schema.
 
 | File | | What is in it |
 |---|--:|---|
-| `69_generated_file_links.gs` | 236 | Live links to the files this system makes outside the workbook: the printed sign-in PDF registry (and its one-time folder backfill), and the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
+| `69_generated_file_links.gs` | 278 | Live links to the files this system makes outside the workbook: the sign-in sheet registry (which is also how `45` finds the document to rewrite, rather than making a second one) and its one-time backfill across both the live-Doc folder and the retired PDF one, plus the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
 
 ### How often registrants hear from us (70)
 
