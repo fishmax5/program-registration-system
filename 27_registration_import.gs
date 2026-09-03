@@ -144,7 +144,7 @@ function syncRegistrationsInternal() {
     // A form that cannot be read is one form's problem; it must not be the
     // workbook's.
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       const responses = form.getResponses(lastSync);
       if (responses.length === 0) return; // don't pay for an item index on a form with nothing new
       const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form

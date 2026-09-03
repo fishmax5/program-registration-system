@@ -321,7 +321,7 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
 
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       // NOT recorded as applied. A form that could not be opened has not been
       // migrated, and the next run must try it again — the rebuild pass logs

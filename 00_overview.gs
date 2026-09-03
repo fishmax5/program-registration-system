@@ -445,7 +445,8 @@
  *      - Per-EXECUTION caches (Apps Script globals, which die with the run,
  *        so there is no cross-run staleness to reason about): the
  *        Lunch_Schedule meal index, Config's meal buffers + order-ahead
- *        days, per-form item lookups, and the calendar event fetch. Each is
+ *        days, open form handles (openFormCached()), per-form item lookups,
+ *        and the calendar event fetch. Each is
  *        dropped by whatever rewrites its source — invalidateMealInfoIndex()
  *        from renderLunchScheduleSheet(), invalidateConfigCaches() from
  *        buildConfigSheet(), invalidateFormItemIndex() from

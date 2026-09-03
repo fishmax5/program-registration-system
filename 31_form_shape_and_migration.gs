@@ -286,7 +286,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
 
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       log(`⚠️ migrateFormsToCurrentTemplate: could not open form ${formId} (${err}).`);
       noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);

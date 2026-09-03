@@ -516,7 +516,7 @@ function getFormInfoForLink(formId, cache) {
   if (Object.prototype.hasOwnProperty.call(cache, formId)) return cache[formId];
   let info = null;
   try {
-    const form = FormApp.openById(formId);
+    const form = openFormCached(formId);
     info = { formId, publishedUrl: buildRegistrationUrl(form) };
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to rebuild its event link (${err}).`);
@@ -531,7 +531,7 @@ function getFormInfoForLink(formId, cache) {
  * rows (see buildDateLabelSets()) but still appear on the Dates checkbox.
  */
 function refreshFormForNewDates(formId, group, configInfo) {
-  const form = FormApp.openById(formId);
+  const form = openFormCached(formId);
   // FIRST, before anything else this function refreshes: a program renamed on
   // the calendar keeps its form (recovered from the event descriptions — see
   // renameFormForGroup()), and the form has to stop advertising the old name.
@@ -660,6 +660,9 @@ function createRegistrationForm(group, configInfo) {
   // every form, so Grouped and Regular groups no longer need separate bases.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
+  // NOT openFormCached(): a file id that came into existence one line ago can
+  // never be in the memo, so routing it through would buy nothing and would
+  // leave a handle behind for a form the failure path below is about to trash.
   const form = FormApp.openById(copiedFile.getId());
 
   // OPENED UP AT BIRTH, so the account that syncs this workbook can read the

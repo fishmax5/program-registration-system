@@ -1004,7 +1004,7 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   let form = null;
   let questionsChanged = 0;
   try {
-    form = FormApp.openById(formId);
+    form = openFormCached(formId);
     questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0, formContext);
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);

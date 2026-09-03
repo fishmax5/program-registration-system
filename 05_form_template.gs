@@ -614,7 +614,7 @@ function getOrCreateTemplateForm() {
   const existingId = props.getProperty(TEMPLATE_FORM_PROP_KEY);
   if (existingId) {
     try {
-      return FormApp.openById(existingId);
+      return openFormCached(existingId);
     } catch (err) {
       log(`⚠️ Stored template form ${existingId} could not be opened (${err}) — building a fresh template.`);
     }

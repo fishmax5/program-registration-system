@@ -76,7 +76,7 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
   if (!options.force && fingerprints[formId] === fingerprint) return false;
 
   try {
-    const form = options.form || FormApp.openById(formId);
+    const form = options.form || openFormCached(formId);
     const items = form.getItems();
     // Found by either title: on a lunch-only form this same grid is the lunch
     // question and has been renamed to say so. See LUNCH_ONLY_GRID.

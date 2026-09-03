@@ -355,7 +355,7 @@ function deleteFormResponsesForRows(rows, map, wanted) {
   Object.keys(byForm).forEach(formId => {
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       failed += byForm[formId].size;
       log(`⚠️ Could not open form ${formId} to delete responses (${err}).`);

@@ -466,7 +466,7 @@ function applyNoRegistrationEffects(registrySheet, groups) {
       // 2. The form stops taking responses, and we remember that we did it.
       if (formId && !closedIds[formId]) {
         try {
-          const form = FormApp.openById(formId);
+          const form = openFormCached(formId);
           if (form.isAcceptingResponses()) {
             form.setAcceptingResponses(false);
             closedNow++;
@@ -483,7 +483,7 @@ function applyNoRegistrationEffects(registrySheet, groups) {
     // we did not close ourselves is left exactly as it is.
     if (formId && closedIds[formId]) {
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         if (!form.isAcceptingResponses()) {
           form.setAcceptingResponses(true);
           reopenedNow++;
@@ -776,7 +776,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     if (shouldBeClosed) {
       if (weClosedIt) return; // already ours, already shut
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         if (form.isAcceptingResponses()) {
           form.setCustomClosedFormMessage(REGISTRATION_NOT_OPEN_FORM_MESSAGE);
           form.setAcceptingResponses(false);
@@ -796,7 +796,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     // Either a session is now inside the horizon, or the form has no upcoming
     // session left to hold shut. Both mean this function is done with it.
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       if (!form.isAcceptingResponses()) {
         form.setAcceptingResponses(true);
         reopened++;
@@ -859,7 +859,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
     if (!formId) return null;
     if (!Object.prototype.hasOwnProperty.call(linksByFormId, formId)) {
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         linksByFormId[formId] = { publishedUrl: form.getPublishedUrl(), editUrl: form.getEditUrl() };
       } catch (err) {
         log(`ℹ️ Could not re-read form ${formId} to restore its links (${err}).`);
