@@ -110,7 +110,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `34_sectioned_tables.gs` | 608 | The Upcoming/Past split every date-bearing tab uses. **The sectioned reader is used everywhere — change it carefully.** |
+| `34_sectioned_tables.gs` | 639 | The Upcoming/Past split every date-bearing tab uses. **The sectioned reader is used everywhere — change it carefully.** |
 | `35_per_sheet_render.gs` | 102 | Per-sheet render wrappers. |
 | `36_quick_mark_dialog.gs` | 999 | Quick Mark, the sign-in desk tool on the menu. |
 | `37_regular_needs.gs` | 586 | The standing notes a desk would otherwise have to memorize. |
