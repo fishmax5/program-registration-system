@@ -118,10 +118,19 @@ defineLazyGlobal_('HEADERS', () => ({
   // for that day and building. Both are DERIVED: every render recomputes them
   // from the registries and overwrites whatever is in the cell, so a link can
   // never outlive the file it points at. See 69_generated_file_links.gs.
+  //
+  // Waitlist_Only is the fourth tick and the odd one out: the other three
+  // describe a PROGRAM and are the same on every one of its dates, while this
+  // one describes THIS DATE and nothing else (see WAITLIST_ONLY_TAG). It sits
+  // with the capacity columns rather than with the flags for exactly that
+  // reason — it is the answer to "can this session still take anybody",
+  // alongside the three numbers that usually answer it — and ticking it sends
+  // every further registration for that one session to the waitlist however
+  // much room Max_Capacity says is left, including when there is no cap at all.
   Master_Program_Dashboard: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
-    'Active_Count', 'Status', 'Form_Response_Link', 'Edit_Form_Link',
+    'Active_Count', 'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
     'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',

@@ -53,14 +53,14 @@ Line counts are a rough guide to what you are about to load.
 | `00_overview.gs` | 446 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
 | `01_logging_and_access.gs` | 209 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
-| `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
-| `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
+| `02_palette_and_tags.gs` | 961 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. Plus the one tag that describes a DATE rather than a program — `Waitlist Only`, which closes a single session to new Active registrations whatever its capacity says — and the two lists that keep the difference straight: `PROGRAM_FLAG_COLUMNS` (ticked onto every row of a program) and `SESSION_FLAG_COLUMNS` (ticked onto the row you clicked, and nowhere else). |
+| `03_sheets_and_headers.gs` | 686 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
-| `07_dates_and_labels.gs` | 589 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
+| `07_dates_and_labels.gs` | 613 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
 | `08_execution_caches.gs` | 351 | The per-execution memo caches the sync hot paths use, and their invalidation — including `openFormCached()`, the one `FormApp.openById()` per form per run. |
-| `09_lunch_schedule_lookup.gs` | 393 | Reading `Lunch_Schedule` by date × location. |
+| `09_lunch_schedule_lookup.gs` | 403 | Reading `Lunch_Schedule` by date × location. |
 | `10_form_date_labels.gs` | 723 | Fingerprinted writes of date labels onto a live form (`applyFormDateLabels`). |
 | `11_menu_items_paste.gs` | 1103 | Adding menu items to `Lunch_Schedule` — paste CSV, in the sheet or a dialog. |
 
@@ -79,29 +79,29 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `16_menu_and_triggers.gs` | 574 | `onOpen`, the menu tree, trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
-| `18_edit_handlers.gs` | 1621 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, Config edits, Registrants edits, catering recount. |
+| `18_edit_handlers.gs` | 1842 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount. |
 
 ### Calendar → forms (19–26)
 
 | File | | What is in it |
 |---|--:|---|
 | `19_calendar_incremental_sync.gs` | 245 | `onCalendarChange` and sync tokens. |
-| `20_calendar_sync.gs` | 341 | `syncCalendars` — the entry point and its shape. |
-| `21_description_tag_readers.gs` | 824 | What the system reads out of a calendar event's description, and the tag inspector. |
-| `22_renamed_programs.gs` | 687 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. |
+| `20_calendar_sync.gs` | 356 | `syncCalendars` — the entry point and its shape. |
+| `21_description_tag_readers.gs` | 844 | What the system reads out of a calendar event's description, and the tag inspector. |
+| `22_renamed_programs.gs` | 794 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. Also `reconcileProgramFlagColumns` / `reconcileSessionFlagColumns` — the sync bringing the dashboard's tick boxes back into line with the calendar, keyed per program and per date respectively. |
 | `23_reconcile_sessions.gs` | 993 | Reconciling session times, assistance settings, club tags, No-Registration effects, and the registration horizon against the calendar. |
-| `24_calendar_groups.gs` | 516 | `buildEventGroups` / `processCalendarGroup` — grouping events into the thing that gets one form. |
+| `24_calendar_groups.gs` | 526 | `buildEventGroups` / `processCalendarGroup` — grouping events into the thing that gets one form. |
 | `25_bootstrap.gs` | 526 | `bootstrapCalendars` — the sliced first import, for setups too large for one execution. |
-| `26_event_descriptions.gs` | 1050 | Stripping every registration link out of an event description and writing exactly one back. |
+| `26_event_descriptions.gs` | 1104 | Stripping every registration link out of an event description and writing exactly one back. |
 
 ### Responses → the workbook (27–33)
 
 | File | | What is in it |
 |---|--:|---|
-| `27_registration_import.gs` | 398 | `syncRegistrations` — the entry point. |
+| `27_registration_import.gs` | 443 | `syncRegistrations` — the entry point. |
 | `28_deletion_tombstones.gs` | 433 | Why a deleted registration stays deleted. |
-| `29_form_response_processing.gs` | 561 | `processFormResponse` — one response into registrant rows, guests and meals included. |
-| `30_registry_counts.gs` | 144 | Active / waitlist / remaining-seat counts. |
+| `29_form_response_processing.gs` | 574 | `processFormResponse` — one response into registrant rows, guests and meals included. |
+| `30_registry_counts.gs` | 162 | Active / waitlist / remaining-seat counts. |
 | `31_form_shape_and_migration.gs` | 383 | Is a live form still on the current template, and migrating it if not. |
 | `32_dashboard_link_repair.gs` | 1256 | Every way a registration link drifts from its session, diagnosed and repaired. |
 | `33_calendar_invitations.gs` | 426 | Registrants as guests on the real calendar event. |

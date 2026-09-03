@@ -456,10 +456,21 @@ function computeEventId(calendarId, cleanTitle, dateKey) {
   return digest.map(b => ((b < 0 ? b + 256 : b).toString(16)).padStart(2, '0')).join('').substring(0, 12);
 }
 
+/**
+ * WHAT A SESSION TAKING NO MORE PLACES READS AS. Spelled once because two
+ * different facts now produce it: a capped session that has filled up (below),
+ * and a session a human has forced to the waitlist whatever its capacity says
+ * (see WAITLIST_ONLY_TAG). Both mean the same thing to whoever is looking at
+ * the tab — the next person to sign up is on a list, not in the room — so they
+ * deliberately say it in the same words and take the same red from
+ * EVENT_STATUS_COLORS, which is keyed by this exact string.
+ */
+const WAITLIST_ONLY_STATUS = '🔴 Waitlist Only';
+
 function computeStatus(activeCount, maxCapacity) {
   if (maxCapacity <= 0) return '🟢 Open';
   const remaining = maxCapacity - activeCount;
-  if (remaining <= 0) return '🔴 Waitlist Only';
+  if (remaining <= 0) return WAITLIST_ONLY_STATUS;
   if (remaining <= Math.max(1, Math.ceil(maxCapacity * 0.15))) return '🟡 Almost Full';
   return '🟢 Open';
 }

@@ -46,6 +46,7 @@ calendar, so no settings go there.
 | `[All Locations]` | This program's sessions at **every** location share **one** form |
 | `[Club]` | People **join once and stay joined** — see [Clubs](#clubs) |
 | `[No Registration]` | **No sign-ups at all** — no form is built — see [No registration](#no-registration) |
+| `[Waitlist Only]` | **This one date takes nobody else** — everyone who signs up for it from now on is waitlisted, cap or no cap — see [Closing one session](#closing-one-session-waitlist_only) |
 
 **A bracket is either all tags or all note.** You can write anything you like
 in the description, including in brackets — a bracket is only read as settings
@@ -794,6 +795,43 @@ stay ticked while the write is on its way.
 > **Sync Cal** delivers it. **📝 Programs & Forms ▸ Push Dashboard
 > Ticks to the Calendar** pushes the queue through by hand at any time.
 
+### Closing one session: `Waitlist_Only`
+
+There is a **fourth** tick box on the Master_Program_Dashboard, and it is the
+only one that means something about **one date** rather than about the program.
+
+Tick `Waitlist_Only` on a session and **everybody who signs up for that session
+from then on goes onto the waitlist** — however many seats `Remaining_Seats`
+says are left, and **even if the program has no capacity at all**. The session
+reads `🔴 Waitlist Only` with `0` seats remaining, and its date on the
+registration form gains **"(FULL - Waitlist)"**, so somebody signing up is told
+before they submit rather than afterwards.
+
+**Nobody already registered is moved.** Everyone holding a place keeps it. The
+tick decides what happens to the *next* person, and nothing else.
+
+Use it for the thing a capacity cannot say: the room is being repainted, the
+second van is out, the co-leader is away — *the program is unchanged and this
+Thursday cannot seat another person.* The old way of saying that was to type
+`[Cap: N]` with N set to however many people happened to be registered, which
+is wrong the moment anybody cancels, and impossible on a program with no cap.
+
+It behaves like the other three ticks in every other respect: the tag
+(`[Waitlist Only]`) is written into a calendar event description, the queue
+protects it until a calendar accepts it, and unticking reverses it — the
+session's capacity decides again, exactly as before. The differences are the
+two that follow from it being about a date:
+
+- **It does not spread.** The other three ticks copy themselves onto every row
+  of the program. This one stays on the row you ticked, because the 21st is not
+  full just because the 14th is.
+- **It reaches one calendar event** — that date's, on that calendar. A program
+  running at two locations has two separate sessions, and one being full says
+  nothing about the other.
+
+To close *every* remaining date of a program, tick the box on each of them, or
+use `[No Registration]` if the program should stop taking sign-ups altogether.
+
 **Tentative events** — start the **title** with `*`:
 
 | Title | Result |
@@ -974,20 +1012,25 @@ form links off the screen.
 it; your changes will be overwritten (you'll get a warning if you try). If a
 session is wrong here, fix the calendar event.
 
-**The exceptions are `Type_Tag`, `Club` and `No_Registration`** — those three
-*are* yours to change, and changing one writes back to the calendar so it
-sticks. `Type_Tag` is a dropdown; `Club` and `No_Registration` are checkboxes;
-each has an "are you sure?" behind it rather than a yellow cell, because each
-always already holds a real value and marking them as blanks-to-fill-in would
-have read as columns of problems. See
+**The exceptions are `Type_Tag`, the flag checkboxes and `Waitlist_Only`** —
+those *are* yours to change, and changing one writes back to the calendar so it
+sticks. `Type_Tag` is a dropdown; the rest are checkboxes; none is given a
+yellow "fill me in" wash, because each always already holds a real value and
+marking them as blanks-to-fill-in would have read as columns of problems. See
 [Grouped vs Regular](#setting-up-your-calendar-events),
-[The two checkboxes](#the-two-checkboxes-club-and-no_registration), and
+[The two checkboxes](#the-two-checkboxes-club-and-no_registration),
+[Closing one session](#closing-one-session-waitlist_only), and
 **Push Dashboard Ticks to the Calendar** if a change doesn't stick.
 
 | Column | Tick it to |
 |---|---|
 | `Club` | Make this program a club — people sign up once and stay signed up ([Clubs](#clubs)) |
 | `No_Registration` | Stop this program taking sign-ups at all ([No registration](#no-registration)) |
+| `Personalized_Assistance` | Book this program by appointment instead of by date ([Personalized assistance](#personalized-assistance-appointments)) |
+| `Waitlist_Only` | Send everyone who signs up for **this one session** to the waitlist, cap or no cap ([Closing one session](#closing-one-session-waitlist_only)) |
+
+The first three describe the **program** and tick themselves onto all of its
+rows. `Waitlist_Only` describes **that date** and stays where you put it.
 
 `Form_ID`, `Event_ID`, `Calendar_Source` and `Calendar_Synced?` are **hidden** —
 internal plumbing, kept after the capacity columns at the far right. The "View
@@ -2476,9 +2519,9 @@ A few things worth knowing:
   row on the next render and nothing detaches — the people already registered
   for that meal keep their rows, and Quick Mark still finds them under the new
   name.
-- For the same reason, **`Type_Tag`, `Club` and `No_Registration` can't be
-  edited on those rows.** They're instructions to a calendar event that doesn't
-  exist. The workbook tells you so and puts the cell back; change the date on
+- For the same reason, **`Type_Tag`, the flag checkboxes and `Waitlist_Only`
+  can't be edited on those rows.** They're instructions to a calendar event that
+  doesn't exist. The workbook tells you so and puts the cell back; change the date on
   `Lunch_Schedule` instead.
 - **Nobody is invited to a calendar event** for a lunch-only date, since there
   isn't one. Program invitations are unaffected.
@@ -2551,7 +2594,7 @@ Everything else is grouped by the job it belongs to.
 | **🔍 Review Programs, Then Update Once…** | Walks your programs a screen at a time and says, for each, what ought to be true and whether it is; your answers are applied together in one pass at the end, and a second tab shows which program is on which form — see [Reviewing your programs](#reviewing-your-programs). Start here when something looks wrong and you don't know where |
 | **➕ Build a Form Question…** | Builds one extra question, notice, picture (uploading it for you) or form-description injection — showing which forms it would reach *before* it writes it — and adds it to **Program_Questions**. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
 | **Update Program Questions on Forms** | Puts the current **Program_Questions** tab onto every form it names, now rather than at the next sync — and takes off any question the system added before that's no longer listed. See [Extra questions on one program's form](#extra-questions-on-one-programs-form) |
-| **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
+| **Push Dashboard Ticks to the Calendar** | Pushes anything the dashboard is still waiting to tell the calendar: every queued `Club` / `No_Registration` / `Personalized_Assistance` / `Waitlist_Only` tick, plus every program's Grouped/Regular tag. Normally unnecessary — the edit trigger and the sync do it — but it's the button for "it didn't stick" |
 | **Rebuild Appointment Forms + Report…** | Reshapes every `[Personalized Assistance]` form now, and reports which programs the workbook treats as appointment programs, how many free times each form offers, and why one offers none. See [Personalized assistance](#personalized-assistance-appointments) |
 | **⏱️ Merge Half-Hour Blocks…** | Finds every day typed as a run of back-to-back events of the same name, and merges each into one event — see [Merging half-hour blocks](#merging-half-hour-blocks) |
 | **🗓️ Review Appointment Months…** | Walks your appointment programs one month at a time — the unit a form covers — and says whether that month's form offers every date and every time in it, with the fixes on the same screen — see [Reviewing your appointment months](#reviewing-your-appointment-months) |

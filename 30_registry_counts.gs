@@ -102,6 +102,15 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
   const isAppointment = regMap['Personalized_Assistance'] === undefined
     ? null
     : registrySheet.getRange(dataStart, regMap['Personalized_Assistance'], numRows, 1).getValues();
+  // WHICH SESSIONS ARE TAKING NOBODY NEW REGARDLESS OF THEIR CAPACITY — see
+  // WAITLIST_ONLY_TAG. Read here because an UNCAPPED session forced to the
+  // waitlist is otherwise reported as "🟢 Unlimited" with a blank
+  // Waitlist_Count, which is the sheet hiding the very thing somebody ticked
+  // the box to make happen: the registrants ARE being waitlisted, and the tab
+  // said the session had unlimited room.
+  const forcedWaitlist = regMap['Waitlist_Only'] === undefined
+    ? null
+    : registrySheet.getRange(dataStart, regMap['Waitlist_Only'], numRows, 1).getValues();
 
   const activeOut = [], waitlistOut = [], remainingOut = [], statusOut = [];
   for (let i = 0; i < numRows; i++) {
@@ -109,11 +118,19 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
     const rawCap = maxCaps[i][0];
     const isUncapped = rawCap === '--' || rawCap === '' || Number(rawCap) <= 0;
     const maxCap = isUncapped ? 0 : Number(rawCap);
+    const isForced = !!forcedWaitlist && isWaitlistOnlyColumnValue(forcedWaitlist[i][0]);
     const c = occupancyForSession(counts[eventId],
       !!isAppointment && isAssistanceColumnValue(isAppointment[i][0]));
 
     activeOut.push([c.active]);
-    if (isUncapped) {
+    if (isForced) {
+      // The counts are real either way; only the two DERIVED cells are decided
+      // by the tick. Seats remaining is 0 because nobody can take one, and the
+      // status says so in the same words a full session uses.
+      waitlistOut.push([c.waitlist]);
+      remainingOut.push([0]);
+      statusOut.push([WAITLIST_ONLY_STATUS]);
+    } else if (isUncapped) {
       waitlistOut.push(['']);
       remainingOut.push(['']);
       statusOut.push(['🟢 Unlimited']);

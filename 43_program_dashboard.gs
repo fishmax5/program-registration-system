@@ -935,6 +935,15 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
         .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
         .setHorizontalAlignment('center');
     });
+    // The fourth tick, drawn the same way and belonging to a different list on
+    // purpose: it closes ONE DATE rather than describing the program, so it is
+    // not in PROGRAM_FLAG_COLUMNS and is never spread to the program's other
+    // rows. See WAITLIST_ONLY_TAG and handleWaitlistOnlyEdit().
+    if (map['Waitlist_Only'] !== undefined) {
+      sheet.getRange(z.start, map['Waitlist_Only'] + 1, z.count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    }
 
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
@@ -946,8 +955,9 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
-  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, Club and
-  // No_Registration are the cells a human changes on this table, but none of
+  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, the flag
+  // checkboxes and Waitlist_Only are the cells a human changes on this table
+  // (PROGRAM_DASHBOARD_EDITABLE_COLUMNS), but none of
   // them is a blank waiting to be filled in — each always already holds a
   // real, calendar-derived value, and washing full columns of correct values
   // in "please type here" yellow read as columns of problems on the tab people

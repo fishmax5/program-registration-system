@@ -471,17 +471,30 @@ function buildRegistrantRow(args) {
     : occupancy.people;
 
   const isCapped = registryEntry.maxCapacity > 0;
-  const programStatus = isCapped && takesAPlace && used >= registryEntry.maxCapacity
+  // A SESSION CAN BE CLOSED WITHOUT BEING FULL — see WAITLIST_ONLY_TAG. The
+  // capacity arithmetic below is unchanged and still decides every ordinary
+  // session; the tick simply short-circuits it, which is what makes it work on
+  // the uncapped sessions that are most of them (`used >= 0` is not a test
+  // anything can fail). Nobody already registered is touched: this is the
+  // status of THIS submission, computed once, at import.
+  const forcedWaitlist = !!registryEntry.waitlistOnly;
+  const programStatus = forcedWaitlist || (isCapped && takesAPlace && used >= registryEntry.maxCapacity)
     ? 'Waitlisted' : 'Active';
   const lunchStatus = programStatus === 'Waitlisted'
     ? 'Waitlisted'
     : (wantsLunch ? 'Needed' : 'No Lunch');
 
   if (programStatus === 'Waitlisted') {
-    // Someone just hit a cap. That's the one registration outcome a human
-    // usually has to do something about, so it goes in the admin digest.
+    // Someone just hit a cap — or signed up for a session somebody has closed
+    // by hand. That's the one registration outcome a human usually has to do
+    // something about, so it goes in the admin digest. The two are reported
+    // apart because the answer to them is different: one is "open another
+    // session", the other is "you already know, and here is who is waiting".
     noteForAdmin('Waitlisted registrants',
-      `${displayName} (${personType}) for ${formatDateLabel(registryEntry.eventDate)} — capacity ${registryEntry.maxCapacity} is full.`);
+      `${displayName} (${personType}) for ${formatDateLabel(registryEntry.eventDate)} — ` +
+      (forcedWaitlist
+        ? `this session is marked ${WAITLIST_ONLY_TAG}, so everyone signing up for it is waitlisted.`
+        : `capacity ${registryEntry.maxCapacity} is full.`));
   }
 
   if (programStatus === 'Active') {

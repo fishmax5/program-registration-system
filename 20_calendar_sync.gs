@@ -34,6 +34,7 @@ defineLazyGlobal_('RECOGNIZED_TAG_PATTERNS', () => ([
   SHARED_LOCATION_WORDS_REGEX,
   CLUB_WORDS_REGEX,
   NO_REGISTRATION_WORDS_REGEX,
+  WAITLIST_ONLY_WORDS_REGEX,
   ASSISTANCE_WORDS_REGEX,
   /\b(Grouped|Fixed)\b/i,
   /\b(Monthly|Regular)\b/i
@@ -144,6 +145,10 @@ function parseSettingsBrackets(text) {
   let isShared = false;
   let isClub = false;
   let noRegistration = false;
+  // A statement about THIS EVENT only — see WAITLIST_ONLY_TAG. Everything else
+  // parsed here is folded up to the program or the group by the caller; this
+  // one deliberately is not.
+  let waitlistOnly = false;
   let isAssistance = false;
   // 0 = "not stated"; the caller falls back to APPOINTMENT_SLOT_MINUTES.
   let slotMinutes = 0;
@@ -189,6 +194,12 @@ function parseSettingsBrackets(text) {
     // Orthogonal to everything above, and the one that overrides them all —
     // see NO_REGISTRATION_TAG. There is no form to group, cap or share.
     if (NO_REGISTRATION_WORDS_REGEX.test(content)) { noRegistration = true; sawAny = true; }
+    // Orthogonal to all of them, and the only tag here that is about one DATE
+    // rather than about the program — see WAITLIST_ONLY_TAG. It composes with
+    // [Cap: N] by overruling it in one direction only: a session forced to the
+    // waitlist takes nobody new whatever its cap says, and a session at its cap
+    // is on the waitlist whether or not this is ticked.
+    if (WAITLIST_ONLY_WORDS_REGEX.test(content)) { waitlistOnly = true; sawAny = true; }
     // Orthogonal to everything above except [No Registration] — see
     // ASSISTANCE_TAG. Read BEFORE the slot length, because "[Slots: 20]" on
     // its own is a statement about appointments and therefore says the
@@ -224,8 +235,8 @@ function parseSettingsBrackets(text) {
       if (!explicitGrouping) explicitGrouping = EVENT_TYPES.REGULAR;
     }
   }
-  return { capacity, isFixed, isShared, isClub, noRegistration, isAssistance, slotMinutes,
-    maxPerMonth, sawAny, explicitGrouping };
+  return { capacity, isFixed, isShared, isClub, noRegistration, waitlistOnly, isAssistance,
+    slotMinutes, maxPerMonth, sawAny, explicitGrouping };
 }
 
 /**
@@ -273,6 +284,7 @@ function parseEventTitle(title) {
     legacyIsShared: legacy.isShared,
     legacyIsClub: legacy.isClub,
     legacyNoRegistration: legacy.noRegistration,
+    legacyWaitlistOnly: legacy.waitlistOnly,
     legacyIsAssistance: legacy.isAssistance,
     legacySlotMinutes: legacy.slotMinutes,
     legacyMaxPerMonth: legacy.maxPerMonth,
@@ -305,6 +317,7 @@ function resolveEventSettings(event, parsedTitle) {
   const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
   const isClub = fromDescription.isClub || parsedTitle.legacyIsClub || false;
   const noRegistration = fromDescription.noRegistration || parsedTitle.legacyNoRegistration || false;
+  const waitlistOnly = fromDescription.waitlistOnly || parsedTitle.legacyWaitlistOnly || false;
   const isAssistance = fromDescription.isAssistance || parsedTitle.legacyIsAssistance || false;
   const slotMinutes = fromDescription.slotMinutes || parsedTitle.legacySlotMinutes || 0;
   const maxPerMonth = fromDescription.maxPerMonth || parsedTitle.legacyMaxPerMonth || 0;
@@ -313,7 +326,8 @@ function resolveEventSettings(event, parsedTitle) {
     log(`ℹ️ "${parsedTitle.cleanTitle}" still carries its settings in the TITLE. That still works, but the supported ` +
       `place is now the event DESCRIPTION — move "[Cap: N]" / "[Grouped]" / "[Club]" there and drop them from the title.`);
   }
-  return { capacity, isFixed, isShared, isClub, noRegistration, isAssistance, slotMinutes, maxPerMonth };
+  return { capacity, isFixed, isShared, isClub, noRegistration, waitlistOnly, isAssistance,
+    slotMinutes, maxPerMonth };
 }
 
 /**
@@ -321,7 +335,8 @@ function resolveEventSettings(event, parsedTitle) {
  * to re-list them — see assignEventSettings() for what re-listing them cost.
  */
 const EVENT_SETTING_KEYS =
-  ['capacity', 'isFixed', 'isShared', 'isClub', 'noRegistration', 'isAssistance', 'slotMinutes', 'maxPerMonth'];
+  ['capacity', 'isFixed', 'isShared', 'isClub', 'noRegistration', 'waitlistOnly', 'isAssistance',
+    'slotMinutes', 'maxPerMonth'];
 
 /**
  * Copies a resolveEventSettings() answer onto a parseEventTitle() result, and
