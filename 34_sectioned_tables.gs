@@ -48,7 +48,7 @@ function getZoneDataRange(sheet, headerRow, nextHeaderRow, dateCol1Based) {
  * NOT part of the schedule yet — see getLunchScheduleEndRow().
  */
 function getSectionZones(sheet, markerHeaderName, endRow) {
-  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
+  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000, endRow);
   if (headerRows.length === 0) return [];
   const map = getHeaderMapAt(sheet, headerRows[0]);
   const dateCol = map['Event_Date'];
@@ -84,7 +84,7 @@ function findZoneForRow(zones, row) {
  * writes back out in the new order.
  */
 function readAllSectionedRows(sheet, headers, markerHeaderName, endRow) {
-  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
+  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000, endRow);
   if (headerRows.length === 0) return [];
   const lastRow = endRow ? Math.min(endRow, sheet.getLastRow()) : sheet.getLastRow();
   const sheetLastCol = Math.max(sheet.getLastColumn(), headers.length);
