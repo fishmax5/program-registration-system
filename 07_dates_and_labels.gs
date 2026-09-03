@@ -50,13 +50,23 @@ function getHeaderMapAt(sheet, headerRow) {
 }
 
 /**
- * Scans down row-by-row (up to maxRowsToScan) for EVERY row that contains
- * uniqueHeaderText anywhere in it, returning all matching row numbers. Every
- * date-bearing tab now has TWO such header rows (Upcoming + Past sub-tables
- * — see section 6), so this replaces the old single-header-row finder.
+ * Scans down row-by-row for EVERY row that contains uniqueHeaderText anywhere
+ * in it, returning all matching row numbers. Every date-bearing tab now has
+ * TWO such header rows (Upcoming + Past sub-tables — see section 6), so this
+ * replaces the old single-header-row finder.
+ *
+ * HOW FAR IT READS. maxRowsToScan is a CEILING, not a target: the scan stops
+ * at getLastRow() — the tab's real extent — and maxRowsToScan only caps that
+ * on a workbook whose grid has grown past anything a header search should be
+ * paying for. (A tab whose trailing rows were cleared but not deleted still
+ * reports a large getLastRow(); that read is honest, and bounded by the
+ * ceiling like any other.) `endRow` narrows it further for a caller that
+ * already knows where the tables end — see getLunchScheduleEndRow().
  */
-function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan) {
-  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), maxRowsToScan || 3000);
+function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan, endRow) {
+  const ceiling = maxRowsToScan || 3000;
+  const bound = endRow ? Math.min(endRow, ceiling) : ceiling;
+  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), bound);
   const lastCol = Math.max(sheet.getLastColumn(), 1);
   if (lastRow < 1) return [];
   const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
