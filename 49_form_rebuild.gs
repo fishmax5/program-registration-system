@@ -319,6 +319,14 @@ function runFormRebuildSweep(registrySheet, plan) {
 // jobs are different work, but "something big is rewriting the dashboard
 // across many executions" is the same fact either way, and everything that
 // has to stand down for one has to stand down for the other.
+//
+// The STATE MACHINE — watchdog, slice count, deadline, stall detection,
+// hand-off — is runSlicedJob() in 74, shared with the other three sliced
+// jobs. What is particular to this sweep stays here: the per-form lock
+// (rather than one lock per slice), the import and plan re-derivation at the
+// head of every slice, and the whole-tab cleanup once the loop is done. The
+// stored state keeps its key and shape, so a sweep already in flight resumes
+// untouched.
 // ============================================================================
 
 const FORM_REBUILD_RESUME_HANDLER = 'resumeFormRebuildSweep';
@@ -338,35 +346,22 @@ const FORM_REBUILD_MAX_STALLED_SLICES = 2;
 const FORM_REBUILD_STALE_MS = 2 * 60 * 60 * 1000;
 
 function getFormRebuildState() {
-  const raw = PropertiesService.getScriptProperties().getProperty(FORM_REBUILD_STATE_PROP_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    log(`⚠️ Form-rebuild sweep state was unreadable (${err}) — treating it as finished.`);
-    return null;
-  }
+  return getSlicedJobState(FORM_REBUILD_STATE_PROP_KEY, 'Form-rebuild sweep');
 }
 
 function saveFormRebuildState(state) {
-  PropertiesService.getScriptProperties().setProperty(FORM_REBUILD_STATE_PROP_KEY, JSON.stringify(state));
+  saveSlicedJobState(FORM_REBUILD_STATE_PROP_KEY, state);
 }
 
 function clearFormRebuildState() {
-  PropertiesService.getScriptProperties().deleteProperty(FORM_REBUILD_STATE_PROP_KEY);
+  clearSlicedJobState(FORM_REBUILD_STATE_PROP_KEY);
 }
 
 /** Is a sliced destroy-and-rebuild sweep in flight right now? Stale state (see FORM_REBUILD_STALE_MS) reads as "no". */
 function isFormRebuildSweepActive() {
-  const state = getFormRebuildState();
-  if (!state) return false;
-  const age = Date.now() - (state.lastSliceAt || state.startedAt || 0);
-  if (age > FORM_REBUILD_STALE_MS) {
-    log(`⚠️ Ignoring a destroy-and-rebuild sweep that hasn't advanced in ${Math.round(age / 60000)} minute(s) — ` +
-      `run destroyAndRebuildAllForms() to restart it, or cancelFormRebuildSweep() to clear it.`);
-    return false;
-  }
-  return true;
+  return isSlicedJobActive(FORM_REBUILD_STATE_PROP_KEY, FORM_REBUILD_STALE_MS, minutes =>
+    `⚠️ Ignoring a destroy-and-rebuild sweep that hasn't advanced in ${minutes} minute(s) — ` +
+    `run destroyAndRebuildAllForms() to restart it, or cancelFormRebuildSweep() to clear it.`);
 }
 
 /**
@@ -411,192 +406,170 @@ function resumeFormRebuildSweep() {
   runFormRebuildSweepSlice();
 }
 
-/** One execution's worth of rebuilding. Everything that decides whether there is a NEXT slice happens here. */
+/**
+ * One execution's worth of rebuilding.
+ *
+ * The state machine — watchdog, slice count, deadline, stall detection,
+ * hand-off — is runSlicedJob() in 74. What is particular to this sweep is
+ * here: the per-form (not per-slice) lock, the import and plan re-derivation
+ * at the head of every slice, and the whole-tab cleanup after the loop.
+ */
 function runFormRebuildSweepSlice() {
-  const state = getFormRebuildState();
-  if (!state) {
-    // Nothing in flight — a leftover trigger firing after the sweep finished.
-    deleteFormRebuildResumeTriggers();
-    return;
-  }
+  return runSlicedJob({
+    label: 'Form-rebuild sweep',
+    propKey: FORM_REBUILD_STATE_PROP_KEY,
+    resumeHandler: FORM_REBUILD_RESUME_HANDLER,
+    budgetMs: FORM_REBUILD_SLICE_BUDGET_MS,
+    resumeDelayMs: FORM_REBUILD_RESUME_DELAY_MS,
+    watchdogDelayMs: FORM_REBUILD_WATCHDOG_DELAY_MS,
+    maxSlices: FORM_REBUILD_MAX_SLICES,
+    maxStalledSlices: FORM_REBUILD_MAX_STALLED_SLICES,
 
-  // Armed BEFORE anything else, including the lock: from here on every exit
-  // path leaves exactly one live successor behind, so neither an outright
-  // kill nor a lock we couldn't get can strand the sweep. finishFormRebuildSweep()
-  // is what finally clears it.
-  armFormRebuildResume(FORM_REBUILD_WATCHDOG_DELAY_MS);
+    // THE LOCK IS TAKEN AND GIVEN BACK AROUND EACH UNIT OF WORK, not held for
+    // the whole slice — this outer check only confirms one is available
+    // before starting; it used to wrap everything below, which meant that
+    // while a sweep ran the workbook was locked for 4.5 minutes out of every
+    // 5 — and the sign-in desk found Quick Mark unavailable, in the words of
+    // the person using it, "half the time". Replacing one form has nothing to
+    // do with marking one person off a list; the lock only ever needed to
+    // cover the steps that read and rewrite whole tabs.
+    around: slice => {
+      if (!withScriptLock(SYNC_LOCK_WAIT_MS, () => true, false)) {
+        log('Form-rebuild slice: another execution holds the lock — the next slice will retry.');
+        return null;
+      }
+      try {
+        return slice();
+      } finally {
+        // No lock to give back here: every hold above is opened and closed
+        // around one unit of work by withScriptLock().
+        flushPersistentRegistries(); // a killed slice's forms must never be forgotten
+      }
+    },
 
-  // THE LOCK IS TAKEN AND GIVEN BACK AROUND EACH UNIT OF WORK, not held for
-  // the whole slice. It used to wrap everything below, which meant that while
-  // a sweep ran the workbook was locked for 4.5 minutes out of every 5 — and
-  // the sign-in desk found Quick Mark unavailable, in the words of the person
-  // using it, "half the time". Replacing one form has nothing to do with
-  // marking one person off a list; the lock only ever needed to cover the
-  // steps that read and rewrite whole tabs.
-  if (!withScriptLock(SYNC_LOCK_WAIT_MS, () => true, false)) {
-    log('Form-rebuild slice: another execution holds the lock — the next slice will retry.');
-    return;
-  }
-
-  try {
-    state.slices++;
-    state.lastSliceAt = Date.now();
-    saveFormRebuildState(state);
     // Re-asserted every slice, not just at the start — see runBootstrapSlice()'s
     // comment on why a trigger that reappears mid-sweep has to be removed again
     // rather than trusted to stay gone.
-    pauseAutomationForBootstrap();
+    beforeSlice: () => { pauseAutomationForBootstrap(); },
 
-    if (state.slices > FORM_REBUILD_MAX_SLICES) {
-      finishFormRebuildSweep(state, `stopped after ${FORM_REBUILD_MAX_SLICES} slices without finishing`);
-      return;
-    }
+    work: ctx => {
+      const state = ctx.state;
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+      if (!registrySheet) return { stop: 'stopped — the program dashboard sheet is gone' };
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (!registrySheet) {
-      finishFormRebuildSweep(state, 'stopped — the program dashboard sheet is gone');
-      return;
-    }
+      const remainingBefore = state.confirmed.length - state.done.length;
+      toastIfPossible(`Rebuild sweep: chunk ${state.slices} running… (${state.replaced} done, ${remainingBefore} left)`);
 
-    const remainingBefore = state.confirmed.length - state.done.length;
-    toastIfPossible(`Rebuild sweep: chunk ${state.slices} running… (${state.replaced} done, ${remainingBefore} left)`);
-
-    // Import outstanding registrations before every slice, not just the
-    // first — a response can be submitted on a not-yet-rebuilt form in the
-    // gap between slices, and that form is about to be trashed. This is the
-    // one step that makes the whole action safe, so a failure here stops the
-    // sweep rather than risking a form being destroyed with a response still
-    // on it (see runFormRebuildSweep()'s identical reasoning above).
-    //
-    // Held under the lock on its own: this rewrites whole tabs, so it must not
-    // interleave with a sync — but it is seconds, not minutes, and the desk
-    // gets the workbook back the moment it is done.
-    const imported = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
-      try {
-        syncRegistrationsInternal();
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, err };
-      }
-    }, null);
-    if (!imported) {
-      log('Form-rebuild slice: could not take the lock to import registrations — the next slice will retry.');
-      armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS);
-      return;
-    }
-    if (!imported.ok) {
-      finishFormRebuildSweep(state, `stopped — could not import outstanding registrations (${imported.err})`);
-      return;
-    }
-
-    const headers = HEADERS.Master_Program_Dashboard;
-    const map = getIndexMap(headers);
-    const confirmedSet = new Set(state.confirmed);
-    const doneSet = new Set(state.done);
-    // Re-derived fresh every slice, same reason runFormRebuildSweep() re-reads
-    // the plan after its import: the sync above can move rows (triage sends a
-    // deleted session's row elsewhere), so only the SET of confirmed old
-    // Form_IDs is trusted from the original plan — the sessions on each one
-    // are taken as they stand right now.
-    const remainingPlan = withScriptLock(SYNC_LOCK_WAIT_MS, () =>
-      planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
-        .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId)), null);
-    if (!remainingPlan) {
-      log('Form-rebuild slice: could not take the lock to re-read the plan — the next slice will retry.');
-      armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS);
-      return;
-    }
-
-    if (remainingPlan.length === 0) {
-      finishFormRebuildSweep(state, null);
-      return;
-    }
-
-    const deadline = Date.now() + FORM_REBUILD_SLICE_BUDGET_MS;
-    let processedThisSlice = 0;
-    for (const item of remainingPlan) {
-      if (Date.now() >= deadline) break;
-      // ONE FORM, ONE LOCK HOLD. This is the loop that used to run for four and
-      // a half minutes inside a single hold. Each form is independent and its
-      // progress is recorded in the state, so taking the lock per form costs
-      // nothing and gives every other execution — above all Quick Mark at the
-      // sign-in desk — a gap to get in between one form and the next.
-      const took = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+      // Import outstanding registrations before every slice, not just the
+      // first — a response can be submitted on a not-yet-rebuilt form in the
+      // gap between slices, and that form is about to be trashed. This is the
+      // one step that makes the whole action safe, so a failure here stops the
+      // sweep rather than risking a form being destroyed with a response still
+      // on it (see runFormRebuildSweep()'s identical reasoning above).
+      //
+      // Held under the lock on its own: this rewrites whole tabs, so it must not
+      // interleave with a sync — but it is seconds, not minutes, and the desk
+      // gets the workbook back the moment it is done.
+      const imported = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
         try {
-          if (replaceOneForm(registrySheet, item)) {
-            state.replaced++;
-          } else {
-            state.failed++;
-          }
+          syncRegistrationsInternal();
+          return { ok: true };
         } catch (err) {
-          state.failed++;
-          log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
-          noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
+          return { ok: false, err };
         }
-        state.done.push(item.oldFormId);
-        saveFormRebuildState(state);
-        return true;
-      }, false);
-      // Somebody else is mid-write. Not an error and not a stall: this form is
-      // still un-done in the state, so the next slice picks it up unchanged.
-      if (!took) {
-        log('Form-rebuild slice: lock busy between forms — leaving the rest to the next slice.');
-        break;
+      }, null);
+      if (!imported) {
+        log('Form-rebuild slice: could not take the lock to import registrations — the next slice will retry.');
+        return { handOff: true };
       }
-      processedThisSlice++;
-      // Pacing between forms — see migrateFormsToCurrentTemplate() / the
-      // identical sleep in runFormRebuildSweep() above for the same reason.
-      // Outside the lock now, so the pause is a gap other work can use rather
-      // than a second and a half of holding the workbook shut doing nothing.
-      if (Date.now() < deadline) Utilities.sleep(1500);
-    }
+      if (!imported.ok) {
+        return { stop: `stopped — could not import outstanding registrations (${imported.err})` };
+      }
 
-    if (processedThisSlice > 0) {
-      // Whole-tab work again, so back under the lock — and if it cannot be had,
-      // the next slice redoes it. Both steps are idempotent: the link rewrite
-      // reads what the descriptions currently say, and the render rebuilds the
-      // dashboard from the rows.
-      withScriptLock(SYNC_LOCK_WAIT_MS, () => {
-        SpreadsheetApp.flush();
-        // Every event replaced this slice still carries a link to a form that
-        // is now in the trash.
-        rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
-        renderProgramDashboard(false, { skipTriage: true });
-        flushPersistentRegistries();
+      const headers = HEADERS.Master_Program_Dashboard;
+      const map = getIndexMap(headers);
+      const confirmedSet = new Set(state.confirmed);
+      const doneSet = new Set(state.done);
+      // Re-derived fresh every slice, same reason runFormRebuildSweep() re-reads
+      // the plan after its import: the sync above can move rows (triage sends a
+      // deleted session's row elsewhere), so only the SET of confirmed old
+      // Form_IDs is trusted from the original plan — the sessions on each one
+      // are taken as they stand right now.
+      const remainingPlan = withScriptLock(SYNC_LOCK_WAIT_MS, () =>
+        planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+          .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId)), null);
+      if (!remainingPlan) {
+        log('Form-rebuild slice: could not take the lock to re-read the plan — the next slice will retry.');
+        return { handOff: true };
+      }
+
+      if (remainingPlan.length === 0) return { finished: true };
+
+      const processedThisSlice = runSlicedItems({
+        items: remainingPlan,
+        deadline: ctx.deadline,
+        lockWaitMs: SYNC_LOCK_WAIT_MS,
+        // Pacing between forms — see migrateFormsToCurrentTemplate().
+        sleepMs: 1500,
+        onLockBusy: () => log('Form-rebuild slice: lock busy between forms — leaving the rest to the next slice.'),
+        step: item => {
+          try {
+            if (replaceOneForm(registrySheet, item)) {
+              state.replaced++;
+            } else {
+              state.failed++;
+            }
+          } catch (err) {
+            state.failed++;
+            log(`⚠️ Could not rebuild the form for ${item.describe} (${err}) — it was left exactly as it was.`);
+            noteForAdmin('Forms that could not be rebuilt', `${item.describe} — ${err}`);
+          }
+          state.done.push(item.oldFormId);
+          saveFormRebuildState(state);
+        }
       });
-    }
 
-    const remaining = state.confirmed.length - state.done.length;
-    if (remaining <= 0) {
-      finishFormRebuildSweep(state, null);
-      return;
-    }
+      if (processedThisSlice > 0) {
+        // Whole-tab work again, so back under the lock — and if it cannot be had,
+        // the next slice redoes it. Both steps are idempotent: the link rewrite
+        // reads what the descriptions currently say, and the render rebuilds the
+        // dashboard from the rows.
+        withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+          SpreadsheetApp.flush();
+          // Every event replaced this slice still carries a link to a form that
+          // is now in the trash.
+          rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+          renderProgramDashboard(false, { skipTriage: true });
+          flushPersistentRegistries();
+        });
+      }
 
-    const madeProgress = processedThisSlice > 0;
-    state.stalledSlices = madeProgress ? 0 : (state.stalledSlices || 0) + 1;
-    saveFormRebuildState(state);
+      const remaining = state.confirmed.length - state.done.length;
+      if (remaining <= 0) return { finished: true };
 
-    if (state.stalledSlices >= FORM_REBUILD_MAX_STALLED_SLICES) {
-      finishFormRebuildSweep(state, `stopped early — ${remaining} form(s) could not be processed`);
-      return;
-    }
+      return { processed: processedThisSlice, remaining };
+    },
 
-    toastIfPossible(`Rebuild sweep: chunk ${state.slices} done — ${state.replaced} form(s) rebuilt so far` +
-      (state.failed > 0 ? `, ${state.failed} failed` : '') +
-      `, ${remaining} to go. Next chunk starts in ${Math.round(FORM_REBUILD_RESUME_DELAY_MS / 1000)}s.`);
-    armFormRebuildResume(FORM_REBUILD_RESUME_DELAY_MS); // replaces the watchdog with a prompt hand-off
-  } catch (err) {
-    // An exception, unlike a timeout, is ours to handle: put the system back
-    // together rather than leaving automation paused.
-    log(`⚠️ Form-rebuild slice failed (${err}) — restoring automation.`);
-    noteForAdmin('Destroy and rebuild forms', `The sweep stopped with an error and automation was restored: ${err}`);
-    finishFormRebuildSweep(getFormRebuildState() || state, `stopped by an error: ${err}`);
-  } finally {
-    // No lock to give back: every hold above is opened and closed around one
-    // unit of work by withScriptLock().
-    flushPersistentRegistries(); // a killed slice's forms must never be forgotten
-  }
+    onHandOff: (state, result) => {
+      toastIfPossible(`Rebuild sweep: chunk ${state.slices} done — ${state.replaced} form(s) rebuilt so far` +
+        (state.failed > 0 ? `, ${state.failed} failed` : '') +
+        `, ${result.remaining} to go. Next chunk starts in ${Math.round(FORM_REBUILD_RESUME_DELAY_MS / 1000)}s.`);
+    },
+
+    overrunProblem: () => `stopped after ${FORM_REBUILD_MAX_SLICES} slices without finishing`,
+    stalledProblem: result => `stopped early — ${result.remaining} form(s) could not be processed`,
+
+    // ONE FAILURE ENDS IT: this job tore automation down, and an exception it
+    // left unfinished would leave the triggers off.
+    onError: err => {
+      log(`⚠️ Form-rebuild slice failed (${err}) — restoring automation.`);
+      noteForAdmin('Destroy and rebuild forms', `The sweep stopped with an error and automation was restored: ${err}`);
+    },
+    errorProblem: err => `stopped by an error: ${err}`,
+
+    onDone: (state, problem) => finishFormRebuildSweep(state, problem)
+  });
 }
 
 /**
@@ -631,18 +604,11 @@ function finishFormRebuildSweep(state, problem) {
 
 /** Replaces any pending hand-off with exactly one, `delayMs` out. Mirrors armBootstrapResume(). */
 function armFormRebuildResume(delayMs) {
-  deleteFormRebuildResumeTriggers();
-  ScriptApp.newTrigger(FORM_REBUILD_RESUME_HANDLER).timeBased().after(delayMs).create();
+  armSlicedJobResume(FORM_REBUILD_RESUME_HANDLER, delayMs);
 }
 
 function deleteFormRebuildResumeTriggers() {
-  let removed = 0;
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() !== FORM_REBUILD_RESUME_HANDLER) return;
-    ScriptApp.deleteTrigger(t); // one-off triggers linger after firing; clear them out
-    removed++;
-  });
-  return removed;
+  return deleteSlicedJobResumeTriggers(FORM_REBUILD_RESUME_HANDLER);
 }
 
 /**

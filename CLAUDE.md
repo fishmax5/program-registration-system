@@ -236,6 +236,20 @@ previous door page.
 | `72_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
 | `73_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
 
+### The sliced-job runner (74)
+
+Numbered last, after the four callers it was extracted FROM (`25`, `32`, `49`,
+`68`), for the usual reason: renumbering an existing file is the one edit this
+project cannot make, and every one of those four predates this file. It reads
+and writes the same Script Property keys and the same state shape those four
+always did, so a job already mid-flight when this shipped resumed on its next
+slice without noticing anything changed — see the file's own banner for why
+that was a design goal, not an accident.
+
+| File | | What is in it |
+|---|--:|---|
+| `74_sliced_jobs.gs` | 312 | `runSlicedJob` — the state machine every multi-execution job in this project runs on: the watchdog armed before work starts, the deadline, the slice counter, stall and consecutive-error detection, and the hand-off trigger. `runSlicedItems` is the one-item-one-lock-hold inner loop the two form sweeps (`32`, `49`) share. Behavior only; the four callers supply their own state, their own budgets, and every word the person reads. |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
