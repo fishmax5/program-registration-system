@@ -43,6 +43,13 @@
 // as it needs, with the header row repeated. Landscape is not a preference:
 // twelve columns, several of them handwritten-into, do not fit across a
 // portrait page at a legible size.
+//
+// A GUEST PRINTS UNDER THEIR REGISTRANT, NEVER AS A ROW OF THEIR OWN. Their
+// name goes in Extra Notes and their ordered meal is added into the
+// registrant's own MEALS ORDERED count — see collectSignInSheetData()'s
+// guest-folding and buildSignInSheetRow(). This is a PDF-only fold: nothing
+// here writes back to Registrant_Dash, so the guest's own row keeps its own
+// meal count everywhere else in the workbook.
 // ============================================================================
 
 /** The printed sheet's columns, left to right, exactly as they appear on paper. */
@@ -347,6 +354,11 @@ function createSignInSheetPdf(sessionValue, include) {
  * roster split into two alphabetical halves means every lookup is two lookups.
  * The meal columns carry the lunch/no-lunch distinction instead, which is
  * where somebody counting meals is looking anyway.
+ *
+ * GUESTS PRINT UNDER THEIR REGISTRANT, NOT AS A ROW OF THEIR OWN — see the
+ * guest-folding pass below and buildSignInSheetRow(). This is a PDF-only
+ * fold: nothing here writes back to Registrant_Dash, so the guest's own row
+ * and its own meal count are untouched everywhere else in the workbook.
  */
 function collectSignInSheetData(dateKey, location, includeEveryone) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -357,7 +369,9 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
   const registrantRows = sheet ? getSectionedRows(sheet, headers, 'Event_ID') : [];
 
   const programs = [];
-  const rows = [];
+  const hosts = [];
+  const hostsByKey = {};
+  const guests = [];
   registrantRows.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
     if (!d || formatDateKey(d) !== dateKey) return;
@@ -369,25 +383,40 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     if (program && programs.indexOf(program) === -1) programs.push(program);
 
     const name = String(row[map['Name']] || '').trim();
-    const split = splitNameForPrinting(name);
-    rows.push({
-      last: split.last,
-      first: split.first,
-      phone: String(row[map['Phone']] || '').trim(),
-      program: truncateForPrinting(program, SIGN_IN_SHEET_MAX_PROGRAM_CHARS),
-      // "Family / Alt Name" is the desk's column for who this person is WITH.
-      // A guest is named against whoever brought them; a registrant who
-      // brought people carries the size of their party. Either way the person
-      // holding the pen can see that two rows belong together.
-      family: describePartyForPrinting(row, map),
-      notes: buildSignInNotes(row, map, status),
+    const entry = {
+      name, program, status, row,
       lunch: String(row[map['Lunch_Status']] || '').trim() === 'Needed',
       // What is actually printed in MEALS ORDERED. A standing order of four is
       // the one fact on this sheet the desk cannot work out for itself, and a
       // pre-printed 1 was the workbook asserting something untrue about Joan.
       meals: readRegistrantMealsOrdered(row, map)
-    });
+    };
+    const personType = String(row[map['Person_Type']] || '').trim();
+    if (/^guest$/i.test(personType)) {
+      guests.push(entry);
+    } else {
+      // Keyed on the SAME program, so a host who came to two sessions today
+      // keeps a guest attached to the one they actually brought them to.
+      hostsByKey[`${normalizeNameKey(name)} ${program}`] = entry;
+      hosts.push(entry);
+    }
   });
+
+  // FOLD GUESTS INTO WHOEVER BROUGHT THEM. A guest whose host is not on
+  // today's roster for that same program — the host cancelled and the guest
+  // did not, or the two names do not match — prints as a row of its own,
+  // exactly as it always has, labelled "guest of X" by describePartyForPrinting().
+  guests.forEach(guest => {
+    const primary = String(guest.row[map['Primary_Registrant']] || '').trim();
+    const key = primary && primary !== 'Self'
+      ? `${normalizeNameKey(primary)} ${guest.program}` : '';
+    const host = key && hostsByKey[key];
+    if (!host) { hosts.push(guest); return; }
+    host.guests = host.guests || [];
+    host.guests.push(guest);
+  });
+
+  const rows = hosts.map(entry => buildSignInSheetRow(entry, map));
 
   rows.sort((a, b) =>
     a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
@@ -450,13 +479,20 @@ function describePartyForPrinting(row, map) {
 }
 
 /** The Extra Notes cell: dietary needs and anything not-normal about the registration. */
-function buildSignInNotes(row, map, status) {
+function buildSignInNotes(row, map, status, guestNames) {
   const parts = [];
   if (status && status !== 'Active') parts.push(status.toUpperCase());
   const lunchStatus = String(row[map['Lunch_Status']] || '').trim();
   if (lunchStatus === 'Needed') {
     const type = String(row[map['Lunch_Type']] || '').trim();
     parts.push(type ? `lunch (${type})` : 'lunch');
+  }
+  // WHO ELSE IS ON THIS ROW. Guests print folded into their registrant rather
+  // than as rows of their own (see collectSignInSheetData()'s guest-folding),
+  // so their names go here — the one place left on a single-row-per-party
+  // sheet for the desk to see who it is actually ticking off.
+  if (guestNames && guestNames.length) {
+    parts.push(`with ${guestNames.length === 1 ? 'guest' : 'guests'}: ${guestNames.join(', ')}`);
   }
   const notes = String(row[map['Admin_Notes']] || '').trim();
   if (notes) parts.push(notes);
@@ -466,6 +502,40 @@ function buildSignInNotes(row, map, status) {
   // Shorter than it was, because the Program column now takes a slice of the
   // width this column used to have.
   return joined.length > 75 ? `${joined.substring(0, 72)}…` : joined;
+}
+
+/**
+ * One printed row for a registrant AND their folded-in guests (see
+ * collectSignInSheetData()). A guest never gets a row of its own here — this
+ * is a PDF-only fold, so their own Registrant_Dash row and meal count are
+ * untouched everywhere else.
+ *
+ * THE MEAL COUNT IS THE PARTY'S, NOT JUST THE REGISTRANT'S: the desk hands
+ * lunch to a party at once, so a guest who ordered a meal has it added to the
+ * name the desk is actually ticking off, and `lunch` flips on for the row so
+ * the meal columns print the total rather than a zero.
+ */
+function buildSignInSheetRow(entry, map) {
+  const row = entry.row;
+  const guests = entry.guests || [];
+  const guestMeals = guests.reduce((n, g) => n + (g.lunch ? g.meals : 0), 0);
+  const split = splitNameForPrinting(entry.name);
+  return {
+    last: split.last,
+    first: split.first,
+    phone: String(row[map['Phone']] || '').trim(),
+    program: truncateForPrinting(entry.program, SIGN_IN_SHEET_MAX_PROGRAM_CHARS),
+    // "Family / Alt Name" is the desk's column for who this person is WITH.
+    // A guest is named against whoever brought them; a registrant who
+    // brought people carries the size of their party. Either way the person
+    // holding the pen can see that two rows belong together.
+    family: describePartyForPrinting(row, map),
+    notes: buildSignInNotes(row, map, entry.status, guests.map(g => g.name)),
+    lunch: entry.lunch || guestMeals > 0,
+    // What is actually printed in MEALS ORDERED — the registrant's own count,
+    // plus whatever their folded-in guests ordered.
+    meals: (entry.lunch ? entry.meals : 0) + guestMeals
+  };
 }
 
 /** The kitchen's own numbers for this day, read off the lunch dashboard if it has them. */
