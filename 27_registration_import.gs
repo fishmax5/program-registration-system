@@ -279,6 +279,15 @@ function syncRegistrationsInternal() {
   // it sits down here with the invitations and carries its own guard.
   const settledRegistrantRows = reusableRows ||
     getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+  // BEFORE THE PUSH: a leader who just ticked Notify_Roster_Changes on a
+  // program with no shared sheet yet gets one built here, so the push right
+  // below fills it from the settled picture the same run it is born in — see
+  // ensureProgramLeaderSheetsForNotifyingLeaders().
+  try {
+    ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
+  } catch (err) {
+    log(`⚠️ Could not auto-create program leader sheets this run (${err}).`);
+  }
   try {
     pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
   } catch (err) {

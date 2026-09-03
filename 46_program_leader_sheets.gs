@@ -1048,6 +1048,68 @@ function removeDefaultSheetIfIdle(file, keepName) {
   });
 }
 
+/**
+ * Builds the shared sheet for every program whose leader has ticked
+ * Notify_Roster_Changes but who does not have one yet.
+ *
+ * BEFORE THIS, the tick only turned on the email in section 9d — and that
+ * email links to the sheet ("Your sign-up sheet: …") only when one already
+ * exists, so a leader who ticked the box on a program nobody had shared yet
+ * got a change list with nowhere to click. Somebody on staff still had to
+ * notice and run "Program Leader Sign-Up Sheets" by hand. The tick is the
+ * only ask a leader gets to make here, so it is the one this reads.
+ *
+ * ONLY FOR PROGRAMS THIS WORKBOOK KNOWS (see knownProgramKeys()) — the same
+ * guard refreshProgramLeadersTab() applies before trusting a row's Program
+ * and Location. A typo'd pair would otherwise build an empty, useless
+ * spreadsheet on every sync until somebody noticed and deleted it by hand.
+ *
+ * Reuses createProgramLeaderSheet() rather than a second way of building one:
+ * that function is already idempotent by program key, already fills the
+ * sheet from the settled picture, and already shares it with the program's
+ * leaders — this only decides WHICH programs it should be called for.
+ *
+ * Called from syncRegistrationsInternal(), right before pushProgramLeaderSheets()
+ * so a sheet created this run is refreshed and access-checked the same pass it
+ * is born in rather than waiting an hour. Never throws: reaches outside the
+ * workbook, on the same footing as the push and the alert pass either side of
+ * it in that function.
+ */
+function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
+  const leaders = getProgramLeadersWantingAlerts();
+  if (leaders.length === 0) return 0;
+
+  const registry = getProgramLeaderSheetRegistry();
+  const known = knownProgramKeys(ss, sessionRows);
+
+  const missing = {};
+  leaders.forEach(leader => leader.programs.forEach(program => {
+    if (registry[program.key] && registry[program.key].fileId) return; // already has one
+    if (!known[program.key]) return; // not a program this workbook recognizes
+    missing[program.key] = program;
+  }));
+
+  const keys = Object.keys(missing);
+  let created = 0;
+  keys.forEach(key => {
+    const program = missing[key];
+    try {
+      createProgramLeaderSheet(`${program.title}|||${program.location}`);
+      created++;
+      log(`Program leader sheet auto-created for "${program.title}" (${program.location}) — ` +
+        `its leader asked to be notified of roster changes.`);
+    } catch (err) {
+      log(`⚠️ Could not auto-create the program leader sheet for "${program.title}" (${err}).`);
+      noteForAdmin('Program leader sheets that could not be auto-created',
+        `"${program.title}" (${program.location}) — its leader ticked Notify_Roster_Changes, so this ` +
+        `workbook tried to build a shared sheet for it automatically and could not (${err}). Use ` +
+        `"Program Leader Sign-Up Sheets" on the Admin menu to build it by hand.`);
+    }
+  });
+
+  return created;
+}
+
 
 // --- the menu -----------------------------------------------------------------
 
@@ -1124,11 +1186,6 @@ function listProgramLeaderProgramOptions() {
  * somebody does not want to wait an hour for them.
  */
 function refreshProgramLeaderSheetsNow() {
-  const registry = getProgramLeaderSheetRegistry();
-  if (Object.keys(registry).length === 0) {
-    toastIfPossible('No program leader sheets have been created yet — use "Share a Sign-Up Sheet…" first.');
-    return;
-  }
   // The same lock syncRegistrations() takes: this reads the whole Registrants
   // tab, changes rows in memory and writes it all back, which is exactly the
   // shape that loses data when two runs overlap.
@@ -1143,6 +1200,22 @@ function refreshProgramLeaderSheetsNow() {
       getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
     const registrantRows = getSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+
+    // BEFORE THE REGISTRY CHECK BELOW: somebody pressing this having just
+    // ticked Notify_Roster_Changes should not have to wait for the hourly
+    // sync to get a sheet — see ensureProgramLeaderSheetsForNotifyingLeaders().
+    try {
+      ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
+    } catch (err) {
+      log(`⚠️ Could not auto-create program leader sheets (${err}).`);
+    }
+
+    const registry = getProgramLeaderSheetRegistry();
+    if (Object.keys(registry).length === 0) {
+      toastIfPossible('No program leader sheets have been created yet — use "Share a Sign-Up Sheet…" first, ' +
+        'or tick Notify_Roster_Changes for a leader on Program_Leaders.');
+      return;
+    }
 
     // EACH HALF GUARDED SEPARATELY, and neither allowed to fail the action.
     // One unreachable sheet used to be able to take the whole refresh down
