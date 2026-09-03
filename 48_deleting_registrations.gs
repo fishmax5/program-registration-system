@@ -87,7 +87,7 @@ function listSessionsWithRegistrations() {
 
   const clubEventIds = collectClubEventIds();
   const byEvent = {};
-  readAllSectionedRows(registrantsSheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrantsSheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!eventId || !date) return;
@@ -129,7 +129,7 @@ function collectClubEventIds() {
   if (!sheet) return ids;
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     if (map['Club'] === undefined || !isClubColumnValue(row[map['Club']])) return;
     const eventId = String(row[map['Event_ID']] || '').trim();
     if (eventId) ids.add(eventId);
@@ -272,7 +272,7 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
 
   const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
-  const allRows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const allRows = getSectionedRows(sheet, headers, 'Event_ID');
 
   const keepRows = [];
   const doomedRows = [];
@@ -386,7 +386,7 @@ function buildFormIdByEventId() {
   if (!sheet) return out;
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const formId = String(row[map['Form_ID']] || '').trim();
     if (eventId && formId) out[eventId] = formId;

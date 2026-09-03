@@ -276,7 +276,7 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
   const regHeaders = HEADERS.Master_Program_Dashboard;
   const regMap = getIndexMap(regHeaders);
   const sessions = sessionRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
   if (sessions.length === 0) return result;
 
   const today = new Date();
@@ -326,7 +326,7 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
   const lrHeaders = HEADERS.Registrant_Dash;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
   const ledger = getRegistrantReminderLedger();
   let quota = registrantReminderRemainingQuota();
@@ -494,9 +494,9 @@ function sendRegistrantRemindersNow() {
   }
   invalidateNotificationPolicyCache();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionRows = readAllSectionedRows(
+  const sessionRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = readAllSectionedRows(
+  const registrantRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
 
   let result;

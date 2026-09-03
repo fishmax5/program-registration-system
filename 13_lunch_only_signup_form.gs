@@ -257,7 +257,7 @@ function syncLunchOnlySessions(registrySheet) {
     return previousLinks;
   }
 
-  const existingRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const existingRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const rowByEventId = {};
   existingRows.forEach(row => {
     const id = String(row[map['Event_ID']] || '').trim();
@@ -712,6 +712,7 @@ function setHeadersIfNeeded(sheet, headers) {
   const needsWrite = headers.some((h, i) => String(existing[i] || '').trim() !== h);
   if (needsWrite) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    invalidateSectionedRowsCache(sheet);
     log(`Headers written on "${sheet.getName()}"`);
   }
 }
@@ -886,6 +887,10 @@ function freezeColumnsSafely(sheet, count) {
 
 /** Writes a bold, dark header row of the given headers at an arbitrary row. */
 function writeSectionHeader(sheet, row, numCols, headerValues) {
+  // The marker row every sectioned read finds its sub-tables by. Moving,
+  // adding or renaming one changes which rows come back and in what column
+  // order, so no cached read of this tab survives it.
+  invalidateSectionedRowsCache(sheet);
   sheet.getRange(row, 1, 1, numCols).setValues([headerValues])
     .setFontSize(TYPO.COLUMN_HEADER.size)
     .setFontWeight(TYPO.COLUMN_HEADER.weight)

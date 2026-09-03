@@ -349,3 +349,133 @@ function invalidateCalendarEventsCache() {
 }
 
 
+// ============================================================================
+// THE SECTIONED-TABLE READ, ONCE PER TAB PER EXECUTION
+// ============================================================================
+//
+// readAllSectionedRows() and readAllSectionedRowValues()
+// (34_sectioned_tables.gs) are how every date-bearing tab is read, from
+// roughly forty-six files. They are also the most expensive read in the
+// project: the formula-preserving one costs a whole-grid read to find the
+// header rows plus a getValues() AND a getFormulas() per sub-table — seven
+// round trips on the two-zone shape every tab has.
+//
+// WHAT THIS REPLACES. A single syncRegistrations() run re-read the same two
+// tabs over and over: Master_Program_Dashboard at 27_registration_import.gs:81,
+// 33_calendar_invitations.gs:110 and :319, 66_program_leader_notifications.gs
+// and 70_registrant_notifications.gs; Registrant_Dash at
+// 27_registration_import.gs:83 and :281, 30_registry_counts.gs:20,
+// 33_calendar_invitations.gs:342 and 70_registrant_notifications.gs:497 —
+// eight-plus full-grid reads of two tabs that changed at most once in
+// between, which is tens of round trips on a workbook with a year of history.
+//
+// The codebase already half-solved this by hand, threading a `sessionRows` /
+// `registrantRows` optional parameter down through call chains so a callee
+// could reuse what its caller had already read. That is a manual cache with
+// no invalidation story, and it only ever reached the callees somebody
+// remembered to thread it to. This is the same idea with the plumbing gone.
+//
+// THE KEY is sheet name + marker header + reader kind, plus the `headers`
+// array and `endRow` the call asked for — the last two because they change
+// the ANSWER, not just the cost: a different HEADERS list projects different
+// columns, and Lunch_Schedule's endRow deliberately stops short of the ADD
+// block below the tables. The reader kind is in the key because the two
+// readers genuinely return different things for the same cell: the
+// formula-preserving one hands back `=HYPERLINK(...)` where the values one
+// hands back the text it displays, and letting them share an entry would
+// hand a caller the wrong one of those.
+//
+// EVERY HIT IS A COPY. Callers mutate the rows they get back —
+// cancelRegistrantRows() stamps four cells on every matching row and hands
+// the same array to the render — so a cache that returned its own array
+// would be rewritten by its first reader. A slice per row costs nothing
+// against the round trips it saves.
+//
+// INVALIDATION is the whole risk here: a cached roster that survives a write
+// reads as data loss, not as a slow page. So it is dropped by every path
+// that writes to one of these tabs — writeUpcomingPastSections() and
+// renderFlatDateSheet() in 34, writeMemoryTab() in 40, and each of the
+// scattered single-cell and single-column writes elsewhere. Grep
+// invalidateSectionedRowsCache() for the list. When in doubt the call is
+// made with no sheet name, which drops everything: a redundant re-read is
+// one round trip, and a missed one is a wrong roster.
+// ============================================================================
+
+let __sectionedRowsCache = {};
+
+/**
+ * The cache key for one sectioned read. The header list goes in whole, not
+ * just its length: two same-length HEADERS arrays project different columns.
+ */
+function sectionedRowsCacheKey(sheet, headers, markerHeaderName, endRow, kind) {
+  return [
+    sheet.getName(), markerHeaderName, kind, endRow || '', (headers || []).join(',')
+  ].join('|');
+}
+
+/** A fresh copy of a cached row set, so a caller's edits never reach the cache. */
+function copySectionedRows(rows) {
+  return rows.map(row => row.slice());
+}
+
+/**
+ * readAllSectionedRows(), memoized for the rest of this execution. The
+ * formula-preserving read — use it when the rows are going back onto a sheet.
+ */
+function getSectionedRows(sheet, headers, markerHeaderName, endRow) {
+  if (!sheet) return [];
+  // A real Sheet always has getName(); a test double that skips it is opting
+  // itself out of caching, not asking for a crash — read straight through.
+  if (typeof sheet.getName !== 'function') {
+    return readAllSectionedRows(sheet, headers, markerHeaderName, endRow);
+  }
+  const key = sectionedRowsCacheKey(sheet, headers, markerHeaderName, endRow, 'formulas');
+  if (!__sectionedRowsCache[key]) {
+    __sectionedRowsCache[key] = readAllSectionedRows(sheet, headers, markerHeaderName, endRow);
+  }
+  return copySectionedRows(__sectionedRowsCache[key]);
+}
+
+/**
+ * readAllSectionedRowValues(), memoized for the rest of this execution. The
+ * one-round-trip values read — use it when nothing is going back onto a
+ * sheet, and when a formula cell (Registrant_Dash's Event_Time) has to come
+ * back as the time it displays rather than as its formula.
+ */
+function getSectionedRowValues(sheet, headers, markerHeaderName) {
+  if (!sheet) return [];
+  if (typeof sheet.getName !== 'function') {
+    return readAllSectionedRowValues(sheet, headers, markerHeaderName);
+  }
+  const key = sectionedRowsCacheKey(sheet, headers, markerHeaderName, null, 'values');
+  if (!__sectionedRowsCache[key]) {
+    __sectionedRowsCache[key] = readAllSectionedRowValues(sheet, headers, markerHeaderName);
+  }
+  return copySectionedRows(__sectionedRowsCache[key]);
+}
+
+/**
+ * Drops the cached reads of one tab — or, called with nothing, of every tab.
+ *
+ * Called by everything that writes to a sectioned tab. Err toward the
+ * no-argument form: dropping a tab that did not change costs one re-read,
+ * and keeping a tab that did costs a stale roster.
+ *
+ * Takes either a sheet or its name — every call site here writes through a
+ * sheet object it already has in hand, so it hands over the sheet itself
+ * rather than repeat-guarding a `.getName()` call at every site. A sheet-like
+ * object with no getName() (only ever a test double that opted out of this
+ * cache — see getSectionedRows()) cannot be identified, so this drops
+ * everything rather than silently leaving it cached.
+ */
+function invalidateSectionedRowsCache(sheetOrName) {
+  const sheetName = !sheetOrName ? null
+    : typeof sheetOrName === 'string' ? sheetOrName
+    : typeof sheetOrName.getName === 'function' ? sheetOrName.getName()
+    : null;
+  if (!sheetName) { __sectionedRowsCache = {}; return; }
+  const prefix = `${sheetName}|`;
+  Object.keys(__sectionedRowsCache).forEach(key => {
+    if (key.indexOf(prefix) === 0) delete __sectionedRowsCache[key];
+  });
+}

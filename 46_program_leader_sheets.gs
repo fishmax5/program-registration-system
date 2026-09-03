@@ -885,7 +885,7 @@ function openUpAllFormSharing() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const map = getIndexMap(HEADERS.Master_Program_Dashboard);
-  const rows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
   const formIds = dedupePreservingOrder(rows.map(row => String(row[map['Form_ID']] || '').trim())
     .filter(Boolean));
 
@@ -979,9 +979,9 @@ function createProgramLeaderSheet(programValue) {
   flushPersistentRegistries(); // registered before the fill, so a timeout mid-write still leaves a findable sheet
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionRows = readAllSectionedRows(
+  const sessionRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = readAllSectionedRows(
+  const registrantRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
 
@@ -1084,7 +1084,7 @@ function listProgramLeaderProgramOptions() {
   const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
   const byKey = {};
-  readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(dash, headers, 'Event_ID').forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const location = String(row[map['Location']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
@@ -1139,9 +1139,9 @@ function refreshProgramLeaderSheetsNow() {
   }
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sessionRows = readAllSectionedRows(
+    const sessionRows = getSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
-    const registrantRows = readAllSectionedRows(
+    const registrantRows = getSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
 
     // EACH HALF GUARDED SEPARATELY, and neither allowed to fail the action.

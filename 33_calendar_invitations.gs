@@ -107,7 +107,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   const regHeaders = HEADERS.Master_Program_Dashboard;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  const sessions = sessionRows || (registrySheet ? readAllSectionedRows(registrySheet, regHeaders, 'Event_ID') : []);
+  const sessions = sessionRows || (registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : []);
   if (sessions.length === 0) return result;
 
   const todayKey = formatDateKey(new Date());
@@ -137,7 +137,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   const lrMap = getIndexMap(lrHeaders);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const rows = registrantRows ||
-    (registrantsSheet ? readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : []);
+    (registrantsSheet ? getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : []);
 
   const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessionByEventId);
   const ledger = getCalendarInviteLedger();
@@ -316,7 +316,7 @@ function listInvitableSessions() {
 
   const todayKey = formatDateKey(new Date());
   const sessions = {};
-  readAllSectionedRows(registrySheet, regHeaders, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, regHeaders, 'Event_ID').forEach(row => {
     const eventId = String(row[regMap['Event_ID']] || '').trim();
     const date = coerceDate(row[regMap['Event_Date']]);
     const calendarId = String(row[regMap['Calendar_Source']] || '').trim();
@@ -339,7 +339,7 @@ function listInvitableSessions() {
   const lrHeaders = HEADERS.Registrant_Dash;
   const lrMap = getIndexMap(lrHeaders);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  const rows = registrantsSheet ? readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : [];
+  const rows = registrantsSheet ? getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : [];
 
   const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessions);
   const ledger = getCalendarInviteLedger();

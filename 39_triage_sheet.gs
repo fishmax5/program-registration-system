@@ -6,7 +6,7 @@ function renderTriageSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.TRIAGE);
   const headers = HEADERS.Deleted_Event_Triage;
-  const rows = allRows || readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = allRows || getSectionedRows(sheet, headers, 'Event_ID');
   return renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming (Triaged)',
     pastLabel: '🕓 Past (Triaged)',
@@ -342,6 +342,10 @@ function applyLunchScheduleFormatting(sheet, headers, result) {
  */
 function writeLunchAddBlock(sheet, startRow) {
   const numCols = LUNCH_ADD_HEADERS.length;
+  // The ADD block sits BELOW the schedule and its rows are dated, which is
+  // exactly why getSectionedRows() is passed getLunchScheduleEndRow() for this
+  // tab. Rewriting it moves that boundary, so the cached read goes with it.
+  invalidateSectionedRowsCache(sheet);
   // Make room BEFORE writing anything: getRange() throws on a row that isn't
   // there, and on a freshly-cleared tab the schedule can easily run past the
   // sheet's default height.

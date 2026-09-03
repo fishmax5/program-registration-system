@@ -93,6 +93,7 @@ function handleProgramDashboardEdit(e, sheet) {
   if (isLunchOnlyEventId(editedEventId)) {
     if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1) {
       e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      invalidateSectionedRowsCache(sheet); // the cell just went back to its old value
     }
     toastIfPossible(`⚠️ That is a lunch date, not a program — it has no calendar event to change. ` +
       `Edit it on ${SHEET_NAMES.LUNCH_SCHEDULE} instead.`);
@@ -311,7 +312,10 @@ function spreadFlagToSiblingRows(sheet, zones, headerMap, flag, sourceRow, on) {
       touched = true;
       if (zone.dataStart + r !== sourceRow) changed++;
     }
-    if (touched) flagRange.setValues(flags);
+    if (touched) {
+      flagRange.setValues(flags);
+      invalidateSectionedRowsCache(sheet);
+    }
   });
   return changed;
 }
@@ -599,7 +603,7 @@ function applyProgramTagChangesToCalendar() {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const byProgram = {};
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
     const tag = normalizeTypeTag(row[map['Type_Tag']]);
@@ -1279,6 +1283,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
       idRange.setValues(ids);
       viewRange.setValues(views);
       editRange.setValues(edits);
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 
@@ -1294,7 +1299,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
   // multi-location rows and adds the location to every date label).
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const derived = { eventIds: new Set(), groupFormMap: {} };
   addSharedGroupKeysFromRows(derived, rows, map);
   Object.keys(derived.groupFormMap).forEach(key => {
@@ -1457,6 +1462,7 @@ function autoFlipManualOverride(sheet, headerMap0Based, editedRow, editedCol1Bas
   const current = String(cell.getValue()).trim();
   if (current === 'Auto-Synced' || current === '') {
     cell.setValue('Manually Edited');
+    invalidateSectionedRowsCache(sheet);
   }
 }
 
@@ -1550,7 +1556,7 @@ function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrantRows = readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
+    const registrantRows = getSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
 
     const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (registrySheet) {
@@ -1588,7 +1594,7 @@ function describeRecalculatedCounts(touched) {
   const headers = HEADERS.Master_Lunch_Dashboard;
   const map = getIndexMap(headers);
   const byKey = {};
-  readAllSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
+  getSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
     if (!d) return;
     byKey[`${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`] = row;

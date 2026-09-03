@@ -195,7 +195,7 @@ function readWalkInDay(location, dateKeyOverride) {
   if (dash) {
     const headers = HEADERS.Master_Program_Dashboard;
     const map = getIndexMap(headers);
-    readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
+    getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
       const d = coerceDate(row[map['Event_Date']]);
       if (!d || formatDateKey(d) !== dateKey) return;
@@ -225,7 +225,7 @@ function readWalkInDay(location, dateKeyOverride) {
   if (reg) {
     const headers = HEADERS.Registrant_Dash;
     const map = getIndexMap(headers);
-    readAllSectionedRowValues(reg, headers, 'Event_ID').forEach(row => {
+    getSectionedRowValues(reg, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
       const d = coerceDate(row[map['Event_Date']]);
       if (!d || formatDateKey(d) !== dateKey) return;

@@ -508,6 +508,12 @@ const ARCHIVE_ADVISORY_CELLS = 150000;
  * can layer per-zone validation/conditional-formatting/formulas on top.
  */
 function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastRows, options) {
+  // THE tab-rewrite choke point: every sectioned tab in the workbook is
+  // written through here, renderFlatDateSheet() included. Anything this
+  // execution read off this tab describes the rows that are about to be
+  // replaced, so it goes now rather than after — an early return below would
+  // otherwise leave a cache describing a half-written tab.
+  invalidateSectionedRowsCache(sheet);
   options = options || {};
   const numCols = headers.length;
   const dateColIdx = headers.indexOf('Event_Date');
@@ -606,6 +612,10 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
+  // Belt and braces: writeUpcomingPastSections() below drops this tab's cached
+  // reads too, but the clear() happens first and a throw in between would
+  // otherwise leave the old rows cached against an emptied tab.
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   // Row visibility is a sheet-level property that survives clear(), exactly

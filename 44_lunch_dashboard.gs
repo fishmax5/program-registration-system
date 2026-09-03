@@ -246,7 +246,7 @@ function buildDashboardRollup(registrantRows) {
   // a source of dashboard rows in its own right (see SEED 1), so a catered day
   // still has to appear even on a workbook whose calendar hasn't been imported.
   const regHeaders = HEADERS.Master_Program_Dashboard;
-  const regRows = registrySheet ? readAllSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
+  const regRows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
   const regMap = getIndexMap(regHeaders);
 
   const eventMeta = {};
@@ -352,7 +352,7 @@ function buildDashboardRollup(registrantRows) {
 
   if (registrantsSheet || registrantRows) {
     const lrHeaders = HEADERS.Registrant_Dash;
-    const lrRows = registrantRows || readAllSectionedRows(registrantsSheet, lrHeaders, 'Event_ID');
+    const lrRows = registrantRows || getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID');
     const lrMap = getIndexMap(lrHeaders);
     lrRows.forEach(row => {
       const eventId = row[lrMap['Event_ID']];
@@ -600,7 +600,7 @@ function updateMasterLunchDashboard(registrantRows) {
   // 'Standard_Buffer' is unique to the Full Schedule headers (not present
   // on TODAY_LUNCH_HEADERS), so it safely finds only the schedule's own
   // header rows and not the Today block's.
-  const existingTable = readAllSectionedRows(sheet, headers, 'Standard_Buffer');
+  const existingTable = getSectionedRows(sheet, headers, 'Standard_Buffer');
   const tableByKey = {};
   existingTable.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
@@ -944,6 +944,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   const map = getIndexMap(headers);
   const numCols = headers.length;
 
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()

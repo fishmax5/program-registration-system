@@ -6,7 +6,7 @@ function renderRegistrantsSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const headers = HEADERS.Registrant_Dash;
-  const rows = allRows || readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = allRows || getSectionedRows(sheet, headers, 'Event_ID');
   backfillRegistrantEventTimes(ss, headers, rows);
   // Same derived pair as the session table, keyed off this row's own program
   // and day — see 69_generated_file_links.gs.
@@ -91,7 +91,7 @@ function buildEventTimeByEventId(ss) {
   if (!sheet) return out;
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     if (!eventId) return;
     const time = formatTimeRange(row[map['Event_Date']],

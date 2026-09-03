@@ -222,7 +222,7 @@ function inspectCalendarEventTags(query, dateHint) {
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const map = getIndexMap(HEADERS.Master_Program_Dashboard);
   const dashboardRows = dash
-    ? readAllSectionedRows(dash, HEADERS.Master_Program_Dashboard, 'Event_ID') : [];
+    ? getSectionedRows(dash, HEADERS.Master_Program_Dashboard, 'Event_ID') : [];
 
   const hits = [];
   const unreadable = [];

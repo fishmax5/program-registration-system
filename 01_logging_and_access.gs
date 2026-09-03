@@ -197,6 +197,8 @@ function confirmCellEditOrRevert(e, title, detail) {
   // Declined: restore what was there. e.oldValue is undefined when the cell
   // was previously empty, which setValue('') reproduces correctly.
   e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+  // Whatever tab that was, its cached read is now a row behind.
+  invalidateSectionedRowsCache();
   return false;
 }
 

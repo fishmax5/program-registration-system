@@ -24,7 +24,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   if (map['Personalized_Assistance'] === undefined) return 0; // a workbook still on the old layout
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
 
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -35,7 +35,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   if (assistanceFormIds.length === 0) return 0;
 
   const booked = readBookedAppointmentTimes(registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.REGISTRANT_DASH),
+    getSectionedRows(getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.REGISTRANT_DASH),
       HEADERS.Registrant_Dash, 'Event_ID'));
   const sharedFormIds = getSharedFormIdSet();
   let touched = 0;
@@ -145,7 +145,7 @@ function rebuildAssistanceFormsNow() {
   }
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(dash, headers, 'Event_ID');
+  const rows = getSectionedRows(dash, headers, 'Event_ID');
   const lines = [];
   const todayKey = formatDateKey(new Date());
 
@@ -272,7 +272,7 @@ function rebuildAssistanceFormsNow() {
   if (assistanceFormIds.length === 0) {
     lines.push('  (none to do)');
   } else {
-    const booked = readBookedAppointmentTimes(readAllSectionedRows(
+    const booked = readBookedAppointmentTimes(getSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID'));
     const sharedFormIds = getSharedFormIdSet();
     assistanceFormIds.forEach(formId => {
@@ -805,7 +805,7 @@ function getAssistanceScheduleData(daysAhead) {
   if (sMap['Personalized_Assistance'] === undefined) return { days: [], earlier: [] };
 
   const assistanceEventIds = {};
-  readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID').forEach(row => {
     if (!isAssistanceColumnValue(row[sMap['Personalized_Assistance']])) return;
     const id = String(row[sMap['Event_ID']] || '').trim();
     if (id) assistanceEventIds[id] = true;
@@ -818,7 +818,7 @@ function getAssistanceScheduleData(daysAhead) {
 
   const byDay = {};
   const earlierList = [];
-  readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID').forEach(row => {
+  getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID').forEach(row => {
     const eventId = String(row[rMap['Event_ID']] || '').trim();
     if (!assistanceEventIds[eventId]) return;
     const status = String(row[rMap['Program_Status']] || '').trim();
@@ -1185,7 +1185,7 @@ function listFormContextsForMatching() {
   if (!registrySheet) return [];
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const byForm = groupRegistryRowsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
   return Object.keys(byForm)
@@ -1538,7 +1538,7 @@ function pushProgramQuestionsToForms(options) {
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const byForm = groupRegistryRowsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
   invalidateProgramQuestionSpecs(); // the whole point of this menu item is to re-read the tab

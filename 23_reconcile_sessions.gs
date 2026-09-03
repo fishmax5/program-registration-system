@@ -188,6 +188,7 @@ function applySessionTimesToRows(registrySheet, expected) {
     if (touched) {
       startRange.setValues(starts);
       endRange.setValues(ends);
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 
@@ -378,6 +379,7 @@ function applyAssistanceSettingsToRows(registrySheet, expected, options) {
       statusRange.setValues(statuses);
     }
     if (flagTouched && flagRange) flagRange.setValues(flags);
+    if (touched || flagTouched) invalidateSectionedRowsCache(registrySheet);
   });
 
   return changed;
@@ -741,7 +743,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
   // Form_ID -> { open: does it still cover a session inside the horizon,
   //              upcoming: does it cover any future session at all, title }
   const byForm = {};
-  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
     const formId = String(row[map['Form_ID']] || '').trim();
     if (!formId) return;
     const date = coerceDate(row[map['Event_Date']]);
@@ -903,6 +905,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
       const setCell = (colName, value) => {
         if (!sheetMap[colName]) return;
         registrySheet.getRange(zone.start + r, sheetMap[colName], 1, 1).setValue(value);
+        invalidateSectionedRowsCache(registrySheet);
       };
 
       if (wantsNoRegistration[key]) {

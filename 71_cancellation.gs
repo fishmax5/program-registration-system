@@ -147,7 +147,7 @@ function cancelRegistrantRowsLocked(matcher, opts) {
 
   const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
 
   let cancelled = 0;
   rows.forEach(row => {
@@ -404,7 +404,7 @@ function upcomingEventIdsForForm(formId) {
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const out = {};
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     if (String(row[map['Form_ID']] || '').trim() !== formId) return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date || formatDateKey(date) < todayKey) return;
@@ -452,7 +452,7 @@ function cancelPageLookup(payload) {
   const map = getIndexMap(headers);
 
   const bookings = [];
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     if (!sessions[eventId]) return;
     // GUESTS ARE NOT LISTED SEPARATELY. They go with the member who brought

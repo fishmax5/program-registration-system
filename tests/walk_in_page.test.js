@@ -343,6 +343,10 @@ function withWorkbook(parts, fn) {
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
     getSheetByName: n => sheets[n] || null
   });
+  // Each call stands in for a fresh execution against a fresh workbook — the
+  // per-execution sectioned-rows cache (08_execution_caches.gs) has to start
+  // empty too, or the next scenario's read comes back as this one's rows.
+  sandbox.invalidateSectionedRowsCache();
   try { return fn(); } finally {
     sandbox.HEADERS.Master_Program_Dashboard = realHeaders.dash;
     sandbox.HEADERS.Registrant_Dash = realHeaders.reg;

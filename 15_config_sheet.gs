@@ -609,7 +609,7 @@ function findRegistrantsExpectingLunch(dateKey, location, registrantRows) {
     const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
     if (!sheet) return [];
     try {
-      rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+      rows = getSectionedRows(sheet, headers, 'Event_ID');
     } catch (err) {
       log(`ℹ️ Could not read the registrants tab to check for lunch sign-ups (${err}).`);
       return [];

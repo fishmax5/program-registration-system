@@ -587,9 +587,9 @@ function sendProgramLeaderRosterAlertsNow() {
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionRows = readAllSectionedRows(
+  const sessionRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = readAllSectionedRows(
+  const registrantRows = getSectionedRows(
     getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
 
   let sent = 0;

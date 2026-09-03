@@ -79,7 +79,7 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return []; // a first import — nothing to rename FROM
 
   const liveTitles = collectLiveTitlesByCalendar(eventsByCalendar);
@@ -354,6 +354,7 @@ function renameSessionTableRows(registrySheet, renames) {
     if (!touched) return;
     idRange.setValues(ids);
     titleRange.setValues(titles);
+    invalidateSectionedRowsCache(registrySheet);
     invalidateEventTimeIndex(); // those Event_IDs are the index's keys
   });
 }
@@ -364,7 +365,7 @@ function renameRegistrantRows(ss, renames, idMap) {
   if (!sheet) return;
   const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const titleByOldId = buildTitleByOldId(renames);
 
   let changed = 0;
@@ -387,7 +388,7 @@ function renameTriageRows(ss, renames, idMap) {
   if (!sheet) return;
   const headers = HEADERS.Deleted_Event_Triage;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const titleByOldId = buildTitleByOldId(renames);
 
   let changed = 0;
@@ -660,7 +661,10 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
         touched = true;
         changed++;
       }
-      if (touched) flagRange.setValues(current);
+      if (touched) {
+        flagRange.setValues(current);
+        invalidateSectionedRowsCache(registrySheet);
+      }
     });
   });
 

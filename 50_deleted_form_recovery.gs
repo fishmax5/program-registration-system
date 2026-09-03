@@ -309,7 +309,7 @@ function recoverDeletedForms() {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const sessionRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
     getLunchOnlyFormLinks());
   if (refs.length === 0) {
@@ -407,7 +407,7 @@ function offerToRebuildLostForms(registrySheet, goneRefs, result) {
   const lost = {};
   goneRefs.forEach(ref => { lost[ref.formId] = ref; });
 
-  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+  const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
     .filter(item => Object.prototype.hasOwnProperty.call(lost, item.oldFormId));
   const pastOnly = goneRefs.length - plan.length;
 

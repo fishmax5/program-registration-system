@@ -219,6 +219,10 @@ function withStubSheet(rows, fn) {
   sandbox.HEADERS.Registrant_Dash = HEADER_ROW;
   const sheet = sheetFrom(rows);
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({ getSheetByName: () => sheet });
+  // Each call stands in for a fresh execution against a fresh sheet — the
+  // per-execution sectioned-rows cache (08_execution_caches.gs) has to start
+  // empty too, or the next scenario's read comes back as this one's rows.
+  sandbox.invalidateSectionedRowsCache();
   try { return fn(); } finally {
     sandbox.HEADERS.Registrant_Dash = realHeaders;
     sandbox.SpreadsheetApp.getActiveSpreadsheet = () => null;

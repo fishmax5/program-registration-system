@@ -440,7 +440,7 @@ function getExistingRegistryState(registrySheet) {
   // off — the second one has work to do even though it has no new dates.
   const state = { eventIds: new Set(), groupFormMap: {}, blockedPrograms: new Set() };
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
 
   rows.forEach(row => {

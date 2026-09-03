@@ -214,8 +214,8 @@ function buildAssistanceReview() {
   // Registrant_Dash's Event_Time is a FORMULA, which the formula-preserving
   // read hands back as its own source text rather than as a time any booked
   // slot could be matched on.
-  const rows = readAllSectionedRowValues(sheet, headers, 'Event_ID');
-  const registrantRows = readAllSectionedRowValues(
+  const rows = getSectionedRowValues(sheet, headers, 'Event_ID');
+  const registrantRows = getSectionedRowValues(
     getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
   const booked = readBookedAppointmentTimes(registrantRows);
   const facts = readAssistanceCalendarFacts();
@@ -917,7 +917,7 @@ function tidyDuplicateAssistanceRows(monthIds) {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
 
   // Only the programs whose months were actually chosen. A workbook can hold
   // duplicate rows this screen has said nothing about, and quietly deleting
@@ -991,7 +991,7 @@ function formIdsForAssistanceMonths(monthIds) {
   if (!sheet) return [];
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  return dedupePreservingOrder(readAllSectionedRowValues(sheet, headers, 'Event_ID')
+  return dedupePreservingOrder(getSectionedRowValues(sheet, headers, 'Event_ID')
     .filter(row => titles[String(row[map['Clean_Title']] || '').trim()])
     .map(row => String(row[map['Form_ID']] || '').trim())
     .filter(Boolean));
