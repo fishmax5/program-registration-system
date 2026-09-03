@@ -225,7 +225,7 @@ function repointSessionsToForm(eventIds, target) {
       formId = extractFormId(target.formRef);
       if (!formId) return '⚠️ That does not look like a form URL or ID.';
       try {
-        FormApp.openById(formId);
+        openFormCached(formId);
       } catch (err) {
         return `⚠️ Could not open form ${formId} (${err}). Check the ID, and that this account can edit it.`;
       }
@@ -297,7 +297,7 @@ function extractFormId(reference) {
 function writeFormIdOntoSessions(registrySheet, wanted, formId) {
   let links;
   try {
-    const form = FormApp.openById(formId);
+    const form = openFormCached(formId);
     links = {
       view: makeHyperlinkFormula(buildRegistrationUrl(form), 'View Live Form'),
       edit: makeHyperlinkFormula(form.getEditUrl(), 'Edit Form Settings')
@@ -427,6 +427,9 @@ function createFormFromSpec(spec, formTitle, context) {
   // leaving an orphaned form in Drive for every attempt beyond the first.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
+  // NOT openFormCached(): a file id that came into existence one line ago can
+  // never be in the memo, so routing it through would buy nothing and would
+  // leave a handle behind for a form the failure path below is about to trash.
   const form = FormApp.openById(copiedFile.getId());
   // The same opening-up createRegistrationForm() does, for the same reason:
   // whoever syncs this workbook is routinely not whoever made the form.
@@ -489,7 +492,7 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
   if (formRows.length === 0) return;
   const context = buildFormSessionContext(formId, formRows, map, getSharedFormIdSet());
   try {
-    applyAttendanceModeChoices(FormApp.openById(formId), {
+    applyAttendanceModeChoices(openFormCached(formId), {
       isFixed: context.isFixed || context.showTitle, // a combined form is a fixed list of dates
       isClub: context.isClub,
       programTitle: context.programTitle,

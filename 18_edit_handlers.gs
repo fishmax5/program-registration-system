@@ -1231,7 +1231,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
     const survivor = candidates.sort((a, b) =>
       (tally[span][b].count - tally[span][a].count) || (tally[span][a].earliest - tally[span][b].earliest))[0];
     try {
-      const form = FormApp.openById(survivor);
+      const form = openFormCached(survivor);
       survivorBySpan[span] = survivor;
       linksBySpan[span] = {
         view: makeHyperlinkFormula(buildRegistrationUrl(form), 'View Live Form'),

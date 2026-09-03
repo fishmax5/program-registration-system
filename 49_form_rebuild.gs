@@ -733,7 +733,7 @@ function replaceOneForm(registrySheet, item) {
 /** The old form's own title if it can still be opened, else one derived from its sessions. */
 function readFormTitleOrDerive(oldFormId, context) {
   try {
-    const title = String(FormApp.openById(oldFormId).getTitle() || '').trim();
+    const title = String(openFormCached(oldFormId).getTitle() || '').trim();
     if (title) return title;
   } catch (err) {
     // Expected often enough to be worth not shouting about: a form nobody can
@@ -819,6 +819,11 @@ function remapFormRegistries(oldFormId, newFormId) {
 function trashReplacedForm(oldFormId, describe) {
   try {
     DriveApp.getFileById(oldFormId).setTrashed(true);
+    // The handle this execution may still be holding now points at a file in
+    // the trash. Dropped here as well as in retireReplacedFormState(), because
+    // this is the step that makes it stale and it is best-effort — a rebuild
+    // that failed to trash still went past the other one.
+    invalidateFormItemIndex(oldFormId);
   } catch (err) {
     log(`ℹ️ Rebuilt ${describe}, but the old form ${oldFormId} could not be trashed (${err}) — ` +
       `nothing points at it any more; delete it by hand if you want it gone.`);

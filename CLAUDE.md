@@ -59,7 +59,7 @@ Line counts are a rough guide to what you are about to load.
 | `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
 | `07_dates_and_labels.gs` | 589 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
-| `08_execution_caches.gs` | 293 | The per-execution memo caches the sync hot paths use, and their invalidation. |
+| `08_execution_caches.gs` | 351 | The per-execution memo caches the sync hot paths use, and their invalidation — including `openFormCached()`, the one `FormApp.openById()` per form per run. |
 | `09_lunch_schedule_lookup.gs` | 393 | Reading `Lunch_Schedule` by date × location. |
 | `10_form_date_labels.gs` | 723 | Fingerprinted writes of date labels onto a live form (`applyFormDateLabels`). |
 | `11_menu_items_paste.gs` | 1103 | Adding menu items to `Lunch_Schedule` — paste CSV, in the sheet or a dialog. |

@@ -18,6 +18,12 @@
 //     per call, the former once per lunch-dashboard rollup row.
 //   - form.getItems() is a REMOTE call and getResponseValueByTitle() made
 //     one per lookup — roughly ten per response, times every response.
+//   - FormApp.openById() is a REMOTE call and had no memo at all, with 35 call
+//     sites across 17 files. reconcileNoRegistrationGroups() and its neighbours
+//     in 23_reconcile_sessions.gs open forms five separate times, and within
+//     ONE sync the same form is commonly opened again by 10_form_date_labels,
+//     26_event_descriptions, 31_form_shape_and_migration, 54_custom_questions,
+//     55_assistance_sync_and_images and 68_form_state_migrations.
 //   - CalendarApp.getEvents() ran once per calendar in syncCalendarsInternal()
 //     AND again in every triageDeletedSessions() pass; a full
 //     initializeAndSyncAll() hit the calendars four times over.
@@ -38,6 +44,7 @@ let __automationEnabledCache = null;
 let __triggerOwnerCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
+let __formHandleCache = {};
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -252,6 +259,55 @@ function getFormItemIndex(form) {
 function invalidateFormItemIndex(formId) {
   if (formId) delete __formItemIndexCache[formId];
   else __formItemIndexCache = {};
+  // The HANDLE goes with the index. Every path that dirties a form's items has
+  // just written to that form, and the cheap thing to do about a handle whose
+  // freshness is now in question is to drop it and pay for one more open —
+  // rather than reason, at every one of these call sites, about what a Form
+  // object does and does not re-read after somebody else has edited the file.
+  // Nothing needs a separate invalidateFormHandle(): a path that wants the
+  // handle gone wants the index gone too, and there is no path that wants the
+  // reverse.
+  if (formId) delete __formHandleCache[formId];
+  else __formHandleCache = {};
+}
+
+/**
+ * ONE FormApp.openById() per form per execution.
+ *
+ * The handle itself, not its items — getFormItemIndex() above memoizes
+ * form.getItems() but was always handed a form somebody else had already paid
+ * to open. A single sync opens the same form from half a dozen files (the
+ * banner at the top of this file lists them), and each of those was a separate
+ * round trip to the Forms service for a document that had not changed hands.
+ *
+ * FAILURES ARE NOT CACHED, deliberately. A form id that will not open is
+ * re-tried on the next call, exactly as it was before this cache existed, for
+ * three reasons:
+ *   - The throw is the ANSWER at some call sites. findExistingFormIdFromEvents()
+ *     and the "existing form" branch of moveSessionsToForm() open a form purely
+ *     to find out whether it opens; a remembered "no" would still be correct,
+ *     but a remembered "no" is one bad minute away from being wrong for the
+ *     rest of a run.
+ *   - A failure here is routinely REPAIRED mid-execution. syncRegistrations()
+ *     answers a permission failure by opening the file's sharing up, and the
+ *     rebuild and recovery paths (49, 50) put a form back within the same run;
+ *     a cached refusal would outlive its own fix.
+ *   - The cost of getting it wrong is asymmetric. A repeated open of a broken
+ *     form is one wasted round trip on a path that is already logging a
+ *     warning; a wrongly remembered refusal silently skips a form's dates, its
+ *     questions or its registrations for the whole execution.
+ * Both mean a caller's own try/catch keeps working unchanged — this function
+ * throws whatever FormApp.openById() throws, at every call.
+ */
+function openFormCached(formId) {
+  const id = String(formId || '').trim();
+  // No id: hand it to Forms anyway, so the caller gets the same error it
+  // always got rather than a different one invented here.
+  if (!id) return FormApp.openById(formId);
+  if (__formHandleCache[id]) return __formHandleCache[id];
+  const form = FormApp.openById(id);
+  __formHandleCache[id] = form;
+  return form;
 }
 
 /**

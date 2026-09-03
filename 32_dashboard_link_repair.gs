@@ -230,7 +230,7 @@ function planDashboardLinkRepair(registrySheet) {
     let urls = urlByFormId[wantedFormId];
     if (!urls) {
       try {
-        const form = FormApp.openById(wantedFormId);
+        const form = openFormCached(wantedFormId);
         urls = { publishedUrl: buildRegistrationUrl(form), editUrl: form.getEditUrl() };
         stats.formsOpened++;
       } catch (err) {
@@ -921,7 +921,7 @@ const FIX_ONE_FORM_DIAGNOSTIC_DATE_LIMIT = 12;
  */
 function logLunchQuestionsOnLiveForm(formId, when) {
   try {
-    const form = FormApp.openById(formId);
+    const form = openFormCached(formId);
     const items = form.getItems();
     const titles = items.map(it => it.getTitle());
     // LUNCH_ONLY_GRID is in the list because on a lunch-only form the roster
@@ -1293,7 +1293,7 @@ function cleanupNeverPolicyForms() {
     if (locations.some(loc => getCateringPolicyForLocation(loc) !== CATERING_POLICIES.NEVER)) return;
     checked++;
     try {
-      removeLunchQuestionsFromForm(FormApp.openById(formId), locations);
+      removeLunchQuestionsFromForm(openFormCached(formId), locations);
     } catch (err) {
       log(`⚠️ cleanupNeverPolicyForms: could not open form ${formId} for "${describeLocations(locations)}" (${err}).`);
     }

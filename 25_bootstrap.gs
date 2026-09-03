@@ -549,7 +549,7 @@ function findExistingFormIdFromEvents(events) {
     const found = findRegistrationLineInDescription(ev.getDescription() || '');
     if (!found) continue;
     try {
-      FormApp.openById(found.formId);
+      openFormCached(found.formId);
       return found.formId;
     } catch (err) {
       log(`⚠️ Found a Form ID marker (${found.formId}) in an event description, but it could not be opened (${err}) — ignoring.`);

@@ -75,7 +75,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
     if (fingerprints[key] === fingerprint) { skipped++; return; }
 
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       const written = syncAssistanceQuestionsOnForm(form, context, choices);
       touched += written;
       if (written > 0) {
@@ -285,7 +285,7 @@ function rebuildAssistanceFormsNow() {
         // ASSISTANCE_NO_TIME_CHOICE. Counting it as one is how a form with
         // nothing free reads as "1 time available".
         const free = choices.filter(c => c !== ASSISTANCE_NO_TIME_CHOICE).length;
-        const changed = syncAssistanceQuestionsOnForm(FormApp.openById(formId), context, choices);
+        const changed = syncAssistanceQuestionsOnForm(openFormCached(formId), context, choices);
         lines.push(`  ${name} — ${free} free appointment time(s) across ${upcoming.length} upcoming ` +
           `session(s); ${changed > 0 ? `${changed} change(s) written` : 'already correct'}` +
           `; asks about an earlier appointment`);
@@ -1561,7 +1561,7 @@ function pushProgramQuestionsToForms(options) {
       (((before.titles || []).length > 0) || !!String(before.description || ''));
     if (wanted.length === 0 && !everApplied) return;
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       let n = syncCustomQuestionsOnForm(form, context, wanted);
       // THE DESCRIPTION ROWS ARE NOT ITEMS, and this menu item used to push
       // only items. syncCustomQuestionsOnForm() filters every "Form
