@@ -623,6 +623,15 @@ function getOrCreateTemplateForm() {
   const form = FormApp.create('TEMPLATE — Registration Form Base (do not edit or delete)');
   addTemplateItemsToForm(form);
 
+  // Same reason every registration form and program leader sheet opens itself
+  // up the moment it is created (see openUpFileToAnyoneWithLink()): the
+  // template is created by whoever ran this, but copied by makeCopy() every
+  // time a program's form is built — routinely a DIFFERENT account, on the
+  // hourly triggers. Leaving the template itself unshared means the very
+  // first copy attempt from another account fails, and openUpAllFormSharing()
+  // only reaches it retroactively if someone remembers to run it.
+  openUpFileToAnyoneWithLink(form.getId(), 'the form template');
+
   props.setProperty(TEMPLATE_FORM_PROP_KEY, form.getId());
   log(`Created template registration form: ${form.getId()}`);
   return form;
