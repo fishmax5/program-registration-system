@@ -121,7 +121,7 @@ function buildProgramReview() {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const calendarFacts = readCalendarFactsForReview();
   const reviewState = getProgramReviewState();
   const todayKey = formatDateKey(new Date());
@@ -1154,7 +1154,11 @@ function writeProgramKindOntoRows(title, calendarIds, settings) {
         values[r] = [wanted[header]];
         touched = true;
       });
-      if (touched) { range.setValues(values); changed += targets.length; }
+      if (touched) {
+        range.setValues(values);
+        invalidateSectionedRowsCache(sheet);
+        changed += targets.length;
+      }
     });
   });
   return changed;

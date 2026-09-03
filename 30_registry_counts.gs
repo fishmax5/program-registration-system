@@ -17,7 +17,7 @@ function recomputeEventRegistryCounts(registrySheet, registrantsSheet, registran
 function buildEventCountsFromRegistrants(registrantsSheet, registrantRows) {
   const counts = {};
   const headers = HEADERS.Registrant_Dash;
-  const rows = registrantRows || readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
+  const rows = registrantRows || getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
@@ -127,6 +127,7 @@ function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, count
   registrySheet.getRange(dataStart, regMap['Waitlist_Count'], numRows, 1).setValues(waitlistOut);
   registrySheet.getRange(dataStart, regMap['Remaining_Seats'], numRows, 1).setValues(remainingOut);
   registrySheet.getRange(dataStart, regMap['Status'], numRows, 1).setValues(statusOut);
+  invalidateSectionedRowsCache(registrySheet);
 }
 
 /**

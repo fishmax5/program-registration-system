@@ -344,7 +344,7 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const sessionByEventId = {};
-  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const d = coerceDate(row[map['Event_Date']]);
     if (!eventId || !d || formatDateKey(d) < todayKey) return;
@@ -868,6 +868,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
 
   if (rows.length > 0) {
     registrySheet.getRange(registrySheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    invalidateSectionedRowsCache(registrySheet); // rows the cached read has never seen
     invalidateEventTimeIndex(); // new sessions, and therefore new times to look up
   }
 }
@@ -875,7 +876,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
 /** Moves any Registrant_Dash rows tied to a deleted event into the Triage tab. */
 function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
   const headers = HEADERS.Registrant_Dash;
-  const allRows = readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
+  const allRows = getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
   const flaggedNow = new Date();
@@ -903,7 +904,7 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const triageSheet = getOrCreateSheet(ss, SHEET_NAMES.TRIAGE);
-  const existingTriageRows = readAllSectionedRows(triageSheet, HEADERS.Deleted_Event_Triage, 'Event_ID');
+  const existingTriageRows = getSectionedRows(triageSheet, HEADERS.Deleted_Event_Triage, 'Event_ID');
   renderTriageSheet(false, existingTriageRows.concat(newTriageRows));
 
   log(`Moved ${newTriageRows.length} registrant row(s) to "${SHEET_NAMES.TRIAGE}".`);
@@ -943,7 +944,7 @@ function restoreTriagedRegistrants() {
   const tMap = getIndexMap(triageHeaders);
   const rMap = getIndexMap(regHeaders);
 
-  const sessionRows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
   const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
   const liveEventIds = new Set(sessionRows.map(row => row[sessionMap['Event_ID']]).filter(Boolean));
   if (liveEventIds.size === 0) {
@@ -952,11 +953,11 @@ function restoreTriagedRegistrants() {
   }
 
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const registrantRows = readAllSectionedRows(registrantsSheet, regHeaders, 'Event_ID');
+  const registrantRows = getSectionedRows(registrantsSheet, regHeaders, 'Event_ID');
   const present = new Set(registrantRows.map(row =>
     `${row[rMap['Event_ID']]}|${normalizeNameKey(row[rMap['Name']])}|${row[rMap['Person_Type']]}`));
 
-  const triageRows = readAllSectionedRows(triageSheet, triageHeaders, 'Event_ID');
+  const triageRows = getSectionedRows(triageSheet, triageHeaders, 'Event_ID');
   const stayInTriage = [];
   const restored = [];
 

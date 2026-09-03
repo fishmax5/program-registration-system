@@ -411,7 +411,7 @@ function buildLiveCheckInSessionIndex() {
     horizon.setDate(horizon.getDate() + CHECK_IN_LIVE_SESSION_DAYS);
     const horizonKey = formatDateKey(horizon);
     const seen = {};
-    readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
+    getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
       const title = String(row[map['Clean_Title']] || '').trim();
       const location = String(row[map['Location']] || '').trim();
       const date = coerceDate(row[map['Event_Date']]);
@@ -761,6 +761,7 @@ function clearCheckInMarkLocked(args) {
   }
   if (map['Attended'] !== undefined) sheet.getRange(target, map['Attended'] + 1).setValue(false);
   if (map['Lunch_Served'] !== undefined) sheet.getRange(target, map['Lunch_Served'] + 1).setValue(false);
+  invalidateSectionedRowsCache(sheet);
   return { ok: true, cleared: true, message: `Cleared ${args.name}.` };
 }
 
@@ -826,7 +827,7 @@ function readCheckInRoster(location, sessionValue) {
   const seen = {};
 
   // The VALUES reader, one pass over the tab — see readAllSectionedRowValues().
-  readAllSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
     const name = String(row[map['Name']] || '').trim();
     if (!name) return;
     if (wantedLocation && String(row[map['Location']] || '').trim() !== wantedLocation) return;

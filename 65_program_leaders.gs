@@ -188,7 +188,7 @@ function knownProgramKeys(ss, sessionRows) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const rows = sessionRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), headers, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), headers, 'Event_ID');
 
   const known = {};
   rows.forEach(row => {

@@ -261,7 +261,7 @@ function mergeLegacyTabs() {
       const targetSheet = getOrCreateSheet(ss, sheetName);
       current = target.readCurrent
         ? target.readCurrent(targetSheet)
-        : readAllSectionedRows(targetSheet, target.headers, target.marker);
+        : getSectionedRows(targetSheet, target.headers, target.marker);
     } catch (err) {
       log(`⚠️ mergeLegacyTabs: could not read "${sheetName}" (${err}) — skipping its sources, tabs left in place.`);
       return;
@@ -371,6 +371,7 @@ function renderProgramDashboardFromRows(rows) {
 
   // Write the combined rows into a bare table the normal render will find,
   // then let renderProgramDashboard() lay it out properly.
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   writeSectionHeader(sheet, 1, headers.length, headers);

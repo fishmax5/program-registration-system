@@ -96,7 +96,7 @@ function destroyAndRebuildAllForms() {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map);
+  const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map);
   if (plan.length === 0) {
     toastIfPossible('Nothing to rebuild — no form on this workbook covers an upcoming session.');
     return null;
@@ -242,7 +242,7 @@ function runFormRebuildSweep(registrySheet, plan) {
   const confirmed = new Set(plan.map(item => item.oldFormId));
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const currentPlan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+  const currentPlan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
     .filter(item => confirmed.has(item.oldFormId));
 
   for (const item of currentPlan) {
@@ -500,7 +500,7 @@ function runFormRebuildSweepSlice() {
     // Form_IDs is trusted from the original plan — the sessions on each one
     // are taken as they stand right now.
     const remainingPlan = withScriptLock(SYNC_LOCK_WAIT_MS, () =>
-      planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+      planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
         .filter(item => confirmedSet.has(item.oldFormId) && !doneSet.has(item.oldFormId)), null);
     if (!remainingPlan) {
       log('Form-rebuild slice: could not take the lock to re-read the plan — the next slice will retry.');

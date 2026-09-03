@@ -320,7 +320,7 @@ function buildQuickMarkIndex() {
   // back onto a sheet, and one read of the tab instead of three is most of why
   // this now finishes in a second rather than twenty. See
   // readAllSectionedRowValues().
-  const registrantRows = sheet ? readAllSectionedRowValues(sheet, headers, 'Event_ID') : [];
+  const registrantRows = sheet ? getSectionedRowValues(sheet, headers, 'Event_ID') : [];
 
   const sessions = [];
   /** "location \0 title \0 dateKey" -> the bucket of names for that session. */
@@ -578,7 +578,7 @@ function collectKnownProgramChoices(location, registrantRows) {
     if (dash) {
       const headers = HEADERS.Master_Program_Dashboard;
       const map = getIndexMap(headers);
-      readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
+      getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
         const isAssistance = map['Personalized_Assistance'] !== undefined &&
           isAssistanceColumnValue(row[map['Personalized_Assistance']]);
         note(row[map['Clean_Title']], row[map['Location']], row[map['Event_Date']], {
@@ -1056,6 +1056,9 @@ function applyQuickMarkLocked(args) {
     const current = String(overrideCell.getValue() || '').trim();
     if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
   }
+  // Everything above wrote cells on the Registrants tab, one at a time. Drop
+  // the cached read of it before anything below looks at the roster again.
+  invalidateSectionedRowsCache(sheet);
 
   // ALREADY REGISTERED. A tick on Register for somebody who has a row for this
   // session is not an error and not a second registration — it is somebody at
@@ -1072,6 +1075,7 @@ function applyQuickMarkLocked(args) {
   let earlierNote = '';
   if (earlierAppointment && map['Earlier_Appointment'] !== undefined) {
     sheet.getRange(target.sheetRow, map['Earlier_Appointment'] + 1).setValue(earlierAppointment);
+    invalidateSectionedRowsCache(sheet);
     earlierNote = ' Marked to be called if an earlier appointment opens up.';
   }
   // What the dialog needs to keep its own copy of the slot list honest without
@@ -1176,7 +1180,7 @@ function appointmentSlotsForRow(sheet, map, target) {
     if (!dash) return [];
     const headers = HEADERS.Master_Program_Dashboard;
     const dashMap = getIndexMap(headers);
-    const session = readAllSectionedRowValues(dash, headers, 'Event_ID')
+    const session = getSectionedRowValues(dash, headers, 'Event_ID')
       .filter(row => String(row[dashMap['Event_ID']] || '').trim() === eventId)[0];
     if (!session) return [];
     return buildAppointmentSlots(
@@ -1227,6 +1231,7 @@ function addQuickMarkMealCounts(sheet, map, sheetRow, counts) {
     const current = cell.getValue();
     const existing = isLegacyFridgeCheckbox(current) ? 0 : (Number(current) || 0);
     cell.setValue(existing + entry.amount);
+    invalidateSectionedRowsCache(sheet);
     written += entry.amount;
   });
   return written;
@@ -1308,7 +1313,7 @@ function addQuickMarkWalkIn(sheet, args) {
     };
   }
   if (session.isAssistance) {
-    const taken = readBookedAppointmentTimes(readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID'));
+    const taken = readBookedAppointmentTimes(getSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID'));
     const free = buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session))
       .filter(s => !(taken[session.eventId] || new Set()).has(s.startLabel));
     if (!appointmentTime) {
@@ -1443,7 +1448,7 @@ function addQuickMarkWalkIn(sheet, args) {
   // arguing with the row just typed in. See section 5c.
   clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, personType));
 
-  const existing = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const existing = getSectionedRows(sheet, headers, 'Event_ID');
   existing.push(row);
   renderRegistrantsSheet(false, existing);
 
@@ -1612,7 +1617,7 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
   const wanted = normalizeNameKey(program);
 
   const matches = [];
-  readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(dash, headers, 'Event_ID').forEach(row => {
     if (normalizeNameKey(row[map['Clean_Title']]) !== wanted) return;
     const rowLocation = String(row[map['Location']] || '').trim();
     if (location && rowLocation !== location) return;

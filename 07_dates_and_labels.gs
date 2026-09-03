@@ -298,6 +298,9 @@ function labelManualEntryColumns(sheet, headerRow, headers, manualColumnNames) {
   manualColumnNames.forEach(name => {
     const idx = headers.indexOf(name);
     if (idx === -1) return;
+    // A HEADER cell, which is what every sectioned read projects its columns
+    // by — so this is a write the cache has to hear about like any other.
+    invalidateSectionedRowsCache(sheet);
     sheet.getRange(headerRow, idx + 1)
       .setValue(`${MANUAL_ENTRY_PREFIX} ${name}`)
       .setBackground(MANUAL_ENTRY_HEADER_COLOR)

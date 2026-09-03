@@ -36,7 +36,7 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // reading the session table themselves when handed null, which is the
     // whole tab read twice per sync for the same rows.
     const sessions = sessionRows ||
-      readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
+      getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
         HEADERS.Master_Program_Dashboard, 'Event_ID');
     // BEFORE refreshProgramOptions(), and that order is load-bearing on a
     // workbook that has not migrated yet: refreshProgramLeadersTab() carries
@@ -75,7 +75,7 @@ function refreshMemberRoll(ss, registrantRows) {
   const lrHeaders = HEADERS.Registrant_Dash;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
   const people = {};
   rows.forEach(row => {
@@ -171,7 +171,7 @@ function refreshProgramOptions(ss, sessionRows) {
   const regHeaders = HEADERS.Master_Program_Dashboard;
   const regMap = getIndexMap(regHeaders);
   const rows = sessionRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
 
   const todayKey = formatDateKey(new Date());
   const programs = {};
@@ -487,6 +487,9 @@ function applyMemoryTabValidation(sheet, headers, rowCount, spec) {
 /** Writes a memory tab: banner, header row, data, and the yellow staff-column wash. */
 function writeMemoryTab(sheet, headers, rows, options) {
   const numCols = headers.length;
+  // Member_Roll and Program_Options are read with the same sectioned readers
+  // as the date-bearing tabs, and this is the only thing that rewrites them.
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   sheet.getBandings().forEach(b => b.remove());

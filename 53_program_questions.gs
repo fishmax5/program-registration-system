@@ -123,7 +123,7 @@ function listKnownProgramTitles() {
     const headers = HEADERS.Master_Program_Dashboard;
     const map = getIndexMap(headers);
     const seen = {};
-    readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
       const title = String(row[map['Clean_Title']] || '').trim();
       if (title) seen[title] = true;
     });

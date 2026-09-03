@@ -60,7 +60,7 @@ function gatherFormLinkFacts(registrySheet, options) {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const sessionRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
     getLunchOnlyFormLinks());
   let folderId = '';
@@ -328,7 +328,7 @@ function runOneDoctorFix(registrySheet, code) {
     const headers = HEADERS.Master_Program_Dashboard;
     const map = getIndexMap(headers);
     const refs = collectFormsWorkbookDependsOn(
-      readAllSectionedRows(registrySheet, headers, 'Event_ID'), map,
+      getSectionedRows(registrySheet, headers, 'Event_ID'), map,
       getPersistentFormRegistry(), getLunchOnlyFormLinks());
     let folder = null;
     let folderId = '';
@@ -351,7 +351,7 @@ function runOneDoctorFix(registrySheet, code) {
 
     const lost = {};
     buckets.gone.forEach(ref => { lost[ref.formId] = true; });
-    const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+    const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
       .filter(item => Object.prototype.hasOwnProperty.call(lost, item.oldFormId));
     if (plan.length === 0) {
       return 'None of the lost forms has a session still to come, so there was nothing to rebuild.';

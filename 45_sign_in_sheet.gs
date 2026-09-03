@@ -131,7 +131,7 @@ function listSignInSheetOptions() {
     if (dash) {
       const headers = HEADERS.Master_Program_Dashboard;
       const map = getIndexMap(headers);
-      readAllSectionedRows(dash, headers, 'Event_ID').forEach(row => {
+      getSectionedRows(dash, headers, 'Event_ID').forEach(row => {
         note(row[map['Event_Date']], row[map['Location']], row[map['Clean_Title']], false);
       });
     }
@@ -354,7 +354,7 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
   const headers = HEADERS.Registrant_Dash;
   const map = getIndexMap(headers);
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  const registrantRows = sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : [];
+  const registrantRows = sheet ? getSectionedRows(sheet, headers, 'Event_ID') : [];
 
   const programs = [];
   const rows = [];
@@ -476,7 +476,7 @@ function lookupOrderingNumbersForPrinting(dateKey, location) {
   try {
     const headers = HEADERS.Master_Lunch_Dashboard;
     const map = getIndexMap(headers);
-    const match = readAllSectionedRows(sheet, headers, 'Standard_Buffer').filter(row => {
+    const match = getSectionedRows(sheet, headers, 'Standard_Buffer').filter(row => {
       const d = coerceDate(row[map['Event_Date']]);
       return d && formatDateKey(d) === dateKey && String(row[map['Location']] || '').trim() === location;
     })[0];

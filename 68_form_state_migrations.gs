@@ -290,7 +290,7 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
   // a form counted in `deferred` is the only kind that comes back next time.
   const result = { opened: 0, repaired: 0, skipped: 0, unrecognized: 0, deferred: 0, visited: [] };
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return result;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -512,7 +512,7 @@ function repairFormRoutingNow() {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const formIds = Object.keys(groupRegistryRowsByForm(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map));
+  const formIds = Object.keys(groupRegistryRowsByForm(getSectionedRows(registrySheet, headers, 'Event_ID'), map));
   if (formIds.length === 0) {
     ui.alert('There is no form on this workbook to check yet.');
     return;

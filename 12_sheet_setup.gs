@@ -115,7 +115,7 @@ function rebuildLayoutFromSheet() {
     try {
       return name === SHEET_NAMES.LUNCH_SCHEDULE
         ? readLunchScheduleRows(sheet)
-        : readAllSectionedRows(sheet, headers, marker);
+        : getSectionedRows(sheet, headers, marker);
     } catch (err) {
       log(`⚠️ Rebuild: could not read "${name}" (${err}) — treating it as empty.`);
       return [];

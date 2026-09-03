@@ -61,7 +61,7 @@ function listRepointableSessions() {
   const todayKey = formatDateKey(new Date());
   const limitKey = formatDateKey(new Date(Date.now() + REPOINT_WINDOW_FORWARD_DAYS * 86400000));
 
-  return readAllSectionedRows(sheet, headers, 'Event_ID')
+  return getSectionedRows(sheet, headers, 'Event_ID')
     .map(row => {
       const date = coerceDate(row[map['Event_Date']]);
       const eventId = String(row[map['Event_ID']] || '').trim();
@@ -91,7 +91,7 @@ function listExistingForms() {
   const todayKey = formatDateKey(new Date());
   const byForm = {};
 
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const formId = String(row[map['Form_ID']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!formId || !date) return;
@@ -210,7 +210,7 @@ function repointSessionsToForm(eventIds, target) {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const allRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const allRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const chosenRows = allRows.filter(row => wanted.has(String(row[map['Event_ID']] || '').trim()));
   if (chosenRows.length === 0) return '⚠️ Those sessions are no longer on the dashboard — try Sync Cal and reopen this.';
 
@@ -243,7 +243,7 @@ function repointSessionsToForm(eventIds, target) {
     // The destination form now covers a different set of dates than it did a
     // moment ago; its grid rows have to say so, or a respondent cannot pick
     // the sessions that were just moved onto it.
-    const refreshedRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+    const refreshedRows = getSectionedRows(registrySheet, headers, 'Event_ID');
     refreshOneFormDateLabels(formId, refreshedRows, map, 'sessions moved onto this form');
     reapplySignUpOptionsForForm(formId, refreshedRows, map);
     flushPersistentRegistries();
@@ -344,6 +344,10 @@ function writeFormIdOntoSessions(registrySheet, wanted, formId) {
       idRange.setValues(ids);
       viewRange.setValues(views);
       editRange.setValues(edits);
+      // repointSessionsToForm() deliberately re-reads these rows straight
+      // after this returns — see the flush() there. It has to see the new
+      // Form_ID, not the one this just replaced.
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 

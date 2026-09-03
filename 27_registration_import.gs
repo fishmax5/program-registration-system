@@ -78,16 +78,16 @@ function syncRegistrationsInternal() {
 
   // One read of each tab up front; both registry-derived structures below
   // are built from the same rows rather than scanning the sheet twice.
-  const sessionRows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registryIndex = buildRegistryIndex(registrySheet, sessionRows);
-  const existingRows = readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const registryIndex = buildRegistryIndex(registrySheet);
+  const existingRows = getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
   const existingRowIndex = getExistingRegistrantIndex(existingRows);
   // What each session is already holding, so this run's waitlist decisions
   // start from the truth rather than from zero — see seedRegistryOccupancy().
   seedRegistryOccupancy(registryIndex, existingRows);
 
-  const formIds = getDistinctFormIds(registrySheet, sessionRows);
+  const formIds = getDistinctFormIds(registrySheet);
   const newRows = [];
   // Club joins are gathered across every response and written to the roster
   // ONCE, below — a tab rewrite per submission would be both slow and, on a
@@ -278,7 +278,7 @@ function syncRegistrationsInternal() {
   // hourly pass that just imported into them. Reaches outside the workbook, so
   // it sits down here with the invitations and carries its own guard.
   const settledRegistrantRows = reusableRows ||
-    readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+    getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
   try {
     pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
   } catch (err) {
@@ -332,9 +332,13 @@ function syncRegistrationsInternal() {
   }
 }
 
-function getDistinctFormIds(registrySheet, sessionRows) {
+// sessionRows dropped: getSectionedRows() below is now the per-execution cache
+// (08_execution_caches.gs), so a caller re-reading right after
+// syncRegistrationsInternal()'s own top-of-run read gets the same array back
+// for free — the hand-threaded parameter would only have duplicated it.
+function getDistinctFormIds(registrySheet) {
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const values = rows.map(row => row[map['Form_ID']]);
   return Array.from(new Set(values.filter(Boolean)));
@@ -348,10 +352,10 @@ function getDistinctFormIds(registrySheet, sessionRows) {
  * is what keeps two sites' sessions on the same date resolving to two
  * different registry entries instead of one.
  */
-function buildRegistryIndex(registrySheet, sessionRows) {
+function buildRegistryIndex(registrySheet) {
   const index = {};
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const labelOptionsByForm = buildLabelOptionsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();

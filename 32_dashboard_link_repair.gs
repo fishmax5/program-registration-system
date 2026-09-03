@@ -276,6 +276,7 @@ function applyDashboardLinkPlan(registrySheet, plan) {
       registrySheet.getRange(p.row, sheetMap['Form_ID']).setValue(p.formId);
       registrySheet.getRange(p.row, sheetMap['Form_Response_Link']).setFormula(p.view);
       registrySheet.getRange(p.row, sheetMap['Edit_Form_Link']).setFormula(p.edit);
+      invalidateSectionedRowsCache(registrySheet);
       fixed++;
     } catch (err) {
       log(`Repair dashboard links: row ${p.row} could not be written (${err}).`);
@@ -444,7 +445,7 @@ function planEventLinkDrift(registrySheet) {
   const drift = [];
 
   const sessionByEventId = {};
-  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const d = coerceDate(row[map['Event_Date']]);
     if (!eventId || !d || formatDateKey(d) < todayKey) return;
@@ -716,7 +717,7 @@ function rebuildAllFormsInPlace() {
   // would only disturb the archive.
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map);
+  const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map);
   if (plan.length === 0) {
     toastIfPossible('Nothing to update — no form on this workbook covers an upcoming session.');
     return null;
@@ -972,7 +973,7 @@ function fixOneFormNow(formRef) {
 
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID')
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID')
     .filter(row => String(row[map['Form_ID']] || '').trim() === formId);
   if (rows.length === 0) {
     log(`Update one form: no session on ${SHEET_NAMES.PROGRAM_DASHBOARD} carries Form_ID ${formId}.`);
@@ -1273,7 +1274,7 @@ function cleanupNeverPolicyForms() {
   if (!registrySheet) return;
 
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
 
   const locationsByForm = {};

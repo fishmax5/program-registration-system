@@ -34,7 +34,7 @@ function renderProgramDashboard(force, options) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
 
-  let sessionRows = options.sessionRows || readAllSectionedRows(sheet, headers, 'Event_ID');
+  let sessionRows = options.sessionRows || getSectionedRows(sheet, headers, 'Event_ID');
 
   const triageResult = options.skipTriage
     ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
@@ -292,7 +292,7 @@ function scanRegistrants(registrantsSheet, registrantRows) {
     earliestMonthByPerson: {}
   };
   const headers = HEADERS.Registrant_Dash;
-  const rows = registrantRows || readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
+  const rows = registrantRows || getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
@@ -646,6 +646,7 @@ function formatMetricChange(current, previous, options) {
  * written before Event_End existed: no end, no dash, just the start time.
  */
 function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
+  invalidateSectionedRowsCache(sheet);
   if (count < 1) return;
   const endColLetter = map['Event_End'] === undefined ? '' : columnToLetter(map['Event_End'] + 1);
   const formulas = [];
@@ -841,6 +842,7 @@ function styleMetricTable(sheet, startRow, numRows, numCols) {
 
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
+  invalidateSectionedRowsCache(sheet); // ...and its rows with them
   sheet.clear();
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()

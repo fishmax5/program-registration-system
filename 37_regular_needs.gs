@@ -272,6 +272,7 @@ function stampRegularNeedsOnRow(sheet, map, sheetRow, needs) {
     .filter(text => existing.indexOf(text) === -1);
   if (added.length === 0) return '';
   cell.setValue([existing, ...added.map(text => `🔔 ${text}`)].filter(Boolean).join(' · '));
+  invalidateSectionedRowsCache(sheet);
   return ` Noted: ${added.join('; ')}.`;
 }
 
@@ -449,6 +450,7 @@ function addRegularNeedFromDialog(args) {
     const at = Math.max(sheet.getLastRow() + 1, MEMORY_TAB_DATA_ROW);
     if (sheet.getMaxRows() < at) sheet.insertRowsAfter(sheet.getMaxRows(), at - sheet.getMaxRows());
     sheet.getRange(at, 1, 1, headers.length).setValues([row]);
+    invalidateSectionedRowsCache(sheet);
     ['Starts', 'Ends', 'Added_On'].forEach(h => {
       sheet.getRange(at, map[h] + 1, 1, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     });

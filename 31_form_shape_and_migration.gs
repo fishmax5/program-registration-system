@@ -33,7 +33,7 @@
  */
 function refreshFormShapeForAllForms(registrySheet) {
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -268,7 +268,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
   const deadline = options.deadline || 0;
 
   const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -376,7 +376,10 @@ function updateRegistryFormLinks(registrySheet, urlByFormId) {
       links[r] = [makeHyperlinkFormula(url, 'View Live Form')];
       touched = true;
     });
-    if (touched) linkRange.setValues(links);
+    if (touched) {
+      linkRange.setValues(links);
+      invalidateSectionedRowsCache(registrySheet);
+    }
   });
 }
 
