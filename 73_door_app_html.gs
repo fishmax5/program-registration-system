@@ -1088,30 +1088,73 @@ function buildDoorAppHtml(options) {
     });
   }
 
+  /**
+   * OPTIMISTIC. doorSignIn() is still a synchronous call under the hood —
+   * google.script.run has no true fire-and-forget from a browser — but
+   * nobody standing at a tablet should be made to wait through its lock
+   * waits and sheet writes to see anything happen. So this hands the tablet
+   * back NOW, showing the sign-in as done, and lets the real write finish
+   * underneath whatever screen comes next.
+   *
+   * A visitor who just said they are not a member yet goes straight to the
+   * membership application instead of the name list — that screen does not
+   * read RESULT or wait on this call either (see openMembership()), so there
+   * is nothing here it needs to wait for.
+   *
+   * If the write actually fails, the visitor has already moved on by the
+   * time anyone could know — so this does not surface an error on the
+   * tablet at all. doorSignIn() (section 16f) catches that server-side and
+   * emails staff through notifyAdmin() instead, which runs to completion
+   * whether or not the tablet is still listening. needsPin is the one
+   * exception: a stale PIN fails every sign-in after this one, not just
+   * this visitor's, so it still interrupts with the PIN screen.
+   */
   function send(payload) {
     payload.location = SETUP.location;
     payload.dateKey = SETUP.dateKey;
-    APPLICANT = {
-      name: payload.name || '',
-      email: payload.email || '',
-      phone: payload.phone || ''
-    };
-    setBusy(true);
+    payload.pin = pin;
+    var offerMembership = payload.member === 'no';
+    var name = payload.name || '';
+
+    PERSON = null; PICKED = {}; LUNCH = false;
+    RECURRING = 'none'; MEMBER = '';
+    WALKIN = { name: '', email: '', phone: '' };
+    if (offerMembership) {
+      APPLICANT = { name: name, email: payload.email || '', phone: payload.phone || '' };
+    } else {
+      STEP = 'names';
+      APPLICANT = { name: '', email: '', phone: '' };
+    }
     draw();
-    say('Signing you in...', '');
-    call('doorSignIn', payload, function (res) {
-      setBusy(false);
-      if (!res) { draw(); return handle(res); }
-      RESULT = res;
-      STEP = 'done';
-      draw();
-      window.scrollTo(0, 0);
-      say(res.message, res.ok ? 'ok' : 'err');
-      // Re-read rather than patch: the next person in the queue has to see
-      // this one as signed in, and the sheet is the truth. Quietly, because
-      // the volunteer is reading the receipt this would otherwise paper over.
-      syncDay();
-    });
+    window.scrollTo(0, 0);
+    say('✅ Signed in — ' + name, 'ok');
+    // Opened AFTER the toast is drawn, so "Signed in" is what the visitor
+    // sees first rather than being instantly overwritten by "Opening the
+    // membership application...".
+    if (offerMembership) openMembership();
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.needsPin) {
+          try { window.localStorage.removeItem('checkInPin'); } catch (err) { /* ignore */ }
+          pin = '';
+          STEP = 'names';
+          draw();
+          say(res.message || 'Wrong PIN — ask a staff member to sign back in.', 'err');
+          return showPin();
+        }
+        // Success is already on screen; a real failure was staff's problem
+        // the moment it happened (doorSignIn emailed it), not the tablet's.
+        // Re-read quietly so the next person in the queue sees this one as
+        // signed in, same as before.
+        syncDay();
+      })
+      .withFailureHandler(function () {
+        // Reported server-side already (see doorSignIn's own try/catch) for
+        // anything that got that far; a transport failure this raw never
+        // reached the server at all, and there is nothing left to tell.
+      })
+      .doorSignIn(JSON.stringify(payload));
   }
 
   function drawDone(main) {

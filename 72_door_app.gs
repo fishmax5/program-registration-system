@@ -95,15 +95,65 @@ function doorDay(payload) {
 }
 
 /**
- * The door app's only write — walkInSignIn() under its own name.
+ * The door app's only write — walkInSignIn() under its own name, and the
+ * one place a failed sign-in still gets caught.
  *
  * Kept as a separate endpoint rather than pointing the page at walkInSignIn()
  * directly, because the page and the write want to be able to move apart
  * later, and because a function called from a served page is part of that
  * page's contract: renaming one should not silently break the other.
+ *
+ * THE APP DOES NOT WAIT ON THIS CALL (section 16g's send()) — a tablet at the
+ * door shows "Signed in" and hands itself back to the name list the instant
+ * somebody taps Confirm, because google.script.run has no true fire-and-forget
+ * and a visitor should not have to stand there for Quick Mark's lock waits and
+ * sheet writes to find that out. Which means a failure here reaches nobody at
+ * the tablet — the screen has already moved on, maybe to the next person's
+ * turn — so this is the one point that can still act on it: an unhandled
+ * throw is caught rather than surfacing as a raw error the page never reads,
+ * and anything that comes back other than success or a wrong PIN (the app's
+ * own PIN screen still catches that, because a stale PIN fails every sign-in
+ * after it, not just this one) is emailed to staff through notifyAdmin() —
+ * the same Config-configured address every other admin notification in this
+ * workbook already uses — so the visit can be entered by hand.
  */
 function doorSignIn(payload) {
-  return walkInSignIn(payload);
+  let res;
+  try {
+    res = walkInSignIn(payload);
+  } catch (err) {
+    log(`doorSignIn: walkInSignIn threw: ${err}`);
+    reportDoorSignInFailure(payload, `Threw an error: ${err}`);
+    return { ok: false, message: 'Something went wrong.', lines: [], name: '' };
+  }
+  if (res && !res.ok && !res.needsPin) {
+    reportDoorSignInFailure(payload, res.message || '(no message came back)');
+  }
+  return res;
+}
+
+/**
+ * One email per failed door sign-in — see doorSignIn() for why this is the
+ * only place that failure is ever going to be seen. Parses `payload` itself
+ * rather than taking the already-parsed args, so a thrown-before-parsing
+ * failure can still be reported with whatever of the payload is readable.
+ */
+function reportDoorSignInFailure(payload, reason) {
+  const args = parseCheckInPayload(payload);
+  const lines = [
+    'A door app sign-in did not complete, but the tablet had already shown the visitor "Signed in" — see 73_door_app_html.gs\'s send().',
+    '',
+    `Name: ${args.name || '(none)'}`,
+    `Location: ${args.location || '(none)'}`,
+    `Date: ${args.dateKey || '(today)'}`,
+    `Phone: ${args.phone || '(none)'}`,
+    `Email: ${args.email || '(none)'}`,
+    '',
+    `Reason: ${reason}`,
+    '',
+    'Please check whether this visit needs to be entered by hand.'
+  ];
+  notifyAdmin('[Door app] A sign-in did not complete', lines.join('\n'));
 }
 
 /**
