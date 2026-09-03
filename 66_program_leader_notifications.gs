@@ -414,8 +414,15 @@ function buildLeaderAlertSubject(programs) {
 // --- the pass itself ---------------------------------------------------------
 
 /**
- * Mails every leader who asked for it whatever moved on their rosters, and
- * records the new baseline for the programs actually told about.
+ * Mails every leader on the "At each registration" channel (see Notify_Timing,
+ * 65_program_leaders.gs) whatever moved on their rosters, and records the new
+ * baseline for the programs actually told about.
+ *
+ * A leader on the OTHER channel — "N days before each date" — is left alone
+ * here entirely; sendProgramLeaderDaySnapshotDigests() below is their pass,
+ * and a program on that channel never gets a snapshot started in
+ * state.programs by this function, so switching a leader between the two
+ * costs nothing more than the next sync noticing the change.
  *
  * Called at the end of syncRegistrationsInternal(), after the shared sheets
  * have been pushed, on a settled picture. Never throws: this is the last thing
@@ -426,7 +433,14 @@ function buildLeaderAlertSubject(programs) {
  * Returns how many emails went out.
  */
 function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
-  const leaders = getProgramLeadersWantingAlerts();
+  // Keep only the programs each leader wants the DIFF pass for — a leader
+  // whose only program is on the day-count channel has nothing for this
+  // function to do, and a leader with a foot in both channels is filtered
+  // down to just the "each registration" half here.
+  const leaders = getProgramLeadersWantingAlerts()
+    .map(leader => Object.assign({}, leader,
+      { programs: leader.programs.filter(p => !p.timing || p.timing.mode === 'each_change') }))
+    .filter(leader => leader.programs.length > 0);
   if (leaders.length === 0) return 0;
 
   const state = readProgramLeaderNotifyState();
@@ -574,6 +588,332 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
 }
 
 
+// ============================================================================
+// 9d-ii. DAY-BEFORE ROSTER DIGESTS (telling a leader who is coming, ahead of the date)
+// ============================================================================
+//
+// THE OTHER HALF OF Notify_Timing (see 65_program_leaders.gs). A leader whose
+// row still reads "At each registration" gets the diff pass above, mid-hour,
+// the moment something on the roster moves. A leader who picked "N days
+// before each date" instead does not want to watch an inbox for changes —
+// they want, once, a plain answer to "who is coming to Thursday's class" a
+// few days ahead of it, so they can set out chairs and go. This is a
+// SNAPSHOT, not a diff: it says who is on the roster that morning, not what
+// changed to get there.
+//
+// ONE EMAIL PER LEADER PER RUN, covering every session of theirs that is due
+// — but each session is judged against ITS OWN date and ITS OWN leader's day
+// count, never merged across programs the way the diff pass merges CHANGES.
+// "3 days before Tuesday's class" and "3 days before Thursday's class" are
+// two different mornings; a leader who happens to have both due in the same
+// hourly run gets one email naming both, not two.
+//
+// A LEDGER, THE SAME SHAPE OF IDEA AS THE REGISTRANT REMINDERS BESIDE IT
+// (section 9e), but keyed by SESSION AND LEADER rather than by event and
+// day-offset: there is only one countdown per leader-program row, so there is
+// nothing to distinguish beyond "has this leader already had this session's
+// digest". Once sent, an hourly re-run must not send it again just because
+// today is still within the window — see pruneLeaderDigestLedger() for why
+// it does not simply grow forever instead.
+// ============================================================================
+
+/** Where the digest ledger lives. Chunked: see writeChunkedScriptProperty(). */
+const LEADER_DIGEST_LEDGER_PROP_KEY = 'PROGRAM_LEADER_DIGEST_SENT_V1';
+const LEADER_DIGEST_LEDGER_CHUNK_CHARS = 8000;
+const LEADER_DIGEST_LEDGER_MAX_CHUNKS = 40;
+
+/** The most digest emails one run will send. Same reasoning as LEADER_ALERT_MAX_EMAILS_PER_RUN beside it. */
+const LEADER_DIGEST_MAX_EMAILS_PER_RUN = 25;
+
+/**
+ * The floor this pass will not dig the day's mail quota below.
+ *
+ * BETWEEN THE TWO RESERVES EITHER SIDE OF IT, on purpose, because all three
+ * passes spend from the same hundred-message allowance in ONE execution, in
+ * this order: the diff alerts above (reserve 50), this pass (reserve 25),
+ * then the registrant reminders in section 9e (reserve 10). Whatever this
+ * pass cannot afford keeps its ledger entry unwritten and is sent on the next
+ * sync, exactly like its neighbors either side.
+ */
+const LEADER_DIGEST_QUOTA_RESERVE = 25;
+
+let __leaderDigestLedgerCache = null;
+let __leaderDigestLedgerDirty = false;
+
+/** { eventId: { emailLowercased: true } } — who has already had THIS session's digest. */
+function getLeaderDigestLedger() {
+  if (__leaderDigestLedgerCache) return __leaderDigestLedgerCache;
+  const raw = readChunkedScriptProperty(LEADER_DIGEST_LEDGER_PROP_KEY);
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    // Unreadable is treated as EMPTY — a duplicate digest is a mild
+    // annoyance, and the alternative direction is a leader never told at all.
+    log(`⚠️ The program leader digest ledger could not be parsed (${err}) — starting fresh.`);
+  }
+  __leaderDigestLedgerCache = parsed && typeof parsed === 'object' ? parsed : {};
+  return __leaderDigestLedgerCache;
+}
+
+function saveLeaderDigestLedger() {
+  if (!__leaderDigestLedgerDirty || !__leaderDigestLedgerCache) return;
+  writeChunkedScriptProperty(LEADER_DIGEST_LEDGER_PROP_KEY, JSON.stringify(__leaderDigestLedgerCache),
+    LEADER_DIGEST_LEDGER_CHUNK_CHARS, LEADER_DIGEST_LEDGER_MAX_CHUNKS);
+  __leaderDigestLedgerDirty = false;
+}
+
+/**
+ * Drops ledger entries for sessions that have happened or that the calendar
+ * no longer mentions — the same reasoning, and nearly the same code, as
+ * pruneRegistrantReminderLedger() beside it. Without it the ledger grows by
+ * one entry per session forever, against a Script Properties budget shared
+ * with every other registry in this project.
+ */
+function pruneLeaderDigestLedger(liveEventDateKeys, todayKey) {
+  const ledger = getLeaderDigestLedger();
+  Object.keys(ledger).forEach(eventId => {
+    const dateKey = liveEventDateKeys[eventId];
+    if (dateKey && dateKey >= todayKey) return;
+    delete ledger[eventId];
+    __leaderDigestLedgerDirty = true;
+  });
+}
+
+/** One session's roster, as the digest states it: name, party size, and whether it is the waitlist. */
+function describeLeaderDigestPerson(person) {
+  const party = person.partySize > 1 ? ` (party of ${person.partySize})` : '';
+  return `${person.name}${party}${person.waitlisted ? ' — waitlisted' : ''}`;
+}
+
+/** The body of one leader's digest: each due session, and who is on it right now. */
+function buildLeaderDigestBody(leader, sessions) {
+  const lines = [];
+  lines.push(leader.name ? `Hello ${leader.name},` : 'Hello,');
+  lines.push('');
+  lines.push(sessions.length === 1
+    ? 'Here is who is on your roster ahead of your upcoming session.'
+    : 'Here is who is on your roster ahead of your upcoming sessions.');
+  lines.push('');
+
+  sessions.forEach(session => {
+    lines.push(`${session.title} — ${session.location} — ${formatDateLabel(session.date)}`);
+    if (session.roster.length === 0) {
+      lines.push('  Nobody is registered yet.');
+    } else {
+      let shown = 0;
+      session.roster.forEach(person => {
+        if (shown >= LEADER_ALERT_MAX_LINES_PER_PROGRAM) return;
+        lines.push(`  ${describeLeaderDigestPerson(person)}`);
+        shown++;
+      });
+      if (session.roster.length > shown) {
+        lines.push(`  …and ${session.roster.length - shown} more.`);
+      }
+    }
+    lines.push('');
+    if (session.url) {
+      lines.push(`  Your sign-up sheet: ${session.url}`);
+      lines.push('');
+    }
+  });
+
+  lines.push('This lists who is registered as of right now — later changes are not reported here.');
+  lines.push('To change when or whether you hear from us, edit Notify_Timing and Notify_Roster_Changes ' +
+    `on the ${SHEET_NAMES.PROGRAM_LEADERS} tab.`);
+  return lines.join('\n');
+}
+
+/** "Chair Yoga (Narberth) — Thu, Mar 5 — 12 on the roster" / "3 upcoming sessions on your roster". */
+function buildLeaderDigestSubject(sessions) {
+  if (sessions.length === 1) {
+    const session = sessions[0];
+    const count = session.roster.length;
+    return `${session.title} (${session.location}) — ${formatDateLabel(session.date)} — ` +
+      `${count} ${count === 1 ? 'person' : 'people'} on the roster`;
+  }
+  return `${sessions.length} upcoming sessions on your roster`;
+}
+
+/**
+ * Mails every leader on the "N days before each date" channel a snapshot of
+ * who is on each of their due sessions, and records that they have had it.
+ *
+ * Called at the end of syncRegistrationsInternal(), after the diff pass above
+ * — see LEADER_DIGEST_QUOTA_RESERVE for why the order matters — on the same
+ * settled picture. Never throws, for the same reason its neighbors do not:
+ * this reaches outside the workbook and must not be able to fail a run that
+ * already imported every registration correctly.
+ *
+ * Returns how many emails went out.
+ */
+function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
+  // Keep only the programs each leader wants a COUNTDOWN for. A leader on the
+  // "each registration" channel — or with no notify tick at all — has nothing
+  // for this function to do.
+  const leaders = getProgramLeadersWantingAlerts()
+    .map(leader => Object.assign({}, leader,
+      { programs: leader.programs.filter(p => p.timing && p.timing.mode === 'days_before') }))
+    .filter(leader => leader.programs.length > 0);
+
+  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const todayKey = formatDateKey(new Date());
+
+  // Live dates for EVERY session, not just the ones somebody is watching —
+  // pruning needs to know a ledgered session's date whether or not it is
+  // still inside anybody's current window.
+  const liveEventDateKeys = {};
+  (sessionRows || []).forEach(row => {
+    const eventId = String(row[sessionMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[sessionMap['Event_Date']]);
+    if (!eventId || !date) return;
+    liveEventDateKeys[eventId] = formatDateKey(date);
+  });
+
+  if (leaders.length === 0) {
+    pruneLeaderDigestLedger(liveEventDateKeys, todayKey);
+    saveLeaderDigestLedger();
+    return 0;
+  }
+
+  // The widest day count anybody asked for, per program — bounds the session
+  // scan below to a handful of dates instead of the whole calendar, the same
+  // way the reminder pass bounds itself with REMINDER_FORWARD_DAYS.
+  const programMaxDays = {};
+  leaders.forEach(leader => leader.programs.forEach(program => {
+    programMaxDays[program.key] = Math.max(programMaxDays[program.key] || 0, program.timing.days);
+  }));
+
+  const sessionsByProgram = {};
+  (sessionRows || []).forEach(row => {
+    const eventId = String(row[sessionMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[sessionMap['Event_Date']]);
+    if (!eventId || !date) return;
+    const dateKey = liveEventDateKeys[eventId];
+    if (dateKey < todayKey) return; // a session that already happened is never "before" any more
+    const programKey = leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+    const maxDays = programMaxDays[programKey];
+    if (maxDays === undefined) return;
+    const daysAway = Math.round(
+      (parseDateKey(dateKey).getTime() - parseDateKey(todayKey).getTime()) / 86400000);
+    if (daysAway > maxDays) return; // outside even the longest countdown asked for on this program
+    if (!sessionsByProgram[programKey]) sessionsByProgram[programKey] = [];
+    sessionsByProgram[programKey].push({ eventId, date, dateKey, daysAway });
+  });
+
+  if (Object.keys(sessionsByProgram).length === 0) {
+    pruneLeaderDigestLedger(liveEventDateKeys, todayKey);
+    saveLeaderDigestLedger();
+    return 0;
+  }
+
+  // Who is actually on each candidate session, read off the registrant rows
+  // ONCE rather than once per session — the same shape of saving
+  // buildLeaderAlertRosters() makes for the diff pass.
+  const wantedEventIds = {};
+  Object.keys(sessionsByProgram).forEach(key =>
+    sessionsByProgram[key].forEach(s => { wantedEventIds[s.eventId] = true; }));
+
+  const regMap = getIndexMap(HEADERS.Registrant_Dash);
+  const rosterByEvent = {};
+  (registrantRows || []).forEach(row => {
+    const eventId = String(row[regMap['Event_ID']] || '').trim();
+    if (!wantedEventIds[eventId]) return;
+    const status = String(row[regMap['Program_Status']] || '').trim();
+    // A snapshot of who is COMING, not who used to be on the list — the same
+    // exclusion buildLeaderSheetRowsByProgram() applies to the shared sheet.
+    if (status === 'Superseded' || status === 'Cancelled') return;
+    const name = String(row[regMap['Name']] || '').trim();
+    if (!name) return;
+    if (!rosterByEvent[eventId]) rosterByEvent[eventId] = [];
+    rosterByEvent[eventId].push({
+      name, partySize: Number(row[regMap['Party_Size']]) || 1, waitlisted: status === 'Waitlisted'
+    });
+  });
+  Object.keys(rosterByEvent).forEach(eventId => rosterByEvent[eventId].sort(
+    (a, b) => normalizeNameKey(a.name).localeCompare(normalizeNameKey(b.name))));
+
+  const ledger = getLeaderDigestLedger();
+  const registry = getProgramLeaderSheetRegistry();
+
+  let sent = 0;
+  const skipped = [];
+
+  leaders.forEach(leader => {
+    const sessions = [];
+    leader.programs.forEach(program => {
+      (sessionsByProgram[program.key] || []).forEach(s => {
+        // This LEADER's own countdown, not the widest one asked for on the
+        // program — a program with two leaders on "7 days before" and
+        // "2 days before" tells each of them on their own morning.
+        if (s.daysAway > program.timing.days) return;
+        const sentFor = ledger[s.eventId] || {};
+        if (sentFor[leader.email.toLowerCase()]) return;
+        const entry = registry[program.key] || {};
+        sessions.push({
+          eventId: s.eventId, date: s.date, dateKey: s.dateKey,
+          title: entry.title || program.title, location: entry.location || program.location,
+          url: entry.fileId ? `https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '',
+          roster: rosterByEvent[s.eventId] || []
+        });
+      });
+    });
+    if (sessions.length === 0) return;
+    sessions.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+    if (sent >= LEADER_DIGEST_MAX_EMAILS_PER_RUN) {
+      skipped.push(leader.email);
+      return;
+    }
+
+    // The quota, the archive BCC, the send itself and the refused-address
+    // rule are section 9f's — this pass decides only who is due, what the
+    // message says, and how much of a scarce quota it may spend (`reserve`).
+    const outcome = sendRationedEmail({
+      to: leader.email,
+      subject: buildLeaderDigestSubject(sessions),
+      body: buildLeaderDigestBody(leader, sessions),
+      reserve: LEADER_DIGEST_QUOTA_RESERVE
+    });
+
+    if (outcome.status === 'sent') {
+      sent++;
+      sessions.forEach(s => {
+        if (!ledger[s.eventId]) ledger[s.eventId] = {};
+        ledger[s.eventId][leader.email.toLowerCase()] = true;
+        __leaderDigestLedgerDirty = true;
+      });
+      log(`Roster digest sent to ${leader.email} — ${sessions.length} upcoming session(s).`);
+      return;
+    }
+
+    // NOT recorded, whatever the reason: the next sync tries again rather
+    // than the leader simply never hearing about this session.
+    if (outcome.status === 'held') {
+      skipped.push(leader.email);
+      return;
+    }
+    log(`⚠️ Could not send the roster digest to ${leader.email} (${outcome.error}).`);
+    if (outcome.status === 'failed') {
+      noteForAdmin('Roster digests that could not be sent',
+        `${leader.email} could not be emailed (${outcome.error}). The digest is not lost — it will be ` +
+        `tried again on the next sync. Check the address on the ${SHEET_NAMES.PROGRAM_LEADERS} tab.`);
+    }
+  });
+
+  pruneLeaderDigestLedger(liveEventDateKeys, todayKey);
+  saveLeaderDigestLedger();
+
+  if (skipped.length > 0) {
+    log(`⚠️ Roster digests: ${skipped.length} leader(s) not emailed this run (per-run cap or daily mail quota).`);
+    noteForAdmin('Roster digests held back',
+      `${skipped.length} leader(s) were not sent their roster digest this run because the per-run cap or ` +
+      `the daily mail quota was reached: ${skipped.join(', ')}. Not discarded — they go out on the next sync.`);
+  }
+  return sent;
+}
+
+
 // --- the menu ----------------------------------------------------------------
 
 /**
@@ -610,4 +950,32 @@ function sendProgramLeaderRosterAlertsNow() {
   toastIfPossible(sent > 0
     ? `Roster alerts sent ✅ — ${sent} email(s).`
     : 'Nothing has changed since the last check — no alerts sent.');
+}
+
+/**
+ * MENU ENTRY: run the day-before digest pass now rather than waiting for the
+ * next sync — the countdown-channel twin of sendProgramLeaderRosterAlertsNow()
+ * above. Same reasoning throughout: read both tables fresh, and run the exact
+ * pass the hourly sync runs so there is no second implementation to drift.
+ */
+function sendProgramLeaderDayDigestsNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionRows = getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const registrantRows = getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+
+  let sent = 0;
+  try {
+    sent = sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows);
+  } catch (err) {
+    log(`⚠️ Could not send the roster digests (${err}).`);
+    toastIfPossible(`Could not send the roster digests ⚠️ — ${err}`);
+    return;
+  }
+  flushAdminDigest('Roster digests');
+
+  toastIfPossible(sent > 0
+    ? `Roster digests sent ✅ — ${sent} email(s).`
+    : `Nobody is due a digest right now — set Notify_Timing to a day count on ${SHEET_NAMES.PROGRAM_LEADERS}.`);
 }

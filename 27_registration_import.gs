@@ -307,6 +307,16 @@ function syncRegistrationsInternal() {
     log(`⚠️ Could not send the roster-change alerts this run (${err}) — the registrations themselves are fine.`);
   }
 
+  // THE OTHER Notify_Timing CHANNEL, right after the diff pass and for the
+  // same reason it sits after the push above — see LEADER_DIGEST_QUOTA_RESERVE
+  // for why the order of these three mail passes (alerts, digests, reminders)
+  // is load-bearing against the shared daily quota.
+  try {
+    sendProgramLeaderDaySnapshotDigests(sessionRows, settledRegistrantRows);
+  } catch (err) {
+    log(`⚠️ Could not send the roster digests this run (${err}) — the registrations themselves are fine.`);
+  }
+
   // LAST, on purpose: this is the only step that reaches outside the workbook
   // to other people, and it should act on the settled picture rather than on
   // rows a later step might still cancel or supersede. Guarded by its own

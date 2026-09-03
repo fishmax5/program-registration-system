@@ -54,7 +54,7 @@ Line counts are a rough guide to what you are about to load.
 | `01_logging_and_access.gs` | 209 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 827 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. |
-| `03_sheets_and_headers.gs` | 650 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
+| `03_sheets_and_headers.gs` | 687 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 368 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 994 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, extra meals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 148 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
@@ -77,7 +77,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `16_menu_and_triggers.gs` | 574 | `onOpen`, the menu tree, trigger installation. |
+| `16_menu_and_triggers.gs` | 588 | `onOpen`, the menu tree, trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
 | `18_edit_handlers.gs` | 1621 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, Config edits, Registrants edits, catering recount. |
 
@@ -98,7 +98,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `27_registration_import.gs` | 398 | `syncRegistrations` — the entry point. |
+| `27_registration_import.gs` | 446 | `syncRegistrations` — the entry point. |
 | `28_deletion_tombstones.gs` | 433 | Why a deleted registration stays deleted. |
 | `29_form_response_processing.gs` | 561 | `processFormResponse` — one response into registrant rows, guests and meals included. |
 | `30_registry_counts.gs` | 144 | Active / waitlist / remaining-seat counts. |
@@ -127,7 +127,7 @@ Line counts are a rough guide to what you are about to load.
 | `43_program_dashboard.gs` | 552 | `renderProgramDashboard`. |
 | `44_lunch_dashboard.gs` | 1124 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 646 | The landscape PDF to mark up by hand. |
-| `46_program_leader_sheets.gs` | 1305 | A live roster shared out of the workbook to a program leader, banded by session. |
+| `46_program_leader_sheets.gs` | 1392 | A live roster shared out of the workbook to a program leader, banded by session — built on the menu, or automatically for a leader who asked to be notified about it (`ensureProgramLeaderSheetsForNotifyingLeaders`). |
 
 ### Repair and last resorts (47–51)
 
@@ -178,8 +178,8 @@ either.
 
 | File | | What is in it |
 |---|--:|---|
-| `65_program_leaders.gs` | 513 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks — and the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
-| `66_program_leader_notifications.gs` | 600 | Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. |
+| `65_program_leaders.gs` | 588 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks, and `Notify_Timing` — the closed dropdown deciding WHICH of `66`'s two channels a ticked leader is on (`parseLeaderNotifyTiming`) — plus the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
+| `66_program_leader_notifications.gs` | 981 | **Two channels, one tick.** Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. And the day-before digests for a leader whose `Notify_Timing` is a day count instead: one email per session, N days ahead of it, listing who is on the roster — with its own ledger so an hourly pass sends it once. |
 
 ### Two months at the door (67)
 

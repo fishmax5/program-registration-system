@@ -16,6 +16,10 @@ const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
 const properties = {};
+// Swapped per-test, below — buildProgramLeaderIndex() reads the active
+// spreadsheet directly, unlike getProgramLeadersWantingAlerts() elsewhere in
+// this file, which is exercised through the __setLeaderIndex() seam instead.
+let activeSpreadsheet = null;
 const sandbox = {
   console: { log: () => {} },
   Utilities: { formatDate: d => d.toISOString(), sleep: () => {} },
@@ -28,8 +32,8 @@ const sandbox = {
     })
   },
   SpreadsheetApp: {
-    getActiveSpreadsheet: () => null,
-    getActive: () => null,
+    getActiveSpreadsheet: () => activeSpreadsheet,
+    getActive: () => activeSpreadsheet,
     newDataValidation: () => {
       const rule = {};
       const builder = {
@@ -52,9 +56,14 @@ this.readLegacyInstructorEmails = readLegacyInstructorEmails;
 this.getProgramLeaderEmailsForProgram = getProgramLeaderEmailsForProgram;
 this.getProgramLeadersWantingAlerts = getProgramLeadersWantingAlerts;
 this.invalidateProgramLeaderIndex = invalidateProgramLeaderIndex;
+this.buildProgramLeaderIndex = buildProgramLeaderIndex;
+this.parseLeaderNotifyTiming = parseLeaderNotifyTiming;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
+this.PROGRAM_LEADERS_STAFF_COLUMNS = PROGRAM_LEADERS_STAFF_COLUMNS;
+this.LEADER_NOTIFY_TIMING_LIST = LEADER_NOTIFY_TIMING_LIST;
+this.LEADER_NOTIFY_TIMING_EACH_CHANGE = LEADER_NOTIFY_TIMING_EACH_CHANGE;
 this.PROGRAM_LEADERS_MIGRATED_PROP_KEY = PROGRAM_LEADERS_MIGRATED_PROP_KEY;
 this.__setLeaderIndex = function (rows) { __programLeaderIndexCache = rows; };
 `, sandbox, { filename: 'program.gs' });
@@ -77,6 +86,11 @@ const leaderMap = sandbox.getIndexMap(leaderHeaders);
 
 check('the address column is gone from the Program_Options layout',
   sandbox.HEADERS.Program_Options.indexOf('Instructor_Email'), -1);
+check('Notify_Timing is a Program_Leaders column',
+  leaderHeaders.indexOf('Notify_Timing') !== -1, true);
+// A refresh that owned this column would wipe the setting every hour.
+check('...and the refresh never overwrites it',
+  sandbox.PROGRAM_LEADERS_STAFF_COLUMNS.indexOf('Notify_Timing') !== -1, true);
 check('and the notes column on a registrant row is now the leader\'s',
   [sandbox.HEADERS.Registrant_Dash.indexOf('Instructor_Notes') === -1,
     sandbox.HEADERS.Registrant_Dash.indexOf('Leader_Notes') !== -1],
@@ -244,6 +258,72 @@ check('...carrying the program title as somebody actually typed it',
   ['Chair Yoga (Narberth)', 'Tai Chi (Narberth)']);
 check('a leader who ticked the box but has no address is not a send',
   wanting.filter(w => w.email === '').length, 0);
+
+// ---------------------------------------------------------------------------
+// Notify_Timing: WHICH channel a ticked leader is on.
+//
+// THE FAILURE THIS PINS is the quiet one, and it is the same shape as an
+// unrecognized Notify_Mode in section 9e: this column arrives on tabs that
+// already have leaders ticked for alerts, so every one of those cells starts
+// BLANK. Read strictly, a blank cell would put all of them on a channel
+// nobody chose — or on none at all — and the first anybody would hear of it
+// is a leader mentioning they have stopped getting emails.
+// ---------------------------------------------------------------------------
+
+const timing = sandbox.parseLeaderNotifyTiming;
+const EACH = { mode: 'each_change', days: 0 };
+
+check('a blank cell keeps doing what a ticked box has always done', timing(''), EACH);
+check('...and so does a cell nobody has typed into at all',
+  [timing(null), timing(undefined)], [EACH, EACH]);
+check('the dropdown\'s own default reads as the diff channel',
+  timing(sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE), EACH);
+check('a day count reads as the countdown channel',
+  timing('3 days before each date'), { mode: 'days_before', days: 3 });
+check('one day is singular, and still a day count',
+  timing('1 day before each date'), { mode: 'days_before', days: 1 });
+check('case and stray spacing are what somebody typed, not what they meant',
+  timing('  2 DAYS BEFORE each date  '), { mode: 'days_before', days: 2 });
+// Out of range falls back rather than silencing: a leader who somehow ends up
+// with "0 days" or "30 days" in the cell still hears from us.
+check('a day count past the week this supports falls back to the diff channel',
+  timing('8 days before each date'), EACH);
+check('...and so does one that is not a countdown at all',
+  [timing('0 days before each date'), timing('when I feel like it')], [EACH, EACH]);
+
+check('the dropdown offers the diff channel and one entry per day of the week',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.length, 8);
+check('...starting with the default',
+  sandbox.LEADER_NOTIFY_TIMING_LIST[0], sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE);
+check('...and every offered value parses back to what it says',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(1).map(label => timing(label).days),
+  [1, 2, 3, 4, 5, 6, 7]);
+
+// The column has to actually be READ off the tab, not just parse well.
+const timedRow = new Array(leaderHeaders.length).fill('');
+timedRow[leaderMap['Leader_Name']] = 'Cat Reed';
+timedRow[leaderMap['Email']] = 'cat@x.com';
+timedRow[leaderMap['Program']] = 'Bridge Club';
+timedRow[leaderMap['Location']] = 'Narberth';
+timedRow[leaderMap['Notify_Roster_Changes']] = true;
+timedRow[leaderMap['Notify_Timing']] = '3 days before each date';
+
+activeSpreadsheet = {
+  getSheetByName: name =>
+    (name === sandbox.SHEET_NAMES.PROGRAM_LEADERS ? fakeLeaderSheet([timedRow]) : null)
+};
+sandbox.invalidateProgramLeaderIndex();
+const rebuilt = sandbox.buildProgramLeaderIndex();
+
+check('the cell on the tab reaches the leader index',
+  rebuilt['bridge club|narberth'][0].timing, { mode: 'days_before', days: 3 });
+// ...and out the other side, because 66 filters its two passes on it.
+check('...and rides along to the pass that has to choose a channel',
+  sandbox.getProgramLeadersWantingAlerts()[0].programs[0].timing,
+  { mode: 'days_before', days: 3 });
+
+activeSpreadsheet = null;
+sandbox.invalidateProgramLeaderIndex();
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
