@@ -161,9 +161,9 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `60_check_in_page_server.gs` | 985 | `doGet`, the PIN gate, the roster read, and the mark/register handlers. |
+| `60_check_in_page_server.gs` | 1052 | `doGet`, the PIN gate, the roster read, and the mark/register handlers. |
 | `61_check_in_page_html.gs` | 1195 | `buildCheckInHtml` — the whole served page, one template literal. |
-| `62_walk_in_page.gs` | 1253 | The sign-in page for people who never registered. |
+| `62_walk_in_page.gs` | 36 | **Retired (September 2026) — a banner and nothing else.** The sign-in page for people who never registered; replaced by the door app (`73`). Kept, empty, because a file here is never renumbered or removed. Its server half is `74`; `checkInRosterModeRequested` went to `60`. |
 | `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
 | `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
@@ -185,7 +185,7 @@ either.
 
 | File | | What is in it |
 |---|--:|---|
-| `67_desk_month_sessions.gs` | 130 | `deskMonthSessions` — every session at one location from today to the end of NEXT month, grouped by day. The live read behind the day picker and the session boxes on both tablet pages (`61`, `62`), and behind the club place a walk-in can take at the door. Behavior only; nothing earlier reads it at load time. |
+| `67_desk_month_sessions.gs` | 130 | `deskMonthSessions` — every session at one location from today to the end of NEXT month, grouped by day. The live read behind the day picker and the session boxes on the staff roster's register screen (`61`), and behind the club place a walk-in can take at the door. Behavior only; nothing earlier reads it at load time. |
 
 ### Migrations (68)
 
@@ -228,13 +228,27 @@ door pages' vocabulary and declares nothing anything else derives from.
 One deployment, one link. The setup screen (building + day, stored on the
 tablet), the A–Z name list, the personal confirm screen, and the walk-in
 sign-up that used to be three separate URLs. `doGet` in `60` serves this by
-default; `?mode=session` is still the staff roster and `?mode=walkin` the
-previous door page.
+default; `?mode=session` is still the staff roster. `?mode=walkin` was the
+previous door page and is no longer a route — an unrecognized mode falls
+through to this app, so a stale bookmark opens it rather than an error.
 
 | File | | What is in it |
 |---|--:|---|
 | `72_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
 | `73_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
+
+### The door's day and its one write (74)
+
+The server half the retired walk-in page (`62`) was built around, which
+outlived it: the door app reads its day and writes its sign-ins through these,
+and the boot store (`64`) builds its snapshot from the same read. Numbered at
+the end for the usual reason — never renumber — and safely so: it is behavior
+only, its two `const`s stand alone, everything it calls is a hoisted function,
+and its schema (`SHEET_NAMES`, `HEADERS.Member_Roll`) lives in `03`.
+
+| File | | What is in it |
+|---|--:|---|
+| `74_door_day_and_sign_in.gs` | 653 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
 
 ## Conventions
 

@@ -1,12 +1,12 @@
-// THE MONTH THE DOOR CAN REGISTER INTO (section 16e), and what both tablet
-// pages do with it.
+// THE MONTH THE DOOR CAN REGISTER INTO (section 16e), and what the staff
+// roster's register screen does with it.
 //
 // The three things that break quietly:
 //
 //   1. THE HORIZON IS A MONTH BOUNDARY, not "sixty days". A person holding a
 //      paper calendar asks about October; a horizon that stops on the 19th of
 //      it is a page that appears to have lost half the month.
-//   2. THE PAGES PICK A DAY AND THEN A BOX. A dropdown of every session is a
+//   2. THE PAGE PICKS A DAY AND THEN A BOX. A dropdown of every session is a
 //      one-line target that opens a screen of more one-line targets, which is
 //      the thing a thumb cannot use — so the DAY is the dropdown and the
 //      sessions on it are cards.
@@ -75,7 +75,7 @@ const noLocation = sandbox.deskMonthSessions(JSON.stringify({ location: '' }));
 ok('a call with no location is refused', noLocation.ok === false);
 
 // ---------------------------------------------------------------------------
-// 2. Both pages ask for it, and both draw a day then boxes
+// 2. The register screen asks for it, and draws a day then boxes
 // ---------------------------------------------------------------------------
 const roster = sandbox.buildCheckInHtml({
   builtAt: '9:00 AM',
@@ -86,12 +86,9 @@ const roster = sandbox.buildCheckInHtml({
   }],
   namesBySession: {}, members: [], needs: []
 }, { location: 'Narberth', page: 'register' });
-const door = sandbox.buildWalkInHtml({ location: 'Narberth', locations: ['Narberth'], boot: null });
 
 ok('the register screen reads the two months live',
   roster.indexOf("call('deskMonthSessions'") !== -1);
-ok('and so does the sign-in page',
-  door.indexOf("call('deskMonthSessions'") !== -1);
 
 ok('the check-in screen picks a day from a dropdown',
   /<select id="day"/.test(roster));
@@ -99,8 +96,6 @@ ok('and the sessions on it are boxes',
   /<div class="cards" id="session-boxes">/.test(roster));
 ok('the register screen does the same',
   /<select id="reg-day"/.test(roster) && /id="reg-session-boxes"/.test(roster));
-ok('and the sign-in page draws its coming-up section',
-  door.indexOf('Coming up at ') !== -1 && /button.pick/.test(door));
 
 // The hidden fields are what every write reads — see the note at the top.
 ok('the chosen session is kept in one place on the check-in screen',
@@ -109,12 +104,10 @@ ok('and on the register screen',
   /<input type="hidden" id="reg-session">/.test(roster));
 
 // ---------------------------------------------------------------------------
-// 3. The club place, on both pages
+// 3. The club place
 // ---------------------------------------------------------------------------
 ok('the register screen calls it a club place',
   /Club place/.test(roster) && /id="reg-standing"/.test(roster));
-ok('the sign-in page offers the same club place on the dates it picks',
-  door.indexOf('UP_CLUB') !== -1 && door.indexOf('upcomingStanding') !== -1);
 // A future date is a REGISTRATION. A door that could mark somebody present for
 // a class three weeks out is a door that inflates every attendance number.
 ok('a future date is never marked as attended',

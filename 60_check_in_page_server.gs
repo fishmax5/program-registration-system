@@ -94,11 +94,13 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * tablet showing the wrong page, and nobody at a door can tell that is what
  * happened.
  *
- * THE OLD PAGES ARE STILL REACHABLE, by name, because they are not the same
- * tool: ?mode=session is the staff session roster (section 16) that marks
- * meals as they are handed over at the counter, and ?mode=walkin is the
- * previous door page, kept for one release so a bookmark that has not been
- * changed yet still opens something that works rather than nothing.
+ * THE STAFF ROSTER IS STILL REACHABLE, by name, because it is not the same
+ * tool: ?mode=session is the session roster (section 16) that marks meals as
+ * they are handed over at the counter. The previous door page (?mode=walkin)
+ * was retired in September 2026 — see the banner in 62_walk_in_page.gs — and
+ * that mode is no longer a branch here. It does not need to be: an
+ * unrecognized mode falls through to the door app, so a bookmark nobody
+ * re-typed opens the page whoever is holding it wanted.
  *
  * AND ONE PAGE IS NOT A DOOR PAGE AT ALL: ?mode=cancel&form=<id> is the link
  * inside a member's own calendar invitation, opened by the member, gated by
@@ -149,14 +151,6 @@ function doGet(e) {
       page: /^register$/i.test(String(params.page || '').trim()) ? 'register' : 'checkin'
     });
     title = 'Check In';
-  } else if (mode === 'walkin' || mode === 'walk-in' || mode === 'legacy') {
-    html = buildWalkInHtml({
-      location,
-      pinRequired,
-      locations: checkInLocations(),
-      rosterUrl: checkInPageUrl({ location, mode: 'session' })
-    });
-    title = 'Sign In';
   } else {
     html = buildDoorAppHtml({
       location,
@@ -177,14 +171,30 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+/** What ?mode= has to say to get the session roster instead of the door page. */
+const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];
+
+/**
+ * Is this request asking for the SESSION ROSTER (section 16) rather than the
+ * door page? Spelled several ways on purpose: the URL is typed by hand onto
+ * tablets and read off a printed card, and refusing "check-in" because the
+ * page is called "checkin" internally would be a page that mysteriously shows
+ * the wrong thing.
+ */
+function checkInRosterModeRequested(params) {
+  const mode = String((params && (params.mode || params.page || params.view)) || '')
+    .trim().toLowerCase();
+  return CHECK_IN_ROSTER_MODES.indexOf(mode) !== -1;
+}
+
 /**
  * One of this web app's own URLs — the base deployment address with a
  * ?location= pin and a ?mode= on it.
  *
- * Built in ONE place because it is written in three (the doGet() footer link,
- * the menu dialog's link list, and anything a QR code is generated from), and
- * three hand-assembled query strings is how one of them ends up missing the
- * mode and quietly serving the wrong page. Returns '' when the script has
+ * Built in ONE place because it is written in several (the menu dialog's link
+ * list, the cancel link inside a calendar invitation, and anything a QR code
+ * is generated from), and hand-assembled query strings are how one of them
+ * ends up missing the mode and quietly serving the wrong page. Returns '' when the script has
  * never been deployed, which every caller renders as "no link yet" rather
  * than as a broken one.
  */

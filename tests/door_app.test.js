@@ -65,9 +65,9 @@ function ok(name, cond) {
 // ---------------------------------------------------------------------------
 ok('a bare URL is not the staff roster', sandbox.checkInRosterModeRequested({}) === false);
 ok('?mode=session still is', sandbox.checkInRosterModeRequested({ mode: 'session' }) === true);
-// The old door page is kept for one release, by name, so an unchanged
-// bookmark opens something that works rather than nothing.
-ok('?mode=walkin is not claimed by the roster',
+// The old door page is retired and ?mode=walkin is no longer a route, so an
+// unchanged bookmark has to fall through to THIS app rather than to an error.
+ok('a stale ?mode=walkin bookmark is not claimed by the roster',
   sandbox.checkInRosterModeRequested({ mode: 'walkin' }) === false);
 
 // ---------------------------------------------------------------------------
