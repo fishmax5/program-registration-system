@@ -101,6 +101,16 @@ function isFormOnCurrentTemplate(form) {
   const titles = items.map(it => it.getTitle());
   if (titles.indexOf(LEGACY_GUEST_COUNT_TITLE) !== -1) return false;
   if (titles.indexOf(LEGACY_FOOTER_ITEM_TITLE) !== -1) return false;
+  // THE PRE-v9 LUNCH QUESTIONS ARE PROOF OF AN OLD FORM, and they have to be
+  // judged here rather than by the `required` list below: the v9 questions are
+  // legitimately ABSENT from a form with nothing to serve, so "does it have
+  // the new ones?" would mark every no-lunch form stale forever. Their
+  // presence, on the other hand, is unambiguous — nothing writes them any more
+  // (see TEMPLATE_VERSION's v9 note), so a form carrying one was built before
+  // the change and is asking for meals in people rather than in numbers.
+  const preV9 = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.EXTRA_MEALS, LEGACY_LUNCH_ONLY_GRID_TITLE];
+  if (preV9.some(title => titles.indexOf(title) !== -1)) return false;
   // AN APPOINTMENT FORM IS A CURRENT FORM. syncAssistanceQuestionsOnForm()
   // deliberately removes the mode question and both roster grids and puts the
   // time question in their place, so judging it by the date-based checklist

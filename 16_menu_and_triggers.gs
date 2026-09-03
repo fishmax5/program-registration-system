@@ -263,10 +263,13 @@ function buildAppMenu(ui, includeAdmin) {
       // once and teaches the registry about what is already in it. New PDFs
       // register themselves as they are built. See backfillSignInSheetRegistry().
       .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
-      // NOT under "Destructive": it replaces no question and moves no link —
-      // it writes only the page-navigation settings that are wrong. It is the
-      // thing to reach for BEFORE "Rebuild Forms In Place", not after.
-      .addItem('\ud83e\udded Fix Form Page Routing (no rebuild)', 'repairFormRoutingNow')
+      // NOT under "Destructive": it moves no link and rebuilds nothing — it
+      // writes only the specific repairs a live form needs to match the
+      // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
+      // BEFORE "Rebuild Forms In Place", not after. The handler is still
+      // called repairFormRoutingNow() because the first such repair was the
+      // page routing; renaming it would strand the trigger that resumes it.
+      .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', 'repairFormRoutingNow')
       .addSeparator()
       // ARRANGEMENTS SOMEBODY MAKES BY HAND that the next rebuild would
       // otherwise undo. They belong together because that is the one thing

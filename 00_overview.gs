@@ -215,16 +215,20 @@
  *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:
- *        "Everyone, every date"          -> one checkbox of who eats, applied
- *          to every session date, including dates added to a Grouped series
- *          afterward (see the ALL_DATES registry + applyAllDatesCatchup()).
- *        "Let me pick specific dates/people" -> the two roster grids,
- *          "Who is Attending Each Date?" and "Who Needs Lunch Each Date?",
- *          with dates as ROWS and PERSON_COLUMN_LABELS as COLUMNS. Full
- *          per-person, per-date resolution: any guest can attend/skip/eat
- *          independently of any other. Checking lunch WITHOUT attendance is
- *          not silently dropped — processFormResponse() reconciles it as
- *          attending and flags it in Admin_Notes.
+ *        "Everyone, every date"          -> one number, the TOTAL meals that
+ *          party wants (0 to MAX_MEALS_PER_SUBMISSION), applied to every
+ *          session date, including dates added to a Grouped series afterward
+ *          (see the ALL_DATES registry + applyAllDatesCatchup()).
+ *        "Let me pick specific dates/people" -> two grids, both with dates as
+ *          ROWS: "Who is Attending Each Date?" with PERSON_COLUMN_LABELS as
+ *          columns, and "How Many Meals Each Date?" with 0-4 as columns.
+ *          Full per-person, per-date attendance: any guest can attend or skip
+ *          independently of any other. MEALS, though, are one number per date
+ *          — see TEMPLATE_VERSION's v9 note — and land on the registrant's own
+ *          row, because a total is not divisible into people the form never
+ *          asked about. Ordering a meal on a date nobody ticked is not
+ *          silently dropped: processFormResponse() reconciles it as attending
+ *          and flags it in Admin_Notes.
  *      There is NO "how many guests?" question: page 1 has three optional
  *      guest-name fields and the headcount is simply how many were filled
  *      in. That kills two bugs by construction — the old "said 3, named 2,
@@ -331,25 +335,28 @@
  *    - AND REPAIRED IN PLACE BEFORE THEY ARE REBUILT. A rebuild is the
  *      sledgehammer: every question replaced, every pre-checked box
  *      regenerated, five forms an execution. Most template changes move far
- *      less than that — v8 moved page-navigation settings and nothing else —
- *      so runFormStateMigrations() (68_form_state_migrations.gs) runs first,
+ *      less than that — v8 moved page-navigation settings and nothing else,
+ *      v9 swapped three lunch questions for two — so
+ *      runFormStateMigrations() (68_form_state_migrations.gs) runs first,
  *      writing only what is wrong on each live form and stamping the form
  *      current when its migrations cover the whole of that version. What is
  *      left for the rebuild pass is the forms a migration could not recognize.
  *      A migration also says WHICH forms it is for, from the dashboard rows
  *      alone: the v8 routing repair is aimed at the single-session and
  *      appointment forms, the only two shapes whose respondents could ever
- *      meet the misplaced setting, so no other form is opened at all.
- *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep,
+ *      meet the misplaced setting, so no other form is opened at all. (The
+ *      v9 meal swap is for every form, and does its own cheap check on the
+ *      titles once the form is open.)
+ *      Admin -> "Fix Forms In Place (no rebuild)" forces the same sweep,
  *      and hands itself on until every form has been looked at.
- *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
+ *    - NO LUNCH MEANS NO LUNCH QUESTION. The meal grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —
- *      syncLunchQuestionsOnForm() takes both roster lunch questions off the form
+ *      syncLunchQuestionsOnForm() takes both meal questions off the form
  *      entirely and says so in the description. They come back on their own
  *      if a catered date later appears. On the data side buildRegistrantRow()
  *      gates lunch demand on isLunchOfferedOn(), so the "everyone, every
- *      date" branch's single who-eats answer can't book a meal on a
+ *      date" branch's single meal total can't book a meal on a
  *      Not-Serving date.
  *    - The template calls setCollectEmail(true) and
  *      setAllowResponseEdits(true) — a submitter's email becomes a real
