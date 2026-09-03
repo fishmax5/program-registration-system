@@ -234,8 +234,8 @@ through to this app, so a stale bookmark opens it rather than an error.
 
 | File | | What is in it |
 |---|--:|---|
-| `72_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
-| `73_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
+| `72_door_app.gs` | 703 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the live membership application — `doorMembershipForm` / `doorMembershipSubmit`, built generically from the Membership Application form's own items (`readMembershipFormShape`) and submitted through the Forms API, with `recordMembershipHandoff` (renamed from `sendMembershipEmail` — it never sent mail) as the record that survives someone not filling it in. |
+| `73_door_app_html.gs` | 1240 | `buildDoorAppHtml` — the whole served app, one template literal, five screens redrawn into one `<main>`, membership application included. |
 
 ### The door's day and its one write (74)
 
@@ -248,7 +248,22 @@ and its schema (`SHEET_NAMES`, `HEADERS.Member_Roll`) lives in `03`.
 
 | File | | What is in it |
 |---|--:|---|
-| `74_door_day_and_sign_in.gs` | 653 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
+| `74_door_day_and_sign_in.gs` | 654 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
+
+### The sliced-job runner (75)
+
+Numbered after `74` (taken by the door's day-and-sign-in file above) and after
+the four callers it was extracted FROM (`25`, `32`, `49`, `68`), for the usual
+reason: renumbering an existing file is the one edit this project cannot make,
+and every one of those five predates this file. It reads and writes the same
+Script Property keys and the same state shape those four callers always did,
+so a job already mid-flight when this shipped resumed on its next slice
+without noticing anything changed — see the file's own banner for why that
+was a design goal, not an accident.
+
+| File | | What is in it |
+|---|--:|---|
+| `75_sliced_jobs.gs` | 312 | `runSlicedJob` — the state machine every multi-execution job in this project runs on: the watchdog armed before work starts, the deadline, the slice counter, stall and consecutive-error detection, and the hand-off trigger. `runSlicedItems` is the one-item-one-lock-hold inner loop the two form sweeps (`32`, `49`) share. Behavior only; the four callers supply their own state, their own budgets, and every word the person reads. |
 
 ## Conventions
 
