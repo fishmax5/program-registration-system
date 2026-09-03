@@ -1,9 +1,12 @@
-// THE WALK-IN SIGN-IN PAGE (section 16b) — the door page the location links
-// now open on, for the person who walked in without registering.
+// THE DOOR'S DAY AND ITS ONE WRITE (section 16h) — what the tablet at the
+// front door reads, and what it is allowed to write.
 //
-// What this file pins is the handful of things that break SILENTLY, which on a
-// page a member of the public taps unsupervised means either a sign-in that
-// records nothing or a promise of a meal that does not exist:
+// The page these functions were built for (section 16b) was retired; the door
+// app (sections 16f/16g) reads and writes through them now, so what is pinned
+// here is the server half and the routing that picks a page. These are the
+// things that break SILENTLY, which on a screen a member of the public taps
+// unsupervised means either a sign-in that records nothing or a promise of a
+// meal that does not exist:
 //
 //   1. THE SESSION VALUES ARE QUICK MARK CHOICES. Every write the page makes
 //      goes through applyQuickMarkFromDialog() against a "title · date" string
@@ -17,10 +20,7 @@
 //      hangs off it: a meal is ordered days ahead against a count, so an
 //      unregistered lunch is a request to be checked with staff and must never
 //      be presented as one that is waiting for them.
-//   4. THE OPTIONS ARE AN INLINE LITERAL. Same hazard as the check-in page's
-//      (check_in_page.test.js): a location name carrying the two characters
-//      that end a script tag would end the page mid-sentence.
-//   5. THE REFUSALS HOLD. A new member the office has no way to reach — no
+//   4. THE REFUSALS HOLD. A new member the office has no way to reach — no
 //      email AND no phone — is the one thing the page turns away, because
 //      being able to follow up is the entire reason it asks a stranger for
 //      anything. Either detail on its own is enough.
@@ -82,7 +82,7 @@ function ok(name, cond) {
 // The door is the DEFAULT, because the link taped to the tablet by the
 // entrance is the one everybody has, and a volunteer should not have to
 // choose a page before they can use one.
-ok('a bare URL is the door', sandbox.checkInRosterModeRequested({}) === false);
+ok('a bare URL is the door app', sandbox.checkInRosterModeRequested({}) === false);
 ok('a location pin alone is still the door',
   sandbox.checkInRosterModeRequested({ location: 'Narberth' }) === false);
 ok('?mode=session is the staff roster', sandbox.checkInRosterModeRequested({ mode: 'session' }) === true);
@@ -90,7 +90,14 @@ ok('?mode=session is the staff roster', sandbox.checkInRosterModeRequested({ mod
 ok('so is ?mode=checkin', sandbox.checkInRosterModeRequested({ mode: 'checkin' }) === true);
 ok('so is ?mode=check-in', sandbox.checkInRosterModeRequested({ mode: 'check-in' }) === true);
 ok('and it is case-insensitive', sandbox.checkInRosterModeRequested({ mode: ' Roster ' }) === true);
-ok('nonsense is the door, not an error', sandbox.checkInRosterModeRequested({ mode: 'banana' }) === false);
+ok('nonsense is the door app, not an error',
+  sandbox.checkInRosterModeRequested({ mode: 'banana' }) === false);
+// THE RETIRED PAGE'S OWN MODE. ?mode=walkin was the previous door page and is
+// no longer a branch in doGet(); a bookmark still carrying it must land on the
+// door app rather than on an error, which is exactly what "not the roster"
+// buys — see the banner in 62_walk_in_page.gs.
+ok('a stale ?mode=walkin bookmark is the door app',
+  sandbox.checkInRosterModeRequested({ mode: 'walkin' }) === false);
 
 // ---------------------------------------------------------------------------
 // 2. The URLs the dialog hands out.
@@ -253,42 +260,6 @@ const clearedRes = sandbox.setCheckInWebAppUrl('');
 ok('a blank clears it', clearedRes.ok === true && savedWebAppUrl === null);
 ok('and the script-reported address is warned about again',
   withUrl('https://script.google.com/macros/s/WRONG/dev', () => sandbox.readCheckInPageInfo()).isDev === true);
-
-// ---------------------------------------------------------------------------
-// 3. The page's inlined options.
-// ---------------------------------------------------------------------------
-const nastyLocation = 'St. Mary\'s </script><script>alert("x")</script>';
-const page = sandbox.buildWalkInHtml({
-  location: nastyLocation, pinRequired: true, locations: [nastyLocation, 'Narberth'],
-  rosterUrl: 'https://x/exec?location=Narberth&mode=session'
-});
-const body = page.substring(page.indexOf('<script>'));
-ok('the page has exactly one closing script tag', body.split('</script>').length - 1 === 1);
-const literal = /var OPTS = JSON\.parse\(("(?:[^"\\]|\\.)*")\);/.exec(page);
-ok('the options are inlined as a single string literal', !!literal);
-if (literal) {
-  const opts = JSON.parse(JSON.parse(literal[1]));
-  ok('the hostile location survives the round trip', opts.location === nastyLocation);
-  ok('the locations travel with the page', opts.locations.indexOf('Narberth') !== -1);
-  ok('the PIN requirement travels with it', opts.pinRequired === true);
-  ok('and so does the way back to the staff roster', /mode=session/.test(opts.rosterUrl));
-}
-// The page's own script has to be JavaScript — a template-literal escape that
-// went wrong is otherwise a blank tablet with nothing in the log.
-const inner = page.substring(page.indexOf('<script>') + '<script>'.length, page.lastIndexOf('</script>'));
-let parses = true;
-try { new vm.Script(inner); } catch (err) { parses = false; }
-ok('the page script parses as JavaScript', parses);
-// The sentence the whole lunch section exists for.
-ok('the page warns that an unregistered lunch is not a promised meal',
-  /check with a staff member that one is available/i.test(page));
-// The tick IS the handover now, on both sides of the registered/not line —
-// the door is where the food is collected, so a meal ticked here is marked
-// served (Lunch_Served), and the page has to say that before it is ticked.
-ok('and says a tick records the meal as taken',
-  /recorded as taking a meal/i.test(page) && /records it as handed to you/i.test(page));
-ok('and offers the way out of a mistaken tick',
-  /leave it unticked if you are not taking it today/i.test(page));
 
 // ---------------------------------------------------------------------------
 // 4. The day, read off stub tabs.

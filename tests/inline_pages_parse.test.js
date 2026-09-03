@@ -89,9 +89,6 @@ function parses(js) {
 const pages = [
   ['the Door Pages dialog', () => sandbox.buildCheckInPageHtml(sandbox.readCheckInPageInfo())],
   ['the check-in roster page', () => sandbox.buildCheckInHtml(null, { location: '', pinRequired: false })],
-  ['the walk-in sign-in page', () => sandbox.buildWalkInHtml({
-    location: '', pinRequired: false, locations: ['Narberth'], rosterUrl: 'https://example.org/exec'
-  })],
   ['the door app page', () => sandbox.buildDoorAppHtml({
     location: '', pinRequired: false, locations: ['Narberth'], todayKey: '2025-09-02'
   })],
