@@ -78,11 +78,19 @@ const REMINDER_CONFIRMATION_OFFSET = 'booked';
 const REMINDER_FORWARD_DAYS = 30;
 
 /**
- * The most reminder emails one run will send, and the slice of the daily mail
- * quota it leaves alone. Same reasoning as the roster alerts one file up: this
- * pass rides the hourly sync, a quiet hour sends nothing, and the hour that is
- * not quiet must not spend the whole workbook's mail on itself. Anything held
- * back keeps its ledger entry unwritten and goes out on the next pass.
+ * The most reminder emails one run will send, and the floor it will not dig
+ * the day's mail quota below (the `reserve` sendRationedEmail() is given, see
+ * section 9f). Same reasoning as the roster alerts one file up: this pass
+ * rides the hourly sync, a quiet hour sends nothing, and the hour that is not
+ * quiet must not spend the whole workbook's mail on itself. Anything held back
+ * keeps its ledger entry unwritten and goes out on the next pass.
+ *
+ * THE FLOOR IS THE LOWER OF THE TWO on purpose. The alert pass runs first in
+ * the same execution and stops at LEADER_ALERT_QUOTA_RESERVE precisely so
+ * there is something left here: a reminder names the time somebody is expected
+ * somewhere, which is worth nothing the day after. What stays under this floor
+ * is the handful of messages notifyAdmin() needs to report that any of this
+ * went wrong.
  */
 const MAX_REMINDER_EMAILS_PER_RUN = 40;
 const REMINDER_QUOTA_RESERVE = 10;
@@ -329,7 +337,6 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
     readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
   const ledger = getRegistrantReminderLedger();
-  let quota = registrantReminderRemainingQuota();
 
   rows.forEach(row => {
     const eventId = String(row[lrMap['Event_ID']] || '').trim();
@@ -355,40 +362,51 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
     const sentFor = ledger[eventId] || {};
     wanted.forEach(offset => {
       const stamp = `${email}|${offset}`;
-      if (sentFor[stamp]) return;
-      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN || quota <= REMINDER_QUOTA_RESERVE) {
+      // Read here as well as inside the send: a message that has already gone
+      // must not count against the per-run cap the way a held one does.
+      const alreadySent = () => !!sentFor[stamp];
+      if (alreadySent()) return;
+      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN) {
         result.held++;
         return;
       }
-      try {
-        // BCC'd to the archive address, like every other message this workbook
-        // sends outside the organization — a reminder about somebody's
-        // appointment is a record of what they were told, and the desk needs
-        // to be able to find it. Blank means copy nobody. A BCC costs its own
-        // message against the daily quota this loop is rationing, so it is
-        // counted rather than treated as free.
-        const archiveCopy = getArchiveCopyEmail();
-        const options = {
-          to: email,
-          subject: buildRegistrantReminderSubject(item.session, offset),
-          body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
-            item.daysAway)
-        };
-        if (archiveCopy) options.bcc = archiveCopy;
-        MailApp.sendEmail(options);
-        result.sent++;
-        quota -= archiveCopy ? 2 : 1;
-        sentFor[stamp] = true;
-        ledger[eventId] = sentFor;
-        __reminderLedgerDirty = true;
-      } catch (err) {
-        // NOT recorded, so the next pass tries again — and told to the admin,
-        // because an address MailApp refuses will refuse the same way tomorrow.
-        log(`⚠️ Could not send a reminder to ${email} for "${item.session.title}" ` +
-          `on ${formatDateLabel(item.session.date)} (${err}).`);
+
+      // The quota, the archive BCC, the send itself, the refused-address rule
+      // and "record it only once it is away" are section 9f's. What is decided
+      // here is who is due a message, what it says, and how much of a scarce
+      // quota this pass may spend (`reserve`).
+      const outcome = sendRationedEmail({
+        to: email,
+        subject: buildRegistrantReminderSubject(item.session, offset),
+        body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
+          item.daysAway),
+        reserve: REMINDER_QUOTA_RESERVE,
+        alreadySent,
+        recordSent: () => {
+          sentFor[stamp] = true;
+          ledger[eventId] = sentFor;
+          __reminderLedgerDirty = true;
+        }
+      });
+
+      if (outcome.status === 'sent' || outcome.status === 'duplicate') {
+        if (outcome.status === 'sent') result.sent++;
+        return;
+      }
+      if (outcome.status === 'held') {
+        result.held++;
+        return;
+      }
+      // NOT recorded, so the next pass tries again. Told to the admin on the
+      // refusal itself — an address MailApp refuses will refuse the same way
+      // tomorrow — but not again for the messages suppressed behind it, which
+      // are the same bad address reported twice.
+      log(`⚠️ Could not send a reminder to ${email} for "${item.session.title}" ` +
+        `on ${formatDateLabel(item.session.date)} (${outcome.error}).`);
+      if (outcome.status === 'failed') {
         noteForAdmin('Reminders that could not be sent',
           `${email} could not be emailed about "${item.session.title}" on ` +
-          `${formatDateLabel(item.session.date)} (${err}). It will be tried again next sync.`);
+          `${formatDateLabel(item.session.date)} (${outcome.error}). It will be tried again next sync.`);
       }
     });
   });
@@ -424,17 +442,6 @@ function pruneRegistrantReminderLedger(liveEventIds, todayKey) {
     delete ledger[eventId];
     __reminderLedgerDirty = true;
   });
-}
-
-/** As in the roster alerts: optimistic when the quota itself cannot be read. */
-function registrantReminderRemainingQuota() {
-  try {
-    const remaining = MailApp.getRemainingDailyQuota();
-    return typeof remaining === 'number' ? remaining : MAX_REMINDER_EMAILS_PER_RUN;
-  } catch (err) {
-    log(`ℹ️ Could not read the remaining mail quota (${err}) — sending up to the per-run cap anyway.`);
-    return MAX_REMINDER_EMAILS_PER_RUN;
-  }
 }
 
 /** "Your appointment on Tue, Mar 3, 2026" / "Reminder: Chair Yoga tomorrow". */
