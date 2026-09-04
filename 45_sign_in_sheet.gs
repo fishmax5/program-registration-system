@@ -1141,7 +1141,7 @@ function openOrCreateSignInSheetDoc(data, title) {
   }
 
   const doc = DocumentApp.create(title);
-  // Same reason every form, leader sheet and printed PDF opens itself up the
+  // Same reason every form, registrant sheet and printed PDF opens itself up the
   // moment it exists (see openUpFileToAnyoneWithLink()): whoever builds this
   // is not necessarily whoever later clicks the Sign_In_Sheet_Link on the
   // dashboard (69_generated_file_links.gs), and Drive hands a new file to its

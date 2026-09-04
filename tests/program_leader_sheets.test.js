@@ -36,6 +36,10 @@ this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.LEADER_OWNED_COLUMNS = LEADER_OWNED_COLUMNS;
 this.HEADERS = HEADERS;
 this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
+this.ensureRegistrantSheetsForUpcomingPrograms = ensureRegistrantSheetsForUpcomingPrograms;
+this.REGISTRANT_SHEET_MAX_CREATES_PER_RUN = REGISTRANT_SHEET_MAX_CREATES_PER_RUN;
+this.__stubCreate = function (fn) { createProgramLeaderSheet = fn; };
+this.registrantSheetFileName = registrantSheetFileName;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -181,6 +185,80 @@ check("Bob's tick and note landed on his row",
 check("Ann's untouched cells left the workbook's own note alone",
   [registrantRows[0][regMap['Contacted']], registrantRows[0][regMap['Leader_Notes']]],
   [false, 'staff note']);
+
+// ---------------------------------------------------------------------------
+// WHO GETS A SHEET, now that it is every program rather than only the ones
+// with a notifying leader.
+//
+// THE FAILURES THIS PINS. (1) A calendar carrying next spring's dates must not
+// build a spreadsheet per program tonight — the horizon is what stops it, and
+// SpreadsheetApp.create() is the slowest call this project makes. (2) A weekly
+// class must get ONE sheet, not one per date: the registry entry is what makes
+// a link handed out in September still right in March. (3) A run that hits the
+// cap must build the SOONEST sessions' sheets, not whatever sorted first.
+// ---------------------------------------------------------------------------
+
+const pdHeaders = sandbox.HEADERS.Master_Program_Dashboard;
+const pdMap = sandbox.getIndexMap(pdHeaders);
+
+function dashRow(title, location, daysOut) {
+  const row = new Array(pdHeaders.length).fill('');
+  row[pdMap['Event_ID']] = `${title}-${daysOut}`;
+  row[pdMap['Clean_Title']] = title;
+  row[pdMap['Location']] = location;
+  row[pdMap['Event_Date']] = new Date(Date.now() + daysOut * 86400000);
+  return row;
+}
+
+let built = [];
+sandbox.__stubCreate(value => { built.push(value); });
+
+sandbox.__setRegistry({});
+built = [];
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+  dashRow('Chair Yoga', 'Narberth', 2),
+  dashRow('Chair Yoga', 'Narberth', 9),   // same program, later — still one sheet
+  dashRow('Bridge Club', 'Narberth', 40), // past the horizon
+  dashRow('Art', 'Ashbridge', -3)         // already happened
+]);
+check('one sheet per program inside the week, and none for the rest',
+  built, ['Chair Yoga|||Narberth']);
+
+check('the same program at another site is its own sheet — the privacy boundary',
+  (() => {
+    built = [];
+    sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+      dashRow('Chair Yoga', 'Narberth', 1), dashRow('Chair Yoga', 'Ashbridge', 1)]);
+    return built.slice().sort();
+  })(),
+  ['Chair Yoga|||Ashbridge', 'Chair Yoga|||Narberth']);
+
+check('a program already holding a sheet is left completely alone',
+  (() => {
+    sandbox.__setRegistry({ 'chair yoga|narberth': { fileId: 'F1' } });
+    built = [];
+    sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [dashRow('Chair Yoga', 'Narberth', 1)]);
+    sandbox.__setRegistry({});
+    return built;
+  })(), []);
+
+// The cap, and the order it spends itself in.
+built = [];
+const many = [];
+for (let i = 0; i < sandbox.REGISTRANT_SHEET_MAX_CREATES_PER_RUN + 3; i++) {
+  // Named so alphabetical order is the REVERSE of soonest-first: a pass that
+  // sorted by name would build the furthest-out sessions and leave tomorrow's.
+  many.push(dashRow(`Program ${String.fromCharCode(90 - i)}`, 'Narberth', i));
+}
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, many);
+check('one run builds no more than the cap',
+  built.length, sandbox.REGISTRANT_SHEET_MAX_CREATES_PER_RUN);
+check('...and spends it on the soonest sessions',
+  built[0], 'Program Z|||Narberth');
+
+check('the file is named for what is on it, not for who reads it',
+  sandbox.registrantSheetFileName('Chair Yoga', 'Narberth'),
+  'Registrant Sheet — Chair Yoga (Narberth)');
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

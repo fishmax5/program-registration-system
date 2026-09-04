@@ -163,8 +163,8 @@ function buildAppMenu(ui, includeAdmin) {
       // current, and tell the leader what moved on it. The last two both ride
       // the hourly sync already — these are for when somebody does not want to
       // wait an hour.
-      .addItem('Share a Sign-Up Sheet with a Program Leader\u2026', 'showProgramLeaderSheetDialog')
-      .addItem('Refresh Program Leader Sheets Now', 'refreshProgramLeaderSheetsNow')
+      .addItem('Share a Program Registrant Sheet\u2026', 'showProgramLeaderSheetDialog')
+      .addItem('Refresh Program Registrant Sheets Now', 'refreshProgramLeaderSheetsNow')
       .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
       // The countdown-channel twin of the item above — see Notify_Timing on
       // Program_Leaders for which leaders are on which.
