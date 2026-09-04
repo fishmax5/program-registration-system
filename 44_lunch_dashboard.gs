@@ -681,7 +681,7 @@ function updateMasterLunchDashboard(registrantRows) {
   const tableRows = dropNotServingRows(existingTable, map, rollup);
   // The printed sheet for that day and building, if one has been built — a
   // derived cell recomputed on every render, never read back (see
-  // 69_generated_file_links.gs). No leader sheet here: a meal has no leader.
+  // 69_generated_file_links.gs). No registrant sheet here: a meal is not a program.
   stampGeneratedFileLinks(tableRows, map, {});
 
   writeMasterLunchDashboardSheet(sheet, plan, headers, tableRows, rollup, signUpRows);

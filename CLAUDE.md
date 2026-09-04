@@ -127,7 +127,7 @@ Line counts are a rough guide to what you are about to load.
 | `43_program_dashboard.gs` | 988 | `renderProgramDashboard`. |
 | `44_lunch_dashboard.gs` | 1131 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 1322 | The desk's sheet for one day and one building — a **live Google Doc**, rebuilt in place so the link never goes stale, filed in `Sign-In Sheets`. Lunch on page one, everybody on page two. One row per PERSON (`signInPersonKey` / `dedupeSignInEntries`: a duplicate's meals take the MAXIMUM, a guest's ADD), and two washes for how a meal is handled — yellow it leaves the building, purple it needs doing something with here. It used to export a PDF and throw the document away; `getOrCreateSignInSheetFolder()` is all that is left of that, for the backfill in `69`. |
-| `46_program_leader_sheets.gs` | 1395 | A live roster shared out of the workbook to a program leader, banded by session — built on the menu, or automatically for a leader who asked to be notified about it (`ensureProgramLeaderSheetsForNotifyingLeaders`). |
+| `46_program_leader_sheets.gs` | 1535 | **Program registrant sheets** — a live roster shared out of the workbook, banded by session. One sheet per program (not per date), so a link handed out in September is still right in March. Built on the menu, automatically a week before a program's next session for EVERY program (`ensureRegistrantSheetsForUpcomingPrograms`, capped per run), and automatically for a leader who asked to be notified whenever their program runs (`ensureProgramLeaderSheetsForNotifyingLeaders`). The identifiers still say "leader" for the same reason `LEADER_SHEET_REGISTRY_PROP_KEY` still says "instructor"; only the words a person reads changed. |
 
 ### Repair and last resorts (47–51)
 
@@ -178,8 +178,8 @@ either.
 
 | File | | What is in it |
 |---|--:|---|
-| `65_program_leaders.gs` | 588 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks, and `Notify_Timing` — the closed dropdown deciding WHICH of `66`'s two channels a ticked leader is on (`parseLeaderNotifyTiming`) — plus the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
-| `66_program_leader_notifications.gs` | 984 | **Two channels, one tick.** Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. And the day-before digests for a leader whose `Notify_Timing` is a day count instead: one email per session, N days ahead of it, listing who is on the roster — with its own ledger so an hourly pass sends it once. |
+| `65_program_leaders.gs` | 641 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks, and `Notify_Timing` — the closed dropdown deciding WHEN a ticked leader hears from `66`: at each change, N days before a date, or on a fixed weekday before one (`parseLeaderNotifyTiming`, `leaderNotifyTimingDaysBefore`) — plus the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it. |
+| `66_program_leader_notifications.gs` | 985 | **Two channels, one tick.** Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. And the day-before digests for a leader whose `Notify_Timing` is a day count or a weekday instead: one email per session, N days ahead of it (a weekday row working its own count out per session, so one answer covers a Tuesday class and a Saturday one), listing who is on the roster — with its own ledger so an hourly pass sends it once. |
 
 ### Two months at the door (67)
 
@@ -201,7 +201,7 @@ time. Its two columns live in `03` like every other schema.
 
 | File | | What is in it |
 |---|--:|---|
-| `69_generated_file_links.gs` | 291 | Live links to the files this system makes outside the workbook: the sign-in sheet registry (which is also how `45` finds the document to rewrite, rather than making a second one) and its one-time backfill across both the live-Doc folder and the retired PDF one, plus the `Leader_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
+| `69_generated_file_links.gs` | 291 | Live links to the files this system makes outside the workbook: the sign-in sheet registry (which is also how `45` finds the document to rewrite, rather than making a second one) and its one-time backfill across both the live-Doc folder and the retired PDF one, plus the `Registrant_Sheet_Link` / `Sign_In_Sheet_Link` columns the dashboards and `Registrant_Dash` stamp on every render. |
 
 ### How often registrants hear from us (70)
 

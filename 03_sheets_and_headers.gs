@@ -111,7 +111,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // with the hidden machine columns because it is an input to the slot
   // arithmetic rather than something staff read: it is how the form layer
   // rebuilds a session's appointment times without going back to the calendar.
-  // Leader_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
+  // Registrant_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
   // because they are the same kind of thing: somewhere else to click through
   // to. They point at the two files this system produces OUTSIDE the workbook
   // — the spreadsheet a program leader marks up, and the printed sign-in PDF
@@ -131,7 +131,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
     'Active_Count', 'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
-    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
+    'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
     'Max_Per_Month'
@@ -230,7 +230,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
-  // Leader_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
+  // Registrant_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
   // session table carries, repeated here so the day's roster is one click
   // from the sheet the leader is marking and the PDF the desk printed — see
   // 69_generated_file_links.gs.
@@ -243,7 +243,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
-    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
+    'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
   // Registered_Count (what the forms say) and Served_Confirmed (what was
@@ -292,7 +292,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // takeaway, 8 carried over means eight of that fourteen left the building
   // on a later day.
   // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
-  // the printed sheet for that date x location (there is no leader sheet for a
+  // the printed sheet for that date x location (there is no registrant sheet for a
   // meal), derived on every render from the registry in
   // 69_generated_file_links.gs. Its position is free to move for the same
   // reason the buffers' is — the formulas build their A1 refs from this array.
@@ -678,7 +678,13 @@ const LEGACY_HEADER_ALIASES = {
   // notes typed by a person about a person, which nothing can regenerate. The
   // alias means a workbook rendered by the old version reads its notes into
   // the new column on the first render rather than showing an empty one.
-  Leader_Notes: ['Instructor_Notes']
+  Leader_Notes: ['Instructor_Notes'],
+  // The shared per-program roster stopped being "the leader's sheet" when the
+  // desk, the office and the leader all turned out to read it — see 46's
+  // banner. This column is DERIVED, rewritten from the registry on every
+  // render, so the alias buys nothing but a first render that still shows the
+  // link instead of a blank while the old header is on the sheet.
+  Registrant_Sheet_Link: ['Leader_Sheet_Link']
 };
 
 /** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */

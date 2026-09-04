@@ -205,7 +205,7 @@ function seedAdminNotificationEmailsTable(sheet) {
   sheet.getRange(CONFIG_DATA_START_ROW, section.startCol, ADMIN_NOTIFICATION_MAX_ROWS, 1).setNote(
     `Up to ${ADMIN_NOTIFICATION_MAX_ROWS} people in the office, one per row, each ticked for what they are `
     + 'copied on. Leave a row blank to skip it; an empty table means this system copies nobody.\n\n'
-    + 'Every address here is also made an editor of the program leader sheets and forms this system '
+    + 'Every address here is also made an editor of the program registrant sheets and forms this system '
     + 'shares out of the workbook, ticked or not — that is file access, not mail.');
 
   const noteByHeader = {
@@ -934,7 +934,7 @@ function adminEmailsForCategory(categoryKey) {
 
 /**
  * Every address in the table, ticked or not. For the one thing that is not
- * mail: editor access on the leader sheets and forms this system shares out of
+ * mail: editor access on the registrant sheets and forms this system shares out of
  * the workbook — see ADMIN_NOTIFICATION_CATEGORIES for why that is not a
  * category of its own.
  */

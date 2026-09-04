@@ -967,7 +967,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
-      'Leader_Sheet_Link', 'Sign_In_Sheet_Link'],
+      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);
