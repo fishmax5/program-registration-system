@@ -160,6 +160,12 @@ function buildDoorAppHtml(options) {
   var PERSON = null;       // { name, key, isNew, phone, email, registered[], ... }
   var PICKED = {};         // session value -> true
   var LUNCH = false;
+  // WHICH OF THIS PERSON'S HOUSEHOLD IS BEING SIGNED IN WITH THEM: member key
+  // -> true. Ticked by default for anyone the workbook expects today and has
+  // not already marked present — the couple who always arrive together are the
+  // reason this exists, and making them tap twice would be the same two taps
+  // as before. Cleared on every choose(), because it is about one visit.
+  var PARTY = {};
   var RECURRING = 'none';  // none | month | club
   // WHAT HAS BEEN TYPED INTO THE WALK-IN FORM, held outside the DOM. Picking a
   // radio redraws the whole screen (one render function, one truth about what
@@ -456,8 +462,13 @@ function buildDoorAppHtml(options) {
     var box = document.getElementById('results');
     box.innerHTML = '';
     if (needle.length < 2) return;
+    // MATCHED ON EVERY SPELLING, not just the one on the row: the search field carries
+    // the nickname a form's parenthetical was holding ("Robert (Bob) Kaplan"),
+    // so a volunteer typing what they actually call somebody finds them. See
+    // memberSearchNames() in 77_households_and_names.gs.
     var hits = (DAY.members || []).filter(function (m) {
-      return m.name.toLowerCase().indexOf(needle) !== -1;
+      var hay = m.search || m.name.toLowerCase();
+      return hay.indexOf(needle) !== -1;
     }).slice(0, 24);
     if (!hits.length) {
       box.appendChild(el('p', 'hint', 'No member matches "' + typed + '".'));
@@ -467,7 +478,7 @@ function buildDoorAppHtml(options) {
       // reset to '' on that tap regardless of what was in the search box.
       // Carrying the typed text straight into WALKIN here is what removes that.
       box.appendChild(button('big', 'Sign in as a walk-in: ' + typed, function () {
-        PERSON = null; PICKED = {}; LUNCH = false; RECURRING = 'none'; MEMBER = '';
+        PERSON = null; PICKED = {}; LUNCH = false; PARTY = {}; RECURRING = 'none'; MEMBER = '';
         WALKIN = { name: typed, email: '', phone: '' };
         STEP = 'walkin';
         draw();
@@ -502,6 +513,11 @@ function buildDoorAppHtml(options) {
     // AN ORPHAN GUEST — the host is not expected today, so there is no party
     // to fold this card into. Labelled rather than left to read as a stranger.
     if (p.guestOf) bits.push('guest of ' + p.guestOf);
+    // The household on the card as well as on the screen behind it, so a
+    // volunteer scanning the list can see that finding one of them is enough.
+    if ((p.household || []).length) {
+      bits.push('with ' + p.household.map(function (m) { return m.name; }).join(', '));
+    }
     b.innerHTML = esc(p.name) + (bits.length ? '<span class="meta">' + esc(bits.join(' · ')) + '</span>' : '');
     b.onclick = function () { choose(p); };
     return b;
@@ -516,6 +532,10 @@ function buildDoorAppHtml(options) {
     // CONFIRMATION with the ticks live, so changing one is the same tap.
     (p.registered || []).forEach(function (v) { PICKED[v] = true; });
     LUNCH = !!p.lunchRegistered;
+    PARTY = {};
+    (p.household || []).forEach(function (m) {
+      if (m.expected && !m.here) PARTY[m.key] = true;
+    });
     RECURRING = 'none';
     MEMBER = '';
     STEP = 'person';
@@ -544,6 +564,20 @@ function buildDoorAppHtml(options) {
     }
     main.appendChild(list);
 
+    // THE HOUSEHOLD, AFTER THE PROGRAMS AND BEFORE THE MEAL. A couple arrive
+    // together and are two members with two sets of rows; this is the one tap
+    // that stops the volunteer scrolling back up the alphabet to do the second
+    // one. Each is signed in for WHAT THEY THEMSELVES ARE DOWN FOR — the ticks
+    // above are this person's, not the household's — except somebody the
+    // workbook is not expecting today, who comes in on the ticks above because
+    // there is nothing else to put them on.
+    if ((PERSON.household || []).length) {
+      main.appendChild(el('h3', '', 'Signing in with'));
+      var party = el('ul', 'list', '');
+      PERSON.household.forEach(function (m) { party.appendChild(householdItem(m)); });
+      main.appendChild(party);
+    }
+
     var lunchList = el('ul', 'list', '');
     lunchList.appendChild(lunchItem(!!PERSON.lunchRegistered));
     main.appendChild(lunchList);
@@ -568,6 +602,7 @@ function buildDoorAppHtml(options) {
       list.appendChild(el('p', 'hint', 'No programs are on at ' + DAY.location + ' that day.'));
     }
     main.appendChild(list);
+
 
     var lunchList = el('ul', 'list', '');
     lunchList.appendChild(lunchItem(false));
@@ -612,6 +647,42 @@ function buildDoorAppHtml(options) {
     main.appendChild(button('plain', 'Back to the name list', function () {
       STEP = 'names'; PICKED = {}; LUNCH = false; draw();
     }));
+  }
+
+  /**
+   * One household member as a tick. Somebody already marked present is shown
+   * and NOT tickable — signing them in twice is not a thing the door should
+   * offer, and hiding them would leave the volunteer wondering where the wife
+   * went.
+   */
+  function householdItem(m) {
+    var locked = busy || !!m.here;
+    var li = el('li', 'item' + (m.here ? ' off' : (PARTY[m.key] ? ' on' : '')), '');
+    var label = document.createElement('label');
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !!PARTY[m.key] && !m.here;
+    box.disabled = locked;
+    box.onchange = function () {
+      if (box.checked) PARTY[m.key] = true; else delete PARTY[m.key];
+      li.className = 'item' + (box.checked ? ' on' : '');
+    };
+    var what = el('div', 'what', '');
+    var tag = m.here ? '<span class="tag yes">SIGNED IN</span>'
+      : (m.expected ? '<span class="tag yes">EXPECTED</span>'
+        : '<span class="tag no">NOT REGISTERED</span>');
+    var meta = [];
+    if (m.here) meta.push('Already signed in today.');
+    else if ((m.registered || []).length) meta.push((m.registered || []).map(titleOf).join(', '));
+    else if (m.expected) meta.push('Down for lunch only.');
+    else meta.push('Not down for anything today — ticking this signs them in for the same sessions.');
+    if (m.lunchRegistered) meta.push('lunch ordered');
+    what.innerHTML = tag + '<span class="title">' + esc(m.name) + '</span>' +
+      '<span class="meta">' + esc(meta.join(' — ')) + '</span>';
+    label.appendChild(box);
+    label.appendChild(what);
+    li.appendChild(label);
+    return li;
   }
 
   function programItem(program) {
@@ -1075,6 +1146,24 @@ function buildDoorAppHtml(options) {
   function submit() {
     var programs = Object.keys(PICKED);
     if (!programs.length && !LUNCH) return say('Tick what you are here for first.', 'err');
+    // EACH COMPANION SIGNS IN AS THEMSELVES — their own sessions, their own
+    // meal (see doorSignIn()). Only somebody the workbook is not expecting
+    // today falls back to this person's ticks, which is the walk-in case
+    // wearing a household's clothes: they came along, so put them where the
+    // person who brought them is going.
+    var party = [];
+    (PERSON.household || []).forEach(function (m) {
+      if (!PARTY[m.key] || m.here) return;
+      var theirs = (m.registered || []).slice();
+      party.push({
+        name: m.name,
+        phone: m.phone || '',
+        email: '',
+        newMember: false,
+        programs: theirs.length ? theirs : programs,
+        lunch: !!m.lunchRegistered
+      });
+    });
     send({
       name: PERSON.name,
       phone: PERSON.phone || '',
@@ -1083,7 +1172,8 @@ function buildDoorAppHtml(options) {
       programs: programs,
       lunch: !!LUNCH,
       recurring: 'none',
-      member: ''
+      member: '',
+      party: party
     });
   }
 
@@ -1153,7 +1243,8 @@ function buildDoorAppHtml(options) {
     var offerMembership = payload.member === 'no';
     var name = payload.name || '';
 
-    PERSON = null; PICKED = {}; LUNCH = false;
+    var partyNames = (payload.party || []).map(function (p) { return p.name; });
+    PERSON = null; PICKED = {}; LUNCH = false; PARTY = {};
     RECURRING = 'none'; MEMBER = '';
     WALKIN = { name: '', email: '', phone: '' };
     if (offerMembership) {
@@ -1164,7 +1255,8 @@ function buildDoorAppHtml(options) {
     }
     draw();
     window.scrollTo(0, 0);
-    say('✅ Signed in — ' + name, 'ok');
+    say('✅ Signed in — ' + name +
+      (partyNames.length ? ' with ' + partyNames.join(', ') : ''), 'ok');
     // Opened AFTER the toast is drawn, so "Signed in" is what the visitor
     // sees first rather than being instantly overwritten by "Opening the
     // membership application...".

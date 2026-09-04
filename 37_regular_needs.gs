@@ -576,7 +576,11 @@ const QUICK_MARK_CACHE_KEY = 'QUICK_MARK_INDEX_V2';
  * stored copy that does not carry the CURRENT stamp is not an index: both
  * readers drop it and the next open rebuilds.
  */
-const QUICK_MARK_INDEX_SCHEMA = 3;
+// 4: each member now carries the spellings they can be found under and the
+// rest of their household (77_households_and_names.gs). A stored copy from
+// before that has neither, and a dialog reading it would silently offer no
+// household anywhere — the same shape of bug as the one above.
+const QUICK_MARK_INDEX_SCHEMA = 4;
 /**
  * CacheService caps one value at 100KB. The index for a workbook with a year
  * of history is bigger than that even gzipped, so it is stored as a manifest

@@ -408,11 +408,24 @@ function buildQuickMarkIndex() {
   // would actually make this payload large.
   const members = [];
   const seen = {};
+  // The households travel with the roll, for the same reason the roll itself
+  // does: the dialog has to be able to say "and Ray Smith" the instant a name
+  // is picked, and there are as many of these as there are couples.
+  const households = readHouseholdIndex();
   collectKnownMembers().sort((a, b) => a.localeCompare(b)).forEach(name => {
     const key = normalizeNameKey(name);
     if (seen[key]) return;
     seen[key] = true;
-    members.push({ name, key });
+    const found = households.byKey[key];
+    members.push({
+      name, key,
+      // Every spelling this person can be found under, so a desk typing the
+      // name they actually use finds the row that says something else — see
+      // memberSearchNames() in 77_households_and_names.gs.
+      search: memberSearchNames(name, '').join(' ').toLowerCase(),
+      // The REST of their household, never themselves.
+      household: found ? found.members.filter(m => m.key !== key) : []
+    });
   });
 
   // The standing needs travel with the lists, for the same reason the roll
@@ -821,6 +834,72 @@ function applyQuickMarkFromDialog(args) {
   // can press the button again in a moment, which is a far better outcome than
   // either a hang or a mark on the wrong row.
   return withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), {
+    ok: false,
+    message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
+  });
+}
+
+/**
+ * THE WHOLE HOUSEHOLD, ONE PRESS — the same mark, applied to this person and
+ * to everybody Member_Roll says arrives with them (77_households_and_names.gs).
+ *
+ * The couple who come to Tuesday lunch together are two rows and have always
+ * been two trips through this dialog: find her, mark her, clear the name, find
+ * him, mark him. This is that, done once.
+ *
+ * ONE LOCK FOR THE WHOLE PARTY rather than one per person, because the reason
+ * applyQuickMarkFromDialog() takes it in the first place — a render moving the
+ * rows between reading and writing — is exactly as true between the second
+ * person and the third. Each mark is otherwise its own ordinary mark: same row
+ * matching, same wording, its own answer back, and a miss on one ("nobody by
+ * that name is registered for this session") leaves the others alone.
+ *
+ * The appointment fields are deliberately NOT carried across: a booked slot is
+ * one chair at one time, and giving a spouse the same one would double-book
+ * it. A household that both hold appointments is two marks, as it should be.
+ */
+function applyQuickMarkForHousehold(args) {
+  const base = args || {};
+  const names = [String(base.name || '').trim()].filter(Boolean);
+  householdCompanionsOf(base.name).forEach(m => {
+    if (names.indexOf(m.name) === -1) names.push(m.name);
+  });
+  if (names.length < 2) {
+    return applyQuickMarkFromDialog(base); // a household of one is just a person
+  }
+
+  return withScriptLock(DESK_LOCK_WAIT_MS, () => {
+    const messages = [];
+    let ok = false;
+    let namesChanged = false;
+    let addedName = '';
+    let addedNameKey = '';
+    names.forEach((name, i) => {
+      const one = Object.assign({}, base, { name });
+      if (i > 0) {
+        one.appointmentTime = '';
+        one.bookedTime = '';
+        one.moveTime = false;
+        one.earlierAppointment = false;
+      }
+      const res = applyQuickMarkLocked(one) || {};
+      messages.push(res.message || `${name}: nothing came back.`);
+      if (res.ok) ok = true;
+      if (res.namesChanged) {
+        namesChanged = true;
+        addedName = res.addedName || addedName;
+        addedNameKey = res.addedNameKey || addedNameKey;
+      }
+    });
+    return {
+      ok,
+      message: `👪 ${messages.join('  ·  ')}`,
+      // The dialog rebuilds its list off these; a party that added more than
+      // one walk-in row still only needs it told once, and it re-reads the
+      // session either way (see sessionChanged()).
+      namesChanged, addedName, addedNameKey
+    };
+  }, {
     ok: false,
     message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
   });

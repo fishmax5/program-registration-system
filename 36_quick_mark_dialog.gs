@@ -193,6 +193,9 @@ function buildQuickMarkHtml(preloadedIndex) {
 <select id="name" onchange="nameChanged()" disabled>
   <option value="">— choose a session first —</option>
 </select>
+<label class="tick" id="householdLabel" style="display:none">
+  <input type="checkbox" id="household" onchange="refreshButton()"> 👪 Mark the whole household
+  <span class="note" id="householdNote"></span></label>
 <label class="field" for="newName" id="newNameLabel" style="display:none">Name of the walk-in</label>
 <input type="text" id="newName" placeholder="Type their name" style="display:none" autocomplete="off"
        oninput="refreshButton()">
@@ -599,6 +602,7 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   function nameChanged() {
     showWalkIn(el('name').value === WALK_IN);
+    showHousehold();
     // The chosen person's own slot is what the time controls key off — whether
     // "move them" is even offered, and what it starts from.
     el('moveTime').checked = false;
@@ -606,6 +610,39 @@ function buildQuickMarkHtml(preloadedIndex) {
     showNeeds();
     toggleNeedBox(false);
     refreshButton();
+  }
+
+  /**
+   * WHO ELSE ARRIVES WITH THIS PERSON. Offered only when the roll actually
+   * says somebody does (Member_Roll's household columns, carried in the index)
+   * — a tick that is always there and usually means nothing is a tick people
+   * stop reading, and this one marks other people present.
+   *
+   * Untouched by default: two people who share a phone number usually arrive
+   * together, but "usually" is not something to assert about somebody's
+   * attendance without being asked.
+   */
+  function householdForPick() {
+    if (!INDEX || !INDEX.members) return [];
+    var name = chosenName();
+    if (!name || el('name').value === WALK_IN) return [];
+    var key = nameKeyOf(name);
+    var found = null;
+    INDEX.members.forEach(function (m) { if (m.key === key) found = m; });
+    return (found && found.household) || [];
+  }
+
+  function showHousehold() {
+    var list = householdForPick();
+    var label = el('householdLabel');
+    if (!list.length) {
+      el('household').checked = false;
+      label.style.display = 'none';
+      return;
+    }
+    el('householdNote').textContent = '— ' + list.map(function (m) { return m.name; }).join(', ') +
+      (list.length === 1 ? ' arrives with them' : ' arrive with them');
+    label.style.display = '';
   }
 
   // ------------------------------------------------------------------
@@ -902,6 +939,8 @@ function buildQuickMarkHtml(preloadedIndex) {
           // Same session, next person: clear the name and the ticks only.
           el('name').value = '';
           showWalkIn(false);
+          el('household').checked = false;
+          showHousehold();
           el('attended').checked = false;
           el('lunch').checked = false;
           el('signup').checked = false;
@@ -950,7 +989,12 @@ function buildQuickMarkHtml(preloadedIndex) {
         refreshButton();
       })
       .withFailureHandler(function (err) { say('Failed: ' + err.message, 'err'); refreshButton(); })
-      .applyQuickMarkFromDialog({
+      // THE SAME MARK, ONE PERSON OR A WHOLE HOUSEHOLD. Two server functions
+      // taking the identical payload, chosen by the tick above — picked by
+      // name here rather than by branching the whole call, so there is one
+      // copy of what a mark consists of and no chance of the two drifting.
+      [el('household').checked && householdForPick().length
+        ? 'applyQuickMarkForHousehold' : 'applyQuickMarkFromDialog']({
         location: el('location').value,
         session: el('session').value,
         name: chosenName(),

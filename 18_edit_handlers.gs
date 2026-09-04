@@ -43,6 +43,8 @@ function onEdit(e) {
       handleConfigEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
       handleClubMembersEdit(e, sheet);
+    } else if (name === SHEET_NAMES.MEMBER_ROLL) {
+      handleMemberRollEdit(e, sheet);
     }
   } catch (err) {
     // Say something. A silent catch here is how "I typed it and nothing
@@ -1850,4 +1852,68 @@ function handleLunchDashboardEdit(e, sheet) {
   autoFlipManualOverride(sheet, headerMap, editedRow, e.range.getColumn());
 }
 
+/**
+ * Member_Roll: two of the staff columns do something when they change, and
+ * the rest are notes.
+ *
+ * DISPLAY_NAME IS A CORRECTION, not a label. A name typed into a public form
+ * is the key every other tab matches on (see 77_households_and_names.gs), so
+ * putting the right spelling here is a request to change it EVERYWHERE — on
+ * this person's registrations, their club memberships, their standing needs —
+ * and to keep changing it as the public goes on typing the old one. That is
+ * more than a cell edit, so it asks first, and puts the cell back on "no".
+ *
+ * HOUSEHOLD_OVERRIDE is the staff's answer when the shared-contact guess got
+ * a household wrong. It only ever needs the household columns recomputed off
+ * this tab, which is why it does not go anywhere near the registrant history.
+ */
+function handleMemberRollEdit(e, sheet) {
+  const headers = HEADERS.Member_Roll;
+  // Read off the tab's OWN header row, not the constant — a workbook whose
+  // roll has not been redrawn since these columns landed still holds the old
+  // order, and a map from HEADERS would aim a rename at whatever sits at that
+  // index instead. A column this tab hasn't got simply comes back undefined,
+  // and the branch below it does nothing.
+  const live = getHeaderMapAt(sheet, MEMORY_TAB_HEADER_ROW);
+  const map = {};
+  headers.forEach(h => { if (live[h]) map[h] = live[h] - 1; });
+  const row = e.range.getRow();
+  const col = e.range.getColumn();
+  if (row < MEMORY_TAB_DATA_ROW) return;
 
+  if (map['Household_Override'] !== undefined && col === map['Household_Override'] + 1) {
+    const count = refreshMemberHouseholds(sheet.getParent());
+    toastIfPossible(`👪 Households recomputed across ${count} member(s).`);
+    return;
+  }
+
+  if (map['Display_Name'] === undefined || map['Name'] === undefined) return;
+  if (col !== map['Display_Name'] + 1) return;
+  const corrected = String(e.value === undefined ? '' : e.value).trim();
+  if (!corrected) return; // cleared: nothing to carry anywhere
+  const current = String(sheet.getRange(row, map['Name'] + 1).getValue() || '').trim();
+  if (!current || normalizeNameKey(current) === normalizeNameKey(corrected)) return;
+
+  let ui = null;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    // No UI to ask through (a script-driven edit). The correction still runs
+    // — it is what somebody typed — and the log carries the record.
+    log(`handleMemberRollEdit: renaming without a confirmation (${err}).`);
+  }
+  if (ui) {
+    const answer = ui.alert('Correct this name everywhere?',
+      `"${current}" becomes "${corrected}" on every tab that carries it — registrations, ` +
+      'club rosters, standing needs — and any response that arrives under the old spelling ' +
+      'from now on will be filed under the new one.\n\nCorrect it?',
+      ui.ButtonSet.YES_NO);
+    if (answer !== ui.Button.YES) {
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      toastIfPossible('Left as it was — nothing was renamed.');
+      return;
+    }
+  }
+  const changed = applyMemberNameCorrection(current, corrected);
+  toastIfPossible(`✏️ "${current}" is now "${corrected}" — ${changed} cell(s) updated.`);
+}

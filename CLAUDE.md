@@ -54,7 +54,7 @@ Line counts are a rough guide to what you are about to load.
 | `01_logging_and_access.gs` | 211 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 972 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. Plus the one tag that describes a DATE rather than a program — `Waitlist Only`, which closes a single session to new Active registrations whatever its capacity says — and the two lists that keep the difference straight: `PROGRAM_FLAG_COLUMNS` (ticked onto every row of a program) and `SESSION_FLAG_COLUMNS` (ticked onto the row you clicked, and nowhere else). |
-| `03_sheets_and_headers.gs` | 696 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
+| `03_sheets_and_headers.gs` | 715 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.**Member_Roll's household and name columns are described here; what they MEAN is `77`. |
 | `04_settings_and_config.gs` | 504 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off, and the Admin Notification Emails table (`ADMIN_NOTIFICATION_CATEGORIES`: who in the office is copied on which outbound mail, replacing the retired single Admin Notification / Archive Copy cells) — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 1173 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, the meal totals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 152 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
@@ -79,7 +79,7 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `16_menu_and_triggers.gs` | 597 | `onOpen`, the menu tree, trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
-| `18_edit_handlers.gs` | 1853 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount. |
+| `18_edit_handlers.gs` | 1919 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount, and the Member_Roll edits that mean something (`handleMemberRollEdit`: a `Display_Name` correction carried across every tab, a `Household_Override` recomputed). |
 
 ### Calendar → forms (19–26)
 
@@ -100,7 +100,7 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `27_registration_import.gs` | 453 | `syncRegistrations` — the entry point. |
 | `28_deletion_tombstones.gs` | 517 | Why a deleted registration stays deleted. |
-| `29_form_response_processing.gs` | 609 | `processFormResponse` — one response into registrant rows, guests and meals included. |
+| `29_form_response_processing.gs` | 615 | `processFormResponse` — one response into registrant rows, guests and meals included. |
 | `30_registry_counts.gs` | 162 | Active / waitlist / remaining-seat counts. |
 | `31_form_shape_and_migration.gs` | 396 | Is a live form still on the current template, and migrating it if not. |
 | `32_dashboard_link_repair.gs` | 1257 | Every way a registration link drifts from its session, diagnosed and repaired. |
@@ -112,11 +112,11 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `34_sectioned_tables.gs` | 649 | The Upcoming/Past split every date-bearing tab uses. **The sectioned reader is used everywhere — change it carefully.** |
 | `35_per_sheet_render.gs` | 105 | Per-sheet render wrappers. |
-| `36_quick_mark_dialog.gs` | 999 | Quick Mark, the sign-in desk tool on the menu. |
-| `37_regular_needs.gs` | 588 | The standing notes a desk would otherwise have to memorize. |
-| `38_quick_mark_index.gs` | 1744 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions. |
+| `36_quick_mark_dialog.gs` | 1043 | Quick Mark, the sign-in desk tool on the menu. |
+| `37_regular_needs.gs` | 592 | The standing notes a desk would otherwise have to memorize. |
+| `38_quick_mark_index.gs` | 1823 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions. |
 | `39_triage_sheet.gs` | 391 | Sessions the calendar stopped mentioning. |
-| `40_memory_tabs.gs` | 520 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). |
+| `40_memory_tabs.gs` | 596 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). Also `stampMemberHouseholds` / `refreshMemberHouseholds` — where the household grouping decided in `77` meets the roll. |
 | `41_club_rosters.gs` | 448 | `Club_Members`. |
 | `42_legacy_tab_merge.gs` | 382 | Merging tabs from older layouts. |
 
@@ -234,8 +234,8 @@ through to this app, so a stale bookmark opens it rather than an error.
 
 | File | | What is in it |
 |---|--:|---|
-| `72_door_app.gs` | 754 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the live membership application — `doorMembershipForm` / `doorMembershipSubmit`, built generically from the Membership Application form's own items (`readMembershipFormShape`) and submitted through the Forms API, with `recordMembershipHandoff` (renamed from `sendMembershipEmail` — it never sent mail) as the record that survives someone not filling it in. |
-| `73_door_app_html.gs` | 1320 | `buildDoorAppHtml` — the whole served app, one template literal, five screens redrawn into one `<main>`, membership application included. |
+| `72_door_app.gs` | 796 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the live membership application — `doorMembershipForm` / `doorMembershipSubmit`, built generically from the Membership Application form's own items (`readMembershipFormShape`) and submitted through the Forms API, with `recordMembershipHandoff` (renamed from `sendMembershipEmail` — it never sent mail) as the record that survives someone not filling it in. |
+| `73_door_app_html.gs` | 1412 | `buildDoorAppHtml` — the whole served app, one template literal, five screens redrawn into one `<main>`, membership application included. |
 
 ### The door's day and its one write (74)
 
@@ -248,7 +248,7 @@ and its schema (`SHEET_NAMES`, `HEADERS.Member_Roll`) lives in `03`.
 
 | File | | What is in it |
 |---|--:|---|
-| `74_door_day_and_sign_in.gs` | 711 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
+| `74_door_day_and_sign_in.gs` | 743 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
 
 ### The sliced-job runner (75)
 
@@ -277,6 +277,17 @@ it is there when they call it.
 | File | | What is in it |
 |---|--:|---|
 | `76_rationed_mailer.gs` | 254 | `sendRationedEmail` — the plumbing every send to somebody outside the workbook shares: the once-per-execution read of `MailApp.getRemainingDailyQuota()` and the floor each caller refuses to dig below, the office BCC the caller resolves from its own Config category (each address counted as its own message, because it is one), the send, the refused address remembered so the run stops paying to be told no twice, and the caller's ledger written only once the message is away. **The policies stay with their callers** — who is written to, what it says, how often, and how much of the day's hundred messages a pass may spend live in `66` and `70`. `notifyAdmin` (`15`) deliberately does not come through here; the banner says why. |
+
+### Who arrives with whom, and what they are called (77)
+
+Behavior and vocabulary for two facts the desk used to hold in its head. Last
+for the usual reason: its columns live in `03` like every other schema, its own
+constants stand alone, and everything that calls into it (`29`, `36`, `38`,
+`40`, `72`, `74`) reaches it through a hoisted function declaration.
+
+| File | | What is in it |
+|---|--:|---|
+| `77_households_and_names.gs` | 453 | **A household is a guess, and a name is not a key you can retype.** `buildHouseholdAssignments` reads the people who arrive together off the contact details they share — one email, one phone — with the office's own address thrown out first (`HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN`) and `Household_Override` beating the guess in both directions; `readHouseholdIndex` / `householdCompanionsOf` are how the door (`74`) and Quick Mark (`38`) ask. And the names: `parseMemberName` lifts the nickname out of `Bob (Robert)` or `Robert "Bob" Kaplan` so a desk can find somebody under what they are actually called, while `applyMemberNameCorrection` is what a staff correction in `Display_Name` costs — the spelling rewritten across every tab that carries it, plus a remembered old→new map (`canonicalMemberName`) so the responses still arriving under the wrong one are filed under the right one. |
 
 ## Conventions
 

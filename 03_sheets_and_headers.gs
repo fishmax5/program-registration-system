@@ -390,9 +390,27 @@ defineLazyGlobal_('HEADERS', () => ({
   // on a form), which is why they sit on the left with the other derived
   // columns. Contact stays a staff column: it is where a note like "reach her
   // daughter Ann first" belongs, and that is not something a form can supply.
+  //
+  // Display_Name / Nickname / Household_ID / Household / Household_Override —
+  // see 77_households_and_names.gs, which owns all four.
+  //
+  // Name stays the JOIN KEY and is the string every other tab carries: it is
+  // what normalizeNameKey() is taken of, what a form response arrives under,
+  // and what Registrant_Dash, Club_Members and Regular_Needs match on. So a
+  // spelling correction is not a matter of retyping it — Display_Name is
+  // where staff write the right one, and applyMemberNameCorrection() is what
+  // carries it out to every tab and remembers it for the responses still to
+  // come. Nickname is what parseMemberName() lifted out of a parenthetical or
+  // a quoted middle ("Bob (Robert)", 'Robert "Bob" Smith'), so the door and
+  // Quick Mark can find a person under the name they are actually called.
+  //
+  // Household_ID and Household are RECOMPUTED from shared contact details
+  // every refresh; Household_Override is the staff's answer when that guess
+  // is wrong — see householdOverrideIntent().
   Member_Roll: [
-    'Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations', 'Usual_Lunch',
-    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'
+    'Name', 'Display_Name', 'Nickname', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen',
+    'Locations', 'Usual_Lunch', 'Household_ID', 'Household',
+    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Household_Override', 'Staff_Notes'
   ],
   /**
    * Club_Members — the standing roster of every club (see CLUB_TAG). One row
@@ -576,7 +594,8 @@ const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
 const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 
 /** Member_Roll columns the refresh must never overwrite — the staff's own knowledge. */
-const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'Usual_Guests', 'Dietary_Notes', 'Contact',
+  'Household_Override', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];
