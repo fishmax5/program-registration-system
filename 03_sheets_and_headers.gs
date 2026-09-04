@@ -470,10 +470,29 @@ defineLazyGlobal_('HEADERS', () => ({
   // Household_ID and Household are RECOMPUTED from shared contact details
   // every refresh; Household_Override is the staff's answer when that guess
   // is wrong — see householdOverrideIntent().
+  //
+  // FIRST_NAME / LAST_NAME are the same person's name as a PERSON rather than
+  // as a string: a roll that sorts by surname, addresses by first name, and
+  // hands to a mail merge. They are SPLIT from Display_Name or Name
+  // (splitPersonName, section 79) wherever they are blank, and are the staff's
+  // once written — but they are never composed BACK onto Name, because
+  // renaming somebody is Display_Name's job and doing it here as well would
+  // rename them on this tab alone. See backfillMemberNameParts().
+  //
+  // STATUS / RETIRED_DATE retire somebody without losing them: the row keeps
+  // every note it has ever carried and simply stops being offered — sorted
+  // below the retired divider on this tab, absent from the door's search box
+  // and Quick Mark's directory. A member roll is a history, so nothing on it
+  // is ever deleted to mean "they stopped coming".
+  //
+  // MERGED_FROM is the dedupe's receipt: every other spelling this row has
+  // absorbed, kept so that a merge can be read back and argued with rather
+  // than being a silent disappearance.
   Member_Roll: [
-    'Name', 'Display_Name', 'Nickname', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen',
-    'Locations', 'Usual_Lunch', 'Household_ID', 'Household',
-    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Household_Override', 'Staff_Notes'
+    'Name', 'Display_Name', 'First_Name', 'Last_Name', 'Nickname', 'Phone', 'Email',
+    'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations', 'Usual_Lunch',
+    'Household_ID', 'Household', 'Usual_Guests', 'Dietary_Notes', 'Contact',
+    'Household_Override', 'Staff_Notes', 'Status', 'Retired_Date', 'Merged_From'
   ],
   /**
    * Club_Members — the standing roster of every club (see CLUB_TAG). One row
@@ -666,9 +685,23 @@ const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
 /** What a request's Status can say. New until somebody looks at it. */
 const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 
-/** Member_Roll columns the refresh must never overwrite — the staff's own knowledge. */
-const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'Usual_Guests', 'Dietary_Notes', 'Contact',
-  'Household_Override', 'Staff_Notes'];
+/**
+ * Member_Roll columns the refresh must never overwrite — the staff's own
+ * knowledge.
+ *
+ * First_Name/Last_Name are on this list because a person's name is the one
+ * thing on the roll that a form cannot be trusted about: "BOB SMITH JR" typed
+ * into a phone at 8am is not a reason to undo the office's reading of who that
+ * is. The split is derived ONCE, from whatever spelling the row already had,
+ * and after that it is the staff's (see backfillMemberNameParts).
+ *
+ * Status/Retired_Date are here for the same reason in the other direction:
+ * nothing this workbook syncs knows that somebody has stopped coming, and a
+ * refresh that could clear a retirement would un-retire the whole roll on its
+ * next run.
+ */
+const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'Usual_Guests',
+  'Dietary_Notes', 'Contact', 'Household_Override', 'Staff_Notes', 'Status', 'Retired_Date'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];

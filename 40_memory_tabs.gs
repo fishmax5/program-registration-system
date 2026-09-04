@@ -146,6 +146,10 @@ function refreshMemberRoll(ss, registrantRows) {
     row[map['Last_Seen']] = p.last || '';
     row[map['Locations']] = Object.keys(p.locations).sort().join(', ');
     row[map['Usual_Lunch']] = pickMostFrequent(p.lunches);
+    // Merged_From is neither recomputed nor a staff column — it is the dedupe's
+    // own receipt (section 77), and a refresh that dropped it would erase the
+    // record of every merge the moment the next sync ran.
+    if (prior) row[map['Merged_From']] = prior[map['Merged_From']];
     outRows.push(row);
     seen[key] = true;
   });
@@ -153,10 +157,15 @@ function refreshMemberRoll(ss, registrantRows) {
     if (!seen[key]) outRows.push(existingByKey[key]);
   });
 
-  stampMemberHouseholds(outRows, headers);
-  writeMemoryTab(sheet, headers, outRows, memberRollTabOptions());
-  invalidateHouseholdIndexMemo();
-  log(`Member_Roll refreshed: ${outRows.length} member(s).`);
+  // Through section 79's writer, not writeMemoryTab() directly: the name
+  // split, the dedupe, the retired section and the Status dropdown are what
+  // make this a roll of people rather than a list of strings, and every path
+  // that writes this tab has to get all four. The household stamp happens
+  // inside it, AFTER the dedupe — who shares a telephone number with whom is a
+  // fact about the roll as it will be drawn, not as it was read.
+  const written = writeMemberRollTab(sheet, outRows);
+  log(`Member_Roll refreshed: ${written.active} active, ${written.retired} retired` +
+    `${written.merges.length ? `, ${written.merges.length} duplicate row(s) merged` : ''}.`);
 }
 
 /**
@@ -206,9 +215,7 @@ function refreshMemberHouseholds(ss) {
   const headers = HEADERS.Member_Roll;
   const rows = readSimpleTable(sheet, headers);
   if (!rows.length) return 0;
-  stampMemberHouseholds(rows, headers);
-  writeMemoryTab(sheet, headers, rows, memberRollTabOptions());
-  invalidateHouseholdIndexMemo();
+  writeMemberRollTab(sheet, rows);
   return rows.length;
 }
 
@@ -222,9 +229,10 @@ function refreshMemberHouseholds(ss) {
 function memberRollTabOptions() {
   return {
     banner: '👤 Member Roll',
-    bannerNote: 'Everyone who has ever registered for anything, whichever form they came in on.',
+    bannerNote: 'Everyone who has ever registered for anything, whichever form they came in on. ' +
+      'Sorted by last name; retired members are below the divider at the bottom, with their notes intact.',
     staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
-    dateColumns: ['First_Seen', 'Last_Seen'],
+    dateColumns: ['First_Seen', 'Last_Seen', 'Retired_Date'],
     numberColumns: ['Times_Seen']
   };
 }
@@ -453,8 +461,11 @@ function readSimpleTable(sheet, headers) {
   const numCols = projection ? lastCol : headers.length;
   let rows = getRowsPreservingFormulas(sheet, MEMORY_TAB_DATA_ROW, 1, lastRow - MEMORY_TAB_DATA_ROW + 1, numCols);
   if (projection) rows = rows.map(row => projection.map(src => (src === -1 ? '' : row[src])));
-  // Blank trailing rows are not members.
-  return rows.filter(row => String(row[0] || '').trim() !== '');
+  // Blank trailing rows are not members. Neither is Member_Roll's retired
+  // divider, which is a real row on the sheet so that a person can see where
+  // the working roll stops — and which every reader has to skip. See
+  // MEMBER_ROLL_RETIRED_DIVIDER.
+  return rows.filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
 }
 
 /**
@@ -472,7 +483,7 @@ function readSimpleTableValues(sheet, headers) {
     `"${sheet.getName()}" row ${MEMORY_TAB_HEADER_ROW}`);
   return grid.slice(MEMORY_TAB_DATA_ROW - 1)
     .map(row => (projection ? projection.map(src => (src === -1 ? '' : row[src])) : row.slice(0, headers.length)))
-    .filter(row => String(row[0] || '').trim() !== '');
+    .filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
 }
 
 const MEMORY_TAB_BANNER_ROW = 1;

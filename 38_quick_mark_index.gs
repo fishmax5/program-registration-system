@@ -780,7 +780,7 @@ function parseQuickMarkProgramChoice(value) {
   return { title, dateKey, lunchOnly: isLunchOnlyProgramTitle(title) };
 }
 
-/** Every name on Member_Roll — the standing directory, registered or not. */
+/** Every ACTIVE name on Member_Roll — the standing directory, registered or not. */
 function collectKnownMembers() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
@@ -789,6 +789,10 @@ function collectKnownMembers() {
     const headers = HEADERS.Member_Roll;
     const map = getIndexMap(headers);
     return readSimpleTableValues(sheet, headers)
+      // A retired member is still ON the roll — that is the point of retiring
+      // rather than deleting them — but they are not somebody the desk is
+      // offered when it starts typing a name. See memberRollIsRetired().
+      .filter(row => !memberRollIsRetired(row, map))
       .map(row => String(row[map['Name']] || '').trim())
       .filter(Boolean);
   } catch (err) {

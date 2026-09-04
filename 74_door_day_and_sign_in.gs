@@ -711,6 +711,14 @@ function recordWalkInMember(entry) {
       } else {
         const row = new Array(headers.length).fill('');
         row[map['Name']] = name;
+        // The two halves of the name, from the one string the door asked for.
+        // Written HERE rather than left to the next refresh so that the roll a
+        // person is added to at 9am is sorted under their surname at 9am. See
+        // splitPersonName().
+        const parts = splitPersonName(name);
+        row[map['First_Name']] = parts.first;
+        row[map['Last_Name']] = parts.last;
+        row[map['Status']] = 'Active';
         row[map['Phone']] = phone;
         row[map['Email']] = email;
         // Zero, not one: Times_Seen counts registrations on file, and this
@@ -727,10 +735,9 @@ function recordWalkInMember(entry) {
           ? `👤 ${name} added to the member roll — send the membership form to ${email}.`
           : `👤 ${name} added to the member roll.`;
       }
-      rows.sort((a, b) => String(a[map['Name']] || '').localeCompare(String(b[map['Name']] || '')));
-      writeMemoryTab(sheet, headers, rows, memberRollTabOptions());
-      // The roll this execution memoized is now one name short of the truth.
-      invalidateWalkInMembersMemo();
+      // Sorting, the retired section and the dedupe all belong to section 77's
+      // writer — which also invalidates the memo this execution is holding.
+      writeMemberRollTab(sheet, rows);
       return note;
     } catch (err) {
       log(`recordWalkInMember failed: ${err}`);

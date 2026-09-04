@@ -158,6 +158,12 @@ function buildAppMenu(ui, includeAdmin) {
       // roster work: it is what somebody has to know to serve the person, and
       // it is edited by the same people who keep the rosters.
       .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', 'openRegularNeedsTab')
+      // Beside the standing notes because it is the same tab's other half: who
+      // the office knows, as against what it knows about them. The dedupe runs
+      // on every write already (section 77) — this is the item for the
+      // afternoon somebody has just pasted a list in and wants the number.
+      .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', 'showMemberRollImportDialog')
+      .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
