@@ -32,8 +32,11 @@
 let __mealInfoIndexCache = null;
 let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
-let __adminNotificationEmailCache = null;
-let __archiveCopyEmailCache = null;
+// Config's Admin Notification Emails table, read once per execution — see
+// getAdminNotificationRows(). An array, so an EMPTY table ([], meaning "copy
+// nobody") caches as the answer it is rather than being re-read from the sheet
+// by every category lookup in the run.
+let __adminNotificationRowsCache = null;
 let __membershipFormIdCache = null;
 // The door's membership application, read once per execution — see
 // membershipFormShape(). Wrapped ({ shape }) so a form that could NOT be
@@ -219,8 +222,7 @@ function invalidateMealInfoIndex() {
 function invalidateConfigCaches() {
   __mealBufferIndexCache = null;
   __orderAheadDaysCache = null;
-  __adminNotificationEmailCache = null;
-  __archiveCopyEmailCache = null;
+  __adminNotificationRowsCache = null;
   __membershipFormIdCache = null;
   __membershipFormShapeCache = null;
   __cateringPolicyIndexCache = null;

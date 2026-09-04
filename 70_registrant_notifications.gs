@@ -371,16 +371,18 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
         return;
       }
 
-      // The quota, the archive BCC, the send itself, the refused-address rule
-      // and "record it only once it is away" are section 9f's. What is decided
-      // here is who is due a message, what it says, and how much of a scarce
-      // quota this pass may spend (`reserve`).
+      // The quota, the send itself, the refused-address rule and "record it
+      // only once it is away" are section 9f's. What is decided here is who is
+      // due a message, who in the office is copied (Config's
+      // Registrant_Reminders tick, and nobody by default), what it says, and
+      // how much of a scarce quota this pass may spend (`reserve`).
       const outcome = sendRationedEmail({
         to: email,
         subject: buildRegistrantReminderSubject(item.session, offset),
         body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
           item.daysAway),
         reserve: REMINDER_QUOTA_RESERVE,
+        bcc: adminEmailsForCategory('registrantReminders'),
         alreadySent,
         recordSent: () => {
           sentFor[stamp] = true;

@@ -2003,7 +2003,8 @@ Eight small settings blocks:
   to appear on dates with no registrations yet is gone with it.
 - **⏰ Order Ahead Time** — how many days' notice you need. Registrations
   inside that window get flagged.
-- **📧 Admin Notifications** — one email address (optional)
+- **📧 Admin Notification Emails** — up to five people in the office, each
+  ticked for what they're copied on — see below
 - **🍽️ Lunch Service by Location** — see below
 - **🔗 Registration Link in Events** — see below
 - **⚙️ Automation & Trigger Ownership** — see below
@@ -2027,10 +2028,39 @@ them in Config any time; you don't need to touch the code.
 > that date shows up regardless — and if there's no menu behind it, it goes in
 > the admin email as "lunch needed with no menu set."
 
-If you set the email, you get **at most one message per sync**, and only when
-something needs a person: waitlisted registrants, forms that couldn't be opened,
-and events sent to triage. A quiet sync sends nothing. **Leave it blank to turn
-notifications off.**
+#### 📧 Admin Notification Emails
+
+One row per person, up to five, and a tick box for each thing they're copied
+on. Type the address, tick what they should get, and that's the whole setup —
+**an empty table means this system copies nobody**, and clearing a row is how
+someone stops hearing from it.
+
+| Tick | What that person gets |
+|---|---|
+| **Sync_Digest** | **At most one message per sync**, and only when something needs a person: waitlisted registrants, forms that couldn't be opened, events sent to triage, a door sign-in that didn't complete. A quiet sync sends nothing. |
+| **Leader_Roster_Alerts** | A blind copy of every roster-change email a program leader gets |
+| **Registrant_Reminders** | A blind copy of the reminder emails registrants get before a session |
+| **Calendar_Invite_Guest** | Added as a **guest** on any calendar event registrants are invited to, so it lands in their own calendar. Google emails them the invitation itself. Only events with at least one registrant are ever touched, and once they're on an event they stay on it. |
+
+The copies are **blind** (BCC) on the two email rows: the leader or the member
+sees only their own message, so nobody starts a reply-all thread with the
+office on it.
+
+> **Every address here also becomes an editor** of the program leader sheets
+> and forms this system shares out of the workbook — ticked or not. That's file
+> access, not mail, which is why it doesn't have a tick box of its own.
+
+> **Mind the daily mail quota.** Google allows this account 100 messages a day
+> (1,500 on Workspace), and *each* blind copy counts as its own message. Three
+> people ticked for registrant reminders makes every reminder cost four
+> messages instead of one. Tick the two BCC columns for the people who actually
+> need the paper trail.
+
+**This replaced the old single Admin Notification Email and Archive Copy
+Address cells, and your existing addresses are carried across automatically** —
+the admin address arrives ticked for the sync digest, the archive address for
+the other three, and the old cells are cleared. Nothing needs re-typing, and
+nothing that was going out stops going out.
 
 #### 🔗 Registration Link in Events
 

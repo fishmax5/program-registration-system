@@ -504,14 +504,17 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       return;
     }
 
-    // The quota, the archive BCC, the send itself and the refused-address rule
-    // are section 9f's — this pass decides only WHO is written to, what the
-    // message says, and how much of a scarce quota it may spend (`reserve`).
+    // The quota, the send itself and the refused-address rule are section
+    // 9f's — this pass decides only WHO is written to, who in the office is
+    // copied (Config's Leader_Roster_Alerts tick, and nobody by default), what
+    // the message says, and how much of a scarce quota it may spend
+    // (`reserve`).
     const outcome = sendRationedEmail({
       to: leader.email,
       subject: buildLeaderAlertSubject(programs),
       body: buildLeaderAlertBody(leader, programs),
-      reserve: LEADER_ALERT_QUOTA_RESERVE
+      reserve: LEADER_ALERT_QUOTA_RESERVE,
+      bcc: adminEmailsForCategory('leaderRosterAlerts')
     });
 
     if (outcome.status === 'sent') {

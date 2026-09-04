@@ -39,9 +39,11 @@
  *      Upcoming/Past sub-tables like every other date-bearing tab.
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
- *      an optional Admin Notification Email + an Archive Copy Address (the
- *      one address copied on everything sent outside the organization) +
- *      Lunch Service by Location +
+ *      an Admin Notification Emails table (up to five people in the office,
+ *      each ticked for what they are copied on: the sync digest, leader
+ *      roster alerts, registrant reminders, calendar invitations — it
+ *      replaced the single Admin Notification Email and Archive Copy
+ *      Address cells) + Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
  *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).

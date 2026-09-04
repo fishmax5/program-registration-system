@@ -21,7 +21,19 @@ function buildConfigSheet(ss) {
   return sheet;
 }
 
+/** The rightmost column any Config section occupies. */
+function configLastColumn() {
+  return Math.max(...Object.values(CONFIG_LAYOUT).map(s => s.startCol + s.headers.length - 1));
+}
+
 function writeConfigStructure(sheet) {
+  // BEFORE anything is written: a section past the grid's edge is not a
+  // cosmetic problem, it is a throw. Every Config tab built before the Admin
+  // Notification Emails table ends at column 25, a new sheet has 26, and the
+  // table wants 27-31 — so the room is asked for first, on every rebuild,
+  // rather than the whole tab failing to draw on the one that needs it.
+  ensureSheetColumns(sheet, configLastColumn());
+
   Object.values(CONFIG_LAYOUT).forEach(section => {
     const span = section.headers.length;
     // Config's banners DO stay merged: unlike every other tab's, these sit
@@ -53,8 +65,7 @@ function writeConfigStructure(sheet) {
 
 function styleConfigSheet(sheet) {
   applyZebraStripingBanding(sheet, CONFIG_DATA_START_ROW);
-  const lastSectionEndCol = Math.max(...Object.values(CONFIG_LAYOUT).map(s => s.startCol + s.headers.length - 1));
-  autosizeColumns(sheet, { force: true, minCols: lastSectionEndCol });
+  autosizeColumns(sheet, { force: true, minCols: configLastColumn() });
 
   const bufferSection = CONFIG_LAYOUT.MEAL_BUFFERS;
   const validationRows = MEAL_BUFFER_LOCATIONS.length * CATERED_LUNCH_TYPES.length; // exactly the fixed Location x Hot/Cold combos
@@ -79,10 +90,19 @@ function styleConfigSheet(sheet) {
   const automationSection = CONFIG_LAYOUT.AUTOMATION;
   applyValueListValidationBounded(sheet, automationSection.startCol, AUTOMATION_ENABLED_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
+  // Who is copied on what: a tick box per category, bounded to the rows the
+  // table actually has, so the columns below it stay clean.
+  const adminSection = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
+  ADMIN_NOTIFICATION_CATEGORIES.forEach(category =>
+    applyCheckboxValidationBounded(sheet, adminSection.startCol + category.offset,
+      CONFIG_DATA_START_ROW, ADMIN_NOTIFICATION_MAX_ROWS));
+
   seedMealBufferRows(sheet);
   seedOrderAheadRow(sheet);
-  seedAdminNotificationRow(sheet);
-  seedArchiveCopyRow(sheet);
+  seedAdminNotificationEmailsTable(sheet);
+  // After the seed, so the notes above are on the cells the carried-across
+  // addresses land in, and before anything reads them back.
+  migrateLegacyAdminNotificationColumns(sheet);
   seedCateringPolicyRows(sheet);
   seedLinkDisplayRow(sheet);
   seedAutomationRow(sheet);
@@ -173,40 +193,129 @@ function seedCateringPolicyRows(sheet) {
 }
 
 /**
- * Leaves the admin email BLANK on purpose — an empty cell means "don't
- * send anything," and guessing an address (the current user's, say) would
- * start mailing someone who never asked for it. Just annotates the cell so
- * it's obvious what goes there.
+ * Annotates the Admin Notification Emails table and leaves every row BLANK on
+ * purpose — an address nobody typed is an address nobody asked to hear from,
+ * and guessing one (the current user's, say) would start mailing someone who
+ * never asked for it. The notes are rewritten on every rebuild: they are the
+ * whole explanation of what the four ticks do, and a rebuild is exactly when
+ * somebody is most likely to be reading them.
  */
-function seedAdminNotificationRow(sheet) {
+function seedAdminNotificationEmailsTable(sheet) {
   const section = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
-  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
-  if (String(cell.getValue() || '').trim() === '') {
-    cell.setNote('Optional. One address to receive a per-sync digest of items needing attention '
-      + '(waitlisted registrants, forms that failed to open, triaged deleted events). Leave blank to disable.');
-  }
+  sheet.getRange(CONFIG_DATA_START_ROW, section.startCol, ADMIN_NOTIFICATION_MAX_ROWS, 1).setNote(
+    `Up to ${ADMIN_NOTIFICATION_MAX_ROWS} people in the office, one per row, each ticked for what they are `
+    + 'copied on. Leave a row blank to skip it; an empty table means this system copies nobody.\n\n'
+    + 'Every address here is also made an editor of the program leader sheets and forms this system '
+    + 'shares out of the workbook, ticked or not — that is file access, not mail.');
+
+  const noteByHeader = {
+    Sync_Digest: 'The per-sync digest of things needing attention: waitlisted registrants, forms that '
+      + 'failed to open, triaged deleted events, a door sign-in that did not complete. Internal — '
+      + 'nobody outside the office is on it.',
+    Leader_Roster_Alerts: 'BCC on the roster-change email a program leader gets when somebody joins, '
+      + 'drops or changes on their program.',
+    Registrant_Reminders: 'BCC on the reminder emails registrants get before a session they signed up for.',
+    Calendar_Invite_Guest: 'Added as a GUEST on any calendar event registrants are invited to, so it '
+      + 'lands in this person\'s own calendar. Google emails them the invitation itself, and once they '
+      + 'are on an event they stay on it. Only events that have at least one registrant are ever touched.'
+  };
+  ADMIN_NOTIFICATION_CATEGORIES.forEach(category => {
+    sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + category.offset, ADMIN_NOTIFICATION_MAX_ROWS, 1)
+      .setNote(noteByHeader[category.header]);
+  });
 }
 
 /**
- * Seeds the archive copy address — the one seeded default in this section,
- * because "copy the office on what we send out" is the answer the office
- * asked for and an empty cell would quietly copy nobody. Only ever written
- * into an EMPTY cell: a workbook whose staff cleared it, or pointed it
- * somewhere else, is left exactly as they left it.
+ * What the two retired cells stand for in the table that replaced them, as
+ * table rows: [Email, Sync_Digest, Leader_Roster_Alerts, Registrant_Reminders,
+ * Calendar_Invite_Guest].
+ *
+ * The categories each old cell is ticked for are exactly what it used to do,
+ * so nothing that was going out stops going out and nothing new starts:
+ *   Admin_Notification_Email -> Sync_Digest
+ *   Archive_Copy_Email       -> Leader alerts + Registrant reminders +
+ *                               Calendar invite guest
+ * ONE ADDRESS IN BOTH CELLS IS ONE ROW with all four ticked, never two rows —
+ * a duplicate would BCC the same person twice off the same daily quota.
+ *
+ * Shared by the migration that WRITES these rows and by the reader that falls
+ * back to them on a workbook nobody has rebuilt yet, so the two cannot come to
+ * different conclusions about who used to be copied on what.
  */
-function seedArchiveCopyRow(sheet) {
-  const section = CONFIG_LAYOUT.ARCHIVE_COPY;
-  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
-  if (String(cell.getValue() || '').trim() === '') {
-    cell.setValue(DEFAULT_ARCHIVE_COPY_EMAIL);
-    log(`Seeded default Archive Copy Address ("${DEFAULT_ARCHIVE_COPY_EMAIL}") on "${SHEET_NAMES.CONFIG}".`);
+function legacyAdminNotificationRowValues(adminEmail, archiveEmail) {
+  const admin = String(adminEmail || '').trim();
+  const archive = String(archiveEmail || '').trim();
+  const sameAddress = !!admin && !!archive && admin.toLowerCase() === archive.toLowerCase();
+
+  const rows = [];
+  if (admin) rows.push([admin, true, sameAddress, sameAddress, sameAddress]);
+  if (archive && !sameAddress) rows.push([archive, false, true, true, true]);
+  return rows;
+}
+
+/** The two retired cells as they stand right now, or ['', ''] if the columns have been cleared. */
+function readLegacyAdminNotificationCells(sheet) {
+  const stillThere = [RETIRED_ADMIN_NOTIFICATION_COL, RETIRED_ARCHIVE_COPY_COL].filter(old =>
+    String(sheet.getRange(1, old.col).getValue() || '').trim() === old.title);
+  if (stillThere.length === 0) return { stillThere, adminEmail: '', archiveEmail: '' };
+  return {
+    stillThere,
+    adminEmail: String(sheet.getRange(CONFIG_DATA_START_ROW, RETIRED_ADMIN_NOTIFICATION_COL.col).getValue() || '').trim(),
+    archiveEmail: String(sheet.getRange(CONFIG_DATA_START_ROW, RETIRED_ARCHIVE_COPY_COL.col).getValue() || '').trim()
+  };
+}
+
+/**
+ * Carries the two retired single-address cells — Admin_Notification_Email and
+ * Archive_Copy_Email — into the table that replaced them, then clears them.
+ *
+ * WHY IT IS SAFE TO RUN EVERY TIME. It does nothing at all unless the banner
+ * above one of those columns still reads what it read when this system wrote
+ * it, so a workbook already migrated (or one where somebody has since put
+ * something of their own in column 8 or 23) is left alone. And it never writes
+ * over a table somebody has already filled in: the carried-across rows land
+ * only while every Email cell is still empty.
+ *
+ * IT IS NOT THE ONLY THING THAT CARRIES THEM, and deliberately so. This runs
+ * from buildConfigSheet(), which is an admin menu item somebody has to choose;
+ * a workbook can run for months of hourly syncs without one. So the READER
+ * falls back to the same two cells until this has run (see
+ * getAdminNotificationRows()), and the day somebody does rebuild the tab, the
+ * fallback stops being reached because the values are now in the table.
+ */
+function migrateLegacyAdminNotificationColumns(sheet) {
+  const { stillThere, adminEmail, archiveEmail } = readLegacyAdminNotificationCells(sheet);
+  if (stillThere.length === 0) return;
+
+  const section = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
+  const tableIsEmpty = sheet
+    .getRange(CONFIG_DATA_START_ROW, section.startCol, ADMIN_NOTIFICATION_MAX_ROWS, 1)
+    .getValues().every(([cell]) => String(cell || '').trim() === '');
+
+  if (tableIsEmpty) {
+    const rows = legacyAdminNotificationRowValues(adminEmail, archiveEmail);
+    if (rows.length > 0) {
+      sheet.getRange(CONFIG_DATA_START_ROW, section.startCol, rows.length, section.headers.length)
+        .setValues(rows);
+      log(`Carried ${rows.length} retired Config address(es) into "${section.title}" on "${SHEET_NAMES.CONFIG}".`);
+    }
+  } else if (adminEmail || archiveEmail) {
+    log(`ℹ️ "${section.title}" is already filled in — the retired Admin Notification / Archive Copy `
+      + 'cells were cleared without being carried across.');
   }
-  cell.setNote('One address copied on everything this system sends outside the organization:\n'
-    + '  • BCC on every program leader roster-change email.\n'
-    + '  • Added as a guest on any calendar event registrants are invited to.\n'
-    + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
-    + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
-    + 'which receives the internal per-sync digest and nothing else.');
+
+  // Cleared rather than left sitting there: a stale address under a stale
+  // banner reads as a live setting, and once the values are in the table
+  // nothing reads these cells again. The format goes with the content —
+  // otherwise the banner's colour is left behind as a block of paint over an
+  // empty column.
+  stillThere.forEach(old => {
+    const height = Math.max(sheet.getLastRow(), CONFIG_DATA_START_ROW);
+    const range = sheet.getRange(1, old.col, height, 1);
+    try { range.breakApart(); } catch (err) { /* the banner may not be merged */ }
+    range.clearContent().clearNote().clearDataValidations().clearFormat();
+  });
+  log(`Retired the "${stillThere.map(o => o.title).join('" and "')}" Config column(s).`);
 }
 
 /**
@@ -734,48 +843,103 @@ function getOrderAheadDays() {
 }
 
 /**
- * The address in Config's "📧 Admin Notifications" section, or '' when
- * blank — in which case notifyAdmin() silently does nothing, so leaving it
- * empty is a perfectly valid way to turn notifications off.
+ * One row of the table — [Email, then a cell per category] — onto `rows`, if
+ * it names an address. The one place a table row becomes a row object, so the
+ * live table and the retired cells behind it are read to the same shape.
  */
-function getAdminNotificationEmail() {
-  if (__adminNotificationEmailCache !== null) return __adminNotificationEmailCache;
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
-  let email = '';
-  if (sheet) {
-    const section = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
-    email = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
-  }
-  __adminNotificationEmailCache = email;
-  return email;
+function pushAdminNotificationRow(rows, cells) {
+  const email = String(cells[0] || '').trim();
+  if (email.indexOf('@') <= 0) return;
+  const row = { email };
+  ADMIN_NOTIFICATION_CATEGORIES.forEach(category => {
+    // A checkbox reads back as a boolean; anything else left in the cell
+    // (a stray "yes", a string from a paste) is not a tick.
+    row[category.key] = cells[category.offset] === true;
+  });
+  rows.push(row);
 }
 
 /**
- * The address in Config's "🗄️ Archive Copy Address" section, or '' when
- * blank. Every caller treats '' as "copy nobody", so an empty cell is a
- * perfectly valid way to turn the copies off — and a Config tab that cannot
- * be read at all (no spreadsheet in this context, tab mid-rebuild) reads the
- * same way, which is the safe direction: a failure here must never mail an
- * address nobody could confirm.
+ * Config's "📧 Admin Notification Emails" table, read ONCE per execution as
+ * [{ email, syncDigest, leaderRosterAlerts, registrantReminders,
+ * calendarInviteGuest }] — one entry per row that names an address.
+ *
+ * A row whose Email cell is blank, or holds something with no "@" in it, is
+ * skipped rather than repaired: a half-typed address is not somebody to mail,
+ * and a category ticked against nobody is not a category to send.
+ *
+ * A TABLE THAT IS NOT THERE YET FALLS BACK TO THE TWO RETIRED CELLS. Those
+ * columns are only carried across and cleared by buildConfigSheet(), which is
+ * an admin menu item somebody has to choose — and between deploying this and
+ * choosing it, a workbook runs its hourly syncs as usual. Reading the old
+ * cells for as long as they are still there is what keeps the office copied on
+ * what it was already copied on, rather than notifications stopping silently
+ * on an upgrade nobody thought was a change. Read-only: the cells are carried
+ * across for good by the rebuild, never from under a trigger.
+ *
+ * FAILS TO EMPTY, quietly. No spreadsheet in this context, a Config tab
+ * mid-rebuild, a table nobody has filled in — all read as "copy nobody",
+ * which is the safe direction and exactly what a blank cell always meant
+ * here. A failure must never mail an address nobody could confirm.
  */
-function getArchiveCopyEmail() {
-  if (__archiveCopyEmailCache !== null) return __archiveCopyEmailCache;
-  let email = '';
+function getAdminNotificationRows() {
+  if (__adminNotificationRowsCache !== null) return __adminNotificationRowsCache;
+  const rows = [];
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
     if (sheet) {
-      const section = CONFIG_LAYOUT.ARCHIVE_COPY;
-      email = String(sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue() || '').trim();
+      const section = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
+      // The table's columns only exist once buildConfigSheet() has widened the
+      // tab for them (see ensureSheetColumns) — reading past the grid's edge
+      // throws, and a workbook that has not been rebuilt yet is precisely the
+      // one the fallback below is for.
+      if (sheet.getMaxColumns() >= section.startCol + section.headers.length - 1) {
+        sheet
+          .getRange(CONFIG_DATA_START_ROW, section.startCol, ADMIN_NOTIFICATION_MAX_ROWS, section.headers.length)
+          .getValues()
+          .forEach(cells => pushAdminNotificationRow(rows, cells));
+      }
+
+      if (rows.length === 0) {
+        const legacy = readLegacyAdminNotificationCells(sheet);
+        legacyAdminNotificationRowValues(legacy.adminEmail, legacy.archiveEmail)
+          .forEach(cells => pushAdminNotificationRow(rows, cells));
+        if (rows.length > 0) {
+          log(`ℹ️ Reading the retired Admin Notification / Archive Copy cells — "${section.title}" `
+            + 'is empty. Run Admin ▸ Rebuild Layout to carry them onto the table for good.');
+        }
+      }
     }
   } catch (err) {
-    log(`\u26a0\ufe0f Could not read the Archive Copy Address from Config (${err}) — nothing was copied.`);
-    email = '';
+    log(`⚠️ Could not read the Admin Notification Emails table from Config (${err}) — nobody was copied.`);
   }
-  if (email.indexOf('@') <= 0) email = '';
-  __archiveCopyEmailCache = email;
-  return email;
+  __adminNotificationRowsCache = rows;
+  return rows;
+}
+
+/**
+ * The addresses ticked for one category — 'syncDigest', 'leaderRosterAlerts',
+ * 'registrantReminders' or 'calendarInviteGuest' (see
+ * ADMIN_NOTIFICATION_CATEGORIES). Lowercased and deduped: every caller either
+ * mails them or compares them against a guest list, and both want one entry
+ * per person. An empty array means copy nobody, which is what an untouched
+ * table, an unreadable one, and a category nobody ticked all come back as.
+ */
+function adminEmailsForCategory(categoryKey) {
+  return dedupePreservingOrder(getAdminNotificationRows()
+    .filter(row => row[categoryKey])
+    .map(row => row.email.toLowerCase()));
+}
+
+/**
+ * Every address in the table, ticked or not. For the one thing that is not
+ * mail: editor access on the leader sheets and forms this system shares out of
+ * the workbook — see ADMIN_NOTIFICATION_CATEGORIES for why that is not a
+ * category of its own.
+ */
+function getAllAdminNotificationEmails() {
+  return dedupePreservingOrder(getAdminNotificationRows().map(row => row.email.toLowerCase()));
 }
 
 /**
@@ -784,8 +948,8 @@ function getArchiveCopyEmail() {
  *
  * '' is a complete answer everywhere it is used: the door simply does not
  * offer the application. Reading fails the same way for the same reason
- * getArchiveCopyEmail() does — a Config tab mid-rebuild must not be able to
- * point the door at a form nobody chose.
+ * getAdminNotificationRows() does — a Config tab mid-rebuild must not be able
+ * to point the door at a form nobody chose.
  */
 function getMembershipFormId() {
   if (__membershipFormIdCache !== null) return __membershipFormIdCache;
@@ -959,25 +1123,33 @@ function claimTriggerOwnership(email) {
 }
 
 /**
- * Sends one admin email, if an address is configured. Never throws — a
- * failed notification must not take down the sync that triggered it.
+ * Sends one admin email to everyone ticked for Sync_Digest on Config's Admin
+ * Notification Emails table, if anybody is. Never throws — a failed
+ * notification must not take down the sync that triggered it.
+ *
+ * ONE MESSAGE, however many people are on it: the recipients go out as a
+ * single comma-separated list, so a table with four names spends one message
+ * rather than four. They see each other, which is right for an internal
+ * digest — this is office mail about the workbook, not a member's own
+ * registration (contrast the BCC in sendRationedEmail()).
  *
  * DELIBERATELY NOT RATIONED. Every other send in this workbook goes through
  * sendRationedEmail() (section 9f) and stops short of a floor; this one is the
- * floor's reason for existing. It is one message to one address saying
- * something went wrong — quite possibly that mail is over quota — and holding
- * back the message that reports the shortage is exactly backwards. It is small
- * and it is rare; the rationed callers leave room for it.
+ * floor's reason for existing. It is one message saying something went wrong —
+ * quite possibly that mail is over quota — and holding back the message that
+ * reports the shortage is exactly backwards. It is small and it is rare; the
+ * rationed callers leave room for it.
  */
 function notifyAdmin(subject, body) {
-  const email = getAdminNotificationEmail();
-  if (!email) return false;
+  const emails = adminEmailsForCategory('syncDigest');
+  if (emails.length === 0) return false;
+  const to = emails.join(',');
   try {
-    MailApp.sendEmail(email, subject, body);
-    log(`Sent admin notification to ${email}: ${subject}`);
+    MailApp.sendEmail(to, subject, body);
+    log(`Sent admin notification to ${emails.join(', ')}: ${subject}`);
     return true;
   } catch (err) {
-    log(`⚠️ Could not send admin notification to "${email}" (${err}).`);
+    log(`⚠️ Could not send admin notification to "${emails.join(', ')}" (${err}).`);
     return false;
   }
 }

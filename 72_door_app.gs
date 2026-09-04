@@ -114,8 +114,9 @@ function doorDay(payload) {
  * and anything that comes back other than success or a wrong PIN (the app's
  * own PIN screen still catches that, because a stale PIN fails every sign-in
  * after it, not just this one) is emailed to staff through notifyAdmin() —
- * the same Config-configured address every other admin notification in this
- * workbook already uses — so the visit can be entered by hand.
+ * to everyone ticked for the sync digest on Config's Admin Notification
+ * Emails table, the same people every other admin notification in this
+ * workbook already reaches — so the visit can be entered by hand.
  */
 function doorSignIn(payload) {
   let res;

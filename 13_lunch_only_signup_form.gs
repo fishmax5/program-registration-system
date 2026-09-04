@@ -931,6 +931,28 @@ function applyZebraStripingBanding(sheet, startRow) {
 }
 
 /**
+ * Widens the grid when a layout needs a column the sheet does not have.
+ *
+ * A tab's column count is not decorative: getRange(1, 27, 1, 5) on a sheet
+ * with 26 columns THROWS rather than growing it, and a default Google Sheet
+ * has exactly 26. So a layout that grows past whatever the tab was created
+ * with — Config's did, when the Admin Notification Emails table landed past
+ * the columns every earlier version ended at — has to ask for the room before
+ * it writes into it.
+ *
+ * Never narrows: a tab somebody has widened by hand keeps its columns, and
+ * this is a no-op on every tab that already has the room, which is all of them
+ * after the first run.
+ */
+function ensureSheetColumns(sheet, neededCols) {
+  const have = sheet.getMaxColumns();
+  if (!neededCols || neededCols <= have) return have;
+  sheet.insertColumnsAfter(have, neededCols - have);
+  log(`Widened "${sheet.getName()}" from ${have} to ${neededCols} columns to fit its layout.`);
+  return neededCols;
+}
+
+/**
  * Resizes columns to fit their content via a single whole-sheet call.
  * options.minCols guarantees columns are considered even if
  * sheet.getLastColumn() hasn't caught up yet this execution. options.force
