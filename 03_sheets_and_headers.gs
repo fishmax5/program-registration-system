@@ -478,12 +478,22 @@ defineLazyGlobal_('HEADERS', () => ({
    * morning — see 66's DAY-BEFORE ROSTER DIGESTS section. A leader with
    * several classes can pick differently per row.
    *
+   * Title_Match is how a program finds its leader instead of the other way
+   * round: comma-separated phrases ("yoga, chair yoga") meaning "a program
+   * whose title contains this is mine". A new calendar event nobody has typed
+   * a row for is PROPOSED to the matching leader — a real, concrete
+   * title|location row written onto this tab with the notification tick clear
+   * and a note saying which phrase found it. It is a suggestion, never an
+   * authority: a phrase shares nothing and sends nothing, because
+   * buildProgramLeaderIndex() still reads concrete rows only, and a phrase
+   * never overrides a row somebody typed. See 65's TITLE MATCHING section.
+   *
    * Staff own everything except Sheet_Link and Last_Notified, which are the
    * tab reporting back: whether that program's shared sheet exists yet, and
    * when this leader was last actually told something (either channel).
    */
   Program_Leaders: [
-    'Leader_Name', 'Email', 'Program', 'Location',
+    'Leader_Name', 'Email', 'Program', 'Location', 'Title_Match',
     'Notify_Roster_Changes', 'Notify_Timing', 'Sheet_Link', 'Last_Notified', 'Staff_Notes'
   ],
   /**
@@ -591,7 +601,7 @@ const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', '
  * thing that ever writes them.
  */
 const PROGRAM_LEADERS_STAFF_COLUMNS = ['Leader_Name', 'Email', 'Program', 'Location',
-  'Notify_Roster_Changes', 'Notify_Timing', 'Staff_Notes'];
+  'Title_Match', 'Notify_Roster_Changes', 'Notify_Timing', 'Staff_Notes'];
 
 /**
  * Club_Members columns the roster refresh must never overwrite — the staff's

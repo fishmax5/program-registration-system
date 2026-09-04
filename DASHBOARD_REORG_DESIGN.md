@@ -1,6 +1,7 @@
 # Dashboard reorganization — design draft
 
-**Status: proposal. Nothing here is implemented.**
+**Status: proposal. Phase 3 (§5 — `Title_Match` and the matcher, option B) is
+implemented; nothing else here is.**
 
 Two questions prompted this, and they turn out to be the same question:
 
@@ -336,7 +337,7 @@ next in a way that traps a half-finished state.
 |---|---|---|
 | **1** | `Program_Month` tab, derived, read-only. New file `77_program_month_dashboard.gs`. | Purely additive. No rename, no schema change to existing tabs, no form change. Delete the tab and nothing else notices. |
 | **2** | Metrics block moves up to the month tab; lunch rows collapse to one row per location per month; `Sessions` drill-through links. | The session tab gets shorter and plainer. |
-| **3** | `Title_Match` on `Program_Leaders` + the matcher, option **B**. | Adds one column to `HEADERS.Program_Leaders`. `writeMemoryTab` handles a widened schema, but check the spare-validation band. |
+| **3** ✅ shipped | `Title_Match` on `Program_Leaders` + the matcher, option **B**. | Adds one column to `HEADERS.Program_Leaders`. `writeMemoryTab` handles a widened schema, but check the spare-validation band. |
 | **4** | `Leader` + `Leader_Source` on the month tab, dropdown, write-back through `18_edit_handlers.gs`. | The only phase that writes. Needs a confirmation prompt on the edit, like the program-flag edits have. |
 | **5** | The rename: `Master_Program_Dashboard` → `Program_Sessions`, via `LEGACY_SHEET_RENAMES`. | Last, deliberately — it is the change with the widest documentation blast radius and the least behavior in it. |
 
