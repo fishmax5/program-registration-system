@@ -469,6 +469,23 @@ function describeDateSpan(start, end) {
 }
 
 /**
+ * The month a month-over-month row is ABOUT, named as a month and nothing
+ * else. The row's own label already says which span it is ("This month",
+ * "Last month"), so spelling the partial span out as dates ("Sep 1–4") only
+ * asked the reader to work back from the days to the month they were after.
+ *
+ * The year is carried only when it is not the current one — which is exactly
+ * the case that needs it: every January, "Last month" is December of the year
+ * before, and a bare "December" there reads as the wrong December.
+ */
+function describeMonthOfSpan(start, now) {
+  const name = Utilities.formatDate(start, TIMEZONE, 'MMMM');
+  return start.getFullYear() === now.getFullYear()
+    ? name
+    : `${name} ${start.getFullYear()}`;
+}
+
+/**
  * Everything both blocks need about one span of dates, gathered in a single
  * pass so no two numbers on this dashboard can be drawn from different
  * populations.
@@ -603,7 +620,7 @@ function computeMonthOverMonth(sessionRows, map, registrantScan, now, todayKey) 
     });
 
     return {
-      label: describeDateSpan(span.start, span.end),
+      label: describeMonthOfSpan(span.start, now),
       sessions: summary.sessions,
       registrations: summary.registrations,
       participants: summary.people.size,

@@ -22,6 +22,7 @@ const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const sandbox = {
   console: { log: () => {} },
@@ -30,6 +31,7 @@ const sandbox = {
       const p = n => String(n).padStart(2, '0');
       if (pattern === 'yyyy-MM-dd') return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
       if (pattern === 'yyyy-MM') return `${date.getFullYear()}-${p(date.getMonth() + 1)}`;
+      if (pattern === 'MMMM') return FULL_MONTHS[date.getMonth()];
       if (pattern === 'MMM d') return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
       if (pattern === 'd') return String(date.getDate());
       return date.toISOString();
@@ -216,8 +218,8 @@ const monthMetrics = sandbox.computeProgramMetrics(MONTH_SESSIONS, sessionMap, m
 const thisMonth = monthMetrics.months.current;
 const lastMonth = monthMetrics.months.previous;
 
-check('this month names the span it covers', thisMonth.label, 'Sep 1–16');
-check('last month is the SAME span, not the whole month', lastMonth.label, 'Aug 1–16');
+check('this month is named by its month alone', thisMonth.label, 'September');
+check('last month likewise, though it still counts the SAME span', lastMonth.label, 'August');
 
 check('this month counts the drop-in as a session it ran', thisMonth.sessions, 3);
 check('and stops at today rather than running to month end', thisMonth.registrations, 4);
@@ -303,7 +305,7 @@ const YEAR_END_REGISTRANTS = [
 ];
 const yearEnd = sandbox.computeProgramMetrics(YEAR_END_SESSIONS, sessionMap,
   sandbox.scanRegistrants(null, YEAR_END_REGISTRANTS), JAN);
-check('January looks back into last year', yearEnd.months.previous.label, 'Dec 1–10');
+check('January looks back into last year, and says which one', yearEnd.months.previous.label, 'December 2026');
 check('and finds December\u2019s session there', yearEnd.months.previous.sessions, 1);
 check('January\u2019s own session is this month\u2019s', yearEnd.months.current.sessions, 1);
 // Marion was in December, so she is returning in January — across the year
@@ -393,7 +395,7 @@ check('the two windows are written in order',
   [rowAt(10)[0], rowAt(11)[0]], ['Next 7 days (thru Sep 22)', 'Next 30 days (thru Oct 15)']);
 check('this month, last month, then the change',
   [rowAt(13)[0], rowAt(14)[0], rowAt(15)[0]],
-  ['This month (Sep 1–16)', 'Last month (Aug 1–16)', 'Change']);
+  ['This month (September)', 'Last month (August)', 'Change']);
 // A percentage reaches the cell as a FRACTION under an 0% format, never as the
 // string "67%" — a cell that merely looks like a percentage is at the mercy of
 // whatever format the tab happens to be carrying.
