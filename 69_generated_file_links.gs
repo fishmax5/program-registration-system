@@ -121,17 +121,27 @@ const SIGN_IN_SHEET_FILENAME_RE = /^Sign-In (\d{4}-\d{2}-\d{2}) (.+?)(?:\.pdf)?$
 /**
  * ADMIN MENU: teaches the registry about every PDF already sitting in the
  * folder, so a workbook that has been printing sheets for a year does not have
- * to wait for the next reprint to show a link.
+ * to wait for the next reprint to show a link. Also opens each one up to
+ * anyone with the link (see openUpFileToAnyoneWithLink()) — sign-in PDFs made
+ * before that existed were left shared with their printer alone, same as a
+ * form or leader sheet made before the equivalent fix for those.
  *
  * One scan, by hand, rather than anything automatic: it is a full folder
  * listing, it only ever has work to do once, and getting it wrong is a link
  * column that stays empty rather than anything lost. Names are parsed back
- * with SIGN_IN_SHEET_FILENAME_RE — a file somebody renamed is skipped, since
- * the date and location cannot be recovered from a name that no longer carries
- * them. The newest file wins a tie, on the same reasoning as a reprint.
+ * with SIGN_IN_SHEET_FILENAME_RE — a file somebody renamed is skipped for the
+ * registry, since the date and location cannot be recovered from a name that
+ * no longer carries them, but it is still opened up like every other file in
+ * the folder. The newest file wins a tie, on the same reasoning as a reprint.
  */
 function backfillSignInSheetRegistry() {
-  if (!requireAuthorizedAdmin('Rebuild Sign-In Sheet Links')) return { matched: 0, skipped: 0 };
+  if (!requireAuthorizedAdmin('Rebuild Sign-In Sheet Links')) return { matched: 0, skipped: 0, opened: 0 };
+  if (!confirmConsequentialAction('Rebuild sign-in sheet links?',
+    'Every PDF already sitting in the sign-in sheet folder is set to "anyone with the link can edit" ' +
+    '(the same fix already applied to registration forms and program leader sheets), so a printed sheet ' +
+    'opens for whoever clicks its dashboard link, not only whoever printed it.', true)) {
+    return { matched: 0, skipped: 0, opened: 0 };
+  }
   const locationByKey = {};
   Object.values(CALENDAR_MAP).forEach(loc => { locationByKey[normalizeNameKey(loc)] = loc; });
 
@@ -140,9 +150,11 @@ function backfillSignInSheetRegistry() {
   const registry = getSignInSheetRegistry();
   let matched = 0;
   let skipped = 0;
+  let opened = 0;
 
   while (files.hasNext()) {
     const file = files.next();
+    if (openUpFileToAnyoneWithLink(file.getId(), `sign-in sheet "${file.getName()}"`).openedUp) opened++;
     const parts = SIGN_IN_SHEET_FILENAME_RE.exec(String(file.getName() || '').trim());
     if (!parts) { skipped++; continue; }
     const dateKey = parts[1];
@@ -163,12 +175,12 @@ function backfillSignInSheetRegistry() {
 
   pruneSignInSheetRegistry();
   flushPersistentRegistries();
-  const message = `Sign-in sheet links: ${matched} PDF(s) picked up` +
-    (skipped > 0 ? `, ${skipped} file(s) skipped (name no longer says which date and location)` : '') +
+  const message = `Sign-in sheet links: ${matched} PDF(s) picked up, ${opened} opened to anyone with the link` +
+    (skipped > 0 ? `, ${skipped} file(s) skipped for the registry (name no longer says which date and location)` : '') +
     '. The links appear on the next render.';
   log(message);
   toastIfPossible(message);
-  return { matched, skipped };
+  return { matched, skipped, opened };
 }
 
 

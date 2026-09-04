@@ -598,6 +598,14 @@ function renderSignInSheetPdf(data) {
 
     const folder = getOrCreateSignInSheetFolder();
     const pdf = folder.createFile(DriveApp.getFileById(doc.getId()).getAs('application/pdf')).setName(`${title}.pdf`);
+
+    // Same reason every form and program leader sheet opens itself up the
+    // moment it exists (see openUpFileToAnyoneWithLink()): whoever presses
+    // the print button is not necessarily whoever later clicks the
+    // Sign_In_Sheet_Link on the dashboard (69_generated_file_links.gs), and
+    // Drive hands a new file to its creator alone. Never thrown — a sign-in
+    // sheet that could not be opened up is still a sign-in sheet.
+    openUpFileToAnyoneWithLink(pdf.getId(), `sign-in sheet "${title}"`);
     return pdf;
   } finally {
     // The Doc was only ever scaffolding for the PDF. Trashed rather than
