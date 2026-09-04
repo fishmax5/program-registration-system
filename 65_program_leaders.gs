@@ -59,14 +59,74 @@ const PROGRAM_LEADERS_MIGRATED_PROP_KEY = 'PROGRAM_LEADERS_MIGRATED_FROM_OPTIONS
 const LEGACY_INSTRUCTOR_EMAIL_COLUMN = 'Instructor_Email';
 
 
+// --- Notify_Timing: WHEN a ticked leader actually hears about it -------------
+
+/**
+ * Notify_Roster_Changes stays the on/off switch (see the tab's own header
+ * comment in 03). Notify_Timing is the closed dropdown that decides which of
+ * two channels a leader who has it ticked is on:
+ *
+ *   "At each registration"     the diff pass in 66 — mid-hour, whenever
+ *                               something on the roster actually moves.
+ *   "N days before each date"  the countdown digest beside it — one email per
+ *                               session, N days ahead of it, listing who is
+ *                               on the roster that morning.
+ *
+ * BLANK OR UNRECOGNIZED READS AS "At each registration" — a typo, or a
+ * workbook upgrading from before this column existed, must keep doing exactly
+ * what a ticked Notify_Roster_Changes has always done rather than going
+ * silent. The same reasoning as an unrecognized Notify_Mode in section 9e.
+ */
+const LEADER_NOTIFY_TIMING_EACH_CHANGE = 'At each registration';
+
+/**
+ * How far ahead a countdown digest can be asked to reach. A week is long
+ * enough for a leader to actually plan around and short enough that the
+ * digest pass never has to look further out than that — the day count IS the
+ * window, so there is no separate forward-horizon constant the way the
+ * reminder and diff passes beside it each need one.
+ */
+const LEADER_NOTIFY_TIMING_MAX_DAYS = 7;
+
+/** "3 days before each date" — the label a day count is spelled as, both in the dropdown and read back out of it. */
+function leaderNotifyTimingDaysBeforeLabel(days) {
+  return `${days} day${days === 1 ? '' : 's'} before each date`;
+}
+
+/** The dropdown's full, closed vocabulary — what Notify_Timing is validated against. */
+const LEADER_NOTIFY_TIMING_LIST = [LEADER_NOTIFY_TIMING_EACH_CHANGE].concat(
+  [1, 2, 3, 4, 5, 6, 7].map(leaderNotifyTimingDaysBeforeLabel));
+
+/**
+ * One Notify_Timing cell, resolved into { mode: 'each_change' | 'days_before', days }.
+ *
+ * Matched by a leading "N day(s) before" rather than the exact label string,
+ * so a cell that still reads a slightly older spelling of the same idea (or
+ * one somebody typed by hand instead of picking from the list) still resolves
+ * the way it obviously means, rather than silently falling back to the
+ * default. A day count outside LEADER_NOTIFY_TIMING_MAX_DAYS falls back the
+ * same way a nonsense one would.
+ */
+function parseLeaderNotifyTiming(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  const match = /^(\d+)\s+days?\s+before/i.exec(text);
+  if (match) {
+    const days = Math.floor(Number(match[1]));
+    if (days >= 1 && days <= LEADER_NOTIFY_TIMING_MAX_DAYS) return { mode: 'days_before', days };
+  }
+  return { mode: 'each_change', days: 0 };
+}
+
+
 // --- the tab ----------------------------------------------------------------
 
 function programLeadersTabOptions() {
   return {
     banner: '👩‍🏫 Program Leaders',
     bannerNote: 'Who leads each program, where to write to them, and whether they want an email ' +
-      'when that program\'s roster changes. One row per leader per program — a leader with three ' +
-      'classes has three rows. Sheet_Link and Last_Notified fill in by themselves.',
+      'when that program\'s roster changes. Notify_Timing picks WHEN: at each change, or a countdown ' +
+      'of days before each date. One row per leader per program — a leader with three classes has ' +
+      'three rows. Sheet_Link and Last_Notified fill in by themselves.',
     staffColumns: PROGRAM_LEADERS_STAFF_COLUMNS,
     dateColumns: [],
     numberColumns: []
@@ -152,6 +212,10 @@ function refreshProgramLeadersTab(ss, sessionRows) {
   // MEMORY_TAB_SPARE_ROWS for the bug that reasoning comes from.
   applyMemoryTabValidation(sheet, headers, rows.length, {
     checkboxes: ['Notify_Roster_Changes'],
+    // Notify_Timing is a CLOSED list, unlike Program and Location below: every
+    // legal answer is known, and a typo here would quietly change which
+    // channel a leader hears from rather than just missing a suggestion.
+    lists: { Notify_Timing: LEADER_NOTIFY_TIMING_LIST },
     // SUGGESTING, not restricting: a leader can legitimately be typed in
     // before the calendar has ever produced that program, and a hard list
     // would refuse the row outright and lose it.
@@ -243,6 +307,11 @@ function buildProgramLeaderIndex() {
       name: String(row[map['Leader_Name']] || '').trim(),
       emails: parseLeaderEmailList(row[map['Email']]),
       notify: isTruthyCheckbox(row[map['Notify_Roster_Changes']]),
+      // Which channel, once notify is on — see parseLeaderNotifyTiming().
+      // Read regardless of `notify`: a leader who has not ticked the box yet
+      // still gets this resolved for free the moment they do, off the same
+      // per-execution read, rather than needing a second pass over the tab.
+      timing: parseLeaderNotifyTiming(row[map['Notify_Timing']]),
       // The program as somebody TYPED it, carried alongside the normalized
       // key. The key is lowercased and space-collapsed so it can match, which
       // makes it exactly the wrong thing to put in an email — and an alert for
@@ -288,14 +357,19 @@ function getProgramLeaderEmailsForProgram(title, location) {
 
 /**
  * The leaders who have asked to hear about their roster, grouped by the
- * address the mail would go to.
+ * address the mail would go to — EITHER channel, both switched on by the same
+ * Notify_Roster_Changes tick. Which channel each program uses is carried on
+ * the program entry (`timing`) rather than decided here: this function
+ * answers "who gets told, about what", and 66 is where each of its two
+ * passes filters this down to the programs its OWN channel owns.
  *
  * GROUPED BY ADDRESS rather than by program, because that is the unit an email
  * is sent in. A leader running three classes gets ONE message covering all
- * three, which is both kinder to read and — see LEADER_ALERT_MAX_EMAILS_PER_RUN
- * — the difference between one send and three against a daily quota.
+ * three (per channel), which is both kinder to read and — see
+ * LEADER_ALERT_MAX_EMAILS_PER_RUN — the difference between one send and three
+ * against a daily quota.
  *
- * Returns [{ email, name, programs: [{ key, title, location }, ...] }, ...].
+ * Returns [{ email, name, programs: [{ key, title, location, timing }, ...] }, ...].
  */
 function getProgramLeadersWantingAlerts() {
   const index = buildProgramLeaderIndex();
@@ -313,7 +387,8 @@ function getProgramLeadersWantingAlerts() {
         if (!byEmail[addressKey].name) byEmail[addressKey].name = leader.name;
         if (byEmail[addressKey].programs.every(p => p.key !== programKey)) {
           byEmail[addressKey].programs.push({
-            key: programKey, title: leader.programTitle, location: leader.programLocation
+            key: programKey, title: leader.programTitle, location: leader.programLocation,
+            timing: leader.timing
           });
         }
       });

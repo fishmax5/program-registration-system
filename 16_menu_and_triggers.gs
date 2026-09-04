@@ -166,6 +166,9 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Share a Sign-Up Sheet with a Program Leader\u2026', 'showProgramLeaderSheetDialog')
       .addItem('Refresh Program Leader Sheets Now', 'refreshProgramLeaderSheetsNow')
       .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
+      // The countdown-channel twin of the item above — see Notify_Timing on
+      // Program_Leaders for which leaders are on which.
+      .addItem('Send Roster Digests Now', 'sendProgramLeaderDayDigestsNow')
       .addSeparator()
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
       .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')

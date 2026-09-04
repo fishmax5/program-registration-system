@@ -459,13 +459,23 @@ defineLazyGlobal_('HEADERS', () => ({
    * exactly the same grain, so the two can never disagree about who may read
    * what.
    *
+   * Notify_Roster_Changes is still the on/off switch — blank or unticked
+   * means this leader hears nothing from section 9d, whatever Notify_Timing
+   * says. Notify_Timing is the NEW question, asked only once that switch is
+   * on: "At each registration" (the default, and everything this tab did
+   * before the column existed) rides the diff pass in 66, mid-hour, whenever
+   * something on the roster actually moves. "N days before each date" instead
+   * gets one countdown digest per session, listing who is on it as of that
+   * morning — see 66's DAY-BEFORE ROSTER DIGESTS section. A leader with
+   * several classes can pick differently per row.
+   *
    * Staff own everything except Sheet_Link and Last_Notified, which are the
    * tab reporting back: whether that program's shared sheet exists yet, and
-   * when a roster-change alert last went out for it.
+   * when this leader was last actually told something (either channel).
    */
   Program_Leaders: [
     'Leader_Name', 'Email', 'Program', 'Location',
-    'Notify_Roster_Changes', 'Sheet_Link', 'Last_Notified', 'Staff_Notes'
+    'Notify_Roster_Changes', 'Notify_Timing', 'Sheet_Link', 'Last_Notified', 'Staff_Notes'
   ],
   /**
    * Program_Questions — THE TAB THAT MAKES A FORM ASK SOMETHING EXTRA.
@@ -572,7 +582,7 @@ const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', '
  * thing that ever writes them.
  */
 const PROGRAM_LEADERS_STAFF_COLUMNS = ['Leader_Name', 'Email', 'Program', 'Location',
-  'Notify_Roster_Changes', 'Staff_Notes'];
+  'Notify_Roster_Changes', 'Notify_Timing', 'Staff_Notes'];
 
 /**
  * Club_Members columns the roster refresh must never overwrite — the staff's
