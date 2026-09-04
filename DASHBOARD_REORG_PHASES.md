@@ -85,7 +85,7 @@ open a new chat.
 
 ---
 
-## Phase 3 — the title detector
+## Phase 3 — the title detector ✅ done
 
 The rule this is built around: **a phrase match NEVER shares a roster and NEVER
 sends mail.** It proposes a concrete `title | location` row; sharing and
@@ -114,6 +114,19 @@ paragraph at the top of that file before writing anything.
 - **Write this test first:** a leader row with a phrase and no concrete program
   row contributes nothing to `buildProgramLeaderIndex()`. It is what holds the
   whole design. Then precedence, the tie refusal, and both safeguards.
+
+Shipped: `Title_Match` on `HEADERS.Program_Leaders` and
+`PROGRAM_LEADERS_STAFF_COLUMNS`; `parseLeaderTitleMatchPhrases()` (comma only,
+so a two-word phrase survives) and `proposeProgramLeaderRowsFromTitles()` — a
+pure function, rows in and proposed rows out, so nothing about it can write by
+itself; `applyTitleMatchNotes()` after the tab write, because `writeMemoryTab()`
+clears the sheet. Called from `refreshProgramLeadersTab()` over the structures
+it already holds. `buildProgramLeaderIndex()` is untouched, which is the whole
+design. `renameProgramLeaderRows()` now takes the UNION of the two rows'
+phrases when a rename makes a duplicate — dropping the row that held them
+would have un-attributed everything they were going to catch. Tests in
+`tests/program_leader_title_match.test.js`, boundary test first. All test files
+pass.
 
 **Hand-off:** commit, push, then print the Phase 4 kickoff line and tell me to
 open a new chat.

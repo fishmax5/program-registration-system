@@ -46,6 +46,7 @@ this.getProgramLeaderEmailsForProgram = getProgramLeaderEmailsForProgram;
 this.getProgramLeadersWantingAlerts = getProgramLeadersWantingAlerts;
 this.LEADER_TITLE_MATCH_MAX_PROGRAMS = LEADER_TITLE_MATCH_MAX_PROGRAMS;
 this.PROGRAM_LEADERS_STAFF_COLUMNS = PROGRAM_LEADERS_STAFF_COLUMNS;
+this.renameProgramLeaderRows = renameProgramLeaderRows;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -194,6 +195,58 @@ check('...so it can share no roster',
   sandbox.getProgramLeaderEmailsForProgram('Chair Yoga', 'Narberth'), []);
 check('...and is on no mailing list',
   sandbox.getProgramLeadersWantingAlerts().map(entry => entry.email), ['ken@x.com']);
+
+// --- a rename must not cost a leader their phrases --------------------------
+//
+// renameProgramLeaderRows() drops a duplicate row when a rename lands a leader
+// on a class they already had a row for. If the dropped one is the one holding
+// the phrases, every program they were going to catch goes quietly unattributed.
+
+const renameSheet = (() => {
+  const state = { written: null };
+  const rows = [
+    leaderRow('Jane', 'jane@x.com', 'Chair Yoga', 'Narberth', ''),
+    leaderRow('Jane', 'jane@x.com', 'Seated Yoga', 'Narberth', 'yoga, tai chi')
+  ];
+  const grid = [new Array(headers.length).fill(''), headers].concat(rows);
+  function makeRange(row, col, numRows, numCols) {
+    const range = {
+      getValues: () => grid.slice(row - 1, row - 1 + (numRows || grid.length))
+        .map(r => r.slice(col - 1, col - 1 + (numCols || headers.length))),
+      getFormulas: () => new Array(numRows || 1).fill(0)
+        .map(() => new Array(numCols || headers.length).fill('')),
+      // Row 3 is MEMORY_TAB_DATA_ROW — the data write, as opposed to the
+      // banner and header writes that share this stub.
+      setValues: values => { if (row === 3) state.written = values; return range; }
+    };
+    ['setValue', 'setNote', 'setBackground', 'setBackgrounds', 'setFontSize', 'setFontWeight',
+      'setFontColor', 'setFontStyle', 'setVerticalAlignment', 'setHorizontalAlignment',
+      'setWrapStrategy', 'setNumberFormat', 'setDataValidation', 'clearDataValidations',
+      'breakApart', 'merge', 'setBorder'].forEach(name => { range[name] = () => range; });
+    range.protect = () => ({ setDescription: () => ({ setWarningOnly: () => {} }) });
+    return range;
+  }
+  return {
+    state,
+    getName: () => sandbox.SHEET_NAMES.PROGRAM_LEADERS,
+    getLastRow: () => grid.length,
+    getLastColumn: () => headers.length,
+    getMaxRows: () => 100, getMaxColumns: () => headers.length,
+    getBandings: () => [], getProtections: () => [],
+    clear: () => {}, clearFormats: () => {}, setRowHeight: () => {},
+    setFrozenRows: () => {}, setFrozenColumns: () => {}, insertRowsAfter: () => {},
+    autoResizeColumns: () => {}, setColumnWidth: () => {}, hideColumns: () => {}, showColumns: () => {},
+    getRange: makeRange
+  };
+})();
+
+sandbox.renameProgramLeaderRows(
+  { getSheetByName: () => renameSheet },
+  [{ oldTitle: 'Seated Yoga', newTitle: 'Chair Yoga' }]);
+check('the duplicate a rename creates is dropped',
+  (renameSheet.state.written || []).length, 1);
+check('...and the survivor keeps the phrases the dropped row was holding',
+  (renameSheet.state.written || [[]])[0][map['Title_Match']], 'yoga, tai chi');
 
 console.log(failures === 0 ? '\nAll title-match tests passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

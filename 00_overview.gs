@@ -221,7 +221,14 @@
  *      same hourly registration sync as everything else here — no new
  *      trigger. Replaces Program_Options' old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
- *      a sync runs (migrateProgramLeaderAddresses()).
+ *      a sync runs (migrateProgramLeaderAddresses()). Title_Match is the
+ *      other direction: comma-separated phrases ("yoga") meaning "a program
+ *      whose title contains this is mine", so a NEW program nobody has typed
+ *      a row for gets one proposed for the matching leader instead of
+ *      running all month attributed to nobody. A proposal is a real row with
+ *      the notify tick clear and a note saying which phrase found it — a
+ *      phrase never overrides a typed row, and never shares or sends
+ *      anything by itself.
  *    - REGISTRANT NOTIFICATIONS (Program_Options' Notify_Mode and
  *      Reminder_Days, section 9e): how often each PROGRAM writes to the
  *      people signed up for it. Two channels under one dropdown — the

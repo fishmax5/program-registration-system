@@ -875,13 +875,25 @@ function renameProgramLeaderRows(ss, renames) {
 
   // A leader may now have two identical rows — one already typed under the new
   // name, one just carried onto it. Same person, same class: keep the first.
+  //
+  // The one thing that is NOT interchangeable between them is Title_Match:
+  // the phrases are how future programs find this leader, and dropping the
+  // duplicate that happened to carry them would quietly un-attribute
+  // everything they were going to catch. So the survivor takes the union.
   const kept = [];
   const claimed = {};
   rows.forEach(row => {
     const identity = `${normalizeNameKey(row[map['Leader_Name']])}|` +
       `${leaderProgramKey(row[map['Program']], row[map['Location']])}`;
-    if (claimed[identity]) return;
-    claimed[identity] = true;
+    const already = claimed[identity];
+    if (already) {
+      const phrases = parseLeaderTitleMatchPhrases(already[map['Title_Match']])
+        .concat(parseLeaderTitleMatchPhrases(row[map['Title_Match']]))
+        .filter(uniqueStrings);
+      if (phrases.length > 0) already[map['Title_Match']] = phrases.join(', ');
+      return;
+    }
+    claimed[identity] = row;
     kept.push(row);
   });
 
