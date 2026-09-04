@@ -193,7 +193,7 @@ open a new chat.
 
 ---
 
-## Phase 5 — the rename
+## Phase 5 — the rename ✅ done
 
 `Master_Program_Dashboard` → `Program_Sessions`. Two lines:
 `SHEET_NAMES.PROGRAM_DASHBOARD`, plus a `LEGACY_SHEET_RENAMES` entry
@@ -210,5 +210,20 @@ holding BOTH tabs must be left alone, and your change must not break that.
 - The real work is documentation: account for every `Master_Program_Dashboard`
   hit across the repo — code, comment, doc, test.
 
-**Hand-off:** commit, push, then say the run is finished and offer to delete
-this file.
+Shipped: `SHEET_NAMES.PROGRAM_DASHBOARD` is `'Program_Sessions'`, with
+`'Program_Sessions': 'Master_Program_Dashboard'` in `LEGACY_SHEET_RENAMES` so
+`getOrCreateSheet()` renames an existing workbook's tab in place — the
+both-tabs-present rule is untouched, and matters more now that the new name is
+one somebody could plausibly have given a tab of their own. No bare string
+existed in any `.gs` outside the constant, so nothing reached the tab except
+through `SHEET_NAMES`. `HEADERS.Master_Program_Dashboard` keeps the old
+spelling with a comment saying why. Documentation: every prose mention across
+20 `.gs` banners, `USER_GUIDE.md` (plus a rename note in its tab section),
+`SYSTEM_REVIEW.md` and `SIMPLIFICATION_REVIEW.md`; the two user-visible strings
+that said the old name out loud (`29`, `55`) now say the new one;
+`DASHBOARD_REORG_DESIGN.md` keeps both names because it is the record of the
+change. Three test fixtures that keyed a stubbed sheet off the literal now read
+`SHEET_NAMES.PROGRAM_DASHBOARD`. All 62 test files pass.
+
+**Hand-off:** the five-phase run is finished. Nothing reads this file — delete
+it if you don't want it in the repo.
