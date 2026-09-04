@@ -176,7 +176,7 @@ Every tab was assessed for whether it earns its place:
 
 | Tab | Grain | Verdict |
 |---|---|---|
-| `Master_Program_Dashboard` | session | Core. Keep |
+| `Program_Sessions` | session | Core. Keep |
 | `Registrant_Dash` | person × session | Core. Keep |
 | `Master_Lunch_Dashboard` | date × location | Core. Keep |
 | `Lunch_Roster` | person × date × location | **Different grain from the dashboard** — one is counts, one is names, and both were asked for explicitly. Keep |

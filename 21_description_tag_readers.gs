@@ -144,7 +144,7 @@ function readTagsFromDescription(description) {
  * this script reads out of it, what the title contributes, and what the
  * session table currently shows for the same session.
  *
- * `dashboardRows` is the already-read Master_Program_Dashboard, passed in so
+ * `dashboardRows` is the already-read Program_Sessions, passed in so
  * inspecting twelve events costs one read of the tab rather than twelve.
  */
 function inspectOneEventTags(ev, calendarId, locationName, dashboardRows, map) {

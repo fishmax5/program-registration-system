@@ -68,7 +68,7 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
   return refreshFormShapeForAllForms(registrySheet);
 }
 
-/** { Form_ID: [session rows] } from a batch of Master_Program_Dashboard rows. Rows with no form are skipped. */
+/** { Form_ID: [session rows] } from a batch of Program_Sessions rows. Rows with no form are skipped. */
 function groupRegistryRowsByForm(rows, map) {
   const byForm = {};
   rows.forEach(row => {
@@ -356,7 +356,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
 }
 
 /**
- * Re-points Master_Program_Dashboard's "View Live Form" links at freshly
+ * Re-points Program_Sessions's "View Live Form" links at freshly
  * generated URLs, for the forms in urlByFormId. Needed after a rebuild: the
  * link we hand out is a PREFILLED url (buildRegistrationUrl()) whose
  * entry.N parameters name the form's item IDs, and a rebuilt form has new

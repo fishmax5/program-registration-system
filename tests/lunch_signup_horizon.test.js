@@ -106,7 +106,7 @@ const menu = (y, m, d, location, type) => [new RealDate(y, m, d), location, type
 function run() {
   built = [];
   Object.keys(props).forEach(k => delete props[k]);
-  return sandbox.syncLunchOnlySessions({ __name: 'Master_Program_Dashboard' });
+  return sandbox.syncLunchOnlySessions({ __name: sandbox.SHEET_NAMES.PROGRAM_DASHBOARD });
 }
 
 // --- the horizon -----------------------------------------------------------
@@ -288,7 +288,7 @@ const lunchId = k => sandbox.makeLunchOnlyEventId(k, 'Narberth');
 
 const shownBands = [];
 const fakeSheet = {
-  getName: () => 'Master_Program_Dashboard',
+  getName: () => sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
   showRows: (start, count) => shownBands.push(`${start}+${count}`)
 };
 

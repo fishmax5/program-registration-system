@@ -125,7 +125,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
  * reports what it saw, per program:
  *
  *   - which sessions the workbook thinks are appointments (the
- *     Personalized_Assistance tick on Master_Program_Dashboard, which is what
+ *     Personalized_Assistance tick on Program_Sessions, which is what
  *     every other part of this feature reads);
  *   - how many free slots each form is offering, and out of how many;
  *   - what changed on the form, or that nothing needed to;
@@ -189,7 +189,7 @@ function rebuildAssistanceFormsNow() {
   const marked = programs.filter(p => p.marked > 0);
   if (marked.length === 0) {
     lines.push('  (nothing — no session on the dashboard has its Personalized_Assistance box ticked)');
-    lines.push('  Tick it on Master_Program_Dashboard, or put [Personalized Assistance] in the');
+    lines.push('  Tick it on Program_Sessions, or put [Personalized Assistance] in the');
     lines.push('  calendar event\'s description, then run Sync Cal.');
   }
   marked.forEach(p => {

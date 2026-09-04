@@ -80,7 +80,7 @@ function initSheet() {
  *
  *   REBUILT (from the rows already on each tab)
  *     Config (older layouts are backed up, current ones kept as-is)
- *     Master_Program_Dashboard    — with triage OFF
+ *     Program_Sessions    — with triage OFF
  *     Registrant_Dash             — the tables only; Quick Mark is a dialog
  *     Deleted_Event_Triage
  *     Lunch_Schedule              — including the new ADD block

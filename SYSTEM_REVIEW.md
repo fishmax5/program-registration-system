@@ -227,7 +227,7 @@ starts eating a meaningful share of the execution budget.
 ### 10. Quick Mark reads three tabs to build its lists. **REDUCED**
 
 Widening the lists to all programs and all members means
-`collectKnownProgramChoices()` reads `Master_Program_Dashboard`,
+`collectKnownProgramChoices()` reads `Program_Sessions`,
 `Program_Options`, `Lunch_Schedule` and the registrant rows, and
 `collectKnownMembers()` reads `Member_Roll`.
 
@@ -523,7 +523,7 @@ order of what would change your plans:
    `Lunch_Roster` under every one of those dates, and `Registered_Count` up by
    one on each. Then submit it again for a date they have ALSO signed up for
    through a program's form, and confirm that date still counts them once.
-5d. **Check the lunch-only session rows on `Master_Program_Dashboard`.** Their
+5d. **Check the lunch-only session rows on `Program_Sessions`.** Their
    `Calendar_Source` must be BLANK — that is the only thing keeping triage off
    them, and if it is ever populated the whole lunch program goes to
    `Deleted_Event_Triage` on the next sync. Then try editing `Type_Tag` on one

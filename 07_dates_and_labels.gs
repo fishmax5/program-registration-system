@@ -77,7 +77,7 @@ function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan, endRow) {
   return rows;
 }
 
-/** Locates Master_Program_Dashboard's session-table header rows (unique marker: 'Event_ID'). */
+/** Locates Program_Sessions's session-table header rows (unique marker: 'Event_ID'). */
 function findProgramSessionHeaderRows(sheet) {
   return findAllHeaderRows(sheet, 'Event_ID', 5000);
 }

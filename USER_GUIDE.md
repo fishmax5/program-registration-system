@@ -73,7 +73,7 @@ bracket of its own: `[Club] [Film selection: Casablanca]`. The ignored bracket
 is written to the log either way, so a mistyped tag doesn't just vanish.
 
 **You don't have to type `[Club]` or `[No Registration]` by hand.** Both are
-also **checkboxes** on the Master_Program_Dashboard — tick one and the tag is
+also **checkboxes** on the Program_Sessions — tick one and the tag is
 written onto the program's calendar events for you. See
 [The two checkboxes](#the-two-checkboxes-club-and-no_registration).
 
@@ -93,7 +93,7 @@ written onto the program's calendar events for you. See
 > said how often a **new form** is handed out.
 
 **You can also change it from the spreadsheet.** Edit the `Type_Tag` column on
-**Master_Program_Dashboard** (it's yellow, because it's yours to change). You'll
+**Program_Sessions** (it's yellow, because it's yours to change). You'll
 be asked to confirm, because switching re-partitions that program across forms —
 and if you say yes, the system writes the tag into **every** calendar event for
 that program, so the change sticks and all its months end up on the same footing.
@@ -268,7 +268,7 @@ slot at the end is never offered.
 
 **One person per slot, automatically.** You never type a cap on an appointment
 program: a slot holds one person, so the session's `Max_Capacity` on
-`Master_Program_Dashboard` is simply its number of slots — a 12:30–3:30 clinic
+`Program_Sessions` is simply its number of slots — a 12:30–3:30 clinic
 in 30-minute slots shows **6**. Ticking `Personalized_Assistance` on a program
 whose dates are already on the dashboard updates those rows on the next
 **Sync Cal**; you don't have to wait for its next new date. Put `[Cap: 4]` on
@@ -762,7 +762,7 @@ For Caroline's four assistance programs the tab reads something like:
 
 ### The three checkboxes: `Club`, `No_Registration` and `Personalized_Assistance`
 
-All three tags are also **tick boxes** on the Master_Program_Dashboard, and
+All three tags are also **tick boxes** on the Program_Sessions, and
 ticking one is exactly the same as typing the tag by hand — because that's what
 it does.
 **Ticking the box is the only step.**
@@ -797,7 +797,7 @@ stay ticked while the write is on its way.
 
 ### Closing one session: `Waitlist_Only`
 
-There is a **fourth** tick box on the Master_Program_Dashboard, and it is the
+There is a **fourth** tick box on the Program_Sessions, and it is the
 only one that means something about **one date** rather than about the program.
 
 Tick `Waitlist_Only` on a session and **everybody who signs up for that session
@@ -867,7 +867,7 @@ window:
 
 | Colour | Group | Tabs | What they are |
 |---|---|---|---|
-| 🟩 green | **Today** | Master_Program_Dashboard, Master_Lunch_Dashboard, Lunch_Roster, Registrant_Dash | What a serving day is run from. These are the ones to open |
+| 🟩 green | **Today** | Program_Sessions, Master_Lunch_Dashboard, Lunch_Roster, Registrant_Dash | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
 | 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, who is waiting for an appointment |
 | ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
@@ -882,7 +882,11 @@ The one tab with **no** editable columns at all is **Lunch_Roster**: it is
 rebuilt from scratch every hour, names and all. To add somebody to the lunch
 list, use **⚡ Quick Mark**.
 
-### 1. Master_Program_Dashboard
+### 1. Program_Sessions
+*Renamed from **Master_Program_Dashboard** in September 2026 — the tab, its rows,
+its formatting and its links are the same ones; only the name on the tab changed.
+The workbook renames it for you the first time it opens after the update.*
+
 Your at-a-glance view. Three sections stacked top to bottom:
 
 - **📍 Today at Each Location** — what's running today and how many are signed up
@@ -1061,7 +1065,7 @@ date the block says so rather than sitting empty.
 Only the **four soonest** location/month forms are pinned, with a line saying
 how many more there are. Everything above the schedule is frozen, so each
 pinned row is a row of screen the schedule doesn't get; the later months are
-on **Master_Program_Dashboard** like every other form, on any
+on **Program_Sessions** like every other form, on any
 `Lunch @ …` row.
 
 See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) for what
@@ -2532,7 +2536,7 @@ A few things worth knowing:
   not two** — the counts are per person (see
   [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
   row shows both under `Programs` with `Requests_Merged` = 1.
-- The dates are **on** Master_Program_Dashboard as sessions like any other and
+- The dates are **on** Program_Sessions as sessions like any other and
   **visible there**, each named `Lunch @ <location> — <dish>`, with a blank
   `Calendar_Source` — because there is no calendar event behind them. That
   blank is what stops them being swept into triage.
@@ -2958,7 +2962,7 @@ by name so their three rows sit together.
 |---|---|
 | ✍️ **Leader_Name** | who they are. Used to address their emails |
 | ✍️ **Email** | where their sheet and their alerts go. Several are fine, separated by commas |
-| ✍️ **Program** | the program title, exactly as it appears on Master_Program_Dashboard. The cell offers a dropdown of what the calendar has actually produced |
+| ✍️ **Program** | the program title, exactly as it appears on Program_Sessions. The cell offers a dropdown of what the calendar has actually produced |
 | ✍️ **Location** | which site. **Both** this and Program are required — see below |
 | ✍️ **Notify_Roster_Changes** | tick to email this person when this program's roster moves — see [Roster change alerts](#roster-change-alerts) |
 | `Sheet_Link` | fills in by itself: the shared sign-up sheet for this program, once one exists |
@@ -3054,7 +3058,7 @@ size changed** — which is a change you set out chairs for.
 
 ## Putting a registration link on the website
 
-**The link you want is `Form_Response_Link`** on Master_Program_Dashboard — the
+**The link you want is `Form_Response_Link`** on Program_Sessions — the
 one that reads **View Live Form**. That is the published form, the same page a
 registrant reaches from the calendar. (`Edit_Form_Link` is the editor, for you,
 and must never go on a website.)
@@ -3459,7 +3463,7 @@ attempt makes duplicates).
 
 Press it once and let it run — expect a few minutes for a small calendar and
 up to half an hour for a big one, and watch rows appear on
-**Master_Program_Dashboard** as it goes. Pressing it again is harmless:
+**Program_Sessions** as it goes. Pressing it again is harmless:
 anything already imported is skipped, which also makes it the way to recover
 if an import was interrupted. When it finishes, run **Sync Registrations** (or
 just wait for the hourly run) to pull in responses to any forms that already
@@ -3481,7 +3485,7 @@ one of them in the current layout.
 
 | Rebuilt from what's already here | Left completely alone |
 |---|---|
-| Master_Program_Dashboard | Your **calendars** — not read, not written |
+| Program_Sessions | Your **calendars** — not read, not written |
 | Registrant_Dash | Your **registration forms** — none opened or changed |
 | Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
 | Master_Lunch_Dashboard (hand-entered columns kept) | |
@@ -3919,7 +3923,7 @@ same person, so a person doesn't get double-counted or double-catered — includ
 across several programs on the same day, which is what stops three lunch
 requests from one person becoming three meals on the order.
 
-**The dashboards are rebuilt, not patched.** Master_Program_Dashboard and the
+**The dashboards are rebuilt, not patched.** Program_Sessions and the
 Today blocks are regenerated from scratch each sync. Only the pencil columns on
 Master_Lunch_Dashboard and manually-marked registrant rows survive.
 
@@ -4082,7 +4086,7 @@ Rebuild Quick Mark Lists** (or the **↻ reload** link in the dialog itself).
 
 If the times are still missing after a rebuild, the session isn't flagged as an
 appointment one: check `Personalized_Assistance` is ticked on its
-**Master_Program_Dashboard** row, and that the calendar event carries
+**Program_Sessions** row, and that the calendar event carries
 `[Personalized Assistance]` — the tick comes from the calendar, and an untagged
 event has no slots to offer. The time picker only appears when you tick
 **Register them** (you are booking a slot) or **🕐 Move them to a different
@@ -4193,7 +4197,7 @@ That's the first-import problem — too many forms to build in one run. Press
 skips whatever already came through. Then press **Check Triggers** to be sure
 the schedule is back (the batched import does that itself at the end).
 
-**Programs vanished from Master_Program_Dashboard**
+**Programs vanished from Program_Sessions**
 The system removes a session when its calendar event is gone — but it now
 refuses to do that *en masse*: if more than a handful of sessions look deleted
 at once, it changes nothing, logs why, and tells the admin address, because
@@ -4218,7 +4222,7 @@ developer can run `confirmLargeTriage()` and then press **Sync Cal** — that
 permits exactly one oversized sweep.
 
 **"Import Everything" seems stuck**
-Look at **Master_Program_Dashboard** — if rows are still appearing every few
+Look at **Program_Sessions** — if rows are still appearing every few
 minutes, it's working. It gives up on its own if two batches in a row make no
 progress, and tells you so. To stop it by hand, ask your developer to run
 `cancelBootstrapCalendars()` from the Apps Script editor; that restores every

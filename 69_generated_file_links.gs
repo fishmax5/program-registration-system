@@ -12,7 +12,7 @@
 // So every tab that already has a row for a session now carries the links to
 // that session's files, rebuilt on each render:
 //
-//   Master_Program_Dashboard   Registrant_Sheet_Link + Sign_In_Sheet_Link
+//   Program_Sessions   Registrant_Sheet_Link + Sign_In_Sheet_Link
 //   Registrant_Dash            Registrant_Sheet_Link + Sign_In_Sheet_Link
 //   Master_Lunch_Dashboard     Sign_In_Sheet_Link   (a meal has no leader)
 //

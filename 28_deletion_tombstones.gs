@@ -207,7 +207,7 @@ function sessionOccupancy(registryEntry) {
  * one hour: a program capped at twelve took twelve MORE people every run, and
  * "#13 is waitlisted automatically" was true only of a thirteenth who
  * submitted inside the same sixty minutes as the other twelve. The
- * Master_Program_Dashboard's own Status went red on schedule, which is why
+ * Program_Sessions's own Status went red on schedule, which is why
  * this was invisible — the sheet said Waitlist Only while the rows underneath
  * it all said Active.
  *

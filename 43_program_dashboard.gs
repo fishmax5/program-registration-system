@@ -105,7 +105,7 @@ const TRIAGE_OVERRIDE_PROP_KEY = 'TRIAGE_OVERRIDE_ONCE';
 /**
  * Cross-checks in-memory session rows against what's genuinely still on the
  * calendars right now and drops any that are gone. Dropped sessions'
- * registrants are moved to Deleted_Event_Triage. Master_Program_Dashboard no
+ * registrants are moved to Deleted_Event_Triage. Program_Sessions no
  * longer has a Manual_Override column, so nothing can be protected from
  * this anymore — every session's presence is strictly calendar-derived.
  *

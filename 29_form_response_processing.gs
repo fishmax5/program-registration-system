@@ -96,7 +96,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     const plainDateLabel = resolveSessionLabelForForm(registryIndex, formId, dateLabel);
     const registryEntry = plainDateLabel ? registryIndex[`${formId}|${plainDateLabel}`] : null;
     if (!registryEntry) {
-      const message = `No Master_Program_Dashboard match for form ${formId} / "${stripMealHint(dateLabel)}"` +
+      const message = `No Program_Sessions match for form ${formId} / "${stripMealHint(dateLabel)}"` +
         ` (grid row "${dateLabel}") — anyone who ticked that row has NOT been imported.`;
       log(`⚠️ ${message}`);
       noteForAdmin('Form row matches no session', message);

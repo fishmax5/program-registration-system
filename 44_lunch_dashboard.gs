@@ -81,7 +81,7 @@ const LUNCH_SIGNUP_HEADERS = ['Location', 'Month', 'Lunch_Dates', 'Edit_Form', '
  *
  * Four is the current month and the next at both locations — which is the
  * whole of what anybody is handing out a link for. The rest are one row down
- * on Master_Program_Dashboard like every other form, and the block says so
+ * on Program_Sessions like every other form, and the block says so
  * rather than pretending they don't exist.
  */
 const LUNCH_SIGNUP_PINNED_LIMIT = 4;
@@ -222,7 +222,7 @@ function countLunchMeals(bucket) {
 }
 
 /**
- * Aggregates Master_Program_Dashboard's session table + Registrant_Dash
+ * Aggregates Program_Sessions's session table + Registrant_Dash
  * into one row per (date, location): how many people need lunch, plus that
  * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
  * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed

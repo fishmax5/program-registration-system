@@ -371,7 +371,7 @@ function invalidateCalendarEventsCache() {
 // round trips on the two-zone shape every tab has.
 //
 // WHAT THIS REPLACES. A single syncRegistrations() run re-read the same two
-// tabs over and over: Master_Program_Dashboard at 27_registration_import.gs:81,
+// tabs over and over: Program_Sessions at 27_registration_import.gs:81,
 // 33_calendar_invitations.gs:110 and :319, 66_program_leader_notifications.gs
 // and 70_registrant_notifications.gs; Registrant_Dash at
 // 27_registration_import.gs:83 and :281, 30_registry_counts.gs:20,

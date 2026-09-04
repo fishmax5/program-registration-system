@@ -56,6 +56,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.scanRegistrants = scanRegistrants;
+this.SHEET_NAMES = SHEET_NAMES;
 this.computeProgramMetrics = computeProgramMetrics;
 this.formatMetricChange = formatMetricChange;
 this.sessionCapacity = sessionCapacity;
@@ -374,7 +375,7 @@ function fakeRange(sheet, row, col, numRows, numCols) {
 }
 
 const fakeSheet = {
-  getName: () => 'Master_Program_Dashboard',
+  getName: () => sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
   getMaxColumns: () => sessionHeaders.length,
   getMaxRows: () => 200,
   getRange: (row, col, numRows, numCols) => fakeRange(fakeSheet, row, col, numRows === undefined ? 1 : numRows, numCols === undefined ? 1 : numCols),

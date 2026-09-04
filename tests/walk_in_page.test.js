@@ -67,7 +67,7 @@ const sandbox = {
   ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
 };
 vm.createContext(sandbox);
-vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP;',
+vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP; this.SHEET_NAMES = SHEET_NAMES;',
   sandbox, { filename: 'program.gs' });
 
 let fail = 0;
@@ -304,7 +304,10 @@ function withWorkbook(parts, fn) {
   // its tests elsewhere.
   sandbox.getMealInfoForDate = (date, loc) => (parts.meal === undefined ? null : parts.meal);
   const sheets = {
-    Master_Program_Dashboard: gridSheet('Master_Program_Dashboard',
+    // Keyed off the constant, not the literal: the session tab was renamed
+    // from Master_Program_Dashboard to Program_Sessions, and a fixture that
+    // spells the name out goes silently empty on the next such rename.
+    [sandbox.SHEET_NAMES.PROGRAM_DASHBOARD]: gridSheet(sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
       [DASH_HEADERS].concat(parts.dash || [])),
     Registrant_Dash: gridSheet('Registrant_Dash', [REG_HEADERS].concat(parts.reg || [])),
     Member_Roll: parts.roll

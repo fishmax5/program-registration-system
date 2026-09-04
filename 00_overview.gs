@@ -3,7 +3,9 @@
  *  🗓️  CALENDAR & FORM MANAGER  —  Program Registration + Lunch Ordering
  * ============================================================================
  *  Sheets:
- *    - Master_Program_Dashboard : "Today at Each Location" + the full
+ *    - Program_Sessions : renamed from Master_Program_Dashboard (Sept 2026;
+ *      LEGACY_SHEET_RENAMES carries an existing workbook's tab across in
+ *      place). "Today at Each Location" + the full
  *      per-session table, now split into an "Upcoming Sessions" sub-table
  *      and a "Past Sessions" sub-table (see section 7). The participation
  *      metrics used to sit here too, and now sit on Program_Month, below —

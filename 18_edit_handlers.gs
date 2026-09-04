@@ -1,7 +1,7 @@
 /**
  * Dispatches to a per-sheet handler for tabs that carry a Manual_Override
  * column (Registrants, Lunch Dashboard) plus the Lunch_Schedule edit hook.
- * Master_Program_Dashboard's session table no longer has a Manual_Override
+ * Program_Sessions's session table no longer has a Manual_Override
  * column at all (see HEADERS.Master_Program_Dashboard), so there's nothing
  * to auto-flip there anymore.
  */
@@ -58,7 +58,7 @@ function onEdit(e) {
 }
 
 /**
- * Master_Program_Dashboard: the session table is rebuilt from the calendar on
+ * Program_Sessions: the session table is rebuilt from the calendar on
  * every render, so almost nothing typed here survives — EXCEPT the three
  * columns that describe how a program's registration works: Type_Tag, and the
  * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,

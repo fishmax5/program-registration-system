@@ -8,7 +8,7 @@
 // tab's (possibly several) header rows, reading all its rows regardless of
 // which zone they're currently in, splitting rows by date, and writing the
 // two zones back out with consistent banners/headers/zebra striping/month
-// tinting. Master_Program_Dashboard and Master_Lunch_Dashboard call the
+// tinting. Program_Sessions and Master_Lunch_Dashboard call the
 // lower-level writeUpcomingPastSections() directly (since they have their
 // own extra Today/Metrics sections above); the three flat, single-table
 // tabs (Registrant_Dash, Deleted_Event_Triage, Lunch_Schedule)

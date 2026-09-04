@@ -849,7 +849,7 @@ function writeSectionBanner(sheet, row, numCols, text, options) {
  * column names stay on screen however far down somebody scrolls.
  *
  * "The table that is the tab" is the rule, and it is not always the topmost
- * table: Master_Program_Dashboard opens with a Today block and a metrics
+ * table: Program_Sessions opens with a Today block and a metrics
  * block, and freezing at those left the session table's headers — the thing
  * five hundred rows are read against — scrolling away with everything else.
  * Whatever a tab puts above its main table comes along in the frozen band.

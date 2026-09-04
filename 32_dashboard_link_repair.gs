@@ -288,7 +288,7 @@ function applyDashboardLinkPlan(registrySheet, plan) {
 /**
  * ADMIN ACTION — "Repair Dashboard Links (no calendar read)".
  *
- * Rewrites Form_ID and both link columns on Master_Program_Dashboard from the
+ * Rewrites Form_ID and both link columns on Program_Sessions from the
  * form registry, row by row, touching nothing else on the tab and reading no
  * calendar. See the section comment above for why the ordinary rebuild cannot
  * do this and what makes this safe.

@@ -15,7 +15,18 @@ defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
 
 const SHEET_NAMES = {
   CONFIG: 'Config',
-  PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
+  // The per-session table. Renamed from 'Master_Program_Dashboard' — it was
+  // never a dashboard in the sense the lunch one is: it is the session ledger
+  // every other tab is derived from, and Program_Month is what a person reads
+  // when they want a summary. LEGACY_SHEET_RENAMES carries an existing
+  // workbook's tab across in place, rows and formatting intact.
+  //
+  // HEADERS.Master_Program_Dashboard deliberately keeps the OLD spelling: a
+  // schema key is read by code and a tab name by people, and renaming the key
+  // would touch ~170 references to buy nothing. Same reasoning as
+  // LEADER_SHEET_REGISTRY_PROP_KEY still being spelled
+  // 'INSTRUCTOR_SHEET_REGISTRY_V1'.
+  PROGRAM_DASHBOARD: 'Program_Sessions',
   // One row per program-month — the same program, at the same location, in
   // the same month, which is exactly the unit buildEventGroups() already
   // makes one FORM for. DERIVED, top to bottom, from the session table:
@@ -62,18 +73,31 @@ const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
  * both is left exactly as it is rather than having one of them clobbered.
  */
 const LEGACY_SHEET_RENAMES = {
-  'Registrant_Dash': 'Lunch_and_Event_Registrants'
+  'Registrant_Dash': 'Lunch_and_Event_Registrants',
+  // Renamed September 2026. The session ledger, under the name it carried for
+  // as long as it was called a dashboard. A workbook that somehow holds BOTH
+  // is left alone by the rule above — which is the case that matters here,
+  // because Program_Sessions is a name somebody could plausibly have given a
+  // tab of their own.
+  'Program_Sessions': 'Master_Program_Dashboard'
 };
 
 /**
  * Column layouts. Every date-bearing sheet now leads with Event_Date (its
  * cell background carries the month tint that used to live in a separate
- * Month column). Master_Program_Dashboard's session table no longer has a
+ * Month column). Program_Sessions's session table no longer has a
  * Manual_Override column at all; the other date-bearing tabs keep it as
  * the second column.
  */
 defineLazyGlobal_('HEADERS', () => ({
-  // The per-session table inside Master_Program_Dashboard (section C).
+  // The per-session table inside Program_Sessions (section C).
+  //
+  // The KEY still spells the old tab name. That is deliberate: a schema key is
+  // read by code, a tab name by people, and the tab was renamed for the
+  // people. Renaming the key too would rewrite ~170 call sites to buy nothing
+  // and would silently mismatch any workbook mid-upgrade. Same reasoning as
+  // LEADER_SHEET_REGISTRY_PROP_KEY still being spelled
+  // 'INSTRUCTOR_SHEET_REGISTRY_V1'.
   //
   // Active_Count sits directly beside Status — "how many signed up" and "is it
   // full" is the pair anyone reads first. On an APPOINTMENT session it counts
@@ -755,7 +779,7 @@ const LEGACY_HEADER_ALIASES = {
   Registrant_Sheet_Link: ['Leader_Sheet_Link']
 };
 
-/** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */
+/** Headers for the small "Today at Each Location" section (A) inside Program_Sessions. */
 const TODAY_AT_LOCATIONS_HEADERS = ['Location', 'Programs Today', 'Sessions Today', 'Registered Today'];
 
 /** Headers for Master_Lunch_Dashboard's "Today's Lunch Needs" block — its own short list. */
