@@ -70,7 +70,24 @@ function renderProgramDashboard(force, options) {
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
 
-  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
+  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
+
+  // THE MONTH VIEW IS DRAWN FROM THE ROWS WE ARE HOLDING, not from a second
+  // read of the tab we have just written — see 78_program_month_dashboard.gs.
+  // It is derived and nothing reads it, so a failure to draw it must not cost
+  // the caller the session table it actually asked for: a broken derived view
+  // is a log line, not a failed sync.
+  try {
+    // metrics travels WITH the rows it was computed from. The block moved to
+    // the month tab in phase 2 and its arithmetic did not: it is still
+    // computeProgramMetrics() over the same lunch-filtered session rows and the
+    // same registrant scan, so not a digit of it changes by being drawn one tab
+    // to the right.
+    renderProgramMonthDashboard(force, { sessionRows, metrics });
+  } catch (err) {
+    log(`\u26a0\ufe0f Program_Month could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
+  }
+
   return { registrantsMoved: triageResult.registrantsMoved };
 }
 
@@ -840,7 +857,7 @@ function styleMetricTable(sheet, startRow, numRows, numCols) {
   }
 }
 
-function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
+function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   invalidateSectionedRowsCache(sheet); // ...and its rows with them
   sheet.clear();
@@ -888,10 +905,21 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   row += todayRowsOut.length;
   row++; // spacer
 
-  // --- Section B: Program Metrics (near-term windows + month over month) ---
-  row = writeProgramMetricsSection(sheet, row, numCols, metrics);
-  row++; // spacer
-
+  // --- Section B: All Program Sessions, split into Upcoming / Past ---
+  //
+  // THE METRICS BLOCK USED TO SIT HERE, between the Today block and the
+  // sessions, and now sits on Program_Month (78_program_month_dashboard.gs).
+  // Every number in it is monthly reasoning — the next 7 and 30 days, this
+  // month against the same span of last — sitting on top of a table that is
+  // one row per DAY, and everything above the session table travels in the
+  // frozen band, so a dozen rows of it were a dozen rows of Tuesday nobody
+  // could see. It is drawn on the tab whose grain it matches instead.
+  //
+  // writeProgramMetricsSection() and computeProgramMetrics() STAY IN THIS
+  // FILE. They are defined against session rows, the words in them are about
+  // sessions, and moving the arithmetic as well as the drawing would have been
+  // the change that could alter a number. The month tab calls them.
+  //
   // --- Section C: All Program Sessions, split into Upcoming / Past ---
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
@@ -967,7 +995,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
-      'Leader_Sheet_Link', 'Sign_In_Sheet_Link'],
+      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);

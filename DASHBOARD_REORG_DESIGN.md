@@ -1,7 +1,10 @@
 # Dashboard reorganization — design draft
 
-**Status: proposal. Phase 3 (§5 — `Title_Match` and the matcher, option B) is
-implemented; nothing else here is.**
+**Status: phases 1, 2 and 3 are shipped** — `78_program_month_dashboard.gs` (the
+design doc says 77; see the numbering note in `DASHBOARD_REORG_PHASES.md`), the
+`Program_Month` tab, the metrics block moved up onto it, the leader-coverage
+line, lunch collapsed, the `Sessions` drill-through, and §5's `Title_Match`
+column and matcher (option **B**). Phases 4 and 5 are still proposals.
 
 Two questions prompted this, and they turn out to be the same question:
 
@@ -374,11 +377,14 @@ That third one is the test that holds §5's line. It should be written first.
 
 1. **Does the session tab keep the Today block, or does the door own it?**
    The door pages read live and are what staff actually look at on the day.
-2. **`FIXED`-span groups** (`parsed.isFixed`) have no month at all — one form
-   for a whole run of dates. Do they get one month row, repeated per month they
-   touch (with a "spans Sep–Nov" note), or one row filed under their first
-   month? Repeating reads better and double-counts in any metric that sums
-   rows; filing once reads worse and is arithmetically honest.
+2. ~~**`FIXED`-span groups**~~ — **ANSWERED, and shipped: one row, filed under
+   its FIRST month.** Every number on a month row is a sum over that row's
+   sessions, so repeating the group per month it touches would either
+   double-count them or have to divide them up, and a `Registered` figure that
+   is a third of the truth in three places is worse than a row filed a month
+   early. The `Schedule` cell states the real span and its note names every
+   session, so nothing about the run is hidden by where the row sits. See the
+   banner of `78_program_month_dashboard.gs`.
 3. **Should `Program_Options` and `Program_Month` merge?** Both are program ×
    location. `Program_Options` is staff-typed memory (`Typical_Attendance`,
    `Room_Or_Setup`, `Notify_Mode`); `Program_Month` is derived and monthly.

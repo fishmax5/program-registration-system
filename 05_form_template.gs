@@ -716,7 +716,7 @@ function getOrCreateTemplateForm() {
   const form = FormApp.create('TEMPLATE — Registration Form Base (do not edit or delete)');
   addTemplateItemsToForm(form);
 
-  // Same reason every registration form and program leader sheet opens itself
+  // Same reason every registration form and program registrant sheet opens itself
   // up the moment it is created (see openUpFileToAnyoneWithLink()): the
   // template is created by whoever ran this, but copied by makeCopy() every
   // time a program's form is built — routinely a DIFFERENT account, on the

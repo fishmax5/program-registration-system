@@ -204,7 +204,7 @@ function matchesCancellationParty(row, map, args) {
 
 /**
  * Cancel one person (and their guests) on one session. The shape every door
- * except the self-serve page uses, since a desk and a leader sheet are both
+ * except the self-serve page uses, since a desk and a registrant sheet are both
  * looking at exactly one row when they decide.
  */
 function cancelOneRegistration(args) {
@@ -263,7 +263,7 @@ function checkInCancel(payload) {
 /**
  * A TICK IN "DROPPED" IS A CANCELLATION, and until now it was a note.
  *
- * The shared leader sheet has carried a Dropped checkbox since it was built,
+ * The shared registrant sheet has carried a Dropped checkbox since it was built,
  * and pullProgramLeaderSheetEdits() has faithfully merged it back onto the
  * Registrants tab every hour — where it sat in a column nothing reads. The
  * leader had done the only thing their sheet offered and the seat stayed full.
@@ -301,7 +301,7 @@ function applyLeaderDropsAsCancellations(registrantRows) {
   });
 
   if (cancelled > 0) {
-    log(`Program leader sheets: ${cancelled} "Dropped" tick(s) became cancellations — those seats are free.`);
+    log(`Program registrant sheets: ${cancelled} "Dropped" tick(s) became cancellations — those seats are free.`);
   }
   return cancelled;
 }

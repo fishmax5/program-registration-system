@@ -375,7 +375,13 @@ function buildRegistrantRow(args) {
   const formSource = formEditUrl
     ? makeHyperlinkFormula(formEditUrl, 'View Submission')
     : String(args.formSourceText || '');
-  const displayName = String(name || '').trim();
+  // THE SPELLING THIS WORKBOOK HAS SETTLED ON, not necessarily the one on the
+  // form. A member whose name staff corrected on Member_Roll goes on typing
+  // the old one into the same form for months (they have it saved in their
+  // browser, or a relative fills it in for them); without this the correction
+  // is undone by every new response and the roll grows the old row back.
+  // See applyMemberNameCorrection() in 77_households_and_names.gs.
+  const displayName = canonicalMemberName(name);
   const key = `${registryEntry.eventId}|${normalizeNameKey(displayName)}|${personType}`;
   // The caller's lunchType is just an intent signal ('No Lunch' vs
   // anything else) — resolveRegistrantLunchType() is what turns that into

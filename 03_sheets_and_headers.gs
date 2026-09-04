@@ -16,6 +16,13 @@ defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
 const SHEET_NAMES = {
   CONFIG: 'Config',
   PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
+  // One row per program-month — the same program, at the same location, in
+  // the same month, which is exactly the unit buildEventGroups() already
+  // makes one FORM for. DERIVED, top to bottom, from the session table:
+  // nothing is stored here that is not already on a session row, which is
+  // what makes deleting this tab a cosmetic act rather than a data loss.
+  // See 78_program_month_dashboard.gs.
+  PROGRAM_MONTH: 'Program_Month',
   REGISTRANT_DASH: 'Registrant_Dash',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
   LUNCH_ROSTER: 'Lunch_Roster',
@@ -111,7 +118,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // with the hidden machine columns because it is an input to the slot
   // arithmetic rather than something staff read: it is how the form layer
   // rebuilds a session's appointment times without going back to the calendar.
-  // Leader_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
+  // Registrant_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
   // because they are the same kind of thing: somewhere else to click through
   // to. They point at the two files this system produces OUTSIDE the workbook
   // — the spreadsheet a program leader marks up, and the printed sign-in PDF
@@ -131,10 +138,30 @@ defineLazyGlobal_('HEADERS', () => ({
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
     'Active_Count', 'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
-    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
+    'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
     'Max_Per_Month'
+  ],
+  /**
+   * Program_Month — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
+   *
+   * Month_Start LEADS THE ROW AND IS A REAL DATE (the 1st of the month), for
+   * the same reason Event_Date leads every other date-bearing tab: it is what
+   * partitionByDate() / writeUpcomingPastSections() / getSectionedRows() are
+   * defined against. A month written as the words "September 2026" would have
+   * needed a second sectioned reader, and this tab is not worth one.
+   *
+   * Form_ID trails at the end with Group_Key, hidden like the session table's
+   * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is how the rows are
+   * GROUPED, and Group_Key is the row's own identity — both are for reading in
+   * the formula bar when something has gone wrong, not for scanning.
+   */
+  Program_Month: [
+    'Month_Start', 'Location', 'Program', 'Type_Tag', 'Flags', 'Schedule', 'Sessions',
+    'Registered', 'Max_Capacity', 'Fill', 'Waitlist',
+    'Form_Response_Link', 'Edit_Form_Link', 'Leader_Sheet_Link', 'Status',
+    'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
@@ -230,7 +257,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
-  // Leader_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
+  // Registrant_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
   // session table carries, repeated here so the day's roster is one click
   // from the sheet the leader is marking and the PDF the desk printed — see
   // 69_generated_file_links.gs.
@@ -243,7 +270,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Person_Type', 'Lunch_Type', 'Lunch_Status', 'Program_Status', 'Earlier_Appointment',
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
-    'Leader_Sheet_Link', 'Sign_In_Sheet_Link',
+    'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
     'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
   ],
   // Registered_Count (what the forms say) and Served_Confirmed (what was
@@ -292,7 +319,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // takeaway, 8 carried over means eight of that fourteen left the building
   // on a later day.
   // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
-  // the printed sheet for that date x location (there is no leader sheet for a
+  // the printed sheet for that date x location (there is no registrant sheet for a
   // meal), derived on every render from the registry in
   // 69_generated_file_links.gs. Its position is free to move for the same
   // reason the buffers' is — the formulas build their A1 refs from this array.
@@ -390,9 +417,27 @@ defineLazyGlobal_('HEADERS', () => ({
   // on a form), which is why they sit on the left with the other derived
   // columns. Contact stays a staff column: it is where a note like "reach her
   // daughter Ann first" belongs, and that is not something a form can supply.
+  //
+  // Display_Name / Nickname / Household_ID / Household / Household_Override —
+  // see 77_households_and_names.gs, which owns all four.
+  //
+  // Name stays the JOIN KEY and is the string every other tab carries: it is
+  // what normalizeNameKey() is taken of, what a form response arrives under,
+  // and what Registrant_Dash, Club_Members and Regular_Needs match on. So a
+  // spelling correction is not a matter of retyping it — Display_Name is
+  // where staff write the right one, and applyMemberNameCorrection() is what
+  // carries it out to every tab and remembers it for the responses still to
+  // come. Nickname is what parseMemberName() lifted out of a parenthetical or
+  // a quoted middle ("Bob (Robert)", 'Robert "Bob" Smith'), so the door and
+  // Quick Mark can find a person under the name they are actually called.
+  //
+  // Household_ID and Household are RECOMPUTED from shared contact details
+  // every refresh; Household_Override is the staff's answer when that guess
+  // is wrong — see householdOverrideIntent().
   Member_Roll: [
-    'Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations', 'Usual_Lunch',
-    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'
+    'Name', 'Display_Name', 'Nickname', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen',
+    'Locations', 'Usual_Lunch', 'Household_ID', 'Household',
+    'Usual_Guests', 'Dietary_Notes', 'Contact', 'Household_Override', 'Staff_Notes'
   ],
   /**
    * Club_Members — the standing roster of every club (see CLUB_TAG). One row
@@ -586,7 +631,8 @@ const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
 const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 
 /** Member_Roll columns the refresh must never overwrite — the staff's own knowledge. */
-const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'Usual_Guests', 'Dietary_Notes', 'Contact',
+  'Household_Override', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];
@@ -688,7 +734,13 @@ const LEGACY_HEADER_ALIASES = {
   // notes typed by a person about a person, which nothing can regenerate. The
   // alias means a workbook rendered by the old version reads its notes into
   // the new column on the first render rather than showing an empty one.
-  Leader_Notes: ['Instructor_Notes']
+  Leader_Notes: ['Instructor_Notes'],
+  // The shared per-program roster stopped being "the leader's sheet" when the
+  // desk, the office and the leader all turned out to read it — see 46's
+  // banner. This column is DERIVED, rewritten from the registry on every
+  // render, so the alias buys nothing but a first render that still shows the
+  // link instead of a blank while the old header is on the sheet.
+  Registrant_Sheet_Link: ['Leader_Sheet_Link']
 };
 
 /** Headers for the small "Today at Each Location" section (A) inside Master_Program_Dashboard. */

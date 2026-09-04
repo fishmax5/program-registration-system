@@ -3,9 +3,11 @@
  *  🗓️  CALENDAR & FORM MANAGER  —  Program Registration + Lunch Ordering
  * ============================================================================
  *  Sheets:
- *    - Master_Program_Dashboard : "Today at Each Location" + participation
- *      metrics + the full per-session table, now split into an "Upcoming
- *      Sessions" sub-table and a "Past Sessions" sub-table (see section 7).
+ *    - Master_Program_Dashboard : "Today at Each Location" + the full
+ *      per-session table, now split into an "Upcoming Sessions" sub-table
+ *      and a "Past Sessions" sub-table (see section 7). The participation
+ *      metrics used to sit here too, and now sit on Program_Month, below —
+ *      they are monthly reasoning, and this table is one row per DAY.
  *      The session table no longer carries a Manual_Override column — it's
  *      fully calendar-derived every render (Location/Type_Tag stay
  *      editable dropdowns, but nothing on this table is protected from a
@@ -13,6 +15,25 @@
  *      is the first column, and the old separate Month column has been
  *      replaced everywhere by simply color-tinting the Event_Date cell
  *      itself (see getMonthColor()/applyMonthColorTint()).
+ *    - Program_Month            : the same sessions, one row per PROGRAM-
+ *      MONTH — one program, one location, one month, which is the unit
+ *      buildEventGroups() already makes one FORM for. Fourteen of the
+ *      session table's columns are program-month facts printed once per
+ *      session; this is the other half of that join written out on its own,
+ *      with the schedule collapsed into a phrase ("Tue 9:30 AM - 11:30 AM ·
+ *      4 sessions") and lunch collapsed to one row per location per month.
+ *      A [Grouped] run of dates, which has one form and no month of its own,
+ *      is one row filed under its FIRST month. It also carries the
+ *      participation metrics block and one line the month grain makes
+ *      possible — how many of this month's programs have nobody down as
+ *      leading them (a COUNT off Program_Leaders; nothing is shared or sent
+ *      from here) — and its Sessions cell links through to that group's own
+ *      block of rows on the session table.
+ *      DERIVED AND READ-ONLY: nothing reads it, nothing is stored on it that
+ *      is not already on a session row, and deleting the tab changes no
+ *      behavior anywhere (the next dashboard render draws it again). Written
+ *      from the session rows the render already holds, never from a second
+ *      read of that tab. See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.

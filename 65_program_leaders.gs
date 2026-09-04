@@ -64,13 +64,17 @@ const LEGACY_INSTRUCTOR_EMAIL_COLUMN = 'Instructor_Email';
 /**
  * Notify_Roster_Changes stays the on/off switch (see the tab's own header
  * comment in 03). Notify_Timing is the closed dropdown that decides which of
- * two channels a leader who has it ticked is on:
+ * three channels a leader who has it ticked is on:
  *
  *   "At each registration"     the diff pass in 66 — mid-hour, whenever
  *                               something on the roster actually moves.
  *   "N days before each date"  the countdown digest beside it — one email per
  *                               session, N days ahead of it, listing who is
  *                               on the roster that morning.
+ *   "The Thursday before
+ *    each date"                the same digest, due on a fixed WEEKDAY rather
+ *                               than a fixed count — see
+ *                               leaderNotifyTimingWeekdayLabel() below.
  *
  * BLANK OR UNRECOGNIZED READS AS "At each registration" — a typo, or a
  * workbook upgrading from before this column existed, must keep doing exactly
@@ -93,12 +97,40 @@ function leaderNotifyTimingDaysBeforeLabel(days) {
   return `${days} day${days === 1 ? '' : 's'} before each date`;
 }
 
-/** The dropdown's full, closed vocabulary — what Notify_Timing is validated against. */
-const LEADER_NOTIFY_TIMING_LIST = [LEADER_NOTIFY_TIMING_EACH_CHANGE].concat(
-  [1, 2, 3, 4, 5, 6, 7].map(leaderNotifyTimingDaysBeforeLabel));
+/**
+ * The weekday names a "The Thursday before each date" answer is spelled with,
+ * indexed the way `Date.getDay()` is so the index IS the parsed value.
+ */
+const LEADER_NOTIFY_TIMING_WEEKDAY_NAMES =
+  ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
- * One Notify_Timing cell, resolved into { mode: 'each_change' | 'days_before', days }.
+ * "The Thursday before each date" — the third channel, and the one a leader
+ * who plans their week on a fixed day actually wants.
+ *
+ * A day COUNT is the wrong shape for "tell me every Thursday": a Tuesday class
+ * and a Saturday class need 5 days and 2 days respectively to land on the same
+ * morning, so a leader with both has to either keep two rows in their head or
+ * hear about one of them on the wrong day. A weekday says the thing they mean
+ * once, and each session works out its own count from it.
+ *
+ * ALWAYS THE WEEK BEFORE, never the same day: a session ON Thursday resolves
+ * to the PREVIOUS Thursday (7 days), not to nothing and not to zero days.
+ * "Before" is what the label promises, and a digest that arrives the morning
+ * of the class is a different feature.
+ */
+function leaderNotifyTimingWeekdayLabel(weekday) {
+  return `The ${LEADER_NOTIFY_TIMING_WEEKDAY_NAMES[weekday]} before each date`;
+}
+
+/** The dropdown's full, closed vocabulary — what Notify_Timing is validated against. */
+const LEADER_NOTIFY_TIMING_LIST = [LEADER_NOTIFY_TIMING_EACH_CHANGE]
+  .concat([1, 2, 3, 4, 5, 6, 7].map(leaderNotifyTimingDaysBeforeLabel))
+  .concat([0, 1, 2, 3, 4, 5, 6].map(leaderNotifyTimingWeekdayLabel));
+
+/**
+ * One Notify_Timing cell, resolved into
+ * { mode: 'each_change' | 'days_before' | 'weekday', days, weekday }.
  *
  * Matched by a leading "N day(s) before" rather than the exact label string,
  * so a cell that still reads a slightly older spelling of the same idea (or
@@ -112,9 +144,51 @@ function parseLeaderNotifyTiming(value) {
   const match = /^(\d+)\s+days?\s+before/i.exec(text);
   if (match) {
     const days = Math.floor(Number(match[1]));
-    if (days >= 1 && days <= LEADER_NOTIFY_TIMING_MAX_DAYS) return { mode: 'days_before', days };
+    if (days >= 1 && days <= LEADER_NOTIFY_TIMING_MAX_DAYS) {
+      return { mode: 'days_before', days, weekday: -1 };
+    }
   }
-  return { mode: 'each_change', days: 0 };
+  // Matched on the weekday NAME rather than the whole label, for the same
+  // reason the day count above is: "Thursday before" and "the Thursday before
+  // each date" mean the same thing to the person who typed either.
+  const weekday = LEADER_NOTIFY_TIMING_WEEKDAY_NAMES.findIndex(
+    name => new RegExp(`(^|\\b)${name}\\b`, 'i').test(text));
+  if (weekday >= 0 && /before/i.test(text)) {
+    return { mode: 'weekday', days: LEADER_NOTIFY_TIMING_MAX_DAYS, weekday };
+  }
+  return { mode: 'each_change', days: 0, weekday: -1 };
+}
+
+/**
+ * How many days before ONE session this timing is due, or 0 if it never is.
+ *
+ * The countdown channel answers with the day count it was typed with. The
+ * weekday channel works it out per session: the most recent occurrence of that
+ * weekday STRICTLY before the session's own date, so a Tuesday class on a
+ * "Thursday" row is due 5 days ahead and a Thursday class is due 7.
+ *
+ * Both are then read the same way by the digest pass — "due once the session
+ * is this close" — which is what makes a pass that missed its morning (a
+ * quiet workbook, a failed run) still send on the next one rather than
+ * skipping the session entirely.
+ */
+function leaderNotifyTimingDaysBefore(timing, sessionDate) {
+  if (!timing) return 0;
+  if (timing.mode === 'days_before') return timing.days;
+  // Duck-typed rather than `instanceof Date`: a date read back out of a sheet
+  // in one context and compared in another is a real Date that fails that
+  // test, and a digest silently never coming due is the worst way to find out.
+  if (timing.mode !== 'weekday' || !sessionDate || typeof sessionDate.getDay !== 'function') return 0;
+  const gap = (sessionDate.getDay() - timing.weekday + 7) % 7;
+  return gap === 0 ? 7 : gap;
+}
+
+/** The furthest ahead this timing can ever be due — what bounds the digest pass's session scan. */
+function leaderNotifyTimingMaxDays(timing) {
+  if (!timing) return 0;
+  if (timing.mode === 'days_before') return timing.days;
+  if (timing.mode === 'weekday') return LEADER_NOTIFY_TIMING_MAX_DAYS;
+  return 0;
 }
 
 
@@ -341,8 +415,8 @@ function programLeadersTabOptions() {
   return {
     banner: '👩‍🏫 Program Leaders',
     bannerNote: 'Who leads each program, where to write to them, and whether they want an email ' +
-      'when that program\'s roster changes. Notify_Timing picks WHEN: at each change, or a countdown ' +
-      'of days before each date. One row per leader per program — a leader with three classes has ' +
+      'when that program\'s roster changes. Notify_Timing picks WHEN: at each change, a countdown ' +
+      'of days before each date, or a fixed weekday before each date. One row per leader per program — a leader with three classes has ' +
       'three rows. Title_Match is optional: comma-separated phrases ("yoga, chair yoga") meaning ' +
       '"a program whose title contains this is mine" — a program nobody has typed a row for gets ' +
       'one proposed here, with the email tick left off until you turn it on. Sheet_Link and ' +

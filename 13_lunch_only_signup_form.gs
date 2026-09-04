@@ -543,6 +543,10 @@ function getLunchOnlyFormLinks() {
 defineLazyGlobal_('TAB_GROUPS', () => ([
   { color: PALETTE.TAB_TODAY, names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
+    // Immediately after the tab it is a view of, and after rather than before
+    // it: the session table is the one staff open every morning, and a derived
+    // summary does not get to be the first thing in the workbook.
+    SHEET_NAMES.PROGRAM_MONTH,
     SHEET_NAMES.LUNCH_DASHBOARD,
     SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.REGISTRANT_DASH

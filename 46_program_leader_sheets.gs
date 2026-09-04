@@ -1,24 +1,53 @@
 // ============================================================================
-// 9b. PROGRAM LEADER SIGN-UP SHEETS  (a live roster, shared out of the workbook)
+// 9b. PROGRAM REGISTRANT SHEETS  (a live roster, shared out of the workbook)
 // ============================================================================
 //
-// THE PROBLEM. A program leader wants to know who is coming to their class, and
-// they want to know it now — not off a PDF printed on Monday. Sharing this
-// workbook with them is not an answer: it holds every location's registrations,
-// every phone number, the catering order and the tabs that break if you type in
-// the wrong cell.
+// THE PROBLEM. Somebody wants to know who is coming to a class, and they want
+// to know it now — not off a PDF printed on Monday. Sharing this workbook with
+// them is not an answer: it holds every location's registrations, every phone
+// number, the catering order and the tabs that break if you type in the wrong
+// cell.
+//
+// THESE USED TO BE CALLED "PROGRAM LEADER SHEETS", and the name was wrong by
+// the time it was written: the leader marks who confirmed, but the desk reads
+// the same sheet to answer the phone, the office reads it to plan a room, and
+// the person covering a class nobody planned to cover reads it because it is
+// the only current list there is. A sheet named after ONE of its readers is a
+// sheet the others hesitate to open. It is the REGISTRANTS' sheet — named for
+// what is on it rather than for who was expected to look.
+//
+// The identifiers below still say "leader", deliberately and for the same
+// reason LEADER_SHEET_REGISTRY_PROP_KEY still says "instructor": renaming a
+// stored key or a tab name hands every live sheet to nobody. What changed is
+// every word a person reads.
 //
 // So each program gets its OWN small spreadsheet in Drive, holding nothing but
-// that program's roster, which the leader is added to as an editor. It is
+// that program's roster, which the leader is added to as an editor.
+//
+// ONE SHEET PER PROGRAM, NOT PER SESSION. A weekly class is one sheet with a
+// band per date (see below), so a link that was handed out in September is
+// still the right link in March. A sheet per session would mean a new link
+// every week, a folder nobody can find anything in, and marks stranded on
+// last week's file. It is
 // refreshed by the hourly registration sync — the same pass that imports the
 // form responses in the first place — so it costs NO NEW TRIGGER. That matters:
 // Apps Script allows twenty installable triggers per account and this project
 // already spends one per calendar, so a design that needed one per program
 // would stop working somewhere around the twentieth class.
 //
-// WHO GETS ONE is Program_Leaders (section 9c), which is where a leader's name,
-// their address and whether they want to be emailed all live. This file knows
-// only how to build the sheet and how to move marks across it.
+// WHO GETS ONE. Every program does, a week before its next session — see
+// ensureRegistrantSheetsForUpcomingPrograms(). It used to be only programs
+// whose leader had ticked Notify_Roster_Changes, and that left the ordinary
+// case (a class with no leader row at all) with no live roster unless somebody
+// remembered the menu item on the morning it was needed. The sheet is cheap,
+// it is built once for the life of the program, and a week is long enough to
+// be useful before the day and short enough that a calendar full of next
+// year's dates does not build a hundred spreadsheets tonight.
+//
+// WHO IT IS SHARED WITH is still Program_Leaders (section 9c), which is where a
+// leader's name and their address live. A program with no leader row gets its
+// sheet anyway — anyone with the link can open it — and nobody is emailed
+// about it.
 //
 // WHY NOT IMPORTRANGE. A formula-driven mirror is live and needs no code at
 // all, and that was the first plan. It cannot work here, because these sheets
@@ -69,14 +98,18 @@
 /**
  * Drive folder the per-program sheets live in, so they don't litter My Drive.
  *
- * The folder these sheets used to live in was called "Instructor Sign-Up
- * Sheets". getOrCreateProgramLeaderSheetFolder() RENAMES that one rather than
- * creating a second: two folders, one holding every sheet made before the
- * rename and one holding every sheet made after, is a filing system nobody
- * asked for and the kind of thing only noticed a year later.
+ * These sheets have been filed under two earlier names — "Instructor Sign-Up
+ * Sheets", then "Program Leader Sign-Up Sheets".
+ * getOrCreateProgramLeaderSheetFolder() RENAMES whichever it finds rather than
+ * creating a second beside it: a folder per historical name, each holding the
+ * sheets made while that name was current, is a filing system nobody asked for
+ * and the kind of thing only noticed a year later. The list is in
+ * most-recent-first order, which is the order a workbook is likeliest to have
+ * them in.
  */
-const LEADER_SHEET_FOLDER_NAME = 'Program Leader Sign-Up Sheets';
-const LEGACY_LEADER_SHEET_FOLDER_NAME = 'Instructor Sign-Up Sheets';
+const LEADER_SHEET_FOLDER_NAME = 'Program Registrant Sheets';
+const LEGACY_LEADER_SHEET_FOLDER_NAMES =
+  ['Program Leader Sign-Up Sheets', 'Instructor Sign-Up Sheets'];
 
 /**
  * programKey -> { fileId, title, location, createdAt }. See
@@ -270,7 +303,7 @@ function pullProgramLeaderSheetEdits(registrantRows) {
       const file = SpreadsheetApp.openById(entry.fileId);
       const tab = file.getSheetByName(LEADER_SHEET_TAB_NAME);
       if (!tab) {
-        log(`ℹ️ Program leader sheet for "${entry.title}" has no "${LEADER_SHEET_TAB_NAME}" tab — nothing to read back.`);
+        log(`ℹ️ Program registrant sheet for "${entry.title}" has no "${LEADER_SHEET_TAB_NAME}" tab — nothing to read back.`);
         return;
       }
       rows = readSimpleTable(tab, LEADER_SHEET_HEADERS);
@@ -279,8 +312,8 @@ function pullProgramLeaderSheetEdits(registrantRows) {
       // permission blip would otherwise silently detach a live sheet and the
       // next push would build a second one. NOT re-thrown either — see the
       // push half.
-      log(`⚠️ Could not read the program leader sheet for "${entry.title}" (${err}).`);
-      noteForAdmin('Program leader sheets that could not be read',
+      log(`⚠️ Could not read the program registrant sheet for "${entry.title}" (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be read',
         describeLeaderSheetAccessFailure(entry, programKey, err));
       return;
     }
@@ -315,13 +348,13 @@ function pullProgramLeaderSheetEdits(registrantRows) {
     });
   });
 
-  if (applied > 0) log(`Program leader sheets: merged ${applied} leader-edited cell(s) back into the Registrants tab.`);
+  if (applied > 0) log(`Program registrant sheets: merged ${applied} leader-edited cell(s) back into the Registrants tab.`);
   return applied;
 }
 
 
 /**
- * What to say when a program leader sheet cannot be opened — and, when the reason
+ * What to say when a program registrant sheet cannot be opened — and, when the reason
  * is a permission, WHO has to do WHAT about it.
  *
  * "Sign_Up — Tai Chi (Narberth) — Exception: You do not have permission to
@@ -341,7 +374,7 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
       `sheet and everything on it are fine — but the leader's ticks are not coming back into the ` +
       `workbook and the workbook's rows are not going out to them.\n\n` +
       `To fix it: open the file, press Share, and either add ${runningAs} as an editor or set "Anyone with ` +
-      `the link" to Editor. Then run "Refresh Program Leader Sheets Now" once. A sheet made from this menu now ` +
+      `the link" to Editor. Then run "Refresh Program Registrant Sheets Now" once. A sheet made from this menu now ` +
       `does both of those automatically.${fileRef}`;
   }
   return `${name} — ${text}${fileRef}`;
@@ -351,7 +384,7 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
 // --- writing the sheets back out --------------------------------------------
 
 /**
- * Refreshes every registered program leader sheet from the settled picture.
+ * Refreshes every registered program registrant sheet from the settled picture.
  *
  * Only sheets ALREADY in the registry are touched. Creating one is a
  * deliberate menu action (createProgramLeaderSheet()) — a sync that
@@ -380,7 +413,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
       // pass that proves we can still open it; the flag on the registry entry
       // is what keeps it from being three Drive calls every hour thereafter.
       if (!entry.accessOpened) {
-        const access = ensureProgramLeaderSheetAccess(file, `program leader sheet for "${entry.title}"`);
+        const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${entry.title}"`);
         if (access.openedUp || access.editors.length > 0) {
           saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, { accessOpened: true }));
         }
@@ -390,17 +423,17 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
       // a settled picture, and a program leader's spreadsheet being unreachable
       // is not a reason to fail a run that has already imported every
       // registration correctly.
-      log(`⚠️ Could not refresh the program leader sheet for "${entry.title}" (${err}).`);
-      noteForAdmin('Program leader sheets that could not be refreshed',
+      log(`⚠️ Could not refresh the program registrant sheet for "${entry.title}" (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be refreshed',
         describeLeaderSheetAccessFailure(entry, programKey, err));
     }
   });
-  if (pushed > 0) log(`Program leader sheets: refreshed ${pushed} shared sheet(s).`);
+  if (pushed > 0) log(`Program registrant sheets: refreshed ${pushed} shared sheet(s).`);
   return pushed;
 }
 
 /**
- * { programKey: [program leader sheet row, ...] } for every program in the
+ * { programKey: [registrant sheet row, ...] } for every program in the
  * registry's window, built ONCE from the rows the caller already has in hand
  * rather than re-reading either tab per program.
  *
@@ -476,7 +509,7 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
       return normalizeNameKey(a[sheetMap['Name']]).localeCompare(normalizeNameKey(b[sheetMap['Name']]));
     });
     if (byProgram[programKey].length > LEADER_SHEET_MAX_ROWS) {
-      log(`⚠️ Program leader sheet for ${programKey} would hold ` +
+      log(`⚠️ Program registrant sheet for ${programKey} would hold ` +
         `${byProgram[programKey].length} rows — trimmed to ${LEADER_SHEET_MAX_ROWS}.`);
       byProgram[programKey] = byProgram[programKey].slice(0, LEADER_SHEET_MAX_ROWS);
     }
@@ -721,31 +754,32 @@ function getOrCreateProgramLeaderSheetFolder() {
   const folders = DriveApp.getFoldersByName(LEADER_SHEET_FOLDER_NAME);
   if (folders.hasNext()) return folders.next();
 
-  const legacy = DriveApp.getFoldersByName(LEGACY_LEADER_SHEET_FOLDER_NAME);
-  if (legacy.hasNext()) {
+  for (let i = 0; i < LEGACY_LEADER_SHEET_FOLDER_NAMES.length; i++) {
+    const legacyName = LEGACY_LEADER_SHEET_FOLDER_NAMES[i];
+    const legacy = DriveApp.getFoldersByName(legacyName);
+    if (!legacy.hasNext()) continue;
     const folder = legacy.next();
     try {
       folder.setName(LEADER_SHEET_FOLDER_NAME);
-      log(`Renamed Drive folder "${LEGACY_LEADER_SHEET_FOLDER_NAME}" to "${LEADER_SHEET_FOLDER_NAME}".`);
-      return folder;
+      log(`Renamed Drive folder "${legacyName}" to "${LEADER_SHEET_FOLDER_NAME}".`);
     } catch (err) {
       // Somebody else's folder, or a Drive that said no. The sheets in it are
       // still reachable by id, so this is a cosmetic loss — use it as it is
       // rather than starting a second folder over a failed rename.
-      log(`ℹ️ Could not rename "${LEGACY_LEADER_SHEET_FOLDER_NAME}" (${err}) — filing new sheets there anyway.`);
-      return folder;
+      log(`ℹ️ Could not rename "${legacyName}" (${err}) — filing new sheets there anyway.`);
     }
+    return folder;
   }
 
   const folder = DriveApp.createFolder(LEADER_SHEET_FOLDER_NAME);
-  log(`Created Drive folder "${LEADER_SHEET_FOLDER_NAME}" for shared program leader rosters.`);
+  log(`Created Drive folder "${LEADER_SHEET_FOLDER_NAME}" for the shared program registrant sheets.`);
   return folder;
 }
 
 /**
  * OPENS THE SHEET UP so that everyone who has to touch it can.
  *
- * THE FAILURE THIS EXISTS FOR. A program leader sheet is created by whoever
+ * THE FAILURE THIS EXISTS FOR. A program registrant sheet is created by whoever
  * clicked the menu item — a real person, signed in as themselves — and it is
  * then read and written every hour by whoever owns the triggers, which is
  * routinely a DIFFERENT account. Drive shares a new file with its creator and
@@ -775,7 +809,7 @@ function getOrCreateProgramLeaderSheetFolder() {
  */
 function ensureProgramLeaderSheetAccess(file, describe) {
   if (!file) return { openedUp: false, editors: [], problems: [] };
-  return openUpFileToAnyoneWithLink(file.getId(), describe || 'program leader sheet');
+  return openUpFileToAnyoneWithLink(file.getId(), describe || 'program registrant sheet');
 }
 
 /**
@@ -783,7 +817,7 @@ function ensureProgramLeaderSheetAccess(file, describe) {
  * BACK: the accounts that run it as named editors, and anyone with the link
  * able to edit.
  *
- * WHY IT IS THE SAME ANSWER FOR A FORM AS FOR A PROGRAM LEADER SHEET. Both are
+ * WHY IT IS THE SAME ANSWER FOR A FORM AS FOR A PROGRAM REGISTRANT SHEET. Both are
  * created by whoever clicked the menu item — a real person, signed in as
  * themselves — and both are read and written every hour by whoever owns the
  * triggers, which is routinely a DIFFERENT account. Drive gives a new file to
@@ -792,7 +826,7 @@ function ensureProgramLeaderSheetAccess(file, describe) {
  * registrations are never imported. Nothing in either case looks broken.
  *
  * LOW SECURITY HERE IS A DELIBERATE TRADE. A registration form is a public
- * sign-up page and a program leader sheet is a roster of first names and ticks;
+ * sign-up page and a program registrant sheet is a roster of first names and ticks;
  * the alternative, in practice, is a file nobody can open and a feature nobody
  * uses. Anybody who wants it narrowed can change the sharing on the file
  * itself — nothing re-opens it except a run that touches it again.
@@ -952,7 +986,7 @@ function createProgramLeaderSheet(programValue) {
     } catch (err) {
       // Registered but gone — trashed by hand, most likely. Build a fresh one
       // rather than failing the action the person actually asked for.
-      log(`ℹ️ Registered program leader sheet for "${title}" could not be opened (${err}) — creating a new one.`);
+      log(`ℹ️ Registered program registrant sheet for "${title}" could not be opened (${err}) — creating a new one.`);
       removeProgramLeaderSheetRegistryEntry(programKey);
       file = null;
     }
@@ -960,7 +994,7 @@ function createProgramLeaderSheet(programValue) {
 
   const isNew = !file;
   if (isNew) {
-    file = SpreadsheetApp.create(`Sign-Up Sheet — ${title} (${location})`);
+    file = SpreadsheetApp.create(registrantSheetFileName(title, location));
     // Moved rather than copied: create() drops it in My Drive root, and a
     // folder of these is what keeps them findable a year from now.
     try {
@@ -968,7 +1002,18 @@ function createProgramLeaderSheet(programValue) {
       getOrCreateProgramLeaderSheetFolder().addFile(driveFile);
       DriveApp.getRootFolder().removeFile(driveFile);
     } catch (err) {
-      log(`ℹ️ Could not file the new program leader sheet into "${LEADER_SHEET_FOLDER_NAME}" (${err}) — it is in My Drive.`);
+      log(`ℹ️ Could not file the new program registrant sheet into "${LEADER_SHEET_FOLDER_NAME}" (${err}) — it is in My Drive.`);
+    }
+  } else {
+    // An existing file made under an older name. Renamed here — on the menu
+    // press, once, rather than on the hourly push — so the folder does not end
+    // up half "Sign-Up Sheet — …" and half "Registrant Sheet — …" forever. A
+    // Drive that refuses is a cosmetic loss and never the reason this fails.
+    const wanted = registrantSheetFileName(title, location);
+    try {
+      if (file.getName() !== wanted) file.rename(wanted);
+    } catch (err) {
+      log(`ℹ️ Could not rename the registrant sheet for "${title}" (${err}) — its contents are unaffected.`);
     }
   }
 
@@ -997,7 +1042,7 @@ function createProgramLeaderSheet(programValue) {
   // this is what keeps the file openable by the account that syncs it, and a
   // sheet created before this existed is repaired the next time somebody
   // presses the menu item. See ensureProgramLeaderSheetAccess().
-  const access = ensureProgramLeaderSheetAccess(file, `program leader sheet for "${title}"`);
+  const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${title}"`);
 
   const emails = getProgramLeaderEmailsForProgram(title, location);
   const shared = [];
@@ -1010,14 +1055,14 @@ function createProgramLeaderSheet(programValue) {
       // (a typo, a personal address a Workspace policy will not share with) is
       // exactly the case where the link still works and somebody should be
       // told to send it by hand.
-      log(`⚠️ Could not share the program leader sheet for "${title}" with ${email} (${err}).`);
-      noteForAdmin('Program leader sheets that could not be shared',
+      log(`⚠️ Could not share the program registrant sheet for "${title}" with ${email} (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be shared',
         `"${title}" (${location}) could not be shared with ${email} — ${err}. The sheet exists and ` +
         `anyone with its link can open it, so sending them the link by hand works.`);
     }
   });
 
-  log(`Program leader sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
+  log(`Program registrant sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
     `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es), ` +
     `link sharing ${access.openedUp ? 'on' : 'NOT on'}.`);
 
@@ -1059,7 +1104,7 @@ function removeDefaultSheetIfIdle(file, keepName) {
  * email links to the sheet ("Your sign-up sheet: …") only when one already
  * exists, so a leader who ticked the box on a program nobody had shared yet
  * got a change list with nowhere to click. Somebody on staff still had to
- * notice and run "Program Leader Sign-Up Sheets" by hand. The tick is the
+ * notice and run "Program Registrant Sheets" by hand. The tick is the
  * only ask a leader gets to make here, so it is the one this reads.
  *
  * ONLY FOR PROGRAMS THIS WORKBOOK KNOWS (see knownProgramKeys()) — the same
@@ -1078,6 +1123,99 @@ function removeDefaultSheetIfIdle(file, keepName) {
  * workbook, on the same footing as the push and the alert pass either side of
  * it in that function.
  */
+/** What one of these spreadsheets is called in Drive. Named for what is on it, not for who reads it. */
+function registrantSheetFileName(title, location) {
+  return `Registrant Sheet — ${title} (${location})`;
+}
+
+/**
+ * How far ahead of a session its program's sheet is built.
+ *
+ * A week, and the number is a compromise between two failures. Too short and
+ * the sheet appears the morning somebody needed it yesterday. Too long — or no
+ * horizon at all — and a workbook whose calendar runs eighteen months out
+ * builds a spreadsheet for every program it has ever run, tonight, in one
+ * execution, against a Drive quota.
+ */
+const REGISTRANT_SHEET_LEAD_DAYS = 7;
+
+/**
+ * How many sheets one sync may create. The hourly pass comes back, so a
+ * backlog drains over a few hours instead of one run spending its whole
+ * execution budget in SpreadsheetApp.create() — which is the slowest call this
+ * project makes — and timing out before it writes the registrations it
+ * actually ran to import.
+ */
+const REGISTRANT_SHEET_MAX_CREATES_PER_RUN = 5;
+
+/**
+ * Builds a registrant sheet for every program with a session inside the next
+ * REGISTRANT_SHEET_LEAD_DAYS days that does not already have one.
+ *
+ * Called from the hourly registration sync (27) BEFORE the push, so a sheet
+ * created here is filled in on the same run rather than sitting empty for an
+ * hour.
+ *
+ * NEVER THROWS AND NEVER REBUILDS. A program already in the registry is left
+ * exactly alone — this decides only whether a sheet EXISTS, and the push
+ * beside it decides what is in it. That is what makes a sheet handed out in
+ * September still the same file, with the same link and the same marks, in
+ * March.
+ *
+ * Returns how many were created.
+ */
+function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
+  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const registry = getProgramLeaderSheetRegistry();
+
+  const today = new Date();
+  const todayKey = formatDateKey(today);
+  const horizonKey = formatDateKey(
+    new Date(today.getTime() + REGISTRANT_SHEET_LEAD_DAYS * 86400000));
+
+  // Soonest session first, so a run that hits the cap builds the sheets that
+  // are needed first rather than whichever program sorts earliest by name.
+  const wanted = {};
+  (sessionRows || []).forEach(row => {
+    const title = String(row[map['Clean_Title']] || '').trim();
+    const location = String(row[map['Location']] || '').trim();
+    if (!title || !location) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < todayKey || dateKey > horizonKey) return;
+    const key = leaderProgramKey(title, location);
+    if (registry[key] && registry[key].fileId) return; // already has one, for the life of the program
+    if (!wanted[key] || dateKey < wanted[key].dateKey) {
+      wanted[key] = { title, location, dateKey };
+    }
+  });
+
+  const keys = Object.keys(wanted).sort((a, b) => wanted[a].dateKey.localeCompare(wanted[b].dateKey));
+  let created = 0;
+  keys.forEach(key => {
+    if (created >= REGISTRANT_SHEET_MAX_CREATES_PER_RUN) return; // the next sync picks the rest up
+    const program = wanted[key];
+    try {
+      createProgramLeaderSheet(`${program.title}|||${program.location}`);
+      created++;
+      log(`Registrant sheet auto-created for "${program.title}" (${program.location}) — ` +
+        `its next session is ${program.dateKey}.`);
+    } catch (err) {
+      log(`⚠️ Could not auto-create the registrant sheet for "${program.title}" (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be auto-created',
+        `"${program.title}" (${program.location}) — its next session is ${program.dateKey}, so this ` +
+        `workbook tried to build a shared roster for it automatically and could not (${err}). Use ` +
+        `"Program Registrant Sheets" on the Admin menu to build it by hand.`);
+    }
+  });
+
+  if (created > 0 && keys.length > created) {
+    log(`${keys.length - created} more registrant sheet(s) are due — the next sync builds them.`);
+  }
+  return created;
+}
+
 function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
   const leaders = getProgramLeadersWantingAlerts();
   if (leaders.length === 0) return 0;
@@ -1099,14 +1237,14 @@ function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
     try {
       createProgramLeaderSheet(`${program.title}|||${program.location}`);
       created++;
-      log(`Program leader sheet auto-created for "${program.title}" (${program.location}) — ` +
+      log(`Registrant sheet auto-created (leader notify) for "${program.title}" (${program.location}) — ` +
         `its leader asked to be notified of roster changes.`);
     } catch (err) {
-      log(`⚠️ Could not auto-create the program leader sheet for "${program.title}" (${err}).`);
-      noteForAdmin('Program leader sheets that could not be auto-created',
+      log(`⚠️ Could not auto-create the program registrant sheet for "${program.title}" (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be auto-created',
         `"${program.title}" (${program.location}) — its leader ticked Notify_Roster_Changes, so this ` +
         `workbook tried to build a shared sheet for it automatically and could not (${err}). Use ` +
-        `"Program Leader Sign-Up Sheets" on the Admin menu to build it by hand.`);
+        `"Program Registrant Sheets" on the Admin menu to build it by hand.`);
     }
   });
 
@@ -1126,7 +1264,7 @@ function showProgramLeaderSheetDialog() {
   const html = HtmlService.createHtmlOutput(buildProgramLeaderSheetHtml(options))
     .setWidth(560)
     .setHeight(500);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Program Leader Sign-Up Sheets');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Program Registrant Sheets');
 }
 
 /**
@@ -1204,19 +1342,26 @@ function refreshProgramLeaderSheetsNow() {
     const registrantRows = getSectionedRows(
       getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
 
-    // BEFORE THE REGISTRY CHECK BELOW: somebody pressing this having just
-    // ticked Notify_Roster_Changes should not have to wait for the hourly
-    // sync to get a sheet — see ensureProgramLeaderSheetsForNotifyingLeaders().
+    // BEFORE THE REGISTRY CHECK BELOW: somebody pressing this — because a
+    // program starts on Monday, or because they have just ticked
+    // Notify_Roster_Changes — should not have to wait for the hourly sync to
+    // get a sheet. Both auto-create passes, in the same order the sync runs
+    // them; either may find the other already did it.
+    try {
+      ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows);
+    } catch (err) {
+      log(`⚠️ Could not auto-create the upcoming programs' registrant sheets (${err}).`);
+    }
     try {
       ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
     } catch (err) {
-      log(`⚠️ Could not auto-create program leader sheets (${err}).`);
+      log(`⚠️ Could not auto-create registrant sheets for the notifying leaders (${err}).`);
     }
 
     const registry = getProgramLeaderSheetRegistry();
     if (Object.keys(registry).length === 0) {
-      toastIfPossible('No program leader sheets have been created yet — use "Share a Sign-Up Sheet…" first, ' +
-        'or tick Notify_Roster_Changes for a leader on Program_Leaders.');
+      toastIfPossible('No program registrant sheets have been created yet. One is built by itself a week before a ' +
+        'program\'s next session — use "Share a Program Registrant Sheet…" to get one sooner.');
       return;
     }
 
@@ -1234,19 +1379,19 @@ function refreshProgramLeaderSheetsNow() {
       merged = pullProgramLeaderSheetEdits(registrantRows);
       if (merged > 0) renderRegistrantsSheet(false, registrantRows);
     } catch (err) {
-      log(`⚠️ Could not read the program leader sheets back in (${err}).`);
+      log(`⚠️ Could not read the program registrant sheets back in (${err}).`);
       failures.push(`the program leaders' own edits could not be read back in (${err})`);
     }
     try {
       pushed = pushProgramLeaderSheets(sessionRows, registrantRows);
     } catch (err) {
-      log(`⚠️ Could not push the program leader sheets out (${err}).`);
+      log(`⚠️ Could not push the program registrant sheets out (${err}).`);
       failures.push(`the rosters could not be sent out (${err})`);
     }
 
-    flushAdminDigest('Program leader sheet refresh');
+    flushAdminDigest('Program registrant sheet refresh');
     const trouble = failures.length === 0 ? '' : ` ⚠️ ${failures.join('; ')}.`;
-    toastIfPossible(`Program leader sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
+    toastIfPossible(`Program registrant sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
       `${pushed} sheet(s) out, ${merged} program leader edit(s) in.${trouble}`);
   } finally {
     lock.releaseLock();
@@ -1288,11 +1433,13 @@ function buildProgramLeaderSheetHtml(options) {
   .ok { color: #188038; } .err { color: #C5221F; }
   a { color: #1155CC; }
 </style>
-<h3>Share a live sign-up sheet</h3>
+<h3>Share a live registrant sheet</h3>
 <p class="hint">
   Makes a small spreadsheet in Drive holding just this program's roster at this location, and adds
-  whoever <b>Program_Leaders</b> names as its leader as an editor. It refreshes itself on
-  the hourly registration sync — no printing, no new trigger.
+  whoever <b>Program_Leaders</b> names as its leader as an editor. One sheet per program, not per
+  date — the same link stays right all season. It refreshes itself on the hourly registration sync,
+  which also builds one by itself a week before a program's next session, so this is for when you
+  want it sooner.
   The program leader ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
   types in <b>Leader_Notes</b>; those come back into the Registrants tab on the same sync.
   <b>Dropped is a cancellation</b> — the seat and the lunch go back on the next sync, and the
