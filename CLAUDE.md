@@ -289,6 +289,19 @@ constants stand alone, and everything that calls into it (`29`, `36`, `38`,
 |---|--:|---|
 | `77_households_and_names.gs` | 453 | **A household is a guess, and a name is not a key you can retype.** `buildHouseholdAssignments` reads the people who arrive together off the contact details they share — one email, one phone — with the office's own address thrown out first (`HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN`) and `Household_Override` beating the guess in both directions; `readHouseholdIndex` / `householdCompanionsOf` are how the door (`74`) and Quick Mark (`38`) ask. And the names: `parseMemberName` lifts the nickname out of `Bob (Robert)` or `Robert "Bob" Kaplan` so a desk can find somebody under what they are actually called, while `applyMemberNameCorrection` is what a staff correction in `Display_Name` costs — the spelling rewritten across every tab that carries it, plus a remembered old→new map (`canonicalMemberName`) so the responses still arriving under the wrong one are filed under the right one. |
 
+### The month behind the sessions (78)
+
+Numbered after `77` (taken by the households-and-names file, which landed
+first) and last for the usual reason: behavior only, its own top-level constants
+stand alone, and everything it reads from other files it reaches through a
+hoisted function call or `HEADERS` — so it is there whatever order the files
+come in. Its schema (`SHEET_NAMES.PROGRAM_MONTH`, `HEADERS.Program_Month`)
+lives in `03` like every other tab's.
+
+| File | | What is in it |
+|---|--:|---|
+| `78_program_month_dashboard.gs` | 423 | The `Program_Month` tab: one row per program-month — the unit `buildEventGroups()` already makes one form for, and the one thing the session table cannot show. Grouped by `Form_ID` (the groupKey's own identity, already on the row), falling back to `(Clean_Title, Location, month)` for the `[No Registration]` and hand-added rows that have no form; a `[Shared]` program at two locations is ONE row, worded by `describeLocations()`. `Schedule` is what earns the tab its keep — `Tue 9:30 AM – 11:30 AM · 4 sessions`, or `times vary` with the outliers in a cell note. **Derived, read-only and purely additive**: nothing reads it, nothing is stored on it that is not already on a session row, and deleting the tab leaves every other behavior alone. Drawn from the session rows `renderProgramDashboard()` already holds — never a second read of that tab. |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
@@ -368,3 +381,4 @@ their number.
 available. It is not part of the normal loop: **do not run it as a build step,
 and do not treat its output as the source.** `Code.bundle.gs` is gitignored;
 edits belong in the numbered files.
+

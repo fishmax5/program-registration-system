@@ -71,6 +71,18 @@ function renderProgramDashboard(force, options) {
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
 
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
+
+  // THE MONTH VIEW IS DRAWN FROM THE ROWS WE ARE HOLDING, not from a second
+  // read of the tab we have just written — see 78_program_month_dashboard.gs.
+  // It is derived and nothing reads it, so a failure to draw it must not cost
+  // the caller the session table it actually asked for: a broken derived view
+  // is a log line, not a failed sync.
+  try {
+    renderProgramMonthDashboard(force, { sessionRows });
+  } catch (err) {
+    log(`\u26a0\ufe0f Program_Month could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
+  }
+
   return { registrantsMoved: triageResult.registrantsMoved };
 }
 

@@ -13,6 +13,18 @@
  *      is the first column, and the old separate Month column has been
  *      replaced everywhere by simply color-tinting the Event_Date cell
  *      itself (see getMonthColor()/applyMonthColorTint()).
+ *    - Program_Month            : the same sessions, one row per PROGRAM-
+ *      MONTH — one program, one location, one month, which is the unit
+ *      buildEventGroups() already makes one FORM for. Fourteen of the
+ *      session table's columns are program-month facts printed once per
+ *      session; this is the other half of that join written out on its own,
+ *      with the schedule collapsed into a phrase ("Tue 9:30 AM - 11:30 AM ·
+ *      4 sessions") and lunch collapsed to one row per location per month.
+ *      DERIVED AND READ-ONLY: nothing reads it, nothing is stored on it that
+ *      is not already on a session row, and deleting the tab changes no
+ *      behavior anywhere (the next dashboard render draws it again). Written
+ *      from the session rows the render already holds, never from a second
+ *      read of that tab. See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.

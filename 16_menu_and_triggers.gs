@@ -227,6 +227,10 @@ function buildAppMenu(ui, includeAdmin) {
       // The \u21bb link inside the Quick Mark dialog does the same thing. This is
       // for the other order \u2014 rebuild the lists first, THEN walk to the desk.
       .addItem('Rebuild Quick Mark Lists', 'rebuildQuickMarkListsNow')
+      // The month view is redrawn by every dashboard render; this is for
+      // somebody who deleted the tab, or who wants it caught up without
+      // waiting for the next sync. See 78_program_month_dashboard.gs.
+      .addItem('Rebuild the Program Month View', 'renderProgramMonthSheetNow')
       // The check-in page queues its marks and a trigger writes them; this is
       // the "write them NOW" for somebody standing over the tab wondering
       // where this morning's ticks are. See flushCheckInQueue().

@@ -16,6 +16,13 @@ defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
 const SHEET_NAMES = {
   CONFIG: 'Config',
   PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
+  // One row per program-month — the same program, at the same location, in
+  // the same month, which is exactly the unit buildEventGroups() already
+  // makes one FORM for. DERIVED, top to bottom, from the session table:
+  // nothing is stored here that is not already on a session row, which is
+  // what makes deleting this tab a cosmetic act rather than a data loss.
+  // See 78_program_month_dashboard.gs.
+  PROGRAM_MONTH: 'Program_Month',
   REGISTRANT_DASH: 'Registrant_Dash',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
   LUNCH_ROSTER: 'Lunch_Roster',
@@ -135,6 +142,26 @@ defineLazyGlobal_('HEADERS', () => ({
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
     'Max_Per_Month'
+  ],
+  /**
+   * Program_Month — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
+   *
+   * Month_Start LEADS THE ROW AND IS A REAL DATE (the 1st of the month), for
+   * the same reason Event_Date leads every other date-bearing tab: it is what
+   * partitionByDate() / writeUpcomingPastSections() / getSectionedRows() are
+   * defined against. A month written as the words "September 2026" would have
+   * needed a second sectioned reader, and this tab is not worth one.
+   *
+   * Form_ID trails at the end with Group_Key, hidden like the session table's
+   * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is how the rows are
+   * GROUPED, and Group_Key is the row's own identity — both are for reading in
+   * the formula bar when something has gone wrong, not for scanning.
+   */
+  Program_Month: [
+    'Month_Start', 'Location', 'Program', 'Type_Tag', 'Flags', 'Schedule', 'Sessions',
+    'Registered', 'Max_Capacity', 'Fill', 'Waitlist',
+    'Form_Response_Link', 'Edit_Form_Link', 'Leader_Sheet_Link', 'Status',
+    'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it
