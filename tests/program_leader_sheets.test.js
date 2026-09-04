@@ -32,6 +32,7 @@ this.pullProgramLeaderSheetEdits = pullProgramLeaderSheetEdits;
 this.leaderRowKey = leaderRowKey;
 this.encodeLeaderSnapshot = encodeLeaderSnapshot;
 this.getIndexMap = getIndexMap;
+this.isLeaderSheetWaitlistedRow = isLeaderSheetWaitlistedRow;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.LEADER_OWNED_COLUMNS = LEADER_OWNED_COLUMNS;
 this.HEADERS = HEADERS;
@@ -259,6 +260,29 @@ check('...and spends it on the soonest sessions',
 check('the file is named for what is on it, not for who reads it',
   sandbox.registrantSheetFileName('Chair Yoga', 'Narberth'),
   'Registrant Sheet — Chair Yoga (Narberth)');
+
+// WHICH LINES GET THE WASH. A leader scans a roster for "how many chairs",
+// and the one line where the answer is no has to look different — from either
+// side: the status the workbook settled on, or the tick the leader made on
+// this sheet a minute ago and has not yet seen pushed back.
+{
+  const m = sandbox.getIndexMap(sandbox.LEADER_SHEET_HEADERS);
+  const line = over => {
+    const row = new Array(sandbox.LEADER_SHEET_HEADERS.length).fill('');
+    Object.keys(over).forEach(k => { row[m[k]] = over[k]; });
+    return row;
+  };
+  check('a waitlisted status is washed',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Waitlisted' }), m), true);
+  check("a leader's own tick is washed before the next push confirms it",
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active', Waitlisted: true }), m), true);
+  check('a pasted "TRUE" counts, the same as it does in the merge',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Waitlisted: 'TRUE' }), m), true);
+  check('an ordinary active line is not washed',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active' }), m), false);
+  check('and neither is a band row, which carries neither',
+    sandbox.isLeaderSheetWaitlistedRow(line({}), m), false);
+}
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

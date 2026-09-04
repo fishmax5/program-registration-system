@@ -174,6 +174,9 @@ function buildQuickMarkHtml(preloadedIndex) {
   put somebody on a session they have not signed up for — over the phone or at the desk, with no
   form. The dialog stays open on the same session, so a queue of people is one pick and one click
   each.<br>
+  <b>Full?</b> Tick <b>Add to waitlist</b> instead of registering them. It works on somebody already
+  on the list as well — that gives their seat and their lunch back — and staff take them off the
+  waitlist on the Registrants tab when a place comes free.<br>
   <b>More than one meal?</b> Ticking <b>Lunch</b> opens boxes for how many they ate here and how many
   they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.
 </p>
@@ -250,8 +253,8 @@ function buildQuickMarkHtml(preloadedIndex) {
 
 <fieldset>
   <legend>Mark</legend>
-  <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
-  <label class="tick"><input type="checkbox" id="lunch" onchange="exclusiveLunch('lunch'); refreshButton()"> Lunch
+  <label class="tick"><input type="checkbox" id="attended" onchange="clearWaitlistTick(); refreshButton()"> Attended</label>
+  <label class="tick"><input type="checkbox" id="lunch" onchange="clearWaitlistTick(); exclusiveLunch('lunch'); refreshButton()"> Lunch
     <span class="note">— on its own means a meal collected, not present</span></label>
   <div id="servedBox" class="meals" style="display:none">
     <p class="hint" style="margin:0 0 4px 0">How many meals did they actually take? Leave them all at 0
@@ -260,7 +263,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     <label class="num">Took home <input type="number" id="tookHome" min="0" max="20" step="1" value="0"></label>
     <label class="num">Into the fridge <input type="number" id="inFridge" min="0" max="20" step="1" value="0"></label>
   </div>
-  <label class="tick"><input type="checkbox" id="signup" onchange="exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
+  <label class="tick"><input type="checkbox" id="signup" onchange="clearWaitlistTick(); exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
     <span class="note">— they want a meal on this date; nothing has been served yet</span></label>
   <div id="mealsBox" class="meals" style="display:none">
     <label class="num">Meals to order <input type="number" id="mealsOrdered" min="1" max="20" step="1" value="1"></label>
@@ -268,6 +271,8 @@ function buildQuickMarkHtml(preloadedIndex) {
   </div>
   <label class="tick"><input type="checkbox" id="register" onchange="registerChanged()"> Register them for this session
     <span class="note">— no form needed; nothing is marked attended</span></label>
+  <label class="tick"><input type="checkbox" id="waitlist" onchange="waitlistChanged()"> Add to waitlist
+    <span class="note">— the session is full: they hold no seat and no meal is ordered</span></label>
   <label class="tick" id="standingLabel" style="display:none">
     <input type="checkbox" id="standing" onchange="standingChanged()"> …and every future session of it
     <span class="note">— a standing place on the list, until staff untick them on Club_Members</span></label>
@@ -856,10 +861,33 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   // "Every future session" is a rider on registering, not a mark of its own:
   // it only means anything once somebody is being put on the list.
+  // WAITLISTING SAYS THE OPPOSITE OF EVERY MARK BESIDE IT — no seat, no meal,
+  // not here — so ticking it clears them rather than leaving the desk to find
+  // out from a refusal after they press the button. The server refuses the
+  // combination anyway (see applyQuickMarkLocked()); this is so nobody ever
+  // reaches it.
+  function waitlistChanged() {
+    if (el('waitlist').checked) {
+      el('attended').checked = false;
+      el('lunch').checked = false;
+      el('signup').checked = false;
+      el('standing').checked = false;
+      el('standingLunch').checked = false;
+      showMealBoxes();
+    }
+    registerChanged();
+  }
+
+  // And the reverse: ticking any of them unticks the waitlist. One line rather
+  // than three handlers, called from each.
+  function clearWaitlistTick() {
+    if (el('waitlist').checked) { el('waitlist').checked = false; waitlistChanged(); }
+  }
+
   function registerChanged() {
     // Not offered on an appointment session: an appointment is booked one at a
     // time, so "every future one" is not a thing anybody can be put down for.
-    var on = el('register').checked && !appointmentSession();
+    var on = el('register').checked && !appointmentSession() && !el('waitlist').checked;
     el('standingLabel').style.display = on ? 'block' : 'none';
     if (!on) el('standing').checked = false;
     standingChanged();
@@ -900,12 +928,14 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   function refreshButton() {
     var registering = el('register').checked;
+    var waitlisting = el('waitlist').checked;
     // Moving somebody to another time IS a thing to press the button for, on
     // its own — "she rang to move to 11:30" is not an attendance mark and not
     // a registration, and until it counted here the button stayed grey.
     var moving = el('moveTime').checked && !!chosenBookedTime();
     var ready = !!el('session').value && !!chosenName() &&
-      (el('attended').checked || el('lunch').checked || el('signup').checked || registering || moving) &&
+      (el('attended').checked || el('lunch').checked || el('signup').checked || registering ||
+        waitlisting || moving) &&
       // An appointment session cannot be booked, or moved, without naming the slot.
       !(appointmentSession() && (registering || moving) && !el('apptTime').value) &&
       // And moving somebody onto the slot they already hold is not a move.
@@ -913,7 +943,10 @@ function buildQuickMarkHtml(preloadedIndex) {
         !el('lunch').checked && !el('signup').checked && !registering);
     el('go').disabled = !ready;
     var onlySignup = el('signup').checked && !el('attended').checked && !el('lunch').checked;
-    el('go').textContent = registering ? 'Sign up'
+    // Ahead of every other label: it is the one word that describes what the
+    // button will actually do when it is ticked, whatever else is.
+    el('go').textContent = waitlisting ? 'Add to waitlist'
+      : registering ? 'Sign up'
       : (moving && !el('attended').checked && !el('lunch').checked && !onlySignup) ? 'Move'
         : (onlySignup ? 'Sign up' : 'Mark');
   }
@@ -945,6 +978,7 @@ function buildQuickMarkHtml(preloadedIndex) {
           el('lunch').checked = false;
           el('signup').checked = false;
           el('register').checked = false;
+          el('waitlist').checked = false;
           el('mealsOrdered').value = '1';
           el('ateHere').value = '0';
           el('tookHome').value = '0';
@@ -1002,6 +1036,7 @@ function buildQuickMarkHtml(preloadedIndex) {
         lunch: el('lunch').checked,
         signup: el('signup').checked,
         register: el('register').checked,
+        waitlist: el('waitlist').checked,
         standing: el('standing').checked,
         standingLunch: el('standingLunch').checked,
         appointmentTime: el('apptTime').value,

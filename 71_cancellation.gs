@@ -84,8 +84,7 @@ function stampRegistrantRowCancelled(row, map, opts) {
   row[map['Program_Status']] = 'Cancelled';
   row[map['Lunch_Status']] = 'Cancelled';
   row[map['Manual_Override']] = 'Manually Edited';
-  const notes = String(row[map['Admin_Notes']] || '').trim();
-  row[map['Admin_Notes']] = notes ? `${notes} | ${cancellationStamp(opts)}` : cancellationStamp(opts);
+  appendAdminNote(row, map, cancellationStamp(opts));
   return true;
 }
 
@@ -746,4 +745,244 @@ function cancelPageProgramLabel(formId) {
   const first = Object.keys(sessions).map(k => sessions[k])
     .sort((a, b) => a.dateKey < b.dateKey ? -1 : 1)[0];
   return first ? [first.title, first.location].filter(Boolean).join(' — ') : '';
+}
+
+
+// ============================================================================
+// THE WAITLIST, SAID OUT LOUD  (the other status a booking can move to)
+// ============================================================================
+//
+// Program_Status = 'Waitlisted' was, until this section, something only the
+// IMPORT could decide: processFormResponse() computes it once, from the
+// session's capacity or its [Waitlist Only] tick, at the moment a form
+// response is read. Nobody who learns afterwards that a person should be
+// waiting rather than booked — the desk taking a phone call, the program
+// leader who knows their own room holds twelve — had any way to say so.
+//
+// It is the same shape as a cancellation and is written the same way, for the
+// same reason: a status change that the next hourly sync silently reverses is
+// worse than none. FOUR CELLS, not one — see stampRegistrantRowCancelled(),
+// whose contract these follow exactly:
+//
+//   Program_Status  — 'Waitlisted'. recomputeEventRegistryCounts() gives the
+//                     seat back to the session the moment it sees this, which
+//                     is the point: a waitlisted person is not holding a place.
+//   Lunch_Status    — 'Waitlisted' too. The kitchen must not cook for somebody
+//                     who does not have a seat, and the meal is never derived
+//                     from the program status anywhere else.
+//   Manual_Override — what makes it STICK against the next import.
+//   Admin_Notes     — who, when, and (for the leader path) the reason.
+//
+// AND BACK AGAIN, which is the one place this differs from a cancellation. A
+// cancellation is final by design; a waitlist is a queue, and "a seat came
+// free, put her back on" is the sentence the whole feature exists for. See
+// stampRegistrantRowActive() for what it will and will not undo.
+
+/** The words that mark a row this project waitlisted BY HAND, so it can be told from one the import waitlisted at capacity. */
+const WAITLIST_HANDLED_MARK = 'Waitlisted';
+
+/** Where a by-hand waitlist decision came from. Same vocabulary as CANCELLATION_SOURCES, and deliberately the same strings. */
+const WAITLIST_SOURCES = CANCELLATION_SOURCES;
+
+/**
+ * Moves ONE registrant row onto the waitlist, in place. Returns true if it moved.
+ *
+ * Refuses a row that is already waitlisted (the hourly caller below would
+ * otherwise append a stamp an hour, forever) and any row that is already
+ * not-coming: cancelled is a stronger statement than waiting, and quietly
+ * turning a cancellation into a queue place would put somebody back on a list
+ * they took themselves off.
+ */
+function stampRegistrantRowWaitlisted(row, map, opts) {
+  const status = String(row[map['Program_Status']] || '').trim();
+  if (status === 'Waitlisted') return false;
+  if (CANCELLATION_TERMINAL_STATUSES.indexOf(status) !== -1) return false;
+
+  row[map['Program_Status']] = 'Waitlisted';
+  if (map['Lunch_Status'] !== undefined) row[map['Lunch_Status']] = 'Waitlisted';
+  row[map['Manual_Override']] = 'Manually Edited';
+  appendAdminNote(row, map, waitlistStamp(WAITLIST_HANDLED_MARK, opts));
+  return true;
+}
+
+/**
+ * Takes ONE row back OFF the waitlist, in place. Returns true if it moved.
+ *
+ * ONLY FROM 'Waitlisted'. It is not a general "make this person active"
+ * button: handing a seat back to somebody who cancelled, or resurrecting a
+ * superseded row, are both things a human should have to type.
+ *
+ * THE MEAL IS RESTORED FROM Lunch_Type, not remembered. A waitlisted row
+ * carries Lunch_Status = 'Waitlisted' and no memory of what it said before, but
+ * Lunch_Type is untouched by any of this and still says which meal the person
+ * asked for — so a row that wanted feeding goes back to 'Needed' and one that
+ * never did goes back to 'No Lunch'. Getting this wrong in the safe direction
+ * means one uneaten meal; the other direction is somebody sitting down to
+ * nothing.
+ */
+function stampRegistrantRowActive(row, map, opts) {
+  if (String(row[map['Program_Status']] || '').trim() !== 'Waitlisted') return false;
+
+  row[map['Program_Status']] = 'Active';
+  if (map['Lunch_Status'] !== undefined) {
+    const lunchType = String(row[map['Lunch_Type']] || '').trim();
+    row[map['Lunch_Status']] = (lunchType && lunchType !== 'No Lunch') ? 'Needed' : 'No Lunch';
+  }
+  row[map['Manual_Override']] = 'Manually Edited';
+  appendAdminNote(row, map, waitlistStamp('Taken off the waitlist', opts));
+  return true;
+}
+
+/** Adds one sentence to Admin_Notes without losing the standing note that may already be there. */
+function appendAdminNote(row, map, sentence) {
+  if (map['Admin_Notes'] === undefined) return;
+  const notes = String(row[map['Admin_Notes']] || '').trim();
+  row[map['Admin_Notes']] = notes ? `${notes} | ${sentence}` : sentence;
+}
+
+/** cancellationStamp()'s sentence, for a move that is not a cancellation. Same order, same cap, same reason. */
+function waitlistStamp(what, opts) {
+  const o = opts || {};
+  const source = o.source || WAITLIST_SOURCES.STAFF;
+  const reason = String(o.reason || '').replace(/\s+/g, ' ').trim().slice(0, CANCELLATION_REASON_MAX_CHARS);
+  const who = String(o.by || '').trim();
+  const parts = [`${what} ${source} on ${formatDateLabel(new Date())}`];
+  if (who) parts.push(`by ${who}`);
+  const head = parts.join(' ');
+  return reason ? `${head}: ${reason}` : `${head}.`;
+}
+
+/**
+ * Was this row put on the waitlist BY HAND, through one of the doors above?
+ *
+ * The distinction matters exactly once, and it is the reason this reads a
+ * sentence out of Admin_Notes rather than carrying a column of its own: only a
+ * by-hand waitlisting may be undone by hand. A row the IMPORT waitlisted
+ * because the session was full is holding a place in a queue that capacity
+ * decides, and promoting it out of turn — because somebody unticked a box on a
+ * shared sheet — is how the twelfth person gets a seat ahead of the eleventh.
+ */
+function wasWaitlistedByHand(row, map) {
+  if (map['Admin_Notes'] === undefined) return false;
+  return String(row[map['Admin_Notes']] || '').indexOf(`${WAITLIST_HANDLED_MARK} ${WAITLIST_SOURCES.LEADER}`) !== -1 ||
+    String(row[map['Admin_Notes']] || '').indexOf(`${WAITLIST_HANDLED_MARK} ${WAITLIST_SOURCES.DESK}`) !== -1 ||
+    String(row[map['Admin_Notes']] || '').indexOf(`${WAITLIST_HANDLED_MARK} ${WAITLIST_SOURCES.STAFF}`) !== -1;
+}
+
+/**
+ * HOW FULL EVERY UPCOMING SESSION IS, keyed by Event_ID: { capacity, closed,
+ * active }.
+ *
+ * Built once per pass rather than read per row, because the caller below walks
+ * the whole Registrants tab and the alternative is a dashboard read per
+ * promotion. `closed` is the session's [Waitlist Only] tick — a session
+ * somebody has shut takes nobody back off its waitlist, whatever the number
+ * beside it says (see WAITLIST_ONLY_TAG).
+ */
+function buildWaitlistSeatIndex(registrantRows, map, sessionRows) {
+  const headers = HEADERS.All_Program_Sessions;
+  const sessionMap = getIndexMap(headers);
+  let rows = sessionRows;
+  if (!rows) {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    rows = sheet ? getSectionedRows(sheet, headers, 'Event_ID') : [];
+  }
+
+  const seats = {};
+  rows.forEach(row => {
+    const eventId = String(row[sessionMap['Event_ID']] || '').trim();
+    if (!eventId) return;
+    seats[eventId] = {
+      capacity: Number(row[sessionMap['Max_Capacity']]) || 0,
+      closed: sessionMap['Waitlist_Only'] !== undefined &&
+        isWaitlistOnlyColumnValue(row[sessionMap['Waitlist_Only']]),
+      active: 0
+    };
+  });
+
+  (registrantRows || []).forEach(row => {
+    const seat = seats[String(row[map['Event_ID']] || '').trim()];
+    if (seat && String(row[map['Program_Status']] || '').trim() === 'Active') seat.active++;
+  });
+  return seats;
+}
+
+
+// --- door 2b: the program leader's Waitlisted tick ---------------------------
+
+/**
+ * A TICK IN "WAITLISTED" IS A WAITLISTING, and until now it was a note.
+ *
+ * The same story as applyLeaderDropsAsCancellations(), one column to the left:
+ * the shared sheet has offered the tick since it was built, the merge has
+ * carried it faithfully back to a column nothing read, and the leader who used
+ * it went on watching the person sit in a seat the workbook still counted.
+ *
+ * TWO-WAY, unlike Dropped, because a waitlist is a queue and not an ending.
+ * Unticking the box puts the person back — but ONLY if this is a place the
+ * leader put them in (wasWaitlistedByHand()) and ONLY if the session actually
+ * has a seat for them. Both guards are the same guard really: a leader's tick
+ * governs the leader's own decisions and must not be able to promote somebody
+ * over a capacity the office set, or ahead of the queue the import built.
+ *
+ * A REFUSED PROMOTION IS LOGGED AND NOT STAMPED. It runs every hour, and a
+ * note appended once an hour to a row nobody can promote is a column of
+ * identical sentences by Friday. The leader sees the row still reading
+ * Waitlisted, which is the true answer.
+ *
+ * UPCOMING ONLY, and stamped in place on the rows the caller is about to
+ * write — both for the reasons applyLeaderDropsAsCancellations() gives.
+ */
+function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
+  if (!registrantRows || registrantRows.length === 0) return 0;
+  const map = getIndexMap(HEADERS.All_Registrants);
+  if (map['Waitlisted'] === undefined) return 0;
+  const todayKey = formatDateKey(new Date());
+  const seats = buildWaitlistSeatIndex(registrantRows, map, sessionRows);
+
+  let waitlisted = 0;
+  let restored = 0;
+  let refused = 0;
+  registrantRows.forEach(row => {
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date || formatDateKey(date) < todayKey) return;
+    // A leader who ticks Waitlisted AND Dropped on the same row has said the
+    // stronger of the two things; the cancellation has already been stamped by
+    // the time this runs, and stampRegistrantRowWaitlisted() refuses it.
+    const seat = seats[String(row[map['Event_ID']] || '').trim()];
+    const opts = { source: WAITLIST_SOURCES.LEADER, reason: String(row[map['Leader_Notes']] || '') };
+
+    if (isCheckedTrue(row[map['Waitlisted']])) {
+      if (!stampRegistrantRowWaitlisted(row, map, opts)) return;
+      waitlisted++;
+      if (seat) seat.active = Math.max(0, seat.active - 1);
+      return;
+    }
+
+    // Unticked. Only a row this project waitlisted by hand is a row a tick can
+    // take back off — everything else is the import's queue.
+    if (String(row[map['Program_Status']] || '').trim() !== 'Waitlisted') return;
+    if (!wasWaitlistedByHand(row, map)) return;
+    if (seat && (seat.closed || (seat.capacity > 0 && seat.active >= seat.capacity))) {
+      refused++;
+      return;
+    }
+    if (!stampRegistrantRowActive(row, map, opts)) return;
+    restored++;
+    if (seat) seat.active++;
+  });
+
+  if (waitlisted > 0 || restored > 0) {
+    log(`Program leader sheets: ${waitlisted} "Waitlisted" tick(s) moved onto the waitlist, ` +
+      `${restored} untick(s) moved back onto the list.`);
+  }
+  if (refused > 0) {
+    log(`ℹ️ ${refused} row(s) stayed waitlisted — the session is full or closed, so unticking Waitlisted ` +
+      `could not give them a seat.`);
+    noteForAdmin('Waitlist places a leader could not give back',
+      `${refused} person(s) had their Waitlisted tick removed on a shared program leader sheet, but the ` +
+      `session is full (or marked ${WAITLIST_ONLY_TAG}) so they are still waiting. Raise Max_Capacity, or ` +
+      `cancel somebody, and they go back on at the next sync.`);
+  }
+  return waitlisted + restored;
 }

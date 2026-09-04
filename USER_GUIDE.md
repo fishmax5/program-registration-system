@@ -1245,7 +1245,16 @@ item on the menu, because on a serving day it's the only one you need.
    **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
    a name that's on neither.
 4. Tick **Attended**, **Lunch**, **Sign up for lunch**, **Register them for
-   this session**, or a combination, and press the button.
+   this session**, **Add to waitlist**, or a combination, and press the button.
+
+   **Add to waitlist** is the one that can't be combined with the others: it
+   says the person has *no* seat and *no* meal on order, which is the opposite
+   of every mark beside it, so ticking it clears them. Use it when the session
+   is full — on somebody who isn't on the list yet (it adds a waitlisted row)
+   or on somebody who is (their seat and their lunch go straight back, and the
+   session's count drops by one there and then). Taking them back off the
+   waitlist is a `Program_Status` change on the Registrants tab, or an untick
+   on the program leader's own sheet.
 
    On a `[Personalized Assistance]` session a fourth box appears between the
    name and the ticks — **Appointment time** — listing the chairs that are
@@ -1710,7 +1719,7 @@ are backfilled from the session table the next time this tab is drawn.
 | ✍️ `Earlier_Appointment` | **Appointment programs only.** `☎️ Call if earlier` · `Keeping this time` · blank. From the form's own question, or type it in when they tell you on the phone — it's what the [call list](#personalized-assistance-appointments) is built from. Blank means **no**: nobody unasked gets rung about moving their appointment |
 | ✍️ `Contacted` | Tick — this person has been reached out to |
 | ✍️ `Confirmed` | Tick — they said they're coming |
-| ✍️ `Waitlisted` | Tick — the program leader's own waitlist, separate from `Program_Status` above |
+| ✍️ `Waitlisted` | Tick — **moves them onto the waitlist**: `Program_Status` and `Lunch_Status` both become `Waitlisted` on the next sync, so the seat and the meal go back. Untick it to put them back on, which works whenever the session has room |
 | ✍️ `Dropped` | Tick — they said they're not coming |
 | ✍️ `Leader_Notes` | Anything else worth knowing about them for this session |
 | `Primary_Registrant` | `Self`, or the name of whoever brought them |
@@ -2602,7 +2611,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 
 | Item | What it does |
 |---|---|
-| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, or register them for a program (an appointment time included) with no form — location, session, name, then Attended / Lunch / Sign up for lunch / Register them. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, register them for a program (an appointment time included) with no form, or put them on the waitlist for a full one — location, session, name, then Attended / Lunch / Sign up for lunch / Register them / Add to waitlist. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **🔄 Update Everything Now** | Catches the workbook up with the calendars *and* the forms, in that order. This is the one to press when you have just changed something and want to see it. It is the same pair of passes the system runs on its own every hour |
 
@@ -2861,7 +2870,7 @@ waitlisted" on every strip.
 | **Program_Status** | what *the system* says — Active, Waitlisted, Cancelled |
 | **✍️ Contacted** | tick — I have reached out to this person |
 | **✍️ Confirmed** | tick — they told me they are coming |
-| **✍️ Waitlisted** | tick — no seat for them yet |
+| **✍️ Waitlisted** | tick — **moves them onto the waitlist**: the seat and the lunch go back, and the row turns peach. Untick it to put them back on |
 | **✍️ Dropped** | tick — they told me they are not coming |
 | **✍️ Leader_Notes** | anything else worth knowing |
 
@@ -2869,11 +2878,24 @@ The five **yellow** columns are the leader's. Everything else fills in by
 itself, and typing over it gets a warning — a correction typed into `Name` does
 not move the registration, it just gets overwritten at the next refresh.
 
-**Waitlisted is not the same as `Program_Status: Waitlisted`.** They answer
-different questions. `Program_Status` is what the system worked out from
-`Max_Capacity`. The tick is what the leader decided about somebody they have
-actually spoken to. Ticking one does not move the other — both are on the sheet
-so you can see both.
+**The two ticks that do something outside the sheet** are `Dropped` and
+`Waitlisted`, and the difference between them is that one can be taken back.
+
+`Dropped` is a cancellation: the seat and the lunch go back on the next sync,
+the leader's note rides along as the reason, and putting the person back is a
+phone call to the office.
+
+`Waitlisted` moves them onto the waitlist — `Program_Status` and `Lunch_Status`
+both become `Waitlisted`, so the seat and the meal go back the same way, and
+the whole row is washed pale peach on the next refresh so a leader scanning for
+"how many chairs" can see at a glance who is waiting. **Unticking it puts them
+back on**, whenever the session actually has room: a full session, or one staff
+have closed with `[Waitlist Only]`, promotes nobody, and the row simply stays
+waitlisted until there is a seat (the office is told).
+
+Only a place the leader made can be given back this way. Somebody the system
+waitlisted because the session was already full stays where they are — that is
+a queue `Max_Capacity` decides, and an untick must not jump it.
 
 ### The marks come back
 

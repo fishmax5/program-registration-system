@@ -931,6 +931,15 @@ function applyQuickMarkLocked(args) {
   // and fill it in as you". It marks nothing: a registration says where
   // somebody is expected, and Attended is a separate fact recorded on the day.
   const register = !!args.register;
+  // ADD TO WAITLIST is the fifth thing a desk does, and the one it has never
+  // been able to say at all: "we are full, put her down and we will ring her".
+  // Until now the only way to record it was to register the person — which
+  // takes a seat that is not there, tells the kitchen to cook, and leaves the
+  // session reading one over its cap — or to write it on a piece of paper,
+  // which is what actually happened. It is a status change and not a mark, so
+  // it goes through the one writer in 71_cancellation.gs rather than setting
+  // Program_Status here: four cells, not one.
+  const waitlist = !!args.waitlist;
   // HOW MANY MEALS, on both sides of the counter. A sign-up carries the size
   // of the ORDER (Joan's four), and a served tick carries what was actually
   // handed over and where it went — eaten here, carried out, left in the
@@ -977,8 +986,28 @@ function applyQuickMarkLocked(args) {
   const selection = parseQuickMarkProgramChoice(args.session);
 
   if (!name) return { ok: false, message: '⚠️ Pick a name first — nothing was marked.' };
-  if (!attended && !lunch && !signup && !register) {
-    return { ok: false, message: '⚠️ Tick Attended, Lunch, Sign up for lunch, or Register them.' };
+  if (!attended && !lunch && !signup && !register && !waitlist) {
+    return { ok: false, message: '⚠️ Tick Attended, Lunch, Sign up for lunch, Register them, or Add to waitlist.' };
+  }
+  // WAITLISTING IS NOT A MARK, and every one of these says the opposite of it.
+  // Attended is "they were here", Lunch and Sign up both order a meal — and a
+  // waitlisted row carries Lunch_Status = 'Waitlisted' precisely so the
+  // kitchen does not cook for somebody without a seat. Refused rather than
+  // silently resolved: a desk that ticked both meant one of them, and only the
+  // person standing there knows which.
+  if (waitlist && (attended || lunch || signup)) {
+    return {
+      ok: false,
+      message: '⚠️ Add to waitlist cannot be ticked with Attended, Lunch, or Sign up for lunch — ' +
+        'somebody on the waitlist has no seat and no meal ordered. Nothing was changed.'
+    };
+  }
+  if (waitlist && standing) {
+    return {
+      ok: false,
+      message: '⚠️ A standing place is a seat at every future session, which is the opposite of a ' +
+        'waitlist. Untick one of them and mark again.'
+    };
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1022,7 +1051,7 @@ function applyQuickMarkLocked(args) {
     // offer every known member and not just the registered ones, this is the
     // walk-in case rather than a dead end.
     return addQuickMarkWalkIn(sheet, {
-      name, selection, location, attended, lunch, signup, register, standing, standingLunch,
+      name, selection, location, attended, lunch, signup, register, waitlist, standing, standingLunch,
       appointmentTime, earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge,
       // HOW TO REACH SOMEBODY THE WORKBOOK IS MEETING FOR THE FIRST TIME. The
       // dialog has never had these to send — a desk registering a walk-in
@@ -1100,6 +1129,50 @@ function applyQuickMarkLocked(args) {
     movedNote = ` Moved from ${bookedTime} to ${appointmentTime}.`;
   }
 
+  // AFTER THE MOVE AND BEFORE EVERYTHING ELSE, which is the only place it can
+  // go: this reads the whole row and writes the whole row back (the stamp is
+  // four cells that have to agree, and stampRegistrantRowWaitlisted() is the
+  // one writer of them), so a read taken before the move would put the old
+  // appointment time back. Nothing below this runs — a waitlisting is the
+  // whole of what the button did.
+  if (waitlist) {
+    const rowValues = sheet.getRange(target.sheetRow, 1, 1, numCols).getValues()[0];
+    if (!stampRegistrantRowWaitlisted(rowValues, map, {
+      source: WAITLIST_SOURCES.DESK,
+      by: getCurrentUserEmail() || '',
+      reason: String(args.reason || '')
+    })) {
+      const why = String(rowValues[map['Program_Status']] || '').trim();
+      return {
+        ok: false,
+        message: `⚠️ ${name} is already ${why ? why.toLowerCase() : 'not on the list'} for ` +
+          `${selection.title || 'that program'} on ${target.date ? formatDateLabel(target.date) : 'that date'} — ` +
+          `nothing was changed.`
+      };
+    }
+    sheet.getRange(target.sheetRow, 1, 1, numCols).setValues([rowValues]);
+    invalidateSectionedRowsCache(sheet);
+    // The seat and the meal go back NOW, not at the next hourly sync — a desk
+    // waitlists somebody because the room is full, and the number it is full
+    // against is the one on the dashboard in front of them.
+    try {
+      const settled = getSectionedRows(sheet, headers, 'Event_ID');
+      const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+      if (registrySheet) recomputeEventRegistryCounts(registrySheet, sheet, settled);
+      updateMasterLunchDashboard(settled);
+    } catch (err) {
+      log(`⚠️ Waitlisted ${name}, but could not recalculate the counts (${err}) — the hourly sync will.`);
+    }
+    const waitlisted = `✅ ${name} moved to the waitlist for ${selection.title || 'that program'} — ` +
+      `${target.date ? formatDateLabel(target.date) : 'that date'}. Their seat and their lunch have gone ` +
+      `back.${movedNote}`;
+    toastIfPossible(waitlisted);
+    log(`applyQuickMarkFromDialog: ${waitlisted}`);
+    return Object.assign({ ok: true, message: waitlisted, namesChanged: false }, moveResultFor(moveTime, {
+      bookedTime: appointmentTime, freedTime: bookedTime, name
+    }));
+  }
+
   if (attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
   // Signing an existing registration up for lunch changes only the two lunch
   // columns. Attended is deliberately left exactly as it is: whether they were
@@ -1161,15 +1234,7 @@ function applyQuickMarkLocked(args) {
     invalidateSectionedRowsCache(sheet);
     earlierNote = ' Marked to be called if an earlier appointment opens up.';
   }
-  // What the dialog needs to keep its own copy of the slot list honest without
-  // re-fetching it between two people in a queue: the slot now taken, the slot
-  // now free, and which row moved.
-  const moveResult = moveTime
-    ? {
-      movedTime: true, bookedTime: appointmentTime, freedTime: bookedTime,
-      addedNameKey: normalizeNameKey(name)
-    }
-    : {};
+  const moveResult = moveResultFor(moveTime, { bookedTime: appointmentTime, freedTime: bookedTime, name });
 
   if (register && !attended && !lunch && !signup && !moveTime) {
     const already = `✅ ${name} is already registered for ${selection.title || 'that program'} on ` +
@@ -1210,6 +1275,22 @@ function applyQuickMarkLocked(args) {
   toastIfPossible(message);
   log(`applyQuickMarkFromDialog: ${message}`);
   return Object.assign({ ok: true, message, namesChanged: false }, moveResult);
+}
+
+/**
+ * What the dialog needs to keep its own copy of the slot list honest without
+ * re-fetching it between two people in a queue: the slot now taken, the slot
+ * now free, and which row moved. Empty when nothing moved, so a caller can
+ * spread it into any result unconditionally.
+ */
+function moveResultFor(moved, args) {
+  if (!moved) return {};
+  return {
+    movedTime: true,
+    bookedTime: args.bookedTime,
+    freedTime: args.freedTime,
+    addedNameKey: normalizeNameKey(args.name)
+  };
 }
 
 /**
@@ -1329,7 +1410,11 @@ function addQuickMarkMealCounts(sheet, map, sheetRow, counts) {
  * applyQuickMarkFromDialog()): one is a meal expected, the other a meal
  * already handed over.
  */
-function describeQuickMark(attended, lunch, signup, register) {
+function describeQuickMark(attended, lunch, signup, register, waitlist) {
+  // FIRST, because it is the one state that contradicts every line below it
+  // rather than adding to them — and by the time this is called the
+  // combinations that would have made it ambiguous have already been refused.
+  if (waitlist) return 'added to the waitlist';
   if (attended && lunch) return 'attended + lunch';
   if (attended && signup) return 'attended + signed up for lunch';
   if (lunch) return 'lunch (collected, not attending)';
@@ -1356,7 +1441,7 @@ function describeQuickMark(attended, lunch, signup, register) {
  * because a button was clicked by accident.
  */
 function addQuickMarkWalkIn(sheet, args) {
-  const { name, selection, location, attended, lunch, signup, register, standing, standingLunch } = args;
+  const { name, selection, location, attended, lunch, signup, register, waitlist, standing, standingLunch } = args;
   const appointmentTime = String(args.appointmentTime || '').trim();
   const earlierAppointment = String(args.earlierAppointment || '').trim();
   const program = selection ? selection.title : '';
@@ -1379,7 +1464,7 @@ function addQuickMarkWalkIn(sheet, args) {
 
   const lunchOffered = isLunchOfferedOn(session.date, session.location);
   const dateLabel = formatDateLabel(session.date);
-  const what = describeQuickMark(attended, lunch, signup, register);
+  const what = describeQuickMark(attended, lunch, signup, register, waitlist);
 
   // AN APPOINTMENT IS A CHAIR AT A TIME, not a place in a room (see
   // ASSISTANCE_TAG), so a desk booking one has to name the slot exactly as the
@@ -1393,6 +1478,19 @@ function addQuickMarkWalkIn(sheet, args) {
       ok: false,
       message: `⚠️ "${program}" is booked by appointment, so nobody can be put on a standing list for it — ` +
         `each appointment is booked one at a time. Untick "every future session" and mark again.`
+    };
+  }
+  // AN APPOINTMENT HAS NO WAITLIST TO JOIN. A place on one is a chair at a
+  // named time, and a row holding one IS the booking — writing a waitlisted
+  // row against a slot would take the slot out of the form's list for
+  // somebody who does not have it. The office keeps an appointment waiting
+  // list the way it always has: Earlier_Appointment on a booking they do hold.
+  if (session.isAssistance && waitlist) {
+    return {
+      ok: false,
+      message: `⚠️ "${program}" is booked by appointment, so there is no waitlist to add "${name}" to — ` +
+        `each time is booked one at a time. Book them a free slot instead, and tick "call if an earlier ` +
+        `one opens up".`
     };
   }
   if (session.isAssistance) {
@@ -1497,7 +1595,17 @@ function addQuickMarkWalkIn(sheet, args) {
     const amount = quickMarkCount(pair[1]);
     if (amount > 0 && map[pair[0]] !== undefined) row[map[pair[0]]] = amount;
   });
-  row[map['Program_Status']] = 'Active';
+  // WAITLISTED FROM BIRTH, when that is what the desk asked for. Written here
+  // rather than stamped afterwards because there is nothing to stamp yet: the
+  // four cells a waitlisting sets (see stampRegistrantRowWaitlisted()) are four
+  // cells this row is being given for the first time, and Lunch_Status /
+  // Lunch_Type above are corrected in the same breath — nobody on a waitlist
+  // has a meal on order.
+  row[map['Program_Status']] = waitlist ? 'Waitlisted' : 'Active';
+  if (waitlist) {
+    row[map['Lunch_Status']] = 'Waitlisted';
+    writeMealsOrdered(row, map, 0);
+  }
   // "Ring me if something opens up sooner" — the fact staff used to keep in a
   // note. See EARLIER_APPOINTMENT_CHOICES.
   if (map['Earlier_Appointment'] !== undefined && earlierAppointment) {
@@ -1505,9 +1613,10 @@ function addQuickMarkWalkIn(sheet, args) {
   }
   row[map['Primary_Registrant']] = String(args.primaryRegistrant || '').trim() || 'Self';
   row[map['Party_Size']] = 1;
-  const how = signup ? 'Lunch sign-up'
-    : (lunch && !attended ? 'Take-out walk-in'
-      : (register && !attended ? (slot ? 'Appointment booked at the desk' : 'Registered at the desk') : 'Walk-in'));
+  const how = waitlist ? 'Added to the waitlist at the desk'
+    : (signup ? 'Lunch sign-up'
+      : (lunch && !attended ? 'Take-out walk-in'
+        : (register && !attended ? (slot ? 'Appointment booked at the desk' : 'Registered at the desk') : 'Walk-in')));
   // The standing facts about this person, on the row from the moment it
   // exists — a walk-in is exactly the case where nobody has had a chance to
   // read them off anything else. See stampRegularNeedsOnRow(), which does the
@@ -1521,7 +1630,9 @@ function addQuickMarkWalkIn(sheet, args) {
     ...walkInNeeds.map(need => `🔔 ${describeRegularNeed(need)}`)
   ].join(' · ');
   row[map['Manual_Override']] = 'Manually Added';
-  row[map['Form_Source']] = (register && !attended && !lunch)
+  row[map['Form_Source']] = waitlist
+    ? 'Front desk waitlist (no form)'
+    : (register && !attended && !lunch)
     ? 'Front desk registration (no form)'
     : (signup ? 'Front desk sign-up (no form)' : 'Walk-in (no form)');
   row[map['Event_ID']] = session.eventId;
@@ -1542,12 +1653,16 @@ function addQuickMarkWalkIn(sheet, args) {
   if (signup) updateMasterLunchDashboard(existing);
 
   const standingNote = standing ? addStandingListMember(session, name, { standingLunch }) : '';
-  const message = (signup
-    ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
-    : (register && !attended && !lunch
-      ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.` +
-        (earlierAppointment ? ' They will be called if an earlier appointment opens up.' : '')
-      : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`)) + standingNote +
+  const message = (waitlist
+    ? `✅ ${name} added to the waitlist for ${program} — ${dateLabel}, ${session.location}. ` +
+      `They hold no seat and no meal is ordered; staff take them off the waitlist on the Registrants tab ` +
+      `when one comes free.`
+    : (signup
+      ? `✅ ${name} signed up for lunch on ${dateLabel} (${program}, ${session.location}) — new row added.`
+      : (register && !attended && !lunch
+        ? `✅ ${name} registered for ${program} — ${dateLabel}${slot ? ` at ${slot.rangeLabel}` : ''}, ${session.location}.` +
+          (earlierAppointment ? ' They will be called if an earlier appointment opens up.' : '')
+        : `✅ ${name} added as a walk-in on ${program} — ${dateLabel}, ${what}.`))) + standingNote +
     (walkInNeeds.length ? ` Noted: ${walkInNeeds.map(describeRegularNeed).join('; ')}.` : '');
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);

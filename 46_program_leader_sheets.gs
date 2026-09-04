@@ -179,6 +179,29 @@ const LEADER_SHEET_DERIVED_COLUMNS = [
 defineLazyGlobal_('LEADER_SHEET_BAND_BG', () => PALETTE.LOC_BLUE);
 defineLazyGlobal_('LEADER_SHEET_BAND_INK', () => PALETTE.INK_STRONG);
 
+/**
+ * WHAT A WAITLISTED LINE LOOKS LIKE, which until now was: exactly like every
+ * other line, with one word in a column a leader had no reason to read.
+ *
+ * A roster is scanned, not read. The one question a leader asks of it standing
+ * in a doorway is "how many chairs do I need", and a person who is waiting is
+ * the one line on the page where the answer is no. So the whole row is washed
+ * — the pale peach of the TINT layer, not a signal colour, because it is a
+ * state of a row rather than an alarm about it and half a class on the
+ * waitlist must not turn the sheet orange.
+ *
+ * The Program_Status CELL itself takes the saturated SIGNAL_ORANGE that
+ * 'Waitlisted' wears everywhere else in this workbook (see STATUS_COLORS): one
+ * loud cell says which word to read, the wash says which rows to skip, and a
+ * leader who has seen the dashboard recognizes both.
+ *
+ * The five yellow hand-entry columns are re-tinted over this afterwards, on
+ * purpose — "type here" outranks "this one is waiting" on a column the leader
+ * is meant to tick.
+ */
+defineLazyGlobal_('LEADER_SHEET_WAITLIST_BG', () => PALETTE.LOC_PEACH);
+defineLazyGlobal_('LEADER_SHEET_WAITLIST_INK', () => PALETTE.SIGNAL_ORANGE);
+
 
 // --- the registry -----------------------------------------------------------
 
@@ -248,6 +271,21 @@ function readLeaderValues(row, map) {
       ? normalizeLeaderNote(raw)
       : normalizeLeaderFlag(raw);
   });
+}
+
+/**
+ * Is this built roster line somebody who is WAITING rather than booked?
+ *
+ * Either half counts, and they are two different facts that a leader reads as
+ * one: Program_Status is what the workbook decided (a full session, a closed
+ * one, or a by-hand waitlisting that has already been applied), and the
+ * Waitlisted tick is what the leader decided a moment ago on this very sheet.
+ * Reading only the first would leave a leader's own tick uncoloured until the
+ * next push — which is the hour in which they are actually looking at it.
+ */
+function isLeaderSheetWaitlistedRow(row, sheetMap) {
+  if (String(row[sheetMap['Program_Status']] || '').trim() === 'Waitlisted') return true;
+  return sheetMap['Waitlisted'] !== undefined && normalizeLeaderFlag(row[sheetMap['Waitlisted']]);
 }
 
 /**
@@ -629,7 +667,14 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
         // applyLeaderDropsAsCancellations().
         `Ticking Dropped CANCELS that person's place — their seat and their lunch go back, ` +
         `and anything you type in Leader_Notes goes with it as the reason. Untick it before the ` +
-        `next hour is up if you did not mean to; after that, ring the office.` });
+        `next hour is up if you did not mean to; after that, ring the office.\n\n` +
+        // THE SECOND TICK WITH A CONSEQUENCE, and the only one that can be
+        // taken back — which is exactly why it has to be said in the same
+        // breath as Dropped, or a leader will use the permanent one to mean
+        // the reversible one. See applyLeaderWaitlistTicks().
+        `Ticking Waitlisted moves that person off the class list and onto the waitlist — their seat ` +
+        `and their lunch go back too, and the row turns peach so you can see at a glance who is ` +
+        `waiting. Untick it to put them back on, which works whenever the class has room for them.` });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
 
@@ -680,12 +725,30 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     if (bandRowSet[rowNumber]) {
       backgrounds.push(new Array(numCols).fill(LEADER_SHEET_BAND_BG));
       stripe = 0; // each class starts its own stripe sequence, so week two looks like week one
+    } else if (isLeaderSheetWaitlistedRow(grid[i], map)) {
+      // The wash replaces the stripe rather than sitting under it — a row that
+      // is half zebra and half peach reads as a rendering fault. It still
+      // COUNTS as a stripe, so the rows either side of it keep alternating and
+      // the band does not appear to skip a beat. See LEADER_SHEET_WAITLIST_BG.
+      backgrounds.push(new Array(numCols).fill(LEADER_SHEET_WAITLIST_BG));
+      stripe++;
     } else {
       backgrounds.push(new Array(numCols).fill(stripe % 2 === 0 ? PALETTE.PAPER : PALETTE.STRIPE));
       stripe++;
     }
   }
   sheet.getRange(MEMORY_TAB_DATA_ROW, 1, grid.length, numCols).setBackgrounds(backgrounds);
+
+  // The one loud cell on the row, written after the wash it sits on. One call
+  // per waitlisted line rather than one per sheet, which is the one place this
+  // function spends an API call per row — a waitlist is a handful of people,
+  // and a roster where it is not has a bigger problem than a slow refresh.
+  for (let i = 0; i < grid.length; i++) {
+    if (bandRowSet[MEMORY_TAB_DATA_ROW + i] || !isLeaderSheetWaitlistedRow(grid[i], map)) continue;
+    sheet.getRange(MEMORY_TAB_DATA_ROW + i, map['Program_Status'] + 1)
+      .setBackground(LEADER_SHEET_WAITLIST_INK)
+      .setFontWeight('bold');
+  }
 
   bandRowNumbers.forEach(rowNumber => {
     sheet.getRange(rowNumber, 1, 1, numCols)
@@ -1377,7 +1440,28 @@ function refreshProgramLeaderSheetsNow() {
     const failures = [];
     try {
       merged = pullProgramLeaderSheetEdits(registrantRows);
-      if (merged > 0) renderRegistrantsSheet(false, registrantRows);
+      // THE SAME TWO STEPS THE HOURLY SYNC TAKES, and for the same reason: a
+      // merge on its own leaves a Dropped tick sitting in a column nothing
+      // reads and a seat that never comes back. This menu item exists for the
+      // person who does not want to wait an hour, and until now what it saved
+      // them the wait for was half the job.
+      if (merged > 0) {
+        merged += applyLeaderDropsAsCancellations(registrantRows);
+        merged += applyLeaderWaitlistTicks(registrantRows, sessionRows);
+        renderRegistrantsSheet(false, registrantRows);
+        // The seat and the meal, now rather than at the next hourly sync —
+        // the same courtesy cancelRegistrantRows() extends to the desk, for
+        // the same reason: somebody pressed this because they want the
+        // answer today.
+        try {
+          recomputeEventRegistryCounts(
+            getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
+            getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), registrantRows);
+          updateMasterLunchDashboard(registrantRows);
+        } catch (err) {
+          log(`⚠️ Merged the leaders' edits, but could not recalculate the counts (${err}) — the hourly sync will.`);
+        }
+      }
     } catch (err) {
       log(`⚠️ Could not read the program registrant sheets back in (${err}).`);
       failures.push(`the program leaders' own edits could not be read back in (${err})`);
@@ -1443,7 +1527,8 @@ function buildProgramLeaderSheetHtml(options) {
   The program leader ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
   types in <b>Leader_Notes</b>; those come back into the Registrants tab on the same sync.
   <b>Dropped is a cancellation</b> — the seat and the lunch go back on the next sync, and the
-  leader's note rides along as the reason.
+  leader's note rides along as the reason. <b>Waitlisted moves them onto the waitlist</b> the same
+  way, and unticking it puts them back on whenever the session has room.
 </p>
 <label for="location">Location</label>
 <select id="location" onchange="fillPrograms()">${locationTags}</select>

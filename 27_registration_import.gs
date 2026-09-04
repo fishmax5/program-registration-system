@@ -234,6 +234,11 @@ function syncRegistrationsInternal() {
     // applyLeaderDropsAsCancellations() for why it stamps these rows rather
     // than going through cancelRegistrantRows() — the tab is written below.
     applyLeaderDropsAsCancellations(existingRows);
+    // ...and the tick beside it, which was a note for exactly as long. Two-way,
+    // so a seat that comes free can be given back by unticking the box that
+    // gave it up. AFTER the drops, on purpose: a row cancelled a line above is
+    // refused here rather than being put in a queue it has left.
+    applyLeaderWaitlistTicks(existingRows, sessionRows);
   } catch (err) {
     log(`⚠️ Could not read the program registrant sheets back in this run (${err}) — the registrations themselves are fine.`);
   }
