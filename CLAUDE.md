@@ -54,7 +54,7 @@ Line counts are a rough guide to what you are about to load.
 | `01_logging_and_access.gs` | 211 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 972 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. Plus the one tag that describes a DATE rather than a program — `Waitlist Only`, which closes a single session to new Active registrations whatever its capacity says — and the two lists that keep the difference straight: `PROGRAM_FLAG_COLUMNS` (ticked onto every row of a program) and `SESSION_FLAG_COLUMNS` (ticked onto the row you clicked, and nowhere else). |
-| `03_sheets_and_headers.gs` | 696 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
+| `03_sheets_and_headers.gs` | 731 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
 | `04_settings_and_config.gs` | 504 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off, and the Admin Notification Emails table (`ADMIN_NOTIFICATION_CATEGORIES`: who in the office is copied on which outbound mail, replacing the retired single Admin Notification / Archive Copy cells) — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 1173 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, the meal totals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 152 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
@@ -69,7 +69,7 @@ Line counts are a rough guide to what you are about to load.
 | File | | What is in it |
 |---|--:|---|
 | `12_sheet_setup.gs` | 213 | `initSheet` and the `Lunch_Schedule` tab's own setup. |
-| `13_lunch_only_signup_form.gs` | 1032 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. Also the shared sheet-shaping helpers it grew around: `autosizeColumns`, and `ensureSheetColumns` (a layout that outgrows a tab's column count is a throw, not a resize). |
+| `13_lunch_only_signup_form.gs` | 1036 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. Also the shared sheet-shaping helpers it grew around: `autosizeColumns`, and `ensureSheetColumns` (a layout that outgrows a tab's column count is a throw, not a resize). |
 | `14_saved_column_widths.gs` | 463 | "This column should be this wide, always." |
 | `15_config_sheet.gs` | 1203 | Drawing and validating the Config tab, reading its settings back (`getAdminNotificationRows` / `adminEmailsForCategory` among them), and `notifyAdmin`. |
 
@@ -124,7 +124,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `43_program_dashboard.gs` | 988 | `renderProgramDashboard`. |
+| `43_program_dashboard.gs` | 1013 | `renderProgramDashboard`. The metrics block's arithmetic and words still live here (`computeProgramMetrics` / `writeProgramMetricsSection`) — the block itself is now DRAWN on `Program_Month` (`77`), which is the tab whose grain it matches. |
 | `44_lunch_dashboard.gs` | 1131 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 1322 | The desk's sheet for one day and one building — a **live Google Doc**, rebuilt in place so the link never goes stale, filed in `Sign-In Sheets`. Lunch on page one, everybody on page two. One row per PERSON (`signInPersonKey` / `dedupeSignInEntries`: a duplicate's meals take the MAXIMUM, a guest's ADD), and two washes for how a meal is handled — yellow it leaves the building, purple it needs doing something with here. It used to export a PDF and throw the document away; `getOrCreateSignInSheetFolder()` is all that is left of that, for the backfill in `69`. |
 | `46_program_leader_sheets.gs` | 1395 | A live roster shared out of the workbook to a program leader, banded by session — built on the menu, or automatically for a leader who asked to be notified about it (`ensureProgramLeaderSheetsForNotifyingLeaders`). |
@@ -264,6 +264,19 @@ was a design goal, not an accident.
 | File | | What is in it |
 |---|--:|---|
 | `75_sliced_jobs.gs` | 312 | `runSlicedJob` — the state machine every multi-execution job in this project runs on: the watchdog armed before work starts, the deadline, the slice counter, stall and consecutive-error detection, and the hand-off trigger. `runSlicedItems` is the one-item-one-lock-hold inner loop the two form sweeps (`32`, `49`) share. Behavior only; the four callers supply their own state, their own budgets, and every word the person reads. |
+
+### The month behind the sessions (77)
+
+Numbered last for the usual reason, and it is the discipline `67`/`69`/`70`/`76`
+are numbered late for: behavior only, two self-contained top-level constants
+nothing else derives from, no other file's constant read at load time, and
+everything it calls (`43`'s metrics writer included) reached through a hoisted
+function declaration. Its schema — `SHEET_NAMES.PROGRAM_MONTH`,
+`HEADERS.Program_Month` — lives in `03` like every other tab's.
+
+| File | | What is in it |
+|---|--:|---|
+| `77_program_month_dashboard.gs` | 570 | **The session table, grouped back into the unit it was made in.** One row per program × location × month — the `groupKey` `buildEventGroups` already keys on, the unit one Google Form covers — instead of one row per date. Derived top to bottom and read-only: `renderProgramDashboard` calls it at the end with the rows and the registrant scan it already holds, inside a `try/catch`, because a view must never be able to fail the table it is a view of; delete the tab and nothing else notices. Grouped on `Form_ID`, falling back to title + location + month when there is none (`[No Registration]`, a hand-added row). A **`FIXED`-span group is filed once, under its FIRST month** — the design's open question #2, answered in the file's banner: repeating it per month it touches would double-count every number on the row. Also the home of the metrics block (`43` still owns its words and arithmetic), the `Sessions` `HYPERLINK` that drills through to the group's own block of day rows, and lunch collapsed to one line per location per month. |
 
 ### Every email this workbook sends (76)
 

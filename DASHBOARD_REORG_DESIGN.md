@@ -1,6 +1,8 @@
 # Dashboard reorganization — design draft
 
-**Status: proposal. Nothing here is implemented.**
+**Status: phases 1 and 2 are shipped** (`77_program_month_dashboard.gs`, the
+`Program_Month` tab, the metrics block moved up, lunch collapsed, the
+`Sessions` drill-through). Phases 3–5 are still proposals.
 
 Two questions prompted this, and they turn out to be the same question:
 
@@ -373,11 +375,13 @@ That third one is the test that holds §5's line. It should be written first.
 
 1. **Does the session tab keep the Today block, or does the door own it?**
    The door pages read live and are what staff actually look at on the day.
-2. **`FIXED`-span groups** (`parsed.isFixed`) have no month at all — one form
-   for a whole run of dates. Do they get one month row, repeated per month they
-   touch (with a "spans Sep–Nov" note), or one row filed under their first
-   month? Repeating reads better and double-counts in any metric that sums
-   rows; filing once reads worse and is arithmetically honest.
+2. ~~**`FIXED`-span groups**~~ **ANSWERED, and shipped: filed once, under
+   their first month.** Every number on a month row is a sum over that row's
+   sessions, so a repeated row would either double-count them or have to divide
+   them up, and a Registered figure that is a third of the truth in three
+   places is worse than a row filed a month early. The real span is stated in
+   the Schedule cell ("10 sessions · Sep 8 – Nov 10") and listed session by
+   session in its note. See the banner of `77_program_month_dashboard.gs`.
 3. **Should `Program_Options` and `Program_Month` merge?** Both are program ×
    location. `Program_Options` is staff-typed memory (`Typical_Attendance`,
    `Room_Or_Setup`, `Notify_Mode`); `Program_Month` is derived and monthly.

@@ -6,8 +6,12 @@
 // called: it reads whatever is currently across both the Upcoming and Past
 // session sub-tables, removes any session whose calendar event has
 // disappeared (routing its registrants to Triage first, refreshing that
-// session's form), sorts/splits the rest by date, computes the Today/
-// Metrics sections, then clears the sheet and writes everything fresh.
+// session's form), sorts/splits the rest by date, computes the Today block,
+// then clears the sheet and writes everything fresh.
+//
+// It also computes the metric block and hands it, with the same rows and the
+// same registrant scan, to renderProgramMonthDashboard() — the metrics now sit
+// on Program_Month, whose grain they match. See section 17.
 // ============================================================================
 
 /**
@@ -70,7 +74,23 @@ function renderProgramDashboard(force, options) {
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
 
-  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
+  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
+
+  // THE MONTH VIEW OF THE ROWS JUST WRITTEN — one row per program-month, and
+  // the home of the metrics block above. Derived from exactly these rows and
+  // this scan, so the two tabs cannot disagree and the view costs no second
+  // read of either tab.
+  //
+  // CAUGHT, NOT THROWN. Program_Month stores nothing: it can be deleted, and
+  // is rebuilt from scratch on the next render. A view failing must never be
+  // able to fail the table it is a view of — a sync that got as far as writing
+  // the session table has done the work that matters.
+  try {
+    renderProgramMonthDashboard(sessionRows, map, registrantScan, metrics, force);
+  } catch (err) {
+    log(`⚠️ Could not rebuild "${SHEET_NAMES.PROGRAM_MONTH}" (${err}) — the session table is written and correct; the month view is rebuilt on the next render.`);
+  }
+
   return { registrantsMoved: triageResult.registrantsMoved };
 }
 
@@ -840,7 +860,7 @@ function styleMetricTable(sheet, startRow, numRows, numCols) {
   }
 }
 
-function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
+function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   invalidateSectionedRowsCache(sheet); // ...and its rows with them
   sheet.clear();
@@ -888,11 +908,16 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   row += todayRowsOut.length;
   row++; // spacer
 
-  // --- Section B: Program Metrics (near-term windows + month over month) ---
-  row = writeProgramMetricsSection(sheet, row, numCols, metrics);
-  row++; // spacer
-
-  // --- Section C: All Program Sessions, split into Upcoming / Past ---
+  // --- Section B: All Program Sessions, split into Upcoming / Past ---
+  //
+  // THE METRICS BLOCK USED TO SIT HERE and now lives on Program_Month
+  // (77_program_month_dashboard.gs), which is the tab whose grain it matches:
+  // every number in it is monthly reasoning — this month against the same span
+  // of last month, the next seven and thirty days — and it was sitting on top
+  // of a table that is one row per DAY. Moving it up bought this tab back the
+  // dozen rows of the frozen band it was spending on numbers nobody reads
+  // while looking for Tuesday. writeProgramMetricsSection() stays in this file:
+  // it still owns the words and the arithmetic, and is called from there.
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
   const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {

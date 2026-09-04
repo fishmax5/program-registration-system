@@ -16,6 +16,11 @@ defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
 const SHEET_NAMES = {
   CONFIG: 'Config',
   PROGRAM_DASHBOARD: 'Master_Program_Dashboard',
+  // The same sessions, one row per PROGRAM-MONTH instead of one row per date
+  // — derived from the tab above and read-only. See
+  // 77_program_month_dashboard.gs; deleting the tab costs nothing but the
+  // view, because nothing is stored on it.
+  PROGRAM_MONTH: 'Program_Month',
   REGISTRANT_DASH: 'Registrant_Dash',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
   LUNCH_ROSTER: 'Lunch_Roster',
@@ -560,6 +565,36 @@ defineLazyGlobal_('HEADERS', () => ({
   Assistance_Requests: [
     'Received', 'Program', 'Location', 'Name', 'Phone', 'Email', 'Answers',
     'Status', 'Scheduled_For', 'Staff_Notes', 'Request_ID'
+  ],
+  /**
+   * Program_Month — Master_Program_Dashboard's session rows, grouped back into
+   * the unit they were made in: one program, at one location, for one month.
+   * DERIVED, top to bottom. Every value on it is recomputed from the session
+   * table and Registrant_Dash on each render, nothing else reads it, and no
+   * column here is anybody's source of truth — which is what makes the tab
+   * safe to delete and cheap to change. See 77_program_month_dashboard.gs.
+   *
+   * Month_Start is a real date (the 1st) rather than a "September 2026"
+   * string, so the tab sorts, splits Upcoming/Past and takes the month tint
+   * with the same machinery every other date-bearing tab uses.
+   *
+   * Flags collapses Club / No_Registration / Personalized_Assistance into one
+   * readable cell. All three are facts about a PROGRAM and are identical on
+   * every one of its session rows (buildEventGroups() sets them on the group),
+   * so three checkbox columns times four sessions is twelve cells saying what
+   * one cell says. They stay checkboxes on the session tab, which is where
+   * ticking one means something.
+   *
+   * Group_Key and Form_ID are hidden plumbing (PROGRAM_MONTH_HIDDEN_COLUMNS):
+   * the key this row was grouped on, kept visible-to-code so a person
+   * troubleshooting a split or a merge can see what the grouping actually
+   * decided rather than guessing.
+   */
+  Program_Month: [
+    'Month_Start', 'Location', 'Program', 'Type', 'Flags', 'Schedule', 'Sessions',
+    'Registered', 'Capacity', 'Fill', 'Waitlist', 'Status',
+    'Form_Response_Link', 'Edit_Form_Link', 'Leader_Sheet_Link',
+    'Group_Key', 'Form_ID'
   ]
 }));
 

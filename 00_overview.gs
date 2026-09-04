@@ -3,9 +3,15 @@
  *  🗓️  CALENDAR & FORM MANAGER  —  Program Registration + Lunch Ordering
  * ============================================================================
  *  Sheets:
- *    - Master_Program_Dashboard : "Today at Each Location" + participation
- *      metrics + the full per-session table, now split into an "Upcoming
- *      Sessions" sub-table and a "Past Sessions" sub-table (see section 7).
+ *    - Master_Program_Dashboard : "Today at Each Location" + the full
+ *      per-session table, now split into an "Upcoming Sessions" sub-table
+ *      and a "Past Sessions" sub-table (see section 7). The participation
+ *      metrics used to sit here and now live on Program_Month, below.
+ *    - Program_Month            : the same sessions, one row per program ×
+ *      location × month instead of one row per date — the unit a form is
+ *      made for. Derived and read-only: nothing is stored on it and nothing
+ *      reads it back, so it can be deleted and is rebuilt on the next
+ *      render. Carries the metrics block (see section 17).
  *      The session table no longer carries a Manual_Override column — it's
  *      fully calendar-derived every render (Location/Type_Tag stay
  *      editable dropdowns, but nothing on this table is protected from a
