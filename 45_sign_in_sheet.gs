@@ -1,25 +1,72 @@
 // ============================================================================
-// 9. PRINTED SIGN-IN SHEET  (a landscape PDF to mark up by hand)
+// 9. THE SIGN-IN SHEET  (a LIVE Google Doc, lunch first, one row per person)
 // ============================================================================
 //
 // Everything else in this workbook assumes a screen. The sign-in desk does not
 // have one — or has one that is already showing something else, with a queue
-// of people in front of it. What that desk needs is paper: one page per
-// session, the expected people already on it, and empty boxes to tick and to
-// write meal counts into, which somebody types back in afterwards.
+// of people in front of it. What that desk needs is a table: the expected
+// people already on it, and empty boxes to tick and to write meal counts into,
+// which somebody types back in afterwards.
 //
-// So this builds exactly that. It takes the registrants for one date and
-// location, plus what the kitchen is serving that day, and produces a
-// LANDSCAPE PDF whose columns are the ones the desk actually uses:
+// This used to export a PDF and throw the document away. It now KEEPS THE
+// DOCUMENT and hands back a link to it, and four things follow from that:
 //
-//   "In CoPilot"  CAME  Last  First  Phone #  Program  Family / Alt Name
-//   Extra Notes  "MEALS ORDERED"  "DINED IN #"  "TAKE OUT #"  "# PUT IN FRIDGE"
+//   * THE LINK IS STABLE. One date x location has one Doc, forever. Rebuilding
+//     a day reopens the same file and rewrites its body, so the link already
+//     sitting on three dashboard tabs (69_generated_file_links.gs), already
+//     mailed to somebody, already open on the tablet, keeps working and shows
+//     the new roster. A PDF could only ever be superseded by a second PDF.
+//   * IT CAN BE EDITED AT THE DESK. A name arrives that nobody expected; a
+//     phone number is wrong. On paper that is a biro and a retype later; in a
+//     live Doc it is a click, and two people can do it at once.
+//   * IT STILL PRINTS. Landscape US Letter with real gridlines is what the
+//     page is laid out as, and a table that outgrows one page paginates by
+//     itself — File > Print is one step.
+//   * THE FILES LIVE IN THEIR OWN FOLDER (SIGN_IN_DOC_FOLDER_NAME), beside the
+//     forms folder rather than loose in My Drive, so a year of them is one
+//     place you can sort by name and find any day.
+//
+// LUNCH COMES FIRST, because lunch is what the sheet is for. The document is
+// two sections, in this order:
+//
+//   1. LUNCH — only the people with a meal ordered. This is the list the
+//      kitchen hands food against, and the one somebody carries to the serving
+//      table. Nothing on it is there for any other reason.
+//   2. EVERYONE — the full roster for that place and day, lunch or not, so the
+//      desk can still tick off an arrival who is only here for the program.
+//
+// (Google Docs TABS cannot be created programmatically — the Document service
+// can read `getTabs()` and switch between them, but nothing in Apps Script or
+// the Docs API adds one. So the two "tabs" are two page-broken sections with
+// their own headings, which is what a person reading or printing this actually
+// wants anyway: one file, lunch on page one.)
+//
+// THE COLUMNS are the ones the desk uses, left to right:
+//
+//   "In CoPilot"  CAME  Last  First  Phone #  Program  Handling  Notes
+//   "MEALS ORDERED"  "DINED IN #"  "TAKE OUT #"  "# FRIDGE"
 //
 // The last four line up one-for-one with the per-registrant meal counts on the
 // Registrants tab (see REGISTRANT_MEAL_COUNT_COLUMNS), so transcribing a
 // finished sheet back into the workbook is column-for-column with no
 // re-interpretation — which is the whole reason the meal counts were split per
 // person in the first place.
+//
+// HANDLING IS A COLUMN AND A COLOUR. A standing need about the physical meal —
+// "take-out", "put meals in the fridge" — is the one thing on this sheet that
+// changes what somebody DOES, and it was previously buried mid-sentence in a
+// notes column at 9pt. Two washes now carry it (see classifySignInHandling):
+//
+//   LIGHT YELLOW   the meal leaves the building — take-out, to-go, bagged,
+//                  brings their own containers.
+//   LIGHT PURPLE   the meal needs handling here — fridge, freezer, dispose
+//                  after N days, serve at a set time, somebody else collects.
+//
+// Purple wins when a row is both, because it is the rarer instruction and the
+// one that goes wrong silently. Diet needs ("no milk") print in the Handling
+// column with no wash: they matter to whoever packs the meal, but they do not
+// change where it goes, and colouring them would colour half the sheet and
+// cost the two washes their meaning.
 //
 // IT IS A SHEET FOR A DAY AND A PLACE, NOT FOR A PROGRAM. The desk is one desk:
 // whoever is on it that morning signs in everybody who walks up, whichever
@@ -29,65 +76,129 @@
 // and a DATE, and the roster is every registrant at that place on that day
 // across every program, with a Program column saying which is which.
 //
-// EVERYONE APPEARS, INCLUDING THE PEOPLE NOT EATING, and this is the part that
-// is easy to get wrong in the other direction. Printing only the lunch list
-// would give the kitchen a clean count and leave the sign-in desk unable to
-// tick off half the people in front of it. Printing everyone with the meal
-// columns left blank is worse still: a blank box is indistinguishable from a
-// box nobody has filled in yet, so at the end of service there is no way to
-// tell "ordered nothing" from "we forgot to ask". So a registrant with no
-// lunch is printed with a literal 0 in each of the four meal columns — already
-// answered, nothing to collect, and it transcribes back as the zero it is.
+// EVERYONE APPEARS ON SECTION 2, INCLUDING THE PEOPLE NOT EATING, and a
+// registrant with no lunch is printed with a literal 0 in each of the four meal
+// columns — already answered, nothing to collect, and it transcribes back as
+// the zero it is. A blank box is indistinguishable from a box nobody has filled
+// in yet; at the end of service that is the difference between "ordered
+// nothing" and "we forgot to ask".
 //
-// ONE PAGE unless the roster does not fit, in which case it runs onto as many
-// as it needs, with the header row repeated. Landscape is not a preference:
-// twelve columns, several of them handwritten-into, do not fit across a
-// portrait page at a legible size.
+// ONE PERSON IS ONE ROW, AGGRESSIVELY. See dedupeSignInEntries() for the whole
+// rule, but the short version is that the desk is looking up an ARRIVAL, not a
+// registration: somebody signed up for three programs today is one human being
+// walking through one door, and printing them three times means three lookups,
+// three ticks, and — the reason this got rewritten — a lunch count of three for
+// somebody who eats one lunch. Names are matched loosely (punctuation, middle
+// initials, honorifics and "Last, First" order all collapse away) and a shared
+// phone number merges two spellings that share a name token. Meal counts across
+// a merged person are taken as the MAXIMUM, never the sum: `Meals_Ordered` on
+// one row is how this workbook says "she wants four", and the same person
+// answering the lunch question on two forms wants one.
 //
 // A GUEST PRINTS UNDER THEIR REGISTRANT, NEVER AS A ROW OF THEIR OWN. Their
-// name goes in Extra Notes and their ordered meal is added into the
-// registrant's own MEALS ORDERED count — see collectSignInSheetData()'s
-// guest-folding and buildSignInSheetRow(). This is a PDF-only fold: nothing
-// here writes back to Registrant_Dash, so the guest's own row keeps its own
-// meal count everywhere else in the workbook.
+// name goes in Notes and their ordered meal is ADDED to the registrant's own
+// MEALS ORDERED count — a guest is a second mouth, so guest meals sum where a
+// duplicate's do not. This is a document-only fold: nothing here writes back to
+// Registrant_Dash, so the guest's own row keeps its own meal count everywhere
+// else in the workbook.
 // ============================================================================
 
-/** The printed sheet's columns, left to right, exactly as they appear on paper. */
+/** The sheet's columns, left to right, exactly as they appear in the table. */
 const SIGN_IN_SHEET_COLUMNS = [
-  'In CoPilot', 'CAME', 'Last', 'First', 'Phone #', 'Program', 'Family / Alt Name', 'Extra Notes',
-  'MEALS ORDERED', 'DINED IN #', 'TAKE OUT #', '# PUT IN FRIDGE'
+  'In CoPilot', 'CAME', 'Last', 'First', 'Phone #', 'Program', 'Handling', 'Notes',
+  'MEALS ORDERED', 'DINED IN #', 'TAKE OUT #', '# FRIDGE'
 ];
 
 /**
- * Relative column widths. The three hand-tick columns are narrow, the name,
- * program and notes columns wide — a Doc table divides the page by these, so
- * they are proportions rather than measurements.
+ * Relative column widths. The hand-tick columns are narrow, the name, program
+ * and notes columns wide — a Doc table divides the page by these, so they are
+ * proportions rather than measurements.
+ *
+ * Retuned for the larger type (see SIGN_IN_SHEET_BODY_FONT_SIZE): at 11pt a
+ * column narrower than about 34pt cannot hold a two-digit number and a tick
+ * without wrapping, so the four tick/count columns took a point each from
+ * Notes rather than the other way round.
  */
-const SIGN_IN_SHEET_COLUMN_WEIGHTS = [6, 6, 11, 11, 11, 12, 12, 14, 8, 7, 7, 8];
+const SIGN_IN_SHEET_COLUMN_WEIGHTS = [5, 5, 10, 9, 10, 11, 11, 12, 7, 6, 7, 7];
 
-/** Longest program name printed before it is clipped — the column is ~78pt wide. */
-const SIGN_IN_SHEET_MAX_PROGRAM_CHARS = 22;
+/**
+ * Longest program name printed before it is clipped. Roomier than it was,
+ * because a deduped person carries EVERY program they are on today in this one
+ * cell (see mergeSignInEntries) — the column wraps to a second line rather than
+ * telling the desk that Joan is here for "Chair Yoga · Brid…".
+ */
+const SIGN_IN_SHEET_MAX_PROGRAM_CHARS = 28;
 
-/** Blank rows added under the roster, for walk-ins nobody knew about. */
+/** Longest Handling line printed before it is clipped — the colour says the rest. */
+const SIGN_IN_SHEET_MAX_HANDLING_CHARS = 42;
+
+/** Longest Notes line. Shorter than it was: Handling took the half of it that mattered most. */
+const SIGN_IN_SHEET_MAX_NOTES_CHARS = 62;
+
+/** Blank rows added under each roster, for walk-ins nobody knew about. */
 const SIGN_IN_SHEET_BLANK_ROWS = 8;
 
-/** US Letter, landscape, in points — the page this is designed against. */
+/**
+ * READABILITY. The old sheet was 8pt headers over 9pt body, which fit twelve
+ * columns comfortably and was reported, accurately, as unreadable across a desk
+ * in a room lit for eating rather than for reading. 11pt body is the size the
+ * rest of this workbook's printed output uses; the header stays a step smaller
+ * so that "MEALS ORDERED" still fits its column on one or two lines.
+ */
+const SIGN_IN_SHEET_BODY_FONT_SIZE = 11;
+const SIGN_IN_SHEET_HEADER_FONT_SIZE = 10;
+
+/** Row height, in points. Tall enough to write a tick or two digits into by hand at 11pt. */
+const SIGN_IN_SHEET_ROW_HEIGHT = 26;
+
+/** US Letter, landscape, in points — the page this is laid out against. */
 const SIGN_IN_PAGE = { width: 792, height: 612, margin: 28 };
 
-/** Where finished PDFs are filed. Sits beside the forms folder rather than loose in My Drive. */
+/** Where the live sign-in documents are filed. One folder, one file per day and building. */
+const SIGN_IN_DOC_FOLDER_NAME = 'Sign-In Sheets';
+
+/**
+ * Where the PDFs this used to export were filed. Nothing writes here any more,
+ * but backfillSignInSheetRegistry() still reads it: a workbook that printed
+ * sheets for a year has that year in this folder, and those links are still the
+ * only record of what a given day's roster looked like.
+ */
 const SIGN_IN_SHEET_FOLDER_NAME = 'Printed Sign-In Sheets';
 
-/** MENU ENTRY: pick a location + date, get a PDF. */
+/**
+ * THE MEAL LEAVES THE BUILDING — light yellow.
+ *
+ * Matched against the standing needs that apply to a person on this session
+ * (37_regular_needs.gs) and against whatever is in their Admin_Notes, because
+ * the desk types notes there by hand as often as Quick Mark stamps them. Loose
+ * on spelling and spacing for the same reason parseNeedWeekdays() is: this text
+ * is written by people in a hurry.
+ */
+const SIGN_IN_TAKEOUT_RE =
+  /take[\s-]*out|take[\s-]*away|carry[\s-]*out|\bto[\s-]*go\b|bagged?\s+(lunch|meal)|own\s+container/i;
+
+/**
+ * THE MEAL NEEDS HANDLING HERE — light purple.
+ *
+ * Deliberately NOT every unusual note. This is the set of instructions that
+ * change what happens to the physical meal on the premises; a diet restriction
+ * changes what is IN it, prints in the Handling column, and gets no wash. If
+ * everything unusual were purple, nothing would be.
+ */
+const SIGN_IN_SPECIAL_RE =
+  /fridge|freezer|refrigerat|\bdispose\b|\bfroze?n\b|collects?\s+for|somebody\s+else\s+collects|someone\s+else\s+collects|serve\s+at\s+\d|hold\s+(for|until)|\bset\s+aside\b/i;
+
+/** MENU ENTRY: pick a location + date, get the live document for that day. */
 function showSignInSheetDialog() {
   const options = listSignInSheetOptions();
   if (options.length === 0) {
-    toastIfPossible('Nothing to print yet — no sessions or lunch dates in the next few weeks. Run Sync Cal first.');
+    toastIfPossible('Nothing to build yet — no sessions or lunch dates in the next few weeks. Run Sync Cal first.');
     return;
   }
   const html = HtmlService.createHtmlOutput(buildSignInSheetHtml(options))
     .setWidth(520)
-    .setHeight(440); // three dropdowns now, not two
-  SpreadsheetApp.getUi().showModalDialog(html, 'Print a Sign-In Sheet');
+    .setHeight(460);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Sign-In Sheet');
 }
 
 /**
@@ -97,8 +208,8 @@ function showSignInSheetDialog() {
  * Both sources, because the two answer different questions — the dashboard
  * knows where people are expected, the menu knows where food is being served,
  * and a sign-in sheet is wanted for either. Yesterday and the day before are
- * included on purpose: the commonest reason to print one late is that the
- * original went missing mid-service.
+ * included on purpose: the commonest reason to build one late is that the
+ * original was never opened.
  *
  * Returned as one flat list of entries rather than a location -> dates map:
  * the dialog needs the locations for one dropdown and the dates for the other,
@@ -228,11 +339,11 @@ function buildSignInSheetHtml(options) {
   .ok { color: #188038; } .err { color: #C5221F; }
   a { color: #1155CC; }
 </style>
-<h3>Print a sign-in sheet</h3>
+<h3>Sign-in sheet for a day</h3>
 <p class="hint">
-  One landscape page for a place and a day — everyone registered for any program there that day,
-  with empty boxes for CAME and the meal counts. Anyone who did not order lunch is printed with 0s
-  in the meal columns. Extra blank rows are added for walk-ins.
+  A live Google Doc for one place and one day: lunch on page one, everybody on page two.
+  Take-out rows are washed yellow, fridge and other special handling purple.
+  Building the same day again reuses the same document, so the link never goes stale.
 </p>
 <label for="location">Location</label>
 <select id="location" onchange="fillDates()">${locationTags}</select>
@@ -243,7 +354,7 @@ function buildSignInSheetHtml(options) {
   <option value="active">Active registrations only (recommended)</option>
   <option value="all">Everyone, including cancelled and waitlisted</option>
 </select>
-<button id="go" onclick="submit()">Create PDF</button>
+<button id="go" onclick="submit()">Build the sheet</button>
 <div id="status"></div>
 <script>
   var OPTIONS = ${payload};
@@ -273,20 +384,20 @@ function buildSignInSheetHtml(options) {
     var include = document.getElementById('include').value;
     if (!session) { say('Pick a date first.', 'err'); return; }
     document.getElementById('go').disabled = true;
-    say('Building the PDF…', '');
+    say('Building the document…', '');
     google.script.run
       .withSuccessHandler(function (res) {
         document.getElementById('go').disabled = false;
-        if (!res || !res.url) { say(res && res.message ? res.message : 'Nothing to print.', 'err'); return; }
+        if (!res || !res.url) { say(res && res.message ? res.message : 'Nothing to build.', 'err'); return; }
         var el = document.getElementById('status');
         el.className = 'ok';
-        el.innerHTML = res.message + '<br><a href="' + res.url + '" target="_blank">Open the PDF</a>';
+        el.innerHTML = res.message + '<br><a href="' + res.url + '" target="_blank">Open the sign-in sheet</a>';
       })
       .withFailureHandler(function (err) {
         document.getElementById('go').disabled = false;
         say('Failed: ' + err.message, 'err');
       })
-      .createSignInSheetPdf(session, include);
+      .createSignInSheetDoc(session, include);
   }
 
   function say(msg, cls) {
@@ -306,11 +417,12 @@ function escapeHtmlForDialog(value) {
 }
 
 /**
- * Called from the dialog. Builds the PDF and returns { url, message }.
+ * Called from the dialog. Builds (or rebuilds) the live document and returns
+ * { url, message }.
  *
  * `sessionValue` is "yyyy-MM-dd|Location"; `include` is 'active' or 'all'.
  */
-function createSignInSheetPdf(sessionValue, include) {
+function createSignInSheetDoc(sessionValue, include) {
   const parts = String(sessionValue || '').split('|');
   const dateKey = String(parts[0] || '').trim();
   const location = String(parts[1] || '').trim();
@@ -322,25 +434,33 @@ function createSignInSheetPdf(sessionValue, include) {
       `and no lunch on the menu — there is nothing to put on a sheet.` };
   }
 
-  const file = renderSignInSheetPdf(data);
+  const file = renderSignInSheetDoc(data);
   // REMEMBERED, not just returned. The dialog hands back a link that is gone
   // the moment it closes; the registry is what puts that same file on the
   // session's row on every tab that has one — see 69_generated_file_links.gs.
-  recordSignInSheetPdf(dateKey, location, file);
+  // It is also how the NEXT build of this day finds the document to rewrite
+  // rather than making a second one.
+  recordSignInSheetFile(dateKey, location, file);
   flushPersistentRegistries();
-  const message = `✅ ${data.rows.length} name(s) on the sheet ` +
-    `(${data.lunchCount} meal(s) ordered, ${data.noLunchCount} here without lunch)` +
-    (data.meal ? `, lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
-  log(`createSignInSheetPdf: built "${file.getName()}" with ${data.rows.length} row(s) — ` +
-    `${data.lunchCount} meal(s) ordered, ${data.noLunchCount} without.`);
+  const message = `✅ ${data.lunchRows.length} on the lunch list (${data.lunchCount} meal(s)), ` +
+    `${data.rows.length} on the full roster` +
+    (data.mergedAway > 0 ? `, ${data.mergedAway} duplicate row(s) merged` : '') +
+    (data.meal ? `. Lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
+  log(`createSignInSheetDoc: wrote "${file.getName()}" — ${data.rows.length} person(s), ` +
+    `${data.lunchRows.length} eating, ${data.lunchCount} meal(s), ${data.mergedAway} duplicate(s) merged.`);
   return { url: file.getUrl(), message };
 }
 
 /**
- * SCHEDULED ENTRY POINT: prints one sign-in sheet PDF per location that has a
+ * SCHEDULED ENTRY POINT: builds one sign-in sheet per location that has a
  * session or catered lunch TODAY, unattended — see writeTriggers() (16) for
  * the early-morning trigger that calls this. The desk should never have to
  * remember to press "Print Sign-In Sheet" before the first person walks in.
+ *
+ * The sheet is a live document now, not a PDF (see renderSignInSheetDoc()),
+ * which makes this cheaper than it reads: a day this has already built is
+ * REWRITTEN in place, so the link on the dashboard is the same link it was
+ * yesterday and a desk that bookmarked it is not stranded.
  *
  * Behind the same kill switch as syncCalendars() / syncRegistrations() (see
  * MANAGED_AUTOMATION_HANDLERS in 04) — this runs on its own, at its own time,
@@ -355,7 +475,7 @@ function createSignInSheetPdf(sessionValue, include) {
  * "Active registrations only" — the dialog's own recommended default — since
  * an unattended run has nobody there to choose "include cancelled/waitlisted".
  * A location with nothing to print (no active roster and no catered lunch) is
- * skipped without complaint, exactly like createSignInSheetPdf()'s own guard.
+ * skipped without complaint, exactly like createSignInSheetDoc()'s own guard.
  */
 function autoCreateTodaysSignInSheets() {
   if (!automationGateAllows('Auto Sign-In Sheets')) return;
@@ -399,8 +519,8 @@ function autoCreateTodaysSignInSheetsInternal() {
         skipped.push(option.location);
         return;
       }
-      const file = renderSignInSheetPdf(data);
-      recordSignInSheetPdf(option.dateKey, option.location, file);
+      const file = renderSignInSheetDoc(data);
+      recordSignInSheetFile(option.dateKey, option.location, file);
       built.push(`${option.location} (${data.rows.length} name(s))`);
     } catch (err) {
       log(`⚠️ autoCreateTodaysSignInSheets: failed to build a sheet for ${option.location} on ${todayKey} (${err}).`);
@@ -416,28 +536,26 @@ function autoCreateTodaysSignInSheetsInternal() {
 }
 
 /**
- * Gathers everything one printed sheet needs: the day's meal, the people, and
- * the counts the kitchen is working to.
+ * Gathers everything one sheet needs: the day's meal, the people, and the
+ * counts the kitchen is working to.
  *
  * EVERY program at this location on this date, in one roster — see the section
  * note. Which program each person came for is kept per row and printed in its
  * own column, so a mixed sheet is still readable at the desk.
  *
  * Sorted by LAST NAME, because that is how a person hunts for their own name
- * on a paper list at a desk — not by registration order, which is meaningless
- * to them, and not by first name, which is what the workbook happens to store.
+ * on a list at a desk — not by registration order, which is meaningless to
+ * them, and not by first name, which is what the workbook happens to store.
  *
- * NOT sorted lunch-first, which is the obvious alternative and the wrong one.
- * Grouping the eaters together would suit the kitchen, but the person holding
- * this sheet is looking up arrivals by name, one at a time, all morning; a
- * roster split into two alphabetical halves means every lookup is two lookups.
- * The meal columns carry the lunch/no-lunch distinction instead, which is
- * where somebody counting meals is looking anyway.
+ * NOT sorted lunch-first WITHIN a section, which is the obvious alternative and
+ * the wrong one: the person holding this is looking up arrivals by name, one at
+ * a time, all morning, and a roster split into two alphabetical halves means
+ * every lookup is two lookups. The LUNCH SECTION is the lunch-first cut, and it
+ * is a separate page for exactly that reason.
  *
- * GUESTS PRINT UNDER THEIR REGISTRANT, NOT AS A ROW OF THEIR OWN — see the
- * guest-folding pass below and buildSignInSheetRow(). This is a PDF-only
- * fold: nothing here writes back to Registrant_Dash, so the guest's own row
- * and its own meal count are untouched everywhere else in the workbook.
+ * GUESTS FOLD INTO THEIR REGISTRANT and DUPLICATES FOLD INTO ONE PERSON — see
+ * the two passes below. Both are document-only folds: nothing here writes back
+ * to Registrant_Dash.
  */
 function collectSignInSheetData(dateKey, location, includeEveryone) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -462,16 +580,22 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     if (program && programs.indexOf(program) === -1) programs.push(program);
 
     const name = String(row[map['Name']] || '').trim();
+    const personType = String(row[map['Person_Type']] || '').trim();
     const entry = {
       name, program, status, row,
+      isGuest: /^guest$/i.test(personType),
+      // Carried on the entry rather than read back off the row when wanted:
+      // dedupeSignInEntries() matches on it and mergeSignInEntries() has to be
+      // able to prefer a duplicate's number over a blank on the first row, and
+      // neither of them has the header map.
+      phone: String(row[map['Phone']] || '').trim(),
       lunch: String(row[map['Lunch_Status']] || '').trim() === 'Needed',
       // What is actually printed in MEALS ORDERED. A standing order of four is
       // the one fact on this sheet the desk cannot work out for itself, and a
       // pre-printed 1 was the workbook asserting something untrue about Joan.
       meals: readRegistrantMealsOrdered(row, map)
     };
-    const personType = String(row[map['Person_Type']] || '').trim();
-    if (/^guest$/i.test(personType)) {
+    if (entry.isGuest) {
       guests.push(entry);
     } else {
       // Keyed on the SAME program, so a host who came to two sessions today
@@ -483,8 +607,8 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
 
   // FOLD GUESTS INTO WHOEVER BROUGHT THEM. A guest whose host is not on
   // today's roster for that same program — the host cancelled and the guest
-  // did not, or the two names do not match — prints as a row of its own,
-  // exactly as it always has, labelled "guest of X" by describePartyForPrinting().
+  // did not, or the two names do not match — stays a row of its own, labelled
+  // "guest of X" by describePartyForPrinting(), and is deduped like anybody.
   guests.forEach(guest => {
     const primary = String(guest.row[map['Primary_Registrant']] || '').trim();
     const key = primary && primary !== 'Self'
@@ -495,7 +619,15 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     host.guests.push(guest);
   });
 
-  const rows = hosts.map(entry => buildSignInSheetRow(entry, map));
+  // ONE PERSON, ONE ROW. The second fold, and the aggressive one.
+  const merged = dedupeSignInEntries(hosts);
+  const mergedAway = hosts.length - merged.length;
+
+  // The standing needs that decide the Handling column and its wash. Read once
+  // for the whole sheet: this is a tab read, and a per-person one would be a
+  // hundred of them.
+  const needs = readRegularNeedsForSignInSheet();
+  const rows = merged.map(entry => buildSignInSheetRow(entry, map, needs, date, location));
 
   rows.sort((a, b) =>
     a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
@@ -504,25 +636,283 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
   // MEALS, matching Master_Lunch_Dashboard's Registered_Count — the kitchen
   // figure printed at the head of this sheet has to be the same number the
   // kitchen was given, or the desk has two counts and no way to choose.
-  const lunchCount = rows.reduce((n, r) => n + (r.lunch ? r.meals : 0), 0);
+  const lunchRows = rows.filter(r => r.lunch && r.meals > 0);
+  const lunchCount = lunchRows.reduce((n, r) => n + r.meals, 0);
   return {
     date,
     dateKey,
     location,
     programs,
     rows,
+    lunchRows,
+    mergedAway,
     meal: meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1 ? meal : null,
     lunchCount,
     // PEOPLE, not meals — this is the count the "rows pre-filled with 0" note
     // explains, and it counts rows on the page. Derived from the rows rather
     // than by subtracting lunchCount, which stopped being a headcount the
     // moment one person could order four (see Meals_Ordered).
-    noLunchCount: rows.filter(r => !r.lunch).length,
+    noLunchCount: rows.length - lunchRows.length,
     ordering: lookupOrderingNumbersForPrinting(dateKey, location)
   };
 }
 
-/** Clips a value to fit its printed column, with an ellipsis so the clipping is visible. */
+// ----------------------------------------------------------------------------
+// One person, one row
+// ----------------------------------------------------------------------------
+
+/**
+ * THE AGGRESSIVE NAME KEY. normalizeNameKey() lowercases and collapses spaces,
+ * which is the right amount of forgiveness for joining a form response to a
+ * roster row and nowhere near enough for deciding whether two rows in front of
+ * a sign-in desk are the same human being. This one additionally:
+ *
+ *   * CLOSES UP apostrophes and drops the rest of the punctuation, so
+ *     "O'Brien" and "OBrien" are one person and "Smith, Jane" stops being a
+ *     third spelling of Jane Smith. Apostrophes close rather than split
+ *     because splitting them would leave "o" — which the initial rule below
+ *     then throws away, turning O'Brien into Brien and matching neither
+ *     spelling. (A name typed "O Brien", with a real space, is out of reach of
+ *     this and stays its own person: there is nothing in the string to say
+ *     whether that space is a missing apostrophe or a middle name.);
+ *   * drops honorifics and suffixes (Mr, Dr, Jr, III), which people type on one
+ *     form and not the next;
+ *   * drops single-letter tokens, so a middle initial supplied once does not
+ *     make a second person;
+ *   * SORTS the remaining tokens, which is what makes "Smith Jane" and "Jane
+ *     Smith" the same key without having to know which field was which.
+ *
+ * Sorting tokens is the deliberately aggressive part: it will also collapse
+ * "Ann Marie" and "Marie Ann", who could in principle be two people. On a
+ * roster of a few dozen names at one building on one day that trade is the
+ * right way round — a wrongly merged pair is one row somebody queries at the
+ * desk, and a wrongly split pair is a second lunch ordered for somebody who
+ * eats one.
+ */
+function signInPersonKey(name) {
+  const raw = String(name || '')
+    .toLowerCase()
+    .replace(/['’`]/g, '')          // O'Brien -> obrien, never "o brien"
+    .replace(/[.,_"()\[\]-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '';
+  const drop = {
+    mr: true, mrs: true, ms: true, miss: true, mx: true, dr: true, rev: true, fr: true,
+    prof: true, sir: true, jr: true, sr: true, ii: true, iii: true, iv: true, v: true
+  };
+  const tokens = raw.split(' ').filter(t => t.length > 1 && !drop[t]);
+  if (tokens.length === 0) return raw; // a one-letter name is still a name
+  return tokens.sort().join(' ');
+}
+
+/** The last ten digits of a phone number, or '' — the form a person types two different ways. */
+function signInPhoneKey(phone) {
+  const digits = String(phone || '').replace(/\D+/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
+/**
+ * Collapses a day's entries down to one per person.
+ *
+ * TWO PASSES. The first groups on signInPersonKey(), which catches every
+ * ordinary duplicate: the same person on two programs, the same registration
+ * imported twice, a name retyped with a middle initial.
+ *
+ * The second is for the case the name key cannot see — two genuinely different
+ * spellings of one person, "Bob Smith" and "Robert Smith". Those merge only
+ * when they share a PHONE NUMBER *and* share at least one name token, which is
+ * tight enough that a household sharing a landline does not collapse into one
+ * row. GUESTS ARE EXEMPT FROM THE PHONE PASS for exactly that reason: a guest
+ * is normally reachable on the phone of whoever brought them, and merging the
+ * two would silently drop a meal — a guest is a second mouth (see the meal
+ * arithmetic in mergeSignInEntries()).
+ *
+ * ORDER IS PRESERVED: the first entry seen for a person is the one that keeps
+ * its position, so the caller's sort is still the only thing deciding order.
+ */
+function dedupeSignInEntries(entries) {
+  const byKey = {};
+  const order = [];
+  const groupOfPhone = {};
+
+  (entries || []).forEach(entry => {
+    let key = signInPersonKey(entry.name);
+    if (!key) key = `#${order.length}`; // a nameless row is its own row, not everyone's
+
+    const phoneKey = entry.isGuest ? '' : signInPhoneKey(entry.phone);
+    if (!byKey[key] && phoneKey && groupOfPhone[phoneKey]) {
+      const candidate = groupOfPhone[phoneKey];
+      if (shareANameToken(key, candidate)) key = candidate;
+    }
+
+    if (!byKey[key]) {
+      byKey[key] = { key, entries: [] };
+      order.push(key);
+    }
+    byKey[key].entries.push(entry);
+    if (phoneKey && !groupOfPhone[phoneKey]) groupOfPhone[phoneKey] = key;
+  });
+
+  return order.map(key => mergeSignInEntries(byKey[key].entries));
+}
+
+/** Do two aggressive name keys have a word in common? The guard on the phone merge. */
+function shareANameToken(a, b) {
+  const left = String(a || '').split(' ').filter(Boolean);
+  const right = String(b || '').split(' ').filter(Boolean);
+  return left.some(token => right.indexOf(token) !== -1);
+}
+
+/**
+ * Folds N entries for one person into one.
+ *
+ * THE MEAL COUNT IS THE MAXIMUM, NOT THE SUM, and this is the whole point of
+ * the exercise. `Meals_Ordered` on a single row is how this workbook says "she
+ * wants four" (readRegistrantMealsOrdered()); the same person ticking the lunch
+ * question on the Art form and the Bridge form has said "I want lunch" twice
+ * about one lunch. Summing them is how a kitchen ends up cooking for a hundred
+ * and ten people at a building that seats seventy.
+ *
+ * Guests are the exception and they are not merged here — they arrive already
+ * attached to their host (see collectSignInSheetData) and their meals ADD in
+ * buildSignInSheetRow(), because a guest really is a second mouth. Guest LISTS
+ * from several merged rows are concatenated and then deduped by the same person
+ * key, so a guest attached to a host on two programs is named once.
+ *
+ * Everything else takes the most informative value: the longest spelling of the
+ * name, the first phone number anybody supplied, every distinct program joined,
+ * and Active in preference to a cancellation (a person who cancelled one of two
+ * programs is still here for the other).
+ */
+function mergeSignInEntries(entries) {
+  const list = entries || [];
+  const base = list[0];
+  if (list.length === 1) return base;
+
+  const programs = [];
+  const guests = [];
+  const guestKeys = {};
+  let name = base.name;
+  let phone = '';
+  let status = '';
+  let meals = 0;
+  let lunch = false;
+
+  list.forEach(entry => {
+    if (String(entry.name || '').length > String(name || '').length) name = entry.name;
+    if (!phone && entry.phone) phone = entry.phone;
+    if (entry.program && programs.indexOf(entry.program) === -1) programs.push(entry.program);
+    if (entry.lunch) lunch = true;
+    if (entry.meals > meals) meals = entry.meals;
+    if (entry.status === 'Active' || !status) status = entry.status;
+    (entry.guests || []).forEach(guest => {
+      const key = signInPersonKey(guest.name) || `#${guests.length}`;
+      if (guestKeys[key]) return;
+      guestKeys[key] = true;
+      guests.push(guest);
+    });
+  });
+
+  return {
+    name,
+    phone,
+    program: programs.join(' · '),
+    programs,
+    status,
+    // The row the merged person is DESCRIBED from — phone, notes, party size,
+    // person type. The first one seen, which is the earliest registration and
+    // so the one most likely to have been filled in by hand rather than
+    // auto-filled from it.
+    row: base.row,
+    isGuest: base.isGuest,
+    lunch,
+    meals,
+    guests,
+    mergedFrom: list.length
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Handling: the column and the two washes
+// ----------------------------------------------------------------------------
+
+/** The standing needs, or an empty list if the tab is missing or unreadable. */
+function readRegularNeedsForSignInSheet() {
+  try {
+    return readRegularNeedRows();
+  } catch (err) {
+    log(`ℹ️ Sign-in sheet: could not read the standing needs (${err}) — building without them.`);
+    return [];
+  }
+}
+
+/**
+ * Everything the desk has to DO differently for this person, as short lines.
+ *
+ * Two sources, because the same fact reaches a row two ways: the Regular_Needs
+ * tab (which Quick Mark also stamps onto Admin_Notes) and whatever somebody
+ * typed into Admin_Notes by hand. Deduped on the text, so a need that has been
+ * both matched and stamped prints once.
+ */
+function collectSignInHandlingNotes(entry, map, needs, date, location) {
+  const out = [];
+  const seen = {};
+  const add = text => {
+    const clean = String(text || '').replace(/^🔔\s*/, '').trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(clean);
+  };
+
+  const titles = entry.programs && entry.programs.length ? entry.programs : [entry.program];
+  titles.forEach(title => {
+    regularNeedsFor(needs, { name: entry.name, location, title: String(title || '').trim(), date })
+      .forEach(need => add(describeRegularNeed(need)));
+  });
+
+  // The hand-typed half. Admin_Notes is one field with several facts in it,
+  // joined by the same ' · ' stampRegularNeedsOnRow() uses, so it splits back
+  // into the pieces that were put in.
+  String((entry.row && map['Admin_Notes'] !== undefined ? entry.row[map['Admin_Notes']] : '') || '')
+    .split(/\s·\s|\n/)
+    .forEach(part => {
+      const clean = part.trim();
+      if (clean && (SIGN_IN_TAKEOUT_RE.test(clean) || SIGN_IN_SPECIAL_RE.test(clean))) add(clean);
+    });
+
+  return out;
+}
+
+/**
+ * '' | 'takeout' | 'special' — which wash this row gets.
+ *
+ * SPECIAL WINS a row that is both. "Take-out, and put it in the fridge if she
+ * has not come by noon" is two instructions, and the second is the one that
+ * gets forgotten; the Handling column still spells out both.
+ */
+function classifySignInHandling(handlingNotes) {
+  const text = (handlingNotes || []).join(' · ');
+  if (!text) return '';
+  if (SIGN_IN_SPECIAL_RE.test(text)) return 'special';
+  if (SIGN_IN_TAKEOUT_RE.test(text)) return 'takeout';
+  return '';
+}
+
+/** The wash a handling class prints as, or '' for no wash at all. */
+function signInHandlingColor(handlingClass) {
+  if (handlingClass === 'takeout') return PALETTE.HANDLING_TAKEOUT;
+  if (handlingClass === 'special') return PALETTE.HANDLING_SPECIAL;
+  return '';
+}
+
+// ----------------------------------------------------------------------------
+// One row
+// ----------------------------------------------------------------------------
+
+/** Clips a value to fit its column, with an ellipsis so the clipping is visible. */
 function truncateForPrinting(value, maxChars) {
   const text = String(value || '').trim();
   return text.length > maxChars ? `${text.substring(0, maxChars - 1)}…` : text;
@@ -557,62 +947,77 @@ function describePartyForPrinting(row, map) {
   return '';
 }
 
-/** The Extra Notes cell: dietary needs and anything not-normal about the registration. */
-function buildSignInNotes(row, map, status, guestNames) {
+/**
+ * The Notes cell: who this person is with, anything not-normal about the
+ * registration, and whatever else is on the row.
+ *
+ * The HANDLING facts are deliberately NOT repeated here — they have their own
+ * column and their own colour now, and printing them twice at 11pt is how a
+ * notes column stops being read.
+ */
+function buildSignInNotes(entry, map, handlingNotes) {
+  const row = entry.row;
   const parts = [];
-  if (status && status !== 'Active') parts.push(status.toUpperCase());
-  const lunchStatus = String(row[map['Lunch_Status']] || '').trim();
-  if (lunchStatus === 'Needed') {
+  if (entry.status && entry.status !== 'Active') parts.push(entry.status.toUpperCase());
+
+  const party = describePartyForPrinting(row, map);
+  if (party) parts.push(party);
+
+  if (entry.lunch) {
     const type = String(row[map['Lunch_Type']] || '').trim();
-    parts.push(type ? `lunch (${type})` : 'lunch');
+    if (type && type !== 'No Lunch') parts.push(type.toLowerCase());
   }
+
   // WHO ELSE IS ON THIS ROW. Guests print folded into their registrant rather
   // than as rows of their own (see collectSignInSheetData()'s guest-folding),
   // so their names go here — the one place left on a single-row-per-party
   // sheet for the desk to see who it is actually ticking off.
-  if (guestNames && guestNames.length) {
+  const guestNames = (entry.guests || []).map(g => g.name).filter(Boolean);
+  if (guestNames.length) {
     parts.push(`with ${guestNames.length === 1 ? 'guest' : 'guests'}: ${guestNames.join(', ')}`);
   }
-  const notes = String(row[map['Admin_Notes']] || '').trim();
-  if (notes) parts.push(notes);
-  const joined = parts.join(' · ');
-  // Paper has a width. A note longer than this is a note nobody reads at a
-  // desk anyway, and the full text is a click away on the Registrants tab.
-  // Shorter than it was, because the Program column now takes a slice of the
-  // width this column used to have.
-  return joined.length > 75 ? `${joined.substring(0, 72)}…` : joined;
+
+  // Whatever is left in Admin_Notes once the handling lines have been lifted
+  // out of it — the free text that is genuinely just a note.
+  const handled = {};
+  (handlingNotes || []).forEach(text => { handled[text.toLowerCase()] = true; });
+  String(row[map['Admin_Notes']] || '')
+    .split(/\s·\s|\n/)
+    .forEach(part => {
+      const clean = part.replace(/^🔔\s*/, '').trim();
+      if (clean && !handled[clean.toLowerCase()]) parts.push(clean);
+    });
+
+  return truncateForPrinting(parts.join(' · '), SIGN_IN_SHEET_MAX_NOTES_CHARS);
 }
 
 /**
- * One printed row for a registrant AND their folded-in guests (see
- * collectSignInSheetData()). A guest never gets a row of its own here — this
- * is a PDF-only fold, so their own Registrant_Dash row and meal count are
- * untouched everywhere else.
+ * One printed row for a person AND their folded-in guests.
  *
  * THE MEAL COUNT IS THE PARTY'S, NOT JUST THE REGISTRANT'S: the desk hands
  * lunch to a party at once, so a guest who ordered a meal has it added to the
  * name the desk is actually ticking off, and `lunch` flips on for the row so
- * the meal columns print the total rather than a zero.
+ * the meal columns print the total rather than a zero. Duplicates of the SAME
+ * person were already collapsed with a maximum rather than a sum — see
+ * mergeSignInEntries() for why the two arithmetics differ.
  */
-function buildSignInSheetRow(entry, map) {
+function buildSignInSheetRow(entry, map, needs, date, location) {
   const row = entry.row;
   const guests = entry.guests || [];
   const guestMeals = guests.reduce((n, g) => n + (g.lunch ? g.meals : 0), 0);
   const split = splitNameForPrinting(entry.name);
+  const handlingNotes = collectSignInHandlingNotes(entry, map, needs, date, location);
   return {
     last: split.last,
     first: split.first,
-    phone: String(row[map['Phone']] || '').trim(),
+    phone: entry.phone || String(row[map['Phone']] || '').trim(),
     program: truncateForPrinting(entry.program, SIGN_IN_SHEET_MAX_PROGRAM_CHARS),
-    // "Family / Alt Name" is the desk's column for who this person is WITH.
-    // A guest is named against whoever brought them; a registrant who
-    // brought people carries the size of their party. Either way the person
-    // holding the pen can see that two rows belong together.
-    family: describePartyForPrinting(row, map),
-    notes: buildSignInNotes(row, map, entry.status, guests.map(g => g.name)),
+    handling: truncateForPrinting(handlingNotes.join(' · '), SIGN_IN_SHEET_MAX_HANDLING_CHARS),
+    handlingClass: classifySignInHandling(handlingNotes),
+    notes: buildSignInNotes(entry, map, handlingNotes),
     lunch: entry.lunch || guestMeals > 0,
-    // What is actually printed in MEALS ORDERED — the registrant's own count,
-    // plus whatever their folded-in guests ordered.
+    // What is actually printed in MEALS ORDERED — the person's own count, plus
+    // whatever their folded-in guests ordered.
     meals: (entry.lunch ? entry.meals : 0) + guestMeals
   };
 }
@@ -642,59 +1047,116 @@ function lookupOrderingNumbersForPrinting(dateKey, location) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// The document
+// ----------------------------------------------------------------------------
+
 /**
- * Renders the sheet as a landscape PDF and returns the Drive file.
+ * Writes the sheet into its live Google Doc and returns the Drive file.
  *
- * Built as a Google Doc and then exported, rather than assembled as HTML: a
- * Doc paginates by itself, repeats nothing it shouldn't, and gives a table
- * that prints with real gridlines at a predictable size. The temporary Doc is
- * removed once the PDF exists — only the PDF is worth keeping.
+ * THE SAME DOCUMENT EVERY TIME for a given date x location. The registry
+ * (69_generated_file_links.gs) already remembers a file per day and building,
+ * so a rebuild opens that one and rewrites its body rather than making a second
+ * file with the same name — which is what keeps every link already handed out
+ * pointing at a roster that is current.
+ *
+ * A document that has been deleted, trashed, or is no longer openable is
+ * silently replaced by a fresh one. That is the honest reading of "the file is
+ * gone": there is nothing to preserve, and refusing to build would leave the
+ * desk with no sheet at all over a file somebody tidied away.
  */
-function renderSignInSheetPdf(data) {
+function renderSignInSheetDoc(data) {
   const title = buildSignInSheetTitle(data);
-  const doc = DocumentApp.create(title);
-  try {
-    const body = doc.getBody();
-    body.setPageWidth(SIGN_IN_PAGE.width);
-    body.setPageHeight(SIGN_IN_PAGE.height);
-    body.setMarginTop(SIGN_IN_PAGE.margin);
-    body.setMarginBottom(SIGN_IN_PAGE.margin);
-    body.setMarginLeft(SIGN_IN_PAGE.margin);
-    body.setMarginRight(SIGN_IN_PAGE.margin);
+  const doc = openOrCreateSignInSheetDoc(data, title);
 
-    writeSignInSheetHeading(body, data);
-    writeSignInSheetTable(body, data);
+  const body = doc.getBody();
+  // A REBUILD, not an append. Everything below is written from scratch, so
+  // whatever the last build (or a person with a biro) left behind goes first.
+  body.clear();
+  body.setPageWidth(SIGN_IN_PAGE.width);
+  body.setPageHeight(SIGN_IN_PAGE.height);
+  body.setMarginTop(SIGN_IN_PAGE.margin);
+  body.setMarginBottom(SIGN_IN_PAGE.margin);
+  body.setMarginLeft(SIGN_IN_PAGE.margin);
+  body.setMarginRight(SIGN_IN_PAGE.margin);
 
-    // DocumentApp gives every new document one empty paragraph at the top; it
-    // costs a line of a page that is meant to hold as many rows as possible.
-    const first = body.getChild(0);
-    if (body.getNumChildren() > 1 && first.getType() === DocumentApp.ElementType.PARAGRAPH &&
-      first.asParagraph().getText() === '') {
-      first.removeFromParent();
-    }
+  // SECTION ONE: LUNCH. First because it is what the sheet is for.
+  writeSignInSheetHeading(body, data, {
+    section: 'Lunch',
+    note: data.lunchRows.length === 0
+      ? 'Nobody has ordered a meal for this day yet.'
+      : 'Everyone with a meal ordered. Hand food against this page.'
+  });
+  writeSignInSheetTable(body, data.lunchRows, { showZeros: false });
 
-    doc.saveAndClose();
+  body.appendPageBreak();
 
-    const folder = getOrCreateSignInSheetFolder();
-    const pdf = folder.createFile(DriveApp.getFileById(doc.getId()).getAs('application/pdf')).setName(`${title}.pdf`);
+  // SECTION TWO: EVERYONE.
+  writeSignInSheetHeading(body, data, {
+    section: 'Everyone',
+    note: 'The full roster for this day — lunch or not. Rows showing 0 in the meal ' +
+      'columns ordered no lunch: nothing to serve them, nothing to write in those boxes.'
+  });
+  writeSignInSheetTable(body, data.rows, { showZeros: true });
 
-    // Same reason every form and program leader sheet opens itself up the
-    // moment it exists (see openUpFileToAnyoneWithLink()): whoever presses
-    // the print button is not necessarily whoever later clicks the
-    // Sign_In_Sheet_Link on the dashboard (69_generated_file_links.gs), and
-    // Drive hands a new file to its creator alone. Never thrown — a sign-in
-    // sheet that could not be opened up is still a sign-in sheet.
-    openUpFileToAnyoneWithLink(pdf.getId(), `sign-in sheet "${title}"`);
-    return pdf;
-  } finally {
-    // The Doc was only ever scaffolding for the PDF. Trashed rather than
-    // deleted outright, so a failed export is still recoverable by hand.
+  // DocumentApp leaves an empty paragraph at the top of a cleared body; it
+  // costs a line of a page that is meant to hold as many rows as possible.
+  const first = body.getChild(0);
+  if (body.getNumChildren() > 1 && first.getType() === DocumentApp.ElementType.PARAGRAPH &&
+    first.asParagraph().getText() === '') {
+    first.removeFromParent();
+  }
+
+  doc.saveAndClose();
+  return DriveApp.getFileById(doc.getId());
+}
+
+/**
+ * The live document for this day and building: the one the registry remembers,
+ * or a new one filed in SIGN_IN_DOC_FOLDER_NAME.
+ *
+ * The title is re-applied on every build, so a day whose location was renamed
+ * — or a file created under the old "Sign-In …" PDF naming — ends up named for
+ * what it now contains without losing its URL.
+ */
+function openOrCreateSignInSheetDoc(data, title) {
+  const entry = getSignInSheetRegistry()[signInSheetKey(data.dateKey, data.location)];
+  if (entry && entry.fileId) {
     try {
-      DriveApp.getFileById(doc.getId()).setTrashed(true);
+      const file = DriveApp.getFileById(entry.fileId);
+      if (!file.isTrashed() && file.getMimeType() === MimeType.GOOGLE_DOCS) {
+        const doc = DocumentApp.openById(entry.fileId);
+        // Renamed through the Document rather than the Drive file: the document
+        // is about to be written and saved, and two APIs holding the same file
+        // open is a race worth not having.
+        if (doc.getName() !== title) doc.setName(title);
+        return doc;
+      }
     } catch (err) {
-      log(`ℹ️ Could not tidy up the temporary sign-in document (${err}) — it is in your Drive root.`);
+      // Deleted, or owned by somebody who has since revoked access. Either way
+      // there is nothing to rewrite — fall through and make a new one.
+      log(`ℹ️ Sign-in sheet: the document for ${data.dateKey} at ${data.location} could not be ` +
+        `reopened (${err}) — building a fresh one.`);
     }
   }
+
+  const doc = DocumentApp.create(title);
+  // Same reason every form, leader sheet and printed PDF opens itself up the
+  // moment it exists (see openUpFileToAnyoneWithLink()): whoever builds this
+  // is not necessarily whoever later clicks the Sign_In_Sheet_Link on the
+  // dashboard (69_generated_file_links.gs), and Drive hands a new file to its
+  // creator alone. Never thrown — a sheet that could not be opened up is
+  // still a sheet. Only on creation: a re-opened document is already shared.
+  openUpFileToAnyoneWithLink(doc.getId(), `sign-in sheet "${title}"`);
+  try {
+    // DocumentApp.create() lands in My Drive root; move it into the folder the
+    // rest of them live in. A failure here costs filing, not the document.
+    DriveApp.getFileById(doc.getId()).moveTo(getOrCreateSignInSheetDocFolder());
+  } catch (err) {
+    log(`ℹ️ Could not file the new sign-in document into "${SIGN_IN_DOC_FOLDER_NAME}" (${err}) — ` +
+      'it is in your Drive root.');
+  }
+  return doc;
 }
 
 function buildSignInSheetTitle(data) {
@@ -702,56 +1164,89 @@ function buildSignInSheetTitle(data) {
   return `Sign-In ${stamp} ${data.location}`;
 }
 
-/** The block above the table: who, where, what is being served, and what was ordered. */
-function writeSignInSheetHeading(body, data) {
+/**
+ * The block above a table: WHO, WHERE, and TOTAL ORDERED, in that order and at
+ * a size somebody reads from standing up.
+ *
+ * TOTAL ORDERED gets a line of its own. It was previously the sixth clause of a
+ * 10pt run-on line beginning with the program names, which is to say it was
+ * invisible — and it is the single number anybody picking this sheet up is
+ * looking for. It reports the kitchen's total when the lunch dashboard has one
+ * (registered plus the buffers, which is what was actually ordered from the
+ * caterer) and the registrants' own total when it does not, and it says which.
+ */
+function writeSignInSheetHeading(body, data, options) {
+  options = options || {};
   const heading = body.appendParagraph(
     `${data.location} — ${Utilities.formatDate(data.date, TIMEZONE, 'EEEE, MMMM d, yyyy')}`);
   heading.setHeading(DocumentApp.ParagraphHeading.HEADING1);
-  heading.editAsText().setFontSize(16).setBold(true);
+  heading.editAsText().setFontSize(18).setBold(true).setForegroundColor(PALETTE.INK_STRONG);
+
+  const section = body.appendParagraph(
+    `${String(options.section || '').toUpperCase()}  ·  ${options.note || ''}`);
+  section.setHeading(DocumentApp.ParagraphHeading.NORMAL);
+  section.editAsText().setFontSize(11).setBold(true).setForegroundColor('#444444');
+
+  const total = data.ordering
+    ? `TOTAL ORDERED: ${data.ordering.total} meals` +
+      `   (${data.ordering.registered} registered + ${data.ordering.standard} standard + ` +
+      `${data.ordering.tester} tester)`
+    : `TOTAL ORDERED: ${data.lunchCount} meals   (requested by ${data.lunchRows.length} people)`;
+  const totalPara = body.appendParagraph(total);
+  totalPara.editAsText().setFontSize(14).setBold(true).setForegroundColor(PALETTE.INK_STRONG);
 
   const bits = [];
-  if (data.programs.length > 0) bits.push(data.programs.join(' · '));
   if (data.meal) {
     const dish = data.meal.shorthand || data.meal.description || '';
     bits.push(`Lunch: ${data.meal.type}${dish ? ` — ${dish}` : ''}`);
   } else {
     bits.push('Lunch: none scheduled');
   }
-  bits.push(`${data.lunchCount} meal(s) requested`);
+  if (data.programs.length > 0) bits.push(data.programs.join(' · '));
   if (data.noLunchCount > 0) bits.push(`${data.noLunchCount} here without lunch`);
-  if (data.ordering) {
-    bits.push(`ordered ${data.ordering.total} (${data.ordering.registered} registered ` +
-      `+ ${data.ordering.standard} standard + ${data.ordering.tester} tester)`);
-  }
-
+  bits.push(`Questions at the desk: ${CENTER_PHONE}`);
   const sub = body.appendParagraph(bits.join('   |   '));
-  sub.editAsText().setFontSize(10).setBold(false).setForegroundColor('#444444');
+  sub.editAsText().setFontSize(10).setBold(false).setForegroundColor('#555555');
 
-  // Says what the 0s mean. Without this the printed zeros look like a count
-  // somebody already took, which is the one reading that would make the sheet
-  // worse than blank columns.
-  if (data.noLunchCount > 0) {
-    const key = body.appendParagraph(
-      'Rows pre-filled with 0 ordered no lunch — nothing to serve them, nothing to write in those boxes.');
-    key.editAsText().setFontSize(9).setBold(false).setForegroundColor('#444444');
+  // THE KEY TO THE TWO WASHES. A colour nobody can name is a colour nobody
+  // trusts, so it is spelled out on both pages rather than once at the front.
+  const legend = body.appendParagraph('');
+  const legendText = legend.editAsText();
+  legendText.appendText('  TAKE-OUT  ');
+  legendText.appendText('   the meal leaves the building        ');
+  legendText.appendText('  SPECIAL HANDLING  ');
+  legendText.appendText('   fridge, freezer, collected by somebody else');
+  legendText.setFontSize(9).setBold(false).setForegroundColor('#444444');
+  legendText.setBackgroundColor(0, 11, PALETTE.HANDLING_TAKEOUT);
+  legendText.setBold(0, 11, true);
+  const specialStart = legendText.getText().indexOf('  SPECIAL HANDLING  ');
+  if (specialStart !== -1) {
+    legendText.setBackgroundColor(specialStart, specialStart + 19, PALETTE.HANDLING_SPECIAL);
+    legendText.setBold(specialStart, specialStart + 19, true);
   }
-
-  const help = body.appendParagraph(`Questions at the desk: ${CENTER_PHONE}`);
-  help.editAsText().setFontSize(9).setForegroundColor('#777777');
 }
 
-/** The table itself: header row, one row per person, then blank rows for walk-ins. */
-function writeSignInSheetTable(body, data) {
+/**
+ * One table: header row, one row per person, then blank rows for walk-ins.
+ *
+ * `showZeros` is what separates the two sections. On the LUNCH page every row
+ * is eating by construction, so a printed 0 would be noise; on the EVERYONE
+ * page a person with no lunch gets a literal 0 in all four meal columns, which
+ * is the difference between "ordered nothing" and "nobody has asked yet".
+ */
+function writeSignInSheetTable(body, rows, options) {
+  options = options || {};
   const cells = [SIGN_IN_SHEET_COLUMNS.slice()];
-  data.rows.forEach(row => {
-    // A registrant with no lunch gets a printed 0 in all four meal columns
-    // rather than four blanks — see the section note. Somebody WITH lunch gets
-    // the ordered count and three empty boxes, because what they actually ate
-    // is the thing the desk is there to record.
+  (rows || []).forEach(row => {
+    // A row that is eating gets its ordered count and three empty boxes,
+    // because what they actually ate is the thing the desk is there to record.
+    // A row that is not gets four printed zeros — but only on the EVERYONE
+    // page, since on the lunch page every row is eating by construction.
     const zero = row.lunch ? '' : '0';
     cells.push([
-      '', '', row.last, row.first, row.phone, row.program, row.family, row.notes,
-      row.lunch ? String(row.meals) : '0', zero, zero, zero
+      '', '', row.last, row.first, row.phone, row.program, row.handling, row.notes,
+      row.lunch ? String(row.meals) : (options.showZeros ? '0' : ''),
+      zero, zero, zero
     ]);
   });
   for (let i = 0; i < SIGN_IN_SHEET_BLANK_ROWS; i++) {
@@ -782,27 +1277,46 @@ function writeSignInSheetTable(body, data) {
   for (let c = 0; c < SIGN_IN_SHEET_COLUMNS.length; c++) {
     const cell = headerRow.getCell(c);
     cell.setBackgroundColor('#D9D9D9');
-    cell.editAsText().setBold(true).setFontSize(8);
+    cell.editAsText().setBold(true).setFontSize(SIGN_IN_SHEET_HEADER_FONT_SIZE);
   }
 
-  // Body rows: small enough to fit eleven columns across, tall enough to write
-  // a tick or a digit into by hand.
+  // Body rows: big enough to read across a desk, tall enough to write a tick or
+  // a digit into by hand. The wash goes on the WHOLE row rather than the
+  // Handling cell alone — the point of a colour here is to be seen while
+  // scanning a column of surnames, not while already reading the note.
   for (let r = 1; r < table.getNumRows(); r++) {
-    const row = table.getRow(r);
-    row.setMinimumHeight(22);
+    const tableRow = table.getRow(r);
+    tableRow.setMinimumHeight(SIGN_IN_SHEET_ROW_HEIGHT);
+    const source = (rows || [])[r - 1];
+    const wash = source ? signInHandlingColor(source.handlingClass) : '';
     for (let c = 0; c < SIGN_IN_SHEET_COLUMNS.length; c++) {
-      row.getCell(c).editAsText().setFontSize(9).setBold(false);
+      const cell = tableRow.getCell(c);
+      if (wash) cell.setBackgroundColor(wash);
+      cell.editAsText().setFontSize(SIGN_IN_SHEET_BODY_FONT_SIZE).setBold(false);
     }
   }
 }
 
-/** Find-or-create the Drive folder finished sign-in sheets are filed in. */
-function getOrCreateSignInSheetFolder() {
-  const folders = DriveApp.getFoldersByName(SIGN_IN_SHEET_FOLDER_NAME);
+/** Find-or-create the Drive folder the live sign-in documents are filed in. */
+function getOrCreateSignInSheetDocFolder() {
+  const folders = DriveApp.getFoldersByName(SIGN_IN_DOC_FOLDER_NAME);
   if (folders.hasNext()) return folders.next();
-  const folder = DriveApp.createFolder(SIGN_IN_SHEET_FOLDER_NAME);
-  log(`Created Drive folder "${SIGN_IN_SHEET_FOLDER_NAME}" for printed sign-in sheets.`);
+  const folder = DriveApp.createFolder(SIGN_IN_DOC_FOLDER_NAME);
+  log(`Created Drive folder "${SIGN_IN_DOC_FOLDER_NAME}" for the live sign-in sheets.`);
   return folder;
 }
 
-
+/**
+ * Find-or-create the folder the PDFs this used to export were filed in.
+ *
+ * Nothing writes here any more. backfillSignInSheetRegistry() still reads it,
+ * because a workbook that printed sheets before this was rewritten has a year
+ * of them in there and those links are worth keeping. It is find-OR-CREATE
+ * rather than find-or-give-up so the backfill has one less way to throw on a
+ * workbook that never printed a single PDF.
+ */
+function getOrCreateSignInSheetFolder() {
+  const folders = DriveApp.getFoldersByName(SIGN_IN_SHEET_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(SIGN_IN_SHEET_FOLDER_NAME);
+}

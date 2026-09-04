@@ -49,8 +49,17 @@ const SIGN_IN_SHEET_REGISTRY_PROP_KEY = 'SIGN_IN_SHEET_REGISTRY_V1';
 /** How many entries the registry keeps. Oldest built go first — see pruneSignInSheetRegistry(). */
 const SIGN_IN_SHEET_REGISTRY_MAX_ENTRIES = 800;
 
-/** The label a sign-in link reads as. Short: the column is narrow and the date is already on the row. */
-const SIGN_IN_SHEET_LINK_LABEL = '🖨️ Sign-In PDF';
+/**
+ * The label a sign-in link reads as. Short: the column is narrow and the date
+ * is already on the row.
+ *
+ * It no longer says PDF, because the file is now a LIVE Google Doc that a
+ * rebuild rewrites in place (45_sign_in_sheet.gs). Entries stored before that
+ * change still point at real PDFs and still open — the STORED SHAPE did not
+ * change, only what is on the other end of the URL, which is why this is still
+ * SIGN_IN_SHEET_REGISTRY_PROP_KEY's _V1 and not a new key.
+ */
+const SIGN_IN_SHEET_LINK_LABEL = '📋 Sign-In Sheet';
 
 /** The label a program leader sheet link reads as. */
 const LEADER_SHEET_LINK_LABEL = '📋 Leader Sheet';
@@ -81,11 +90,17 @@ function signInSheetKey(dateKey, location) {
 }
 
 /**
- * Remembers the PDF just built for one date x location, REPLACING whatever was
- * there. Reprinting a day is the normal case — a name arrives after the first
- * copy came off the printer — and the newest copy is the one the desk wants.
+ * Remembers the file just built for one date x location, REPLACING whatever
+ * was there.
+ *
+ * Rebuilding a day is the normal case — a name arrives after somebody opened
+ * the sheet — and since the sheet became a live Doc this is usually the SAME
+ * file being re-recorded: renderSignInSheetDoc() looks the entry up here to
+ * find the document to rewrite, so the URL already handed out keeps working.
+ * An entry left over from the PDF era points at a PDF, which cannot be
+ * rewritten; that build makes a Doc and this replaces the entry with it.
  */
-function recordSignInSheetPdf(dateKey, location, file) {
+function recordSignInSheetFile(dateKey, location, file) {
   if (!dateKey || !location || !file) return;
   const registry = getSignInSheetRegistry();
   registry[signInSheetKey(dateKey, location)] = {
@@ -115,16 +130,31 @@ function pruneSignInSheetRegistry() {
   __signInSheetRegistryDirty = true;
 }
 
-/** What a sign-in PDF is named on disk — the one shape backfillSignInSheetRegistry() can read back. */
+/**
+ * What a sign-in sheet is named on disk — the one shape
+ * backfillSignInSheetRegistry() can read back.
+ *
+ * The `.pdf` is optional because a live Google Doc has no extension in its
+ * name: both eras of file are "Sign-In yyyy-MM-dd Location", and both parse
+ * back to the date and building they were built for.
+ */
 const SIGN_IN_SHEET_FILENAME_RE = /^Sign-In (\d{4}-\d{2}-\d{2}) (.+?)(?:\.pdf)?$/i;
 
 /**
- * ADMIN MENU: teaches the registry about every PDF already sitting in the
- * folder, so a workbook that has been printing sheets for a year does not have
- * to wait for the next reprint to show a link. Also opens each one up to
- * anyone with the link (see openUpFileToAnyoneWithLink()) — sign-in PDFs made
- * before that existed were left shared with their printer alone, same as a
- * form or leader sheet made before the equivalent fix for those.
+ * ADMIN MENU: teaches the registry about every sign-in sheet already sitting in
+ * Drive, so a workbook that has been building them for a year does not have to
+ * wait for the next rebuild to show a link.
+ *
+ * BOTH FOLDERS ARE SCANNED, and in this order: the retired PDF folder first,
+ * then the live-document folder, so that where a day exists in both, the DOC
+ * wins regardless of which file happens to be newer. That is not a tie-break,
+ * it is the point — a PDF is a photograph of a roster that has since changed,
+ * and the Doc is the roster. Within one folder the newest file still wins, on
+ * the same reasoning as a rebuild.
+ *
+ * Also opens each file it walks up to anyone with the link (see
+ * openUpFileToAnyoneWithLink()) — sheets made before that existed, PDF and
+ * document alike, were left shared with their builder alone.
  *
  * One scan, by hand, rather than anything automatic: it is a full folder
  * listing, it only ever has work to do once, and getting it wrong is a link
@@ -132,12 +162,12 @@ const SIGN_IN_SHEET_FILENAME_RE = /^Sign-In (\d{4}-\d{2}-\d{2}) (.+?)(?:\.pdf)?$
  * with SIGN_IN_SHEET_FILENAME_RE — a file somebody renamed is skipped for the
  * registry, since the date and location cannot be recovered from a name that
  * no longer carries them, but it is still opened up like every other file in
- * the folder. The newest file wins a tie, on the same reasoning as a reprint.
+ * the two folders: only the registry needs the name.
  */
 function backfillSignInSheetRegistry() {
   if (!requireAuthorizedAdmin('Rebuild Sign-In Sheet Links')) return { matched: 0, skipped: 0, opened: 0 };
   if (!confirmConsequentialAction('Rebuild sign-in sheet links?',
-    'Every PDF already sitting in the sign-in sheet folder is set to "anyone with the link can edit" ' +
+    'Every sheet already sitting in either sign-in sheet folder is set to "anyone with the link can edit" ' +
     '(the same fix already applied to registration forms and program leader sheets), so a printed sheet ' +
     'opens for whoever clicks its dashboard link, not only whoever printed it.', true)) {
     return { matched: 0, skipped: 0, opened: 0 };
@@ -145,38 +175,51 @@ function backfillSignInSheetRegistry() {
   const locationByKey = {};
   Object.values(CALENDAR_MAP).forEach(loc => { locationByKey[normalizeNameKey(loc)] = loc; });
 
-  const folder = getOrCreateSignInSheetFolder();
-  const files = folder.getFiles();
   const registry = getSignInSheetRegistry();
   let matched = 0;
   let skipped = 0;
   let opened = 0;
 
-  while (files.hasNext()) {
-    const file = files.next();
-    if (openUpFileToAnyoneWithLink(file.getId(), `sign-in sheet "${file.getName()}"`).openedUp) opened++;
-    const parts = SIGN_IN_SHEET_FILENAME_RE.exec(String(file.getName() || '').trim());
-    if (!parts) { skipped++; continue; }
-    const dateKey = parts[1];
-    const location = locationByKey[normalizeNameKey(parts[2])] || parts[2];
-    const key = signInSheetKey(dateKey, location);
-    const builtAt = file.getDateCreated();
-    const existing = registry[key];
-    if (existing && String(existing.builtAt || '') >= builtAt.toISOString()) continue;
-    registry[key] = {
-      fileId: file.getId(),
-      url: file.getUrl(),
-      name: file.getName(),
-      builtAt: builtAt.toISOString()
-    };
-    __signInSheetRegistryDirty = true;
-    matched++;
-  }
+  // [folder, does a hit here overrule a PDF already recorded for that day?]
+  const sources = [
+    [getOrCreateSignInSheetFolder(), false],
+    [getOrCreateSignInSheetDocFolder(), true]
+  ];
+  // Which keys this run has already taken from the DOC folder, so that
+  // newest-wins still applies among documents and only a PDF gets overruled.
+  const claimedByDoc = {};
+
+  sources.forEach(source => {
+    const files = source[0].getFiles();
+    const overrules = source[1];
+    while (files.hasNext()) {
+      const file = files.next();
+      if (openUpFileToAnyoneWithLink(file.getId(), `sign-in sheet "${file.getName()}"`).openedUp) opened++;
+      const parts = SIGN_IN_SHEET_FILENAME_RE.exec(String(file.getName() || '').trim());
+      if (!parts) { skipped++; continue; }
+      const dateKey = parts[1];
+      const location = locationByKey[normalizeNameKey(parts[2])] || parts[2];
+      const key = signInSheetKey(dateKey, location);
+      const builtAt = file.getDateCreated();
+      const existing = registry[key];
+      const newestWins = !overrules || claimedByDoc[key];
+      if (existing && newestWins && String(existing.builtAt || '') >= builtAt.toISOString()) continue;
+      if (overrules) claimedByDoc[key] = true;
+      registry[key] = {
+        fileId: file.getId(),
+        url: file.getUrl(),
+        name: file.getName(),
+        builtAt: builtAt.toISOString()
+      };
+      __signInSheetRegistryDirty = true;
+      matched++;
+    }
+  });
 
   pruneSignInSheetRegistry();
   flushPersistentRegistries();
-  const message = `Sign-in sheet links: ${matched} PDF(s) picked up, ${opened} opened to anyone with the link` +
-    (skipped > 0 ? `, ${skipped} file(s) skipped for the registry (name no longer says which date and location)` : '') +
+  const message = `Sign-in sheet links: ${matched} sheet(s) picked up, ${opened} opened to anyone with the link` +
+    (skipped > 0 ? `, ${skipped} file(s) skipped (name no longer says which date and location)` : '') +
     '. The links appear on the next render.';
   log(message);
   toastIfPossible(message);

@@ -39,6 +39,7 @@ this.leaderProgramKey = leaderProgramKey;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SIGN_IN_SHEET_FILENAME_RE = SIGN_IN_SHEET_FILENAME_RE;
+this.SIGN_IN_SHEET_LINK_LABEL = SIGN_IN_SHEET_LINK_LABEL;
 this.__setSignInRegistry = function (r) { __signInSheetRegistryCache = r; };
 this.__setLeaderRegistry = function (r) { __leaderSheetRegistryCache = r; };
 `, sandbox, { filename: 'program.gs' });
@@ -83,8 +84,12 @@ const rows = [
 ];
 sandbox.stampGeneratedFileLinks(rows, pdMap, { titleColumn: 'Clean_Title' });
 
-check('the day\'s printed sheet lands on its session row',
-  rows[0][pdMap['Sign_In_Sheet_Link']], '=HYPERLINK("https://drive/pdf1","🖨️ Sign-In PDF")');
+// Read off the constant rather than spelled out: the LABEL is presentation and
+// has changed once already (the file became a live Doc); what is pinned here is
+// that the row gets a formula pointing at THAT day's file.
+check('the day\'s sign-in sheet lands on its session row',
+  rows[0][pdMap['Sign_In_Sheet_Link']],
+  `=HYPERLINK("https://drive/pdf1","${sandbox.SIGN_IN_SHEET_LINK_LABEL}")`);
 check('and so does the leader sheet for that program in that building',
   rows[0][pdMap['Leader_Sheet_Link']],
   '=HYPERLINK("https://docs.google.com/spreadsheets/d/sheet1/edit","📋 Leader Sheet")');
