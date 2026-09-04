@@ -60,6 +60,12 @@ defineLazyGlobal_('DESCRIPTION_TAG_READERS', () => ([
     describe: () => 'No registration form at all. This tag beats every other tag here.'
   },
   {
+    key: 'waitlistOnly', label: WAITLIST_ONLY_TAG, pattern: WAITLIST_ONLY_WORDS_REGEX,
+    describe: () => 'THIS DATE only takes no more Active registrations: everyone who signs up for it ' +
+      'from now on is waitlisted, whatever its capacity is and even if it has none. Nobody already ' +
+      'registered is moved. The other tags here describe the whole program; this one does not.'
+  },
+  {
     key: 'isAssistance', label: ASSISTANCE_TAG, pattern: ASSISTANCE_WORDS_REGEX,
     describe: () => 'Booked by APPOINTMENT, not by date: each event is cut into back-to-back slots and ' +
       'the form asks for a time.'
@@ -164,6 +170,8 @@ function inspectOneEventTags(ev, calendarId, locationName, dashboardRows, map) {
         isClub: isClubColumnValue(row[map['Club']]),
         noRegistration: isNoRegistrationColumnValue(row[map['No_Registration']]),
         isAssistance: isAssistanceColumnValue(row[map['Personalized_Assistance']]),
+        waitlistOnly: map['Waitlist_Only'] !== undefined &&
+          isWaitlistOnlyColumnValue(row[map['Waitlist_Only']]),
         slotMinutes: row[map['Slot_Minutes']],
         maxCapacity: row[map['Max_Capacity']],
         formId: String(row[map['Form_ID']] || '').trim()
@@ -171,16 +179,22 @@ function inspectOneEventTags(ev, calendarId, locationName, dashboardRows, map) {
     }
   }
 
-  // The three flags the sheet shows as checkboxes, calendar answer beside
-  // sheet answer. A disagreement here IS the bug report — it means the tick and
-  // the tag have come apart, and which way round says which one to fix.
-  const comparisons = settings && sheetRow ? PROGRAM_FLAG_COLUMNS.map(flag => ({
-    column: flag.column,
-    tag: flag.tag,
-    calendar: !!settings[flag.groupKey],
-    sheet: !!sheetRow[flag.groupKey],
-    agrees: !!settings[flag.groupKey] === !!sheetRow[flag.groupKey]
-  })) : [];
+  // Every flag the sheet shows as a checkbox, calendar answer beside sheet
+  // answer. A disagreement here IS the bug report — it means the tick and the
+  // tag have come apart, and which way round says which one to fix.
+  //
+  // The session flags belong here as much as the program ones, and the match
+  // above is already the right one for them: this row was found by calendar +
+  // title + DATE, which is exactly what a [Waitlist Only] tick describes.
+  const comparisons = settings && sheetRow
+    ? PROGRAM_FLAG_COLUMNS.concat(SESSION_FLAG_COLUMNS).map(flag => ({
+      column: flag.column,
+      tag: flag.tag,
+      calendar: !!settings[flag.groupKey],
+      sheet: !!sheetRow[flag.groupKey],
+      agrees: !!settings[flag.groupKey] === !!sheetRow[flag.groupKey]
+    }))
+    : [];
 
   return {
     title: ev.getTitle(),
@@ -567,6 +581,12 @@ function importCalendarGroups(registrySheet, options) {
   // sync after they are ticked, not the sync after the program's next new
   // date.
   reconcileProgramFlagColumns(registrySheet, work.allGroups || []);
+  // The same gap, one date at a time, for the tick that belongs to a session
+  // rather than to a program — see reconcileSessionFlagColumns() and
+  // WAITLIST_ONLY_TAG. Kept as its own pass, and NOT folded into the call
+  // above, because the two are keyed differently on purpose: one answer per
+  // program there, one answer per date here.
+  reconcileSessionFlagColumns(registrySheet, work.allGroups || []);
   // The same gap again, for the two columns nothing has ever rewritten: a
   // session's START and END. An event lengthened on the calendar after its
   // date was first written left the row saying what it used to say, and an

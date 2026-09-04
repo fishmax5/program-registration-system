@@ -105,6 +105,9 @@ function handleProgramDashboardEdit(e, sheet) {
   for (let i = 0; i < PROGRAM_FLAG_COLUMNS.length; i++) {
     if (handleProgramFlagEdit(e, sheet, zones, headerMap, PROGRAM_FLAG_COLUMNS[i])) return;
   }
+  // And the one that belongs to a single date rather than to the program — same
+  // queue, same trigger, no spread. See handleWaitlistOnlyEdit().
+  if (handleWaitlistOnlyEdit(e, sheet, zones, headerMap)) return;
 
   const typeCol = headerMap['Type_Tag'];
   if (typeCol === undefined) return;
@@ -257,6 +260,76 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
 }
 
 /**
+ * ONE SESSION CLOSED BY HAND — a tick of Waitlist_Only, which is the one
+ * checkbox on this table that means something about a DATE (see
+ * WAITLIST_ONLY_TAG and SESSION_FLAG_COLUMNS).
+ *
+ * Returns TRUE when the edit belonged to this column, so the caller can stop
+ * looking.
+ *
+ * The same two-step delivery as handleProgramFlagEdit(), for the same reason —
+ * a simple onEdit cannot write to a calendar, so the tick is queued here and
+ * stamped seconds later by the installable trigger. The differences are the
+ * whole feature:
+ *
+ *   - IT DOES NOT SPREAD. spreadFlagToSiblingRows() exists because a program
+ *     flag left on one row of twelve was saying something untrue about the
+ *     other eleven. Here the other eleven are genuinely unaffected: the room is
+ *     full on the 14th, not in November.
+ *   - IT QUEUES PER DATE. The entry carries the row's Event_Date, so two dates
+ *     of one program can be queued at once with opposite answers.
+ *
+ * A fill-down over a block of these is honoured row by row rather than being
+ * collapsed per program, which is the same rule read from the other end: every
+ * row it lands on is its own session.
+ */
+function handleWaitlistOnlyEdit(e, sheet, zones, headerMap) {
+  const flag = getSessionFlagByColumn('Waitlist_Only');
+  const flagCol = flag ? headerMap[flag.column] : undefined;
+  if (flagCol === undefined) return false;
+
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (flagCol + 1 < firstCol || flagCol + 1 > lastCol) return false;
+
+  const editedRow = e.range.getRow();
+  const numRows = e.range.getNumRows();
+  const readCell = (row, name) =>
+    (headerMap[name] === undefined ? '' : sheet.getRange(row, headerMap[name] + 1).getValue());
+
+  const targets = [];
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (!isRowInAnyDataZone(zones, row)) continue;
+    const title = String(readCell(row, 'Clean_Title') || '').trim();
+    const calendarId = String(readCell(row, 'Calendar_Source') || '').trim();
+    const date = coerceDate(readCell(row, 'Event_Date'));
+    // No date means no session to close — and a dated queue entry is the only
+    // thing that keeps this tick off the program's other events.
+    if (!title || !calendarId || !date) continue;
+    targets.push({
+      row, title, calendarId,
+      dateKey: formatDateKey(date),
+      when: formatDateLabel(date),
+      on: isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue())
+    });
+  }
+  if (targets.length === 0) return true;
+
+  targets.forEach(t => recordPendingProgramFlag(flag.column, t.calendarId, t.title, t.on, t.dateKey));
+
+  const headline = targets.length === 1
+    ? describeFlagState(flag, targets[0].title, targets[0].on, targets[0].when)
+    : `${targets.length} session(s) updated`;
+  const consequence = targets.some(t => t.on)
+    ? `Everyone who signs up for ${targets.length === 1 ? 'it' : 'them'} from now on is waitlisted, ` +
+      `whatever the seats say. Nobody already registered is moved.`
+    : `Registrations for ${targets.length === 1 ? 'it' : 'them'} are decided by capacity again.`;
+  toastIfPossible(`${headline}. ${consequence} Writing [${flag.tag}] to the calendar.`);
+  return true;
+}
+
+/**
  * Puts the same tick on every other row of the same program, and reports how
  * many rows it changed.
  *
@@ -387,14 +460,19 @@ function onProgramFlagEditInstallable(e) {
   }
 }
 
-/** True when `e` covers a Club / No_Registration cell inside a data zone of the session table. */
+/**
+ * True when `e` covers a tag checkbox — a program one (Club, No_Registration,
+ * Personalized_Assistance) or a session one (Waitlist_Only) — inside a data
+ * zone of the session table. Both kinds queue an entry the installable trigger
+ * has to wait for, so both belong to this question.
+ */
 function editTouchesProgramFlagColumn(e, sheet) {
   const zone = findZoneForRow(getSectionZones(sheet, 'Event_ID'), e.range.getRow());
   if (!zone) return false;
   const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
   const firstCol = e.range.getColumn();
   const lastCol = firstCol + e.range.getNumColumns() - 1;
-  return PROGRAM_FLAG_COLUMNS.some(flag => {
+  return PROGRAM_FLAG_COLUMNS.concat(SESSION_FLAG_COLUMNS).some(flag => {
     const col = headerMap[flag.column];
     return col !== undefined && col + 1 >= firstCol && col + 1 <= lastCol;
   });
@@ -427,12 +505,24 @@ function applyPendingProgramFlags() {
 function drainPendingProgramFlags(entries, result) {
   const delivered = [];
   entries.forEach(entry => {
-    const flag = getProgramFlagByColumn(entry.column);
+    const flag = getProgramFlagByColumn(entry.column) || getSessionFlagByColumn(entry.column);
     if (!flag || !entry.title || !entry.calendarId) {
       delivered.push(entry); // unreadable row — clearing it is the only sane end
       return;
     }
-    const outcome = stampProgramFlagOnCalendar(entry.title, entry.calendarId, flag, entry.on);
+    // ONE EVENT OR ALL OF THEM, decided by whether the entry names a date. A
+    // per-session flag that lost its date would otherwise be stamped across the
+    // whole program, which is the one thing it must never do — so a dated
+    // column with no date is refused rather than widened. See WAITLIST_ONLY_TAG.
+    if (flag.perSession && !entry.dateKey) {
+      log(`⚠️ Dropping a queued ${entry.column} change for "${entry.title}" — it names no date, and ` +
+        `this tag belongs to one session. Tick the box again on the row you meant.`);
+      delivered.push(entry);
+      return;
+    }
+    const outcome = flag.perSession
+      ? stampSessionFlagOnCalendarEvent(entry.title, entry.calendarId, entry.dateKey, flag, entry.on)
+      : stampProgramFlagOnCalendar(entry.title, entry.calendarId, flag, entry.on);
     if (!outcome.ok) {
       result.failed++;
       return;
@@ -469,38 +559,71 @@ function getPendingFlagSheet(createIfMissing) {
     freezeRowsSafely(sheet, 1);
     try { if (wasActive) ss.setActiveSheet(wasActive); } catch (err) { /* nothing to go back to */ }
     try { sheet.hideSheet(); } catch (err) { /* a lone or active tab cannot be hidden */ }
+    return sheet;
+  }
+  // A TAB WRITTEN BY AN EARLIER VERSION IS ONE COLUMN SHORT. Date_Key was
+  // appended when Waitlist_Only arrived (see PENDING_FLAG_HEADERS), and the
+  // entries already sitting there are program-wide ones that correctly have no
+  // date — so the header is widened in place and nothing is rewritten.
+  //
+  // Only on the WRITE path (`createIfMissing`), because that is the only caller
+  // that needs the wider tab: a read of a five-column tab already answers ''
+  // for the missing date, which is what those entries mean. A read has no
+  // business writing to the sheet it is reading.
+  try {
+    if (createIfMissing && sheet.getLastColumn() < PENDING_FLAG_HEADERS.length) {
+      sheet.getRange(1, 1, 1, PENDING_FLAG_HEADERS.length)
+        .setValues([PENDING_FLAG_HEADERS])
+        .setFontWeight('bold');
+    }
+  } catch (err) {
+    log(`ℹ️ Could not widen "${PENDING_FLAG_SHEET_NAME}" (${err}) — its entries still deliver.`);
   }
   return sheet;
 }
 
-/** Every outstanding entry: { column, calendarId, title, on, row }. */
+/**
+ * Every outstanding entry: { column, calendarId, title, on, dateKey, row }.
+ *
+ * `dateKey` is '' for every program-wide flag, which is all of
+ * PROGRAM_FLAG_COLUMNS, and 'yyyy-MM-dd' for a per-session one (Waitlist_Only —
+ * see WAITLIST_ONLY_TAG). A queue row written before that column existed is
+ * five values long and reads as '' here, which is the right answer for it.
+ */
 function readPendingProgramFlags() {
   const sheet = getPendingFlagSheet(false);
   if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  return sheet.getRange(2, 1, lastRow - 1, PENDING_FLAG_HEADERS.length).getValues()
+  // Never wider than the tab actually is: one written by an older version has
+  // no Date_Key column, and asking a range for more columns than the sheet
+  // holds throws. The missing value then reads as '' — "no date", which is
+  // exactly what every entry on such a tab means.
+  const width = Math.min(PENDING_FLAG_HEADERS.length, Math.max(1, sheet.getLastColumn()));
+  return sheet.getRange(2, 1, lastRow - 1, width).getValues()
     .map((row, i) => ({
       column: String(row[0] || '').trim(),
       calendarId: String(row[1] || '').trim(),
       title: String(row[2] || '').trim(),
       on: isTruthyCheckbox(row[3]),
+      dateKey: String(row[5] || '').trim(),
       row: i + 2
     }))
     .filter(entry => entry.column);
 }
 
 /**
- * Records (or replaces) one program's outstanding tick. Callable from a simple
- * onEdit — it is a spreadsheet write and nothing else.
+ * Records (or replaces) one outstanding tick — a program's, or a single
+ * session's when `dateKey` is given. Callable from a simple onEdit — it is a
+ * spreadsheet write and nothing else.
  */
-function recordPendingProgramFlag(flagColumn, calendarId, title, on) {
+function recordPendingProgramFlag(flagColumn, calendarId, title, on, dateKey) {
   try {
     const sheet = getPendingFlagSheet(true);
-    const key = pendingFlagKey(flagColumn, calendarId, title);
+    const key = pendingFlagKey(flagColumn, calendarId, title, dateKey);
     const existing = readPendingProgramFlags()
-      .filter(entry => pendingFlagKey(entry.column, entry.calendarId, entry.title) === key);
-    const values = [flagColumn, calendarId, title, !!on, new Date()];
+      .filter(entry => pendingFlagKey(entry.column, entry.calendarId, entry.title, entry.dateKey) === key);
+    const values = [flagColumn, calendarId, title, !!on, new Date(), String(dateKey || '')];
 
     if (existing.length > 0) {
       sheet.getRange(existing[0].row, 1, 1, values.length).setValues([values]);
@@ -543,6 +666,21 @@ function pendingProgramKeysFor(flagColumn) {
 }
 
 /**
+ * The same set for a SESSION flag, keyed `Calendar_Source|Clean_Title|dateKey`
+ * — the set reconcileSessionFlagColumns() must not touch. Entries with no date
+ * are skipped rather than widened to the program: a per-session flag that
+ * cannot say which session is not an instruction about all of them.
+ */
+function pendingSessionKeysFor(flagColumn) {
+  const keys = new Set();
+  readPendingProgramFlags().forEach(entry => {
+    if (entry.column !== flagColumn || !entry.dateKey) return;
+    keys.add(`${entry.calendarId}|${entry.title}|${entry.dateKey}`);
+  });
+  return keys;
+}
+
+/**
  * "Book Club is a club" / "Coffee Hour takes no registration" — one line, for
  * a toast or a list.
  *
@@ -554,9 +692,12 @@ function pendingProgramKeysFor(flagColumn) {
  * both wrong and — on a tab where Club is a real neighbouring checkbox —
  * actively misleading about what had just been ticked.
  */
-function describeFlagState(flag, title, on) {
+function describeFlagState(flag, title, on, when) {
   const describe = on ? (flag && flag.describeOn) : (flag && flag.describeOff);
-  if (typeof describe === 'function') return describe(title);
+  // `when` is passed only by the session flags, whose subject is one date and
+  // whose wording says so ("Sep 14 'Chair Yoga' is waitlist-only"). A program
+  // flag's wording takes one argument and ignores it.
+  if (typeof describe === 'function') return describe(title, when);
   // A flag added without wording still says something true about itself.
   return `"${title}" ${on ? 'is now' : 'is no longer'} ${flag ? `[${flag.tag}]` : 'tagged'}`;
 }
@@ -809,6 +950,91 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
       `[${flag.tag}] — the word is part of a bracketed note somebody wrote (something like "[Book ${flag.tag}]"), ` +
       `and removing it would have deleted their note. Edit those event descriptions by hand, or the next sync ` +
       `will tick the box again.`;
+    log(`⚠️ ${message}`);
+    noteForAdmin(`${flag.column} could not be removed from the calendar`, message);
+  }
+  return { stamped, ok: true, stuck };
+}
+
+/**
+ * THE SAME WRITE, AIMED AT ONE EVENT — the delivery half of a SESSION flag
+ * (SESSION_FLAG_COLUMNS; today that is Waitlist_Only, see WAITLIST_ONLY_TAG).
+ *
+ * Everything about it is deliberately narrower than stampProgramFlagOnCalendar():
+ * one calendar, one day, the first event on it whose title matches, and no
+ * [All Locations] reach at all. A program's other locations are running their
+ * own sessions with their own rooms and their own numbers, and "the Narberth
+ * session on the 14th is full" says nothing whatever about Ashbridge's.
+ *
+ * Reads the day directly rather than through getCalendarEventsForWindow(): the
+ * window cache is the whole sync horizon across every calendar, which is a lot
+ * of reading to do to find one afternoon, and this runs from a checkbox.
+ *
+ * Returns the same { stamped, ok } contract the program stamp does, and for the
+ * same reason — the queue has to tell "already agreed" apart from "could not
+ * read the calendar".
+ */
+function stampSessionFlagOnCalendarEvent(title, calendarId, dateKey, flag, on) {
+  if (!title || !calendarId || !dateKey || !flag) return { stamped: 0, ok: false };
+
+  // parseDateKey() answers with an Invalid Date rather than null for anything
+  // that is not a date key, and an Invalid Date is truthy — so it is tested for
+  // what it is. An unusable key can only come from a hand-edited queue row, and
+  // reporting it as delivered is the right end for it: retrying forever cannot
+  // make it parse.
+  const start = parseDateKey(dateKey);
+  if (!start || isNaN(start.getTime())) {
+    log(`⚠️ ${flag.column} change for "${title}": "${dateKey}" is not a date — dropping it.`);
+    return { stamped: 0, ok: true };
+  }
+
+  let events;
+  try {
+    const calendar = CalendarApp.getCalendarById(calendarId);
+    if (!calendar) throw new Error('calendar not found');
+    events = calendar.getEvents(start, new Date(start.getTime() + 24 * 60 * 60 * 1000));
+  } catch (err) {
+    log(`⚠️ ${flag.column} change for "${title}" on ${dateKey}: calendar ${calendarId} could not be read (${err}).`);
+    return { stamped: 0, ok: false };
+  }
+
+  const wanted = normalizeNameKey(title);
+  const matches = events.filter(ev => {
+    if (ev.isAllDayEvent()) return false;
+    const parsed = parseEventTitle(ev.getTitle());
+    return !!parsed && normalizeNameKey(parsed.cleanTitle) === wanted;
+  });
+  if (matches.length === 0) {
+    // NOT ok: the event may simply be outside what this calendar returned, and
+    // dropping the instruction would untick the box on the next sync with
+    // nothing to show for it. It stays queued and is retried.
+    log(`⚠️ ${flag.column} change for "${title}" on ${dateKey}: no matching event on that day — still queued.`);
+    return { stamped: 0, ok: false };
+  }
+
+  let stamped = 0;
+  let stuck = 0;
+  // Every match on the day, not just the first: a program that meets twice on
+  // one date is ONE row on the dashboard (they share an Event_ID — see
+  // computeEventId(), which is keyed by date), so tagging one of the two would
+  // leave the row's answer depending on which the sync read first.
+  matches.forEach(ev => {
+    const existing = ev.getDescription() || '';
+    const updated = setFlagBracketInDescription(existing, flag.regex, flag.tag, on);
+    if (!on && descriptionStillCarriesFlag(updated, flag.regex)) stuck++;
+    if (updated === existing) return;
+    ev.setDescription(updated);
+    stamped++;
+  });
+
+  if (stamped > 0) {
+    invalidateCalendarEventsCache(); // a description just changed under the cache
+    log(`${on ? 'Added' : 'Removed'} [${flag.tag}] on ${stamped} calendar event(s) for "${title}" on ${dateKey}.`);
+  }
+  if (stuck > 0) {
+    const message = `Unticking ${flag.column} for "${title}" on ${dateKey} left the event still reading as ` +
+      `[${flag.tag}] — the word is part of a bracketed note somebody wrote, and removing it would have ` +
+      `deleted their note. Edit that event's description by hand, or the next sync will tick the box again.`;
     log(`⚠️ ${message}`);
     noteForAdmin(`${flag.column} could not be removed from the calendar`, message);
   }

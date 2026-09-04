@@ -840,11 +840,24 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
       : group.capacity;
     const isUncapped = !capacity || capacity <= 0;
 
+    // ONE DATE'S OWN ANSWER, not the group's — see WAITLIST_ONLY_TAG. This is
+    // the only column on the row read from `session` rather than from `group`,
+    // because it is the only thing a calendar event can say about itself that
+    // its siblings on the same form do not also say.
+    row[map['Waitlist_Only']] = session.waitlistOnly ? WAITLIST_ONLY_COLUMN_VALUE : false;
+
     row[map['Max_Capacity']] = isUncapped ? '' : capacity;
     row[map['Active_Count']] = 0;
-    row[map['Waitlist_Count']] = isUncapped ? '' : 0;
-    row[map['Remaining_Seats']] = isUncapped ? '' : capacity;
-    row[map['Status']] = isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity);
+    // A session forced to the waitlist reads FULL from the moment it is
+    // written, cap or no cap: nobody can take a place on it, so "🟢 Unlimited"
+    // beside a form that waitlists everybody would be the sheet contradicting
+    // itself. See recomputeCountsForZone(), which keeps saying so as the counts
+    // move.
+    row[map['Waitlist_Count']] = (isUncapped && !session.waitlistOnly) ? '' : 0;
+    row[map['Remaining_Seats']] = session.waitlistOnly ? 0 : (isUncapped ? '' : capacity);
+    row[map['Status']] = session.waitlistOnly
+      ? WAITLIST_ONLY_STATUS
+      : (isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity));
 
     // formInfo is null for a [No Registration] group — there is no form to
     // link to, and the link columns say so in words rather than sitting empty.

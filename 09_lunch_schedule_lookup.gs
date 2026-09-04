@@ -374,6 +374,16 @@ function buildCapacityHintsFromRegistryRows(rows, map) {
   rows.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
     if (!d) return;
+    // A SESSION CLOSED BY HAND CARRIES THE HINT TOO, and it is the case the
+    // capacity test below cannot see: it usually has no cap at all (see
+    // WAITLIST_ONLY_TAG), so `isCapped` is false and the date used to go onto
+    // the form reading like any other. Somebody signing up for it is
+    // waitlisted, and being told that before submitting is the whole job of
+    // this suffix.
+    if (map['Waitlist_Only'] !== undefined && isWaitlistOnlyColumnValue(row[map['Waitlist_Only']])) {
+      hints[formatDateKey(d)] = CAPACITY_HINT_SUFFIX;
+      return;
+    }
     const rawCap = row[map['Max_Capacity']];
     const isCapped = rawCap !== '' && rawCap !== '--' && Number(rawCap) > 0;
     if (!isCapped) return;

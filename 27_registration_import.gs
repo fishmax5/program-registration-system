@@ -393,6 +393,13 @@ function buildRegistryIndex(registrySheet) {
       formId,
       eventId: row[map['Event_ID']],
       maxCapacity: Number(row[map['Max_Capacity']]) || 0,
+      // "This session takes nobody else, whatever the number beside it says."
+      // Read per SESSION, like the capacity it overrides — see
+      // WAITLIST_ONLY_TAG and processFormResponse(). Absent on a workbook still
+      // on the old layout, which reads as false: the column is the only place
+      // this is ever stated, so a missing one states nothing.
+      waitlistOnly: map['Waitlist_Only'] !== undefined &&
+        isWaitlistOnlyColumnValue(row[map['Waitlist_Only']]),
       eventDate,
       // What the session's clock time reads as on the registrant rows built
       // from this entry — see formatTimeRange().

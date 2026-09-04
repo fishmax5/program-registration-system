@@ -689,3 +689,106 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
   return changed;
 }
 
+/**
+ * THE SAME RECONCILE, ONE DATE AT A TIME — for SESSION_FLAG_COLUMNS
+ * (Waitlist_Only; see WAITLIST_ONLY_TAG).
+ *
+ * It exists for the reason the program version does: writeEventRegistryRows()
+ * only writes NEW rows, so a program whose dates are all already on the sheet
+ * never has its cells rewritten, and a tag typed straight into a calendar
+ * description — or a tick this workbook queued and delivered an hour ago —
+ * would otherwise never reach the column.
+ *
+ * WHAT IS DIFFERENT, and it is the whole reason this is not a fourth entry in
+ * PROGRAM_FLAG_COLUMNS: the expectation is keyed by calendar + title + DATE,
+ * and it is read off the SESSION rather than off the group. Keyed the program
+ * way, September's tick would be written onto every date of the program and
+ * every date of it would then untick together — which is precisely the
+ * behaviour this column exists to avoid.
+ *
+ * A row whose date this run saw no calendar event for is LEFT ALONE rather than
+ * unticked: the sync window is finite, past dates fall out of it, and "the
+ * calendar did not mention it" is not the same statement as "the calendar says
+ * no".
+ *
+ * Returns how many cells changed.
+ */
+function reconcileSessionFlagColumns(registrySheet, groups) {
+  if (!groups || groups.length === 0) return 0;
+
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return 0;
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title'] || !sheetMap['Event_Date']) return 0;
+
+  let changed = 0;
+  SESSION_FLAG_COLUMNS.forEach(flag => {
+    if (!sheetMap[flag.column]) return; // a workbook still on the old layout
+
+    // Sessions whose tick has not reached the calendar yet are left alone —
+    // same rule as the program reconcile, keyed by date like everything here.
+    const pendingKeys = pendingSessionKeysFor(flag.column);
+
+    const expected = {};
+    groups.forEach(group => {
+      group.sessions.forEach(session => {
+        const date = coerceDate(session.event.getStartTime());
+        if (!date) return;
+        const key = `${session.calendarId}|${group.cleanTitle}|${formatDateKey(date)}`;
+        // OR, not overwrite: a program that meets twice on one date is one row
+        // (computeEventId() is keyed by date), and either event carrying the
+        // tag closes the day.
+        expected[key] = !!expected[key] || !!session[flag.groupKey];
+      });
+    });
+    if (Object.keys(expected).length === 0) return;
+
+    const closed = [];
+    const opened = [];
+    headerRows.forEach((hRow, i) => {
+      const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+      const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+      if (!zone) return;
+
+      const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
+      const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
+      const dates = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1).getValues();
+      const flagRange = registrySheet.getRange(zone.start, sheetMap[flag.column], zone.count, 1);
+      const current = flagRange.getValues();
+
+      let touched = false;
+      for (let r = 0; r < zone.count; r++) {
+        const date = coerceDate(dates[r][0]);
+        if (!date) continue;
+        const title = String(titles[r][0] || '').trim();
+        const key = `${String(sources[r][0] || '').trim()}|${title}|${formatDateKey(date)}`;
+        if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
+        if (pendingKeys.has(key)) continue; // waiting to be written TO the calendar
+        const want = expected[key];
+        if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
+        if (isFlagColumnValue(current[r][0], flag.regex) !== want) {
+          (want ? closed : opened).push(`${title} ${formatDateLabel(date)}`);
+        }
+        current[r] = [want];
+        touched = true;
+        changed++;
+      }
+      if (touched) {
+        flagRange.setValues(current);
+        invalidateSectionedRowsCache(registrySheet);
+      }
+    });
+
+    if (closed.length > 0) {
+      log(`Ticked ${flag.column} on ${closed.length} session row(s) — the calendar says so: ` +
+        `${dedupePreservingOrder(closed).slice(0, 10).join(', ')}.`);
+    }
+    if (opened.length > 0) {
+      log(`Cleared ${flag.column} on ${dedupePreservingOrder(opened).slice(0, 10).join(', ')} — ` +
+        `no [${flag.tag}] on those calendar events any more, and the calendar is the source of truth. ` +
+        `To put it back, tick the box and let it reach the calendar.`);
+    }
+  });
+  return changed;
+}
+

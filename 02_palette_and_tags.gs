@@ -207,7 +207,11 @@ const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
 // Spelled out rather than derived from PROGRAM_FLAG_COLUMNS: that list is
 // declared further down this file, and a top-level const cannot read another
 // one that has not been evaluated yet.
-const PROGRAM_DASHBOARD_EDITABLE_COLUMNS = ['Type_Tag', 'Club', 'No_Registration', 'Personalized_Assistance'];
+// Waitlist_Only is on this list and NOT in PROGRAM_FLAG_COLUMNS, which is the
+// difference between "a human may change this here" and "this flag describes a
+// whole program": it is ticked one session at a time. See WAITLIST_ONLY_TAG.
+const PROGRAM_DASHBOARD_EDITABLE_COLUMNS =
+  ['Type_Tag', 'Club', 'No_Registration', 'Personalized_Assistance', 'Waitlist_Only'];
 
 /**
  * Internal plumbing on the program dashboard: the raw IDs and the duplicate
@@ -458,6 +462,63 @@ const NO_REGISTRATION_COLUMN_VALUE = true;
  * feature would otherwise look exactly like.
  */
 const NO_REGISTRATION_LINK_LABEL = '— no registration —';
+
+/**
+ * WAITLIST ONLY — the [Waitlist Only] tag, and the one tag on this list that
+ * describes ONE DATE rather than a program.
+ *
+ * Every other flag here answers "what kind of program is this", and the answer
+ * is the same in September as in March: a club is a club, a drop-in takes no
+ * sign-ups. This one answers a question a program cannot answer for itself —
+ * "can this Thursday still take anybody?" — and the honest answer differs from
+ * one date of the same program to the next. The room is being repainted, the
+ * second van is out, the co-leader is away: the program is unchanged and THIS
+ * session cannot seat another person.
+ *
+ * Until now the only way to say that was to type "[Cap: N]" on the event with N
+ * set to whatever the current registration count happened to be — which is a
+ * guess that goes stale the moment anybody cancels, is wrong the moment the
+ * counts are recomputed, and says something false about the room besides. And
+ * on an UNCAPPED session (most of them) there was no way to say it at all: with
+ * no capacity to be at, nothing ever waitlists, and every new registration was
+ * taken as Active however full the day already was.
+ *
+ * WHAT THE TAG CHANGES, for the one session carrying it:
+ *   - every new registration lands Waitlisted, whatever its capacity says and
+ *     whether or not it has one (see processFormResponse());
+ *   - the session reads 🔴 Waitlist Only on the dashboard, with 0 seats
+ *     remaining, so the desk sees the same answer the form is giving;
+ *   - the form's own date label gains CAPACITY_HINT_SUFFIX — "(FULL -
+ *     Waitlist)" — so somebody signing up is told before they submit rather
+ *     than after.
+ *
+ * WHAT IT DELIBERATELY DOES NOT CHANGE. Nobody already registered is moved:
+ * the people holding places keep them, and a session forced to the waitlist
+ * with twelve Active registrants still has twelve Active registrants. Turning
+ * it off is one untick, and the next registration is Active again.
+ *
+ * A PROPERTY OF ONE DATE, NOT OF A PROGRAM — which is why it is not in
+ * PROGRAM_FLAG_COLUMNS, is never spread to sibling rows, and is never unified
+ * across a program's months (see buildEventGroups() / unifyProgramFlagsAcrossGroups(),
+ * where every other flag is). Ticking it on the 14th says nothing whatever
+ * about the 21st.
+ */
+const WAITLIST_ONLY_TAG = 'Waitlist Only';
+
+/**
+ * What gets READ as the waitlist-only tag. Permissive in the same way the club
+ * and assistance ones are — staff type this into a calendar description by hand
+ * — and deliberately narrow in one respect: it matches the WORD "waitlist"
+ * only alongside "only"/"all", never on its own. A description that merely
+ * mentions a waitlist ("[Waitlist: call the office]") is a note about one, not
+ * an instruction to start one, and isTagOnlyBracket() would refuse that bracket
+ * anyway.
+ */
+const WAITLIST_ONLY_WORDS_REGEX =
+  /\b(Wait\s*-?\s*list\s+Only|Only\s+Wait\s*-?\s*list|Force\s+Wait\s*-?\s*list|Wait\s*-?\s*list\s+All)\b/i;
+
+/** Written into the Waitlist_Only checkbox column for a session forced to the waitlist. */
+const WAITLIST_ONLY_COLUMN_VALUE = true;
 
 /**
  * PERSONALIZED ASSISTANCE — the [Personalized Assistance] tag.
@@ -755,6 +816,52 @@ function getProgramFlagByColumn(columnName) {
 }
 
 /**
+ * THE SAME TABLE, FOR THE TICKS THAT BELONG TO ONE DATE.
+ *
+ * Shaped exactly like a PROGRAM_FLAG_COLUMNS entry — column, tag, regex,
+ * wording — so everything that only needs to know "which tag, spelled how"
+ * (setFlagBracketInDescription(), describeFlagState(), the pending queue) walks
+ * either list without caring which it has. What differs is `perSession`, and
+ * the whole of the difference is where the tag lands: a program flag is stamped
+ * onto every calendar event of the program, and one of these onto exactly the
+ * one event whose row was ticked.
+ *
+ * They are two lists rather than one list with a field, because the mistake
+ * this shape prevents is the expensive one. Every existing caller iterating
+ * PROGRAM_FLAG_COLUMNS — the reconciler that unticks whatever the calendar does
+ * not say, the sibling-row spread, the group-level flag unification — is
+ * correct for program flags and WRONG for these, and would quietly apply one
+ * date's answer to all of them. Reaching this list is therefore something a
+ * caller has to do deliberately.
+ *
+ *   groupKey  the field on a SESSION (never on a group) that carries it — see
+ *             buildEventGroups().
+ */
+defineLazyGlobal_('SESSION_FLAG_COLUMNS', () => ([
+  {
+    column: 'Waitlist_Only',
+    tag: WAITLIST_ONLY_TAG,
+    regex: WAITLIST_ONLY_WORDS_REGEX,
+    groupKey: 'waitlistOnly',
+    perSession: true,
+    describeOn: (title, when) => `${when ? `${when} ` : ''}"${title}" is waitlist-only`,
+    describeOff: (title, when) => `${when ? `${when} ` : ''}"${title}" is taking registrations again`,
+    onDetail: () =>
+      `Everyone who signs up for this ONE session from now on goes on the waitlist, however many ` +
+      `seats it says are left and even if it has no capacity at all.\n\nNobody already registered ` +
+      `is moved.`,
+    offDetail: () =>
+      `This session takes registrations normally again — its capacity decides who is waitlisted, ` +
+      `the way every other session's does.`
+  }
+]));
+
+/** The session-flag definition for one dashboard column name, or null. */
+function getSessionFlagByColumn(columnName) {
+  return SESSION_FLAG_COLUMNS.filter(f => f.column === columnName)[0] || null;
+}
+
+/**
  * PENDING FLAG CHANGES — the tab that makes a tick survive long enough to be
  * delivered.
  *
@@ -782,13 +889,30 @@ function getProgramFlagByColumn(columnName) {
  *
  * One row per program per flag; a later tick on the same program replaces the
  * earlier one, so the queue holds intentions rather than history.
+ *
+ * DATE_KEY IS THE EXCEPTION, and it is empty on almost every row. A
+ * PROGRAM_FLAG_COLUMNS tick is a statement about a program and reaches every
+ * one of its calendar events, so it names no date. Waitlist_Only is a statement
+ * about ONE SESSION (see WAITLIST_ONLY_TAG) and must reach exactly one event,
+ * so its entries carry that event's date key — and two dates of one program can
+ * therefore sit in the queue at once saying opposite things, which is the whole
+ * point of the column. It was appended rather than inserted so that a queue
+ * written by an older version still reads correctly: those rows have four
+ * values and a missing fifth, which is the same "no date" every program-wide
+ * entry writes deliberately.
  */
 const PENDING_FLAG_SHEET_NAME = '_Pending_Tag_Changes';
-const PENDING_FLAG_HEADERS = ['Column', 'Calendar_Source', 'Clean_Title', 'Turn_On', 'Requested_At'];
+const PENDING_FLAG_HEADERS =
+  ['Column', 'Calendar_Source', 'Clean_Title', 'Turn_On', 'Requested_At', 'Date_Key'];
 
-/** The queue's identity for one program's one flag. */
-function pendingFlagKey(flagColumn, calendarId, title) {
-  return `${String(flagColumn || '').trim()}|${String(calendarId || '').trim()}|${String(title || '').trim()}`;
+/**
+ * The queue's identity for one flag change: a program's, or — when a date key
+ * is given — one session's. The date is part of the key so that ticking the
+ * 14th does not replace an outstanding tick of the 21st.
+ */
+function pendingFlagKey(flagColumn, calendarId, title, dateKey) {
+  return `${String(flagColumn || '').trim()}|${String(calendarId || '').trim()}|` +
+    `${String(title || '').trim()}|${String(dateKey || '').trim()}`;
 }
 
 /**
@@ -834,5 +958,15 @@ function isClubColumnValue(value) {
 /** True when a Master_Program_Dashboard row's No_Registration cell says this session takes no sign-ups. */
 function isNoRegistrationColumnValue(value) {
   return isFlagColumnValue(value, NO_REGISTRATION_WORDS_REGEX);
+}
+
+/**
+ * True when a Master_Program_Dashboard row's Waitlist_Only cell says THIS
+ * SESSION takes no more Active registrations — see WAITLIST_ONLY_TAG. Read
+ * through isFlagColumnValue() like the other tag columns, so a cell that
+ * arrived as pasted text ("TRUE", "Waitlist Only") still means what it says.
+ */
+function isWaitlistOnlyColumnValue(value) {
+  return isFlagColumnValue(value, WAITLIST_ONLY_WORDS_REGEX);
 }
 
