@@ -265,6 +265,9 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   //    Lunch is included: a counseling appointment is not a meal, and asking
   //    orders one.
   const doomed = findRosterGridItems(items)
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID))
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT))
+    // The pre-v9 pair as well, for a form that has not been rebuilt yet.
     .concat(byTitle(TEMPLATE_ITEM_TITLES.LUNCH_GRID))
     .concat(byTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE))
     .concat(byTitle(TEMPLATE_ITEM_TITLES.ALLERGIES))
@@ -318,8 +321,8 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   changed += applyEarlierAppointmentQuestion(form);
   // 5. And, under that, lunch — but only where lunch is actually served on
   //    one of this form's days. Step 1 above deleted the two roster grids and
-  //    syncLunchQuestionsOnForm() takes the all-dates checkbox and the
-  //    extra-meals question off every appointment form, so this yes/no is the
+  //    syncLunchQuestionsOnForm() takes the all-dates meal count off every
+  //    appointment form, so this yes/no is the
   //    only lunch question such a form carries and there is nothing here for
   //    the two passes to fight over.
   changed += applyAppointmentLunchQuestion(form,

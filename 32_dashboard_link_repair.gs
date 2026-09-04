@@ -913,18 +913,26 @@ function logLunchQuestionsOnLiveForm(formId, when) {
     // has a lunch section, and reporting one as having none would send
     // somebody hunting for a grid that is already there.
     const present = [
-      TEMPLATE_ITEM_TITLES.LUNCH_GRID,
+      TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID,
+      TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT,
       TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID,
+      TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH,
+      // The pre-v9 three, so a form that has not been rebuilt yet reports what
+      // it actually carries rather than "NONE — the form has no lunch section."
+      TEMPLATE_ITEM_TITLES.LUNCH_GRID,
       TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
       TEMPLATE_ITEM_TITLES.EXTRA_MEALS,
-      TEMPLATE_ITEM_TITLES.APPOINTMENT_LUNCH
+      LEGACY_LUNCH_ONLY_GRID_TITLE
     ].filter(title => titles.indexOf(title) !== -1);
     log(`Lunch questions on form ${formId} ("${form.getTitle()}") ${when}: ` +
       (present.length ? present.map(t => `"${t}"`).join(', ') : 'NONE — the form has no lunch section.'));
 
-    items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID).forEach(it => {
-      const rows = it.asCheckboxGridItem().getRows();
-      log(`  the lunch grid offers ${rows.length} row(s): ${rows.join(' | ')}`);
+    items.filter(it => isMealCountGridTitle(it.getTitle()) ||
+        it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID).forEach(it => {
+      // Either kind of grid — the meal grid is a GRID and the pre-v9 lunch one
+      // a CHECKBOX_GRID, and asking the wrong one for its rows throws.
+      const rows = (it.getType() === FormApp.ItemType.GRID ? it.asGridItem() : it.asCheckboxGridItem()).getRows();
+      log(`  "${it.getTitle()}" offers ${rows.length} row(s): ${rows.join(' | ')}`);
     });
   } catch (err) {
     log(`Could not read the lunch questions off form ${formId} ${when} (${err}).`);

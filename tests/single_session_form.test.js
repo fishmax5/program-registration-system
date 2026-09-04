@@ -114,7 +114,7 @@ const templateItems = () => [
   { title: T.MODE, type: PAGE_BREAK },
   { title: Q.ATTENDANCE_MODE, type: 'LIST' },
   { title: T.ALL_DATES, type: PAGE_BREAK },
-  { title: Q.ALL_DATES_LUNCH_PEOPLE, type: 'CHECKBOX' },
+  { title: Q.ALL_DATES_MEAL_COUNT, type: 'LIST' },
   { title: T.SPECIFIC_DATES, type: PAGE_BREAK },
   { title: Q.ATTENDANCE_GRID, type: 'GRID' }
 ];

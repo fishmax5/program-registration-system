@@ -1707,11 +1707,13 @@ will be overwritten if you type in it (you'll get a warning if you try).
 > that says whether somebody eats at all; a `0` in `Meals_Ordered` is ignored
 > so that a typo can never quietly cancel somebody's lunch.
 >
-> **Registrants can order extras themselves.** Every form that asks about lunch
-> now also asks **"Extra Meals (Beyond One Each)"** — `None`, or 1 to 6. It is
-> asked once and applies to every date on that submission that asked for lunch,
-> and the extras go on the person filling the form in, which is who collects
-> them. Somebody who needs more than six is asked to ring the office.
+> **Registrants order their own meals as a total.** Every form that asks about
+> lunch asks **how many meals** — `0` to `4`, *including their own*. Somebody
+> coming with two guests who all want lunch picks `3`; somebody who wants a
+> meal to take home as well picks `4`. There is no separate "extras" question
+> any more, and nothing has to be added up. The number lands on the person
+> filling the form in, which is who collects the meals — their guests are on
+> the roster, not on the order. More than four is asked to ring the office.
 >
 > **One person, several different meals.** The five meal counts are
 > **independent**, which is the whole point of them: Joe eats the day-1 meal in
@@ -2314,14 +2316,15 @@ however few dates it covers — *"I want to sign up for all future X meetings"* 
 a choice on that same question, and it isn't about dates at all: it is how
 somebody joins the roster.
 
-**Every form that asks about lunch also asks about extra meals**, right under
-the lunch question: **"Extra Meals (Beyond One Each)"** — *None*, or 1 to 6.
-Everyone listed who is having lunch already gets one; this is only for people
-who need **more** than that. It's asked once and applied to every date on the
-submission that asked for lunch, and the extras go on the person filling the
-form in, since that's who collects them. More than six is asked to ring the
-office. On a form with nothing catered the question isn't there at all — it
-comes and goes with the lunch questions themselves.
+**Lunch is asked for as a TOTAL, not as a box per person.** Guests are still
+named — the roster, the sign-in sheet and the calendar invite all need them —
+but the meal question asks for one number, **0 to 4, the registrant's own meal
+included**. Three guests and everybody eating is `4`; coming alone and taking
+one home is `2`; coming and not eating is `0`. The number goes on the person
+filling the form in, since that's who collects the meals, and it is what
+`Meals_Ordered` on their row reads. More than four is asked to ring the office.
+On a form with nothing catered the question isn't there at all — it comes and
+goes with the lunch questions themselves.
 
 The roster, for those who want it:
 
@@ -2331,14 +2334,15 @@ Who is Attending Each Date?
   Tue Aug 5       ☑       ☑         ☐         ☐
   Thu Aug 7       ☑       ☐         ☐         ☐
 
-Who Needs Lunch Each Date?
-                 You   Guest 1   Guest 2   Guest 3
-  Tue Aug 5       ☑       ☑         ☐         ☐
-  Thu Aug 7       ☐       ☐         ☐         ☐
+How Many Meals Each Date?
+                  0     1     2     3     4
+  Tue Aug 5       ○     ○     ◉     ○     ○
+  Thu Aug 7       ◉     ○     ○     ○     ○
 ```
 
-Dates are rows, people are columns — so any guest can attend or skip any single
-date independently, and eat or not eat independently.
+On the attendance grid dates are rows and people are columns, so any guest can
+attend or skip any single date independently. On the meal grid a date carries
+one number: the total meals that party wants that day, their own included.
 
 A few things worth knowing:
 
@@ -2428,13 +2432,14 @@ forward becomes a date on the form. Add a month of menu rows, run
 whose entire subject is the meal, "which dates are you coming" and "which dates
 do you want lunch" are the same question, and asking both is how you get
 somebody ticking the lunch row, leaving the attendance row blank, and the
-import having to guess. So there's one grid:
+import having to guess. So there's one grid, and a number above zero on a date
+*is* the registration for that date:
 
 ```
-Who Needs Lunch on Each Date?
-                 You   Guest 1   Guest 2   Guest 3
-  Mon Sep 14      ☑       ☑         ☐         ☐
-  Tue Sep 15      ☑       ☐         ☐         ☐
+How Many Meals on Each Date?
+                  0     1     2     3     4
+  Mon Sep 14      ○     ○     ◉     ○     ○
+  Tue Sep 15      ○     ◉     ○     ○     ○
 ```
 
 The fork at the top reads in lunch terms too — *"I want lunch on every date

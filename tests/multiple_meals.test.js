@@ -73,6 +73,13 @@ this.buildDashboardRollup = buildDashboardRollup;
 this.renderLunchRosterSheet = renderLunchRosterSheet;
 this.readRegistrantMealsOrdered = readRegistrantMealsOrdered;
 this.readExtraMealsResponse = readExtraMealsResponse;
+this.readMealCountAnswer = readMealCountAnswer;
+this.readMealCountResponse = readMealCountResponse;
+this.readMealCountGridResponse = readMealCountGridResponse;
+this.TEMPLATE_ITEM_TITLES = TEMPLATE_ITEM_TITLES;
+this.MEAL_COUNT_NONE_LABEL = MEAL_COUNT_NONE_LABEL;
+this.MAX_MEALS_PER_SUBMISSION = MAX_MEALS_PER_SUBMISSION;
+this.PERSON_COLUMN_LABELS = PERSON_COLUMN_LABELS;
 this.readCachedQuickMarkIndex = readCachedQuickMarkIndex;
 this.readSheetQuickMarkIndex = readSheetQuickMarkIndex;
 this.QUICK_MARK_INDEX_SCHEMA = QUICK_MARK_INDEX_SCHEMA;
@@ -120,23 +127,95 @@ check('a typed 0 does not silently cancel the meal', sandbox.readRegistrantMeals
 check('and neither does a word', sandbox.readRegistrantMealsOrdered(rowWith('four'), map), 1);
 
 // ===========================================================================
-// 2. THE FORM CAN ORDER EXTRAS
+// 2. THE FORM ASKS FOR A TOTAL, AND OLD RESPONSES STILL PARSE
 // ===========================================================================
-// Caroline enters Joan's standing order through the ordinary program form, so
-// the question has to survive the trip from a Forms answer to a number.
-function extrasFor(answer) {
-  const formIndex = { byTitle: {}, form: { getId: () => 'f1' } };
-  sandbox.getResponseValueByTitle = () => answer;
-  return sandbox.readExtraMealsResponse(formIndex, {});
+// v9 stopped asking who eats and started asking how many meals — the
+// registrant's own included. Caroline enters Joan's standing order through the
+// ordinary program form, so the answer has to survive the trip from a Forms
+// answer to a number; and every response already collected against the old
+// three questions has to keep landing on the same rows it did yesterday.
+const T = sandbox.TEMPLATE_ITEM_TITLES;
+
+/** getResponseValueByTitle(), answering from a { title: value } map. */
+function answersAre(map) {
+  sandbox.getResponseValueByTitle = (formIndex, response, title) =>
+    (title in map ? map[title] : '');
 }
-check('"None" is no extras', extrasFor(sandbox.EXTRA_MEALS_NONE_LABEL), 0);
-check('an unanswered question is no extras', extrasFor(''), 0);
-check('"3" is three extras', extrasFor('3'), 3);
+const formIndex = { byTitle: {}, form: { getId: () => 'f1' } };
+const PEOPLE = sandbox.PERSON_COLUMN_LABELS.map((columnLabel, i) => ({
+  columnLabel, name: `P${i}`, personType: i === 0 ? 'Attendee' : 'Guest'
+}));
+
+// --- the answer itself ---
+check('"0 — no lunch" is zero, not unanswered',
+  sandbox.readMealCountAnswer(sandbox.MEAL_COUNT_NONE_LABEL), 0);
+check('"3" is three', sandbox.readMealCountAnswer('3'), 3);
+// NULL IS NOT ZERO: an unanswered question is one the respondent may never
+// have been shown, and the caller has somewhere else to look before it can
+// call that no lunch.
+check('an unanswered question is null', sandbox.readMealCountAnswer(''), null);
+check('and so is an answer with no number in it', sandbox.readMealCountAnswer('lunch please'), null);
 // The question is a list of fixed choices, so a number past the cap can only
 // come from an edited form — and an order of ninety meals should reach a
 // person before it reaches the kitchen.
 check('an impossible answer is capped, not trusted',
-  extrasFor('90'), sandbox.MAX_EXTRA_MEALS);
+  sandbox.readMealCountAnswer('90'), sandbox.MAX_MEALS_PER_SUBMISSION);
+
+// --- the all-dates branch ---
+answersAre({ [T.ALL_DATES_MEAL_COUNT]: '3' });
+check('a v9 form answers with the total', sandbox.readMealCountResponse(formIndex, {}, PEOPLE), 3);
+answersAre({ [T.ALL_DATES_MEAL_COUNT]: sandbox.MEAL_COUNT_NONE_LABEL });
+check('...and "no lunch" is believed, not treated as missing',
+  sandbox.readMealCountResponse(formIndex, {}, PEOPLE), 0);
+answersAre({});
+check('a form that never asked answers null',
+  sandbox.readMealCountResponse(formIndex, {}, PEOPLE), null);
+
+// A v8 response: two people ticked, plus two extras beyond one each. The same
+// four meals the respondent would now simply pick "4" for.
+answersAre({
+  [T.ALL_DATES_LUNCH_PEOPLE]: ['You', 'Guest 1'],
+  [T.EXTRA_MEALS]: '2'
+});
+check('a pre-v9 response is read as people ticked plus extras',
+  sandbox.readMealCountResponse(formIndex, {}, PEOPLE), 4);
+// A tick in a column whose guest was never named is nobody — `people` only
+// holds the guests who actually have names.
+answersAre({ [T.ALL_DATES_LUNCH_PEOPLE]: ['You', 'Guest 3'] });
+check('...and a tick for an unnamed guest is not a meal',
+  sandbox.readMealCountResponse(formIndex, {}, PEOPLE.slice(0, 2)), 1);
+check('"None" is no extras', extrasFor(sandbox.EXTRA_MEALS_NONE_LABEL), 0);
+check('an unanswered extras question is no extras', extrasFor(''), 0);
+check('an impossible extras answer is capped too', extrasFor('90'), sandbox.MAX_EXTRA_MEALS);
+
+function extrasFor(answer) {
+  answersAre({ [T.EXTRA_MEALS]: answer });
+  return sandbox.readExtraMealsResponse(formIndex, {});
+}
+
+// --- the per-date grid ---
+/** getGridResponseByTitle(), answering for one titled grid. */
+function gridIs(title, rows, values) {
+  sandbox.getGridResponseByTitle = (fi, response, wanted) =>
+    (wanted === title ? { rows, columns: [], values } : null);
+}
+answersAre({});
+gridIs(T.MEAL_COUNT_GRID, ['Tue Sep 15', 'Thu Sep 17'], ['2', sandbox.MEAL_COUNT_NONE_LABEL]);
+let grid = sandbox.readMealCountGridResponse(formIndex, {}, PEOPLE);
+check('the meal grid reads one number per date',
+  [grid.countForRow(0), grid.countForRow(1)], [2, 0]);
+
+// The pre-v9 grid: ticks per person per date, and the submission's extras
+// riding on every date that has anybody ticked at all.
+answersAre({ [T.EXTRA_MEALS]: '1' });
+gridIs(T.LUNCH_GRID, ['Tue Sep 15', 'Thu Sep 17'], [['You', 'Guest 1'], []]);
+grid = sandbox.readMealCountGridResponse(formIndex, {}, PEOPLE);
+check('a pre-v9 lunch grid becomes counts, extras included',
+  [grid.countForRow(0), grid.countForRow(1)], [3, 0]);
+
+sandbox.getGridResponseByTitle = () => null;
+check('and a form with no meal grid at all reads as nothing',
+  sandbox.readMealCountGridResponse(formIndex, {}, PEOPLE), null);
 
 // ===========================================================================
 // 3. A LUNCH TICKED ON A PROGRAM FORM REACHES THE KITCHEN

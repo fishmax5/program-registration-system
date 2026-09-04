@@ -20,10 +20,18 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
   // both paths below carry it, and kept OUT of Admin_Notes so a staff note and
   // a form answer never turn into each other.
   const customAnswers = getCustomAnswersResponse(formIndex, response);
-  // Asked once, applied to every date on this submission that wants lunch, and
-  // attributed to the PERSON FILLING THE FORM IN — see EXTRA_MEALS. A guest is
-  // one guest and one meal; the extras belong to whoever collects them.
-  const extraMeals = readExtraMealsResponse(formIndex, response);
+  // HOW MANY MEALS, not who eats — see TEMPLATE_VERSION's v9 note. Read once
+  // here for the all-dates branch (the per-date branch reads its own grid) and
+  // attributed to the PERSON FILLING THE FORM IN: the meals are a single order
+  // that somebody collects, so they belong on one row rather than being shared
+  // out over a party this form never asked us to divide them among.
+  //
+  // Null means the form never asked, which is not the same as zero: a form
+  // with nothing to serve, or an appointment form, whose respondents are not
+  // saying "no lunch" so much as never having been offered one. Both end up as
+  // No Lunch; the distinction matters only to readMealCountResponse(), which
+  // uses it to decide whether to look at a pre-v9 response's answers instead.
+  const mealCount = readMealCountResponse(formIndex, response, people);
 
   // AN APPOINTMENT FORM IS RECOGNIZED BY ITS OWN SHAPE, not by a flag passed
   // in: a form carrying the time question is one, and nothing else is. That
@@ -57,26 +65,31 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     return processAllDatesResponse({
       formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
       name, people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-      phone, email, joiningClub, collectors, customAnswers, extraMeals
+      phone, email, joiningClub, collectors, customAnswers, mealCount
     });
   }
 
-  // Specific-dates path. Two roster grids: ATTENDANCE_GRID's rows are every
-  // date on the form, LUNCH_GRID's rows are only the lunch-eligible ("not
-  // Not-Serving") subset — see buildDateLabelSets().
+  // Specific-dates path. Two grids: ATTENDANCE_GRID's rows are every date on
+  // the form and its columns are the people; MEAL_COUNT_GRID's rows are only
+  // the lunch-eligible ("not Not-Serving") subset — see buildDateLabelSets() —
+  // and its answer on a row is one number, the meals that party wants that day.
   //
-  // A LUNCH-ONLY FORM HAS ONE GRID, carrying the other title (see
-  // makeFormLunchOnly()), and no lunch grid at all — because on that form the
-  // roster grid IS the lunch question. So it is looked up under both titles,
-  // and a tick on it is read as lunch further down.
+  // A LUNCH-ONLY FORM HAS ONE GRID, the meal grid under its own title (see
+  // makeFormLunchOnly()), and no attendance grid at all — because on that form
+  // a meal IS the registration. A pre-v9 lunch-only form is the other way
+  // around: one checkbox grid of people under LEGACY_LUNCH_ONLY_GRID_TITLE,
+  // which is why that title is an attendance grid here.
   const attendanceGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID) ||
-    getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID);
-  const lunchGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_GRID);
-  if (!attendanceGrid) return [];
+    getGridResponseByTitle(formIndex, response, LEGACY_LUNCH_ONLY_GRID_TITLE);
+  const mealGrid = readMealCountGridResponse(formIndex, response, people);
+  if (!attendanceGrid && !mealGrid) return [];
 
   const rows = [];
   const formId = form.getId();
-  attendanceGrid.rows.forEach((dateLabel, rowIdx) => {
+  // The dates to walk: every date the respondent was shown. On a v9 lunch-only
+  // form the meal grid is the only grid there is, so it is also the date list.
+  const dateRows = attendanceGrid ? attendanceGrid.rows : mealGrid.rows;
+  dateRows.forEach((dateLabel, rowIdx) => {
     // Resolved against the registry rather than cut at the first " — ", so a
     // program whose NAME contains that separator still finds its session
     // instead of losing the whole submission — see sessionLabelCandidates().
@@ -90,36 +103,43 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
       return;
     }
 
-    const attendingCols = attendanceGrid.values[rowIdx] || [];
-    const lunchRowIdx = lunchGrid
-      ? lunchGrid.rows.findIndex(r => resolveSessionLabelForForm(registryIndex, formId, r) === plainDateLabel)
-      : -1;
-    const lunchCols = (lunchGrid && lunchRowIdx >= 0) ? (lunchGrid.values[lunchRowIdx] || []) : [];
-
-    // On a lunch-only session there is nothing to attend, so a tick means the
-    // meal — the one and only reading of that grid on such a form. Decided
-    // per SESSION rather than per form because that is where the fact lives:
-    // the Event_ID says outright that this row is a lunch with no program
-    // behind it (see makeLunchOnlyEventId()).
-    const lunchOnlySession = isLunchOnlyEventId(registryEntry.eventId);
+    const attendingCols = attendanceGrid ? (attendanceGrid.values[rowIdx] || []) : [];
+    // The two grids do not carry the same rows — the meal grid holds only the
+    // catered dates — so the meal row is found by the label it resolves to,
+    // never by position. Unless there is no attendance grid, in which case the
+    // meal grid is the one being walked and the index is already its own.
+    const mealRowIdx = !mealGrid ? -1
+      : (attendanceGrid
+        ? mealGrid.rows.findIndex(r => resolveSessionLabelForForm(registryIndex, formId, r) === plainDateLabel)
+        : rowIdx);
+    const mealsThisDate = (mealGrid && mealRowIdx >= 0) ? mealGrid.countForRow(mealRowIdx) : 0;
 
     people.forEach(person => {
-      const isAttending = attendingCols.indexOf(person.columnLabel) !== -1;
-      const wantsLunch = lunchCols.indexOf(person.columnLabel) !== -1 || (lunchOnlySession && isAttending);
-      if (!isAttending && !wantsLunch) return; // this person didn't check anything for this date — no row
+      const isRegistrant = person.personType === 'Attendee';
+      // WHO IS COMING is still a per-person question — except on a lunch-only
+      // form, where there is no attendance grid and a meal ordered is the
+      // whole of the registration.
+      const attendingHere = attendanceGrid
+        ? attendingCols.indexOf(person.columnLabel) !== -1
+        : mealsThisDate > 0;
+      // EVERY MEAL ON THIS SUBMISSION GOES ON THE REGISTRANT'S ROW. The form
+      // asks for a total, not for who eats, so there is no honest way to say
+      // which guest a given meal is for — and inventing one would put a meal
+      // against a name that never asked for it. The roster still lists the
+      // guests; the order still says four. See Meals_Ordered on Registrant_Dash.
+      const meals = isRegistrant ? mealsThisDate : 0;
+      const wantsLunch = meals > 0;
+      if (!attendingHere && !wantsLunch) return; // nothing said about this person on this date
 
       let notes = person.baseNotes || '';
-      // The reconcile warning below is for a real inconsistency — lunch ticked
-      // on a date the person didn't say they were coming to. On a lunch-only
-      // session the two are the same tick by construction, so there is nothing
-      // to reconcile and nothing to warn about.
-      if (!isAttending && wantsLunch && !lunchOnlySession) {
-        // Reconcile rather than silently drop: a checked lunch box implies
-        // attendance even if that same date wasn't also checked in the
-        // attendance grid. Flag it for staff instead of guessing quietly.
-        const flag = `⚠️ Checked lunch without attendance for ${plainDateLabel} — reconciled as attending.`;
+      // Meals ordered on a date the registrant did not tick. Reconcile rather
+      // than silently drop — a meal asked for implies somebody there to eat it
+      // — but say so, since it is the one combination the form allows that the
+      // respondent may not have meant.
+      if (!attendingHere && wantsLunch && attendanceGrid) {
+        const flag = `⚠️ Ordered ${meals} meal(s) for ${plainDateLabel} without ticking that date — reconciled as attending.`;
         notes = notes ? `${notes} | ${flag}` : flag;
-        log(`Reconciliation: ${person.name} checked "${TEMPLATE_ITEM_TITLES.LUNCH_GRID}" without "${TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID}" for ${plainDateLabel} on form ${form.getId()} — treating as attending.`);
+        log(`Reconciliation: ${person.name} ordered meals for ${plainDateLabel} without ticking "${TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID}" on form ${form.getId()} — treating as attending.`);
       }
 
       rows.push(buildRegistrantRow({
@@ -127,8 +147,8 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
         lunchType: wantsLunch ? 'Yes - Lunch' : 'No Lunch', primaryRegistrant: person.primaryRegistrant,
         adminNotes: notes, formEditUrl: responseEditUrl, protectedKeys, existingRowIndex, submittedAt, orderAheadDays,
         partyId, partySize,
-        mealsOrdered: 1 + (person.personType === 'Attendee' ? extraMeals : 0),
-        formAnswers: person.personType === 'Attendee' ? customAnswers : '',
+        mealsOrdered: meals,
+        formAnswers: isRegistrant ? customAnswers : '',
         // A response being read as it arrives — the one path allowed to lift a
         // deletion tombstone. See buildRegistrantRow() and section 5c.
         fromLiveSubmission: true,
@@ -155,14 +175,8 @@ function processAllDatesResponse(args) {
   const {
     formIndex, response, registryIndex, protectedKeys, existingRowIndex, orderAheadDays,
     people, adminNotes, responseEditUrl, submittedAt, partyId, partySize,
-    phone, email, joiningClub, collectors, customAnswers, extraMeals
+    phone, email, joiningClub, collectors, customAnswers, mealCount
   } = args;
-
-  // A single checkbox of PERSON_COLUMN_LABELS: who eats, applied to every
-  // date. Checked-but-unnamed columns are already filtered out, since
-  // `people` only contains rows for guests who were actually named.
-  const eaters = getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE) || [];
-  const eaterSet = new Set(Array.isArray(eaters) ? eaters : [eaters]);
 
   const formId = formIndex.formId;
   const matchingEntries = Object.keys(registryIndex).filter(k => k.startsWith(`${formId}|`)).map(k => registryIndex[k]);
@@ -181,29 +195,45 @@ function processAllDatesResponse(args) {
   }
 
   // THE MONTH-OF-LUNCHES PATH. On a lunch-only form every session on it is a
-  // meal and nothing else, so a submission that ticks nobody in the "Who Needs
-  // Lunch?" box has asked for nothing at all — which is never what somebody
+  // meal and nothing else, so a submission that answers the meal question with
+  // nothing at all has asked for nothing — which is never what somebody
   // filling in a lunch form meant. Left as-is it produced a party of rows all
   // reading "No Lunch", i.e. a registration for an event that does not exist.
-  // So on this form alone, an empty answer means everybody in the party eats,
-  // which is both the obvious reading and the one a person can correct at the
-  // desk; the opposite mistake is a meal nobody ordered.
+  // So on this form alone, an unanswered question means one meal each, which
+  // is both the obvious reading and the one a person can correct at the desk;
+  // the opposite mistake is a meal nobody ordered.
+  //
+  // AN EXPLICIT ZERO IS STILL ZERO — mealCount is null only when the question
+  // was never answered, and somebody who picked "0 — no lunch" has told us
+  // something and is entitled to be believed.
   const lunchOnlyForm = matchingEntries.length > 0 &&
     matchingEntries.every(entry => isLunchOnlyEventId(entry.eventId));
-  const everybodyEats = lunchOnlyForm && eaterSet.size === 0;
+  const meals = (mealCount === null || mealCount === undefined)
+    ? (lunchOnlyForm ? Math.min(people.length, MAX_MEALS_PER_SUBMISSION) : 0)
+    : mealCount;
 
   const rows = [];
   people.forEach(person => {
-    const lunchType = (everybodyEats || eaterSet.has(person.columnLabel)) ? 'Yes - Lunch' : 'No Lunch';
+    // EVERY MEAL ON THE REGISTRANT'S ROW — see the specific-dates path for the
+    // whole of the reason. A guest is on the roster; the order is one number,
+    // and it belongs to whoever collects it.
+    const personMeals = person.personType === 'Attendee' ? meals : 0;
+    const lunchType = personMeals > 0 ? 'Yes - Lunch' : 'No Lunch';
     saveAllDatesRegistryEntry(formId, {
       name: person.name, personType: person.personType, lunchType,
       primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '',
       formEditUrl: responseEditUrl, submittedAt: submittedAt.toISOString(), partyId, partySize,
       phone: phone || '', email: email || '',
       // Stored with the registration so applyAllDatesCatchup() re-derives the
-      // same order on a date added months later. An entry written before this
-      // existed has no field and reads as zero extras, which is what it meant.
-      extraMeals: person.personType === 'Attendee' ? (extraMeals || 0) : 0
+      // same order on a date added months later.
+      //
+      // BOTH FIELDS, and the new one is the one that is read: `mealsOrdered`
+      // is the v9 total, `extraMeals` the pre-v9 number of EXTRAS that an
+      // entry written before this change carries. Neither is re-interpreted as
+      // the other — an old entry's 0 extras means one meal, a new entry's 0
+      // meals means none — so the catch-up reads mealsOrdered where it is
+      // present and falls back to 1 + extras where it is not.
+      mealsOrdered: personMeals
     });
 
     // The club half. Recorded per person, not per submission: a party of three
@@ -231,7 +261,7 @@ function processAllDatesResponse(args) {
         primaryRegistrant: person.primaryRegistrant, adminNotes: person.baseNotes || '', formEditUrl: responseEditUrl,
         protectedKeys, existingRowIndex, submittedAt, orderAheadDays, partyId, partySize,
         fromLiveSubmission: true,
-        mealsOrdered: 1 + (person.personType === 'Attendee' ? (extraMeals || 0) : 0),
+        mealsOrdered: personMeals,
         formAnswers: person.personType === 'Attendee' ? (customAnswers || '') : '',
         phone, email
       }));
@@ -282,7 +312,11 @@ function applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, or
           formEditUrl: entry.formEditUrl, protectedKeys, existingRowIndex,
           submittedAt: new Date(entry.submittedAt), orderAheadDays,
           partyId: entry.partyId || '', partySize: entry.partySize || '',
-          mealsOrdered: 1 + (Number(entry.extraMeals) || 0),
+          // The v9 total where the entry has one; the pre-v9 "one each plus
+          // extras" where it does not. See saveAllDatesRegistryEntry() above.
+          mealsOrdered: entry.mealsOrdered === undefined || entry.mealsOrdered === null
+            ? 1 + (Number(entry.extraMeals) || 0)
+            : (Number(entry.mealsOrdered) || 0),
           phone: entry.phone || '', email: entry.email || ''
         });
         if (row) newRows.push(row);
@@ -525,7 +559,8 @@ function buildRegistrantRow(args) {
  * What a caller's `mealsOrdered` means once it is known whether the row is
  * having lunch at all: undefined stays undefined (no opinion — see
  * writeMealsOrdered()), and a row with no lunch orders no meals whatever the
- * form said, since the extras were extras OF a meal that is not happening.
+ * form said — a count of meals on a row that is not eating is a count of
+ * nothing.
  */
 function resolveMealsOrderedArg(mealsOrdered, wantsLunch) {
   if (mealsOrdered === undefined || mealsOrdered === null) return undefined;

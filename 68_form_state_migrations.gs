@@ -115,8 +115,83 @@ const FORM_STATE_MIGRATIONS = [
     version: 8,
     targets: context => isRoutingAffectedFormContext(context),
     apply: (form, context) => repairFormPageRouting(form, context)
+  },
+  {
+    id: 'meal_totals_v9',
+    title: 'Lunch asked for as a total (v8 → v9)',
+    version: 9,
+    // EVERY FORM, with no targets predicate. The three questions this replaces
+    // are on every form that has ever offered lunch, and whether a given form
+    // still carries them cannot be judged from the dashboard rows — a form
+    // whose dates stopped serving lunch had them stripped, and a form built
+    // last week never had them. So the cheap check is the one inside apply(),
+    // which reads the titles off the form and returns 0 without a write when
+    // there is nothing of the old shape on it.
+    apply: (form, context) => convertFormToMealTotals(form, context)
   }
 ];
+
+/**
+ * v8 → v9: SWAPS THE THREE PERSON-SHAPED LUNCH QUESTIONS FOR THE TWO
+ * COUNT-SHAPED ONES, in place, on a live form.
+ *
+ * The change itself is described on TEMPLATE_VERSION. What this exists for is
+ * the alternative: without it every live form in the workbook is stale by
+ * isFormOnCurrentTemplate()'s reckoning and gets REBUILT — a few dozen Forms
+ * writes each, five per execution, and a new prefilled link for every session
+ * row because a rebuilt form has new item IDs. The questions are the only
+ * thing that actually changed, so this changes the questions.
+ *
+ * IT DOES NOT WRITE ITS OWN VERSION OF THE SHAPE. syncLunchQuestionsOnForm()
+ * is already the one place that decides which lunch questions a form should
+ * carry — the lunch-only form's single grid, the appointment form's none, the
+ * ordinary form's two — and it now removes the pre-v9 items wherever it looks.
+ * Calling it is what keeps this migration and the hourly sync from disagreeing
+ * about the same form.
+ *
+ * THE DATE ROWS HAVE TO FOLLOW IT. A freshly added grid holds the template's
+ * placeholder row, so a form left here without a forced label write is a form
+ * whose lunch question offers "(dates will be filled in automatically)" and
+ * nothing else — strictly worse than the old shape it replaced.
+ *
+ * Returns 0 and writes nothing on a form that has already been converted,
+ * which is most of them after the first sweep: the guard below is three title
+ * comparisons on items the sweep has already read.
+ */
+function convertFormToMealTotals(form, context) {
+  const titles = form.getItems().map(it => it.getTitle());
+  // A FORM THAT IS STALE FOR SOME OTHER REASON IS THE REBUILD PASS'S. This
+  // migration carries a `version`, so a form it lands on is STAMPED at
+  // TEMPLATE_VERSION and the rebuild pass then leaves it alone — which would
+  // be exactly wrong for a form still on the v1/v2 guest-count branch pages or
+  // still carrying the floating footer header. Those are the other two things
+  // isFormOnCurrentTemplate() judges a form stale by, and swapping their lunch
+  // questions does not make either of them any less true.
+  if (titles.indexOf(LEGACY_GUEST_COUNT_TITLE) !== -1 ||
+      titles.indexOf(LEGACY_FOOTER_ITEM_TITLE) !== -1) {
+    return { changed: 0, recognized: false };
+  }
+  const preV9 = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.EXTRA_MEALS, LEGACY_LUNCH_ONLY_GRID_TITLE];
+  if (!preV9.some(title => titles.indexOf(title) !== -1)) return { changed: 0, recognized: true };
+
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
+  let changed = syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0, context);
+  // force: the rows this form's meal question is carrying are the template's
+  // placeholder, and the fingerprint on file still describes the labels the
+  // old grid had.
+  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, {
+    form, force: true, context: 'meal-total migration',
+    shape: formLunchShapeKey(context, lunchDateLabels.length > 0)
+  });
+
+  if (changed > 0) {
+    log(`Form ${form.getId()} ("${describeLocations(context.locations)}") now asks for meals as a ` +
+      `total per date rather than as a box per person.`);
+    invalidateFormItemIndex(form.getId());
+  }
+  return { changed: changed, recognized: true };
+}
 
 /**
  * WHICH FORMS THE v8 ROUTING REPAIR IS FOR: the single-session ones and the
@@ -479,20 +554,26 @@ function deleteFormRoutingRepairResumeTriggers() {
 }
 
 /**
- * ADMIN → "Fix Form Page Routing (no rebuild)". Runs every registered
- * migration over the forms it applies to, ledger ignored, and says what it did.
+ * ADMIN → "Fix Forms In Place (no rebuild)". Runs every registered migration
+ * over the forms it applies to, ledger ignored, and says what it did.
  *
- * The un-destructive sibling of "Rebuild Forms In Place": no question is
- * replaced, no pre-checked box is regenerated, no link moves — the only writes
- * are the navigation settings that are actually wrong. Someone who has just
+ * The un-destructive sibling of "Rebuild Forms In Place": no form is emptied
+ * and rebuilt, and no link moves — the only writes are the repairs a form
+ * actually needs, whether that is a misplaced navigation setting or the swap
+ * from the pre-v9 lunch questions to the meal totals. Someone who has just
  * pulled a fix and does not want to wait an hour for the sync runs this.
+ *
+ * STILL SPELLED "ROUTING" throughout its state and its handler names, because
+ * the first repair it carried was the page routing and its stored state and
+ * resume trigger are keyed by those names — see the Script Properties rule in
+ * CLAUDE.md. What it does is every migration, not only that one.
  *
  * ONE CLICK IS THE WHOLE JOB. What does not fit in this execution is carried on
  * by a hand-off trigger until every form has been looked at; the dialog says so
  * rather than asking for another click.
  */
 function repairFormRoutingNow() {
-  if (!requireAuthorizedAdmin('Fix Form Page Routing')) return;
+  if (!requireAuthorizedAdmin('Fix Forms In Place')) return;
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -501,7 +582,7 @@ function repairFormRoutingNow() {
     return;
   }
   if (isFormRoutingRepairActive()) {
-    ui.alert('A routing check is already running in the background and will finish on its own — ' +
+    ui.alert('A form check is already running in the background and will finish on its own — ' +
       'leaving it alone.');
     return;
   }
@@ -518,7 +599,7 @@ function repairFormRoutingNow() {
     startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0,
     remaining: formIds, opened: 0, repaired: 0, skipped: 0, unrecognized: 0
   });
-  toastIfPossible('Checking every form’s page routing…');
+  toastIfPossible('Checking every form for repairs it needs…');
 
   const state = runFormRoutingRepairSlice();
   const totals = state || getFormRoutingRepairState();

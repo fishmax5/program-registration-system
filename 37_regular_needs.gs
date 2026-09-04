@@ -547,7 +547,7 @@ const QUICK_MARK_NAME_TIME_SEPARATOR = '|@|';
 /**
  * The most meals one Quick Mark can record in a single box. Not a rule about
  * what the workbook can hold — staff type any number onto the row — but the
- * same judgement MAX_EXTRA_MEALS makes about a control anybody can lean on: a
+ * same judgement MAX_MEALS_PER_SUBMISSION makes about a control anybody can lean on: a
  * mistyped 200 in a hurry should not reach the kitchen's order.
  */
 const QUICK_MARK_MAX_MEAL_COUNT = 20;
