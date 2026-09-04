@@ -736,7 +736,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     noRegistrationClosed = {};
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
 

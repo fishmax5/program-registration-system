@@ -15,28 +15,33 @@ defineLazyGlobal_('LOCATION_COLOR_MAP', () => ({
 
 const SHEET_NAMES = {
   CONFIG: 'Config',
-  // The per-session table. Renamed from 'Master_Program_Dashboard' — it was
-  // never a dashboard in the sense the lunch one is: it is the session ledger
-  // every other tab is derived from, and Program_Month is what a person reads
-  // when they want a summary. LEGACY_SHEET_RENAMES carries an existing
-  // workbook's tab across in place, rows and formatting intact.
+  // The per-session table. It was called 'Master_Program_Dashboard', then
+  // briefly 'Program_Sessions' — it was never a dashboard in the sense the
+  // lunch one is: it is the session ledger every other tab is derived from,
+  // and the month tab is what a person reads when they want a summary.
+  // LEGACY_SHEET_RENAMES carries an existing workbook's tab across in place,
+  // rows and formatting intact.
   //
-  // HEADERS.Master_Program_Dashboard deliberately keeps the OLD spelling: a
-  // schema key is read by code and a tab name by people, and renaming the key
-  // would touch ~170 references to buy nothing. Same reasoning as
-  // LEADER_SHEET_REGISTRY_PROP_KEY still being spelled
-  // 'INSTRUCTOR_SHEET_REGISTRY_V1'.
-  PROGRAM_DASHBOARD: 'Program_Sessions',
+  // Its HEADERS key was renamed with it, unlike the usual practice here
+  // (LEADER_SHEET_REGISTRY_PROP_KEY is still spelled
+  // 'INSTRUCTOR_SHEET_REGISTRY_V1'): HEADERS is indexed by SHEET NAME in
+  // 13_lunch_only_signup_form.gs and 14_saved_column_widths.gs, and the
+  // month tab has now taken the name 'Master_Program_Dashboard' — so a
+  // HEADERS key left on the old spelling would hand the month tab the
+  // session table's columns.
+  PROGRAM_DASHBOARD: 'All_Program_Sessions',
   // One row per program-month — the same program, at the same location, in
   // the same month, which is exactly the unit buildEventGroups() already
   // makes one FORM for. DERIVED, top to bottom, from the session table:
   // nothing is stored here that is not already on a session row, which is
   // what makes deleting this tab a cosmetic act rather than a data loss.
-  // See 78_program_month_dashboard.gs.
-  PROGRAM_MONTH: 'Program_Month',
-  REGISTRANT_DASH: 'Registrant_Dash',
+  // See 78_program_month_dashboard.gs. It carries the name the session
+  // ledger gave up: 'Master_Program_Dashboard' is what everybody already
+  // calls the front page, and the month view is what the front page now is.
+  PROGRAM_MONTH: 'Master_Program_Dashboard',
+  REGISTRANT_DASH: 'All_Registrants',
   LUNCH_DASHBOARD: 'Master_Lunch_Dashboard',
-  LUNCH_ROSTER: 'Lunch_Roster',
+  LUNCH_ROSTER: 'All_Lunch_Registrants',
   LUNCH_SCHEDULE: 'Lunch_Schedule',
   TRIAGE: 'Deleted_Event_Triage',
   MEMBER_ROLL: 'Member_Roll',
@@ -72,25 +77,42 @@ const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
  * Only ever applied when the new name is absent: a workbook that somehow has
  * both is left exactly as it is rather than having one of them clobbered.
  */
+// ORDER MATTERS HERE, which it never used to, and a value may now be a LIST.
+//
+// A tab that has been renamed twice is still sitting under whichever of its
+// names its workbook stopped at, so the entry names them newest-first and the
+// first one actually present wins:
+//
+//   Lunch_and_Event_Registrants -> Registrant_Dash -> All_Registrants
+//   Master_Program_Dashboard -> Program_Sessions -> All_Program_Sessions
+//
+// A list rather than a chain of one-hop entries because the destination is
+// what the "only when the new name is absent" rule is checked against: an
+// already-migrated workbook HAS All_Program_Sessions, so the whole entry is
+// skipped — and it has to be, because 'Master_Program_Dashboard' is no longer
+// a name nobody is using. It is the MONTH tab now (SHEET_NAMES.PROGRAM_MONTH),
+// which is also why that entry is written last: the month tab inherits the
+// name only once the session ledger has finished vacating it.
 const LEGACY_SHEET_RENAMES = {
-  'Registrant_Dash': 'Lunch_and_Event_Registrants',
-  // Renamed September 2026. The session ledger, under the name it carried for
-  // as long as it was called a dashboard. A workbook that somehow holds BOTH
-  // is left alone by the rule above — which is the case that matters here,
+  'All_Registrants': ['Registrant_Dash', 'Lunch_and_Event_Registrants'],
+  'All_Lunch_Registrants': 'Lunch_Roster',
+  // Renamed September 2026. The session ledger, under the two names it carried
+  // while it was called a dashboard. A workbook that somehow holds BOTH is
+  // left alone by the rule above — which is the case that matters here,
   // because Program_Sessions is a name somebody could plausibly have given a
   // tab of their own.
-  'Program_Sessions': 'Master_Program_Dashboard'
+  'All_Program_Sessions': ['Program_Sessions', 'Master_Program_Dashboard'],
+  'Master_Program_Dashboard': 'Program_Month'
 };
-
 /**
  * Column layouts. Every date-bearing sheet now leads with Event_Date (its
  * cell background carries the month tint that used to live in a separate
- * Month column). Program_Sessions's session table no longer has a
+ * Month column). All_Program_Sessions's session table no longer has a
  * Manual_Override column at all; the other date-bearing tabs keep it as
  * the second column.
  */
 defineLazyGlobal_('HEADERS', () => ({
-  // The per-session table inside Program_Sessions (section C).
+  // The per-session table inside All_Program_Sessions (section C).
   //
   // The KEY still spells the old tab name. That is deliberate: a schema key is
   // read by code, a tab name by people, and the tab was renamed for the
@@ -158,7 +180,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // alongside the three numbers that usually answer it — and ticking it sends
   // every further registration for that one session to the waitlist however
   // much room Max_Capacity says is left, including when there is no cap at all.
-  Master_Program_Dashboard: [
+  All_Program_Sessions: [
     'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
     'Active_Count', 'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
@@ -168,7 +190,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Max_Per_Month'
   ],
   /**
-   * Program_Month — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
+   * Master_Program_Dashboard — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
    *
    * Month_Start LEADS THE ROW AND IS A REAL DATE (the 1st of the month), for
    * the same reason Event_Date leads every other date-bearing tab: it is what
@@ -192,7 +214,7 @@ defineLazyGlobal_('HEADERS', () => ({
    * GROUPED, and Group_Key is the row's own identity — both are for reading in
    * the formula bar when something has gone wrong, not for scanning.
    */
-  Program_Month: [
+  Master_Program_Dashboard: [
     'Month_Start', 'Location', 'Program', 'Leader', 'Leader_Source',
     'Type_Tag', 'Flags', 'Schedule', 'Sessions',
     'Registered', 'Max_Capacity', 'Fill', 'Waitlist',
@@ -231,7 +253,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // readRegistrantMealsOrdered() and countLunchMeals()).
   //
   // It is a count of MEALS, never of people: Party_Size still says how many
-  // human beings arrived together, Lunch_Roster still lists one row per
+  // human beings arrived together, All_Lunch_Registrants still lists one row per
   // person, and four meals for Joan is one name with a 4 beside it.
   //
   // To order NO meal, set Lunch_Status to "No Lunch" — that is the column that
@@ -297,7 +319,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // session table carries, repeated here so the day's roster is one click
   // from the sheet the leader is marking and the PDF the desk printed — see
   // 69_generated_file_links.gs.
-  Registrant_Dash: [
+  All_Registrants: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Meals_Ordered',
     'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge',
@@ -316,15 +338,15 @@ defineLazyGlobal_('HEADERS', () => ({
   // Registered_Count counts MEALS and Served_Confirmed counts PEOPLE, and the
   // difference is deliberate rather than an oversight. What the kitchen orders
   // is meals, and one person can be down for four of them (Meals_Ordered on
-  // Registrant_Dash) — so a day where Joan orders four and nobody else eats
+  // All_Registrants) — so a day where Joan orders four and nobody else eats
   // reads 4 registered. What a tick on Lunch_Served records is that a PERSON
   // was handed their food; how much of it they took is the four consumption
-  // counts beside it, which is the honest place for that number. Lunch_Roster
+  // counts beside it, which is the honest place for that number. All_Lunch_Registrants
   // shows both per person, which is where the two are reconciled by eye.
   //
   // The consumption columns are no longer hand-typed here (see
   // LUNCH_DASHBOARD_MANUAL_COLUMNS): they're tallied by buildDashboardRollup()
-  // from the five per-person meal counts on Registrant_Dash, the
+  // from the five per-person meal counts on All_Registrants, the
   // same way Served_Confirmed is tallied from Lunch_Served.
   // updateMasterLunchDashboard() only overwrites a cell when the tally is
   // greater than zero, so a value typed here before that wiring existed is
@@ -349,7 +371,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // different day from the one the row is dated — portions of this batch that
   // went out later, attributed here because this is the row with the
   // Actual_Ordered to reconcile them against (see Meal_Source on
-  // Registrant_Dash). It is always a subset of the consumption
+  // All_Registrants). It is always a subset of the consumption
   // columns beside it, never an addition to them: it explains part of those
   // numbers rather than adding to the total. A row reading 40 ordered, 14
   // takeaway, 8 carried over means eight of that fourteen left the building
@@ -369,13 +391,13 @@ defineLazyGlobal_('HEADERS', () => ({
     'Sign_In_Sheet_Link'
   ],
   /**
-   * Lunch_Roster - WHO is eating, one row per PERSON per date+location.
+   * All_Lunch_Registrants - WHO is eating, one row per PERSON per date+location.
    *
    * Master_Lunch_Dashboard answers "how many lunches do we order"; it is a
    * count and nothing but a count. This tab answers the other half of the same
    * question - "which people are those" - which is what the desk needs to hand
    * the meals out against, and what gets typed into CoPilot afterwards.
-   * Registrant_Dash has the names but it is every registration for every
+   * All_Registrants has the names but it is every registration for every
    * program, so finding the day's eaters in it means reading past the eleven
    * people who signed up for Chair Yoga and never asked for food.
    *
@@ -392,12 +414,12 @@ defineLazyGlobal_('HEADERS', () => ({
    *
    * Meals is the other half of that audit, and the reason the dashboard's
    * Registered_Count can be larger than the number of rows here: it is how
-   * many meals this ONE PERSON is down for (Meals_Ordered on Registrant_Dash).
+   * many meals this ONE PERSON is down for (Meals_Ordered on All_Registrants).
    * Joan is one row reading 4, not four rows — which is what the desk needs to
    * see when it hands the meals over, and what stops "Extra Meal 1" and "Extra
    * Meal 2" being typed into the guest boxes as though they were people.
    */
-  Lunch_Roster: [
+  All_Lunch_Registrants: [
     'Event_Date', 'Location', 'Name', 'Lunch_Type', 'Meals', 'Lunch_Served',
     'Registered', 'Requests_Merged', 'Programs', 'Phone', 'Source'
   ],
@@ -407,7 +429,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // handed over. Everything else on this tab describes a date; this is the one
   // column that describes a thing that can outlive its date, which is what
   // makes "we served yesterday's chicken today" recordable at all (see
-  // Meal_Source on Registrant_Dash).
+  // Meal_Source on All_Registrants).
   //
   // DERIVED, never typed: deriveMealId() computes it from the row's own date,
   // location and type, and renderLunchScheduleSheet() re-stamps every row on
@@ -419,7 +441,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // Last on the row because nobody reads it — it is a join key that happens to
   // be visible, and the menu is what staff come to this tab for.
   Lunch_Schedule: ['Event_Date', 'Location', 'Type', 'Meal_Description', 'Meal_Shorthand', 'Meal_ID'],
-  // A superset of Registrant_Dash' own array (same columns, same
+  // A superset of All_Registrants' own array (same columns, same
   // order) plus 4 triage-only columns — moveRegistrantsToTriage() copies by
   // HEADER NAME, so keeping this a true prefix-plus-extra of the Registrants
   // array is what keeps every registrant column (Location/Event included)
@@ -459,7 +481,7 @@ defineLazyGlobal_('HEADERS', () => ({
   //
   // Name stays the JOIN KEY and is the string every other tab carries: it is
   // what normalizeNameKey() is taken of, what a form response arrives under,
-  // and what Registrant_Dash, Club_Members and Regular_Needs match on. So a
+  // and what All_Registrants, Club_Members and Regular_Needs match on. So a
   // spelling correction is not a matter of retyping it — Display_Name is
   // where staff write the right one, and applyMemberNameCorrection() is what
   // carries it out to every tab and remembers it for the responses still to
@@ -616,7 +638,7 @@ defineLazyGlobal_('HEADERS', () => ({
    *     note rather than applied;
    *   - the answers are recorded in ONE column, Form_Answers, as
    *     "Question: answer" pairs. Adding a question therefore never changes
-   *     the shape of Registrant_Dash, so nothing downstream — counts, lunch
+   *     the shape of All_Registrants, so nothing downstream — counts, lunch
    *     rollups, instructor sheets — has to learn about it;
    *   - a question is added to BOTH branch pages of the form, so it is asked
    *     whichever way somebody signs up, and read back by title exactly like
@@ -732,7 +754,7 @@ const CLUB_LUNCH_OPTIONS = ['Yes - Lunch', 'No Lunch'];
 /** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
 /**
  * THE FIVE COLUMNS THE PROGRAM LEADER OWNS, in the order they appear on both
- * Registrant_Dash and the shared sheet. This one array drives the checkbox
+ * All_Registrants and the shared sheet. This one array drives the checkbox
  * formatting, the yellow wash, the snapshot encoding and the merge — they can
  * never disagree about what is leader-owned, which is the kind of drift that
  * turns a merge into data loss.
@@ -756,7 +778,7 @@ const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
  * PERSON accounted for. All five are independent: one row can carry a dined-in
  * day-1 meal and two taken-out subs at once, which is the case the old single
  * "was this takeaway?" checkbox could not express (see
- * HEADERS.Registrant_Dash).
+ * HEADERS.All_Registrants).
  */
 const REGISTRANT_MEAL_COUNT_COLUMNS = [
   'Day1_Dined_In', 'Day1_Taken_Out', 'Subs_Dined_In', 'Subs_Taken_Out', 'Meals_In_Fridge'
@@ -812,7 +834,7 @@ const LEGACY_HEADER_ALIASES = {
   Registrant_Sheet_Link: ['Leader_Sheet_Link']
 };
 
-/** Headers for the small "Today at Each Location" section (A) inside Program_Sessions. */
+/** Headers for the small "Today at Each Location" section (A) inside All_Program_Sessions. */
 const TODAY_AT_LOCATIONS_HEADERS = ['Location', 'Programs Today', 'Sessions Today', 'Registered Today'];
 
 /** Headers for Master_Lunch_Dashboard's "Today's Lunch Needs" block — its own short list. */

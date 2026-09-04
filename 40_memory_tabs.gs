@@ -37,7 +37,7 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // whole tab read twice per sync for the same rows.
     const sessions = sessionRows ||
       getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
-        HEADERS.Master_Program_Dashboard, 'Event_ID');
+        HEADERS.All_Program_Sessions, 'Event_ID');
     // BEFORE refreshProgramOptions(), and that order is load-bearing on a
     // workbook that has not migrated yet: refreshProgramLeadersTab() carries
     // Program_Options' old Instructor_Email column onto its own tab, reading
@@ -72,7 +72,7 @@ function refreshMemberRoll(ss, registrantRows) {
     if (key) existingByKey[key] = row;
   });
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
@@ -132,7 +132,7 @@ function refreshMemberRoll(ss, registrantRows) {
     // tab at once, under a confirmation, with the old spelling remembered
     // (77_households_and_names.gs). Doing it here as well would let a rename
     // happen quietly on the next sync with none of that: the Name column is
-    // what Registrant_Dash, Club_Members and Regular_Needs all match on, and
+    // what All_Registrants, Club_Members and Regular_Needs all match on, and
     // changing it on this tab alone is exactly how a person's history is left
     // behind under their old spelling.
     //
@@ -249,7 +249,7 @@ function refreshProgramOptions(ss, sessionRows) {
     if (key !== '|') existingByKey[key] = row;
   });
 
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const rows = sessionRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');

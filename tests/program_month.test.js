@@ -1,4 +1,4 @@
-// Program_Month is one row per program-month — the unit buildEventGroups()
+// Master_Program_Dashboard is one row per program-month — the unit buildEventGroups()
 // already makes one FORM for, and the one thing the session table cannot show.
 // Everything here is about the COLLAPSING: what becomes one row, what refuses
 // to, and what a collapsed cell is allowed to claim.
@@ -106,9 +106,9 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const sessionHeaders = sandbox.HEADERS.Master_Program_Dashboard;
+const sessionHeaders = sandbox.HEADERS.All_Program_Sessions;
 const sessionMap = sandbox.getIndexMap(sessionHeaders);
-const monthMap = sandbox.getIndexMap(sandbox.HEADERS.Program_Month);
+const monthMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
 
 /** One session row. `at` is [year, month0, day, hour, minute]. */
 function session(fields) {
@@ -357,7 +357,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 21, 9, 30], eventId: 'taichi', capacity: 4 }),
     session({ at: [2026, 8, 17, 9, 30], eventId: 'coffee', capacity: '--' })
   ];
-  const regHeaders = sandbox.HEADERS.Registrant_Dash;
+  const regHeaders = sandbox.HEADERS.All_Registrants;
   const regMap = sandbox.getIndexMap(regHeaders);
   const registrants = [];
   const add = (eventId, name) => {

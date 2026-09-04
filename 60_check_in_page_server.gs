@@ -529,7 +529,7 @@ function buildLiveCheckInSessionIndex() {
   const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const sessions = [];
   if (dash) {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     const todayKey = formatDateKey(new Date());
     const horizon = new Date();
@@ -876,7 +876,7 @@ function clearCheckInMark(args) {
 function clearCheckInMarkLocked(args) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return { ok: false, message: 'There is no registrants tab yet.' };
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const target = findCheckInRow(sheet, map, args);
   if (!target) {
     return {
@@ -903,7 +903,7 @@ function findCheckInRow(sheet, map, args) {
   const nameKey = normalizeNameKey(args.name);
   const location = String(args.location || '').trim();
   const bookedTime = appointmentStartLabelOf(args.bookedTime);
-  const numCols = HEADERS.Registrant_Dash.length;
+  const numCols = HEADERS.All_Registrants.length;
   let found = 0;
   getSectionZones(sheet, 'Event_ID').forEach(zone => {
     if (found) return;
@@ -944,7 +944,7 @@ function findCheckInRow(sheet, map, args) {
 function readCheckInRoster(location, sessionValue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return [];
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const selection = parseQuickMarkProgramChoice(sessionValue);
   const wantedLocation = String(location || '').trim();

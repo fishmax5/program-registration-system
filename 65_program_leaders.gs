@@ -250,7 +250,7 @@ const LEADER_TITLE_MATCH_MAX_PROGRAMS = 10;
  * it alone, and a column saying otherwise would have to be cleared by hand to
  * stop saying it. The Staff_Notes stamp is already the thing a person deletes
  * when they have checked the row, so it is also the honest answer to "has
- * anybody checked this?" — which is exactly what Program_Month's
+ * anybody checked this?" — which is exactly what Master_Program_Dashboard's
  * Leader_Source reports.
  */
 const LEADER_TITLE_MATCH_NOTE_PREFIX = 'Matched on "';
@@ -573,7 +573,7 @@ function invalidateProgramLeaderIndex() {
  * blanking its columns every winter would look like the tab losing data.
  */
 function knownProgramKeys(ss, sessionRows) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = sessionRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), headers, 'Event_ID');
@@ -645,7 +645,7 @@ function buildProgramLeaderIndex() {
       programLocation: location,
       // Whether this row is still a PROPOSAL nobody has confirmed. Read here
       // because this is already the one read of the tab per execution, and
-      // Program_Month's Leader_Source is a report on the same rows the
+      // Master_Program_Dashboard's Leader_Source is a report on the same rows the
       // sharing paths use — a second read to answer it would be a second
       // answer waiting to disagree with this one.
       matched: isTitleMatchedLeaderRow(row[map['Staff_Notes']])
@@ -762,7 +762,7 @@ function programLeaderNames() {
 
 /**
  * ATTACHES a leader to a program: the single write this tab accepts from
- * anywhere else in the workbook, and the whole of what editing Program_Month's
+ * anywhere else in the workbook, and the whole of what editing Master_Program_Dashboard's
  * Leader cell does (see handleProgramMonthEdit() in 18_edit_handlers.gs).
  *
  * IT ONLY EVER ADDS. It never edits somebody else's row and never deletes one,

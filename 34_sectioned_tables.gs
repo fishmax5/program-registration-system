@@ -8,10 +8,10 @@
 // tab's (possibly several) header rows, reading all its rows regardless of
 // which zone they're currently in, splitting rows by date, and writing the
 // two zones back out with consistent banners/headers/zebra striping/month
-// tinting. Program_Sessions and Master_Lunch_Dashboard call the
+// tinting. All_Program_Sessions and Master_Lunch_Dashboard call the
 // lower-level writeUpcomingPastSections() directly (since they have their
 // own extra Today/Metrics sections above); the three flat, single-table
-// tabs (Registrant_Dash, Deleted_Event_Triage, Lunch_Schedule)
+// tabs (All_Registrants, Deleted_Event_Triage, Lunch_Schedule)
 // use the renderFlatDateSheet() wrapper instead.
 // ============================================================================
 
@@ -100,7 +100,7 @@ function readAllSectionedRows(sheet, headers, markerHeaderName, endRow) {
  * the getValues(). Nothing here is going back onto a sheet, so the second
  * fetch is dead weight — one getValues() of the whole grid answers all of it.
  *
- * It is also the MORE correct read for a consumer of values: Registrant_Dash's
+ * It is also the MORE correct read for a consumer of values: All_Registrants's
  * Event_Time is a formula, and the formula-preserving read hands back the
  * formula string, which is not a time anything can parse.
  */
@@ -266,7 +266,7 @@ function partitionByDate(rows, dateColIdx, todayKey) {
 // ============================================================================
 //
 // Every date-sorted tab in this workbook grows in one direction forever. A
-// year in, the Past section of Registrant_Dash is thousands of
+// year in, the Past section of All_Registrants is thousands of
 // rows that nobody scrolls through and every render rewrites.
 //
 // THE CHEAP HALF OF THE PROBLEM — that it is in the way — is solved here, by
@@ -436,8 +436,8 @@ function reportArchivableMonths() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cutoff = getVisibleMonthCutoffKey();
   const tabs = [
-    { name: SHEET_NAMES.REGISTRANT_DASH, headers: HEADERS.Registrant_Dash, marker: 'Event_ID' },
-    { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.Master_Program_Dashboard, marker: 'Event_ID' },
+    { name: SHEET_NAMES.REGISTRANT_DASH, headers: HEADERS.All_Registrants, marker: 'Event_ID' },
+    { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.All_Program_Sessions, marker: 'Event_ID' },
     { name: SHEET_NAMES.TRIAGE, headers: HEADERS.Deleted_Event_Triage, marker: 'Event_ID' },
     { name: SHEET_NAMES.LUNCH_SCHEDULE, headers: HEADERS.Lunch_Schedule, marker: 'Event_Date' }
   ];
@@ -608,7 +608,7 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
 /**
  * Fully rebuilds a "flat" (single logical table) sheet into Upcoming/Past
  * sub-tables, driven entirely by each row's Event_Date. Used for
- * Registrant_Dash, Deleted_Event_Triage, and Lunch_Schedule.
+ * All_Registrants, Deleted_Event_Triage, and Lunch_Schedule.
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};

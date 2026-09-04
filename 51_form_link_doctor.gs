@@ -58,7 +58,7 @@ function gatherFormLinkFacts(registrySheet, options) {
   const { stats } = planDashboardLinkRepair(registrySheet);
   facts.linkStats = stats;
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
@@ -325,7 +325,7 @@ function runOneDoctorFix(registrySheet, code) {
   }
 
   if (code === DOCTOR_FIXES.RESTORE || code === DOCTOR_FIXES.REFILE || code === DOCTOR_FIXES.REBUILD) {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     const refs = collectFormsWorkbookDependsOn(
       getSectionedRows(registrySheet, headers, 'Event_ID'), map,

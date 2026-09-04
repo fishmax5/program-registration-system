@@ -732,7 +732,7 @@ function isExplicitlyNotServing(date, locationName) {
  * spreadsheet read and is safe to call from an onEdit (see onEdit()).
  */
 function findRegistrantsExpectingLunch(dateKey, location, registrantRows) {
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
 
   let rows = registrantRows;

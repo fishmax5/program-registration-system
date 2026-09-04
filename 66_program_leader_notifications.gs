@@ -208,7 +208,7 @@ function buildLeaderAlertRosters(sessionRows, registrantRows, programKeys) {
   Object.keys(wanted).forEach(key => { rosters[key] = {}; });
   if (Object.keys(wanted).length === 0) return rosters;
 
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const window = leaderAlertWindow();
 
   // Event_ID -> the program it belongs to, and the date it is on. By ID rather
@@ -227,7 +227,7 @@ function buildLeaderAlertRosters(sessionRows, registrantRows, programKeys) {
     sessionByEventId[eventId] = { programKey, dateKey };
   });
 
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   (registrantRows || []).forEach(row => {
     const session = sessionByEventId[String(row[map['Event_ID']] || '').trim()];
     if (!session) return;
@@ -760,7 +760,7 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
         (p.timing.mode === 'days_before' || p.timing.mode === 'weekday')) }))
     .filter(leader => leader.programs.length > 0);
 
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const todayKey = formatDateKey(new Date());
 
   // Live dates for EVERY session, not just the ones somebody is watching —
@@ -819,7 +819,7 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
   Object.keys(sessionsByProgram).forEach(key =>
     sessionsByProgram[key].forEach(s => { wantedEventIds[s.eventId] = true; }));
 
-  const regMap = getIndexMap(HEADERS.Registrant_Dash);
+  const regMap = getIndexMap(HEADERS.All_Registrants);
   const rosterByEvent = {};
   (registrantRows || []).forEach(row => {
     const eventId = String(row[regMap['Event_ID']] || '').trim();
@@ -942,9 +942,9 @@ function sendProgramLeaderRosterAlertsNow() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
   const registrantRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
 
   let sent = 0;
   try {
@@ -970,9 +970,9 @@ function sendProgramLeaderRosterAlertsNow() {
 function sendProgramLeaderDayDigestsNow() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
   const registrantRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
 
   let sent = 0;
   try {

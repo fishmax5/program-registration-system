@@ -32,7 +32,7 @@
  * the capacity hints this still exists to write — is fresh.
  */
 function refreshFormShapeForAllForms(registrySheet) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return;
   const map = getIndexMap(headers);
@@ -68,7 +68,7 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
   return refreshFormShapeForAllForms(registrySheet);
 }
 
-/** { Form_ID: [session rows] } from a batch of Program_Sessions rows. Rows with no form are skipped. */
+/** { Form_ID: [session rows] } from a batch of All_Program_Sessions rows. Rows with no form are skipped. */
 function groupRegistryRowsByForm(rows, map) {
   const byForm = {};
   rows.forEach(row => {
@@ -146,7 +146,7 @@ function isFormOnCurrentTemplate(form) {
  * cost is that responses already collected against the OLD questions lose
  * their per-question answers when those questions are deleted — which is why
  * this runs from syncRegistrations() only AFTER that run has imported
- * everything new. Rows already on Registrant_Dash are the record
+ * everything new. Rows already on All_Registrants are the record
  * of those registrations and are untouched.
  */
 function rebuildFormFromCurrentTemplate(form, context) {
@@ -277,7 +277,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
   const limit = options.limit || MAX_FORM_REBUILDS_PER_RUN;
   const deadline = options.deadline || 0;
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
   const map = getIndexMap(headers);
@@ -356,7 +356,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
 }
 
 /**
- * Re-points Program_Sessions's "View Live Form" links at freshly
+ * Re-points All_Program_Sessions's "View Live Form" links at freshly
  * generated URLs, for the forms in urlByFormId. Needed after a rebuild: the
  * link we hand out is a PREFILLED url (buildRegistrationUrl()) whose
  * entry.N parameters name the form's item IDs, and a rebuilt form has new

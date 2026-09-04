@@ -97,8 +97,8 @@ check('Notify_Timing is a Program_Leaders column',
 check('...and the refresh never overwrites it',
   sandbox.PROGRAM_LEADERS_STAFF_COLUMNS.indexOf('Notify_Timing') !== -1, true);
 check('and the notes column on a registrant row is now the leader\'s',
-  [sandbox.HEADERS.Registrant_Dash.indexOf('Instructor_Notes') === -1,
-    sandbox.HEADERS.Registrant_Dash.indexOf('Leader_Notes') !== -1],
+  [sandbox.HEADERS.All_Registrants.indexOf('Instructor_Notes') === -1,
+    sandbox.HEADERS.All_Registrants.indexOf('Leader_Notes') !== -1],
   [true, true]);
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ sandbox.invalidateProgramLeaderIndex();
 
 // ---------------------------------------------------------------------------
 // attachProgramLeaderRow() — the ONE write this tab takes from somewhere else
-// (Program_Month's Leader dropdown, via 18_edit_handlers.gs).
+// (Master_Program_Dashboard's Leader dropdown, via 18_edit_handlers.gs).
 //
 // The rule it exists to keep: that dropdown must not become a second place
 // who-leads-what is stored. So it writes a real row HERE, and everything below
@@ -433,7 +433,7 @@ sandbox.invalidateProgramLeaderIndex();
   // email a roster to the wrong person.
   check('...and the notification tick CLEAR',
     sheet.state.wrote[leaderMap['Notify_Roster_Changes']], false);
-  check('...and it is not a title match, so Program_Month reads it as typed',
+  check('...and it is not a title match, so Master_Program_Dashboard reads it as typed',
     sandbox.isTitleMatchedLeaderRow(sheet.state.wrote[leaderMap['Staff_Notes']]), false);
 
   // Idempotent: the same attachment twice is one row. An hourly render plus a

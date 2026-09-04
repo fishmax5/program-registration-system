@@ -104,7 +104,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const sessions = sessionRows || (registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : []);
@@ -133,7 +133,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   });
   if (Object.keys(sessionByEventId).length === 0) return result;
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const rows = registrantRows ||
@@ -315,7 +315,7 @@ function showCalendarInviteDialog() {
  */
 function listInvitableSessions() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return [];
@@ -342,7 +342,7 @@ function listInvitableSessions() {
   });
   if (Object.keys(sessions).length === 0) return [];
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const rows = registrantsSheet ? getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : [];

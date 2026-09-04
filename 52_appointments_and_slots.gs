@@ -10,7 +10,7 @@
 //                              see ASSISTANCE_TAG for what the tag changes.
 //   Program_Questions          extra questions a single program needs asked,
 //                              added to its form without the parser, the
-//                              template migration, or Registrant_Dash's shape
+//                              template migration, or All_Registrants's shape
 //                              having to change — see HEADERS.Program_Questions.
 //
 // THE RULE BOTH OBEY: nothing here may make an EXISTING answer mean something
@@ -180,7 +180,7 @@ function appointmentStartLabelOf(eventTime) {
  * can have that time.
  */
 function readBookedAppointmentTimes(registrantRows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const booked = {};
   (registrantRows || []).forEach(row => {
     const status = String(row[map['Program_Status']] || '').trim();

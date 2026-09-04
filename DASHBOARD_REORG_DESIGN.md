@@ -2,13 +2,13 @@
 
 **Status: phases 1, 2 and 3 are shipped** — `78_program_month_dashboard.gs` (the
 design doc says 77; see the numbering note in `DASHBOARD_REORG_PHASES.md`), the
-`Program_Month` tab, the metrics block moved up onto it, the leader-coverage
+`Master_Program_Dashboard` tab, the metrics block moved up onto it, the leader-coverage
 line, lunch collapsed, the `Sessions` drill-through, and §5's `Title_Match`
 column and matcher (option **B**). Phases 4 and 5 are still proposals.
 
 Two questions prompted this, and they turn out to be the same question:
 
-1. `Master_Program_Dashboard` is long and repetitive. A weekly class shows up
+1. `Master_Program_Dashboard` (as the session ledger was then called) is long and repetitive. A weekly class shows up
    four or five times a month as near-identical rows — same form, same leader,
    same roster file, same capacity — differing only in a date.
 2. `Program_Leaders` is good at catching a new program as it comes in, but only
@@ -40,7 +40,7 @@ downstream is actually organized around:
 | A `Program_Leaders` row | same: `title \| location` |
 | A `Program_Options` row | same: `Event × Location` |
 | A leader notification | one per leader per sync, across their programs |
-| **`Master_Program_Dashboard`** | **one row per session** |
+| **the session ledger** | **one row per session** |
 
 Every row of a four-session group carries the *same* `Form_ID`,
 `Form_Response_Link`, `Edit_Form_Link`, `Leader_Sheet_Link`, `Max_Capacity`,
@@ -71,8 +71,8 @@ staff can see what is on. That is a real need, but it does not need 42 rows.
 
 | Tab | Grain | Answers |
 |---|---|---|
-| `Program_Month` (new) | program × location × month | What are we running? Who leads it? How full? Where is its form? |
-| `Program_Sessions` (today's `Master_Program_Dashboard`) | one session | What is on Tuesday? Who is coming to *that* one? |
+| `Master_Program_Dashboard` (new — the name the session ledger hands over) | program × location × month | What are we running? Who leads it? How full? Where is its form? |
+| `All_Program_Sessions` (the session ledger, once called `Master_Program_Dashboard`) | one session | What is on Tuesday? Who is coming to *that* one? |
 
 Everything about a session — the checkboxes staff tick, the counts, the
 per-session status, the Quick Mark and door reads, `32_dashboard_link_repair`,
@@ -93,25 +93,27 @@ the formatting and every reference.
 So renaming is a two-line change:
 
 ```js
-PROGRAM_DASHBOARD: 'Program_Sessions',            // was 'Master_Program_Dashboard'
+PROGRAM_DASHBOARD: 'All_Program_Sessions',            // was 'Master_Program_Dashboard'
 // and
 const LEGACY_SHEET_RENAMES = {
-  'Registrant_Dash': 'Lunch_and_Event_Registrants',
-  'Program_Sessions': 'Master_Program_Dashboard'   // new -> old
+  'All_Registrants': 'Lunch_and_Event_Registrants',
+  'All_Program_Sessions': ['Program_Sessions', 'Master_Program_Dashboard']  // new -> older, oldest
 };
 ```
 
 The real cost is documentation: `CLAUDE.md`, `00_overview.gs`, `USER_GUIDE.md`
-and `HEADERS.Master_Program_Dashboard` all say the old name.
-`HEADERS.Master_Program_Dashboard` is the awkward one — the headers key is
-independent of the sheet name and can simply stay as it is, at the price of the
-two never quite agreeing again. **Recommendation: rename the tab, keep the
-`HEADERS` key**, and say why in a comment. A schema key is read by code; a tab
-name is read by people, and the people are the ones being confused.
+and `HEADERS.All_Program_Sessions` all said the old name.
+`HEADERS` is the awkward one. The key is independent of the sheet name and
+would normally simply stay as it is — a schema key is read by code, a tab name
+by people. It could not stay here: `HEADERS` is indexed by SHEET NAME in
+`13_lunch_only_signup_form.gs` and `14_saved_column_widths.gs`, and the month
+tab takes the name the session ledger gives up, so a key left on the old
+spelling hands the month tab the session table's columns. **The `HEADERS` keys
+were renamed with the tabs**, and the comment in `03` says why.
 
 ---
 
-## 3. What a `Program_Month` row looks like
+## 3. What a `Master_Program_Dashboard` row looks like
 
 ```
 Month_Start | Location | Program | Leader | Leader_Source | Type | Flags |
@@ -338,11 +340,11 @@ next in a way that traps a half-finished state.
 
 | Phase | What ships | Notes |
 |---|---|---|
-| **1** | `Program_Month` tab, derived, read-only. New file `77_program_month_dashboard.gs`. | Purely additive. No rename, no schema change to existing tabs, no form change. Delete the tab and nothing else notices. |
+| **1** | `Master_Program_Dashboard` tab, derived, read-only. New file `77_program_month_dashboard.gs`. | Purely additive. No rename, no schema change to existing tabs, no form change. Delete the tab and nothing else notices. |
 | **2** | Metrics block moves up to the month tab; lunch rows collapse to one row per location per month; `Sessions` drill-through links. | The session tab gets shorter and plainer. |
 | **3** ✅ shipped | `Title_Match` on `Program_Leaders` + the matcher, option **B**. | Adds one column to `HEADERS.Program_Leaders`. `writeMemoryTab` handles a widened schema, but check the spare-validation band. |
 | **4** | `Leader` + `Leader_Source` on the month tab, dropdown, write-back through `18_edit_handlers.gs`. | The only phase that writes. Needs a confirmation prompt on the edit, like the program-flag edits have. |
-| **5** | The rename: `Master_Program_Dashboard` → `Program_Sessions`, via `LEGACY_SHEET_RENAMES`. | Last, deliberately — it is the change with the widest documentation blast radius and the least behavior in it. |
+| **5** | The rename: `Master_Program_Dashboard` → `All_Program_Sessions`, via `LEGACY_SHEET_RENAMES`, freeing the old name for the month tab. | Last, deliberately — it is the change with the widest documentation blast radius and the least behavior in it. |
 
 ### What this does *not* need
 
@@ -385,9 +387,9 @@ That third one is the test that holds §5's line. It should be written first.
    early. The `Schedule` cell states the real span and its note names every
    session, so nothing about the run is hidden by where the row sits. See the
    banner of `78_program_month_dashboard.gs`.
-3. **Should `Program_Options` and `Program_Month` merge?** Both are program ×
+3. **Should `Program_Options` and `Master_Program_Dashboard` merge?** Both are program ×
    location. `Program_Options` is staff-typed memory (`Typical_Attendance`,
-   `Room_Or_Setup`, `Notify_Mode`); `Program_Month` is derived and monthly.
+   `Room_Or_Setup`, `Notify_Mode`); `Master_Program_Dashboard` is derived and monthly.
    They are close enough to be confusing and different enough that merging
    them would put a typed cell and a derived cell in the same row — which is
    exactly the mixture `Program_Leaders` keeps carefully separated with its

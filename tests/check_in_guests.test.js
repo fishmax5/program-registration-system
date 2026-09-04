@@ -63,7 +63,7 @@ function ok(name, cond) {
 function sheetFrom(rows) {
   const values = [HEADER_ROW].concat(rows);
   return {
-    getName: () => 'Registrant_Dash',
+    getName: () => 'All_Registrants',
     getLastRow: () => values.length,
     getLastColumn: () => HEADER_ROW.length,
     getMaxRows: () => values.length,
@@ -77,9 +77,9 @@ function sheetFrom(rows) {
   };
 }
 
-const realHeaders = sandbox.HEADERS.Registrant_Dash;
+const realHeaders = sandbox.HEADERS.All_Registrants;
 function withStubSheet(rows, fn) {
-  sandbox.HEADERS.Registrant_Dash = HEADER_ROW;
+  sandbox.HEADERS.All_Registrants = HEADER_ROW;
   const sheet = sheetFrom(rows);
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({ getSheetByName: () => sheet });
   // Each call stands in for a fresh execution against a fresh sheet — the
@@ -87,7 +87,7 @@ function withStubSheet(rows, fn) {
   // empty too, or the next scenario's read comes back as this one's rows.
   sandbox.invalidateSectionedRowsCache();
   try { return fn(); } finally {
-    sandbox.HEADERS.Registrant_Dash = realHeaders;
+    sandbox.HEADERS.All_Registrants = realHeaders;
     sandbox.SpreadsheetApp.getActiveSpreadsheet = () => null;
   }
 }

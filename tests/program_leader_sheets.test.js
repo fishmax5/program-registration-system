@@ -109,10 +109,10 @@ check('a session with no readable date still gets a band rather than throwing',
 // THE ONE THAT MATTERS: a banded sheet pulls back only the leader's edits.
 // ---------------------------------------------------------------------------
 
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 
 function registrantRow(values) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   Object.keys(values).forEach(k => { row[regMap[k]] = values[k]; });
   return row;
 }
@@ -198,7 +198,7 @@ check("Ann's untouched cells left the workbook's own note alone",
 // cap must build the SOONEST sessions' sheets, not whatever sorted first.
 // ---------------------------------------------------------------------------
 
-const pdHeaders = sandbox.HEADERS.Master_Program_Dashboard;
+const pdHeaders = sandbox.HEADERS.All_Program_Sessions;
 const pdMap = sandbox.getIndexMap(pdHeaders);
 
 function dashRow(title, location, daysOut) {

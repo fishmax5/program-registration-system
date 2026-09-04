@@ -364,7 +364,7 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
   // executions (repairFormRoutingNow()) takes the rest of its list from it, so
   // a form counted in `deferred` is the only kind that comes back next time.
   const result = { opened: 0, repaired: 0, skipped: 0, unrecognized: 0, deferred: 0, visited: [] };
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return result;
   const map = getIndexMap(headers);
@@ -587,7 +587,7 @@ function repairFormRoutingNow() {
     return;
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const formIds = Object.keys(groupRegistryRowsByForm(getSectionedRows(registrySheet, headers, 'Event_ID'), map));
   if (formIds.length === 0) {

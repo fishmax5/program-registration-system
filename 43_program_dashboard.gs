@@ -11,7 +11,7 @@
 // ============================================================================
 
 /**
- * options.registrantRows — already-in-memory Registrant_Dash
+ * options.registrantRows — already-in-memory All_Registrants
  * rows, to skip re-reading that tab. Honored only when this render's own
  * triage pass didn't rewrite the tab underneath them (see registrantsMoved).
  * Returns { registrantsMoved } so a caller holding those rows knows whether
@@ -31,7 +31,7 @@ function renderProgramDashboard(force, options) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
 
   let sessionRows = options.sessionRows || getSectionedRows(sheet, headers, 'Event_ID');
@@ -85,7 +85,7 @@ function renderProgramDashboard(force, options) {
     // to the right.
     renderProgramMonthDashboard(force, { sessionRows, metrics });
   } catch (err) {
-    log(`\u26a0\ufe0f Program_Month could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
+    log(`\u26a0\ufe0f Master_Program_Dashboard could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
   }
 
   return { registrantsMoved: triageResult.registrantsMoved };
@@ -105,7 +105,7 @@ const TRIAGE_OVERRIDE_PROP_KEY = 'TRIAGE_OVERRIDE_ONCE';
 /**
  * Cross-checks in-memory session rows against what's genuinely still on the
  * calendars right now and drops any that are gone. Dropped sessions'
- * registrants are moved to Deleted_Event_Triage. Program_Sessions no
+ * registrants are moved to Deleted_Event_Triage. All_Program_Sessions no
  * longer has a Manual_Override column, so nothing can be protected from
  * this anymore — every session's presence is strictly calendar-derived.
  *
@@ -268,7 +268,7 @@ function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
 }
 
 /**
- * One pass over Registrant_Dash powering BOTH the Today block and the
+ * One pass over All_Registrants powering BOTH the Today block and the
  * participation metrics. Four structures come out of it:
  *
  *   countsByEventId       { eventId: { active, waitlist, attended } }
@@ -308,7 +308,7 @@ function scanRegistrants(registrantsSheet, registrantRows) {
     monthsByPerson: {},
     earliestMonthByPerson: {}
   };
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const rows = registrantRows || getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
@@ -594,7 +594,7 @@ function computeProgramMetrics(sessionRows, map, registrantScan, now) {
  * three weeks of every September, for no reason except the date.
  *
  * THE LIMIT WORTH KNOWING: "never seen before" means "has no earlier row on
- * Registrant_Dash". Someone whose earlier registrations were deleted — a
+ * All_Registrants". Someone whose earlier registrations were deleted — a
  * cleared test run, a purge — reads as new again. Old rows are hidden rather
  * than removed (see collapseOldPastMonths), so ordinary aging does not do
  * this; deletion does, and deletion is a deliberate act.
@@ -925,7 +925,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // --- Section B: All Program Sessions, split into Upcoming / Past ---
   //
   // THE METRICS BLOCK USED TO SIT HERE, between the Today block and the
-  // sessions, and now sits on Program_Month (78_program_month_dashboard.gs).
+  // sessions, and now sits on Master_Program_Dashboard (78_program_month_dashboard.gs).
   // Every number in it is monthly reasoning — the next 7 and 30 days, this
   // month against the same span of last — sitting on top of a table that is
   // one row per DAY, and everything above the session table travels in the

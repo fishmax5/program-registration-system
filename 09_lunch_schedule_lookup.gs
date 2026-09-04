@@ -365,7 +365,7 @@ function dedupePreservingOrder(values) {
 
 /**
  * Builds { 'yyyy-MM-dd': CAPACITY_HINT_SUFFIX } from a batch of
- * Program_Sessions rows (any set sharing the same header layout —
+ * All_Program_Sessions rows (any set sharing the same header layout —
  * typically one form's sessions), using each row's own Max_Capacity /
  * Remaining_Seats. Uncapped sessions (no Max_Capacity) never get a hint.
  */

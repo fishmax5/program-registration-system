@@ -164,7 +164,7 @@ function tombstoneDateKey(entry) {
 
 /** Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited OR Manually Added. */
 function getProtectedRegistrantKeys(rows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const set = new Set();
   rows.forEach(row => {
     const override = String(row[map['Manual_Override']]).trim();
@@ -207,7 +207,7 @@ function sessionOccupancy(registryEntry) {
  * one hour: a program capped at twelve took twelve MORE people every run, and
  * "#13 is waitlisted automatically" was true only of a thirteenth who
  * submitted inside the same sixty minutes as the other twelve. The
- * Program_Sessions's own Status went red on schedule, which is why
+ * All_Program_Sessions's own Status went red on schedule, which is why
  * this was invisible — the sheet said Waitlist Only while the rows underneath
  * it all said Active.
  *
@@ -223,7 +223,7 @@ function sessionOccupancy(registryEntry) {
  * separately.
  */
 function seedRegistryOccupancy(registryIndex, existingRows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const byEventId = {};
   (existingRows || []).forEach(row => {
     if (String(row[map['Program_Status']] || '').trim() !== 'Active') return;
@@ -248,7 +248,7 @@ function seedRegistryOccupancy(registryIndex, existingRows) {
 }
 
 function getExistingRegistrantIndex(rows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const index = new Map();
   rows.forEach(row => index.set(`${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`, row));
   return index;
@@ -365,7 +365,7 @@ function getAdminNotesResponse(formIndex, response) {
  * string — the whole of what an added question contributes to a row.
  *
  * ONE COLUMN, NOT ONE PER QUESTION. A column per question would mean
- * Registrant_Dash's shape changing every time somebody adds a question to any
+ * All_Registrants's shape changing every time somebody adds a question to any
  * program, which is precisely the "adding a question breaks things" this
  * feature exists to avoid: every render, every projection, every downstream
  * consumer would have to cope with a table whose columns depend on a different

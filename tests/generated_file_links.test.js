@@ -64,9 +64,9 @@ sandbox.__setLeaderRegistry({
 // ---------------------------------------------------------------------------
 // The session table: both links, keyed off the row's own program and day.
 // ---------------------------------------------------------------------------
-const pdMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
+const pdMap = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
 function sessionRow(values) {
-  const row = new Array(sandbox.HEADERS.Master_Program_Dashboard.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Program_Sessions.length).fill('');
   Object.keys(values).forEach(k => { row[pdMap[k]] = values[k]; });
   return row;
 }
@@ -114,8 +114,8 @@ check('and carries no leader sheet column at all',
 // ---------------------------------------------------------------------------
 // Registrants: one row per person, each pointing at their own session's files.
 // ---------------------------------------------------------------------------
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
-const regRow = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
+const regRow = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
 regRow[regMap['Event_Date']] = DAY;
 regRow[regMap['Location']] = 'Narberth';
 regRow[regMap['Event']] = 'Chair Yoga';

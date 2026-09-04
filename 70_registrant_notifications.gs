@@ -281,7 +281,7 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
   const result = { sent: 0, held: 0, eventsTouched: 0 };
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const sessions = sessionRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
@@ -331,7 +331,7 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
     return result;
   }
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
@@ -504,9 +504,9 @@ function sendRegistrantRemindersNow() {
   invalidateNotificationPolicyCache();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
   const registrantRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
 
   let result;
   try {

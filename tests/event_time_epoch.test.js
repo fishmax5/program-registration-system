@@ -110,9 +110,9 @@ check('the slot match reads a coerced cell as its own start time',
 
 // A booked chair whose cell has been coerced must still read as BOOKED — the
 // failure this pins is two people in one chair, not a cosmetic one.
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 function reg(name, time) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   row[regMap['Name']] = name;
   row[regMap['Event_ID']] = 'EV-WILLS-1013';
   row[regMap['Event_Date']] = START;
@@ -134,7 +134,7 @@ check('an afternoon whose end is a clock time is still cut into its chairs',
 // --- the render heals what is already on the tab ------------------------------
 
 const rows = [reg('Ruth Kaplan', epochTime(10, 0)), reg('Sam Weber', '10:00 AM – 11:30 AM')];
-sandbox.backfillRegistrantEventTimes(null, sandbox.HEADERS.Registrant_Dash, rows);
+sandbox.backfillRegistrantEventTimes(null, sandbox.HEADERS.All_Registrants, rows);
 check('the next render writes the words back, and leaves good rows alone',
   rows.map(r => r[regMap['Event_Time']]), ['10:00 AM', '10:00 AM – 11:30 AM']);
 
@@ -142,7 +142,7 @@ check('the next render writes the words back, and leaves good rows alone',
 
 const calls = [];
 const fakeSheet = {
-  getName: () => 'Registrant_Dash',
+  getName: () => 'All_Registrants',
   getRange: (row, col, numRows) => ({
     setNumberFormat: fmt => { calls.push({ row, col, numRows, fmt }); }
   })
@@ -153,7 +153,7 @@ check('the time column is stamped plain text over its own rows',
 
 const emptyCalls = [];
 const emptySheet = {
-  getName: () => 'Registrant_Dash',
+  getName: () => 'All_Registrants',
   getRange: (row, col, numRows) => ({ setNumberFormat: fmt => { emptyCalls.push({ row, col, numRows, fmt }); } })
 };
 sandbox.stampTextColumns(emptySheet, [4], 3, 0);

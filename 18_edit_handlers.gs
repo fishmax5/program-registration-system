@@ -1,8 +1,8 @@
 /**
  * Dispatches to a per-sheet handler for tabs that carry a Manual_Override
  * column (Registrants, Lunch Dashboard) plus the Lunch_Schedule edit hook.
- * Program_Sessions's session table no longer has a Manual_Override
- * column at all (see HEADERS.Master_Program_Dashboard), so there's nothing
+ * All_Program_Sessions's session table no longer has a Manual_Override
+ * column at all (see HEADERS.All_Program_Sessions), so there's nothing
  * to auto-flip there anymore.
  */
 /**
@@ -58,7 +58,7 @@ function onEdit(e) {
 }
 
 /**
- * Program_Sessions: the session table is rebuilt from the calendar on
+ * All_Program_Sessions: the session table is rebuilt from the calendar on
  * every render, so almost nothing typed here survives — EXCEPT the three
  * columns that describe how a program's registration works: Type_Tag, and the
  * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,
@@ -81,7 +81,7 @@ function handleProgramDashboardEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
 
   // A LUNCH-ONLY ROW HAS NO CALENDAR EVENT BEHIND IT, and everything below
   // this line works by writing a tag into an event description. Type_Tag,
@@ -300,7 +300,7 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
  * in-memory variable, which is why it is reachable from here at all.
  */
 function handleProgramMonthEdit(e, sheet) {
-  const headers = HEADERS.Program_Month;
+  const headers = HEADERS.Master_Program_Dashboard;
   const headerRows = findAllHeaderRows(sheet, 'Group_Key');
   if (headerRows.length === 0) return;
   const editedRow = e.range.getRow();
@@ -397,7 +397,7 @@ function handleProgramMonthEdit(e, sheet) {
     '. Emails are off until you tick them there.');
 }
 
-/** Puts a Program_Month cell back to what it held. The tab is derived; the cell was never the record. */
+/** Puts a Master_Program_Dashboard cell back to what it held. The tab is derived; the cell was never the record. */
 function revertProgramMonthCell(e, sheet) {
   if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
   e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
@@ -614,7 +614,7 @@ function onProgramFlagEditInstallable(e) {
 function editTouchesProgramFlagColumn(e, sheet) {
   const zone = findZoneForRow(getSectionZones(sheet, 'Event_ID'), e.range.getRow());
   if (!zone) return false;
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
   const firstCol = e.range.getColumn();
   const lastCol = firstCol + e.range.getNumColumns() - 1;
   return PROGRAM_FLAG_COLUMNS.concat(SESSION_FLAG_COLUMNS).some(flag => {
@@ -886,7 +886,7 @@ function applyProgramTagChangesToCalendar() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const byProgram = {};
   getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
@@ -1668,7 +1668,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
   // These forms now span locations. Record that where the next sync looks for
   // them, then relabel each one (buildFormSessionContext() sees the
   // multi-location rows and adds the location to every date label).
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const derived = { eventIds: new Set(), groupFormMap: {} };
@@ -1837,7 +1837,7 @@ function autoFlipManualOverride(sheet, headerMap0Based, editedRow, editedCol1Bas
   }
 }
 
-/** Registrant_Dash: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
+/** All_Registrants: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
 function handleRegistrantsEdit(e, sheet) {
   const editedRow = e.range.getRow();
   const editedCol = e.range.getColumn();
@@ -1846,7 +1846,7 @@ function handleRegistrantsEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Registrant_Dash);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Registrants);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
   // Computed from the RANGE, not just its top-left cell, so a fill-down or a
@@ -1927,7 +1927,7 @@ function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrantRows = getSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
+    const registrantRows = getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID');
 
     const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (registrySheet) {

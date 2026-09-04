@@ -152,7 +152,7 @@ function readWalkInDay(location, dateKeyOverride) {
 
   const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   if (dash) {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
@@ -182,7 +182,7 @@ function readWalkInDay(location, dateKeyOverride) {
   const peopleByKey = {};
   const reg = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
   if (reg) {
-    const headers = HEADERS.Registrant_Dash;
+    const headers = HEADERS.All_Registrants;
     const map = getIndexMap(headers);
     getSectionedRowValues(reg, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;

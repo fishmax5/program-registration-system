@@ -371,9 +371,9 @@ function invalidateCalendarEventsCache() {
 // round trips on the two-zone shape every tab has.
 //
 // WHAT THIS REPLACES. A single syncRegistrations() run re-read the same two
-// tabs over and over: Program_Sessions at 27_registration_import.gs:81,
+// tabs over and over: All_Program_Sessions at 27_registration_import.gs:81,
 // 33_calendar_invitations.gs:110 and :319, 66_program_leader_notifications.gs
-// and 70_registrant_notifications.gs; Registrant_Dash at
+// and 70_registrant_notifications.gs; All_Registrants at
 // 27_registration_import.gs:83 and :281, 30_registry_counts.gs:20,
 // 33_calendar_invitations.gs:342 and 70_registrant_notifications.gs:497 —
 // eight-plus full-grid reads of two tabs that changed at most once in
@@ -449,7 +449,7 @@ function getSectionedRows(sheet, headers, markerHeaderName, endRow) {
 /**
  * readAllSectionedRowValues(), memoized for the rest of this execution. The
  * one-round-trip values read — use it when nothing is going back onto a
- * sheet, and when a formula cell (Registrant_Dash's Event_Time) has to come
+ * sheet, and when a formula cell (All_Registrants's Event_Time) has to come
  * back as the time it displays rather than as its formula.
  */
 function getSectionedRowValues(sheet, headers, markerHeaderName) {

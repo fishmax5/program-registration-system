@@ -5,7 +5,7 @@
 // Two problems the desk has always solved in its head, written down here.
 //
 // THE HOUSEHOLD. A married couple arrive together, sit together, eat
-// together, and are two rows on Registrant_Dash that know nothing about each
+// together, and are two rows on All_Registrants that know nothing about each
 // other. The volunteer at the door finds him, signs him in, scrolls back up
 // the alphabet and finds her. A daughter who books for both her parents is the
 // same shape again. Nothing in this workbook has ever said "these people come
@@ -28,7 +28,7 @@
 //
 // WHY A CORRECTION IS NOT JUST RETYPING THE CELL. Name is the key: it is what
 // normalizeNameKey() is taken of, what a form response arrives under, and what
-// Registrant_Dash, Club_Members and Regular_Needs all match on. Retyping it in
+// All_Registrants, Club_Members and Regular_Needs all match on. Retyping it in
 // place would orphan every one of those rows and the next sync would rebuild
 // the OLD row beside the new one. So staff write the right spelling in
 // Display_Name, and applyMemberNameCorrection() does the whole job: rewrites
@@ -201,7 +201,7 @@ function canonicalMemberName(name, corrections) {
  * many cells changed.
  *
  * The tabs are listed rather than discovered because the column that holds a
- * person's name is not the same one on each: Registrant_Dash also carries a
+ * person's name is not the same one on each: All_Registrants also carries a
  * host's name in Primary_Registrant, and a correction that fixed the guest and
  * not the host would break the guest-folding that reads them against each
  * other (see readWalkInDay()).

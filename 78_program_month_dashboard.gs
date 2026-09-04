@@ -199,7 +199,7 @@ function programMonthNumber(value) {
 }
 
 /**
- * Session rows in, Program_Month rows out. Pure — no sheet, no cache, no
+ * Session rows in, Master_Program_Dashboard rows out. Pure — no sheet, no cache, no
  * clock beyond the dates on the rows themselves — which is what lets the tests
  * pin the collapsing rules without a spreadsheet.
  *
@@ -218,7 +218,7 @@ function programMonthNumber(value) {
  * that no longer exists by the time the notes are written.
  */
 function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex) {
-  const headers = HEADERS.Program_Month;
+  const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const groups = {};
   const order = [];
@@ -360,7 +360,7 @@ function renderProgramMonthDashboard(force, options) {
   options = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_MONTH);
-  const sessionHeaders = HEADERS.Master_Program_Dashboard;
+  const sessionHeaders = HEADERS.All_Program_Sessions;
   const sessionMap = getIndexMap(sessionHeaders);
 
   const sessionSheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -380,7 +380,7 @@ function renderProgramMonthDashboard(force, options) {
       const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
       metrics = computeProgramMetrics(programRows, sessionMap, scanRegistrants(registrantsSheet));
     } catch (err) {
-      log(`\u2139\ufe0f Program_Month: could not compute the metrics block (${err}) — the month table is drawn without it.`);
+      log(`\u2139\ufe0f Master_Program_Dashboard: could not compute the metrics block (${err}) — the month table is drawn without it.`);
       metrics = null;
     }
   }
@@ -400,12 +400,12 @@ function renderProgramMonthDashboard(force, options) {
     rowNumbersByEventId: programMonthSessionRowNumbers(sessionSheet, sessionMap)
   }, leaderIndex);
   writeProgramMonthSheet(sheet, built, force, metrics);
-  log(`Program_Month: ${built.rows.length} program-month row(s) from ${sessionRows.length} session row(s).`);
+  log(`Master_Program_Dashboard: ${built.rows.length} program-month row(s) from ${sessionRows.length} session row(s).`);
   return built;
 }
 
 function writeProgramMonthSheet(sheet, built, force, metrics) {
-  const headers = HEADERS.Program_Month;
+  const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const numCols = headers.length;
 
@@ -557,7 +557,7 @@ function programMonthSessionRowNumbers(sessionSheet, sessionMap) {
       if (eventId && out[eventId] === undefined) out[eventId] = i + 1;
     });
   } catch (err) {
-    log(`\u2139\ufe0f Could not read the session tab's row numbers (${err}) — Program_Month's Sessions cells stay plain text.`);
+    log(`\u2139\ufe0f Could not read the session tab's row numbers (${err}) — Master_Program_Dashboard's Sessions cells stay plain text.`);
   }
   return out;
 }
@@ -588,7 +588,7 @@ function programMonthSessionsCell(label, firstEventId, target) {
  * anything — see the NO WILDCARDS paragraph at the top of 65_program_leaders.gs.
  */
 function programMonthLeaderCoverage(rows, monthKey) {
-  const map = getIndexMap(HEADERS.Program_Month);
+  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
   const missing = [];
   let considered = 0;
 
@@ -596,7 +596,7 @@ function programMonthLeaderCoverage(rows, monthKey) {
   try {
     index = buildProgramLeaderIndex();
   } catch (err) {
-    log(`\u2139\ufe0f Could not read the leader index for Program_Month's coverage line (${err}).`);
+    log(`\u2139\ufe0f Could not read the leader index for Master_Program_Dashboard's coverage line (${err}).`);
     return null;
   }
 
@@ -654,7 +654,7 @@ function writeProgramMonthCoverageLine(sheet, row, numCols, coverage) {
 /** Menu: rebuild the month view on its own, from whatever the session tab currently says. */
 function renderProgramMonthSheetNow() {
   renderProgramMonthDashboard(true);
-  SpreadsheetApp.getActive().toast('Program_Month rebuilt from the session table.');
+  SpreadsheetApp.getActive().toast('Master_Program_Dashboard rebuilt from the session table.');
 }
 
 // ============================================================================

@@ -290,7 +290,7 @@ const MEAL_SOURCE_LOOKAHEAD_DAYS = 7;
 const MEAL_SOURCE_MAX_OPTIONS = 40;
 /** Full set of Type choices offered on Lunch_Schedule / Master_Lunch_Dashboard. */
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
-/** Registrant_Dash' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
+/** All_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
 
 /**

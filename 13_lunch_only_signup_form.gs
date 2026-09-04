@@ -155,7 +155,7 @@ function syncLunchOnlySessions(registrySheet) {
   const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   if (!menuSheet) return {};
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
   // NOT the calendar's 60-day window — see LUNCH_SIGNUP_LOOKAHEAD_MONTHS.
@@ -849,7 +849,7 @@ function writeSectionBanner(sheet, row, numCols, text, options) {
  * column names stay on screen however far down somebody scrolls.
  *
  * "The table that is the tab" is the rule, and it is not always the topmost
- * table: Program_Sessions opens with a Today block and a metrics
+ * table: All_Program_Sessions opens with a Today block and a metrics
  * block, and freezing at those left the session table's headers — the thing
  * five hundred rows are read against — scrolling away with everything else.
  * Whatever a tab puts above its main table comes along in the frozen band.

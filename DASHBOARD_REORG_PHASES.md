@@ -44,10 +44,10 @@ adding any new file.
 
 ---
 
-## Phase 1 — the `Program_Month` tab ✅ done (`4bd285b`)
+## Phase 1 — the `Master_Program_Dashboard` tab ✅ done (`4bd285b`)
 
 New `78_program_month_dashboard.gs`; `SHEET_NAMES.PROGRAM_MONTH` and
-`HEADERS.Program_Month` in `03`; rendered from the session rows
+`HEADERS.Master_Program_Dashboard` in `03`; rendered from the session rows
 `renderProgramDashboard()` already holds (inside a try/catch — a broken derived
 view is a log line, not a failed sync); menu item in `16`;
 `tests/program_month.test.js`. All test files pass.
@@ -56,7 +56,7 @@ view is a log line, not a failed sync); menu item in `16`;
 
 ## Phase 2 — metrics up, session tab thinner ✅ done
 
-Move the metrics block (`43_program_dashboard.gs:403–823`) onto `Program_Month`.
+Move the metrics block (`43_program_dashboard.gs:403–823`) onto `Master_Program_Dashboard`.
 
 - It still reads SESSION rows, so **the numbers must not move by a digit** —
   assert that before and after. Keep every column note verbatim.
@@ -135,7 +135,7 @@ open a new chat.
 
 ## Phase 4 — the leader dropdown ✅ done
 
-`Leader` and `Leader_Source` on `Program_Month`. The column must not become a
+`Leader` and `Leader_Source` on `Master_Program_Dashboard`. The column must not become a
 second place "who leads what" is stored — `Program_Leaders` is what shares a
 roster and sends mail, and two records disagreeing gets found out the day
 somebody is emailed a class they don't teach. So it reads and writes:
@@ -158,7 +158,7 @@ write:  edit the cell → onEdit writes that row → invalidateProgramLeaderInde
 - Carry-forward needs no code: `leaderProgramKey()` has no month in it. Prove it
   with a test; don't build a mechanism.
 
-Shipped: `Leader` / `Leader_Source` on `HEADERS.Program_Month`, right after
+Shipped: `Leader` / `Leader_Source` on `HEADERS.Master_Program_Dashboard`, right after
 `Program`. The read is `programMonthLeaderCell()` in `78`, off the memoized
 `buildProgramLeaderIndex()` the caller already reads for the coverage line —
 never a second read, so the two can never disagree. It prints BOTH leaders of a
@@ -195,7 +195,7 @@ open a new chat.
 
 ## Phase 5 — the rename ✅ done
 
-`Master_Program_Dashboard` → `Program_Sessions`. Two lines:
+`All_Program_Sessions` → `All_Program_Sessions`. Two lines:
 `SHEET_NAMES.PROGRAM_DASHBOARD`, plus a `LEGACY_SHEET_RENAMES` entry
 (`03_sheets_and_headers.gs:57`) so `getOrCreateSheet()` renames the tab in
 place, keeping rows and formatting. Read that constant's comment — a workbook
@@ -203,20 +203,20 @@ holding BOTH tabs must be left alone, and your change must not break that.
 
 - Grep for the bare string first and stop if you find one — every file should
   reach the tab through the constant.
-- Keep `HEADERS.Master_Program_Dashboard` as it is, with a comment saying why: a
+- Keep `HEADERS.All_Program_Sessions` as it is, with a comment saying why: a
   schema key is read by code, a tab name by people (same reasoning as
   `LEADER_SHEET_REGISTRY_PROP_KEY` still being spelled
   `INSTRUCTOR_SHEET_REGISTRY_V1`).
-- The real work is documentation: account for every `Master_Program_Dashboard`
+- The real work is documentation: account for every `All_Program_Sessions`
   hit across the repo — code, comment, doc, test.
 
-Shipped: `SHEET_NAMES.PROGRAM_DASHBOARD` is `'Program_Sessions'`, with
-`'Program_Sessions': 'Master_Program_Dashboard'` in `LEGACY_SHEET_RENAMES` so
+Shipped: `SHEET_NAMES.PROGRAM_DASHBOARD` is `'All_Program_Sessions'`, with
+`'All_Program_Sessions': 'All_Program_Sessions'` in `LEGACY_SHEET_RENAMES` so
 `getOrCreateSheet()` renames an existing workbook's tab in place — the
 both-tabs-present rule is untouched, and matters more now that the new name is
 one somebody could plausibly have given a tab of their own. No bare string
 existed in any `.gs` outside the constant, so nothing reached the tab except
-through `SHEET_NAMES`. `HEADERS.Master_Program_Dashboard` keeps the old
+through `SHEET_NAMES`. `HEADERS.All_Program_Sessions` keeps the old
 spelling with a comment saying why. Documentation: every prose mention across
 20 `.gs` banners, `USER_GUIDE.md` (plus a rename note in its tab section),
 `SYSTEM_REVIEW.md` and `SIMPLIFICATION_REVIEW.md`; the two user-visible strings

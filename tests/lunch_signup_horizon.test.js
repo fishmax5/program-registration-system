@@ -271,12 +271,12 @@ check('an unchanged form is not rewritten', unchanged.navTargets.length, 0);
 // line — and because hiding is a property of the sheet's ROWS rather than of
 // their contents, a workbook that ever ran the old code has to be told to show
 // them again explicitly, on every render.
-const progMap = vm.runInContext('getIndexMap(HEADERS.Master_Program_Dashboard)', sandbox);
+const progMap = vm.runInContext('getIndexMap(HEADERS.All_Program_Sessions)', sandbox);
 // Dated inside the metrics block's near-term window, since every number it
 // reports is now bounded by a period — an undated row would sit outside all of
 // them and make the check below pass for the wrong reason.
 const sessionRow = (eventId, title, date) => {
-  const row = new Array(vm.runInContext('HEADERS.Master_Program_Dashboard.length', sandbox)).fill('');
+  const row = new Array(vm.runInContext('HEADERS.All_Program_Sessions.length', sandbox)).fill('');
   row[progMap['Event_ID']] = eventId;
   row[progMap['Clean_Title']] = title;
   row[progMap['Location']] = 'Narberth';

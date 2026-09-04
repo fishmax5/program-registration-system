@@ -77,7 +77,7 @@ function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan, endRow) {
   return rows;
 }
 
-/** Locates Program_Sessions's session-table header rows (unique marker: 'Event_ID'). */
+/** Locates All_Program_Sessions's session-table header rows (unique marker: 'Event_ID'). */
 function findProgramSessionHeaderRows(sheet) {
   return findAllHeaderRows(sheet, 'Event_ID', 5000);
 }
@@ -117,9 +117,18 @@ function migrateLegacySheetNames(ss) {
 
 /** The rename half of getOrCreateSheet(), without the "create it if it isn't there" half. */
 function getOrCreateSheetRenameOnly(ss, name) {
-  const formerName = LEGACY_SHEET_RENAMES[name];
-  if (!formerName) return null;
-  const former = ss.getSheetByName(formerName);
+  // A LIST of former names is a tab that has been renamed more than once,
+  // written newest-first: whichever one this workbook stopped at is the one
+  // to bring forward. See LEGACY_SHEET_RENAMES.
+  const entry = LEGACY_SHEET_RENAMES[name];
+  if (!entry) return null;
+  const candidates = Array.isArray(entry) ? entry : [entry];
+  let formerName = null;
+  let former = null;
+  for (let i = 0; i < candidates.length; i++) {
+    former = ss.getSheetByName(candidates[i]);
+    if (former) { formerName = candidates[i]; break; }
+  }
   if (!former) return null;
   try {
     former.setName(name);

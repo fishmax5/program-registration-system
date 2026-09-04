@@ -314,7 +314,7 @@ function unpackCachedText(packed) {
 function buildQuickMarkIndex() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   // The VALUES reader, not the formula-preserving one: nothing here is going
   // back onto a sheet, and one read of the tab instead of three is most of why
@@ -589,7 +589,7 @@ function collectKnownProgramChoices(location, registrantRows) {
   try {
     const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (dash) {
-      const headers = HEADERS.Master_Program_Dashboard;
+      const headers = HEADERS.All_Program_Sessions;
       const map = getIndexMap(headers);
       getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
         const isAssistance = map['Personalized_Assistance'] !== undefined &&
@@ -622,7 +622,7 @@ function collectKnownProgramChoices(location, registrantRows) {
     log(`ℹ️ Quick Mark could not read Program_Options for its program list (${err}).`);
   }
 
-  const lrMap = getIndexMap(HEADERS.Registrant_Dash);
+  const lrMap = getIndexMap(HEADERS.All_Registrants);
   (registrantRows || []).forEach(row => {
     note(row[lrMap['Event']], row[lrMap['Location']], row[lrMap['Event_Date']]);
   });
@@ -985,7 +985,7 @@ function applyQuickMarkLocked(args) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return { ok: false, message: '⚠️ There is no registrants tab yet — run Sync Registrations once.' };
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const numCols = headers.length;
   const zones = getSectionZones(sheet, 'Event_ID');
@@ -1261,7 +1261,7 @@ function appointmentSlotsForRow(sheet, map, target) {
     if (!eventId) return [];
     const dash = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (!dash) return [];
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const dashMap = getIndexMap(headers);
     const session = getSectionedRowValues(dash, headers, 'Event_ID')
       .filter(row => String(row[dashMap['Event_ID']] || '').trim() === eventId)[0];
@@ -1396,7 +1396,7 @@ function addQuickMarkWalkIn(sheet, args) {
     };
   }
   if (session.isAssistance) {
-    const taken = readBookedAppointmentTimes(getSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID'));
+    const taken = readBookedAppointmentTimes(getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID'));
     const free = buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session))
       .filter(s => !(taken[session.eventId] || new Set()).has(s.startLabel));
     if (!appointmentTime) {
@@ -1450,7 +1450,7 @@ function addQuickMarkWalkIn(sheet, args) {
     };
   }
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const row = new Array(headers.length).fill('');
   row[map['Event_Date']] = session.date;
@@ -1694,7 +1694,7 @@ function findNearestSessionForProgram(program, location, wantedDateKey) {
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!dash) return null;
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const wanted = normalizeNameKey(program);

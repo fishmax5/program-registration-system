@@ -79,7 +79,7 @@ function listSessionsWithRegistrations() {
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!registrantsSheet) return [];
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const backKey = formatDateKey(new Date(Date.now() - DELETE_REGISTRATIONS_WINDOW_BACK_DAYS * 86400000));
@@ -127,7 +127,7 @@ function collectClubEventIds() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const ids = new Set();
   if (!sheet) return ids;
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     if (map['Club'] === undefined || !isClubColumnValue(row[map['Club']])) return;
@@ -171,7 +171,7 @@ function buildDeleteRegistrationsHtml(sessions) {
 <h3>Delete registrations</h3>
 <p class="hint">
   Tick the sessions whose registrations should be <b>permanently deleted</b> from
-  Registrant_Dash. This is for test runs and duplicates — to record that somebody is no
+  All_Registrants. This is for test runs and duplicates — to record that somebody is no
   longer coming, set their Program_Status to <b>Cancelled</b> instead, which keeps the row and the
   history. The catering numbers are recalculated afterwards.
 </p>
@@ -270,7 +270,7 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return '⚠️ There is no registrants tab yet.';
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const allRows = getSectionedRows(sheet, headers, 'Event_ID');
 
@@ -384,7 +384,7 @@ function buildFormIdByEventId() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const out = {};
   if (!sheet) return out;
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();

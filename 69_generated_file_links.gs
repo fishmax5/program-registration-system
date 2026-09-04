@@ -12,8 +12,8 @@
 // So every tab that already has a row for a session now carries the links to
 // that session's files, rebuilt on each render:
 //
-//   Program_Sessions   Registrant_Sheet_Link + Sign_In_Sheet_Link
-//   Registrant_Dash            Registrant_Sheet_Link + Sign_In_Sheet_Link
+//   All_Program_Sessions   Registrant_Sheet_Link + Sign_In_Sheet_Link
+//   All_Registrants            Registrant_Sheet_Link + Sign_In_Sheet_Link
 //   Master_Lunch_Dashboard     Sign_In_Sheet_Link   (a meal has no leader)
 //
 // THE COLUMNS ARE DERIVED, NOT STORED. Nothing here reads back what is in the

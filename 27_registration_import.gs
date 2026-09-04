@@ -78,9 +78,9 @@ function syncRegistrationsInternal() {
 
   // One read of each tab up front; both registry-derived structures below
   // are built from the same rows rather than scanning the sheet twice.
-  const sessionRows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
   const registryIndex = buildRegistryIndex(registrySheet);
-  const existingRows = getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+  const existingRows = getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
   const existingRowIndex = getExistingRegistrantIndex(existingRows);
   // What each session is already holding, so this run's waitlist decisions
@@ -278,7 +278,7 @@ function syncRegistrationsInternal() {
   // hourly pass that just imported into them. Reaches outside the workbook, so
   // it sits down here with the invitations and carries its own guard.
   const settledRegistrantRows = reusableRows ||
-    getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+    getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
   // BEFORE THE PUSH, both of them, so a sheet born on this run is filled from
   // the settled picture the same run rather than sitting empty for an hour.
   //
@@ -368,7 +368,7 @@ function syncRegistrationsInternal() {
 // syncRegistrationsInternal()'s own top-of-run read gets the same array back
 // for free — the hand-threaded parameter would only have duplicated it.
 function getDistinctFormIds(registrySheet) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const values = rows.map(row => row[map['Form_ID']]);
@@ -385,7 +385,7 @@ function getDistinctFormIds(registrySheet) {
  */
 function buildRegistryIndex(registrySheet) {
   const index = {};
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const labelOptionsByForm = buildLabelOptionsByForm(rows, map);

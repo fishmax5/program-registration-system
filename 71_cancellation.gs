@@ -145,7 +145,7 @@ function cancelRegistrantRowsLocked(matcher, opts) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return { ok: false, cancelled: 0, message: 'There is no Registrants tab to cancel anything on.' };
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(sheet, headers, 'Event_ID');
 
@@ -285,7 +285,7 @@ function checkInCancel(payload) {
  */
 function applyLeaderDropsAsCancellations(registrantRows) {
   if (!registrantRows || registrantRows.length === 0) return 0;
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   if (map['Dropped'] === undefined) return 0;
   const todayKey = formatDateKey(new Date());
 
@@ -400,7 +400,7 @@ function parseCancelIdentity(payload) {
 function upcomingEventIdsForForm(formId) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet || !formId) return {};
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const out = {};
@@ -448,7 +448,7 @@ function cancelPageLookup(payload) {
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return { ok: false, message: 'We cannot look that up right now. Please ring the office.' };
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
 
   const bookings = [];

@@ -16,7 +16,7 @@ function recomputeEventRegistryCounts(registrySheet, registrantsSheet, registran
 
 function buildEventCountsFromRegistrants(registrantsSheet, registrantRows) {
   const counts = {};
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const rows = registrantRows || getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {

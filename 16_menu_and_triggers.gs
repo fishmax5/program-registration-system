@@ -447,7 +447,7 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('syncCalendars', () =>
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
   // AN HOUR AFTER THE CALENDAR SYNC, not alongside it: this reads
-  // Registrant_Dash and the dashboard, and wants that hour's syncCalendars()
+  // All_Registrants and the dashboard, and wants that hour's syncCalendars()
   // run — whatever it moved or added overnight — reflected before it prints,
   // not raced against it. See autoCreateTodaysSignInSheets() (45).
   removed += resetTriggersForHandler('autoCreateTodaysSignInSheets', () =>

@@ -81,7 +81,7 @@ const LUNCH_SIGNUP_HEADERS = ['Location', 'Month', 'Lunch_Dates', 'Edit_Form', '
  *
  * Four is the current month and the next at both locations — which is the
  * whole of what anybody is handing out a link for. The rest are one row down
- * on Program_Sessions like every other form, and the block says so
+ * on All_Program_Sessions like every other form, and the block says so
  * rather than pretending they don't exist.
  */
 const LUNCH_SIGNUP_PINNED_LIMIT = 4;
@@ -152,7 +152,7 @@ function buildLunchSignUpRows(links) {
  * missing meal is a person at the counter with nothing to eat. Each unnamed
  * row therefore keeps its own slot.
  *
- * The entry doubles as the source row for Lunch_Roster, which is why it
+ * The entry doubles as the source row for All_Lunch_Registrants, which is why it
  * carries names, programs and phone rather than only a flag: the count and the
  * list of who is in it are built in one pass and cannot drift apart.
  */
@@ -222,7 +222,7 @@ function countLunchMeals(bucket) {
 }
 
 /**
- * Aggregates Program_Sessions's session table + Registrant_Dash
+ * Aggregates All_Program_Sessions's session table + All_Registrants
  * into one row per (date, location): how many people need lunch, plus that
  * day's Meal_Shorthand/Type pulled from Lunch_Schedule (per date AND
  * location now). Only rows with Program_Status=Active AND Lunch_Status=Needed
@@ -245,7 +245,7 @@ function buildDashboardRollup(registrantRows) {
   // No early return on a missing/empty session table any more: the menu is now
   // a source of dashboard rows in its own right (see SEED 1), so a catered day
   // still has to appear even on a workbook whose calendar hasn't been imported.
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regRows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
   const regMap = getIndexMap(regHeaders);
 
@@ -351,7 +351,7 @@ function buildDashboardRollup(registrantRows) {
   });
 
   if (registrantsSheet || registrantRows) {
-    const lrHeaders = HEADERS.Registrant_Dash;
+    const lrHeaders = HEADERS.All_Registrants;
     const lrRows = registrantRows || getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID');
     const lrMap = getIndexMap(lrHeaders);
     lrRows.forEach(row => {
@@ -475,7 +475,7 @@ function buildDashboardRollup(registrantRows) {
         noteForAdmin('Lunch needed at a Never-catering location',
           `${row[lrMap['Name']]} is marked Lunch_Status=Needed for ${meta.location} on ` +
           `${formatDateLabel(parseDateKey(meta.dateKey))}, but that location's policy is "Never." ` +
-          `Probably a stale form answer — fix their Lunch_Status on Registrant_Dash.`);
+          `Probably a stale form answer — fix their Lunch_Status on All_Registrants.`);
         return;
       }
 
@@ -536,12 +536,12 @@ function buildDashboardRollup(registrantRows) {
 
   // The counts are now READ OFF the person records rather than accumulated as
   // the rows go past, so there is exactly one definition of each number and
-  // Lunch_Roster is guaranteed to list the very people the dashboard counted.
+  // All_Lunch_Registrants is guaranteed to list the very people the dashboard counted.
   Object.keys(rollup).forEach(key => {
     const r = rollup[key];
     // MEALS, not heads: Registered_Count is the number the kitchen orders
     // against, and one person can be down for four of them (see
-    // countLunchMeals() and Meals_Ordered on Registrant_Dash).
+    // countLunchMeals() and Meals_Ordered on All_Registrants).
     r.registeredCount = countLunchMeals(r);
     r.registeredPeople = countLunchPeople(r, 'registered');
     r.servedConfirmed = countLunchPeople(r, 'served');
@@ -623,7 +623,7 @@ function updateMasterLunchDashboard(registrantRows) {
     // reconciliation numbers beside it) are in that row. So the very act of
     // recording what was ordered used to freeze Registered_Count at whatever
     // it read that morning: every registrant who signed up afterwards was
-    // imported, counted in the rollup, listed on Lunch_Roster — and silently
+    // imported, counted in the rollup, listed on All_Lunch_Registrants — and silently
     // never reached the number the kitchen orders against.
     //
     // A flip therefore protects the columns a person OWNS, not the ones this
@@ -693,7 +693,7 @@ function updateMasterLunchDashboard(registrantRows) {
 }
 
 /**
- * Writes Lunch_Roster - one row per person per catered date+location.
+ * Writes All_Lunch_Registrants - one row per person per catered date+location.
  *
  * WHOLLY DERIVED. The tab is cleared and rebuilt from `rollup` on every render,
  * so nothing typed into it survives and nothing here needs an upsert, a
@@ -711,7 +711,7 @@ function updateMasterLunchDashboard(registrantRows) {
 function renderLunchRosterSheet(rollup) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_ROSTER);
-  const headers = HEADERS.Lunch_Roster;
+  const headers = HEADERS.All_Lunch_Registrants;
   const map = getIndexMap(headers);
 
   const rows = [];
@@ -760,7 +760,7 @@ function renderLunchRosterSheet(rollup) {
 }
 
 /**
- * Lunch_Roster's afterWrite hook: location tinting like every other tab, and a
+ * All_Lunch_Registrants's afterWrite hook: location tinting like every other tab, and a
  * typing warning on the columns anybody would reach for.
  *
  * The warning is the important half. This is the one tab in the workbook that

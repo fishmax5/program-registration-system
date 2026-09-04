@@ -96,7 +96,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
     const plainDateLabel = resolveSessionLabelForForm(registryIndex, formId, dateLabel);
     const registryEntry = plainDateLabel ? registryIndex[`${formId}|${plainDateLabel}`] : null;
     if (!registryEntry) {
-      const message = `No Program_Sessions match for form ${formId} / "${stripMealHint(dateLabel)}"` +
+      const message = `No All_Program_Sessions match for form ${formId} / "${stripMealHint(dateLabel)}"` +
         ` (grid row "${dateLabel}") — anyone who ticked that row has NOT been imported.`;
       log(`⚠️ ${message}`);
       noteForAdmin('Form row matches no session', message);
@@ -126,7 +126,7 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
       // asks for a total, not for who eats, so there is no honest way to say
       // which guest a given meal is for — and inventing one would put a meal
       // against a name that never asked for it. The roster still lists the
-      // guests; the order still says four. See Meals_Ordered on Registrant_Dash.
+      // guests; the order still says four. See Meals_Ordered on All_Registrants.
       const meals = isRegistrant ? mealsThisDate : 0;
       const wantsLunch = meals > 0;
       if (!attendingHere && !wantsLunch) return; // nothing said about this person on this date
@@ -399,7 +399,7 @@ function buildRegistrantRow(args) {
   // simply has no Lunch_Schedule row yet — and at a "By exception" location
   // that is every date until the month's menu is typed. An all-dates
   // registrant who ticked lunch before the menu existed was written No Lunch,
-  // vanished from Master_Lunch_Dashboard and Lunch_Roster, and stayed gone:
+  // vanished from Master_Lunch_Dashboard and All_Lunch_Registrants, and stayed gone:
   // typing the menu afterwards changes nothing a row already says.
   //
   // A missing menu row is a GAP, and demand over a gap is exactly what
@@ -436,7 +436,7 @@ function buildRegistrantRow(args) {
     log(`A deleted registration was re-created by a new submission: ${displayName} on ${registryEntry.eventId}.`);
   }
 
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const existingRow = existingRowIndex.get(key);
 
   if (existingRow) {
@@ -543,7 +543,7 @@ function buildRegistrantRow(args) {
     else if (registryEntry.isAssistance) occupancy.untimed++;
   }
 
-  const row = new Array(HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(HEADERS.All_Registrants.length).fill('');
 
   row[map['Location']] = registryEntry.location || '';
   row[map['Event']] = registryEntry.cleanTitle || '';

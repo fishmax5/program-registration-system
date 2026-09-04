@@ -68,7 +68,7 @@
 //   current values against that snapshot, cell by cell. A cell that DIFFERS is
 //   something the leader typed since the last refresh, and it wins. A cell
 //   that MATCHES was never touched, so whatever the workbook says now wins,
-//   and a correction made on Registrant_Dash is not clobbered by a stale copy
+//   and a correction made on All_Registrants is not clobbered by a stale copy
 //   sitting in a browser tab.
 //
 // That is a real three-way merge and it is why staff and leader can work on
@@ -146,7 +146,7 @@ const LEADER_SHEET_FORWARD_DAYS = 90;
 const LEADER_SHEET_MAX_ROWS = 3000;
 
 /**
- * The shared sheet's own columns. A SUBSET of Registrant_Dash plus two hidden
+ * The shared sheet's own columns. A SUBSET of All_Registrants plus two hidden
  * machine columns — deliberately not the whole row: Lunch_Type, the meal
  * counts, Admin_Notes and the internal keys are staff business, and every
  * column left out here is one a program leader cannot see.
@@ -335,7 +335,7 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   const editedKeys = Object.keys(edits);
   if (editedKeys.length === 0) return 0;
 
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   let applied = 0;
   registrantRows.forEach(row => {
     const rowKey = leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
@@ -442,7 +442,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
  * renamed program's older registrant rows still carry the old title.
  */
 function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const today = parseDateKey(formatDateKey(new Date()));
   const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
   const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
@@ -458,7 +458,7 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
       leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
   });
 
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const byProgram = {};
 
@@ -921,8 +921,8 @@ function openUpAllFormSharing() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
-  const rows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
+  const map = getIndexMap(HEADERS.All_Program_Sessions);
+  const rows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
   const formIds = dedupePreservingOrder(rows.map(row => String(row[map['Form_ID']] || '').trim())
     .filter(Boolean));
 
@@ -1028,9 +1028,9 @@ function createProgramLeaderSheet(programValue) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
   const registrantRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
 
   const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
@@ -1165,7 +1165,7 @@ const REGISTRANT_SHEET_MAX_CREATES_PER_RUN = 5;
  * Returns how many were created.
  */
 function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
-  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const map = getIndexMap(HEADERS.All_Program_Sessions);
   const registry = getProgramLeaderSheetRegistry();
 
   const today = new Date();
@@ -1280,7 +1280,7 @@ function listProgramLeaderProgramOptions() {
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!dash) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const today = parseDateKey(formatDateKey(new Date()));
   const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
@@ -1338,9 +1338,9 @@ function refreshProgramLeaderSheetsNow() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sessionRows = getSectionedRows(
-      getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
+      getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
     const registrantRows = getSectionedRows(
-      getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+      getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
 
     // BEFORE THE REGISTRY CHECK BELOW: somebody pressing this — because a
     // program starts on Monday, or because they have just ticked

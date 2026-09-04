@@ -18,7 +18,7 @@
 // THEY ARE NEVER COMPOSED BACK ONTO Name, and that is the one rule here worth
 // stating twice. Name is the join key every other tab carries — what
 // normalizeNameKey() is taken of, what a form response arrives under, what
-// Registrant_Dash, Club_Members and Regular_Needs match on — and renaming
+// All_Registrants, Club_Members and Regular_Needs match on — and renaming
 // somebody already has an owner: Display_Name, carried out across every tab by
 // applyMemberNameCorrection() (section 77) under a confirmation, with the old
 // spelling remembered for the responses still to come. A second rename path on
