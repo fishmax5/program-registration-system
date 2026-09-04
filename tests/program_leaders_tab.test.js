@@ -58,6 +58,8 @@ this.getProgramLeadersWantingAlerts = getProgramLeadersWantingAlerts;
 this.invalidateProgramLeaderIndex = invalidateProgramLeaderIndex;
 this.buildProgramLeaderIndex = buildProgramLeaderIndex;
 this.parseLeaderNotifyTiming = parseLeaderNotifyTiming;
+this.leaderNotifyTimingDaysBefore = leaderNotifyTimingDaysBefore;
+this.leaderNotifyTimingMaxDays = leaderNotifyTimingMaxDays;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -271,7 +273,7 @@ check('a leader who ticked the box but has no address is not a send',
 // ---------------------------------------------------------------------------
 
 const timing = sandbox.parseLeaderNotifyTiming;
-const EACH = { mode: 'each_change', days: 0 };
+const EACH = { mode: 'each_change', days: 0, weekday: -1 };
 
 check('a blank cell keeps doing what a ticked box has always done', timing(''), EACH);
 check('...and so does a cell nobody has typed into at all',
@@ -279,11 +281,11 @@ check('...and so does a cell nobody has typed into at all',
 check('the dropdown\'s own default reads as the diff channel',
   timing(sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE), EACH);
 check('a day count reads as the countdown channel',
-  timing('3 days before each date'), { mode: 'days_before', days: 3 });
+  timing('3 days before each date'), { mode: 'days_before', days: 3, weekday: -1 });
 check('one day is singular, and still a day count',
-  timing('1 day before each date'), { mode: 'days_before', days: 1 });
+  timing('1 day before each date'), { mode: 'days_before', days: 1, weekday: -1 });
 check('case and stray spacing are what somebody typed, not what they meant',
-  timing('  2 DAYS BEFORE each date  '), { mode: 'days_before', days: 2 });
+  timing('  2 DAYS BEFORE each date  '), { mode: 'days_before', days: 2, weekday: -1 });
 // Out of range falls back rather than silencing: a leader who somehow ends up
 // with "0 days" or "30 days" in the cell still hears from us.
 check('a day count past the week this supports falls back to the diff channel',
@@ -291,13 +293,43 @@ check('a day count past the week this supports falls back to the diff channel',
 check('...and so does one that is not a countdown at all',
   [timing('0 days before each date'), timing('when I feel like it')], [EACH, EACH]);
 
-check('the dropdown offers the diff channel and one entry per day of the week',
-  sandbox.LEADER_NOTIFY_TIMING_LIST.length, 8);
+// The weekday channel: the same digest, due on a fixed day of the week rather
+// than a fixed count. The failure this pins is a Thursday class on a
+// "Thursday before" row resolving to zero days — i.e. the morning of — rather
+// than to the week before.
+check('a weekday reads as the weekday channel',
+  timing('The Thursday before each date'), { mode: 'weekday', days: 7, weekday: 4 });
+check('...however it was spelled',
+  timing('  thursday before  '), { mode: 'weekday', days: 7, weekday: 4 });
+check('...and a weekday with no "before" is not a timing at all',
+  timing('Thursday'), EACH);
+
+const daysBefore = sandbox.leaderNotifyTimingDaysBefore;
+const thursday = timing('The Thursday before each date');
+check('a Tuesday session on a Thursday row is due five days ahead',
+  daysBefore(thursday, new Date(2026, 8, 8)), 5);
+check('a session ON that weekday is due the week before, never the morning of',
+  daysBefore(thursday, new Date(2026, 8, 10)), 7);
+check('a day count ignores the session date it is handed',
+  daysBefore(timing('3 days before each date'), new Date(2026, 8, 8)), 3);
+check('the diff channel is never due as a digest',
+  daysBefore(EACH, new Date(2026, 8, 8)), 0);
+check('a weekday row is scanned for out to the whole week',
+  [sandbox.leaderNotifyTimingMaxDays(thursday),
+   sandbox.leaderNotifyTimingMaxDays(timing('2 days before each date')),
+   sandbox.leaderNotifyTimingMaxDays(EACH)],
+  [7, 2, 0]);
+
+check('the dropdown offers the diff channel, one entry per day count and one per weekday',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.length, 15);
 check('...starting with the default',
   sandbox.LEADER_NOTIFY_TIMING_LIST[0], sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE);
 check('...and every offered value parses back to what it says',
-  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(1).map(label => timing(label).days),
+  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(1, 8).map(label => timing(label).days),
   [1, 2, 3, 4, 5, 6, 7]);
+check('...weekdays included',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(8).map(label => timing(label).weekday),
+  [0, 1, 2, 3, 4, 5, 6]);
 
 // The column has to actually be READ off the tab, not just parse well.
 const timedRow = new Array(leaderHeaders.length).fill('');
@@ -316,11 +348,11 @@ sandbox.invalidateProgramLeaderIndex();
 const rebuilt = sandbox.buildProgramLeaderIndex();
 
 check('the cell on the tab reaches the leader index',
-  rebuilt['bridge club|narberth'][0].timing, { mode: 'days_before', days: 3 });
+  rebuilt['bridge club|narberth'][0].timing, { mode: 'days_before', days: 3, weekday: -1 });
 // ...and out the other side, because 66 filters its two passes on it.
 check('...and rides along to the pass that has to choose a channel',
   sandbox.getProgramLeadersWantingAlerts()[0].programs[0].timing,
-  { mode: 'days_before', days: 3 });
+  { mode: 'days_before', days: 3, weekday: -1 });
 
 activeSpreadsheet = null;
 sandbox.invalidateProgramLeaderIndex();

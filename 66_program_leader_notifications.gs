@@ -756,7 +756,8 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
   // for this function to do.
   const leaders = getProgramLeadersWantingAlerts()
     .map(leader => Object.assign({}, leader,
-      { programs: leader.programs.filter(p => p.timing && p.timing.mode === 'days_before') }))
+      { programs: leader.programs.filter(p => p.timing &&
+        (p.timing.mode === 'days_before' || p.timing.mode === 'weekday')) }))
     .filter(leader => leader.programs.length > 0);
 
   const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
@@ -784,7 +785,8 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
   // way the reminder pass bounds itself with REMINDER_FORWARD_DAYS.
   const programMaxDays = {};
   leaders.forEach(leader => leader.programs.forEach(program => {
-    programMaxDays[program.key] = Math.max(programMaxDays[program.key] || 0, program.timing.days);
+    programMaxDays[program.key] = Math.max(
+      programMaxDays[program.key] || 0, leaderNotifyTimingMaxDays(program.timing));
   }));
 
   const sessionsByProgram = {};
@@ -849,7 +851,11 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
         // This LEADER's own countdown, not the widest one asked for on the
         // program — a program with two leaders on "7 days before" and
         // "2 days before" tells each of them on their own morning.
-        if (s.daysAway > program.timing.days) return;
+        // A weekday row works its count out from THIS session's own date, so
+        // the same "Thursday before" answer is 5 days ahead of a Tuesday class
+        // and 7 ahead of a Thursday one. See leaderNotifyTimingDaysBefore().
+        const dueDays = leaderNotifyTimingDaysBefore(program.timing, s.date);
+        if (dueDays <= 0 || s.daysAway > dueDays) return;
         const sentFor = ledger[s.eventId] || {};
         if (sentFor[leader.email.toLowerCase()]) return;
         const entry = registry[program.key] || {};

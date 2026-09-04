@@ -113,7 +113,7 @@ const ADMIN_NOTIFICATION_MAX_ROWS = 5;
  *                          A guest, not a CC — Google mails them the invitation
  *                          itself — so it is a tick per person, not a BCC line.
  *
- * BEING AN EDITOR of the leader sheets and forms this system shares is
+ * BEING AN EDITOR of the registrant sheets and forms this system shares is
  * deliberately NOT a category. It is not mail at all, it is standing access to
  * a file, and a fifth checkbox for one Drive grant would suggest otherwise.
  * Every address in the table gets it, ticked or not, which is what

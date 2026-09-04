@@ -77,9 +77,13 @@ function refreshMemberRoll(ss, registrantRows) {
   const rows = registrantRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
+  // ONE READ OF THE CORRECTIONS for the whole rebuild: a name staff have put
+  // right is put right again here, whatever the form response still says.
+  const corrections = readMemberNameCorrections();
+
   const people = {};
   rows.forEach(row => {
-    const name = String(row[lrMap['Name']] || '').trim();
+    const name = canonicalMemberName(row[lrMap['Name']], corrections);
     const key = normalizeNameKey(name);
     if (!key) return;
     const d = coerceDate(row[lrMap['Event_Date']]);
@@ -123,6 +127,20 @@ function refreshMemberRoll(ss, registrantRows) {
     // to lose to a skipped field.
     row[map['Phone']] = p.phone || (prior ? prior[map['Phone']] : '') || '';
     row[map['Email']] = p.email || (prior ? prior[map['Email']] : '') || '';
+    // THE REFRESH DOES NOT RENAME ANYBODY. A correction typed into
+    // Display_Name is carried out by handleMemberRollEdit() —> across every
+    // tab at once, under a confirmation, with the old spelling remembered
+    // (77_households_and_names.gs). Doing it here as well would let a rename
+    // happen quietly on the next sync with none of that: the Name column is
+    // what Registrant_Dash, Club_Members and Regular_Needs all match on, and
+    // changing it on this tab alone is exactly how a person's history is left
+    // behind under their old spelling.
+    //
+    // The nickname is read from whichever spelling is the fuller one, because
+    // that is where a parenthetical usually survives.
+    const display = prior ? String(prior[map['Display_Name']] || '').trim() : '';
+    row[map['Nickname']] = parseMemberName(display || p.name).nickname ||
+      parseMemberName(p.name).nickname;
     row[map['Times_Seen']] = p.times;
     row[map['First_Seen']] = p.first || '';
     row[map['Last_Seen']] = p.last || '';
@@ -135,8 +153,63 @@ function refreshMemberRoll(ss, registrantRows) {
     if (!seen[key]) outRows.push(existingByKey[key]);
   });
 
+  stampMemberHouseholds(outRows, headers);
   writeMemoryTab(sheet, headers, outRows, memberRollTabOptions());
+  invalidateHouseholdIndexMemo();
   log(`Member_Roll refreshed: ${outRows.length} member(s).`);
+}
+
+/**
+ * THE HOUSEHOLD COLUMNS, WRITTEN ONTO ROWS THAT ARE ABOUT TO BE DRAWN.
+ *
+ * Kept apart from the loop above because it cannot be done a row at a time:
+ * who shares a phone number with whom is a fact about the whole roll, and the
+ * institutional-contact filter (HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN) needs to
+ * have seen every row before it can say which details to ignore. Everything
+ * about how the grouping is decided lives in 77_households_and_names.gs; this
+ * is only where the answer meets the sheet.
+ *
+ * Rows carried over from a roll that predates these columns pass through with
+ * their household cells blank, which reads correctly: not in one.
+ */
+function stampMemberHouseholds(rows, headers) {
+  const map = getIndexMap(headers);
+  if (map['Household_ID'] === undefined || map['Household'] === undefined) return;
+  const entries = rows.map(row => ({
+    key: normalizeNameKey(row[map['Name']]),
+    name: String(row[map['Name']] || '').trim(),
+    phone: row[map['Phone']],
+    email: row[map['Email']],
+    override: map['Household_Override'] === undefined ? '' : row[map['Household_Override']]
+  }));
+  const { byKey } = buildHouseholdAssignments(entries);
+  rows.forEach((row, i) => {
+    const found = byKey[entries[i].key];
+    row[map['Household_ID']] = found ? found.id : '';
+    // The OTHER people in it, not a list this row is already the first line
+    // of: a cell that reads "Jane Smith, Ray Smith" on Jane's own row is a
+    // cell staff have to read twice to learn one fact.
+    row[map['Household']] = found
+      ? found.members.filter(m => m.key !== entries[i].key).map(m => m.name).join(', ')
+      : '';
+  });
+}
+
+/**
+ * The household columns recomputed from the tab AS IT STANDS, without going
+ * back to the registrant history — what an edit to Household_Override wants.
+ * Ticking a box should not cost a full roll rebuild, and the only input that
+ * changed is on this tab already.
+ */
+function refreshMemberHouseholds(ss) {
+  const sheet = getOrCreateSheet(ss || SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.MEMBER_ROLL);
+  const headers = HEADERS.Member_Roll;
+  const rows = readSimpleTable(sheet, headers);
+  if (!rows.length) return 0;
+  stampMemberHouseholds(rows, headers);
+  writeMemoryTab(sheet, headers, rows, memberRollTabOptions());
+  invalidateHouseholdIndexMemo();
+  return rows.length;
 }
 
 /**
@@ -487,6 +560,10 @@ function applyMemoryTabValidation(sheet, headers, rowCount, spec) {
 /** Writes a memory tab: banner, header row, data, and the yellow staff-column wash. */
 function writeMemoryTab(sheet, headers, rows, options) {
   const numCols = headers.length;
+  // A layout that has grown a column since this tab was last drawn — the
+  // household and name columns did exactly that — must not meet a sheet that
+  // is still the old width halfway through a setValues().
+  ensureSheetColumns(sheet, numCols);
   // Member_Roll and Program_Options are read with the same sectioned readers
   // as the date-bearing tabs, and this is the only thing that rewrites them.
   invalidateSectionedRowsCache(sheet);

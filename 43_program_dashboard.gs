@@ -6,12 +6,8 @@
 // called: it reads whatever is currently across both the Upcoming and Past
 // session sub-tables, removes any session whose calendar event has
 // disappeared (routing its registrants to Triage first, refreshing that
-// session's form), sorts/splits the rest by date, computes the Today block,
-// then clears the sheet and writes everything fresh.
-//
-// It also computes the metric block and hands it, with the same rows and the
-// same registrant scan, to renderProgramMonthDashboard() — the metrics now sit
-// on Program_Month, whose grain they match. See section 17.
+// session's form), sorts/splits the rest by date, computes the Today/
+// Metrics sections, then clears the sheet and writes everything fresh.
 // ============================================================================
 
 /**
@@ -76,19 +72,20 @@ function renderProgramDashboard(force, options) {
 
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
 
-  // THE MONTH VIEW OF THE ROWS JUST WRITTEN — one row per program-month, and
-  // the home of the metrics block above. Derived from exactly these rows and
-  // this scan, so the two tabs cannot disagree and the view costs no second
-  // read of either tab.
-  //
-  // CAUGHT, NOT THROWN. Program_Month stores nothing: it can be deleted, and
-  // is rebuilt from scratch on the next render. A view failing must never be
-  // able to fail the table it is a view of — a sync that got as far as writing
-  // the session table has done the work that matters.
+  // THE MONTH VIEW IS DRAWN FROM THE ROWS WE ARE HOLDING, not from a second
+  // read of the tab we have just written — see 78_program_month_dashboard.gs.
+  // It is derived and nothing reads it, so a failure to draw it must not cost
+  // the caller the session table it actually asked for: a broken derived view
+  // is a log line, not a failed sync.
   try {
-    renderProgramMonthDashboard(sessionRows, map, registrantScan, metrics, force);
+    // metrics travels WITH the rows it was computed from. The block moved to
+    // the month tab in phase 2 and its arithmetic did not: it is still
+    // computeProgramMetrics() over the same lunch-filtered session rows and the
+    // same registrant scan, so not a digit of it changes by being drawn one tab
+    // to the right.
+    renderProgramMonthDashboard(force, { sessionRows, metrics });
   } catch (err) {
-    log(`⚠️ Could not rebuild "${SHEET_NAMES.PROGRAM_MONTH}" (${err}) — the session table is written and correct; the month view is rebuilt on the next render.`);
+    log(`\u26a0\ufe0f Program_Month could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
   }
 
   return { registrantsMoved: triageResult.registrantsMoved };
@@ -910,14 +907,20 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
 
   // --- Section B: All Program Sessions, split into Upcoming / Past ---
   //
-  // THE METRICS BLOCK USED TO SIT HERE and now lives on Program_Month
-  // (77_program_month_dashboard.gs), which is the tab whose grain it matches:
-  // every number in it is monthly reasoning — this month against the same span
-  // of last month, the next seven and thirty days — and it was sitting on top
-  // of a table that is one row per DAY. Moving it up bought this tab back the
-  // dozen rows of the frozen band it was spending on numbers nobody reads
-  // while looking for Tuesday. writeProgramMetricsSection() stays in this file:
-  // it still owns the words and the arithmetic, and is called from there.
+  // THE METRICS BLOCK USED TO SIT HERE, between the Today block and the
+  // sessions, and now sits on Program_Month (78_program_month_dashboard.gs).
+  // Every number in it is monthly reasoning — the next 7 and 30 days, this
+  // month against the same span of last — sitting on top of a table that is
+  // one row per DAY, and everything above the session table travels in the
+  // frozen band, so a dozen rows of it were a dozen rows of Tuesday nobody
+  // could see. It is drawn on the tab whose grain it matches instead.
+  //
+  // writeProgramMetricsSection() and computeProgramMetrics() STAY IN THIS
+  // FILE. They are defined against session rows, the words in them are about
+  // sessions, and moving the arithmetic as well as the drawing would have been
+  // the change that could alter a number. The month tab calls them.
+  //
+  // --- Section C: All Program Sessions, split into Upcoming / Past ---
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
   const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
@@ -992,7 +995,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
-      'Leader_Sheet_Link', 'Sign_In_Sheet_Link'],
+      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);

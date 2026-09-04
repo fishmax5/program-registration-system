@@ -235,7 +235,7 @@ function syncRegistrationsInternal() {
     // than going through cancelRegistrantRows() — the tab is written below.
     applyLeaderDropsAsCancellations(existingRows);
   } catch (err) {
-    log(`⚠️ Could not read program leader sheets back in this run (${err}) — the registrations themselves are fine.`);
+    log(`⚠️ Could not read the program registrant sheets back in this run (${err}) — the registrations themselves are fine.`);
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);
@@ -273,25 +273,37 @@ function syncRegistrationsInternal() {
   step('rebuilding the club roster tab', () =>
     renderClubMembersSheet(refreshClubMemberLabels(sessionRows)));
 
-  // The other half of the program leader round trip, and the reason this
+  // The other half of the registrant sheet round trip, and the reason this
   // feature needs NO TRIGGER OF ITS OWN: the rosters go back out on the same
   // hourly pass that just imported into them. Reaches outside the workbook, so
   // it sits down here with the invitations and carries its own guard.
   const settledRegistrantRows = reusableRows ||
     getSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
-  // BEFORE THE PUSH: a leader who just ticked Notify_Roster_Changes on a
-  // program with no shared sheet yet gets one built here, so the push right
-  // below fills it from the settled picture the same run it is born in — see
-  // ensureProgramLeaderSheetsForNotifyingLeaders().
+  // BEFORE THE PUSH, both of them, so a sheet born on this run is filled from
+  // the settled picture the same run rather than sitting empty for an hour.
+  //
+  // Two reasons a program gets a sheet, and they are deliberately separate.
+  // The horizon pass builds one for EVERY program a week before its next
+  // session (ensureRegistrantSheetsForUpcomingPrograms), which is the ordinary
+  // case. The leader pass builds one for a program whose leader has just
+  // ticked Notify_Roster_Changes whether or not it is running this week —
+  // somebody who asked to hear about a roster should have somewhere to look at
+  // it now, not in five weeks. Either may find the other already did it: both
+  // skip a program already in the registry.
+  try {
+    ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows);
+  } catch (err) {
+    log(`⚠️ Could not auto-create the upcoming programs' registrant sheets this run (${err}).`);
+  }
   try {
     ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
   } catch (err) {
-    log(`⚠️ Could not auto-create program leader sheets this run (${err}).`);
+    log(`⚠️ Could not auto-create registrant sheets for the notifying leaders this run (${err}).`);
   }
   try {
     pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
   } catch (err) {
-    log(`⚠️ Could not refresh the program leader sheets this run (${err}).`);
+    log(`⚠️ Could not refresh the program registrant sheets this run (${err}).`);
   }
 
   // AFTER the push, deliberately. The alert email links to the shared sheet
