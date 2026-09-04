@@ -133,7 +133,7 @@ open a new chat.
 
 ---
 
-## Phase 4 — the leader dropdown
+## Phase 4 — the leader dropdown ✅ done
 
 `Leader` and `Leader_Source` on `Program_Month`. The column must not become a
 second place "who leads what" is stored — `Program_Leaders` is what shares a
@@ -157,6 +157,36 @@ write:  edit the cell → onEdit writes that row → invalidateProgramLeaderInde
   is still a true record.
 - Carry-forward needs no code: `leaderProgramKey()` has no month in it. Prove it
   with a test; don't build a mechanism.
+
+Shipped: `Leader` / `Leader_Source` on `HEADERS.Program_Month`, right after
+`Program`. The read is `programMonthLeaderCell()` in `78`, off the memoized
+`buildProgramLeaderIndex()` the caller already reads for the coverage line —
+never a second read, so the two can never disagree. It prints BOTH leaders of a
+two-leader program and both buildings of a `[Shared]` one. The write is
+`handleProgramMonthEdit()` in `18` → `attachProgramLeaderRow()` in `65`, which
+is where the posture lives: it ONLY ADDS — never edits or deletes somebody
+else's row — takes the email off the leader's own other rows rather than
+leaving it blank to retype, and leaves `Notify_Roster_Changes` clear, because
+attaching somebody is not putting them on a mailing list.
+
+Decided while here, in the dialog's own words: **blanking the cell removes
+nothing.** It reverts and says a leader is removed on `Program_Leaders`, by
+deleting the row whose deletion is visibly what stops the roster being shared.
+Same reading for a replacement — the new name is added beside the old and the
+cell prints both until somebody deletes one there. A fill-down is refused
+outright (every row is a different roster going to the same person, and there
+is no honest single question to ask), and so is a `[Shared]` row: that is two
+leader rows, one per building, and resolving it generously here would invent a
+grain `65`'s NO WILDCARDS paragraph refuses to have.
+
+`Leader_Source` reads off the `Title_Match` stamp rather than a new column —
+`LEADER_TITLE_MATCH_NOTE_PREFIX` / `isTitleMatchedLeaderRow()`, extracted from
+the literal Phase 3 shipped — because deleting that note is already how a
+person says they have checked the row. `matched` cells take the manual-entry
+wash; `Leader` is the one column left out of `protectDerivedColumns()`. Tests:
+the carry-forward proof (three months, one key, no mechanism) in
+`tests/program_month.test.js`, and the writer's refusals in
+`tests/program_leaders_tab.test.js`. All 62 test files pass.
 
 **Hand-off:** commit, push, then print the Phase 5 kickoff line and tell me to
 open a new chat.

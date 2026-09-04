@@ -26,6 +26,18 @@
 //      — only ever counts: it shares nothing and sends nothing.
 //   8. Moving the metric block onto this tab does not move a number in it. The
 //      arithmetic stayed in 43_program_dashboard.gs; this asserts it.
+//
+// And, from phase 4 — the leader column, which is a window onto
+// Program_Leaders and not a second place who-leads-what is stored:
+//
+//   9. The Leader cell is READ off the leader index the sharing and mail paths
+//      already read: both leaders of a two-leader program, both buildings of a
+//      shared one, blank for lunch and for a program nobody leads, and blank
+//      when no index was handed in at all. Leader_Source says 'matched' while
+//      a Title_Match proposal behind it is still unconfirmed.
+//  10. Monthly carry-forward needed no code, and the test IS the mechanism:
+//      leaderProgramKey() has no month in it, so October reads the same row as
+//      September with nothing stored per month.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
@@ -363,6 +375,84 @@ const cell = (row, header) => row[monthMap[header]];
   check('the near-term window still counts the same sessions', metrics.windows[0].sessions, 3);
   check('and the same registrations', metrics.windows[0].registrations, 13);
   check('and the same fill over capped sessions only', metrics.windows[0].seatsFilledPct, 93);
+}
+
+// --- 9. The leader column: a window onto Program_Leaders, not a drawer ------
+//
+// The rule the whole of phase 4 is built on: this cell is READ off
+// Program_Leaders and never read back. What is asserted here is that reading —
+// the writing half is one confirmed edit in 18_edit_handlers.gs, and the thing
+// worth pinning about it is that nothing in THIS file can do it.
+{
+  const index = {
+    [sandbox.leaderProgramKey('Chair Yoga', 'Narberth')]: [{ name: 'Jane Doe', matched: false }],
+    // Two leaders, because a class with a lead and an assistant is ordinary.
+    [sandbox.leaderProgramKey('Book Club', 'Narberth')]: [
+      { name: 'Sam Reed', matched: false }, { name: 'Kit Alvarez', matched: false }],
+    // A row a Title_Match phrase proposed and nobody has confirmed.
+    [sandbox.leaderProgramKey('Watercolor', 'Narberth')]: [{ name: 'Ada Frost', matched: true }],
+    // One form, two buildings — only the Ashbridge half is named.
+    [sandbox.leaderProgramKey('Memory Cafe', 'Ashbridge')]: [{ name: 'Lee Park', matched: false }]
+  };
+  const build = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, index).rows;
+
+  const yoga = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })])[0];
+  check('the leader is read off Program_Leaders',
+    [cell(yoga, 'Leader'), cell(yoga, 'Leader_Source')], ['Jane Doe', 'typed']);
+
+  const book = build([session({ at: [2026, 8, 2, 9, 30], title: 'Book Club', formId: 'F_B' })])[0];
+  check('a program with two leaders prints both', cell(book, 'Leader'), 'Sam Reed, Kit Alvarez');
+
+  const paint = build([session({ at: [2026, 8, 3, 9, 30], title: 'Watercolor', formId: 'F_W' })])[0];
+  check('an unconfirmed title match says so, which is what gets it the wash',
+    [cell(paint, 'Leader'), cell(paint, 'Leader_Source')], ['Ada Frost', 'matched']);
+
+  const cafe = build([
+    session({ at: [2026, 8, 4, 9, 30], title: 'Memory Cafe', formId: 'F_C', location: 'Narberth' }),
+    session({ at: [2026, 8, 5, 9, 30], title: 'Memory Cafe', formId: 'F_C', location: 'Ashbridge' })
+  ])[0];
+  check('a shared program takes the leaders of both its buildings',
+    [cell(cafe, 'Location'), cell(cafe, 'Leader')], ['Narberth + Ashbridge', 'Lee Park']);
+
+  const nobody = build([session({ at: [2026, 8, 6, 9, 30], title: 'Tai Chi', formId: 'F_T' })])[0];
+  check('a program nobody leads is blank, and blank about its source too',
+    [cell(nobody, 'Leader'), cell(nobody, 'Leader_Source')], ['', '']);
+
+  const lunchRow = build([session({
+    at: [2026, 8, 7, 12, 0], formId: '', title: 'Lunch @ Narberth — Chx Parm',
+    eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_7` })])[0];
+  check('lunch has no leader row and is not made to look like it does',
+    [cell(lunchRow, 'Leader'), cell(lunchRow, 'Leader_Source')], ['', '']);
+
+  // Called with no index at all — every test above this section — the columns
+  // are blank rather than guessed at, and nothing is read from anywhere.
+  const unlit = sandbox.buildProgramMonthRows(
+    [session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })], sessionMap).rows[0];
+  check('with no leader index in hand the columns stay blank', cell(unlit, 'Leader'), '');
+
+  // --- MONTHLY CARRY-FORWARD, WHICH NEEDED NO CODE ---------------------------
+  // leaderProgramKey(title, location) has no month in it, so October's row
+  // resolves to the same key as September's and prints the same name with
+  // nothing stored per month and nothing carried anywhere. This test IS the
+  // mechanism: if it ever fails, something has grown a month.
+  const across = build([
+    session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_SEP' }),
+    session({ at: [2026, 9, 6, 9, 30], title: 'Chair Yoga', formId: 'F_OCT' }),
+    session({ at: [2026, 10, 3, 9, 30], title: 'Chair Yoga', formId: 'F_NOV' })
+  ]);
+  check('every future month of the same program carries the leader forward, unstored',
+    across.map(row => `${cell(row, 'Month_Start').getMonth()}:${cell(row, 'Leader')}`),
+    ['8:Jane Doe', '9:Jane Doe', '10:Jane Doe']);
+}
+
+// --- 10. What "matched" is read off -----------------------------------------
+{
+  check('a row still carrying the proposal stamp reads as matched',
+    sandbox.isTitleMatchedLeaderRow('Matched on "chair yoga" — check this. Emails are off until you tick it.'),
+    true);
+  check('a row somebody typed a note on does not',
+    sandbox.isTitleMatchedLeaderRow('Jane covers this while Sam is away.'), false);
+  check('and neither does a blank one', sandbox.isTitleMatchedLeaderRow(''), false);
 }
 
 console.log(failures === 0 ? '\nAll program_month tests passed.' : `\n${failures} failure(s).`);

@@ -29,11 +29,19 @@
  *      leading them (a COUNT off Program_Leaders; nothing is shared or sent
  *      from here) — and its Sessions cell links through to that group's own
  *      block of rows on the session table.
- *      DERIVED AND READ-ONLY: nothing reads it, nothing is stored on it that
- *      is not already on a session row, and deleting the tab changes no
- *      behavior anywhere (the next dashboard render draws it again). Written
- *      from the session rows the render already holds, never from a second
- *      read of that tab. See section 7b.
+ *      DERIVED AND READ-ONLY, WITH ONE WINDOW IN IT: nothing reads this tab,
+ *      nothing is stored on it that is not already on a session row, and
+ *      deleting it changes no behavior anywhere (the next dashboard render
+ *      draws it again). Written from the session rows the render already
+ *      holds, never from a second read of that tab. The window is Leader /
+ *      Leader_Source: read off Program_Leaders on every render and never read
+ *      back, so typing a name there ADDS a row on THAT tab (with the email
+ *      tick clear) instead of storing a second answer to "who may read this
+ *      roster" here. Leader_Source says 'matched' while a Title_Match
+ *      proposal behind the name is still unconfirmed, and those cells carry
+ *      the yellow please-look-at-this wash. Because leaderProgramKey() has no
+ *      month in it, every future month of the same program shows the same
+ *      leader with nothing carried anywhere. See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.

@@ -242,6 +242,26 @@ function leaderNotifyTimingMaxDays(timing) {
 const LEADER_TITLE_MATCH_MAX_PROGRAMS = 10;
 
 /**
+ * How a proposed row says it is one, and the whole of what "matched" means
+ * anywhere else in this workbook.
+ *
+ * There is no Source column on this tab and there deliberately is not one: a
+ * proposed row is an ORDINARY row the moment somebody looks at it and leaves
+ * it alone, and a column saying otherwise would have to be cleared by hand to
+ * stop saying it. The Staff_Notes stamp is already the thing a person deletes
+ * when they have checked the row, so it is also the honest answer to "has
+ * anybody checked this?" — which is exactly what Program_Month's
+ * Leader_Source reports.
+ */
+const LEADER_TITLE_MATCH_NOTE_PREFIX = 'Matched on "';
+
+/** True for a row still carrying the stamp proposeProgramLeaderRowsFromTitles() wrote. */
+function isTitleMatchedLeaderRow(staffNotes) {
+  return String(staffNotes === null || staffNotes === undefined ? '' : staffNotes)
+    .trim().indexOf(LEADER_TITLE_MATCH_NOTE_PREFIX) === 0;
+}
+
+/**
  * One Title_Match cell into its phrases, normalized the way titles are
  * (`normalizeNameKey`: trimmed, inner whitespace collapsed, lowercased) so the
  * comparison is the same one Program/Location keys are built with.
@@ -366,7 +386,7 @@ function proposeProgramLeaderRowsFromTitles(rows, map, known) {
     row[map['Title_Match']] = '';
     // Not ticked, and the timing left blank with it. See the banner above.
     row[map['Notify_Roster_Changes']] = false;
-    row[map['Staff_Notes']] = `Matched on "${winner.phrase}" — check this. Emails are off until ` +
+    row[map['Staff_Notes']] = `${LEADER_TITLE_MATCH_NOTE_PREFIX}${winner.phrase}" — check this. Emails are off until ` +
       `you tick Notify_Roster_Changes. To refuse it, change the phrase (deleting this row alone ` +
       `brings it back next sync).`;
     proposed.push(row);
@@ -622,7 +642,13 @@ function buildProgramLeaderIndex() {
       // a program with no shared sheet yet has nowhere else to read a title
       // from.
       programTitle: title,
-      programLocation: location
+      programLocation: location,
+      // Whether this row is still a PROPOSAL nobody has confirmed. Read here
+      // because this is already the one read of the tab per execution, and
+      // Program_Month's Leader_Source is a report on the same rows the
+      // sharing paths use — a second read to answer it would be a second
+      // answer waiting to disagree with this one.
+      matched: isTitleMatchedLeaderRow(row[map['Staff_Notes']])
     });
   });
   return index;
@@ -700,6 +726,154 @@ function getProgramLeadersWantingAlerts() {
   });
 
   return Object.keys(byEmail).sort().map(k => byEmail[k]);
+}
+
+
+// --- the one write from somewhere else ---------------------------------------
+
+/**
+ * Every name typed on this tab, once each, in the order a dropdown should
+ * offer them.
+ *
+ * Read off the TAB and not off buildProgramLeaderIndex(): that index is keyed
+ * by program and skips a row with a blank Program or Location (see NO
+ * WILDCARDS above), so a leader who has been typed in with only their
+ * Title_Match phrases so far would be missing from the one list whose whole
+ * job is to offer them.
+ */
+function programLeaderNames() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_LEADERS) : null;
+  if (!sheet) return [];
+  const headers = HEADERS.Program_Leaders;
+  const map = getIndexMap(headers);
+  const names = [];
+  try {
+    readSimpleTableValues(sheet, headers).forEach(row => {
+      const name = String(row[map['Leader_Name']] || '').trim();
+      if (name && names.indexOf(name) === -1) names.push(name);
+    });
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read ${SHEET_NAMES.PROGRAM_LEADERS} for the leader list (${err}).`);
+    return [];
+  }
+  return names.sort((a, b) => normalizeNameKey(a).localeCompare(normalizeNameKey(b)));
+}
+
+/**
+ * ATTACHES a leader to a program: the single write this tab accepts from
+ * anywhere else in the workbook, and the whole of what editing Program_Month's
+ * Leader cell does (see handleProgramMonthEdit() in 18_edit_handlers.gs).
+ *
+ * IT ONLY EVER ADDS. It never edits somebody else's row and never deletes one,
+ * which is the same posture the rest of this file takes and for the same
+ * reason: a row saying who led a class is a true record whether or not they
+ * still lead it, and a dropdown that quietly unpicked one would be deleting
+ * history from a tab nobody was looking at. A program that now has two leader
+ * rows is a program with two leaders until a person removes one HERE, on the
+ * tab where the consequence — who may read the roster — is written down.
+ *
+ * The tick starts CLEAR, exactly as a title match's proposal does: attaching
+ * somebody is not the same as putting them on a mailing list, and the one
+ * version of this feature that can email a roster to the wrong person is the
+ * one that turns mail on for a name somebody picked out of a dropdown.
+ *
+ * Runs from a SIMPLE onEdit, so SpreadsheetApp is all it may touch: no
+ * properties, no mail, no form. Everything here is a sheet read and a sheet
+ * write.
+ *
+ * Returns { status, name, email, note } — 'exists' (nothing written), 'added',
+ * or 'refused' with `note` saying why, so the caller can tell the person what
+ * happened rather than leaving a dropdown looking like it did something.
+ */
+function attachProgramLeaderRow(name, title, location) {
+  const leaderName = String(name || '').trim();
+  const programTitle = String(title || '').trim();
+  const programLocation = String(location || '').trim();
+  if (!leaderName || !programTitle || !programLocation) {
+    return { status: 'refused', name: leaderName, email: '', note: 'a leader row needs a name, a program and a location' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_LEADERS) : null;
+  if (!sheet) {
+    return { status: 'refused', name: leaderName, email: '',
+      note: `there is no ${SHEET_NAMES.PROGRAM_LEADERS} tab yet — run a sync first` };
+  }
+
+  const headers = HEADERS.Program_Leaders;
+  const map = getIndexMap(headers);
+  let rows;
+  try {
+    rows = readSimpleTableValues(sheet, headers);
+  } catch (err) {
+    return { status: 'refused', name: leaderName, email: '', note: `${SHEET_NAMES.PROGRAM_LEADERS} could not be read (${err})` };
+  }
+
+  const wantedKey = leaderProgramKey(programTitle, programLocation);
+  const wantedName = normalizeNameKey(leaderName);
+  let email = '';
+  let already = false;
+  rows.forEach(row => {
+    const rowName = normalizeNameKey(row[map['Leader_Name']]);
+    if (rowName !== wantedName) return;
+    // THE ADDRESS COMES OFF THEIR OTHER ROWS. A leader is a person, and the
+    // person's address is the same one whichever class this is — retyping it
+    // per row is how a leader ends up with two addresses and one of them
+    // stale. Blank when this is their first row, which is a row somebody has
+    // to finish on the leader tab, and the dialog says so.
+    if (!email) email = String(row[map['Email']] || '').trim();
+    const rowTitle = String(row[map['Program']] || '').trim();
+    const rowLocation = String(row[map['Location']] || '').trim();
+    if (rowTitle && rowLocation && leaderProgramKey(rowTitle, rowLocation) === wantedKey) already = true;
+  });
+  if (already) return { status: 'exists', name: leaderName, email: email, note: '' };
+
+  // The first blank line in the data band — the same one a person typing on
+  // this tab would use, spare rows and all (see MEMORY_TAB_SPARE_ROWS).
+  const out = new Array(headers.length).fill('');
+  out[map['Leader_Name']] = leaderName;
+  out[map['Email']] = email;
+  out[map['Program']] = programTitle;
+  out[map['Location']] = programLocation;
+  out[map['Notify_Roster_Changes']] = false;
+  out[map['Staff_Notes']] = `Added from ${SHEET_NAMES.PROGRAM_MONTH}. Emails are off until you tick ` +
+    `Notify_Roster_Changes` + (email ? '.' : `, and there is no address on this row yet — add one before ` +
+    `the roster can be shared.`);
+  try {
+    const at = firstBlankProgramLeaderRow(sheet, map['Leader_Name'] + 1);
+    sheet.getRange(at, 1, 1, headers.length).setValues([out]);
+  } catch (err) {
+    return { status: 'refused', name: leaderName, email: email, note: `the row could not be written (${err})` };
+  }
+  // The tab this index was built from has just gained a row; anything asking
+  // again in this execution must see it.
+  invalidateProgramLeaderIndex();
+  invalidateSectionedRowsCache(sheet);
+  return { status: 'added', name: leaderName, email: email, note: '' };
+}
+
+/**
+ * The sheet row a new leader row goes on: the first one at or below the data
+ * row whose name cell is empty, growing the sheet if the tab is full.
+ *
+ * NOT getLastRow() + 1. writeMemoryTab() leaves a spare band of validated
+ * blank rows under the data (MEMORY_TAB_SPARE_ROWS), and those rows count
+ * towards getLastRow() the moment anything on the sheet reaches them —
+ * appending past them would leave a gap, and readSimpleTable() stops at the
+ * first blank name.
+ */
+function firstBlankProgramLeaderRow(sheet, nameColumn) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= MEMORY_TAB_DATA_ROW) {
+    const values = sheet.getRange(MEMORY_TAB_DATA_ROW, nameColumn, lastRow - MEMORY_TAB_DATA_ROW + 1, 1).getValues();
+    for (let i = 0; i < values.length; i++) {
+      if (String(values[i][0] || '').trim() === '') return MEMORY_TAB_DATA_ROW + i;
+    }
+  }
+  const at = Math.max(lastRow + 1, MEMORY_TAB_DATA_ROW);
+  if (sheet.getMaxRows() < at) sheet.insertRowsAfter(sheet.getMaxRows(), at - sheet.getMaxRows());
+  return at;
 }
 
 

@@ -152,13 +152,25 @@ defineLazyGlobal_('HEADERS', () => ({
    * defined against. A month written as the words "September 2026" would have
    * needed a second sectioned reader, and this tab is not worth one.
    *
+   * LEADER AND LEADER_SOURCE ARE NOT STORAGE. They are the one pair of
+   * columns on this tab that a person may type into, and what they type is
+   * written straight onto Program_Leaders — the tab that actually shares a
+   * roster and sends the mail. Nothing here is ever read back as the answer to
+   * "who leads this": the next render reads it off Program_Leaders again. Two
+   * records disagreeing about who may read a roster is found out the day
+   * somebody is emailed a class they do not teach, so there is only ever one.
+   * Leader_Source says which kind of row the name came off — 'typed', or
+   * 'matched' where a Title_Match phrase proposed it and nobody has confirmed
+   * it yet (see the TITLE MATCHING banner in 65_program_leaders.gs).
+   *
    * Form_ID trails at the end with Group_Key, hidden like the session table's
    * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is how the rows are
    * GROUPED, and Group_Key is the row's own identity — both are for reading in
    * the formula bar when something has gone wrong, not for scanning.
    */
   Program_Month: [
-    'Month_Start', 'Location', 'Program', 'Type_Tag', 'Flags', 'Schedule', 'Sessions',
+    'Month_Start', 'Location', 'Program', 'Leader', 'Leader_Source',
+    'Type_Tag', 'Flags', 'Schedule', 'Sessions',
     'Registered', 'Max_Capacity', 'Fill', 'Waitlist',
     'Form_Response_Link', 'Edit_Form_Link', 'Leader_Sheet_Link', 'Status',
     'Form_ID', 'Group_Key'

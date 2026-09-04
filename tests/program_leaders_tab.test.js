@@ -68,6 +68,9 @@ this.LEADER_NOTIFY_TIMING_LIST = LEADER_NOTIFY_TIMING_LIST;
 this.LEADER_NOTIFY_TIMING_EACH_CHANGE = LEADER_NOTIFY_TIMING_EACH_CHANGE;
 this.PROGRAM_LEADERS_MIGRATED_PROP_KEY = PROGRAM_LEADERS_MIGRATED_PROP_KEY;
 this.__setLeaderIndex = function (rows) { __programLeaderIndexCache = rows; };
+this.attachProgramLeaderRow = attachProgramLeaderRow;
+this.programLeaderNames = programLeaderNames;
+this.isTitleMatchedLeaderRow = isTitleMatchedLeaderRow;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -356,6 +359,120 @@ check('...and rides along to the pass that has to choose a channel',
 
 activeSpreadsheet = null;
 sandbox.invalidateProgramLeaderIndex();
+
+// ---------------------------------------------------------------------------
+// attachProgramLeaderRow() — the ONE write this tab takes from somewhere else
+// (Program_Month's Leader dropdown, via 18_edit_handlers.gs).
+//
+// The rule it exists to keep: that dropdown must not become a second place
+// who-leads-what is stored. So it writes a real row HERE, and everything below
+// is about what it refuses to do while writing it — which is where the privacy
+// boundary actually lives.
+// ---------------------------------------------------------------------------
+{
+  /** A leader tab that records the row written to it, and where. */
+  function writableLeaderSheet(rows) {
+    const grid = [new Array(leaderHeaders.length).fill(''), leaderHeaders.slice()]
+      .concat(rows.map(r => r.slice()));
+    const state = { grid, wroteAt: null, wrote: null };
+    const sheet = {
+      state,
+      getName: () => 'Program_Leaders',
+      getLastRow: () => grid.length,
+      getLastColumn: () => leaderHeaders.length,
+      getMaxRows: () => 100,
+      insertRowsAfter: () => {},
+      getRange: (row, col, numRows, numCols) => ({
+        getValues: () => {
+          const out = [];
+          for (let i = 0; i < (numRows || 1); i++) {
+            const source = grid[row - 1 + i] || new Array(leaderHeaders.length).fill('');
+            out.push(source.slice(col - 1, col - 1 + (numCols || 1)));
+          }
+          return out;
+        },
+        setValues: values => {
+          state.wroteAt = row;
+          state.wrote = values[0];
+          while (grid.length < row) grid.push(new Array(leaderHeaders.length).fill(''));
+          grid[row - 1] = values[0].slice();
+          return sheet.getRange(row, col, numRows, numCols);
+        }
+      })
+    };
+    return sheet;
+  }
+
+  const row = (name, email, program, location, notes) => {
+    const r = new Array(leaderHeaders.length).fill('');
+    r[leaderMap['Leader_Name']] = name;
+    r[leaderMap['Email']] = email;
+    r[leaderMap['Program']] = program;
+    r[leaderMap['Location']] = location;
+    r[leaderMap['Staff_Notes']] = notes || '';
+    return r;
+  };
+
+  const use = sheet => {
+    activeSpreadsheet = { getSheetByName: n => (n === sandbox.SHEET_NAMES.PROGRAM_LEADERS ? sheet : null) };
+    sandbox.invalidateProgramLeaderIndex();
+    return sheet;
+  };
+
+  // A leader already down for one class, attached to a second.
+  let sheet = use(writableLeaderSheet([row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth')]));
+  let result = sandbox.attachProgramLeaderRow('Jane Doe', 'Tai Chi', 'Ashbridge');
+  check('attaching a leader writes a row', [result.status, sheet.state.wroteAt], ['added', 4]);
+  check('...naming the program and the location asked for',
+    [sheet.state.wrote[leaderMap['Program']], sheet.state.wrote[leaderMap['Location']]],
+    ['Tai Chi', 'Ashbridge']);
+  check('...with the address taken off their existing row, not retyped',
+    sheet.state.wrote[leaderMap['Email']], 'jane@x.com');
+  // THE LINE THAT MATTERS: attaching somebody is not putting them on a mailing
+  // list. A dropdown that turned mail on is the one version of this that can
+  // email a roster to the wrong person.
+  check('...and the notification tick CLEAR',
+    sheet.state.wrote[leaderMap['Notify_Roster_Changes']], false);
+  check('...and it is not a title match, so Program_Month reads it as typed',
+    sandbox.isTitleMatchedLeaderRow(sheet.state.wrote[leaderMap['Staff_Notes']]), false);
+
+  // Idempotent: the same attachment twice is one row. An hourly render plus a
+  // second look at the dropdown must not grow the tab.
+  sheet = use(writableLeaderSheet([row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth')]));
+  result = sandbox.attachProgramLeaderRow('Jane Doe', 'Chair Yoga', 'Narberth');
+  check('attaching somebody who is already down for it writes nothing',
+    [result.status, sheet.state.wroteAt], ['exists', null]);
+
+  // IT ONLY ADDS. Sam does not lose their row because Kit was picked.
+  sheet = use(writableLeaderSheet([row('Sam Reed', 'sam@x.com', 'Book Club', 'Narberth')]));
+  sandbox.attachProgramLeaderRow('Kit Alvarez', 'Book Club', 'Narberth');
+  check('a new leader is added beside the old one, never over it',
+    [sheet.state.grid[2][leaderMap['Leader_Name']], sheet.state.wrote[leaderMap['Leader_Name']]],
+    ['Sam Reed', 'Kit Alvarez']);
+  check('...and a name nobody has an address for yet says so rather than guessing',
+    sheet.state.wrote[leaderMap['Email']], '');
+
+  check('a row with no program or location is refused outright',
+    sandbox.attachProgramLeaderRow('Jane Doe', '', 'Narberth').status, 'refused');
+  activeSpreadsheet = { getSheetByName: () => null };
+  sandbox.invalidateProgramLeaderIndex();
+  check('and so is one with no tab to write to',
+    sandbox.attachProgramLeaderRow('Jane Doe', 'Chair Yoga', 'Narberth').status, 'refused');
+
+  // The dropdown's own list: every name once, including a leader who so far
+  // has only Title_Match phrases and no program row for the index to key on.
+  use(writableLeaderSheet([
+    row('Sam Reed', 'sam@x.com', 'Book Club', 'Narberth'),
+    row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth'),
+    row('Jane Doe', 'jane@x.com', 'Tai Chi', 'Ashbridge'),
+    row('Ada Frost', 'ada@x.com', '', '')
+  ]));
+  check('the dropdown offers each name once, phrase-only leaders included',
+    sandbox.programLeaderNames(), ['Ada Frost', 'Jane Doe', 'Sam Reed']);
+
+  activeSpreadsheet = null;
+  sandbox.invalidateProgramLeaderIndex();
+}
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

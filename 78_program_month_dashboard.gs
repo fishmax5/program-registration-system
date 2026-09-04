@@ -208,12 +208,16 @@ function programMonthNumber(value) {
  * anything that has no sheet in hand) the cell is the plain count, which is
  * what it always was.
  *
+ * `leaderIndex` — buildProgramLeaderIndex(), if the caller has it. Omitted,
+ * the Leader columns come back blank: this function still writes nothing
+ * anywhere, and the leader it would have printed is not a fact it holds.
+ *
  * Returns { rows, notes }: `notes` is keyed by the row ARRAY (not its index),
  * because the rows are about to be split into Upcoming and Past and sorted,
  * and an index into the list handed back here would be an index into a list
  * that no longer exists by the time the notes are written.
  */
-function buildProgramMonthRows(sessionRows, sessionMap, linkTarget) {
+function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex) {
   const headers = HEADERS.Program_Month;
   const map = getIndexMap(headers);
   const groups = {};
@@ -330,6 +334,13 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget) {
     out[map['Edit_Form_Link']] = firstNonBlank('Edit_Form_Link');
     out[map['Leader_Sheet_Link']] = firstNonBlank('Leader_Sheet_Link');
     out[map['Status']] = isLunch ? '' : worstProgramMonthStatus(sessions, sessionMap);
+    // Lunch has no leader row and never will — it is not a program (see the
+    // note above), and a blank here is the true answer rather than a gap.
+    const leader = isLunch
+      ? { name: '', source: '' }
+      : programMonthLeaderCell(String(first[sessionMap['Clean_Title']] || ''), locations, leaderIndex);
+    out[map['Leader']] = leader.name;
+    out[map['Leader_Source']] = leader.source;
     out[map['Form_ID']] = String(first[sessionMap['Form_ID']] || '');
     out[map['Group_Key']] = key;
 
@@ -374,10 +385,20 @@ function renderProgramMonthDashboard(force, options) {
     }
   }
 
+  // The SAME index the coverage line, the sharing paths and the mail paths
+  // read, memoized per execution. Caught rather than thrown: a leader tab that
+  // cannot be read costs two columns, not the tab.
+  let leaderIndex = null;
+  try {
+    leaderIndex = buildProgramLeaderIndex();
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read the leader index for ${SHEET_NAMES.PROGRAM_MONTH}'s Leader column (${err}).`);
+  }
+
   const built = buildProgramMonthRows(sessionRows, sessionMap, {
     gid: sessionSheet ? sessionSheet.getSheetId() : null,
     rowNumbersByEventId: programMonthSessionRowNumbers(sessionSheet, sessionMap)
-  });
+  }, leaderIndex);
   writeProgramMonthSheet(sheet, built, force, metrics);
   log(`Program_Month: ${built.rows.length} program-month row(s) from ${sessionRows.length} session row(s).`);
   return built;
@@ -425,9 +446,13 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     collapseOldMonths: false
   });
 
+  // `rows` rides along with each zone so anything working per-row — the
+  // matched-leader wash — can read the values it is about to format without
+  // going back to the sheet for what it just wrote. protectDerivedColumns()
+  // reads start and count and ignores the rest.
   const zones = [
-    { start: result.upcomingDataStart, count: upcoming.length },
-    { start: result.pastDataStart, count: past.length }
+    { start: result.upcomingDataStart, count: upcoming.length, rows: upcoming },
+    { start: result.pastDataStart, count: past.length, rows: past }
   ];
 
   const rules = [];
@@ -448,17 +473,24 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
         .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
     });
     locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
+    washMatchedProgramMonthLeaders(sheet, map, z.rows, z.start, z.count);
   });
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
   writeProgramMonthNotes(sheet, map, built.notes, upcoming, past, result);
 
-  // EVERY column, because every column here is derived. There is nothing on
-  // this tab a person is meant to type into: an edit would be overwritten by
-  // the next sync without ever having changed anything, which is precisely
-  // what the warning says.
-  protectDerivedColumns(sheet, headers, headers, zones);
+  // EVERY column BUT THE LEADER PAIR, because every other column here is
+  // derived from the session rows and an edit to one would be overwritten by
+  // the next sync without ever having changed anything — which is precisely
+  // what the warning says. Leader is the exception the phase-4 banner
+  // explains: it is derived too, but from Program_Leaders, and typing in it
+  // writes there. Leader_Source is REPORTED, so it keeps its warning; it says
+  // which kind of row the name came off, and typing over that changes nothing
+  // but what the tab claims about itself.
+  protectDerivedColumns(sheet, headers, headers.filter(h => h !== 'Leader'), zones);
+  applyProgramMonthLeaderValidation(sheet, map, zones,
+    [result.upcomingHeaderRow, result.pastHeaderRow], programLeaderNames());
   applyColumnVisibility(sheet, headers, PROGRAM_MONTH_HIDDEN_COLUMNS);
   freezeRowsSafely(sheet, result.upcomingHeaderRow);
   freezeColumnsSafely(sheet, 3); // month, location, program name
@@ -623,4 +655,130 @@ function writeProgramMonthCoverageLine(sheet, row, numCols, coverage) {
 function renderProgramMonthSheetNow() {
   renderProgramMonthDashboard(true);
   SpreadsheetApp.getActive().toast('Program_Month rebuilt from the session table.');
+}
+
+// ============================================================================
+// PHASE 4 — THE LEADER COLUMN, WHICH IS A WINDOW AND NOT A DRAWER
+// ============================================================================
+//
+// Everything else on this tab is derived from the session rows and read-only.
+// Leader is derived from Program_Leaders and WRITABLE, and the two halves of
+// that sentence are the whole design:
+//
+//   read:   the Program_Leaders row for (title | location)  ->  Leader cell
+//   write:  edit the cell -> handleProgramMonthEdit() (18) writes that row
+//                         -> invalidateProgramLeaderIndex()
+//
+// THE COLUMN IS NOT A SECOND PLACE WHO-LEADS-WHAT IS STORED. Nothing ever
+// reads this cell back: the next render asks Program_Leaders again, so a cell
+// somebody typed into and a leader tab that disagrees with it cannot both
+// survive a sync. That matters more here than anywhere else on the tab,
+// because "who leads this" is also "who may read this roster" — two records
+// disagreeing about that is discovered the day somebody is emailed a class
+// they do not teach.
+//
+// MONTHLY CARRY-FORWARD NEEDED NO CODE, and this is the file where that is
+// worth saying out loud: leaderProgramKey(title, location) has no month in it.
+// Attach a leader to Chair Yoga at Narberth once and every future month's row
+// resolves to the same key and prints the same name, with nothing stored per
+// month and nothing to carry anywhere. tests/program_month.test.js pins it.
+// ============================================================================
+
+/** Leader_Source' two words. A row proposed by a Title_Match phrase that nobody has confirmed yet, or one somebody typed. */
+const PROGRAM_MONTH_LEADER_SOURCE_MATCHED = 'matched';
+const PROGRAM_MONTH_LEADER_SOURCE_TYPED = 'typed';
+
+/**
+ * Who is down as leading this program-month, off the SAME per-execution index
+ * the sharing and mail paths read — never a second read, and never a second
+ * answer that could disagree with theirs.
+ *
+ * A program with two leaders prints both, because it has two: a class with a
+ * lead and an assistant is ordinary (see buildProgramLeaderIndex()), and
+ * printing one of them would make the tab quietly wrong about who holds the
+ * roster.
+ *
+ * A shared program — one form, two buildings, Location reading "Narberth +
+ * Ashbridge" — takes the leaders of BOTH keys, the same way the coverage line
+ * counts it as covered if either building's row names somebody. It is one
+ * thing to run.
+ *
+ * The source is 'matched' if ANY row behind the cell is still an unconfirmed
+ * Title_Match proposal. Worst-first, like the status column: a name nobody has
+ * checked is the fact worth surfacing, and averaging it away against a typed
+ * row beside it would hide the one of the two that needs looking at.
+ */
+function programMonthLeaderCell(title, locations, index) {
+  if (!index || !title) return { name: '', source: '' };
+  const names = [];
+  let matched = false;
+  (locations || []).forEach(location => {
+    (index[leaderProgramKey(title, location)] || []).forEach(leader => {
+      const name = String(leader.name || '').trim();
+      if (!name || names.indexOf(name) !== -1) return;
+      names.push(name);
+      if (leader.matched) matched = true;
+    });
+  });
+  if (names.length === 0) return { name: '', source: '' };
+  return {
+    name: names.join(', '),
+    source: matched ? PROGRAM_MONTH_LEADER_SOURCE_MATCHED : PROGRAM_MONTH_LEADER_SOURCE_TYPED
+  };
+}
+
+/**
+ * The dropdown, and the note above it.
+ *
+ * SUGGESTING, NOT RESTRICTING — the same rule the Program and Location lists
+ * on the leader tab are applied under, and for a stronger reason here: a
+ * leader who has never been typed anywhere has no row to be offered off, and a
+ * closed list would refuse the very edit that would create their first one.
+ *
+ * The blank is the empty cell an open list already allows. Clearing the cell
+ * is answered by the handler rather than obeyed — nothing on this tab deletes
+ * a leader row, and the dialog says where one is deleted.
+ */
+function applyProgramMonthLeaderValidation(sheet, map, zones, headerRows, names) {
+  const column = map['Leader'] + 1;
+  zones.forEach(z => {
+    if (z.count < 1) return;
+    applyOpenValueListValidationBounded(sheet, column, names, z.start, z.count);
+  });
+  (headerRows || []).forEach(row => {
+    if (!row) return;
+    try {
+      sheet.getRange(row, column).setNote(
+        `Type or pick a name here and a row is ADDED on ${SHEET_NAMES.PROGRAM_LEADERS} — the tab ` +
+        `that shares a roster and sends the mail. Emails stay off until you tick them there.\n\n` +
+        `Nothing here removes a leader: clear the cell and the next render reads the same name ` +
+        `back off ${SHEET_NAMES.PROGRAM_LEADERS}, which is where a row is deleted.\n\n` +
+        `"${PROGRAM_MONTH_LEADER_SOURCE_MATCHED}" means a Title_Match phrase proposed that row and ` +
+        `nobody has checked it yet.`);
+    } catch (err) { /* the header row moved out from under us; the dropdown is the point */ }
+  });
+}
+
+/**
+ * The manual-entry wash on the cells whose leader was GUESSED — the same
+ * yellow the other tabs use for "please look at this", used here for exactly
+ * that and nowhere else on the tab.
+ *
+ * One getRangeList() per section rather than a setBackground() per row: a year
+ * of unconfirmed matches would otherwise be a hundred round trips on a tab
+ * nobody asked to be slow.
+ */
+function washMatchedProgramMonthLeaders(sheet, map, rows, start, count) {
+  if (count < 1) return;
+  const a1 = [];
+  for (let i = 0; i < count; i++) {
+    if (String(rows[i][map['Leader_Source']] || '') !== PROGRAM_MONTH_LEADER_SOURCE_MATCHED) continue;
+    a1.push(sheet.getRange(start + i, map['Leader'] + 1, 1, 2).getA1Notation());
+  }
+  if (a1.length === 0) return;
+  try {
+    sheet.getRangeList(a1).setBackground(MANUAL_ENTRY_CELL_TINT);
+  } catch (err) {
+    log(`\u2139\ufe0f Could not wash the matched leader cells on ${SHEET_NAMES.PROGRAM_MONTH} (${err}).`);
+  }
 }

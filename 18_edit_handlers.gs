@@ -39,6 +39,8 @@ function onEdit(e) {
       handleLunchScheduleEdit(e, sheet);
     } else if (name === SHEET_NAMES.PROGRAM_DASHBOARD) {
       handleProgramDashboardEdit(e, sheet);
+    } else if (name === SHEET_NAMES.PROGRAM_MONTH) {
+      handleProgramMonthEdit(e, sheet);
     } else if (name === SHEET_NAMES.CONFIG) {
       handleConfigEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
@@ -259,6 +261,147 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
   toastIfPossible(`${headline}${spread > 0 ? ` — ${spread} other session row(s) ticked to match` : ''}. ` +
     `Writing [${flag.tag}] to the calendar; the forms follow on the next Sync Cal.`);
   return true;
+}
+
+/**
+ * PROGRAM_MONTH'S LEADER CELL — the one cell on a derived, read-only tab that
+ * a person may type into, and the only edit anywhere that writes to
+ * Program_Leaders from somewhere else.
+ *
+ * THE HAZARD IT IS SHAPED AROUND. Program_Leaders is what shares a sign-up
+ * sheet and what sends a roster by email. A dropdown that stored its own
+ * answer would be a second record of who may read a roster, and two records
+ * disagreeing about that is found out the day somebody is emailed a class they
+ * do not teach. So this cell is a window: it is READ off Program_Leaders on
+ * every render (programMonthLeaderCell() in 78), and typing in it ADDS a row
+ * there. Nothing typed here is ever read back.
+ *
+ * IT ONLY ADDS — see attachProgramLeaderRow(), which is where that rule and
+ * its reasons live. Two consequences a person meets:
+ *
+ *   CLEARING THE CELL DELETES NOTHING. A row saying who led a class is a true
+ *   record whether or not they still lead it, and the next render simply reads
+ *   the same name back. The dialog says so in its own words, and says where a
+ *   leader is actually removed — on Program_Leaders, on the row whose deletion
+ *   is visibly the thing that stops a roster being shared.
+ *
+ *   REPLACING A NAME ADDS THE NEW ONE beside the old. The cell then prints
+ *   both, because both rows exist. That is the honest picture, and unpicking
+ *   the old one from here would be deleting a record from a tab nobody was
+ *   looking at.
+ *
+ * WHY IT ASKS. handleProgramFlagEdit() deliberately does not (a checkbox is
+ * its own question and its own undo). This is a dropdown holding a real value,
+ * and what it does is change who may read a roster — the single most
+ * consequential edit in the workbook that is not on the Admin menu.
+ *
+ * A simple onEdit, so: SpreadsheetApp only. Everything below is a sheet read,
+ * a sheet write and a dialog. invalidateProgramLeaderIndex() clears an
+ * in-memory variable, which is why it is reachable from here at all.
+ */
+function handleProgramMonthEdit(e, sheet) {
+  const headers = HEADERS.Program_Month;
+  const headerRows = findAllHeaderRows(sheet, 'Group_Key');
+  if (headerRows.length === 0) return;
+  const editedRow = e.range.getRow();
+  let headerRow = 0;
+  headerRows.forEach(row => { if (row < editedRow && row > headerRow) headerRow = row; });
+  if (!headerRow) return;
+
+  const sheetMap = getHeaderMapAt(sheet, headerRow);
+  const leaderCol = sheetMap['Leader'];
+  if (!leaderCol) return;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (leaderCol < firstCol || leaderCol > lastCol) return;
+
+  // A FILL-DOWN IS NOT ANSWERED, and it is not reverted either. Every row it
+  // lands on is a different program handing a different roster to the same
+  // person, which is the one shape of this edit nobody should be able to make
+  // with a drag — and there is no honest single question to ask about it. The
+  // tab is derived, so the next render puts every one of those cells back to
+  // what Program_Leaders says; the toast is what stops that looking like the
+  // edit silently working.
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) {
+    toastIfPossible(`⚠️ Leaders are attached one program at a time — nothing was written to ` +
+      `${SHEET_NAMES.PROGRAM_LEADERS}. The next render will put these cells back.`);
+    return;
+  }
+
+  const readCell = name => (sheetMap[name]
+    ? String(sheet.getRange(editedRow, sheetMap[name]).getValue() || '').trim() : '');
+  const groupKey = readCell('Group_Key');
+  const title = readCell('Program');
+  const location = readCell('Location');
+  const before = e.oldValue === undefined ? '' : String(e.oldValue).trim();
+  const typed = e.value === undefined ? '' : String(e.value).trim();
+
+  // A LUNCH ROW IS NOT A PROGRAM and has no leader row to write — the same
+  // refusal handleProgramDashboardEdit() makes for a lunch date, for the same
+  // reason: accepted on screen, reaching nothing, undone by the next render.
+  if (groupKey.indexOf('lunch::') === 0) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ Lunch is not a program and has no leader row.');
+    return;
+  }
+  if (!title || !location) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ That row has no program and location to attach a leader to.');
+    return;
+  }
+  // A SHARED PROGRAM IS ONE THING TO RUN AND TWO ROWS ON THE LEADER TAB — the
+  // privacy boundary there is one program at ONE location (see NO WILDCARDS in
+  // 65_program_leaders.gs), so attaching somebody to "Narberth + Ashbridge"
+  // would have to invent a grain that tab refuses to have. Sent to the tab
+  // where both rows can be typed deliberately, rather than resolved
+  // generously here.
+  if (location.indexOf(' + ') !== -1) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ "${title}" runs at ${location} — that is two leader rows, one per building. ` +
+      `Add them on ${SHEET_NAMES.PROGRAM_LEADERS}.`);
+    return;
+  }
+
+  if (typed === '') {
+    // The non-destructive reading, said out loud. Nothing is deleted here, so
+    // the cell goes back to what Program_Leaders says rather than sitting
+    // blank until the next render quietly refills it.
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`Nothing was removed: clearing this cell does not take ${before || 'a leader'} off ` +
+      `"${title}". Delete their row on ${SHEET_NAMES.PROGRAM_LEADERS} — that is what stops the ` +
+      `roster being shared with them.`);
+    return;
+  }
+  if (normalizeNameKey(typed) === normalizeNameKey(before)) return;
+
+  if (!confirmCellEditOrRevert(e, `Attach ${typed} to "${title}" at ${location}?`,
+      `A row is added on ${SHEET_NAMES.PROGRAM_LEADERS} naming ${typed} as leading "${title}" at ` +
+      `${location}. That tab is what shares this program's sign-up sheet, so this decides who may ` +
+      `read its roster.\n\n` +
+      `Emails stay OFF until you tick Notify_Roster_Changes there.\n\n` +
+      (before ? `${before} is not removed — their row stays, and this cell will show both names ` +
+        `until you delete it on ${SHEET_NAMES.PROGRAM_LEADERS}.` : ''))) return;
+
+  const result = attachProgramLeaderRow(typed, title, location);
+  if (result.status === 'refused') {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ ${typed} was not attached to "${title}" — ${result.note}.`);
+    return;
+  }
+  if (result.status === 'exists') {
+    toastIfPossible(`${typed} was already down as leading "${title}" at ${location}.`);
+    return;
+  }
+  toastIfPossible(`${typed} added to ${SHEET_NAMES.PROGRAM_LEADERS} for "${title}" at ${location}` +
+    (result.email ? '' : ' — with no email address yet, so nothing can be shared until you add one') +
+    '. Emails are off until you tick them there.');
+}
+
+/** Puts a Program_Month cell back to what it held. The tab is derived; the cell was never the record. */
+function revertProgramMonthCell(e, sheet) {
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
+  e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+  invalidateSectionedRowsCache(sheet);
 }
 
 /**
