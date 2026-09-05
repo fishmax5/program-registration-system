@@ -627,18 +627,18 @@ const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
 /**
  * The same date cell shown as its MONTH alone — "September 2026".
  *
- * FOR A ROW THAT IS A MONTH, AND NOTHING ELSE. Master_Program_Dashboard's
- * Month_Start is the 1st of the month and stands for every session in it, so
- * printing it as "Tue 9/1/2026" states a weekday and a day-of-month that are
- * not facts about the row: nothing happens on the 1st, and the program does
- * not run on Tuesdays because September started on one.
+ * FOR A DATE THAT STANDS FOR A MONTH, AND NOT FOR A DAY. It is what
+ * Master_Program_Dashboard's Schedule cell says a span in
+ * ("September 2026 – June 2027"), and what its per-month breakdown is written
+ * in.
  *
  * IT IS NOT FOR A ROW THAT IS A SESSION, and it was applied to one for a
  * while — the session table showed thirty rows all reading "September 2026",
  * which is the single most useful column on the tab spent saying the same
  * thing thirty times. A session's row keeps DATE_DISPLAY_FORMAT: the weekday
  * is half of how a program is known here (see above), and the drill-through
- * from a month row lands on a block of days a person then has to tell apart.
+ * from the program tab lands on a block of days a person then has to tell
+ * apart.
  *
  * The cell still holds the real date underneath either way, so
  * partitionByDate(), collapseOldPastMonths() and the Event_Time formulas that

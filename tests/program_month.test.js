@@ -1,47 +1,58 @@
-// Master_Program_Dashboard is one row per program-month — the unit buildEventGroups()
-// already makes one FORM for, and the one thing the session table cannot show.
-// Everything here is about the COLLAPSING: what becomes one row, what refuses
-// to, and what a collapsed cell is allowed to claim.
+// Master_Program_Dashboard is ONE ROW PER PROGRAM — for as long as that program
+// runs, across every month and every form it takes. Everything here is about
+// the COLLAPSING: what becomes one row, what refuses to, and what a collapsed
+// cell is allowed to claim.
 //
 // The rules this file holds:
 //
-//   1. Four sessions sharing a Form_ID are ONE row. That is the whole premise.
-//   2. A blank Form_ID falls back to (title, location, month) — the
-//      [No Registration] and hand-added cases, which have no form to group by.
+//   1. A program's sessions are ONE row however many monthly forms they span.
+//      That is the whole premise, and the key (title + building signature) is
+//      what carries it. Form_ID resolves the building signature and is not the
+//      key itself: keying on the form is how the month got into the grain.
+//   2. A blank Form_ID falls back to (title, location) — the [No Registration]
+//      and hand-added cases, which have no form to resolve buildings with.
 //   3. A [Shared] program at two locations has ONE form and is ONE row, with
 //      describeLocations() wording the pair.
 //   4. An all-uncapped group's Fill is BLANK, never 0% — most programs here
 //      are uncapped, and "0% full" about a month of open-door sessions is a
 //      lie a person would act on.
-//   5. Lunch collapses to one row per location per month.
+//   5. Lunch collapses to one row per location.
+//   6. Seats are summed over THIS MONTH AND NEXT, never the program's life:
+//      at this grain a lifetime total is arithmetic about 2019 printed beside
+//      a capacity, which reads as something somebody could book against.
+//   7. The split is Running / Not currently running — a status, not a date.
 //
-// And, from phase 2 — the metrics block's move up here, the leader-coverage
-// line it made possible, and the Sessions drill-through:
+// And the metrics block's move up here, the leader-coverage line it made
+// possible, and the Sessions drill-through:
 //
-//   6. The Sessions cell links into the session tab at the group's OWN first
-//      day row, and degrades to the plain count rather than to a wrong link.
-//   7. Leader coverage counts THIS month's programs with nobody down as
+//   8. The Sessions cell links into the session tab at the group's NEXT day
+//      row, and degrades to the plain count rather than to a wrong link. It is
+//      also where the month detail went when the month left the grain.
+//   9. Leader coverage counts the RUNNING programs with nobody down as
 //      leading them, treats a shared program as covered if either building's
 //      row names a leader, leaves lunch out of it, and — the line that matters
 //      — only ever counts: it shares nothing and sends nothing.
-//   8. Moving the metric block onto this tab does not move a number in it. The
+//  10. Moving the metric block onto this tab does not move a number in it. The
 //      arithmetic stayed in 43_program_dashboard.gs; this asserts it.
 //
-// And, from phase 4 — the leader column, which is a window onto
-// Program_Leaders and not a second place who-leads-what is stored:
+// And the four cells a person may touch, which are WINDOWS onto the tabs that
+// own the answers and not a second place anything is stored:
 //
-//   9. The Leader cell is READ off the leader index the sharing and mail paths
+//  11. The Leader cell is READ off the leader index the sharing and mail paths
 //      already read: both leaders of a two-leader program, both buildings of a
 //      shared one, blank for lunch and for a program nobody leads, and blank
-//      when no index was handed in at all. Leader_Source says 'matched' while
-//      a Title_Match proposal behind it is still unconfirmed.
-//  10. Monthly carry-forward needed no code, and the test IS the mechanism:
-//      leaderProgramKey() has no month in it, so October reads the same row as
-//      September with nothing stored per month.
+//      when no index was handed in at all. An unconfirmed Title_Match proposal
+//      travels beside the rows for the yellow wash rather than in a column.
+//  12. The three program FLAGS are real tick boxes here, read off the session
+//      rows — they were twelve identical copies of themselves on that tab.
+//  13. Room and Notify are read-only off Program_Settings, where blank and
+//      "Silent" are deliberately different answers.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const sandbox = {
@@ -54,7 +65,7 @@ const sandbox = {
       if (pattern === 'MMM d') return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
       if (pattern === 'EEE MMM d') return `${DAYS[date.getDay()]} ${MONTHS[date.getMonth()]} ${date.getDate()}`;
       if (pattern === 'EEE') return DAYS[date.getDay()];
-      if (pattern === 'MMMM yyyy') return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+      if (pattern === 'MMMM yyyy') return `${FULL_MONTHS[date.getMonth()]} ${date.getFullYear()}`;
       if (pattern === 'd') return String(date.getDate());
       if (pattern === 'h:mm a') {
         const h = date.getHours() % 12 || 12;
@@ -92,6 +103,8 @@ this.programMonthLinkParts = programMonthLinkParts;
 this.hyperlinkFormulaUrl = hyperlinkFormulaUrl;
 this.NO_REGISTRATION_LINK_LABEL = NO_REGISTRATION_LINK_LABEL;
 this.SHEET_NAMES = SHEET_NAMES;
+this.partitionRunningPrograms = partitionRunningPrograms;
+this.programSeatWindow = programSeatWindow;
 this.describeProgramMonthNotify = describeProgramMonthNotify;
 this.notificationProgramKey = notificationProgramKey;
 this.writeNotificationTicks = writeNotificationTicks;
@@ -141,6 +154,20 @@ function session(fields) {
 
 const cell = (row, header) => row[monthMap[header]];
 
+/**
+ * A FIXED "TODAY", because the tab now has a clock in it.
+ *
+ * Next_Date, the Running / Not currently running split and the seat window are
+ * all relative to the day the render runs, so the row builder takes `today`
+ * rather than reading one — which is what keeps it a pure function of its
+ * inputs and keeps this file from expiring. 5 September 2026: mid-month, so
+ * the fixtures dated the 1st are in the past and the 8th onwards is not.
+ */
+const TODAY = new Date(2026, 8, 5);
+const build = (rows, link, leaders, settings) =>
+  sandbox.buildProgramMonthRows(rows, sessionMap, link || null, leaders || null,
+    settings || null, TODAY);
+
 // --- 1. Four sessions, one Form_ID, one row ---------------------------------
 {
   const rows = [
@@ -149,15 +176,21 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 15, 9, 30], active: 4, capacity: 12, status: '🟢 Open' }),
     session({ at: [2026, 8, 22, 9, 30], active: 5, capacity: 12, status: '🟢 Open' })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const built = build(rows);
   check('four sessions collapse to one row', built.rows.length, 1);
   const row = built.rows[0];
-  check('Month_Start is the 1st, as a real Date',
+  // NEXT_DATE IS THE NEXT SESSION FROM TODAY, not the first one ever: with
+  // TODAY at the 5th, the 1st has gone and the 8th is next.
+  check('Next_Date is the next session still to come, as a real Date',
     // Not `instanceof Date`: the value was built inside the vm context, whose
     // Date is a different constructor from this file's. What matters is that
     // the sectioned reader will see a date, which is what this asks.
-    [Object.prototype.toString.call(cell(row, 'Month_Start')), cell(row, 'Month_Start').getDate(), cell(row, 'Month_Start').getMonth()],
-    ['[object Date]', 1, 8]);
+    [Object.prototype.toString.call(cell(row, 'Next_Date')),
+      cell(row, 'Next_Date').getDate(), cell(row, 'Next_Date').getMonth()],
+    ['[object Date]', 8, 8]);
+  check('Last_Date is the final session', cell(row, 'Last_Date').getDate(), 22);
+  check('the month has left the layout',
+    sandbox.HEADERS.Master_Program_Dashboard.indexOf('Month_Start'), -1);
   check('Sessions counts the group', cell(row, 'Sessions'), '4 sessions');
   // FOUR TUESDAYS IN A ROW IS "WEEKLY", and saying so is the point: the same
   // phrase without it is equally true of a class that ran on the 1st, 8th,
@@ -168,7 +201,10 @@ const cell = (row, header) => row[monthMap[header]];
   // without the capacity beside it, and Fill was arithmetic on those two.
   check('Seats is the whole count in one cell', cell(row, 'Seats'), '24 / 48 · 50%');
   check('Status is the group\'s worst', cell(row, 'Status'), '🟡 Almost Full');
-  check('Group_Key is the form', cell(row, 'Group_Key'), 'form::FORM_A');
+  // THE KEY IS THE PROGRAM, NOT THE FORM. A Regular program takes a new form
+  // every month, so keying on it is exactly how the month got into the grain.
+  check('Group_Key is the program and its building',
+    cell(row, 'Group_Key'), 'program::chair yoga::narberth');
 }
 
 // --- 2. A blank Form_ID falls back to (title, location, month) --------------
@@ -176,18 +212,25 @@ const cell = (row, header) => row[monthMap[header]];
   const rows = [
     session({ at: [2026, 8, 2, 10, 0], formId: '', title: 'Coffee Hour', noRegistration: true }),
     session({ at: [2026, 8, 9, 10, 0], formId: '', title: 'Coffee Hour', noRegistration: true }),
-    // Same title, DIFFERENT location — a separate program-month, and the
-    // fallback key is the only thing that can say so.
+    // Same title, DIFFERENT location — a separate program, and the fallback
+    // key is the only thing that can say so.
     session({ at: [2026, 8, 9, 10, 0], formId: '', title: 'Coffee Hour', location: 'Ashbridge' }),
-    // Same title and location, NEXT month. Without the month in the key this
-    // would join the September row and claim three sessions.
+    // Same title and location, NEXT month — the same program, still.
     session({ at: [2026, 9, 7, 10, 0], formId: '', title: 'Coffee Hour' })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
-  check('blank Form_ID groups by title, location and month', built.rows.length, 3);
-  check('the fallback key says what it grouped on',
-    cell(built.rows[0], 'Group_Key'), 'plain::Coffee Hour::Narberth::2026-09');
-  check('the two-session fallback group counts two', cell(built.rows[0], 'Sessions'), '2 sessions');
+  const built = build(rows);
+  // TWO rows, not three: the September and October Narberth sessions are the
+  // SAME PROGRAM. Before phase 4 the month was in the key and this was three.
+  check('a formless program groups by title and location, across months', built.rows.length, 2);
+  check('the key says what it grouped on, and has no month in it',
+    cell(built.rows[0], 'Group_Key'), 'program::coffee hour::narberth');
+  check('and the row spans both months', cell(built.rows[0], 'Sessions'), '3 sessions');
+  check('...with the span in the Schedule cell and the breakdown in its note',
+    cell(built.rows[0], 'Schedule').indexOf('September 2026 – October 2026') > -1, true);
+  const spanNote = built.notes.filter(n => n.row === built.rows[0] && n.header === 'Schedule')[0];
+  check('the per-month breakdown is the note, which is where a follow-up belongs',
+    !!spanNote && spanNote.text.indexOf('September 2026 — 2') > -1 &&
+      spanNote.text.indexOf('October 2026 — 1') > -1, true);
   // THE FLAGS ARE TICK BOXES ON THIS TAB NOW, not words in a joined cell —
   // real booleans, so the cell is something a person can click.
   check('a program flag reads as a ticked box on the program-month row',
@@ -200,7 +243,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 3, 13, 0], formId: 'FORM_SHARED', title: 'Book Club', location: 'Narberth', club: true }),
     session({ at: [2026, 8, 10, 13, 0], formId: 'FORM_SHARED', title: 'Book Club', location: 'Ashbridge', club: true })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const built = build(rows);
   check('one form across two locations is one row', built.rows.length, 1);
   check('Location is worded by describeLocations()',
     cell(built.rows[0], 'Location'), 'Narberth + Ashbridge');
@@ -213,7 +256,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_U', active: 7 }),
     session({ at: [2026, 8, 11, 11, 0], formId: 'FORM_U', active: 5 })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const built = build(rows);
   const row = built.rows[0];
   check('an uncapped group says "unlimited", never 0%', cell(row, 'Seats'), '12 · unlimited');
   // ...and the note still shows its working, which is where the reason lives.
@@ -224,17 +267,16 @@ const cell = (row, header) => row[monthMap[header]];
 
 // Nobody registered and nothing capped: an empty cell, not "0 · unlimited".
 {
-  const row = sandbox.buildProgramMonthRows(
-    [session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_E' })], sessionMap).rows[0];
+  const row = build([session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_E' })]).rows[0];
   check('a group nobody has signed up for has nothing to say about seats',
     cell(row, 'Seats'), '');
 }
 
 // A waitlist is part of the same sentence.
 {
-  const row = sandbox.buildProgramMonthRows([
+  const row = build([
     session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_W', active: 12, capacity: 12, waitlist: 2 })
-  ], sessionMap).rows[0];
+  ]).rows[0];
   check('somebody queueing is said in the same cell', cell(row, 'Seats'), '12 / 12 · 100% · 2 waiting');
 }
 
@@ -245,7 +287,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_M', active: 5, capacity: 10 }),
     session({ at: [2026, 8, 11, 11, 0], formId: 'FORM_M', active: 40 })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const built = build(rows);
   const row = built.rows[0];
   // AND DOES NOT PRINT "45 / 10", which is a nonsense: the 45 and the 10 are
   // two different populations, so the cell says which is which.
@@ -268,8 +310,8 @@ const cell = (row, header) => row[monthMap[header]];
   const rows = [];
   [1, 2, 3, 4, 7].forEach(day => rows.push(lunch(day, 'Narberth')));
   [1, 2].forEach(day => rows.push(lunch(day, 'Ashbridge')));
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
-  check('lunch is one row per location per month', built.rows.length, 2);
+  const built = build(rows);
+  check('lunch is one row per location', built.rows.length, 2);
   check('the lunch row says where and how many days',
     [cell(built.rows[0], 'Program'), cell(built.rows[0], 'Sessions')],
     ['Lunch @ Narberth', '5 days']);
@@ -286,7 +328,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 8, 9, 30], formId: 'FORM_V' }),
     session({ at: [2026, 8, 15, 14, 0], formId: 'FORM_V' })
   ];
-  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const built = build(rows);
   check('a moved session makes the schedule read "times vary"',
     cell(built.rows[0], 'Schedule'), '3 sessions · times vary');
   const scheduleNote = built.notes.filter(n => n.header === 'Schedule')[0];
@@ -303,7 +345,7 @@ const cell = (row, header) => row[monthMap[header]];
 // is the one that gets a room booked on a day nothing happens.
 {
   const weekly = [1, 8, 15, 22].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_WK' }));
-  const built = sandbox.buildProgramMonthRows(weekly, sessionMap);
+  const built = build(weekly);
   check('four Tuesdays in a row read as weekly',
     cell(built.rows[0], 'Schedule'), 'Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions');
   const note = built.notes.filter(n => n.header === 'Schedule')[0];
@@ -317,7 +359,7 @@ const cell = (row, header) => row[monthMap[header]];
 // note must still be told the run has a hole in it.
 {
   const skipping = [1, 8, 22, 29].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_SK' }));
-  const built = sandbox.buildProgramMonthRows(skipping, sessionMap);
+  const built = build(skipping);
   check('a missing week is still weekly, and says a week is missing',
     cell(built.rows[0], 'Schedule'), 'Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions · 1 skipped');
   const note = built.notes.filter(n => n.header === 'Schedule')[0];
@@ -336,7 +378,7 @@ const cell = (row, header) => row[monthMap[header]];
 {
   const fortnightly = [1, 15, 29].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_FN' }));
   check('a genuine fortnightly run is named as one',
-    cell(sandbox.buildProgramMonthRows(fortnightly, sessionMap).rows[0], 'Schedule'),
+    cell(build(fortnightly).rows[0], 'Schedule'),
     'Every 2 weeks · Tue 9:30 AM – 11:30 AM · 3 sessions');
 }
 
@@ -347,7 +389,7 @@ const cell = (row, header) => row[monthMap[header]];
 {
   const twice = [1, 8].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_TW' }));
   check('two sessions a week apart are two sessions a week apart',
-    cell(sandbox.buildProgramMonthRows(twice, sessionMap).rows[0], 'Schedule'),
+    cell(build(twice).rows[0], 'Schedule'),
     'Tue 9:30 AM – 11:30 AM · 2 sessions');
   const uneven = [1, 8, 11].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_UN' }));
   check('a run with a non-weekly gap is not called weekly',
@@ -361,7 +403,7 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 15, 14, 0], formId: 'F_MV' })
   ];
   check('a moved session is not a weekly class', 
-    cell(sandbox.buildProgramMonthRows(moved, sessionMap).rows[0], 'Schedule'),
+    cell(build(moved).rows[0], 'Schedule'),
     '3 sessions · times vary');
 }
 
@@ -374,7 +416,7 @@ const cell = (row, header) => row[monthMap[header]];
   const withLinks = session({ at: [2026, 8, 1, 9, 30], formId: 'F_L' });
   withLinks[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/live","View Live Form")';
   withLinks[sessionMap['Registrant_Sheet_Link']] = 'https://docs.example/roster';
-  const built = sandbox.buildProgramMonthRows([withLinks], sessionMap);
+  const built = build([withLinks]);
   check('the words are on the sheet, in the order they are wanted',
     cell(built.rows[0], 'Links'), 'Register · Roster');
   check('and the URLs travel beside them for the rich-text pass',
@@ -388,7 +430,7 @@ const cell = (row, header) => row[monthMap[header]];
 {
   const blocked = session({ at: [2026, 8, 1, 9, 30], formId: '', title: 'Coffee Hour' });
   blocked[sessionMap['Form_Response_Link']] = sandbox.NO_REGISTRATION_LINK_LABEL;
-  const built = sandbox.buildProgramMonthRows([blocked], sessionMap);
+  const built = build([blocked]);
   check('a link column holding words prints the words, unlinked',
     [cell(built.rows[0], 'Links'), built.links[0].parts[0].url],
     [sandbox.NO_REGISTRATION_LINK_LABEL, '']);
@@ -429,9 +471,9 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   put({ title: 'Memory Cafe', location: 'Ashbridge', room: 'Hall B',
     policy: { invite: true, remind: false, days: [], confirmTime: false } });
 
-  const build = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, null, index);
+  const buildWithSettings = rows => build(rows, null, null, index);
 
-  const yoga = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })]);
+  const yoga = buildWithSettings([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })]);
   check('Notify is the tick boxes as one phrase, soonest last',
     cell(yoga.rows[0], 'Notify'), 'Cal · 7d · AM');
   check('Room is the standing note about where it runs',
@@ -444,9 +486,9 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   // yet — notified the way its kind is until the next refresh writes one.
   // "Silent" is a row somebody has cleared every box on. One is a gap and one
   // is a decision, and only one of them is worth acting on.
-  const quiet = build([session({ at: [2026, 8, 2, 9, 30], title: 'Quiet Hour', formId: 'S_Q' })]);
+  const quiet = buildWithSettings([session({ at: [2026, 8, 2, 9, 30], title: 'Quiet Hour', formId: 'S_Q' })]);
   check('a row with every box clear reads as a decision', cell(quiet.rows[0], 'Notify'), 'Silent');
-  const unknown = build([session({ at: [2026, 8, 3, 9, 30], title: 'Brand New', formId: 'S_N' })]);
+  const unknown = buildWithSettings([session({ at: [2026, 8, 3, 9, 30], title: 'Brand New', formId: 'S_N' })]);
   check('a program with no settings row yet is blank, not Silent',
     cell(unknown.rows[0], 'Notify'), '');
   const unknownNote = unknown.notes.filter(n => n.header === 'Notify')[0];
@@ -455,7 +497,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
 
   // A shared program prints BOTH rooms and ONE notify phrase: the channels are
   // a property of the program, the room is a property of the building.
-  const cafe = build([
+  const cafe = buildWithSettings([
     session({ at: [2026, 8, 4, 9, 30], title: 'Memory Cafe', formId: 'S_C', location: 'Narberth' }),
     session({ at: [2026, 8, 5, 9, 30], title: 'Memory Cafe', formId: 'S_C', location: 'Ashbridge' })
   ]);
@@ -463,7 +505,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     [cell(cafe.rows[0], 'Room'), cell(cafe.rows[0], 'Notify')], ['Lounge · Hall B', 'Cal']);
 
   // Lunch is not a program and has no settings row to look up.
-  const lunchRow = build([session({
+  const lunchRow = buildWithSettings([session({
     at: [2026, 8, 7, 12, 0], formId: '', title: 'Lunch @ Narberth — Chx Parm',
     eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_7` })]).rows[0];
   check('lunch has neither a room nor a notify policy',
@@ -471,10 +513,107 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
 
   // Handed no index at all — every other test in this file — the two columns
   // are blank rather than guessed at, and nothing is read from anywhere.
-  const unlit = sandbox.buildProgramMonthRows(
-    [session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })], sessionMap).rows[0];
+  const unlit = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })]).rows[0];
   check('with no settings index in hand the columns stay blank',
     [cell(unlit, 'Room'), cell(unlit, 'Notify')], ['', '']);
+}
+
+// --- THE GRAIN: ONE ROW PER PROGRAM, FOR AS LONG AS IT RUNS -----------------
+//
+// This is the phase-4 change and the thing everything else on the tab now
+// depends on. A weekly class used to be twelve rows a year — one per month,
+// because a Regular program takes one FORM per month and the form was the key.
+// Eleven of those rows differed from the first only in which dates they
+// summed, which is the same complaint that produced this tab, one level up.
+{
+  const year = [
+    session({ at: [2026, 8, 8, 9, 30], formId: 'F_SEP', active: 6, capacity: 12 }),
+    session({ at: [2026, 8, 15, 9, 30], formId: 'F_SEP', active: 6, capacity: 12 }),
+    session({ at: [2026, 9, 6, 9, 30], formId: 'F_OCT', active: 9, capacity: 12 }),
+    session({ at: [2026, 10, 3, 9, 30], formId: 'F_NOV', active: 40, capacity: 12 })
+  ];
+  const built = build(year);
+  check('four sessions on three monthly forms are ONE row', built.rows.length, 1);
+  const row = built.rows[0];
+
+  // SEATS ARE THIS MONTH AND NEXT — September and October here, so November's
+  // forty are not in the number. A lifetime total only ever goes up, says
+  // nothing about whether there is room next Tuesday, and beside a capacity
+  // reads as something somebody could book against.
+  check('Seats counts this month and next, not the whole run',
+    cell(row, 'Seats'), '21 / 36 · 58%');
+  const seatNote = built.notes.filter(n => n.header === 'Seats')[0];
+  check('and the note names the window it is a sum over',
+    !!seatNote && seatNote.text.indexOf('in September 2026 and October 2026') > -1, true);
+
+  // The window is whole MONTHS starting with this one, not "from today": a
+  // window that started today would make a program read emptier every week of
+  // the month for no reason a person could see.
+  const window = sandbox.programSeatWindow(TODAY);
+  check('the window is this whole month and the whole of the next',
+    [window.covers(new Date(2026, 8, 1)), window.covers(new Date(2026, 9, 31)),
+      window.covers(new Date(2026, 10, 1)), window.covers(new Date(2026, 7, 31))],
+    [true, true, false, false]);
+}
+
+// A [Shared] program is ONE form across two buildings and one thing to run, so
+// it stays ONE row — across months too, which is the case the old Form_ID key
+// got right by accident and the new key has to get right on purpose.
+{
+  const shared = [
+    session({ at: [2026, 8, 10, 13, 0], formId: 'SH_SEP', title: 'Book Club', location: 'Narberth' }),
+    session({ at: [2026, 8, 17, 13, 0], formId: 'SH_SEP', title: 'Book Club', location: 'Ashbridge' }),
+    session({ at: [2026, 9, 8, 13, 0], formId: 'SH_OCT', title: 'Book Club', location: 'Narberth' }),
+    session({ at: [2026, 9, 15, 13, 0], formId: 'SH_OCT', title: 'Book Club', location: 'Ashbridge' })
+  ];
+  const built = build(shared);
+  check('a shared program is one row across two buildings AND two months',
+    [built.rows.length, cell(built.rows[0], 'Location'), cell(built.rows[0], 'Sessions')],
+    [1, 'Narberth + Ashbridge', '4 sessions']);
+  check('and its key names the buildings rather than the form',
+    cell(built.rows[0], 'Group_Key'), 'program::book club::ashbridge|narberth');
+}
+
+// THE FIXED-SPAN PROBLEM DISSOLVED. A [Grouped] series takes one form for its
+// whole run, so it had no month of its own and was filed under its earliest
+// one — the design doc's open question #2, answered awkwardly for two
+// versions. There is no month to file it under now: it is a program with a
+// span, and the Schedule cell states the span.
+{
+  // Sep 8, 15, 22, 29 and Oct 6, 13 — written out rather than computed,
+  // because a fixture that rolls its own month over is the sort of clever a
+  // test should not have to be read through.
+  const run = [[2026, 8, 8], [2026, 8, 15], [2026, 8, 22], [2026, 8, 29],
+    [2026, 9, 6], [2026, 9, 13]].map(at => session({ at: [at[0], at[1], at[2], 9, 30],
+    formId: 'F_FIXED', type: 'Grouped' }));
+  const built = build(run);
+  check('a ten-week course is one row that states its span, not a row per month',
+    [built.rows.length, cell(built.rows[0], 'Schedule')],
+    [1, 'Weekly · Tue 9:30 AM – 11:30 AM · September 2026 – October 2026 · 6 sessions']);
+}
+
+// --- RUNNING / NOT CURRENTLY RUNNING ----------------------------------------
+//
+// Not a date partition. A row here is a PROGRAM, which has no single date to
+// be on one side or the other of: a class running September to June is neither
+// upcoming nor past. The question is "do we run this at the moment", and the
+// answer is whether it has a session still to come.
+{
+  const rows = build([
+    session({ at: [2026, 9, 6, 9, 30], title: 'Later', formId: 'R_L' }),
+    session({ at: [2026, 8, 8, 9, 30], title: 'Sooner', formId: 'R_S' }),
+    session({ at: [2026, 7, 20, 9, 30], title: 'Stopped In August', formId: 'R_A' }),
+    session({ at: [2019, 3, 2, 9, 30], title: 'Stopped In 2019', formId: 'R_O' })
+  ]).rows;
+  const split = sandbox.partitionRunningPrograms(rows, monthMap);
+  check('running is everything with a session still to come, soonest first',
+    split.running.map(r => cell(r, 'Program')), ['Sooner', 'Later']);
+  // Ordered by Last_Date, newest first: the class that finished in August is
+  // the one somebody is looking for, and the 2019 one is not.
+  check('and the rest are ordered by how recently they stopped',
+    split.finished.map(r => cell(r, 'Program')), ['Stopped In August', 'Stopped In 2019']);
+  check('a program that is not running has no Next_Date to tint',
+    cell(split.finished[0], 'Next_Date'), '');
 }
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------
@@ -490,7 +629,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   const row = session({ at: [2026, 8, 1, 9, 30] });
   row[sessionMap['Event_Date']] = '';
   check('a row with no date contributes no month',
-    sandbox.buildProgramMonthRows([row], sessionMap).rows.length, 0);
+    build([row]).rows.length, 0);
 }
 
 // --- 6. The Sessions drill-through ------------------------------------------
@@ -499,19 +638,21 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     session({ at: [2026, 8, 1, 9, 30], eventId: 'EV_FIRST' }),
     session({ at: [2026, 8, 8, 9, 30], eventId: 'EV_SECOND' })
   ];
-  const linked = sandbox.buildProgramMonthRows(rows, sessionMap,
-    { gid: 1234, rowNumbersByEventId: { EV_FIRST: 57, EV_SECOND: 58 } });
-  check('the Sessions cell links at the group\u2019s FIRST session row',
-    cell(linked.rows[0], 'Sessions'), '=HYPERLINK("#gid=1234&range=A57","2 sessions")');
+  const linked = build(rows, { gid: 1234, rowNumbersByEventId: { EV_FIRST: 57, EV_SECOND: 58 } });
+  // AT THE NEXT SESSION, not the first ever: TODAY is the 5th, so the 1st has
+  // gone and the row somebody wants to land on is the 8th. A row that now
+  // spans a year cannot sensibly drop them at last September.
+  check('the Sessions cell links at the group\u2019s NEXT session row',
+    cell(linked.rows[0], 'Sessions'), '=HYPERLINK("#gid=1234&range=A58","2 sessions")');
 
   // A wrong link is worse than no link: both of these degrade rather than guess.
-  const unlocated = sandbox.buildProgramMonthRows(rows, sessionMap, { gid: 1234, rowNumbersByEventId: {} });
+  const unlocated = build(rows, { gid: 1234, rowNumbersByEventId: {} });
   check('and is the plain count when the row cannot be located',
     cell(unlocated.rows[0], 'Sessions'), '2 sessions');
-  const noTab = sandbox.buildProgramMonthRows(rows, sessionMap, { gid: null, rowNumbersByEventId: { EV_FIRST: 57 } });
+  const noTab = build(rows, { gid: null, rowNumbersByEventId: { EV_SECOND: 58 } });
   check('or when there is no session tab to point at', cell(noTab.rows[0], 'Sessions'), '2 sessions');
   check('a build with no link target at all still writes the count',
-    cell(sandbox.buildProgramMonthRows(rows, sessionMap).rows[0], 'Sessions'), '2 sessions');
+    cell(build(rows).rows[0], 'Sessions'), '2 sessions');
 
   // The row numbers come off the tab itself. A duplicate Event_ID mid-repair
   // resolves to the EARLIER row, which is the one in the Upcoming block.
@@ -529,23 +670,30 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
 }
 
 // --- 7. Leader coverage ------------------------------------------------------
+//
+// IT USED TO COUNT "THIS MONTH", because the tab used to have a month in it.
+// At one row per program the honest population is the section above the line:
+// everything with a session still to come. A program between terms has no
+// leader gap worth chasing.
 {
-  const now = new Date();
-  const thisMonth = [now.getFullYear(), now.getMonth()];
-  const monthKey = `${thisMonth[0]}-${String(thisMonth[1] + 1).padStart(2, '0')}`;
+  const thisMonth = [2026, 8];
 
-  const built = sandbox.buildProgramMonthRows([
-    session({ at: [thisMonth[0], thisMonth[1], 3, 9, 30], title: 'Chair Yoga', formId: 'F_YOGA' }),
-    session({ at: [thisMonth[0], thisMonth[1], 4, 9, 30], title: 'Book Club', formId: 'F_BOOK' }),
+  const built = build([
+    session({ at: [thisMonth[0], thisMonth[1], 10, 9, 30], title: 'Chair Yoga', formId: 'F_YOGA' }),
+    session({ at: [thisMonth[0], thisMonth[1], 11, 9, 30], title: 'Book Club', formId: 'F_BOOK' }),
     // One form, two buildings — covered if EITHER building has a leader row.
-    session({ at: [thisMonth[0], thisMonth[1], 5, 9, 30], title: 'Memory Cafe', formId: 'F_CAFE', location: 'Narberth' }),
-    session({ at: [thisMonth[0], thisMonth[1], 6, 9, 30], title: 'Memory Cafe', formId: 'F_CAFE', location: 'Ashbridge' }),
+    session({ at: [thisMonth[0], thisMonth[1], 12, 9, 30], title: 'Memory Cafe', formId: 'F_CAFE', location: 'Narberth' }),
+    session({ at: [thisMonth[0], thisMonth[1], 13, 9, 30], title: 'Memory Cafe', formId: 'F_CAFE', location: 'Ashbridge' }),
     // Lunch is not a program and is not counted either way.
-    session({ at: [thisMonth[0], thisMonth[1], 7, 12, 0], title: 'Lunch @ Narberth \u2014 Chx Parm',
+    session({ at: [thisMonth[0], thisMonth[1], 14, 12, 0], title: 'Lunch @ Narberth \u2014 Chx Parm',
       formId: 'F_LUNCH', eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}x|Narberth` }),
-    // Next month's row is somebody else's problem, and not this month's number.
-    session({ at: [thisMonth[0], thisMonth[1] + 1, 3, 9, 30], title: 'Watercolor', formId: 'F_PAINT' })
-  ], sessionMap);
+    // A program that has FINISHED is not counted: there is no leader gap to
+    // chase on a class that stopped running in July.
+    session({ at: [2026, 6, 3, 9, 30], title: 'Watercolor', formId: 'F_PAINT' })
+  ]);
+  const { running, finished } = sandbox.partitionRunningPrograms(built.rows, monthMap);
+  check('the finished program is filed under Not Currently Running',
+    [running.length, finished.length, cell(finished[0], 'Program')], [4, 1, 'Watercolor']);
 
   const realIndex = sandbox.buildProgramLeaderIndex;
   sandbox.buildProgramLeaderIndex = () => ({
@@ -553,18 +701,18 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     // Only the Ashbridge half of the shared program is named.
     [sandbox.leaderProgramKey('Memory Cafe', 'Ashbridge')]: [{ name: 'Sam Reed' }]
   });
-  const coverage = sandbox.programMonthLeaderCoverage(built.rows, monthKey);
+  const coverage = sandbox.programMonthLeaderCoverage(running, monthMap);
   sandbox.buildProgramLeaderIndex = realIndex;
 
-  check('coverage counts this month\u2019s programs, lunch excluded', coverage.considered, 3);
+  check('coverage counts the running programs, lunch excluded', coverage.considered, 3);
   check('and names only the ones nobody is down for', coverage.missing, ['Book Club — Narberth']);
 
   // With no leader tab at all, every program reads unassigned — which is the
   // honest answer, and the number the tab exists to drive to zero.
   const empty = sandbox.buildProgramLeaderIndex;
   sandbox.buildProgramLeaderIndex = () => ({});
-  check('an empty leader tab reports every program this month',
-    sandbox.programMonthLeaderCoverage(built.rows, monthKey).missing.length, 3);
+  check('an empty leader tab reports every program still running',
+    sandbox.programMonthLeaderCoverage(running, monthMap).missing.length, 3);
   sandbox.buildProgramLeaderIndex = empty;
 }
 
@@ -617,14 +765,14 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     // One form, two buildings — only the Ashbridge half is named.
     [sandbox.leaderProgramKey('Memory Cafe', 'Ashbridge')]: [{ name: 'Lee Park', matched: false }]
   };
-  const build = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, index).rows;
+  const buildLed = rows => build(rows, null, index).rows;
 
-  const buildAll = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, index);
+  const buildAll = rows => build(rows, null, index);
 
-  const yoga = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })])[0];
+  const yoga = buildLed([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })])[0];
   check('the leader is read off Program_Leaders', cell(yoga, 'Leader'), 'Jane Doe');
 
-  const book = build([session({ at: [2026, 8, 2, 9, 30], title: 'Book Club', formId: 'F_B' })])[0];
+  const book = buildLed([session({ at: [2026, 8, 2, 9, 30], title: 'Book Club', formId: 'F_B' })])[0];
   check('a program with two leaders prints both', cell(book, 'Leader'), 'Sam Reed, Kit Alvarez');
 
   // LEADER_SOURCE IS NOT A COLUMN ANY MORE. An unconfirmed Title_Match
@@ -641,17 +789,17 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   check('Leader_Source has left the layout',
     sandbox.HEADERS.Master_Program_Dashboard.indexOf('Leader_Source'), -1);
 
-  const cafe = build([
+  const cafe = buildLed([
     session({ at: [2026, 8, 4, 9, 30], title: 'Memory Cafe', formId: 'F_C', location: 'Narberth' }),
     session({ at: [2026, 8, 5, 9, 30], title: 'Memory Cafe', formId: 'F_C', location: 'Ashbridge' })
   ])[0];
   check('a shared program takes the leaders of both its buildings',
     [cell(cafe, 'Location'), cell(cafe, 'Leader')], ['Narberth + Ashbridge', 'Lee Park']);
 
-  const nobody = build([session({ at: [2026, 8, 6, 9, 30], title: 'Tai Chi', formId: 'F_T' })])[0];
+  const nobody = buildLed([session({ at: [2026, 8, 6, 9, 30], title: 'Tai Chi', formId: 'F_T' })])[0];
   check('a program nobody leads is blank', cell(nobody, 'Leader'), '');
 
-  const lunchRow = build([session({
+  const lunchRow = buildLed([session({
     at: [2026, 8, 7, 12, 0], formId: '', title: 'Lunch @ Narberth — Chx Parm',
     eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_7` })])[0];
   check('lunch has no leader row and is not made to look like it does',
@@ -663,23 +811,26 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
 
   // Called with no index at all — every test above this section — the columns
   // are blank rather than guessed at, and nothing is read from anywhere.
-  const unlit = sandbox.buildProgramMonthRows(
-    [session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })], sessionMap).rows[0];
+  const unlit = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })]).rows[0];
   check('with no leader index in hand the columns stay blank', cell(unlit, 'Leader'), '');
 
-  // --- MONTHLY CARRY-FORWARD, WHICH NEEDED NO CODE ---------------------------
-  // leaderProgramKey(title, location) has no month in it, so October's row
-  // resolves to the same key as September's and prints the same name with
-  // nothing stored per month and nothing carried anywhere. This test IS the
-  // mechanism: if it ever fails, something has grown a month.
-  const across = build([
+  // --- CARRY-FORWARD NEEDED NO CODE, AND NOW NEEDS EVEN LESS -----------------
+  // leaderProgramKey(title, location) has no month in it, and since phase 4
+  // neither does the ROW: three months of Chair Yoga on three separate forms
+  // are one row, reading one leader off one key. This test IS the mechanism —
+  // if it ever fails, something has grown a month.
+  const across = buildLed([
     session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_SEP' }),
     session({ at: [2026, 9, 6, 9, 30], title: 'Chair Yoga', formId: 'F_OCT' }),
     session({ at: [2026, 10, 3, 9, 30], title: 'Chair Yoga', formId: 'F_NOV' })
   ]);
-  check('every future month of the same program carries the leader forward, unstored',
-    across.map(row => `${cell(row, 'Month_Start').getMonth()}:${cell(row, 'Leader')}`),
-    ['8:Jane Doe', '9:Jane Doe', '10:Jane Doe']);
+  check('three months on three forms are one row, with one leader',
+    [across.length, cell(across[0], 'Leader'), cell(across[0], 'Sessions')],
+    [1, 'Jane Doe', '3 sessions']);
+  // AND THE LINKS ARE THE CURRENT ONES. A Regular program has a form per
+  // month, so the row's Form_ID is the newest — last September's is not what
+  // somebody troubleshooting this program wants in the formula bar.
+  check('...and the form it names is the current one', cell(across[0], 'Form_ID'), 'F_NOV');
 }
 
 // --- 10. What "matched" is read off -----------------------------------------

@@ -264,7 +264,7 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
 }
 
 /**
- * PROGRAM_MONTH'S LEADER CELL — the one cell on a derived, read-only tab that
+ * THE MASTER DASHBOARD'S LEADER CELL — the one cell on a derived tab that
  * a person may type into, and the only edit anywhere that writes to
  * Program_Leaders from somewhere else.
  *
@@ -463,11 +463,7 @@ function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
     if (groupKey.indexOf('lunch::') === 0) { lunchRows++; continue; }
     const title = readCell(row, 'Program');
     if (!title) continue;
-    targets.push({
-      row, title,
-      formId: readCell(row, 'Form_ID'),
-      on: isTruthyCheckbox(sheet.getRange(row, flagCol).getValue())
-    });
+    targets.push({ row, title, on: isTruthyCheckbox(sheet.getRange(row, flagCol).getValue()) });
   }
   if (targets.length === 0) {
     if (lunchRows > 0) toastIfPossible('⚠️ Lunch is not a program — there is nothing to tag.');
@@ -501,20 +497,23 @@ function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
 }
 
 /**
- * Writes one program-month row's flag onto every session row of that program,
+ * Writes one program row's flag onto every session row of that program,
  * and queues the calendar tag per calendar.
  *
- * MATCHED BY Form_ID WHERE THERE IS ONE, and that is the same identity
- * buildProgramMonthRows() grouped the row under — so the rows this touches are
- * exactly the rows the tick was displayed from. A [Shared] program running at
- * two buildings has one form and two calendars, which is why the queue entries
- * are made per DISTINCT calendar found rather than once for the program: the
- * tag has to be written into both buildings' events.
+ * MATCHED BY Clean_Title, which is the grain the row is. Since the month left
+ * this tab, one row is one PROGRAM for as long as it runs — twelve months of a
+ * weekly class, and twelve forms — so matching on the row's Form_ID would tick
+ * one month's sessions and leave the other eleven disagreeing with the box
+ * that was just ticked. The flag is a fact about the program; the write is too.
  *
- * The fallback is Clean_Title, for the rows that genuinely have no form —
- * [No Registration] programs and rows somebody typed in by hand. Deliberately
- * NOT title-plus-location: the month row for a shared program says "Narberth +
- * Ashbridge", and matching on that would match nothing at all.
+ * NOT title-plus-location, deliberately: the row for a [Shared] program says
+ * "Narberth + Ashbridge", which matches no session row at all. A program run
+ * at two buildings under one title is one program here, and ticking it ticks
+ * both — which is the same answer reconcileProgramFlagColumns() would arrive
+ * at from the calendar anyway.
+ *
+ * The queue entries are made per DISTINCT calendar found rather than once for
+ * the program: the tag has to be written into both buildings' events.
  *
  * Returns { rows, calendars }.
  */
@@ -531,7 +530,6 @@ function applyProgramMonthFlagToSessions(flag, target) {
   const titleCol = map['Clean_Title'];
   const calCol = map['Calendar_Source'];
   if (flagCol === undefined || titleCol === undefined || calCol === undefined) return out;
-  const formCol = map['Form_ID'];
 
   const seenCalendars = {};
   zones.forEach(zone => {
@@ -539,17 +537,13 @@ function applyProgramMonthFlagToSessions(flag, target) {
     if (count < 1) return;
     const titles = registrySheet.getRange(zone.dataStart, titleCol + 1, count, 1).getValues();
     const calendars = registrySheet.getRange(zone.dataStart, calCol + 1, count, 1).getValues();
-    const forms = formCol === undefined
-      ? null : registrySheet.getRange(zone.dataStart, formCol + 1, count, 1).getValues();
     const flagRange = registrySheet.getRange(zone.dataStart, flagCol + 1, count, 1);
     const flags = flagRange.getValues();
 
     let touched = false;
     for (let r = 0; r < count; r++) {
-      const rowForm = forms ? String(forms[r][0] || '').trim() : '';
       const rowTitle = String(titles[r][0] || '').trim();
-      const sameProgram = target.formId ? rowForm === target.formId : rowTitle === target.title;
-      if (!sameProgram) continue;
+      if (normalizeNameKey(rowTitle) !== normalizeNameKey(target.title)) continue;
       const calendarId = String(calendars[r][0] || '').trim();
       if (calendarId) seenCalendars[calendarId] = rowTitle || target.title;
       out.rows++;

@@ -1,5 +1,5 @@
 // ============================================================================
-// 7b. THE PROGRAM_MONTH TAB  (one row per program-month)
+// 7b. THE MASTER PROGRAM DASHBOARD  (one row per program)
 // ============================================================================
 //
 // The session table is one row per SESSION. Almost nothing downstream is:
@@ -10,21 +10,38 @@
 // fourteen columns four times over, and the difference between the rows is a
 // date and three counts.
 //
-// This tab is the other half of that join, written out on its own: one row per
-// program-month, with the schedule collapsed into a phrase a person reads
-// instead of four rows they compare.
+// This tab is the other half of that join, written out on its own — with the
+// schedule collapsed into a phrase a person reads instead of forty rows they
+// compare.
 //
-// TEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN. A tab that exists so
-// four rows read as one line is not doing its job at nineteen columns wide —
-// that is not a line somebody reads, it is a line they scroll. So the rule
-// describeProgramMonthSchedule() was written under became the rule for the
-// whole tab: THE FACT GOES IN THE CELL, THE FOLLOW-UP QUESTION GOES IN A CELL
-// NOTE. Type_Tag stands alone; Seats is the four counting columns as one
-// sentence with its working in the note; Links is four link columns as one
-// cell of rich text; Leader_Source is a yellow wash and a note. The three
-// program FLAGS went the other way — from words in a joined cell to real tick
-// boxes, because a person on this row is as likely to want to change one as to
-// read it (see the flag banner further down).
+// ONE ROW PER PROGRAM, WHICH IS NOT WHERE THIS STARTED. It was one row per
+// program-MONTH, keyed on Form_ID, because that is the unit a form and a
+// capacity belong to. That is the right grain for the tab's first question and
+// the wrong grain for the one people bring to a front page: "what do we run,
+// and who runs it?" A weekly class was twelve rows a year, eleven of which
+// differed from the first only in which twelve dates they summed — the same
+// complaint that produced this tab in the first place, one level up.
+//
+// So the grain moved and the key moved with it:
+//
+//   • A PROGRAM IS ITS TITLE AND THE BUILDING(S) IT RUNS IN. Form_ID still
+//     resolves the one case a (title, location) key gets wrong — a [Shared]
+//     program has ONE form across two buildings and is ONE thing to run, so it
+//     is one row reading "Narberth + Ashbridge" the way describeLocations()
+//     words it everywhere else — but the form is no longer the key itself. A
+//     Regular program takes a NEW form every month, and keying on it is
+//     precisely how the month got into the grain.
+//   • THE MONTH LEFT THE ROW. Next_Date leads it (the next session from today,
+//     blank when there is none) and Last_Date closes it. The split is Running
+//     / Not currently running rather than Upcoming / Past, and the second
+//     section is ordered by Last_Date, so a class that finished in June sits
+//     above one that finished in 2019.
+//   • THE FIXED-SPAN PROBLEM DISSOLVED. A [Grouped] series takes ONE form for
+//     its whole run (formSpanKey() gives it the literal 'FIXED'), so it had no
+//     month of its own and was filed, awkwardly, under its earliest one — the
+//     design doc's open question #2, answered here for two versions with an
+//     apology attached. There is no month to file it under now. It is a
+//     program, it has a span, and the Schedule cell states the span.
 //
 // IT IS DERIVED, READ-ONLY, AND PURELY ADDITIVE — that is the whole design
 // constraint, and everything below follows from it:
@@ -32,40 +49,27 @@
 //   • Nothing reads this tab. Not the sync, not Quick Mark, not the door, not
 //     the link doctor. Delete the tab and the workbook behaves exactly as it
 //     did; the next render draws it again from the session rows.
-//   • Nothing is STORED here that is not already on a session row. There is no
-//     second record of a capacity, a leader or a link that could drift out of
-//     agreement with the first one and be believed.
+//   • Nothing is STORED here that is not already on a session row or on
+//     Program_Leaders / Program_Settings. There is no second record of a
+//     capacity, a leader, a room or a link that could drift out of agreement
+//     with the first one and be believed. The four cells a person may touch
+//     (Leader and the three program flags) are WINDOWS: they are read fresh on
+//     every render and what is typed into them is written back to the tab that
+//     owns the answer.
 //   • It is rendered from the session rows the caller ALREADY HAS in memory
 //     (renderProgramDashboard passes them). A derived view that cost a second
 //     full read of a several-hundred-row tab on every sync would be paying,
 //     every hour, for something nobody has looked at since Tuesday.
 //
-// WHY Form_ID IS THE GROUPING KEY. It is the groupKey's identity, it is
-// already on the row, and it costs nothing to read. It also collapses the one
-// case a (title, location, month) key gets wrong: a [Shared] program running
-// at two locations has ONE form and is ONE thing to run, so it is one row here
-// with Location reading "Narberth + Ashbridge" the way describeLocations()
-// words it everywhere else. The fallback is only for rows that genuinely have
-// no form — [No Registration] programs, and rows somebody typed in by hand.
-//
-// FIXED-SPAN GROUPS ARE FILED UNDER THEIR FIRST MONTH — the design doc's open
-// question #2, answered. A [Grouped] series takes ONE form for its whole run
-// (formSpanKey() gives it the literal 'FIXED' rather than a month label), so a
-// ten-week course starting in September has no month of its own: it touches
-// three. Grouping on Form_ID gives it ONE row, and monthStart is its earliest
-// session's month.
-//
-// The alternative — repeating the group on every month it touches, with a
-// "spans Sep–Nov" note — reads better on a tab somebody scrolls by month, and
-// was refused anyway: every number on a month row is a SUM over that row's
-// sessions, so a repeated row would either double-count them or have to divide
-// them up, and a Registered figure that is a third of the truth in three
-// places is worse than a row filed a month early. The Schedule cell states the
-// real span, and its note names every session, so nothing about the run is
-// hidden by where the row sits.
-//
-// Nothing downstream depends on the choice, because nothing downstream reads
-// this tab: if it is ever revisited, this is the only place it lives.
+// FIFTEEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN — at a twelfth of
+// the row count. The rule describeProgramMonthSchedule() was written under
+// became the rule for the whole tab: THE FACT GOES IN THE CELL, THE FOLLOW-UP
+// QUESTION GOES IN A CELL NOTE. Type_Tag stands alone; Seats is the four
+// counting columns as one sentence with its working in the note; Links is four
+// link columns as one cell of rich text; Leader_Source is a yellow wash and a
+// note. The three program FLAGS went the other way — from words in a joined
+// cell to real tick boxes, because a person on this row is as likely to want
+// to change one as to read it.
 // ============================================================================
 
 /**
@@ -96,7 +100,7 @@ const PROGRAM_MONTH_STATUS_ORDER = ['🔴 Waitlist Only', '🟡 Almost Full', '�
 const PROGRAM_MONTH_JOINER = ' · ';
 
 /**
- * The three links a program-month has, in the order they are wanted, with the
+ * The links a program has, in the order they are wanted, with the
  * word each one is printed as.
  *
  * ONE CELL OF RICH TEXT, not three columns. They were three columns three
@@ -135,25 +139,64 @@ const PROGRAM_MONTH_RECURRENCE_WORDS = { 1: 'Weekly', 2: 'Every 2 weeks', 3: 'Ev
 const PROGRAM_MONTH_MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * The key a session row is filed under.
+ * WHICH BUILDINGS EACH FORM COVERS — { formId: [location, ...] }.
  *
- * Form_ID first — see the banner. The fallback carries the month explicitly
- * because, without a form, nothing else in the key says which month this is:
- * two Septembers of the same drop-in coffee hour must not collapse into one
- * row claiming twelve sessions.
+ * The one thing a (title, location) key cannot work out for itself, and the
+ * only reason this tab still looks at Form_ID at all. A [Shared] program has
+ * ONE form and runs at two buildings; it is one thing to run, so it is one
+ * row. Nothing else in the key needs the form, and using the form AS the key
+ * is what put the month in the grain — a Regular program takes a new one every
+ * month.
+ *
+ * A cheap first pass over the rows the caller already holds: one string read
+ * per row, no sheet, no cache.
  */
-function programMonthGroupKey(row, map, monthKey) {
+function programFormLocations(sessionRows, map) {
+  const out = {};
+  (sessionRows || []).forEach(row => {
+    const formId = String(row[map['Form_ID']] || '').trim();
+    if (!formId) return;
+    const location = String(row[map['Location']] || '').trim();
+    if (!location) return;
+    if (!out[formId]) out[formId] = [];
+    if (out[formId].indexOf(location) === -1) out[formId].push(location);
+  });
+  return out;
+}
+
+/**
+ * The key a session row is filed under: one program, at the building(s) it
+ * runs in, for as long as it runs.
+ *
+ * NO MONTH IN IT ANYWHERE, which is the phase-4 change in one line. The old
+ * key was `form::${formId}` with `plain::title::location::month` behind it,
+ * and both carried the month — the first implicitly (a Regular program's form
+ * is monthly) and the second by writing it out. Twelve rows a year for a
+ * weekly class, differing only in which dates they summed.
+ *
+ * The locations come from `formLocations` where the row has a form, so every
+ * month of a [Shared] program resolves to the same "Narberth|Ashbridge"
+ * signature and lands on one row. Where it has no form — [No Registration]
+ * programs, and rows somebody typed in by hand — the row's own location is the
+ * answer, which is right: without a form there is nothing to say two buildings
+ * are one thing.
+ *
+ * NORMALIZED like every other program key in this workbook (normalizeNameKey),
+ * so the casing and spacing drift that "Chair Yoga " picks up across a year of
+ * calendar edits does not split a program in two.
+ */
+function programMonthGroupKey(row, map, formLocations) {
   const eventId = String(row[map['Event_ID']] || '').trim();
   const location = String(row[map['Location']] || '').trim();
-  // A meal is not a program and never had a form: it groups by where and when
-  // it was served, and by nothing else. See the lunch note in buildProgramMonthRows().
-  if (isLunchOnlyEventId(eventId)) return `lunch::${location}::${monthKey}`;
-
-  const formId = String(row[map['Form_ID']] || '').trim();
-  if (formId) return `form::${formId}`;
+  // A meal is not a program and never had a form: it groups by where it was
+  // served and by nothing else. See the lunch note in buildProgramMonthRows().
+  if (isLunchOnlyEventId(eventId)) return `lunch::${location}`;
 
   const title = String(row[map['Clean_Title']] || '').trim();
-  return `plain::${title}::${location}::${monthKey}`;
+  const formId = String(row[map['Form_ID']] || '').trim();
+  const locations = (formId && formLocations && formLocations[formId]) || [location];
+  const signature = locations.map(normalizeNameKey).slice().sort().join('|');
+  return `program::${normalizeNameKey(title)}::${signature}`;
 }
 
 /**
@@ -230,7 +273,47 @@ function detectProgramMonthRecurrence(sessions) {
 }
 
 /**
- * "Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions", or "Tue 9:30 AM – 11:00 AM ·
+ * "Sep 2026 – Jun 2027", or "Sep 2026" when the run does not leave its month.
+ *
+ * THE ONLY PLACE THE MONTH SURVIVED, and it is a fact about the row rather
+ * than the grain of the tab: a program running from September to June is one
+ * program with a span, not ten rows. Blank when it stays inside one month,
+ * because "Sep 2026 – Sep 2026" is a longer way of saying nothing, and the
+ * dates are one drill-through away.
+ */
+function describeProgramMonthSpan(sessions) {
+  if (!sessions || sessions.length === 0) return '';
+  const first = sessions[0].date;
+  const last = sessions[sessions.length - 1].date;
+  if (!first || !last) return '';
+  const from = Utilities.formatDate(first, TIMEZONE, MONTH_DISPLAY_FORMAT);
+  const to = Utilities.formatDate(last, TIMEZONE, MONTH_DISPLAY_FORMAT);
+  return from === to ? from : `${from} \u2013 ${to}`;
+}
+
+/**
+ * "Sep 2026 — 4\nOct 2026 — 5" : the per-month breakdown, for the note.
+ *
+ * The month left the GRAIN, not the tab: at one row per program, "how many in
+ * October?" is still a question somebody asks, and the answer is one line each
+ * rather than one ROW each. Which is the whole trade — a fact worth having
+ * kept, in the place a follow-up question belongs.
+ */
+function describeProgramMonthBreakdown(sessions) {
+  const order = [];
+  const tally = {};
+  (sessions || []).forEach(s => {
+    if (!s.date) return;
+    const label = Utilities.formatDate(s.date, TIMEZONE, MONTH_DISPLAY_FORMAT);
+    if (tally[label] === undefined) { tally[label] = 0; order.push(label); }
+    tally[label]++;
+  });
+  if (order.length < 2) return '';
+  return order.map(label => `${label} \u2014 ${tally[label]}`).join('\n');
+}
+
+/**
+ * "Weekly · Tue 9:30 AM – 11:30 AM · Sep 2026 – Jun 2027 · 38 sessions", or "Tue 9:30 AM – 11:00 AM ·
  * 4 sessions" when the dates do not repeat, or "4 sessions · times vary" when
  * they do not even agree — which is the line that earns this tab its keep. A
  * person reading one phrase learns what four rows of a session table were
@@ -260,16 +343,27 @@ function describeProgramMonthSchedule(sessions) {
     if (distinct.indexOf(signature) === -1) distinct.push(signature);
   });
 
+  const span = describeProgramMonthSpan(sessions);
+  const breakdown = describeProgramMonthBreakdown(sessions);
+  // THE SPAN IS ONLY WORTH SAYING WHEN THE RUN LEAVES ITS MONTH. A program
+  // whose sessions are all in September gains nothing from "Sep 2026" in a
+  // cell that already names the weekday and the count.
+  const spanPart = breakdown ? `${PROGRAM_MONTH_JOINER}${span}` : '';
+  const spanNote = breakdown ? `\n\nBy month:\n${breakdown}` : '';
+
   if (distinct.length === 1 && shapes.length > 0 && shapes[0].weekday) {
     const one = shapes[0];
     const phrase = one.times ? `${one.weekday} ${one.times}` : one.weekday;
     const repeat = detectProgramMonthRecurrence(sessions);
     if (!repeat) {
-      return { text: `${phrase}${PROGRAM_MONTH_JOINER}${count} ${plural}`, note: '' };
+      return {
+        text: `${phrase}${spanPart}${PROGRAM_MONTH_JOINER}${count} ${plural}`,
+        note: breakdown ? `${phrase}.${spanNote}` : ''
+      };
     }
     const dates = sessions.map(s => Utilities.formatDate(s.date, TIMEZONE, 'EEE MMM d'));
-    let text = `${repeat.word}${PROGRAM_MONTH_JOINER}${phrase}${PROGRAM_MONTH_JOINER}${count} ${plural}`;
-    let note = `${repeat.word}, ${phrase}.\n\nOn:\n${dates.join('\n')}`;
+    let text = `${repeat.word}${PROGRAM_MONTH_JOINER}${phrase}${spanPart}${PROGRAM_MONTH_JOINER}${count} ${plural}`;
+    let note = `${repeat.word}, ${phrase}.${spanNote}\n\nOn:\n${dates.join('\n')}`;
     if (repeat.skipped.length > 0) {
       const missed = repeat.skipped.map(d => Utilities.formatDate(d, TIMEZONE, 'EEE MMM d'));
       // SAID IN THE CELL TOO, not only in the note. A gap is the one thing
@@ -304,9 +398,9 @@ function describeProgramMonthSchedule(sessions) {
   const usual = commonest.split('|');
   const usualPhrase = usual[0] ? (usual[1] ? `${usual[0]} ${usual[1]}` : usual[0]) : '';
   const note = outliers.length > 0
-    ? `Usually ${usualPhrase || 'the same time'}.\n\nNot these:\n${outliers.join('\n')}`
-    : '';
-  return { text: `${count} ${plural}${PROGRAM_MONTH_JOINER}times vary`, note };
+    ? `Usually ${usualPhrase || 'the same time'}.${spanNote}\n\nNot these:\n${outliers.join('\n')}`
+    : (breakdown ? `Times vary.${spanNote}` : '');
+  return { text: `${count} ${plural}${spanPart}${PROGRAM_MONTH_JOINER}times vary`, note };
 }
 
 /**
@@ -435,7 +529,7 @@ function describeProgramMonthNotifyNote(policy) {
 }
 
 /**
- * The Program_Settings row(s) behind one program-month, resolved into
+ * The Program_Settings row(s) behind one program, resolved into
  * { room, notify, note }.
  *
  * A [Shared] program is TWO rows on that tab — one per building, because that
@@ -574,6 +668,76 @@ function worstProgramMonthStatus(sessions, map) {
   return worst;
 }
 
+/**
+ * THE WINDOW THE SEAT COUNTS ARE SUMMED OVER: this calendar month and the next
+ * one, whole.
+ *
+ * WHY NOT THE PROGRAM'S WHOLE LIFE. At one row per program a lifetime
+ * Registered is a number that only ever goes up, tells nobody whether there is
+ * room next Tuesday, and — printed beside a capacity — reads as a total
+ * somebody could book against. "Chair Yoga 412 / 480" is arithmetic about
+ * 2019.
+ *
+ * WHY NOT JUST "FROM TODAY". A window that starts today makes a program read
+ * emptier every week of the month, for no reason a person could see, and makes
+ * the number disagree with the metrics block above it (which counts calendar
+ * months). Whole months, starting with this one.
+ *
+ * WHY TWO AND NOT ONE. A month is not enough notice for the thing the number
+ * is for. On the 28th, "this month" is a class that has already run; the next
+ * month is the one somebody is deciding about, and a window that hides it
+ * would make the tab useless in exactly the week people plan in.
+ *
+ * `today` is passed in rather than read here so that the whole row builder
+ * stays a pure function of its inputs — which is what lets the tests pin these
+ * rules without a spreadsheet or a clock.
+ */
+function programSeatWindow(today) {
+  const now = today ? new Date(today.getTime()) : new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + 2, 0); // last day of next month
+  const fromKey = formatDateKey(from);
+  const toKey = formatDateKey(to);
+  return {
+    today: now,
+    from, to,
+    label: `in ${Utilities.formatDate(from, TIMEZONE, MONTH_DISPLAY_FORMAT)} and ` +
+      `${Utilities.formatDate(to, TIMEZONE, MONTH_DISPLAY_FORMAT)}`,
+    covers: date => {
+      if (!date) return false;
+      const key = formatDateKey(date);
+      return key >= fromKey && key <= toKey;
+    }
+  };
+}
+
+/** The next session from today, or null when the program is not currently running. */
+function nextSessionDate(sessions, today) {
+  const todayKey = formatDateKey(today || new Date());
+  let found = null;
+  sessions.forEach(s => {
+    if (!s.date || formatDateKey(s.date) < todayKey) return;
+    if (!found || s.date < found) found = s.date;
+  });
+  return found;
+}
+
+/**
+ * The session a Sessions cell should drill through to: the next one, or the
+ * last one for a program that is over.
+ *
+ * A row that spans a year cannot sensibly land somebody on its September block
+ * in June. Never null — the caller only reaches this with at least one
+ * session.
+ */
+function nextOrLastSession(sessions, today) {
+  const todayKey = formatDateKey(today || new Date());
+  for (let i = 0; i < sessions.length; i++) {
+    if (sessions[i].date && formatDateKey(sessions[i].date) >= todayKey) return sessions[i];
+  }
+  return sessions[sessions.length - 1];
+}
+
 /** A number out of a cell that may hold '', '--', or words. 0 for anything that is not one. */
 function programMonthNumber(value) {
   const n = Number(value);
@@ -614,32 +778,30 @@ function programMonthNumber(value) {
  *            for; it is a wash and a note now, so it travels beside the rows
  *            instead of on them.
  */
-function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex, settingsIndex) {
+function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex, settingsIndex, today) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const groups = {};
   const order = [];
+  const formLocations = programFormLocations(sessionRows, sessionMap);
+  const window = programSeatWindow(today);
 
   (sessionRows || []).forEach(row => {
     const date = coerceDate(row[sessionMap['Event_Date']]);
-    // No date, no month, and this tab IS the month. A dateless row keeps
+    // No date, no place on a tab whose row is a span. A dateless row keeps
     // living on the session table, where it is visible and fixable.
     if (!date) return;
-    const monthKey = formatMonthKey(date);
-    const key = programMonthGroupKey(row, sessionMap, monthKey);
+    const key = programMonthGroupKey(row, sessionMap, formLocations);
     if (!groups[key]) {
-      groups[key] = { key, sessions: [], monthStart: null };
+      groups[key] = { key, sessions: [] };
       order.push(key);
     }
-    const group = groups[key];
-    group.sessions.push({
+    groups[key].sessions.push({
       row,
       date,
       times: formatTimeRange(row[sessionMap['Event_Date']],
         sessionMap['Event_End'] === undefined ? '' : row[sessionMap['Event_End']])
     });
-    const first = new Date(date.getFullYear(), date.getMonth(), 1);
-    if (!group.monthStart || first < group.monthStart) group.monthStart = first;
   });
 
   const rows = [];
@@ -658,8 +820,15 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
       if (location && locations.indexOf(location) === -1) locations.push(location);
     });
 
+    // THIS MONTH AND NEXT, never the program's whole life. At one row per
+    // program a lifetime Registered is a number that only goes up, says
+    // nothing about whether there is room next Tuesday, and — beside a
+    // capacity — reads as a total somebody could book against. The window is
+    // named in the cell's note; the Sessions drill-through is where history
+    // lives. See programSeatWindow().
+    const counted = sessions.filter(s => window.covers(s.date));
     let registered = 0, waitlist = 0, capacity = 0, cappedRegistered = 0, cappedSessions = 0;
-    sessions.forEach(s => {
+    counted.forEach(s => {
       registered += programMonthNumber(s.row[sessionMap['Active_Count']]);
       waitlist += programMonthNumber(s.row[sessionMap['Waitlist_Count']]);
       const cap = sessionCapacity(s.row, sessionMap);
@@ -670,49 +839,56 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
       }
     });
 
-    // The first non-blank wins for each link. They are group facts printed on
-    // every session row, so they agree — but a row written before a form
-    // existed holds a blank, and taking the first row's blank would lose a
-    // link the group plainly has.
+    // THE MOST RECENT NON-BLANK WINS for each link, which is a change the
+    // grain forced and an improvement anyway. A Regular program has a form per
+    // MONTH, so its rows genuinely disagree about which link is current — and
+    // the one worth handing out is this month's, not the one from last
+    // September. Walked backwards from the newest session; a row written
+    // before a form existed holds a blank and is skipped, rather than losing a
+    // link the program plainly has.
     const firstNonBlank = header => {
       let found = '';
-      sessions.some(s => {
-        const value = sessionMap[header] === undefined ? '' : s.row[sessionMap[header]];
-        if (String(value || '').trim()) { found = value; return true; }
-        return false;
-      });
+      for (let i = sessions.length - 1; i >= 0; i--) {
+        const value = sessionMap[header] === undefined ? '' : sessions[i].row[sessionMap[header]];
+        if (String(value || '').trim()) { found = value; break; }
+      }
       return found;
     };
 
     const schedule = describeProgramMonthSchedule(sessions);
     // A MEAL IS NOT A PROGRAM, and this is the whole of what that costs here:
-    // one row per location per month, saying what it is and how many days it
-    // ran, instead of the ~21 rows the session table carries. Its Schedule
+    // one row per location, saying what it is and how many days it has run,
+    // instead of the ~250 rows a year the session table carries. Its Schedule
     // says the span rather than a weekday, because lunch is every weekday and
-    // "Mon–Fri · 21 sessions" tells nobody anything. Everything downstream
+    // "Mon–Fri · 250 sessions" tells nobody anything. Everything downstream
     // that counts PROGRAMS still filters these out by Event_ID, exactly as it
     // does today — see renderProgramDashboard()'s filter.
     const sessionsLabel = isLunch
       ? `${sessions.length} ${sessions.length === 1 ? 'day' : 'days'}`
       : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`;
-    // Linked at the group's FIRST session, which is the row somebody landing
-    // on the session tab wants to be looking at — the top of this program's
-    // block, not the middle of it.
+    // LINKED AT THE NEXT SESSION, or at the last one for a program that is
+    // over. A row that now spans a year cannot sensibly drop somebody at its
+    // September rows in June: the block they want is the one that is about to
+    // happen. This is also where the month detail went — the tab stopped
+    // having a row per month, and this cell is the way through to the dates.
+    const drillAt = nextOrLastSession(sessions, window.today);
     const sessionsCell = programMonthSessionsCell(sessionsLabel,
-      String(sessions[0].row[sessionMap['Event_ID']] || '').trim(), linkTarget);
+      String(drillAt.row[sessionMap['Event_ID']] || '').trim(), linkTarget);
     const scheduleCell = isLunch
       ? describeDateSpan(sessions[0].date, sessions[sessions.length - 1].date)
       : schedule.text;
 
     const seats = describeProgramMonthSeats({
       registered, waitlist, capacity, cappedRegistered, cappedSessions,
-      sessions: sessions.length,
-      window: describeProgramMonthWindow(group.monthStart)
+      sessions: counted.length,
+      window: window.label
     });
     const linkParts = programMonthLinkParts(firstNonBlank);
+    const nextDate = nextSessionDate(sessions, window.today);
 
     const out = new Array(headers.length).fill('');
-    out[map['Month_Start']] = group.monthStart;
+    out[map['Next_Date']] = nextDate || '';
+    out[map['Last_Date']] = sessions[sessions.length - 1].date;
     out[map['Location']] = describeLocations(locations);
     out[map['Program']] = isLunch
       ? `Lunch @ ${locations[0] || 'this location'}`
@@ -746,7 +922,10 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
         settingsIndex);
     out[map['Room']] = settings.room;
     out[map['Notify']] = settings.notify;
-    out[map['Form_ID']] = String(first[sessionMap['Form_ID']] || '');
+    // THE CURRENT form, off the same session the links came from — a Regular
+    // program has one per month, and last September's id is not the one
+    // somebody troubleshooting this program wants in the formula bar.
+    out[map['Form_ID']] = String(firstNonBlank('Form_ID') || '');
     out[map['Group_Key']] = key;
 
     rows.push(out);
@@ -760,10 +939,7 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
   return { rows, notes, links, matched };
 }
 
-/** "in September 2026" — what the seat note's numbers are a sum over. */
-function describeProgramMonthWindow(monthStart) {
-  return monthStart ? `in ${Utilities.formatDate(monthStart, TIMEZONE, MONTH_DISPLAY_FORMAT)}` : '';
-}
+
 
 /**
  * options.sessionRows — the session rows the caller already has. Passed by
@@ -824,9 +1000,10 @@ function renderProgramMonthDashboard(force, options) {
   const built = buildProgramMonthRows(sessionRows, sessionMap, {
     gid: sessionSheet ? sessionSheet.getSheetId() : null,
     rowNumbersByEventId: programMonthSessionRowNumbers(sessionSheet, sessionMap)
-  }, leaderIndex, settingsIndex);
+  }, leaderIndex, settingsIndex, new Date());
   writeProgramMonthSheet(sheet, built, force, metrics);
-  log(`Master_Program_Dashboard: ${built.rows.length} program-month row(s) from ${sessionRows.length} session row(s).`);
+  log(`${SHEET_NAMES.PROGRAM_MONTH}: ${built.rows.length} program row(s) from ` +
+    `${sessionRows.length} session row(s).`);
   return built;
 }
 
@@ -847,34 +1024,36 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
   // accumulates explanations attached to the wrong months.
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearNote();
 
+  // RUNNING FIRST, THEN THE REST. The split is a status, not a date — see
+  // partitionRunningPrograms() — so it is worked out before the metrics block
+  // is drawn, because the coverage line under that block counts the running
+  // half.
+  const { running, finished } = partitionRunningPrograms(built.rows, map);
+
   // --- The metrics block, on the tab whose grain it matches ---
   let row = 1;
   if (metrics) {
     row = writeProgramMetricsSection(sheet, row, numCols, metrics);
     row = writeProgramMonthCoverageLine(sheet, row, numCols,
-      programMonthLeaderCoverage(built.rows, formatMonthKey(new Date())));
+      programMonthLeaderCoverage(running, map));
     row++; // spacer
   }
 
-  // A MONTH ROW IS PAST WHEN ITS MONTH IS OVER, not when its first day has
-  // gone: partitioning on today would file the whole of this month under
-  // "Past" from the 2nd onwards. The 1st of the current month is the boundary.
-  const now = new Date();
-  const todayKey = formatDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
-  const { upcoming, past } = partitionByDate(built.rows, map['Month_Start'], todayKey);
-  const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
-    upcomingLabel: '🗓️ This Month & Ahead', pastLabel: '🕓 Past Months',
+  const result = writeUpcomingPastSections(sheet, row, headers, running, finished, {
+    upcomingLabel: '▶️ Running', pastLabel: '⏸️ Not Currently Running',
     // NOT COLLAPSED. Old-month hiding is defined against a tab of sessions,
-    // where two months is hundreds of rows; here a year of history is a couple
-    // of dozen, and the whole point of the tab is that a year of it fits on a
-    // screen. Passed explicitly rather than left to the default, because the
-    // default would silently hide half of what this tab exists to show.
+    // where two months is hundreds of rows; here the whole history of the
+    // place is a couple of dozen, and the point of the tab is that it fits on
+    // a screen. Passed explicitly rather than left to the default, because the
+    // default would silently hide half of what this tab exists to show — and
+    // it would hide it by looking for an Event_Date column this tab has not
+    // got, which is the quieter half of the same mistake.
     collapseOldMonths: false
   });
 
   const zones = [
-    { start: result.upcomingDataStart, count: upcoming.length },
-    { start: result.pastDataStart, count: past.length }
+    { start: result.upcomingDataStart, count: running.length },
+    { start: result.pastDataStart, count: finished.length }
   ];
 
   const rules = [];
@@ -883,12 +1062,19 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     if (z.count < 1) return;
     // The month tint the sectioned writer applies for itself on every other
     // tab. It keys off a column literally named Event_Date, and this tab's
-    // date is Month_Start — so it is applied here rather than by changing what
-    // that shared writer is defined against.
-    // ...and reads as "September 2026", not "Tue 9/1/2026". The row IS the
-    // month: the 1st of it is where the value has to sit for partitionByDate()
-    // and the sectioned readers, and it is not a day anything happens on.
-    applyMonthColorTint(sheet, map['Month_Start'] + 1, z.start, z.count, MONTH_DISPLAY_FORMAT);
+    // leading date is Next_Date — so it is applied here rather than by
+    // changing what that shared writer is defined against.
+    //
+    // ON NEXT_DATE, WHERE IT USED TO BE ON MONTH_START, and it is doing more
+    // work than it was: at one row per program the tint is what makes "these
+    // four all start again in October" visible without reading a single date.
+    // A program that is not currently running has no Next_Date and takes no
+    // tint, which is the right answer rather than a missing one.
+    applyMonthColorTint(sheet, map['Next_Date'] + 1, z.start, z.count);
+    // Last_Date is a DAY, and the day is the point of it: the second section
+    // is ordered by how recently a program stopped.
+    sheet.getRange(z.start, map['Last_Date'] + 1, z.count, 1)
+      .setNumberFormat(DATE_DISPLAY_FORMAT);
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text)
         .setBackground(EVENT_STATUS_COLORS[text])
@@ -921,7 +1107,7 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     [result.upcomingHeaderRow, result.pastHeaderRow]);
   applyColumnVisibility(sheet, headers, PROGRAM_MONTH_HIDDEN_COLUMNS);
   freezeRowsSafely(sheet, result.upcomingHeaderRow);
-  freezeColumnsSafely(sheet, 3); // month, location, program name
+  freezeColumnsSafely(sheet, 3); // next date, location, program name
   autosizeColumns(sheet, { force: !!force, minCols: numCols });
 }
 
@@ -940,6 +1126,56 @@ function programMonthRowPosition(row, upcoming, past, result) {
   at = past.indexOf(row);
   if (at !== -1) return result.pastDataStart + at;
   return 0; // a row that was not written can't be annotated
+}
+
+/**
+ * RUNNING / NOT CURRENTLY RUNNING — the split that replaced Upcoming / Past.
+ *
+ * WHY NOT partitionByDate(). Every other date-bearing tab in this workbook is
+ * one row per DATE, so "has that date gone?" is the whole question and
+ * partitionByDate() is the whole answer. A row here is a program, which has no
+ * single date to be on one side or the other of: a weekly class that started
+ * in September and runs to June is neither upcoming nor past, and filing it by
+ * either end of its span is filing it by something nobody asked about.
+ *
+ * The question a person actually has is "is this a thing we run at the
+ * moment?", and the honest answer is whether it has a session still to come.
+ * Which is exactly Next_Date: set, and it is running; blank, and it is not.
+ *
+ * SO THIS IS 79_member_roll.gs's SHAPE, NOT 34's — a status section, the way
+ * the roll files a retired member below a divider with their notes intact. A
+ * program between terms is not deleted, is not stale, and is not wrong: it is
+ * a true record of something this place runs, sitting under a heading that
+ * says it is not running today. Two banner-and-header sections rather than the
+ * roll's single divider row, because this tab's edit handler finds a row's
+ * columns by walking up to the nearest header (handleProgramMonthEdit), and
+ * one header for two differently-sorted halves would be one header too few.
+ *
+ * The second section is ordered by Last_Date, newest first: a class that
+ * finished in June is the one somebody is looking for, and the 2019 one is
+ * not. The first is ordered by Next_Date, soonest first, and then by name so a
+ * day's worth of programs reads alphabetically rather than at random.
+ */
+function partitionRunningPrograms(rows, map) {
+  const running = [];
+  const finished = [];
+  (rows || []).forEach(row => {
+    if (coerceDate(row[map['Next_Date']])) running.push(row); else finished.push(row);
+  });
+  const name = row => String(row[map['Program']] || '');
+  running.sort((a, b) => {
+    const at = coerceDate(a[map['Next_Date']]).getTime();
+    const bt = coerceDate(b[map['Next_Date']]).getTime();
+    return at === bt ? name(a).localeCompare(name(b)) : at - bt;
+  });
+  finished.sort((a, b) => {
+    const ad = coerceDate(a[map['Last_Date']]);
+    const bd = coerceDate(b[map['Last_Date']]);
+    const at = ad ? ad.getTime() : 0;
+    const bt = bd ? bd.getTime() : 0;
+    return at === bt ? name(a).localeCompare(name(b)) : bt - at;
+  });
+  return { running, finished };
 }
 
 /** The cell notes — a schedule's outliers and skipped weeks, a seat count's working. */
@@ -1059,8 +1295,15 @@ function programMonthSessionsCell(label, firstEventId, target) {
 }
 
 /**
- * How many of THIS MONTH's programs have nobody down as leading them, and
- * which ones — the count for the line, the names for its note.
+ * How many of the programs we are CURRENTLY RUNNING have nobody down as
+ * leading them, and which ones — the count for the line, the names for its
+ * note.
+ *
+ * IT USED TO SAY "THIS MONTH", because the tab used to have a month in it. At
+ * one row per program the honest population is the one the section above the
+ * line already names: everything with a session still to come. A program
+ * between terms has no leader gap worth chasing, and counting it would make
+ * the number one nobody could drive to zero.
  *
  * Lunch is not a program and is not counted. A row whose Location reads
  * "Narberth + Ashbridge" (one form, two buildings) counts as covered if EITHER
@@ -1072,8 +1315,8 @@ function programMonthSessionsCell(label, firstEventId, target) {
  * Program_Leaders; it never writes one, never shares a sheet and never sends
  * anything — see the NO WILDCARDS paragraph at the top of 65_program_leaders.gs.
  */
-function programMonthLeaderCoverage(rows, monthKey) {
-  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+function programMonthLeaderCoverage(rows, map) {
+  map = map || getIndexMap(HEADERS.Master_Program_Dashboard);
   const missing = [];
   let considered = 0;
 
@@ -1081,14 +1324,12 @@ function programMonthLeaderCoverage(rows, monthKey) {
   try {
     index = buildProgramLeaderIndex();
   } catch (err) {
-    log(`\u2139\ufe0f Could not read the leader index for Master_Program_Dashboard's coverage line (${err}).`);
+    log(`\u2139\ufe0f Could not read the leader index for ${SHEET_NAMES.PROGRAM_MONTH}'s coverage line (${err}).`);
     return null;
   }
 
-  rows.forEach(row => {
+  (rows || []).forEach(row => {
     if (String(row[map['Group_Key']] || '').indexOf('lunch::') === 0) return;
-    const monthStart = coerceDate(row[map['Month_Start']]);
-    if (!monthStart || formatMonthKey(monthStart) !== monthKey) return;
     const title = String(row[map['Program']] || '').trim();
     if (!title) return;
     considered++;
@@ -1113,18 +1354,18 @@ function programMonthLeaderCoverage(rows, monthKey) {
  */
 function writeProgramMonthCoverageLine(sheet, row, numCols, coverage) {
   if (!coverage) return row;
-  const label = 'Programs with no leader this month';
+  const label = 'Programs running now with no leader';
   sheet.getRange(row, 1, 1, 2).setValues([[label, coverage.missing.length]]);
   sheet.getRange(row, 1)
     .setFontSize(TYPO.HERO_LABEL.size)
     .setFontWeight(TYPO.HERO_LABEL.weight)
     .setFontColor(TYPO.HERO_LABEL.color)
     .setNote(coverage.missing.length > 0
-      ? `Counted over the ${coverage.considered} program(s) running this month.\n\n` +
+      ? `Counted over the ${coverage.considered} program(s) with a session still to come.\n\n` +
         `Nobody on ${SHEET_NAMES.PROGRAM_LEADERS} is down as leading:\n${coverage.missing.join('\n')}\n\n` +
         `Add a row there naming the program and its location. This tab only COUNTS — ` +
         `nothing is shared and no mail is sent from here.`
-      : `Every one of the ${coverage.considered} program(s) running this month has a leader row on ` +
+      : `Every one of the ${coverage.considered} program(s) still running has a leader row on ` +
         `${SHEET_NAMES.PROGRAM_LEADERS}.`);
   sheet.getRange(row, 2)
     .setFontSize(TYPO.METRIC_VALUE.size)
@@ -1136,10 +1377,10 @@ function writeProgramMonthCoverageLine(sheet, row, numCols, coverage) {
   return row + 1;
 }
 
-/** Menu: rebuild the month view on its own, from whatever the session tab currently says. */
+/** Menu: rebuild the program view on its own, from whatever the session tab currently says. */
 function renderProgramMonthSheetNow() {
   renderProgramMonthDashboard(true);
-  SpreadsheetApp.getActive().toast('Master_Program_Dashboard rebuilt from the session table.');
+  SpreadsheetApp.getActive().toast(`${SHEET_NAMES.PROGRAM_MONTH} rebuilt from the session table.`);
 }
 
 // ============================================================================
@@ -1187,7 +1428,7 @@ const PROGRAM_MONTH_LEADER_SOURCE_MATCHED = 'matched';
 const PROGRAM_MONTH_LEADER_SOURCE_TYPED = 'typed';
 
 /**
- * Who is down as leading this program-month, off the SAME per-execution index
+ * Who is down as leading this program, off the SAME per-execution index
  * the sharing and mail paths read — never a second read, and never a second
  * answer that could disagree with theirs.
  *

@@ -17,30 +17,35 @@
  *      is the first column, and the old separate Month column has been
  *      replaced everywhere by simply color-tinting the Event_Date cell
  *      itself (see getMonthColor()/applyMonthColorTint()).
- *    - Master_Program_Dashboard            : the same sessions, one row per PROGRAM-
- *      MONTH — one program, one location, one month, which is the unit
- *      buildEventGroups() already makes one FORM for. Fourteen of the
- *      session table's columns are program-month facts printed once per
- *      session; this is the other half of that join written out on its own,
- *      with the schedule collapsed into a phrase ("Weekly · Tue 9:30 AM -
- *      11:30 AM · 4 sessions", and a note naming any week the run skips)
- *      and lunch collapsed to one row per location per month.
- *      TEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN. The rule is
- *      the schedule cell's, applied to the whole tab: THE FACT GOES IN THE
- *      CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE. Seats is the four
- *      counting columns as one sentence ("12 / 20 · 60% · 2 waiting", or
- *      "12 · unlimited"), Links is the form, its editor and the two generated
- *      sheets as one cell of rich text with a live link per word, and the
- *      three PROGRAM FLAGS — Club, No Registration, Personalized Assistance —
- *      are tick boxes here rather than twelve identical copies of themselves
- *      on the session table.
+ *    - Master_Program_Dashboard            : the same sessions, ONE ROW PER
+ *      PROGRAM — one title, at the building(s) it runs in, for as long as it
+ *      runs. Fourteen of the session table's columns are whole-program facts
+ *      printed once per session; this is the other half of that join written
+ *      out on its own, with the schedule collapsed into a phrase ("Weekly ·
+ *      Tue 9:30 AM - 11:30 AM · September 2026 - June 2027 · 38 sessions",
+ *      with the per-month breakdown and any week the run skips in a note) and
+ *      lunch collapsed to one row per location.
+ *      FIFTEEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN — at a
+ *      twelfth of the row count. The rule is the schedule cell's, applied to
+ *      the whole tab: THE FACT GOES IN THE CELL AND THE FOLLOW-UP QUESTION
+ *      GOES IN A CELL NOTE. Seats is the four counting columns as one
+ *      sentence ("12 / 20 · 60% · 2 waiting", or "12 · unlimited"), summed
+ *      over THIS MONTH AND NEXT rather than over the program's whole life;
+ *      Links is the form, its editor and the two generated sheets as one cell
+ *      of rich text with a live link per word; and the three PROGRAM FLAGS —
+ *      Club, No Registration, Personalized Assistance — are tick boxes here
+ *      rather than twelve identical copies of themselves on the session table.
+ *      Next_Date leads the row and carries the month tint; Last_Date closes
+ *      it; the split is Running / Not currently running rather than Upcoming
+ *      / Past, because a class running September to June is neither.
  *      A [Grouped] run of dates, which has one form and no month of its own,
- *      is one row filed under its FIRST month. It also carries the
- *      participation metrics block and one line the month grain makes
- *      possible — how many of this month's programs have nobody down as
- *      leading them (a COUNT off Program_Leaders; nothing is shared or sent
- *      from here) — and its Sessions cell links through to that group's own
- *      block of rows on the session table.
+ *      used to be filed awkwardly under its earliest month; there is no month
+ *      to file it under now. It also carries the participation metrics block
+ *      and one line the program grain makes possible — how many of the
+ *      programs we are running have nobody down as leading them (a COUNT off
+ *      Program_Leaders; nothing is shared or sent from here) — and its
+ *      Sessions cell links through to that program's NEXT day row on the
+ *      session table, which is where the month detail lives now.
  *      DERIVED AND READ-ONLY, WITH ONE WINDOW IN IT: nothing reads this tab,
  *      nothing is stored on it that is not already on a session row, and
  *      deleting it changes no behavior anywhere (the next dashboard render

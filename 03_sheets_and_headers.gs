@@ -30,9 +30,8 @@ const SHEET_NAMES = {
   // HEADERS key left on the old spelling would hand the month tab the
   // session table's columns.
   PROGRAM_DASHBOARD: 'All_Program_Sessions',
-  // One row per program-month — the same program, at the same location, in
-  // the same month, which is exactly the unit buildEventGroups() already
-  // makes one FORM for. DERIVED, top to bottom, from the session table:
+  // ONE ROW PER PROGRAM — one title, at the building(s) it runs in, for as
+  // long as it runs. DERIVED, top to bottom, from the session table:
   // nothing is stored here that is not already on a session row, which is
   // what makes deleting this tab a cosmetic act rather than a data loss.
   // See 78_program_month_dashboard.gs. It carries the name the session
@@ -230,44 +229,64 @@ defineLazyGlobal_('HEADERS', () => ({
     'Max_Per_Month'
   ],
   /**
-   * Master_Program_Dashboard — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
+   * Master_Program_Dashboard — ONE ROW PER PROGRAM (see SHEET_NAMES.PROGRAM_MONTH).
    *
-   * FIFTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen —
-   * and of the fifteen, three are tick boxes and two are facts off
-   * Program_Settings that this tab did not use to be able to show at all.
-   * The count went down while what the row SAYS went up, which is the whole
-   * point: the columns that came off were the ones nobody read on their own. The tab
-   * exists so that four session rows read as one line, and a line nineteen
-   * columns wide is not one a person reads — it is one they scroll. So the
-   * columns that were always read TOGETHER are now written together, in the
-   * shape describeProgramMonthSchedule() set for the whole tab: THE FACT GOES
-   * IN THE CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE.
+   * It was one row per program-MONTH, which was the right grain for the tab's
+   * first question — buildEventGroups() makes one FORM per program per month,
+   * so that is the unit a capacity and a set of links belong to. It is the
+   * wrong grain for the question people actually bring to a front page:
+   * "what do we run, and who runs it?" A weekly class was twelve rows a year,
+   * eleven of which differed from the first only in which twelve dates they
+   * summed.
    *
+   * A PROGRAM IS ITS TITLE AND THE BUILDING(S) IT RUNS IN, and the row's
+   * identity says exactly that. Form_ID is still what resolves the one case a
+   * (title, location) key gets wrong — a [Shared] program has ONE form across
+   * two buildings and is ONE thing to run, so it is one row with Location
+   * reading "Narberth + Ashbridge" — but the form is no longer the key
+   * itself, because a Regular program takes a NEW form every month and
+   * keying on it is how the month got into the grain in the first place.
+   *
+   * NEXT_DATE LEADS THE ROW AND IS A REAL DATE, for the same reason Event_Date
+   * leads every other date-bearing tab: it is what the sectioned readers and
+   * the month tint are defined against. It is the next session from today, and
+   * it is BLANK for a program that is not currently running — which is the
+   * whole of what the Running / Not currently running split is decided on.
+   * Last_Date is when it last ran (or last will), and is what the second
+   * section is ordered by: a program that finished in June sits above one that
+   * finished in 2019.
+   *
+   * FIFTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen at
+   * twelve times the row count. The rule describeProgramMonthSchedule() was
+   * written under became the rule for the whole tab: THE FACT GOES IN THE
+   * CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE.
+   *
+   *   Schedule  the cadence, the times, the span and the count — "Weekly ·
+   *             Tue 9:30 AM – 11:30 AM · Sep 2026 – Jun 2027 · 38 sessions".
+   *             The per-month breakdown, and any week the run skips, are in
+   *             the note. Sessions drills through to the session table, which
+   *             is where a month of dates belongs.
    *   Notify    the six notification tick boxes on Program_Settings, as one
    *             phrase — "Cal · 7d · AM". READ-ONLY, and read fresh on every
    *             render off the one memoized read of that tab the invitation
    *             and reminder passes already make. Nothing is stored: the
    *             ticks are the answer, this is a window onto them, and the
    *             place to change one is the tab that owns it.
-   *   Room      Program_Settings' Room_Or_Setup, same read, same rule. "The
-   *             big room, projector" is a fact about the program that a
-   *             person planning a month wants beside its schedule, and
-   *             sending them to another tab for one cell is how a note nobody
-   *             reads stays a note nobody reads.
-   *   Seats     Registered + Max_Capacity + Fill + Waitlist.
-   *             "12 / 20 · 60% · 2 waiting", or "12 · unlimited". Nobody
-   *             reads a Registered without looking at the capacity beside it,
-   *             and Fill was arithmetic on the other two printed in its own
-   *             column. The note carries how the sum was made.
+   *   Room      Program_Settings' Room_Or_Setup, same read, same rule.
+   *   Seats     Registered + Max_Capacity + Fill + Waitlist, summed over THIS
+   *             MONTH AND NEXT — not over the program's whole life. At this
+   *             grain a lifetime total would be a number that only ever goes
+   *             up, says nothing about whether there is room next Tuesday, and
+   *             would read as a capacity somebody could book against. The
+   *             window is stated in the column note, and the Sessions
+   *             drill-through is where history lives.
    *   Links     Form_Response_Link, Edit_Form_Link, Registrant_Sheet_Link and
    *             Sign_In_Sheet_Link, in one cell of rich text with a live link
-   *             per word. They were columns three words wide that nobody ever
-   *             sorted, filtered or read — only clicked — and one of them
-   *             (spelled Leader_Sheet_Link, a name no session row carries) had
-   *             been blank on every row of every workbook without anybody
-   *             noticing. A fourth link costs nothing now.
+   *             per word — the CURRENT ones, off the program's most recent
+   *             session, because a Regular program has a form per month and
+   *             the one worth handing out is this month's.
    *
-   * THE THREE PROGRAM FLAGS LIVE HERE NOW — Club, No_Registration and
+   * THE THREE PROGRAM FLAGS LIVE HERE — Club, No_Registration and
    * Personalized_Assistance, as real tick boxes on the row of the thing they
    * describe. They were on the session table, where they were ticked onto
    * EVERY row of a program because they are facts about the program and not
@@ -283,35 +302,26 @@ defineLazyGlobal_('HEADERS', () => ({
    * calendar (handleProgramMonthFlagEdit in 18), and the next render reads the
    * answer back off the session rows. Nothing is stored here.
    *
-   * LEADER_SOURCE IS GONE, and nothing was lost with it. It held one of two
-   * words, 'typed' or 'matched', and 'matched' — an unconfirmed Title_Match
-   * proposal — was already being said twice: the pair of cells took the yellow
-   * manual-entry wash as well. The wash and a cell note on the Leader cell say
-   * it on their own, in the place a person is already looking.
-   *
-   * Month_Start LEADS THE ROW AND IS A REAL DATE (the 1st of the month), for
-   * the same reason Event_Date leads every other date-bearing tab: it is what
-   * partitionByDate() / writeUpcomingPastSections() / getSectionedRows() are
-   * defined against. A month written as the words "September 2026" would have
-   * needed a second sectioned reader, and this tab is not worth one.
-   *
    * LEADER IS NOT STORAGE. It is the one column on this tab that a person may
-   * type into, and what they type is written straight onto Program_Leaders —
+   * TYPE into, and what they type is written straight onto Program_Leaders —
    * the tab that actually shares a roster and sends the mail. Nothing here is
    * ever read back as the answer to "who leads this": the next render reads it
    * off Program_Leaders again. Two records disagreeing about who may read a
    * roster is found out the day somebody is emailed a class they do not teach,
-   * so there is only ever one.
+   * so there is only ever one. Leader_Source used to sit beside it saying
+   * 'typed' or 'matched'; a yellow wash and a cell note say the interesting
+   * half on their own.
    *
    * Form_ID trails at the end with Group_Key, hidden like the session table's
-   * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is how the rows are
-   * GROUPED, and Group_Key is the row's own identity — both are for reading in
-   * the formula bar when something has gone wrong, not for scanning.
+   * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is the program's
+   * current form, and Group_Key is the row's own identity — both are for
+   * reading in the formula bar when something has gone wrong, not for
+   * scanning.
    */
   Master_Program_Dashboard: [
-    'Month_Start', 'Location', 'Program', 'Leader', 'Type_Tag',
+    'Next_Date', 'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify', 'Links', 'Status',
+    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify', 'Links', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
