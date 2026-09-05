@@ -437,3 +437,16 @@ calls into `34`, `40` and `43` is a hoisted function.
 | File | | What is in it |
 |---|--:|---|
 | `83_monthly_metrics.gs` | 708 | The `Metrics` tab: one stored row per calendar month, and the year-over-year block built on those rows rather than on `All_Registrants`. **The rule the file exists for:** a month whose registrant rows have been archived recounts to `null`, not to zero — overwriting a captured month with a count of nothing would report a collapse that never happened. It is the ONE tab in this workbook that is a record rather than a projection of the rows still on the other tabs, and `collapseOldPastMonths` is why it has to be. Counted through the same readers `43` uses, so the two blocks cannot disagree about what a registration is. Runs monthly (`captureMonthlyMetricsTrigger`, the 2nd at 4am) and on demand (`refreshMetricsTabNow`, under Settings & Fixes).<br><br>Its own `HEADERS.Metrics` key is spelled for the TAB, unlike the session table's — there is no second tab called `Metrics` for it to collide with. |
+
+### Session rows left behind by a calendar (84)
+
+Behavior only, numbered last for the usual reason: it declares no constant
+anything else derives from, and everything it reaches for — `CALENDAR_MAP`,
+`HEADERS`, `renderProgramDashboard`, `moveRegistrantsToTriage` — it reads at
+CALL time or through a hoisted function declaration. It was `83` on its own
+branch until the merge that brought the `Metrics` tab in; the prefix is all
+that changed.
+
+| File | | What is in it |
+|---|--:|---|
+| `84_orphaned_session_rows.gs` | 297 | **A calendar that left, not a date that did.** `triageDeletedSessions` (`43`) removes a session whose calendar EVENT went; by design it leaves alone any row it cannot attribute to a calendar it just read, which is what stops one unreadable calendar cancelling a location — and which also means a retired, recreated or repointed calendar leaves a residue nothing reaches, re-importing beside itself under the new ID. `findOrphanedSessionRows` is the pure split, scoped by `Calendar_Source` alone: a blank one is a lunch or hand-typed row and is never in scope, and a CONFIGURED calendar's rows never are either — nothing here reads a calendar, so a calendar that merely failed to load cannot be read as a retired one, which is also why this needs no size limit where triage does (a retired location legitimately IS most of the table). `describeOrphanedSessionRows` names each calendar ID in full with its rows, programs and date span, and is shared by `reportOrphanedSessionRows` (read-only, ungated) and the confirmation `removeOrphanedSessionRows` asks — menu-only, never a trigger, gated as `Remove Leftover Calendar Rows`. Registrants MOVE to `Deleted_Event_Triage` rather than being deleted, which is why `moveRegistrantsToTriage` (`26`) now takes optional wording: "the event is gone" would be a lie about a session whose event may still sit on a calendar we no longer read. The retired calendar's forms are left alone — a link already in circulation still opens. |
