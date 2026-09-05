@@ -536,7 +536,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   if (upcomingRows.length > 0) sheet.getRange(upcomingDataStart, 1, upcomingRows.length, numCols).setValues(upcomingRows);
   setDataRowHeights(sheet, upcomingDataStart, upcomingRows.length);
   applyZebraStripingManualBounded(sheet, upcomingDataStart, upcomingRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length);
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length, options.dateNumberFormat);
   row += upcomingRows.length;
   row++; // spacer
 
@@ -551,7 +551,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   if (pastRows.length > 0) sheet.getRange(pastDataStart, 1, pastRows.length, numCols).setValues(pastRows);
   setDataRowHeights(sheet, pastDataStart, pastRows.length);
   applyZebraStripingManualBounded(sheet, pastDataStart, pastRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length);
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length, options.dateNumberFormat);
   row += pastRows.length;
 
   // Old months go away LAST, once the rows are written and formatted — hiding

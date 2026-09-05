@@ -896,7 +896,10 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
   const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
-    upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions'
+    upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions',
+    // Event_Date reads as its month here — "September 2026", not "Tue 9/1/2026".
+    // The value under it is still the session's real start datetime.
+    dateNumberFormat: MONTH_DISPLAY_FORMAT
   });
 
   const dateColLetter = columnToLetter(map['Event_Date'] + 1);

@@ -598,6 +598,18 @@ function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
 const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
 
 /**
+ * The same date cell shown as its MONTH alone — "September 2026".
+ *
+ * Master_Program_Dashboard's session table reads by month rather than by day:
+ * the day is already in Event_Time's row and in the calendar, and a column of
+ * thirty near-identical dates is noise there. The cell still holds the real
+ * start datetime, so partitionByDate(), collapseOldPastMonths() and the
+ * Event_Time formulas that read it are untouched — only what a person sees
+ * changes. See applyMonthColorTint(), whose `format` argument carries it.
+ */
+const MONTH_DISPLAY_FORMAT = 'MMMM yyyy';
+
+/**
  * Tints an Event_Date column's cells by month — the direct replacement for the
  * old separate Month column everywhere — and stamps DATE_DISPLAY_FORMAT while
  * it is there.
@@ -605,14 +617,18 @@ const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
  * The two belong together: this is called on exactly the Event_Date column of
  * exactly the tabs that have one, from writeUpcomingPastSections(), so it is
  * the one place that already knows where every date cell in the workbook is.
+ *
+ * `format` lets one tab say it wants its dates read differently —
+ * Master_Program_Dashboard passes MONTH_DISPLAY_FORMAT. Omitted, every tab
+ * gets DATE_DISPLAY_FORMAT as it always has.
  */
-function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows) {
+function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows, format) {
   if (numRows < 1) return;
   const range = sheet.getRange(startRow, colIndex1Based, numRows, 1);
   const values = range.getValues();
   const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : PALETTE.PAPER]; });
   range.setBackgrounds(backgrounds);
-  range.setNumberFormat(DATE_DISPLAY_FORMAT);
+  range.setNumberFormat(format || DATE_DISPLAY_FORMAT);
 }
 
 /** Builds a "text equals" conditional format rule across one or more explicit ranges. */
