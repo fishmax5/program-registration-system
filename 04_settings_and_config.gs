@@ -62,6 +62,14 @@ const CONFIG_LAYOUT = {
     startCol: 27,
     headers: ['Email', 'Sync_Digest', 'Leader_Roster_Alerts', 'Registrant_Reminders', 'Calendar_Invite_Guest',
       'Appointment_Requests']
+  },
+  // Fresh columns past ADMIN_NOTIFICATIONS for the same reason that table got
+  // them: every section here is keyed by column on workbooks already running,
+  // so a new one is appended and nothing between is ever reflowed.
+  OUTBOUND_MAIL: {
+    title: '🔇 Mail to Members & Leaders',
+    startCol: 34,
+    headers: ['Pause_Outbound_Mail']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -69,7 +77,7 @@ const CONFIG_LAYOUT = {
 // until the migration cleared them (RETIRED_ADMIN_NOTIFICATION_COL /
 // RETIRED_ARCHIVE_COPY_COL), and naming them here would invite somebody to
 // close the gap by moving a live section into one.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26, 33];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the
@@ -424,6 +432,62 @@ const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgram
  */
 const AUTOMATION_FLAG_CACHE_SECONDS = 60;
 const AUTOMATION_FLAG_CACHE_KEY = 'AUTOMATION_ENABLED_FLAG';
+
+// ---------------------------------------------------------------------------
+// THE OUTBOUND-MAIL PAUSE  (Config -> "🔇 Mail to Members & Leaders")
+// ---------------------------------------------------------------------------
+//
+// A SECOND SWITCH, BECAUSE IT ANSWERS A DIFFERENT QUESTION. Automation_Enabled
+// stops the syncs from running at all, which is not what somebody doing repair
+// work wants: they want the imports, the dashboards and the link repairs to
+// keep working — those are the repair — while nobody OUTSIDE the office hears
+// a word about it.
+//
+// The failure this exists for is a real one, and it is the shape every repair
+// has. Rows that were deleted came back on the next sync (a form rebuild, a
+// re-import, a catch-up), the roster diff in section 9d compared the roster
+// against its stored snapshot exactly as it is supposed to, and program
+// leaders were emailed about a dozen registrations that had never actually
+// changed. Nothing malfunctioned. The mail was simply reporting bookkeeping,
+// and there was no way to say "not while I am working".
+//
+// WHAT IT PAUSES: everything that leaves the organization, which is everything
+// that goes through sendRationedEmail() — the leader roster alerts and
+// day-before digests (66) and the registrant reminders (70). Calendar
+// invitations are NOT sent by this workbook (Google emails the guest when the
+// event is written), so pausing mail cannot stop those; take Invite_Registrants
+// off for that.
+//
+// WHAT IT DOES NOT PAUSE: notifyAdmin(), which is office mail about the
+// workbook itself. Silencing the channel that would tell you the repair went
+// wrong is exactly backwards, and it is not what anybody means by "don't email
+// the members".
+//
+// DISCARDED, NOT QUEUED — see sendRationedEmail(). A pause that held every
+// message and delivered the pile on release would be worse than useless for
+// the case it was built for: the whole point is that the churn never reaches
+// anybody. So a paused message counts as handled: its caller's ledger advances
+// and the roster snapshot moves on, exactly as if it had gone. The office is
+// told how many were dropped, once per run.
+//
+// FAILS OPEN, like the automation switch and for the same asymmetry: a Config
+// tab that is missing or mid-rebuild must never be able to silence a reminder
+// nobody knew was owed. Only the literal "Yes" pauses.
+// ---------------------------------------------------------------------------
+
+const OUTBOUND_MAIL_PAUSE_OPTIONS = ['No', 'Yes'];
+
+/** Blank, unreadable, anything but a deliberate "Yes": mail goes out. */
+const DEFAULT_OUTBOUND_MAIL_PAUSED = false;
+
+/**
+ * Cached across executions like the automation flag, and for the weaker
+ * version of the same reason: a sync sends in two passes and asks once per
+ * message. A minute of staleness on a pause somebody just set costs at most
+ * the tail of the run they set it during.
+ */
+const OUTBOUND_MAIL_PAUSE_CACHE_SECONDS = 60;
+const OUTBOUND_MAIL_PAUSE_CACHE_KEY = 'OUTBOUND_MAIL_PAUSED_FLAG';
 
 /** Script Property prefix for the per-handler "which accounts actually ran this" record. */
 const HANDLER_ATTRIBUTION_PROP_PREFIX = 'HANDLER_RUN_BY_';

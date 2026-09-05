@@ -104,7 +104,12 @@
  *      replaced the single Admin Notification Email and Archive Copy
  *      Address cells) + Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
- *      owner — see the multi-account note below). Unaffected by the
+ *      owner — see the multi-account note below) + Mail to Members &
+ *      Leaders (Pause_Outbound_Mail: set to "Yes" while repairing and
+ *      nothing leaves the office — no roster alerts, no reminders. Held
+ *      messages are DROPPED, not saved up, so releasing it never delivers
+ *      a pile of churn about registrations that only ever moved on paper.
+ *      The office's own digest and error mail are unaffected). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
  *      first-column/month-tint treatment as All_Registrants.

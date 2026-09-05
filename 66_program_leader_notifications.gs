@@ -472,6 +472,7 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
   });
 
   let sent = 0;
+  let paused = 0;
   // A program is re-baselined only once NOBODY is still owed its current
   // changes. Any leader who was skipped or whose mail bounced puts every
   // program they were owed in here, and those keep their old snapshot.
@@ -522,6 +523,18 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       programs.forEach(program => { told[program.key] = true; });
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
         `${programs.reduce((sum, p) => sum + p.changes.length, 0)} change(s).`);
+      return;
+    }
+
+    // PAUSED COUNTS AS TOLD, which is the entire reason the pause exists.
+    // This pass reports the DIFF against a stored snapshot, so a change left
+    // un-advanced is a change reported again next hour — and the run somebody
+    // paused the mail for is exactly the run that produces a hundred of them.
+    // Advancing the snapshot without sending is what makes "not while I am
+    // working" mean the churn is gone rather than merely late.
+    if (outcome.status === 'paused') {
+      paused++;
+      programs.forEach(program => { told[program.key] = true; });
       return;
     }
 
@@ -586,6 +599,10 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       `${skipped.length} leader(s) were not emailed this run because the per-run cap or the daily mail ` +
       `quota was reached: ${skipped.join(', ')}. Their changes were NOT discarded — they go out on the ` +
       `next sync.`);
+  }
+  if (paused > 0) {
+    log(`\u23f8\ufe0f Roster alerts: ${paused} leader(s) not emailed \u2014 mail to members and leaders is ` +
+      `paused, and their changes were dropped rather than held.`);
   }
   return sent;
 }
@@ -842,6 +859,7 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
   const registry = getProgramLeaderSheetRegistry();
 
   let sent = 0;
+  let paused = 0;
   const skipped = [];
 
   leaders.forEach(leader => {
@@ -885,14 +903,25 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
       reserve: LEADER_DIGEST_QUOTA_RESERVE
     });
 
+    const recordDigest = () => sessions.forEach(s => {
+      if (!ledger[s.eventId]) ledger[s.eventId] = {};
+      ledger[s.eventId][leader.email.toLowerCase()] = true;
+      __leaderDigestLedgerDirty = true;
+    });
+
     if (outcome.status === 'sent') {
       sent++;
-      sessions.forEach(s => {
-        if (!ledger[s.eventId]) ledger[s.eventId] = {};
-        ledger[s.eventId][leader.email.toLowerCase()] = true;
-        __leaderDigestLedgerDirty = true;
-      });
+      recordDigest();
       log(`Roster digest sent to ${leader.email} — ${sessions.length} upcoming session(s).`);
+      return;
+    }
+
+    // Recorded without being sent, like the alerts above: a digest is "the day
+    // before this session", and a paused one is not owed later — by the time
+    // the pause lifts, the day it was about may well have happened.
+    if (outcome.status === 'paused') {
+      paused++;
+      recordDigest();
       return;
     }
 
@@ -918,6 +947,9 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
     noteForAdmin('Roster digests held back',
       `${skipped.length} leader(s) were not sent their roster digest this run because the per-run cap or ` +
       `the daily mail quota was reached: ${skipped.join(', ')}. Not discarded — they go out on the next sync.`);
+  }
+  if (paused > 0) {
+    log(`\u23f8\ufe0f Roster digests: ${paused} leader(s) not emailed \u2014 mail to members and leaders is paused.`);
   }
   return sent;
 }

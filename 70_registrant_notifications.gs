@@ -210,7 +210,7 @@ function notificationPolicyForSession(session) {
  * impossible and a sync with nothing due does no work beyond the read.
  */
 function sendRegistrantReminders(sessionRows, registrantRows) {
-  const result = { sent: 0, held: 0, eventsTouched: 0 };
+  const result = { sent: 0, held: 0, paused: 0, eventsTouched: 0 };
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const regHeaders = HEADERS.All_Program_Sessions;
@@ -331,6 +331,15 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
         result.held++;
         return;
       }
+      // PAUSED IS NOT HELD. The mailer has already called recordSent() for it
+      // (see THE PAUSE in section 9f), so this reminder is spent, not queued:
+      // switching the pause off does not deliver yesterday's "your program is
+      // tomorrow" the day after. Counted so the run can say so, and no
+      // warning — nothing went wrong.
+      if (outcome.status === 'paused') {
+        result.paused++;
+        return;
+      }
       // NOT recorded, so the next pass tries again. Told to the admin on the
       // refusal itself — an address MailApp refuses will refuse the same way
       // tomorrow — but not again for the messages suppressed behind it, which
@@ -353,6 +362,9 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
     log(`Registrant reminders: ${result.sent} email(s) sent` +
       (result.held > 0 ? `; ${result.held} held back by the per-run cap or the mail quota — ` +
         `they go out on the next sync.` : '.'));
+  }
+  if (result.paused > 0) {
+    log(`Registrant reminders: ${result.paused} email(s) dropped — mail to members and leaders is paused.`);
   }
   if (result.held > 0) {
     noteForAdmin('Reminders held back',
