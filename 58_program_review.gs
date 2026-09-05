@@ -119,7 +119,7 @@ function buildProgramReview() {
     };
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const calendarFacts = readCalendarFactsForReview();

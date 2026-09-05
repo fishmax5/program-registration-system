@@ -78,7 +78,7 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
     !group.noRegistration && !existingState.groupFormMap[group.groupKey]);
   if (unknown.length === 0) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return []; // a first import — nothing to rename FROM
@@ -320,7 +320,7 @@ function applyProgramRenames(registrySheet, renames) {
 
 /** The session table itself: new Event_ID and new Clean_Title, written in place. */
 function renameSessionTableRows(registrySheet, renames) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const titleByOldId = {};
   const idMap = {};
   renames.forEach(rename => Object.keys(rename.idMap).forEach(oldId => {
@@ -365,7 +365,7 @@ function renameSessionTableRows(registrySheet, renames) {
 function renameRegistrantRows(ss, renames, idMap) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return;
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const titleByOldId = buildTitleByOldId(renames);

@@ -36,14 +36,14 @@ function getMergeTargets() {
   return [
     {
       sheetName: SHEET_NAMES.PROGRAM_DASHBOARD,
-      headers: HEADERS.Master_Program_Dashboard,
+      headers: HEADERS.All_Program_Sessions,
       marker: 'Event_ID',
       identity: (row, map) => String(row[map['Event_ID']] || '').trim(),
       render: rows => renderProgramDashboardFromRows(rows)
     },
     {
       sheetName: SHEET_NAMES.REGISTRANT_DASH,
-      headers: HEADERS.Registrant_Dash,
+      headers: HEADERS.All_Registrants,
       marker: 'Event_ID',
       identity: (row, map) => {
         const eventId = String(row[map['Event_ID']] || '').trim();
@@ -98,7 +98,10 @@ function getProtectedTabNames() {
   // still has its data under the old name, and the scanner would otherwise
   // offer to merge a tab that is about to simply be renamed into place.
   return Object.values(SHEET_NAMES)
-    .concat(Object.keys(LEGACY_SHEET_RENAMES).map(k => LEGACY_SHEET_RENAMES[k]))
+    .concat(Object.keys(LEGACY_SHEET_RENAMES).reduce((names, k) => {
+      const entry = LEGACY_SHEET_RENAMES[k];
+      return names.concat(Array.isArray(entry) ? entry : [entry]);
+    }, []))
     .concat([PENDING_FLAG_SHEET_NAME]);
 }
 
@@ -367,7 +370,7 @@ function stampMergeProvenance(row, map, target, sourceName) {
 function renderProgramDashboardFromRows(rows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
 
   // Write the combined rows into a bare table the normal render will find,
   // then let renderProgramDashboard() lay it out properly.

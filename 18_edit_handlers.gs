@@ -1,8 +1,8 @@
 /**
  * Dispatches to a per-sheet handler for tabs that carry a Manual_Override
  * column (Registrants, Lunch Dashboard) plus the Lunch_Schedule edit hook.
- * Master_Program_Dashboard's session table no longer has a Manual_Override
- * column at all (see HEADERS.Master_Program_Dashboard), so there's nothing
+ * All_Program_Sessions's session table no longer has a Manual_Override
+ * column at all (see HEADERS.All_Program_Sessions), so there's nothing
  * to auto-flip there anymore.
  */
 /**
@@ -39,10 +39,14 @@ function onEdit(e) {
       handleLunchScheduleEdit(e, sheet);
     } else if (name === SHEET_NAMES.PROGRAM_DASHBOARD) {
       handleProgramDashboardEdit(e, sheet);
+    } else if (name === SHEET_NAMES.PROGRAM_MONTH) {
+      handleProgramMonthEdit(e, sheet);
     } else if (name === SHEET_NAMES.CONFIG) {
       handleConfigEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
       handleClubMembersEdit(e, sheet);
+    } else if (name === SHEET_NAMES.MEMBER_ROLL) {
+      handleMemberRollEdit(e, sheet);
     }
   } catch (err) {
     // Say something. A silent catch here is how "I typed it and nothing
@@ -54,7 +58,7 @@ function onEdit(e) {
 }
 
 /**
- * Master_Program_Dashboard: the session table is rebuilt from the calendar on
+ * All_Program_Sessions: the session table is rebuilt from the calendar on
  * every render, so almost nothing typed here survives — EXCEPT the three
  * columns that describe how a program's registration works: Type_Tag, and the
  * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,
@@ -77,7 +81,7 @@ function handleProgramDashboardEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
 
   // A LUNCH-ONLY ROW HAS NO CALENDAR EVENT BEHIND IT, and everything below
   // this line works by writing a tag into an event description. Type_Tag,
@@ -257,6 +261,147 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
   toastIfPossible(`${headline}${spread > 0 ? ` — ${spread} other session row(s) ticked to match` : ''}. ` +
     `Writing [${flag.tag}] to the calendar; the forms follow on the next Sync Cal.`);
   return true;
+}
+
+/**
+ * PROGRAM_MONTH'S LEADER CELL — the one cell on a derived, read-only tab that
+ * a person may type into, and the only edit anywhere that writes to
+ * Program_Leaders from somewhere else.
+ *
+ * THE HAZARD IT IS SHAPED AROUND. Program_Leaders is what shares a sign-up
+ * sheet and what sends a roster by email. A dropdown that stored its own
+ * answer would be a second record of who may read a roster, and two records
+ * disagreeing about that is found out the day somebody is emailed a class they
+ * do not teach. So this cell is a window: it is READ off Program_Leaders on
+ * every render (programMonthLeaderCell() in 78), and typing in it ADDS a row
+ * there. Nothing typed here is ever read back.
+ *
+ * IT ONLY ADDS — see attachProgramLeaderRow(), which is where that rule and
+ * its reasons live. Two consequences a person meets:
+ *
+ *   CLEARING THE CELL DELETES NOTHING. A row saying who led a class is a true
+ *   record whether or not they still lead it, and the next render simply reads
+ *   the same name back. The dialog says so in its own words, and says where a
+ *   leader is actually removed — on Program_Leaders, on the row whose deletion
+ *   is visibly the thing that stops a roster being shared.
+ *
+ *   REPLACING A NAME ADDS THE NEW ONE beside the old. The cell then prints
+ *   both, because both rows exist. That is the honest picture, and unpicking
+ *   the old one from here would be deleting a record from a tab nobody was
+ *   looking at.
+ *
+ * WHY IT ASKS. handleProgramFlagEdit() deliberately does not (a checkbox is
+ * its own question and its own undo). This is a dropdown holding a real value,
+ * and what it does is change who may read a roster — the single most
+ * consequential edit in the workbook that is not on the Admin menu.
+ *
+ * A simple onEdit, so: SpreadsheetApp only. Everything below is a sheet read,
+ * a sheet write and a dialog. invalidateProgramLeaderIndex() clears an
+ * in-memory variable, which is why it is reachable from here at all.
+ */
+function handleProgramMonthEdit(e, sheet) {
+  const headers = HEADERS.Master_Program_Dashboard;
+  const headerRows = findAllHeaderRows(sheet, 'Group_Key');
+  if (headerRows.length === 0) return;
+  const editedRow = e.range.getRow();
+  let headerRow = 0;
+  headerRows.forEach(row => { if (row < editedRow && row > headerRow) headerRow = row; });
+  if (!headerRow) return;
+
+  const sheetMap = getHeaderMapAt(sheet, headerRow);
+  const leaderCol = sheetMap['Leader'];
+  if (!leaderCol) return;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (leaderCol < firstCol || leaderCol > lastCol) return;
+
+  // A FILL-DOWN IS NOT ANSWERED, and it is not reverted either. Every row it
+  // lands on is a different program handing a different roster to the same
+  // person, which is the one shape of this edit nobody should be able to make
+  // with a drag — and there is no honest single question to ask about it. The
+  // tab is derived, so the next render puts every one of those cells back to
+  // what Program_Leaders says; the toast is what stops that looking like the
+  // edit silently working.
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) {
+    toastIfPossible(`⚠️ Leaders are attached one program at a time — nothing was written to ` +
+      `${SHEET_NAMES.PROGRAM_LEADERS}. The next render will put these cells back.`);
+    return;
+  }
+
+  const readCell = name => (sheetMap[name]
+    ? String(sheet.getRange(editedRow, sheetMap[name]).getValue() || '').trim() : '');
+  const groupKey = readCell('Group_Key');
+  const title = readCell('Program');
+  const location = readCell('Location');
+  const before = e.oldValue === undefined ? '' : String(e.oldValue).trim();
+  const typed = e.value === undefined ? '' : String(e.value).trim();
+
+  // A LUNCH ROW IS NOT A PROGRAM and has no leader row to write — the same
+  // refusal handleProgramDashboardEdit() makes for a lunch date, for the same
+  // reason: accepted on screen, reaching nothing, undone by the next render.
+  if (groupKey.indexOf('lunch::') === 0) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ Lunch is not a program and has no leader row.');
+    return;
+  }
+  if (!title || !location) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ That row has no program and location to attach a leader to.');
+    return;
+  }
+  // A SHARED PROGRAM IS ONE THING TO RUN AND TWO ROWS ON THE LEADER TAB — the
+  // privacy boundary there is one program at ONE location (see NO WILDCARDS in
+  // 65_program_leaders.gs), so attaching somebody to "Narberth + Ashbridge"
+  // would have to invent a grain that tab refuses to have. Sent to the tab
+  // where both rows can be typed deliberately, rather than resolved
+  // generously here.
+  if (location.indexOf(' + ') !== -1) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ "${title}" runs at ${location} — that is two leader rows, one per building. ` +
+      `Add them on ${SHEET_NAMES.PROGRAM_LEADERS}.`);
+    return;
+  }
+
+  if (typed === '') {
+    // The non-destructive reading, said out loud. Nothing is deleted here, so
+    // the cell goes back to what Program_Leaders says rather than sitting
+    // blank until the next render quietly refills it.
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`Nothing was removed: clearing this cell does not take ${before || 'a leader'} off ` +
+      `"${title}". Delete their row on ${SHEET_NAMES.PROGRAM_LEADERS} — that is what stops the ` +
+      `roster being shared with them.`);
+    return;
+  }
+  if (normalizeNameKey(typed) === normalizeNameKey(before)) return;
+
+  if (!confirmCellEditOrRevert(e, `Attach ${typed} to "${title}" at ${location}?`,
+      `A row is added on ${SHEET_NAMES.PROGRAM_LEADERS} naming ${typed} as leading "${title}" at ` +
+      `${location}. That tab is what shares this program's sign-up sheet, so this decides who may ` +
+      `read its roster.\n\n` +
+      `Emails stay OFF until you tick Notify_Roster_Changes there.\n\n` +
+      (before ? `${before} is not removed — their row stays, and this cell will show both names ` +
+        `until you delete it on ${SHEET_NAMES.PROGRAM_LEADERS}.` : ''))) return;
+
+  const result = attachProgramLeaderRow(typed, title, location);
+  if (result.status === 'refused') {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ ${typed} was not attached to "${title}" — ${result.note}.`);
+    return;
+  }
+  if (result.status === 'exists') {
+    toastIfPossible(`${typed} was already down as leading "${title}" at ${location}.`);
+    return;
+  }
+  toastIfPossible(`${typed} added to ${SHEET_NAMES.PROGRAM_LEADERS} for "${title}" at ${location}` +
+    (result.email ? '' : ' — with no email address yet, so nothing can be shared until you add one') +
+    '. Emails are off until you tick them there.');
+}
+
+/** Puts a Master_Program_Dashboard cell back to what it held. The tab is derived; the cell was never the record. */
+function revertProgramMonthCell(e, sheet) {
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
+  e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+  invalidateSectionedRowsCache(sheet);
 }
 
 /**
@@ -469,7 +614,7 @@ function onProgramFlagEditInstallable(e) {
 function editTouchesProgramFlagColumn(e, sheet) {
   const zone = findZoneForRow(getSectionZones(sheet, 'Event_ID'), e.range.getRow());
   if (!zone) return false;
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
   const firstCol = e.range.getColumn();
   const lastCol = firstCol + e.range.getNumColumns() - 1;
   return PROGRAM_FLAG_COLUMNS.concat(SESSION_FLAG_COLUMNS).some(flag => {
@@ -741,7 +886,7 @@ function applyProgramTagChangesToCalendar() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const byProgram = {};
   getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
@@ -1523,7 +1668,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
   // These forms now span locations. Record that where the next sync looks for
   // them, then relabel each one (buildFormSessionContext() sees the
   // multi-location rows and adds the location to every date label).
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const derived = { eventIds: new Set(), groupFormMap: {} };
@@ -1692,7 +1837,7 @@ function autoFlipManualOverride(sheet, headerMap0Based, editedRow, editedCol1Bas
   }
 }
 
-/** Registrant_Dash: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
+/** All_Registrants: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
 function handleRegistrantsEdit(e, sheet) {
   const editedRow = e.range.getRow();
   const editedCol = e.range.getColumn();
@@ -1701,7 +1846,7 @@ function handleRegistrantsEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Registrant_Dash);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Registrants);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
   // Computed from the RANGE, not just its top-left cell, so a fill-down or a
@@ -1782,7 +1927,7 @@ function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrantRows = getSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
+    const registrantRows = getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID');
 
     const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (registrySheet) {
@@ -1850,4 +1995,68 @@ function handleLunchDashboardEdit(e, sheet) {
   autoFlipManualOverride(sheet, headerMap, editedRow, e.range.getColumn());
 }
 
+/**
+ * Member_Roll: two of the staff columns do something when they change, and
+ * the rest are notes.
+ *
+ * DISPLAY_NAME IS A CORRECTION, not a label. A name typed into a public form
+ * is the key every other tab matches on (see 77_households_and_names.gs), so
+ * putting the right spelling here is a request to change it EVERYWHERE — on
+ * this person's registrations, their club memberships, their standing needs —
+ * and to keep changing it as the public goes on typing the old one. That is
+ * more than a cell edit, so it asks first, and puts the cell back on "no".
+ *
+ * HOUSEHOLD_OVERRIDE is the staff's answer when the shared-contact guess got
+ * a household wrong. It only ever needs the household columns recomputed off
+ * this tab, which is why it does not go anywhere near the registrant history.
+ */
+function handleMemberRollEdit(e, sheet) {
+  const headers = HEADERS.Member_Roll;
+  // Read off the tab's OWN header row, not the constant — a workbook whose
+  // roll has not been redrawn since these columns landed still holds the old
+  // order, and a map from HEADERS would aim a rename at whatever sits at that
+  // index instead. A column this tab hasn't got simply comes back undefined,
+  // and the branch below it does nothing.
+  const live = getHeaderMapAt(sheet, MEMORY_TAB_HEADER_ROW);
+  const map = {};
+  headers.forEach(h => { if (live[h]) map[h] = live[h] - 1; });
+  const row = e.range.getRow();
+  const col = e.range.getColumn();
+  if (row < MEMORY_TAB_DATA_ROW) return;
 
+  if (map['Household_Override'] !== undefined && col === map['Household_Override'] + 1) {
+    const count = refreshMemberHouseholds(sheet.getParent());
+    toastIfPossible(`👪 Households recomputed across ${count} member(s).`);
+    return;
+  }
+
+  if (map['Display_Name'] === undefined || map['Name'] === undefined) return;
+  if (col !== map['Display_Name'] + 1) return;
+  const corrected = String(e.value === undefined ? '' : e.value).trim();
+  if (!corrected) return; // cleared: nothing to carry anywhere
+  const current = String(sheet.getRange(row, map['Name'] + 1).getValue() || '').trim();
+  if (!current || normalizeNameKey(current) === normalizeNameKey(corrected)) return;
+
+  let ui = null;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    // No UI to ask through (a script-driven edit). The correction still runs
+    // — it is what somebody typed — and the log carries the record.
+    log(`handleMemberRollEdit: renaming without a confirmation (${err}).`);
+  }
+  if (ui) {
+    const answer = ui.alert('Correct this name everywhere?',
+      `"${current}" becomes "${corrected}" on every tab that carries it — registrations, ` +
+      'club rosters, standing needs — and any response that arrives under the old spelling ' +
+      'from now on will be filed under the new one.\n\nCorrect it?',
+      ui.ButtonSet.YES_NO);
+    if (answer !== ui.Button.YES) {
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      toastIfPossible('Left as it was — nothing was renamed.');
+      return;
+    }
+  }
+  const changed = applyMemberNameCorrection(current, corrected);
+  toastIfPossible(`✏️ "${current}" is now "${corrected}" — ${changed} cell(s) updated.`);
+}

@@ -1,4 +1,4 @@
-// WHERE THE FILES THIS SYSTEM MAKES END UP (section 79).
+// WHERE THE FILES THIS SYSTEM MAKES END UP (section 82).
 //
 // The bug: every folder lookup was a Drive-WIDE getFoldersByName() plus a
 // root-level createFolder(), so a folder nobody had dragged anywhere was
@@ -74,7 +74,7 @@ function makeDrive() {
     app: {
       getRootFolder: () => root,
       // The no-anchor path: a bare createFolder() lands in Drive root, which
-      // is exactly what section 79 stopped doing everywhere else.
+      // is exactly what section 82 stopped doing everywhere else.
       createFolder: n => folder(n, root.getId()),
       getFolderById: id => { if (!byId[id]) throw new Error('no such folder'); return byId[id]; },
       getFileById: id => { if (!byId[id]) throw new Error('no such file'); return byId[id]; },
@@ -135,7 +135,7 @@ this.moveDriveFileInto = moveDriveFileInto;
 this.driveFileIsIn = driveFileIsIn;
 this.STRAY_FILE_PATTERNS = STRAY_FILE_PATTERNS;
 this.LEADER_SHEET_FOLDER_NAME = LEADER_SHEET_FOLDER_NAME;
-this.LEGACY_LEADER_SHEET_FOLDER_NAME = LEGACY_LEADER_SHEET_FOLDER_NAME;
+this.LEGACY_LEADER_SHEET_FOLDER_NAMES = LEGACY_LEADER_SHEET_FOLDER_NAMES;
 `, sandbox, { filename: 'program.gs' });
   return sandbox;
 }
@@ -186,10 +186,10 @@ this.LEGACY_LEADER_SHEET_FOLDER_NAME = LEGACY_LEADER_SHEET_FOLDER_NAME;
   const drive = makeDrive();
   const home = drive.folder('Program Registration System', drive.root.getId());
   const s = load(drive, home.getId());
-  const old = drive.folder(s.LEGACY_LEADER_SHEET_FOLDER_NAME, drive.root.getId());
+  const old = drive.folder(s.LEGACY_LEADER_SHEET_FOLDER_NAMES[0], drive.root.getId());
 
   const got = s.getOrCreateSystemFolder(s.LEADER_SHEET_FOLDER_NAME,
-    [s.LEGACY_LEADER_SHEET_FOLDER_NAME]);
+    s.LEGACY_LEADER_SHEET_FOLDER_NAMES);
   check('the legacy folder is the one returned', got.getId(), old.getId());
   check('...renamed to the current name', got.getName(), s.LEADER_SHEET_FOLDER_NAME);
   check('...and filed under the anchor', got.parentId, home.getId());
@@ -247,7 +247,7 @@ this.LEGACY_LEADER_SHEET_FOLDER_NAME = LEGACY_LEADER_SHEET_FOLDER_NAME;
 // 6. moveDriveFileInto() never throws, and says so when it could not move.
 //    Which folder a file sits in is the least important true thing about it:
 //    a sync that died because Drive would not reparent a document would be a
-//    far worse bug than the mess section 79 exists to clean up.
+//    far worse bug than the mess section 82 exists to clean up.
 // ---------------------------------------------------------------------------
 {
   const drive = makeDrive();

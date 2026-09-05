@@ -56,7 +56,7 @@ function listRepointableSessions() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const limitKey = formatDateKey(new Date(Date.now() + REPOINT_WINDOW_FORWARD_DAYS * 86400000));
@@ -86,7 +86,7 @@ function listExistingForms() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const byForm = {};
@@ -208,7 +208,7 @@ function repointSessionsToForm(eventIds, target) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return '⚠️ No program dashboard yet — run Sync Cal first.';
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const allRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const chosenRows = allRows.filter(row => wanted.has(String(row[map['Event_ID']] || '').trim()));

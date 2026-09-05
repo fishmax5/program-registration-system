@@ -340,7 +340,7 @@ function rewriteEventRegistrationLinks() {
 /** The rewrite itself, inside the lock. See rewriteEventRegistrationLinks(). */
 function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   // Event_ID -> what the session table says this event's form is.
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const sessionByEventId = {};
@@ -790,7 +790,7 @@ function applyFormFooterNote(form, footerNote) {
  * the row rather than the form.
  */
 function writeEventRegistryRows(registrySheet, group, formInfo) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   // An appointment program's capacity is arithmetic, not a decision: however
   // many slots fit between the event's start and end IS how many people can be
@@ -812,7 +812,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Location']] = session.locationName;
     row[map['Clean_Title']] = group.cleanTitle;
     // The end time is stored so Event_Time can show a RANGE — see
-    // HEADERS.Master_Program_Dashboard and setEventTimeFormulas().
+    // HEADERS.All_Program_Sessions and setEventTimeFormulas().
     row[map['Event_End']] = endTime || '';
     // Fallback only — renderProgramDashboard() always overwrites this with
     // a =TEXT(...) formula (see that function for why a formula is required
@@ -889,9 +889,9 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
   }
 }
 
-/** Moves any Registrant_Dash rows tied to a deleted event into the Triage tab. */
+/** Moves any All_Registrants rows tied to a deleted event into the Triage tab. */
 function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const allRows = getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
@@ -933,7 +933,7 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
 
 /**
  * The inverse of moveRegistrantsToTriage(): puts triaged rows back on
- * Registrant_Dash for every session that is on the dashboard
+ * All_Registrants for every session that is on the dashboard
  * again.
  *
  * Needed because a triage sweep is not recoverable from the forms. The import
@@ -956,12 +956,12 @@ function restoreTriagedRegistrants() {
   }
 
   const triageHeaders = HEADERS.Deleted_Event_Triage;
-  const regHeaders = HEADERS.Registrant_Dash;
+  const regHeaders = HEADERS.All_Registrants;
   const tMap = getIndexMap(triageHeaders);
   const rMap = getIndexMap(regHeaders);
 
-  const sessionRows = getSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
+  const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const liveEventIds = new Set(sessionRows.map(row => row[sessionMap['Event_ID']]).filter(Boolean));
   if (liveEventIds.size === 0) {
     log('restoreTriagedRegistrants: the session table is empty — import the calendar first, then run this again.');

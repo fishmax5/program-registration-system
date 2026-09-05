@@ -192,7 +192,7 @@ const LUNCH_DASHBOARD_MANUAL_COLUMNS = [
 const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
 
 /**
- * Master_Program_Dashboard: the session table is rebuilt from the calendar
+ * All_Program_Sessions: the session table is rebuilt from the calendar
  * every render, so the only cells a human can usefully change are the ones
  * handleProgramDashboardEdit() writes back to the calendar — Type_Tag and the
  * two flag checkboxes (Club, No_Registration; see PROGRAM_FLAG_COLUMNS).
@@ -409,7 +409,7 @@ const CLUB_TAG = 'Club';
 const CLUB_WORDS_REGEX = /\b(Club|Membership|Members\s+Only)\b/i;
 
 /**
- * What gets WRITTEN into Master_Program_Dashboard's Club column for a club
+ * What gets WRITTEN into All_Program_Sessions's Club column for a club
  * session: TRUE, because that column is now a real CHECKBOX (see
  * PROGRAM_FLAG_COLUMNS). Earlier versions wrote the word "Club" there and
  * plenty of workbooks still hold it, which is why isClubColumnValue() reads
@@ -564,7 +564,7 @@ const WAITLIST_ONLY_COLUMN_VALUE = true;
  *     you?" — because these bookings run months ahead and the person who took
  *     the first free November slot and the person who WANTS November are
  *     otherwise indistinguishable on the sheet. The answer lands in
- *     Registrant_Dash's Earlier_Appointment column, which staff can also set
+ *     All_Registrants's Earlier_Appointment column, which staff can also set
  *     themselves (most people say it on the telephone), and the assistance
  *     schedule turns it into a call list the moment something falls through.
  *     See EARLIER_APPOINTMENT_CHOICES.
@@ -655,7 +655,7 @@ const ASSISTANCE_NO_TIME_CHOICE = 'None of these work — please contact me abou
  * NOT REQUIRED, and blank means NO. Nobody who skipped the question has agreed
  * to be telephoned, and a cold call moving somebody's appointment is exactly
  * the wrong way to discover you guessed. The question is asked on the form,
- * and the column is staff-editable on Registrant_Dash for the far commoner
+ * and the column is staff-editable on All_Registrants for the far commoner
  * case: they said it on the phone.
  */
 const EARLIER_APPOINTMENT_CHOICES = {
@@ -664,7 +664,7 @@ const EARLIER_APPOINTMENT_CHOICES = {
 };
 
 /**
- * What those answers are STORED as, in Registrant_Dash's Earlier_Appointment
+ * What those answers are STORED as, in All_Registrants's Earlier_Appointment
  * column. Short, because it is read at a glance down a column beside twenty
  * other columns — and deliberately not "Yes"/"No", which says nothing at all
  * on a sheet where the question is not on screen.
@@ -731,13 +731,13 @@ function wantsEarlierAppointment(value) {
   return /^(☎️\s*)?(y|call)/i.test(text);
 }
 
-/** True when a Master_Program_Dashboard row's Personalized_Assistance cell marks it appointment-based. */
+/** True when a All_Program_Sessions row's Personalized_Assistance cell marks it appointment-based. */
 function isAssistanceColumnValue(value) {
   return isFlagColumnValue(value, ASSISTANCE_WORDS_REGEX);
 }
 
 /**
- * The two TICKABLE tag columns on Master_Program_Dashboard, and everything
+ * The two TICKABLE tag columns on All_Program_Sessions, and everything
  * that differs between them, in one place.
  *
  * They are the same mechanism twice over — a calendar-description bracket,
@@ -950,18 +950,18 @@ function computeClubKey(cleanTitle, location, isShared) {
   return `${scope}::${title}`;
 }
 
-/** True when a Master_Program_Dashboard row's Club cell marks it a club session. */
+/** True when a All_Program_Sessions row's Club cell marks it a club session. */
 function isClubColumnValue(value) {
   return isFlagColumnValue(value, CLUB_WORDS_REGEX);
 }
 
-/** True when a Master_Program_Dashboard row's No_Registration cell says this session takes no sign-ups. */
+/** True when a All_Program_Sessions row's No_Registration cell says this session takes no sign-ups. */
 function isNoRegistrationColumnValue(value) {
   return isFlagColumnValue(value, NO_REGISTRATION_WORDS_REGEX);
 }
 
 /**
- * True when a Master_Program_Dashboard row's Waitlist_Only cell says THIS
+ * True when a All_Program_Sessions row's Waitlist_Only cell says THIS
  * SESSION takes no more Active registrations — see WAITLIST_ONLY_TAG. Read
  * through isFlagColumnValue() like the other tag columns, so a cell that
  * arrived as pasted text ("TRUE", "Waitlist Only") still means what it says.

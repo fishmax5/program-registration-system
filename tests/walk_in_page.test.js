@@ -67,7 +67,7 @@ const sandbox = {
   ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
 };
 vm.createContext(sandbox);
-vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP;',
+vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP; this.SHEET_NAMES = SHEET_NAMES;',
   sandbox, { filename: 'program.gs' });
 
 let fail = 0;
@@ -289,24 +289,27 @@ function gridSheet(name, values) {
 }
 
 const realHeaders = {
-  dash: sandbox.HEADERS.Master_Program_Dashboard,
-  reg: sandbox.HEADERS.Registrant_Dash,
+  dash: sandbox.HEADERS.All_Program_Sessions,
+  reg: sandbox.HEADERS.All_Registrants,
   roll: sandbox.HEADERS.Member_Roll
 };
 const realMeal = sandbox.getMealInfoForDate;
 
 function withWorkbook(parts, fn) {
-  sandbox.HEADERS.Master_Program_Dashboard = DASH_HEADERS;
-  sandbox.HEADERS.Registrant_Dash = REG_HEADERS;
+  sandbox.HEADERS.All_Program_Sessions = DASH_HEADERS;
+  sandbox.HEADERS.All_Registrants = REG_HEADERS;
   sandbox.HEADERS.Member_Roll = ROLL_HEADERS;
   // The menu is stubbed rather than a fourth sheet: what readWalkInDay() does
   // with a meal is all this file is about, and Lunch_Schedule's own reader has
   // its tests elsewhere.
   sandbox.getMealInfoForDate = (date, loc) => (parts.meal === undefined ? null : parts.meal);
   const sheets = {
-    Master_Program_Dashboard: gridSheet('Master_Program_Dashboard',
+    // Keyed off the constant, not the literal: the session tab was renamed
+    // from All_Program_Sessions to All_Program_Sessions, and a fixture that
+    // spells the name out goes silently empty on the next such rename.
+    [sandbox.SHEET_NAMES.PROGRAM_DASHBOARD]: gridSheet(sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
       [DASH_HEADERS].concat(parts.dash || [])),
-    Registrant_Dash: gridSheet('Registrant_Dash', [REG_HEADERS].concat(parts.reg || [])),
+    All_Registrants: gridSheet('All_Registrants', [REG_HEADERS].concat(parts.reg || [])),
     Member_Roll: parts.roll
       ? gridSheet('Member_Roll', [['👤 Member Roll'], ROLL_HEADERS].concat(parts.roll))
       : null
@@ -319,8 +322,8 @@ function withWorkbook(parts, fn) {
   // empty too, or the next scenario's read comes back as this one's rows.
   sandbox.invalidateSectionedRowsCache();
   try { return fn(); } finally {
-    sandbox.HEADERS.Master_Program_Dashboard = realHeaders.dash;
-    sandbox.HEADERS.Registrant_Dash = realHeaders.reg;
+    sandbox.HEADERS.All_Program_Sessions = realHeaders.dash;
+    sandbox.HEADERS.All_Registrants = realHeaders.reg;
     sandbox.HEADERS.Member_Roll = realHeaders.roll;
     sandbox.getMealInfoForDate = realMeal;
     sandbox.SpreadsheetApp.getActiveSpreadsheet = () => null;

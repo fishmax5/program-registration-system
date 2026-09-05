@@ -152,7 +152,7 @@ function readWalkInDay(location, dateKeyOverride) {
 
   const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   if (dash) {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
@@ -182,7 +182,7 @@ function readWalkInDay(location, dateKeyOverride) {
   const peopleByKey = {};
   const reg = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
   if (reg) {
-    const headers = HEADERS.Registrant_Dash;
+    const headers = HEADERS.All_Registrants;
     const map = getIndexMap(headers);
     getSectionedRowValues(reg, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
@@ -287,6 +287,33 @@ function readWalkInDay(location, dateKeyOverride) {
     host.guests.push(person);
   });
 
+  // WHO ELSE COMES WITH THEM. A guest folds into the member who brought them
+  // (above) because the guest's row says so; a HOUSEHOLD is the other case —
+  // two members with rows of their own who arrive as one, and who the door has
+  // always had to find twice. The workbook already knows: they gave the same
+  // phone number (see 77_households_and_names.gs). Attached here as names and
+  // keys only, so the person screen can offer them; every one of them is still
+  // signed in through their own rows, never through this person's.
+  const households = readHouseholdIndex();
+  hosted.forEach(person => {
+    person.household = householdCompanionsOf(person.name, households).map(m => {
+      const other = peopleByKey[m.key];
+      return {
+        name: m.name,
+        key: m.key,
+        // EXPECTED means the workbook has rows for them today; HERE means
+        // somebody has already marked them present. The screen says both,
+        // because "sign in my wife too" and "my wife is already inside" want
+        // different answers.
+        expected: !!other,
+        here: !!(other && other.here),
+        registered: other ? other.registered.slice() : [],
+        lunchRegistered: !!(other && other.lunchRegistered),
+        phone: other ? other.phone : ''
+      };
+    });
+  });
+
   const meal = getMealInfoForDate(date, loc);
   const mealType = meal ? String(meal.type || '').trim() : '';
   hosted.sort((a, b) => a.name.localeCompare(b.name));
@@ -348,7 +375,12 @@ function readWalkInMembers() {
     const key = normalizeNameKey(name);
     if (!key || seen[key]) return;
     seen[key] = true;
-    out.push({ name, key });
+    // `search` is every spelling this person can be found under, lowercased
+    // and run together — the row that reads "Robert Kaplan" is findable by
+    // typing "Bob", because that is what the form said and what the desk
+    // calls him (memberSearchNames(), 77_households_and_names.gs). It is the
+    // one extra field a tablet by the front door has any business carrying.
+    out.push({ name, key, search: memberSearchNames(name, '').join(' ').toLowerCase() });
   });
   out.sort((a, b) => a.name.localeCompare(b.name));
   walkInMembersMemo = out.slice(0, WALK_IN_MAX_MEMBERS);
@@ -679,6 +711,14 @@ function recordWalkInMember(entry) {
       } else {
         const row = new Array(headers.length).fill('');
         row[map['Name']] = name;
+        // The two halves of the name, from the one string the door asked for.
+        // Written HERE rather than left to the next refresh so that the roll a
+        // person is added to at 9am is sorted under their surname at 9am. See
+        // splitPersonName().
+        const parts = splitPersonName(name);
+        row[map['First_Name']] = parts.first;
+        row[map['Last_Name']] = parts.last;
+        row[map['Status']] = 'Active';
         row[map['Phone']] = phone;
         row[map['Email']] = email;
         // Zero, not one: Times_Seen counts registrations on file, and this
@@ -695,10 +735,9 @@ function recordWalkInMember(entry) {
           ? `👤 ${name} added to the member roll — send the membership form to ${email}.`
           : `👤 ${name} added to the member roll.`;
       }
-      rows.sort((a, b) => String(a[map['Name']] || '').localeCompare(String(b[map['Name']] || '')));
-      writeMemoryTab(sheet, headers, rows, memberRollTabOptions());
-      // The roll this execution memoized is now one name short of the truth.
-      invalidateWalkInMembersMemo();
+      // Sorting, the retired section and the dedupe all belong to section 77's
+      // writer — which also invalidates the memo this execution is holding.
+      writeMemberRollTab(sheet, rows);
       return note;
     } catch (err) {
       log(`recordWalkInMember failed: ${err}`);

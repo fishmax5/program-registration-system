@@ -59,7 +59,25 @@
 //      nobody waiting, not at the desk with a queue. Opening the dialog is
 //      never allowed to trigger a rebuild (readyQuickMarkIndex()).
 //   4. Building it reads each tab ONCE (readAllSectionedRowValues()) instead
-//      of three times, for the times it does have to be built.
+//      of three times, for the times it does have to be built. And it is
+//      rebuilt on the five-minute pass whenever a desk write has dropped it
+//      (warmQuickMarkIndexIfCold()), so "there is nothing stored to inline"
+//      lasts minutes rather than until the next hourly sync.
+//
+// AND PRESSING MARK NO LONGER WAITS EITHER. That was the one round trip left,
+// and it is the one a desk pays thirty times over a lunch service: the button
+// disabled, "Marking…", and the whole dialog held still through a script lock,
+// a scan of the registrants tab and a write — four of those writes, inside one
+// lock, for a household of four. The mark is now shown as done immediately and
+// the write happens underneath, which is the optimistic hand-back the door app
+// already makes on the tablet (section 16e's send()). Two consequences, both
+// handled where they arise: the walk-in confirmation is asked from the
+// dialog's own copy of the lists BEFORE the call rather than from a
+// needsConfirm answer after it (submit(), walkInNames()), and a refusal that
+// arrives once the desk has moved on is emailed to the office by the server
+// (reportOptimisticQuickMarkFailure()) as well as struck through in the
+// dialog's log. Adding a regular need is optimistic in the same way, and for
+// the same reason (saveNeed()).
 // ============================================================================
 
 /** Menu entry: opens the Quick Mark dialog. */
@@ -174,6 +192,9 @@ function buildQuickMarkHtml(preloadedIndex) {
   put somebody on a session they have not signed up for — over the phone or at the desk, with no
   form. The dialog stays open on the same session, so a queue of people is one pick and one click
   each.<br>
+  <b>Full?</b> Tick <b>Add to waitlist</b> instead of registering them. It works on somebody already
+  on the list as well — that gives their seat and their lunch back — and staff take them off the
+  waitlist on the Registrants tab when a place comes free.<br>
   <b>More than one meal?</b> Ticking <b>Lunch</b> opens boxes for how many they ate here and how many
   they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.
 </p>
@@ -193,6 +214,9 @@ function buildQuickMarkHtml(preloadedIndex) {
 <select id="name" onchange="nameChanged()" disabled>
   <option value="">— choose a session first —</option>
 </select>
+<label class="tick" id="householdLabel" style="display:none">
+  <input type="checkbox" id="household" onchange="refreshButton()"> 👪 Mark the whole household
+  <span class="note" id="householdNote"></span></label>
 <label class="field" for="newName" id="newNameLabel" style="display:none">Name of the walk-in</label>
 <input type="text" id="newName" placeholder="Type their name" style="display:none" autocomplete="off"
        oninput="refreshButton()">
@@ -247,8 +271,8 @@ function buildQuickMarkHtml(preloadedIndex) {
 
 <fieldset>
   <legend>Mark</legend>
-  <label class="tick"><input type="checkbox" id="attended" onchange="refreshButton()"> Attended</label>
-  <label class="tick"><input type="checkbox" id="lunch" onchange="exclusiveLunch('lunch'); refreshButton()"> Lunch
+  <label class="tick"><input type="checkbox" id="attended" onchange="clearWaitlistTick(); refreshButton()"> Attended</label>
+  <label class="tick"><input type="checkbox" id="lunch" onchange="clearWaitlistTick(); exclusiveLunch('lunch'); refreshButton()"> Lunch
     <span class="note">— on its own means a meal collected, not present</span></label>
   <div id="servedBox" class="meals" style="display:none">
     <p class="hint" style="margin:0 0 4px 0">How many meals did they actually take? Leave them all at 0
@@ -257,7 +281,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     <label class="num">Took home <input type="number" id="tookHome" min="0" max="20" step="1" value="0"></label>
     <label class="num">Into the fridge <input type="number" id="inFridge" min="0" max="20" step="1" value="0"></label>
   </div>
-  <label class="tick"><input type="checkbox" id="signup" onchange="exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
+  <label class="tick"><input type="checkbox" id="signup" onchange="clearWaitlistTick(); exclusiveLunch('signup'); refreshButton()"> Sign up for lunch
     <span class="note">— they want a meal on this date; nothing has been served yet</span></label>
   <div id="mealsBox" class="meals" style="display:none">
     <label class="num">Meals to order <input type="number" id="mealsOrdered" min="1" max="20" step="1" value="1"></label>
@@ -265,6 +289,8 @@ function buildQuickMarkHtml(preloadedIndex) {
   </div>
   <label class="tick"><input type="checkbox" id="register" onchange="registerChanged()"> Register them for this session
     <span class="note">— no form needed; nothing is marked attended</span></label>
+  <label class="tick"><input type="checkbox" id="waitlist" onchange="waitlistChanged()"> Add to waitlist
+    <span class="note">— the session is full: they hold no seat and no meal is ordered</span></label>
   <label class="tick" id="standingLabel" style="display:none">
     <input type="checkbox" id="standing" onchange="standingChanged()"> …and every future session of it
     <span class="note">— a standing place on the list, until staff untick them on Club_Members</span></label>
@@ -273,7 +299,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     <span class="note">— a meal on every future session too, not only this one</span></label>
 </fieldset>
 
-<button id="go" onclick="submit(false)" disabled>Mark</button>
+<button id="go" onclick="submit()" disabled>Mark</button>
 <div id="status"></div>
 <div id="log"></div>
 
@@ -599,6 +625,7 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   function nameChanged() {
     showWalkIn(el('name').value === WALK_IN);
+    showHousehold();
     // The chosen person's own slot is what the time controls key off — whether
     // "move them" is even offered, and what it starts from.
     el('moveTime').checked = false;
@@ -606,6 +633,39 @@ function buildQuickMarkHtml(preloadedIndex) {
     showNeeds();
     toggleNeedBox(false);
     refreshButton();
+  }
+
+  /**
+   * WHO ELSE ARRIVES WITH THIS PERSON. Offered only when the roll actually
+   * says somebody does (Member_Roll's household columns, carried in the index)
+   * — a tick that is always there and usually means nothing is a tick people
+   * stop reading, and this one marks other people present.
+   *
+   * Untouched by default: two people who share a phone number usually arrive
+   * together, but "usually" is not something to assert about somebody's
+   * attendance without being asked.
+   */
+  function householdForPick() {
+    if (!INDEX || !INDEX.members) return [];
+    var name = chosenName();
+    if (!name || el('name').value === WALK_IN) return [];
+    var key = nameKeyOf(name);
+    var found = null;
+    INDEX.members.forEach(function (m) { if (m.key === key) found = m; });
+    return (found && found.household) || [];
+  }
+
+  function showHousehold() {
+    var list = householdForPick();
+    var label = el('householdLabel');
+    if (!list.length) {
+      el('household').checked = false;
+      label.style.display = 'none';
+      return;
+    }
+    el('householdNote').textContent = '— ' + list.map(function (m) { return m.name; }).join(', ') +
+      (list.length === 1 ? ' arrives with them' : ' arrive with them');
+    label.style.display = '';
   }
 
   // ------------------------------------------------------------------
@@ -696,35 +756,124 @@ function buildQuickMarkHtml(preloadedIndex) {
     return out.join(', ');
   }
 
+  /**
+   * The chosen weekdays as DAY NUMBERS, which is the shape a need carries in
+   * the index (needAppliesOn() reads them against Date#getDay()). The server
+   * is sent the names, as it always was; this is for the provisional copy
+   * saveNeed() shows before the server has answered.
+   */
+  function chosenWeekdayNumbers() {
+    var out = [];
+    var boxes = el('needDays').getElementsByTagName('input');
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].checked) {
+        var at = NEED_WEEKDAYS.indexOf(boxes[i].getAttribute('data-day'));
+        if (at !== -1) out.push(at);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The same sentence describeNeedSchedule() writes on the server, from what
+   * the form is holding. Only ever shown until the server answers with its own
+   * wording, which replaces it (see saveNeed()) — so a phrasing that has
+   * drifted costs a moment of slightly different words, never a wrong need.
+   */
+  function describeNeedWhen(frequency, days, dates, interval, program, location) {
+    var names = days.map(function (d) { return NEED_WEEKDAYS[d]; });
+    var dayPhrase = names.length ? ' on ' + names.join(', ') : '';
+    var where = [program ? 'every ' + program : '', location ? 'at ' + location : '']
+      .filter(Boolean).join(' ');
+    var base;
+    if (frequency === 'Once') base = 'once';
+    else if (frequency === 'Specific dates') base = 'on ' + (dates || 'the listed dates');
+    else if (frequency === 'Monthly') base = 'monthly' + dayPhrase;
+    else if (frequency === 'Every N weeks') base = 'every ' + Math.max(1, Math.round(Number(interval) || 1)) + ' weeks' + dayPhrase;
+    else if (frequency === 'Weekly') base = 'weekly' + dayPhrase;
+    else base = names.length ? 'every time' + dayPhrase : 'every time';
+    return [base, where].filter(Boolean).join(', ');
+  }
+
+  /**
+   * OPTIMISTIC, for the same reason submit() is: a desk typing "no milk" while
+   * somebody stands there must not then wait out a script lock and an append
+   * to a tab. The need is shown on the person straight away, from what was
+   * typed, and the server's own copy replaces it when it lands — which is what
+   * keeps the wording and the Need_ID right without anybody having waited for
+   * them.
+   */
   function saveNeed() {
     var name = chosenName();
     if (!name) return;
-    el('needGo').disabled = true;
-    say('Saving the need…', 'busy');
+    var text = el('needText').value.trim();
+    if (!text) return;
     var session = chosenSession();
+    var program = el('needThisProgram').checked && session ? titleOf(session.label) : '';
+    var location = el('needThisLocation').checked ? el('location').value : '';
+    var frequency = el('needWhen').value;
+    var days = chosenWeekdayNumbers();
+    var dates = el('needDates').value.trim();
+    var interval = el('needEvery').value;
+
+    // The provisional copy, indistinguishable to needsForPick() from a stored
+    // one — and swapped for the stored one below.
+    var provisional = {
+      text: text,
+      when: describeNeedWhen(frequency, days, dates, interval, program, location),
+      kind: 'Note',
+      nameKey: nameKeyOf(name),
+      location: location,
+      program: program,
+      frequency: frequency,
+      weekdays: days,
+      dates: dates ? dates.split(/\s*,\s*/) : [],
+      startsKey: '',
+      endsKey: ''
+    };
+    if (INDEX && INDEX.needs) INDEX.needs.push(provisional);
+    toggleNeedBox(false);
+    showNeeds();
+    say('🔔 Noted for ' + name + ': ' + text + ' — ' + provisional.when + '.', 'ok');
+    refreshNeedButton();
+
     google.script.run
       .withSuccessHandler(function (res) {
-        say(res.message, res.ok ? 'ok' : 'err');
-        if (res.ok) {
-          // Added to the copy the dialog is holding, so it shows on this
-          // person straight away rather than at the next reload.
-          if (INDEX && INDEX.needs && res.stored) INDEX.needs.push(res.stored);
-          toggleNeedBox(false);
+        if (!res || !res.ok) {
+          dropProvisionalNeed(provisional);
+          showNeeds();
+          say((res && res.message) || '⚠️ That need did not save.', 'err');
+          return;
+        }
+        // The server's own wording and Need_ID, in place of what was guessed.
+        if (INDEX && INDEX.needs && res.stored) {
+          dropProvisionalNeed(provisional);
+          INDEX.needs.push(res.stored);
           showNeeds();
         }
-        refreshNeedButton();
       })
-      .withFailureHandler(function (err) { say('Failed: ' + err.message, 'err'); refreshNeedButton(); })
+      .withFailureHandler(function (err) {
+        dropProvisionalNeed(provisional);
+        showNeeds();
+        say('That need did not save: ' + err.message, 'err');
+      })
       .addRegularNeedFromDialog({
         name: name,
-        need: el('needText').value.trim(),
-        frequency: el('needWhen').value,
+        need: text,
+        frequency: frequency,
         weekdays: chosenWeekdays(),
-        interval: el('needEvery').value,
+        interval: interval,
         dates: el('needDates').value,
-        location: el('needThisLocation').checked ? el('location').value : '',
-        program: el('needThisProgram').checked && session ? titleOf(session.label) : ''
+        location: location,
+        program: program
       });
+  }
+
+  /** Takes the provisional need back out of the index by identity. */
+  function dropProvisionalNeed(provisional) {
+    if (!INDEX || !INDEX.needs) return;
+    var at = INDEX.needs.indexOf(provisional);
+    if (at !== -1) INDEX.needs.splice(at, 1);
   }
 
   // The three rules the browser has to be able to apply on its own, kept
@@ -819,10 +968,33 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   // "Every future session" is a rider on registering, not a mark of its own:
   // it only means anything once somebody is being put on the list.
+  // WAITLISTING SAYS THE OPPOSITE OF EVERY MARK BESIDE IT — no seat, no meal,
+  // not here — so ticking it clears them rather than leaving the desk to find
+  // out from a refusal after they press the button. The server refuses the
+  // combination anyway (see applyQuickMarkLocked()); this is so nobody ever
+  // reaches it.
+  function waitlistChanged() {
+    if (el('waitlist').checked) {
+      el('attended').checked = false;
+      el('lunch').checked = false;
+      el('signup').checked = false;
+      el('standing').checked = false;
+      el('standingLunch').checked = false;
+      showMealBoxes();
+    }
+    registerChanged();
+  }
+
+  // And the reverse: ticking any of them unticks the waitlist. One line rather
+  // than three handlers, called from each.
+  function clearWaitlistTick() {
+    if (el('waitlist').checked) { el('waitlist').checked = false; waitlistChanged(); }
+  }
+
   function registerChanged() {
     // Not offered on an appointment session: an appointment is booked one at a
     // time, so "every future one" is not a thing anybody can be put down for.
-    var on = el('register').checked && !appointmentSession();
+    var on = el('register').checked && !appointmentSession() && !el('waitlist').checked;
     el('standingLabel').style.display = on ? 'block' : 'none';
     if (!on) el('standing').checked = false;
     standingChanged();
@@ -863,12 +1035,14 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   function refreshButton() {
     var registering = el('register').checked;
+    var waitlisting = el('waitlist').checked;
     // Moving somebody to another time IS a thing to press the button for, on
     // its own — "she rang to move to 11:30" is not an attendance mark and not
     // a registration, and until it counted here the button stayed grey.
     var moving = el('moveTime').checked && !!chosenBookedTime();
     var ready = !!el('session').value && !!chosenName() &&
-      (el('attended').checked || el('lunch').checked || el('signup').checked || registering || moving) &&
+      (el('attended').checked || el('lunch').checked || el('signup').checked || registering ||
+        waitlisting || moving) &&
       // An appointment session cannot be booked, or moved, without naming the slot.
       !(appointmentSession() && (registering || moving) && !el('apptTime').value) &&
       // And moving somebody onto the slot they already hold is not a move.
@@ -876,104 +1050,286 @@ function buildQuickMarkHtml(preloadedIndex) {
         !el('lunch').checked && !el('signup').checked && !registering);
     el('go').disabled = !ready;
     var onlySignup = el('signup').checked && !el('attended').checked && !el('lunch').checked;
-    el('go').textContent = registering ? 'Sign up'
+    // Ahead of every other label: it is the one word that describes what the
+    // button will actually do when it is ticked, whatever else is.
+    el('go').textContent = waitlisting ? 'Add to waitlist'
+      : registering ? 'Sign up'
       : (moving && !el('attended').checked && !el('lunch').checked && !onlySignup) ? 'Move'
         : (onlySignup ? 'Sign up' : 'Mark');
   }
 
-  function submit(confirmWalkIn) {
-    el('go').disabled = true;
-    say('Marking…', 'busy');
+  /**
+   * IS THIS PERSON ON THE LIST FOR THIS SESSION, as far as the dialog knows?
+   *
+   * The name dropdown offers two groups — the people registered for the chosen
+   * session, and every other known member — plus "Someone not on this list…".
+   * Only the first group is a mark on a row that already exists; everything
+   * else writes a new "Manually Added" row, which is the thing the desk is
+   * asked to confirm.
+   *
+   * The server decides this for itself under the lock, the same way it always
+   * has (see applyQuickMarkLocked's candidate search). This is the same
+   * question asked from the dialog's own copy of the lists so the CONFIRMATION
+   * can be put up BEFORE the call rather than after it — see submit().
+   */
+  function isRegisteredPick(name, time) {
+    var bucket = INDEX && INDEX.namesBySession[el('location').value + SEP + el('session').value];
+    if (!bucket || !bucket.keys) return false;
+    var key = nameKeyOf(name);
+    var times = bucket.times || [];
+    for (var i = 0; i < bucket.keys.length; i++) {
+      if (bucket.keys[i] === key && (times[i] || '') === (time || '')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Everybody this mark is about — the picked person, plus their household
+   * when the tick is on — who is NOT on this session's list, and would
+   * therefore have a row written for them.
+   */
+  function walkInNames() {
+    var picked = el('name').value;
+    var name = chosenName();
+    var out = [];
+    if (picked === WALK_IN) out.push(name);
+    else if (!isRegisteredPick(name, chosenBookedTime())) out.push(name);
+    if (el('household').checked) {
+      householdForPick().forEach(function (m) {
+        if (!isRegisteredPick(m.name, '')) out.push(m.name);
+      });
+    }
+    return out;
+  }
+
+  /**
+   * The same phrasing describeQuickMark() uses on the server, so the toast,
+   * the log line and the row's own Admin_Notes read alike whichever side of
+   * the call wrote them. Kept in step with describeQuickMark() by hand — there
+   * are seven words in it and no way to share them across the two runtimes.
+   */
+  function describeMark(attended, lunch, signup, register, waitlist) {
+    if (waitlist) return 'added to the waitlist';
+    if (attended && lunch) return 'attended + lunch';
+    if (attended && signup) return 'attended + signed up for lunch';
+    if (lunch) return 'lunch (collected, not attending)';
+    if (signup) return 'signed up for lunch (not served yet)';
+    if (attended) return 'attended';
+    if (register) return 'registered (nothing marked yet)';
+    return 'attended';
+  }
+
+  /** The question the desk answers before a new row is written for somebody. */
+  function walkInQuestion(newNames, session, what) {
+    var where = session ? session.label : 'the chosen session';
+    var who = newNames.length === 1
+      ? '"' + newNames[0] + '" is not on the list'
+      : newNames.length + ' of them are not on the list (' + newNames.join(', ') + ')';
+    return who + ' for ' + where + '.\\n\\n' +
+      'Add a new row for ' + (newNames.length === 1 ? 'them' : 'each of them') +
+      ', marked ' + what + ' and flagged "Manually Added"?' +
+      (el('standing').checked
+        ? '\\n\\nThey will also be kept on the list for every future session of it' +
+          (el('standingLunch').checked ? ', with a lunch on each of those dates.' : '.')
+        : '');
+  }
+
+  /**
+   * The dialog's own copy of a session's free appointment times, corrected for
+   * a slot this mark has just taken or given back. The dialog holds the only
+   * copy of that list between two people in a queue, so it keeps it honest
+   * itself rather than re-fetching — which is what it always did, only now
+   * from what was ASKED for rather than from what came back.
+   */
+  function applyLocalSlotChange(session, took, freed) {
+    if (!session || !session.times || (!took && !freed)) return;
+    if (took) {
+      session.times = session.times.filter(function (t) { return t.value !== took; });
+    }
+    if (freed && !session.times.some(function (t) { return t.value === freed; })) {
+      session.times.push({ value: freed, label: freed });
+      session.times.sort(function (a, b) { return minutesOfDay(a.value) - minutesOfDay(b.value); });
+    }
+    showAppointmentTimes();
+  }
+
+  /** Same session, next person: the name and the ticks cleared, nothing else. */
+  function readyForNextPerson() {
+    el('name').value = '';
+    showWalkIn(false);
+    el('household').checked = false;
+    showHousehold();
+    el('attended').checked = false;
+    el('lunch').checked = false;
+    el('signup').checked = false;
+    el('register').checked = false;
+    el('waitlist').checked = false;
+    el('mealsOrdered').value = '1';
+    el('ateHere').value = '0';
+    el('tookHome').value = '0';
+    el('inFridge').value = '0';
+    showMealBoxes();
+    el('standing').checked = false;
+    el('standingLunch').checked = false;
+    el('earlier').checked = false;
+    el('moveTime').checked = false;
+    registerChanged();
+    showNeeds();
+    toggleNeedBox(false);
+    refreshButton();
+  }
+
+  /**
+   * OPTIMISTIC — THE DESK NEVER WAITS ON THE SHEET.
+   *
+   * This used to disable the button, say "Marking…", and hold the whole dialog
+   * still until applyQuickMarkFromDialog() had taken the script lock, read the
+   * registrants tab looking for the row, written it, and come back. That is a
+   * second or two of a person standing at a desk with a queue behind them,
+   * thirty times over a lunch service — and a household of four is four of
+   * those writes inside one lock. It is the same wait the door app removed
+   * from the tablet (section 16e's send()), for the same reason, and it is
+   * removed here the same way.
+   *
+   * So the mark is shown as done NOW: the log line is drawn, the dialog's own
+   * copy of the lists is corrected, the ticks are cleared, and the next name
+   * can be picked while the write is still happening underneath.
+   *
+   * TWO THINGS HAD TO MOVE FOR THAT TO BE HONEST.
+   *
+   *   1. THE WALK-IN QUESTION IS ASKED FIRST. The server used to answer the
+   *      first call with needsConfirm and the dialog asked then — which means
+   *      the round trip was load-bearing and could not be got out from under.
+   *      The dialog can tell for itself who among the party is not on this
+   *      session's list (walkInNames()), so it asks BEFORE the call and sends
+   *      confirmWalkIn straight away. The server's own guard is untouched: if
+   *      the dialog's copy is out of date and the server disagrees, it still
+   *      returns needsConfirm, writes nothing, and the handler below asks the
+   *      question for real and re-sends.
+   *   2. A FAILURE HAS TO REACH SOMEBODY WHO IS NOT LOOKING. The desk has
+   *      already moved on to the next person, so a refusal — the lock timed
+   *      out, the appointment slot went in between, no lunch on that date —
+   *      is emailed to the office by the server itself (optimistic: true is
+   *      what asks it to). The dialog ALSO strikes its own log line through if
+   *      it is still open, which costs nothing and is what the person who
+   *      marked it will actually see.
+   */
+  function submit() {
+    var name = chosenName();
+    if (!name) return;
+    var loc = el('location').value;
+    var sessionValue = el('session').value;
+    var session = chosenSession();
+    var attended = el('attended').checked;
+    var lunch = el('lunch').checked;
+    var signup = el('signup').checked;
+    var register = el('register').checked;
+    var waitlist = el('waitlist').checked;
+    var apptTime = el('apptTime').value;
+    var booked = chosenBookedTime();
+    var moving = el('moveTime').checked && !!booked && !!apptTime && apptTime !== booked;
+    var household = el('household').checked && householdForPick().length > 0;
+    var newNames = walkInNames();
+    var what = describeMark(attended, lunch, signup, register, waitlist);
+
+    if (newNames.length && !window.confirm(walkInQuestion(newNames, session, what))) {
+      say('Nothing added — ' + newNames.join(', ') + ' not put on the list.', '');
+      return;
+    }
+
+    var payload = {
+      location: loc,
+      session: sessionValue,
+      name: name,
+      attended: attended,
+      lunch: lunch,
+      signup: signup,
+      register: register,
+      waitlist: waitlist,
+      standing: el('standing').checked,
+      standingLunch: el('standingLunch').checked,
+      appointmentTime: apptTime,
+      // How many meals, on both sides of the same tab. Sent whatever is
+      // ticked; the server ignores the half that does not apply.
+      mealsOrdered: countIn('mealsOrdered', 1),
+      ateHere: countIn('ateHere', 0),
+      tookHome: countIn('tookHome', 0),
+      inFridge: countIn('inFridge', 0),
+      // WHICH ROW this mark is for, when the name alone does not say — see
+      // QUICK_MARK_NAME_TIME_SEPARATOR.
+      bookedTime: booked,
+      moveTime: el('moveTime').checked,
+      earlierAppointment: el('earlier').checked,
+      // Already asked, above, where it could be answered without a round trip.
+      confirmWalkIn: true,
+      // "Nobody is waiting for your answer — tell the office if this fails."
+      optimistic: true
+    };
+    // THE SAME MARK, ONE PERSON OR A WHOLE HOUSEHOLD. Two server functions
+    // taking the identical payload, chosen by the tick — picked by name rather
+    // than by branching the whole call, so there is one copy of what a mark
+    // consists of and no chance of the two drifting.
+    var fn = household ? 'applyQuickMarkForHousehold' : 'applyQuickMarkFromDialog';
+    var party = household
+      ? [name].concat(householdForPick().map(function (m) { return m.name; }))
+      : [name];
+
+    var message = (household ? '👪 ' : '✅ ') + party.join(', ') + ' — ' + what +
+      (session ? ' · ' + session.label : '');
+    var line = document.createElement('div');
+    line.textContent = '• ' + message;
+    el('log').insertBefore(line, el('log').firstChild);
+
+    // The lists the dialog is holding, corrected from what was asked for. A
+    // walk-in is on this session from now on; a booked slot is gone for the
+    // next person in the queue and a vacated one is free again.
+    newNames.forEach(function (n) {
+      rememberWalkIn(loc, sessionValue, n, nameKeyOf(n), n === name ? (apptTime || '') : '');
+    });
+    if (moving) retimeName(loc, sessionValue, nameKeyOf(name), booked, apptTime);
+    applyLocalSlotChange(session, (apptTime && (newNames.length || register || moving)) ? apptTime : '',
+      moving ? booked : '');
+    if (newNames.length || moving) sessionChanged();
+    readyForNextPerson();
+    // After sessionChanged(), which says the session's own counts and would
+    // otherwise overwrite this.
+    say(message, 'ok');
+
     google.script.run
       .withSuccessHandler(function (res) {
-        // A walk-in needs a yes first, and the dialog has to be the one that
-        // asks: Apps Script will not show an alert over an open modal.
-        if (res.needsConfirm) {
-          refreshButton();
-          if (window.confirm(res.question)) { submit(true); }
-          else { say('Nothing added — ' + res.message, ''); }
+        // The dialog's copy of the lists disagreed with the sheet — somebody
+        // it thought was registered is not. Nothing was written, so ask the
+        // question for real and send it again.
+        if (res && res.needsConfirm) {
+          if (window.confirm(res.question)) {
+            google.script.run
+              .withSuccessHandler(function (r) { if (r && !r.ok) failLine(line, r.message); })
+              .withFailureHandler(function () { /* reported by the server */ })[fn](payload);
+          } else {
+            failLine(line, 'Nothing added — ' + res.message);
+          }
           return;
         }
-        say(res.message, res.ok ? 'ok' : 'err');
-        if (res.ok) {
-          var line = document.createElement('div');
-          line.textContent = '• ' + res.message;
-          el('log').insertBefore(line, el('log').firstChild);
-          // Same session, next person: clear the name and the ticks only.
-          el('name').value = '';
-          showWalkIn(false);
-          el('attended').checked = false;
-          el('lunch').checked = false;
-          el('signup').checked = false;
-          el('register').checked = false;
-          el('mealsOrdered').value = '1';
-          el('ateHere').value = '0';
-          el('tookHome').value = '0';
-          el('inFridge').value = '0';
-          showMealBoxes();
-          el('standing').checked = false;
-          el('standingLunch').checked = false;
-          el('earlier').checked = false;
-          el('moveTime').checked = false;
-          registerChanged();
-          // A slot just booked is gone for the next person in the queue, and a
-          // slot just vacated by a move is free again. The dialog holds the
-          // only copy of that list until it is reloaded, so it keeps its own
-          // copy honest rather than re-fetching between two people in a queue.
-          if (res.bookedTime || res.freedTime) {
-            var session = chosenSession();
-            if (session && session.times) {
-              if (res.bookedTime) {
-                session.times = session.times.filter(function (t) { return t.value !== res.bookedTime; });
-              }
-              if (res.freedTime && !session.times.some(function (t) { return t.value === res.freedTime; })) {
-                session.times.push({ value: res.freedTime, label: res.freedTime });
-                session.times.sort(function (a, b) { return minutesOfDay(a.value) - minutesOfDay(b.value); });
-              }
-            }
-            showAppointmentTimes();
-          }
-          // A move rewrites the slot on a row the list is already showing, so
-          // the list has to be rebuilt for the next person to see it.
-          if (res.namesChanged || res.movedTime) {
-            if (res.namesChanged) {
-              rememberWalkIn(el('location').value, el('session').value, res.addedName, res.addedNameKey,
-                res.bookedTime);
-            }
-            if (res.movedTime) {
-              retimeName(el('location').value, el('session').value, res.addedNameKey, res.freedTime,
-                res.bookedTime);
-            }
-            sessionChanged();
-          }
-        }
-        refreshButton();
+        if (res && !res.ok) failLine(line, res.message);
       })
-      .withFailureHandler(function (err) { say('Failed: ' + err.message, 'err'); refreshButton(); })
-      .applyQuickMarkFromDialog({
-        location: el('location').value,
-        session: el('session').value,
-        name: chosenName(),
-        attended: el('attended').checked,
-        lunch: el('lunch').checked,
-        signup: el('signup').checked,
-        register: el('register').checked,
-        standing: el('standing').checked,
-        standingLunch: el('standingLunch').checked,
-        appointmentTime: el('apptTime').value,
-        // How many meals, on both sides of the same tab. Sent whatever is
-        // ticked; the server ignores the half that does not apply.
-        mealsOrdered: countIn('mealsOrdered', 1),
-        ateHere: countIn('ateHere', 0),
-        tookHome: countIn('tookHome', 0),
-        inFridge: countIn('inFridge', 0),
-        // WHICH ROW this mark is for, when the name alone does not say — see
-        // QUICK_MARK_NAME_TIME_SEPARATOR.
-        bookedTime: chosenBookedTime(),
-        moveTime: el('moveTime').checked,
-        earlierAppointment: el('earlier').checked,
-        confirmWalkIn: !!confirmWalkIn
-      });
+      .withFailureHandler(function () {
+        // Anything that reached the server was emailed from there; a transport
+        // failure this raw never got that far and there is nothing to tell.
+        failLine(line, 'The workbook did not answer — check the row before marking again.');
+      })[fn](payload);
+  }
+
+  /**
+   * A mark that was shown as done and then refused. Struck through where the
+   * desk drew it, and said out loud — the office has the email either way (see
+   * reportOptimisticQuickMarkFailure()), but the person who pressed the button
+   * is the one who can put it right while the member is still standing there.
+   */
+  function failLine(line, message) {
+    line.style.textDecoration = 'line-through';
+    line.style.opacity = '0.7';
+    line.textContent = line.textContent + '  ⚠️ ' + (message || 'did not save');
+    say(message || '⚠️ That mark did not save.', 'err');
   }
 
   // The locations first and synchronously — nothing about them is on the

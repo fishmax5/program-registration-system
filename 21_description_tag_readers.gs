@@ -144,7 +144,7 @@ function readTagsFromDescription(description) {
  * this script reads out of it, what the title contributes, and what the
  * session table currently shows for the same session.
  *
- * `dashboardRows` is the already-read Master_Program_Dashboard, passed in so
+ * `dashboardRows` is the already-read All_Program_Sessions, passed in so
  * inspecting twelve events costs one read of the tab rather than twelve.
  */
 function inspectOneEventTags(ev, calendarId, locationName, dashboardRows, map) {
@@ -234,9 +234,9 @@ function inspectCalendarEventTags(query, dateHint) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  const map = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const map = getIndexMap(HEADERS.All_Program_Sessions);
   const dashboardRows = dash
-    ? getSectionedRows(dash, HEADERS.Master_Program_Dashboard, 'Event_ID') : [];
+    ? getSectionedRows(dash, HEADERS.All_Program_Sessions, 'Event_ID') : [];
 
   const hits = [];
   const unreadable = [];

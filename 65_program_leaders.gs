@@ -64,13 +64,17 @@ const LEGACY_INSTRUCTOR_EMAIL_COLUMN = 'Instructor_Email';
 /**
  * Notify_Roster_Changes stays the on/off switch (see the tab's own header
  * comment in 03). Notify_Timing is the closed dropdown that decides which of
- * two channels a leader who has it ticked is on:
+ * three channels a leader who has it ticked is on:
  *
  *   "At each registration"     the diff pass in 66 — mid-hour, whenever
  *                               something on the roster actually moves.
  *   "N days before each date"  the countdown digest beside it — one email per
  *                               session, N days ahead of it, listing who is
  *                               on the roster that morning.
+ *   "The Thursday before
+ *    each date"                the same digest, due on a fixed WEEKDAY rather
+ *                               than a fixed count — see
+ *                               leaderNotifyTimingWeekdayLabel() below.
  *
  * BLANK OR UNRECOGNIZED READS AS "At each registration" — a typo, or a
  * workbook upgrading from before this column existed, must keep doing exactly
@@ -94,12 +98,40 @@ function leaderNotifyTimingDaysBeforeLabel(days) {
   return `${days} day${days === 1 ? '' : 's'} before each date`;
 }
 
-/** The dropdown's full, closed vocabulary — what Notify_Timing is validated against. */
-const LEADER_NOTIFY_TIMING_LIST = [LEADER_NOTIFY_TIMING_EACH_CHANGE].concat(
-  [1, 2, 3, 4, 5, 6, 7].map(leaderNotifyTimingDaysBeforeLabel));
+/**
+ * The weekday names a "The Thursday before each date" answer is spelled with,
+ * indexed the way `Date.getDay()` is so the index IS the parsed value.
+ */
+const LEADER_NOTIFY_TIMING_WEEKDAY_NAMES =
+  ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
- * One Notify_Timing cell, resolved into { mode: 'each_change' | 'days_before', days }.
+ * "The Thursday before each date" — the third channel, and the one a leader
+ * who plans their week on a fixed day actually wants.
+ *
+ * A day COUNT is the wrong shape for "tell me every Thursday": a Tuesday class
+ * and a Saturday class need 5 days and 2 days respectively to land on the same
+ * morning, so a leader with both has to either keep two rows in their head or
+ * hear about one of them on the wrong day. A weekday says the thing they mean
+ * once, and each session works out its own count from it.
+ *
+ * ALWAYS THE WEEK BEFORE, never the same day: a session ON Thursday resolves
+ * to the PREVIOUS Thursday (7 days), not to nothing and not to zero days.
+ * "Before" is what the label promises, and a digest that arrives the morning
+ * of the class is a different feature.
+ */
+function leaderNotifyTimingWeekdayLabel(weekday) {
+  return `The ${LEADER_NOTIFY_TIMING_WEEKDAY_NAMES[weekday]} before each date`;
+}
+
+/** The dropdown's full, closed vocabulary — what Notify_Timing is validated against. */
+const LEADER_NOTIFY_TIMING_LIST = [LEADER_NOTIFY_TIMING_EACH_CHANGE]
+  .concat([1, 2, 3, 4, 5, 6, 7].map(leaderNotifyTimingDaysBeforeLabel))
+  .concat([0, 1, 2, 3, 4, 5, 6].map(leaderNotifyTimingWeekdayLabel));
+
+/**
+ * One Notify_Timing cell, resolved into
+ * { mode: 'each_change' | 'days_before' | 'weekday', days, weekday }.
  *
  * Matched by a leading "N day(s) before" rather than the exact label string,
  * so a cell that still reads a slightly older spelling of the same idea (or
@@ -113,9 +145,288 @@ function parseLeaderNotifyTiming(value) {
   const match = /^(\d+)\s+days?\s+before/i.exec(text);
   if (match) {
     const days = Math.floor(Number(match[1]));
-    if (days >= 1 && days <= LEADER_NOTIFY_TIMING_MAX_DAYS) return { mode: 'days_before', days };
+    if (days >= 1 && days <= LEADER_NOTIFY_TIMING_MAX_DAYS) {
+      return { mode: 'days_before', days, weekday: -1 };
+    }
   }
-  return { mode: 'each_change', days: 0 };
+  // Matched on the weekday NAME rather than the whole label, for the same
+  // reason the day count above is: "Thursday before" and "the Thursday before
+  // each date" mean the same thing to the person who typed either.
+  const weekday = LEADER_NOTIFY_TIMING_WEEKDAY_NAMES.findIndex(
+    name => new RegExp(`(^|\\b)${name}\\b`, 'i').test(text));
+  if (weekday >= 0 && /before/i.test(text)) {
+    return { mode: 'weekday', days: LEADER_NOTIFY_TIMING_MAX_DAYS, weekday };
+  }
+  return { mode: 'each_change', days: 0, weekday: -1 };
+}
+
+/**
+ * How many days before ONE session this timing is due, or 0 if it never is.
+ *
+ * The countdown channel answers with the day count it was typed with. The
+ * weekday channel works it out per session: the most recent occurrence of that
+ * weekday STRICTLY before the session's own date, so a Tuesday class on a
+ * "Thursday" row is due 5 days ahead and a Thursday class is due 7.
+ *
+ * Both are then read the same way by the digest pass — "due once the session
+ * is this close" — which is what makes a pass that missed its morning (a
+ * quiet workbook, a failed run) still send on the next one rather than
+ * skipping the session entirely.
+ */
+function leaderNotifyTimingDaysBefore(timing, sessionDate) {
+  if (!timing) return 0;
+  if (timing.mode === 'days_before') return timing.days;
+  // Duck-typed rather than `instanceof Date`: a date read back out of a sheet
+  // in one context and compared in another is a real Date that fails that
+  // test, and a digest silently never coming due is the worst way to find out.
+  if (timing.mode !== 'weekday' || !sessionDate || typeof sessionDate.getDay !== 'function') return 0;
+  const gap = (sessionDate.getDay() - timing.weekday + 7) % 7;
+  return gap === 0 ? 7 : gap;
+}
+
+/** The furthest ahead this timing can ever be due — what bounds the digest pass's session scan. */
+function leaderNotifyTimingMaxDays(timing) {
+  if (!timing) return 0;
+  if (timing.mode === 'days_before') return timing.days;
+  if (timing.mode === 'weekday') return LEADER_NOTIFY_TIMING_MAX_DAYS;
+  return 0;
+}
+
+
+// --- TITLE MATCHING: how a program finds its leader --------------------------
+
+/**
+ * THE GAP THIS FILLS. This tab is good at catching a new program — but only
+ * once somebody notices the new program and types a row. Nothing attributes an
+ * incoming calendar event to a person on its own, so a class can run for a
+ * month with its roster shared with nobody and no sign that anything is
+ * missing.
+ *
+ * Title_Match is the leader saying it once instead: comma-separated phrases
+ * ("yoga, chair yoga") meaning "a program whose title contains one of these is
+ * mine". A program the workbook knows about and nobody has typed a row for is
+ * PROPOSED to the matching leader.
+ *
+ * THE RULE THAT KEEPS THE PRIVACY BOUNDARY INTACT. A phrase is a wildcard
+ * wearing a different hat, and the section header above says why this tab has
+ * no wildcards. So:
+ *
+ *   A phrase match never shares anything and never sends anything. It writes a
+ *   concrete title | location row, with the notification tick CLEAR, and every
+ *   sharing and mailing path keeps reading concrete rows only.
+ *
+ * buildProgramLeaderIndex() is therefore untouched by any of this: it still
+ * skips a row with a blank Program or Location, so a phrase-only row — a
+ * leader with phrases and no class typed yet — shares nothing and is on no
+ * mailing list. There is still exactly ONE path from "who leads what" to "who
+ * may read a roster", and it runs through rows a person can see and delete.
+ *
+ * WRITTEN, NOT ACTED ON. The row arrives unticked with a note saying which
+ * phrase found it, which is how the Instructor_Email migration below already
+ * behaves: carry the information across, leave the notification off, and say
+ * so out loud. Turning mail on for somebody a phrase guessed at would be the
+ * one version of this feature that can email a roster to the wrong person.
+ *
+ * DELETING A PROPOSED ROW IS NOT HOW YOU REFUSE IT — the phrase that produced
+ * it is still there, so the next sync proposes it again. Fix the phrase (or
+ * retype the row naming whoever really leads it: rule 1 below means a typed
+ * row always wins). The Staff_Notes text on every proposed row says this.
+ */
+
+/**
+ * How many programs one phrase may claim before it is reported instead of
+ * applied. `a` matches everything, and a one-character phrase is how one
+ * person gets proposed for every class in the building. Ten is more classes
+ * than a leader plausibly runs and few enough that a runaway phrase is caught
+ * on the sync it is typed.
+ */
+const LEADER_TITLE_MATCH_MAX_PROGRAMS = 10;
+
+/**
+ * How a proposed row says it is one, and the whole of what "matched" means
+ * anywhere else in this workbook.
+ *
+ * There is no Source column on this tab and there deliberately is not one: a
+ * proposed row is an ORDINARY row the moment somebody looks at it and leaves
+ * it alone, and a column saying otherwise would have to be cleared by hand to
+ * stop saying it. The Staff_Notes stamp is already the thing a person deletes
+ * when they have checked the row, so it is also the honest answer to "has
+ * anybody checked this?" — which is exactly what Master_Program_Dashboard's
+ * Leader_Source reports.
+ */
+const LEADER_TITLE_MATCH_NOTE_PREFIX = 'Matched on "';
+
+/** True for a row still carrying the stamp proposeProgramLeaderRowsFromTitles() wrote. */
+function isTitleMatchedLeaderRow(staffNotes) {
+  return String(staffNotes === null || staffNotes === undefined ? '' : staffNotes)
+    .trim().indexOf(LEADER_TITLE_MATCH_NOTE_PREFIX) === 0;
+}
+
+/**
+ * One Title_Match cell into its phrases, normalized the way titles are
+ * (`normalizeNameKey`: trimmed, inner whitespace collapsed, lowercased) so the
+ * comparison is the same one Program/Location keys are built with.
+ *
+ * COMMA ONLY, unlike the Email cell's generous separators: a phrase is allowed
+ * to contain spaces ("chair yoga") and splitting on whitespace would turn one
+ * specific claim into two general ones.
+ */
+function parseLeaderTitleMatchPhrases(value) {
+  const seen = [];
+  String(value === null || value === undefined ? '' : value)
+    .split(',')
+    .map(part => normalizeNameKey(part))
+    .forEach(phrase => { if (phrase !== '' && seen.indexOf(phrase) === -1) seen.push(phrase); });
+  return seen;
+}
+
+/**
+ * The matcher. Pure: rows in, proposed rows out — no sheet, no properties, no
+ * network — which is what makes it testable and what keeps it honest about
+ * writing nothing on its own.
+ *
+ * `rows` are the tab's rows as read, `known` is knownProgramKeys(). Returns
+ * { rows, notes, reports }:
+ *
+ *   rows     new Program_Leaders rows to append, already filled in
+ *   notes    [{ row, note }] for the Title_Match cell of a row whose phrase
+ *            needs looking at — matched nothing, or claimed too much
+ *   reports  lines for the admin digest: one per batch of proposals, one per
+ *            refused tie, one per phrase too broad to apply
+ *
+ * PRECEDENCE, in the order an argument about it should be settled:
+ *
+ *   1. An explicit row wins. A program with ANY concrete row naming it is
+ *      answered, full stop — including a row that deliberately assigns it to
+ *      somebody other than the obvious phrase match. A guess never overrides
+ *      a decision.
+ *   2. Longest matching phrase wins among phrase rows. `chair yoga` beats
+ *      `yoga`, which is how a specific claim overrides a general one without
+ *      anybody needing a priority column.
+ *   3. A tie proposes nothing and reports both candidates. Two leaders
+ *      claiming `yoga` at the same length is a question for a human, and
+ *      picking the alphabetically-first one is how the wrong person gets a
+ *      roster.
+ */
+function proposeProgramLeaderRowsFromTitles(rows, map, known) {
+  const headers = HEADERS.Program_Leaders;
+  const covered = {};
+  const claimants = [];
+
+  rows.forEach(row => {
+    const title = String(row[map['Program']] || '').trim();
+    const location = String(row[map['Location']] || '').trim();
+    if (title && location) covered[leaderProgramKey(title, location)] = true;
+    const phrases = parseLeaderTitleMatchPhrases(row[map['Title_Match']]);
+    if (phrases.length > 0) claimants.push({ row, phrases });
+  });
+
+  const keys = Object.keys(known);
+  const titleKeys = {};
+  keys.forEach(key => { titleKeys[key] = normalizeNameKey(known[key].title); });
+
+  // How much of the building each phrase claims, counted across EVERY known
+  // program rather than only the uncovered ones — a phrase that hits forty
+  // classes is too broad whether or not they happen to have leaders today.
+  const notes = [];
+  const reports = [];
+  claimants.forEach(claimant => {
+    const tooBroad = [];
+    const unmatched = [];
+    claimant.live = [];
+    claimant.phrases.forEach(phrase => {
+      const hits = keys.filter(key => titleKeys[key].indexOf(phrase) !== -1).length;
+      if (hits === 0) unmatched.push(phrase);
+      else if (hits > LEADER_TITLE_MATCH_MAX_PROGRAMS) tooBroad.push({ phrase, hits });
+      else claimant.live.push(phrase);
+    });
+    const name = String(claimant.row[map['Leader_Name']] || '').trim() || '(unnamed leader)';
+    const lines = [];
+    unmatched.forEach(phrase => lines.push(`No program title contains "${phrase}".`));
+    tooBroad.forEach(found => {
+      lines.push(`"${found.phrase}" matches ${found.hits} programs — too many to apply. ` +
+        `Make it more specific.`);
+      reports.push(`${name}'s phrase "${found.phrase}" matches ${found.hits} programs, more than ` +
+        `the ${LEADER_TITLE_MATCH_MAX_PROGRAMS} one phrase may claim, so it was not applied.`);
+    });
+    if (lines.length > 0) notes.push({ row: claimant.row, note: lines.join('\n') });
+  });
+
+  const proposed = [];
+  keys.sort().forEach(key => {
+    if (covered[key]) return;                     // rule 1
+    const titleKey = titleKeys[key];
+    let best = 0;
+    let winners = [];
+    claimants.forEach(claimant => {
+      let longest = '';
+      claimant.live.forEach(phrase => {
+        if (titleKey.indexOf(phrase) !== -1 && phrase.length > longest.length) longest = phrase;
+      });
+      if (longest === '') return;
+      if (longest.length > best) { best = longest.length; winners = [{ claimant, phrase: longest }]; }
+      else if (longest.length === best) winners.push({ claimant, phrase: longest });  // rule 2
+    });
+    if (winners.length === 0) return;
+    if (winners.length > 1) {                     // rule 3
+      const names = winners.map(w =>
+        String(w.claimant.row[map['Leader_Name']] || '').trim() || '(unnamed leader)');
+      reports.push(`${known[key].title} at ${known[key].location} is claimed by ${names.join(' and ')} ` +
+        `with phrases of the same length — nothing was proposed. Type the row for whoever leads it.`);
+      return;
+    }
+
+    const winner = winners[0];
+    const row = new Array(headers.length).fill('');
+    row[map['Leader_Name']] = String(winner.claimant.row[map['Leader_Name']] || '').trim();
+    row[map['Email']] = String(winner.claimant.row[map['Email']] || '').trim();
+    row[map['Program']] = known[key].title;
+    row[map['Location']] = known[key].location;
+    // The phrase stays on the row that claims things. Copying it here would
+    // turn one claim into two and the proposal into a claimant of its own.
+    row[map['Title_Match']] = '';
+    // Not ticked, and the timing left blank with it. See the banner above.
+    row[map['Notify_Roster_Changes']] = false;
+    row[map['Staff_Notes']] = `${LEADER_TITLE_MATCH_NOTE_PREFIX}${winner.phrase}" — check this. Emails are off until ` +
+      `you tick Notify_Roster_Changes. To refuse it, change the phrase (deleting this row alone ` +
+      `brings it back next sync).`;
+    proposed.push(row);
+  });
+
+  if (proposed.length > 0) {
+    reports.push(`${proposed.length} program(s) with no leader row were matched to a leader by ` +
+      `their Title_Match phrases and proposed on the ${SHEET_NAMES.PROGRAM_LEADERS} tab. Nothing ` +
+      `was shared and no email was turned on.`);
+  }
+  return { rows: proposed, notes: notes, reports: reports };
+}
+
+/**
+ * Puts the matcher's notes on the Title_Match cells, after the tab has been
+ * written — writeMemoryTab() clears the sheet, so a note applied before it
+ * would be part of what got cleared.
+ *
+ * A phrase that matches nothing is otherwise perfectly silent: the leader
+ * simply never gets attributed, and nobody finds out until a roster goes
+ * unshared. One cell note is the cheapest place to say so, because it is on
+ * the cell the typo is in.
+ */
+function applyTitleMatchNotes(sheet, headers, rows, notes) {
+  if (!notes || notes.length === 0) return 0;
+  const map = getIndexMap(headers);
+  if (map['Title_Match'] === undefined) return 0;
+  let written = 0;
+  notes.forEach(entry => {
+    const index = rows.indexOf(entry.row);
+    if (index === -1) return;
+    try {
+      sheet.getRange(MEMORY_TAB_DATA_ROW + index, map['Title_Match'] + 1).setNote(entry.note);
+      written++;
+    } catch (err) {
+      log(`ℹ️ Could not note a Title_Match cell (${err}).`);
+    }
+  });
+  return written;
 }
 
 
@@ -125,9 +436,12 @@ function programLeadersTabOptions() {
   return {
     banner: '👩‍🏫 Program Leaders',
     bannerNote: 'Who leads each program, where to write to them, and whether they want an email ' +
-      'when that program\'s roster changes. Notify_Timing picks WHEN: at each change, or a countdown ' +
-      'of days before each date. One row per leader per program — a leader with three classes has ' +
-      'three rows. Sheet_Link and Last_Notified fill in by themselves.',
+      'when that program\'s roster changes. Notify_Timing picks WHEN: at each change, a countdown ' +
+      'of days before each date, or a fixed weekday before each date. One row per leader per program — a leader with three classes has ' +
+      'three rows. Title_Match is optional: comma-separated phrases ("yoga, chair yoga") meaning ' +
+      '"a program whose title contains this is mine" — a program nobody has typed a row for gets ' +
+      'one proposed here, with the email tick left off until you turn it on. Sheet_Link and ' +
+      'Last_Notified fill in by themselves.',
     staffColumns: PROGRAM_LEADERS_STAFF_COLUMNS,
     dateColumns: [],
     numberColumns: []
@@ -193,6 +507,13 @@ function refreshProgramLeadersTab(ss, sessionRows) {
       : '';
   });
 
+  // A program nobody has typed a row for, matched to a leader by their
+  // Title_Match phrases. Written, never acted on — see the TITLE MATCHING
+  // banner above for why the tick starts clear.
+  const matched = proposeProgramLeaderRowsFromTitles(rows, map, known);
+  if (matched.rows.length > 0) rows = rows.concat(matched.rows);
+  matched.reports.forEach(line => noteForAdmin('Program leaders matched by title', line));
+
   // Leader first, then their programs. Somebody opens this tab to answer
   // "what does Jane lead" or "who leads Chair Yoga", and only the first of
   // those is helped by an order — sorting by program would scatter Jane's
@@ -203,6 +524,8 @@ function refreshProgramLeadersTab(ss, sessionRows) {
     String(a[map['Program']] || '').localeCompare(String(b[map['Program']] || '')));
 
   writeMemoryTab(sheet, headers, rows, programLeadersTabOptions());
+  // After the write, not before: writeMemoryTab() clears the sheet.
+  applyTitleMatchNotes(sheet, headers, rows, matched.notes);
   // The tab this index was built from has just been rewritten. Anything that
   // asks again in this execution — the sign-up-sheet dialog, the alert pass —
   // must read the rows as they now stand, not as they stood before the sort.
@@ -227,6 +550,7 @@ function refreshProgramLeadersTab(ss, sessionRows) {
   });
 
   log(`Program_Leaders refreshed: ${rows.length} row(s)` +
+    (matched.rows.length > 0 ? `, ${matched.rows.length} proposed from Title_Match phrases` : '') +
     (unmatched > 0 ? `, ${unmatched} naming a program this workbook does not know` : '') + '.');
 }
 
@@ -250,7 +574,7 @@ function invalidateProgramLeaderIndex() {
  * blanking its columns every winter would look like the tab losing data.
  */
 function knownProgramKeys(ss, sessionRows) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = sessionRows ||
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), headers, 'Event_ID');
@@ -319,7 +643,13 @@ function buildProgramLeaderIndex() {
       // a program with no shared sheet yet has nowhere else to read a title
       // from.
       programTitle: title,
-      programLocation: location
+      programLocation: location,
+      // Whether this row is still a PROPOSAL nobody has confirmed. Read here
+      // because this is already the one read of the tab per execution, and
+      // Master_Program_Dashboard's Leader_Source is a report on the same rows the
+      // sharing paths use — a second read to answer it would be a second
+      // answer waiting to disagree with this one.
+      matched: isTitleMatchedLeaderRow(row[map['Staff_Notes']])
     });
   });
   return index;
@@ -397,6 +727,154 @@ function getProgramLeadersWantingAlerts() {
   });
 
   return Object.keys(byEmail).sort().map(k => byEmail[k]);
+}
+
+
+// --- the one write from somewhere else ---------------------------------------
+
+/**
+ * Every name typed on this tab, once each, in the order a dropdown should
+ * offer them.
+ *
+ * Read off the TAB and not off buildProgramLeaderIndex(): that index is keyed
+ * by program and skips a row with a blank Program or Location (see NO
+ * WILDCARDS above), so a leader who has been typed in with only their
+ * Title_Match phrases so far would be missing from the one list whose whole
+ * job is to offer them.
+ */
+function programLeaderNames() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_LEADERS) : null;
+  if (!sheet) return [];
+  const headers = HEADERS.Program_Leaders;
+  const map = getIndexMap(headers);
+  const names = [];
+  try {
+    readSimpleTableValues(sheet, headers).forEach(row => {
+      const name = String(row[map['Leader_Name']] || '').trim();
+      if (name && names.indexOf(name) === -1) names.push(name);
+    });
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read ${SHEET_NAMES.PROGRAM_LEADERS} for the leader list (${err}).`);
+    return [];
+  }
+  return names.sort((a, b) => normalizeNameKey(a).localeCompare(normalizeNameKey(b)));
+}
+
+/**
+ * ATTACHES a leader to a program: the single write this tab accepts from
+ * anywhere else in the workbook, and the whole of what editing Master_Program_Dashboard's
+ * Leader cell does (see handleProgramMonthEdit() in 18_edit_handlers.gs).
+ *
+ * IT ONLY EVER ADDS. It never edits somebody else's row and never deletes one,
+ * which is the same posture the rest of this file takes and for the same
+ * reason: a row saying who led a class is a true record whether or not they
+ * still lead it, and a dropdown that quietly unpicked one would be deleting
+ * history from a tab nobody was looking at. A program that now has two leader
+ * rows is a program with two leaders until a person removes one HERE, on the
+ * tab where the consequence — who may read the roster — is written down.
+ *
+ * The tick starts CLEAR, exactly as a title match's proposal does: attaching
+ * somebody is not the same as putting them on a mailing list, and the one
+ * version of this feature that can email a roster to the wrong person is the
+ * one that turns mail on for a name somebody picked out of a dropdown.
+ *
+ * Runs from a SIMPLE onEdit, so SpreadsheetApp is all it may touch: no
+ * properties, no mail, no form. Everything here is a sheet read and a sheet
+ * write.
+ *
+ * Returns { status, name, email, note } — 'exists' (nothing written), 'added',
+ * or 'refused' with `note` saying why, so the caller can tell the person what
+ * happened rather than leaving a dropdown looking like it did something.
+ */
+function attachProgramLeaderRow(name, title, location) {
+  const leaderName = String(name || '').trim();
+  const programTitle = String(title || '').trim();
+  const programLocation = String(location || '').trim();
+  if (!leaderName || !programTitle || !programLocation) {
+    return { status: 'refused', name: leaderName, email: '', note: 'a leader row needs a name, a program and a location' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_LEADERS) : null;
+  if (!sheet) {
+    return { status: 'refused', name: leaderName, email: '',
+      note: `there is no ${SHEET_NAMES.PROGRAM_LEADERS} tab yet — run a sync first` };
+  }
+
+  const headers = HEADERS.Program_Leaders;
+  const map = getIndexMap(headers);
+  let rows;
+  try {
+    rows = readSimpleTableValues(sheet, headers);
+  } catch (err) {
+    return { status: 'refused', name: leaderName, email: '', note: `${SHEET_NAMES.PROGRAM_LEADERS} could not be read (${err})` };
+  }
+
+  const wantedKey = leaderProgramKey(programTitle, programLocation);
+  const wantedName = normalizeNameKey(leaderName);
+  let email = '';
+  let already = false;
+  rows.forEach(row => {
+    const rowName = normalizeNameKey(row[map['Leader_Name']]);
+    if (rowName !== wantedName) return;
+    // THE ADDRESS COMES OFF THEIR OTHER ROWS. A leader is a person, and the
+    // person's address is the same one whichever class this is — retyping it
+    // per row is how a leader ends up with two addresses and one of them
+    // stale. Blank when this is their first row, which is a row somebody has
+    // to finish on the leader tab, and the dialog says so.
+    if (!email) email = String(row[map['Email']] || '').trim();
+    const rowTitle = String(row[map['Program']] || '').trim();
+    const rowLocation = String(row[map['Location']] || '').trim();
+    if (rowTitle && rowLocation && leaderProgramKey(rowTitle, rowLocation) === wantedKey) already = true;
+  });
+  if (already) return { status: 'exists', name: leaderName, email: email, note: '' };
+
+  // The first blank line in the data band — the same one a person typing on
+  // this tab would use, spare rows and all (see MEMORY_TAB_SPARE_ROWS).
+  const out = new Array(headers.length).fill('');
+  out[map['Leader_Name']] = leaderName;
+  out[map['Email']] = email;
+  out[map['Program']] = programTitle;
+  out[map['Location']] = programLocation;
+  out[map['Notify_Roster_Changes']] = false;
+  out[map['Staff_Notes']] = `Added from ${SHEET_NAMES.PROGRAM_MONTH}. Emails are off until you tick ` +
+    `Notify_Roster_Changes` + (email ? '.' : `, and there is no address on this row yet — add one before ` +
+    `the roster can be shared.`);
+  try {
+    const at = firstBlankProgramLeaderRow(sheet, map['Leader_Name'] + 1);
+    sheet.getRange(at, 1, 1, headers.length).setValues([out]);
+  } catch (err) {
+    return { status: 'refused', name: leaderName, email: email, note: `the row could not be written (${err})` };
+  }
+  // The tab this index was built from has just gained a row; anything asking
+  // again in this execution must see it.
+  invalidateProgramLeaderIndex();
+  invalidateSectionedRowsCache(sheet);
+  return { status: 'added', name: leaderName, email: email, note: '' };
+}
+
+/**
+ * The sheet row a new leader row goes on: the first one at or below the data
+ * row whose name cell is empty, growing the sheet if the tab is full.
+ *
+ * NOT getLastRow() + 1. writeMemoryTab() leaves a spare band of validated
+ * blank rows under the data (MEMORY_TAB_SPARE_ROWS), and those rows count
+ * towards getLastRow() the moment anything on the sheet reaches them —
+ * appending past them would leave a gap, and readSimpleTable() stops at the
+ * first blank name.
+ */
+function firstBlankProgramLeaderRow(sheet, nameColumn) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= MEMORY_TAB_DATA_ROW) {
+    const values = sheet.getRange(MEMORY_TAB_DATA_ROW, nameColumn, lastRow - MEMORY_TAB_DATA_ROW + 1, 1).getValues();
+    for (let i = 0; i < values.length; i++) {
+      if (String(values[i][0] || '').trim() === '') return MEMORY_TAB_DATA_ROW + i;
+    }
+  }
+  const at = Math.max(lastRow + 1, MEMORY_TAB_DATA_ROW);
+  if (sheet.getMaxRows() < at) sheet.insertRowsAfter(sheet.getMaxRows(), at - sheet.getMaxRows());
+  return at;
 }
 
 
@@ -572,13 +1050,25 @@ function renameProgramLeaderRows(ss, renames) {
 
   // A leader may now have two identical rows — one already typed under the new
   // name, one just carried onto it. Same person, same class: keep the first.
+  //
+  // The one thing that is NOT interchangeable between them is Title_Match:
+  // the phrases are how future programs find this leader, and dropping the
+  // duplicate that happened to carry them would quietly un-attribute
+  // everything they were going to catch. So the survivor takes the union.
   const kept = [];
   const claimed = {};
   rows.forEach(row => {
     const identity = `${normalizeNameKey(row[map['Leader_Name']])}|` +
       `${leaderProgramKey(row[map['Program']], row[map['Location']])}`;
-    if (claimed[identity]) return;
-    claimed[identity] = true;
+    const already = claimed[identity];
+    if (already) {
+      const phrases = parseLeaderTitleMatchPhrases(already[map['Title_Match']])
+        .concat(parseLeaderTitleMatchPhrases(row[map['Title_Match']]))
+        .filter(uniqueStrings);
+      if (phrases.length > 0) already[map['Title_Match']] = phrases.join(', ');
+      return;
+    }
+    claimed[identity] = row;
     kept.push(row);
   });
 

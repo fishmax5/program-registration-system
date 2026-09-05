@@ -288,7 +288,7 @@ function applyDashboardLinkPlan(registrySheet, plan) {
 /**
  * ADMIN ACTION — "Repair Dashboard Links (no calendar read)".
  *
- * Rewrites Form_ID and both link columns on Master_Program_Dashboard from the
+ * Rewrites Form_ID and both link columns on All_Program_Sessions from the
  * form registry, row by row, touching nothing else on the tab and reading no
  * calendar. See the section comment above for why the ordinary rebuild cannot
  * do this and what makes this safe.
@@ -438,7 +438,7 @@ function compareEventLinkToSession(found, session) {
  * dashboard row for the same session. Reads both sides, writes neither.
  */
 function planEventLinkDrift(registrySheet) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const stats = { scanned: 0, agrees: 0, disagrees: 0, noLink: 0, noSession: 0 };
@@ -672,7 +672,7 @@ function deleteInPlaceRebuildResumeTriggers() {
  * imported yet, since rebuilding deletes the questions those answers hang off.
  * Which is why the import runs at the head of every slice and a failed import
  * stops the sweep — exactly as in the destroy path, and for the same reason.
- * Rows already on Registrant_Dash are the record of those registrations and
+ * Rows already on All_Registrants are the record of those registrations and
  * are untouched either way.
  *
  * Returns { started, planned }, or null if it never started.
@@ -698,7 +698,7 @@ function rebuildAllFormsInPlace() {
   // The same plan the destroy path builds, for the same reason: a form whose
   // sessions have all happened is nobody's route to anything, and rewriting it
   // would only disturb the archive.
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map);
   if (plan.length === 0) {
@@ -962,7 +962,7 @@ function fixOneFormNow(formRef) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return '⚠️ No program dashboard yet — run Sync Cal first.';
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID')
     .filter(row => String(row[map['Form_ID']] || '').trim() === formId);
@@ -1225,7 +1225,7 @@ function cleanupNeverPolicyForms() {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return;
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
 

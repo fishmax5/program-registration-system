@@ -10,7 +10,7 @@
 //
 // So Meals_Ordered says how many meals ONE registrant row is down for (blank
 // means one, which is what every row written before it meant), the rollup adds
-// meals rather than heads, and Lunch_Roster prints the number beside the name.
+// meals rather than heads, and All_Lunch_Registrants prints the number beside the name.
 //
 // The second half — how many meals a person actually CONSUMED and where —
 // already existed as the four per-person counts. What this file pins there is
@@ -19,7 +19,7 @@
 // that will not record it at all.
 //
 // And the end-to-end question underneath both: a lunch ticked on an ORDINARY
-// PROGRAM FORM still has to reach Master_Lunch_Dashboard and Lunch_Roster.
+// PROGRAM FORM still has to reach Master_Lunch_Dashboard and All_Lunch_Registrants.
 // That path is the one every registration in September travels.
 const fs = require('fs');
 const path = require('path');
@@ -103,7 +103,7 @@ sandbox.getCateringPolicyForLocation = () => 'Always';
 sandbox.getRegistrantTombstone = () => null;
 sandbox.computeOrderAheadFlag = () => '';
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 const d = day => new RealDate(2026, 8, day);
 const DATE_KEY = '2026-09-16';
 
@@ -113,7 +113,7 @@ const DATE_KEY = '2026-09-16';
 // The whole reason this column needed no migration: every row already in every
 // workbook is blank, and blank has to keep meaning exactly what it meant.
 function rowWith(meals) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   if (meals !== undefined) row[map['Meals_Ordered']] = meals;
   return row;
 }
@@ -283,7 +283,7 @@ const eventMeta = {
   'evt-yoga': { dateKey: DATE_KEY, location: 'Narberth' }
 };
 // The session table, read back in the shape buildDashboardRollup() reads it.
-const dashHeaders = sandbox.HEADERS.Master_Program_Dashboard;
+const dashHeaders = sandbox.HEADERS.All_Program_Sessions;
 const dashMap = sandbox.getIndexMap(dashHeaders);
 const sessionRows = Object.keys(eventMeta).map(eventId => {
   const row = new Array(dashHeaders.length).fill('');
@@ -293,7 +293,7 @@ const sessionRows = Object.keys(eventMeta).map(eventId => {
   return row;
 });
 sandbox.readAllSectionedRows = (sheet, headers) =>
-  (headers === sandbox.HEADERS.Master_Program_Dashboard ? sessionRows : []);
+  (headers === sandbox.HEADERS.All_Program_Sessions ? sessionRows : []);
 
 const rollup = sandbox.buildDashboardRollup(
   [plainRow, joanRow, noLunchRow, guestRow, adaAgain]);
@@ -317,7 +317,7 @@ sandbox.parseDateKey = key => {
 };
 sandbox.renderLunchRosterSheet(rollup);
 
-const rosterMap = sandbox.getIndexMap(sandbox.HEADERS.Lunch_Roster);
+const rosterMap = sandbox.getIndexMap(sandbox.HEADERS.All_Lunch_Registrants);
 const byName = {};
 rosterRows.forEach(row => { byName[row[rosterMap['Name']]] = row; });
 check('everyone eating is on the roster',

@@ -11,7 +11,7 @@ the spreadsheet fills itself in.
 1. You create an event on one of the program calendars.
 2. The system builds a registration form for it and pastes the link into the
    calendar event's description.
-3. People register. Their answers land on the **Registrant_Dash**
+3. People register. Their answers land on the **All_Registrants**
    tab, one row per person per session.
 4. **Master_Lunch_Dashboard** adds up who needs lunch each day so you know what
    to order.
@@ -73,7 +73,7 @@ bracket of its own: `[Club] [Film selection: Casablanca]`. The ignored bracket
 is written to the log either way, so a mistyped tag doesn't just vanish.
 
 **You don't have to type `[Club]` or `[No Registration]` by hand.** Both are
-also **checkboxes** on the Master_Program_Dashboard — tick one and the tag is
+also **checkboxes** on the All_Program_Sessions — tick one and the tag is
 written onto the program's calendar events for you. See
 [The two checkboxes](#the-two-checkboxes-club-and-no_registration).
 
@@ -93,7 +93,7 @@ written onto the program's calendar events for you. See
 > said how often a **new form** is handed out.
 
 **You can also change it from the spreadsheet.** Edit the `Type_Tag` column on
-**Master_Program_Dashboard** (it's yellow, because it's yours to change). You'll
+**All_Program_Sessions** (it's yellow, because it's yours to change). You'll
 be asked to confirm, because switching re-partitions that program across forms —
 and if you say yes, the system writes the tag into **every** calendar event for
 that program, so the change sticks and all its months end up on the same footing.
@@ -268,7 +268,7 @@ slot at the end is never offered.
 
 **One person per slot, automatically.** You never type a cap on an appointment
 program: a slot holds one person, so the session's `Max_Capacity` on
-`Master_Program_Dashboard` is simply its number of slots — a 12:30–3:30 clinic
+`All_Program_Sessions` is simply its number of slots — a 12:30–3:30 clinic
 in 30-minute slots shows **6**. Ticking `Personalized_Assistance` on a program
 whose dates are already on the dashboard updates those rows on the next
 **Sync Cal**; you don't have to wait for its next new date. Put `[Cap: 4]` on
@@ -308,7 +308,7 @@ That's how a counselor who comes in *when there's demand* gets their demand,
 months before a date exists — and how you register somebody without inventing a
 calendar event to attach them to. Work the tab, and when you've agreed a time,
 put the event on the calendar and add them the normal way (or by hand on
-Registrant_Dash).
+All_Registrants).
 
 **`[Max Per Month: 1]`** — for a provider who won't see the same person twice in
 a month. A second booking is **flagged, not refused**: the row is created and
@@ -327,7 +327,7 @@ everybody.
 
 - **It's optional, and blank means no.** Somebody who skipped the question has
   not agreed to be telephoned. Only a *yes* puts them on the call list.
-- **The answer lands in `Earlier_Appointment` on Registrant_Dash**, which is
+- **The answer lands in `Earlier_Appointment` on All_Registrants**, which is
   **yours to edit** — a yellow column with a dropdown. That's the common case:
   people say it on the phone, not on a form. Type it in whenever you hear it.
 - **At the desk**, the Quick Mark tick **☎️ Call them if an earlier appointment
@@ -363,7 +363,7 @@ at the desk](#booking-an-appointment-at-the-desk).
 
 **It's reversible.** Untick the box (or remove the tag) and the next sync
 rebuilds the form as an ordinary date-based one. Appointments already booked
-keep their times on Registrant_Dash.
+keep their times on All_Registrants.
 
 **If a form doesn't look right** — no times on it, or it still offers *"I want
 to sign up for all events this month"* — run **📝 Programs & Forms ▸ Rebuild
@@ -694,7 +694,7 @@ in the form's *theme*, and neither Apps Script nor the Forms API can set it.
 > the calendar exactly: `Bookclub`, or a trailing space, and the question is
 > asked of no form at all with nothing here to say so.
 
-**Where the answers go.** Into one column, `Form_Answers`, on Registrant_Dash,
+**Where the answers go.** Into one column, `Form_Answers`, on All_Registrants,
 as `Question: answer | Question: answer`. Deliberately one column and not one
 per question: a table whose columns changed every time somebody added a question
 to any program is exactly the thing that breaks. It's also what the assistance
@@ -762,7 +762,7 @@ For Caroline's four assistance programs the tab reads something like:
 
 ### The three checkboxes: `Club`, `No_Registration` and `Personalized_Assistance`
 
-All three tags are also **tick boxes** on the Master_Program_Dashboard, and
+All three tags are also **tick boxes** on the All_Program_Sessions, and
 ticking one is exactly the same as typing the tag by hand — because that's what
 it does.
 **Ticking the box is the only step.**
@@ -797,7 +797,7 @@ stay ticked while the write is on its way.
 
 ### Closing one session: `Waitlist_Only`
 
-There is a **fourth** tick box on the Master_Program_Dashboard, and it is the
+There is a **fourth** tick box on the All_Program_Sessions, and it is the
 only one that means something about **one date** rather than about the program.
 
 Tick `Waitlist_Only` on a session and **everybody who signs up for that session
@@ -867,7 +867,7 @@ window:
 
 | Colour | Group | Tabs | What they are |
 |---|---|---|---|
-| 🟩 green | **Today** | Master_Program_Dashboard, Master_Lunch_Dashboard, Lunch_Roster, Registrant_Dash | What a serving day is run from. These are the ones to open |
+| 🟩 green | **Today** | All_Program_Sessions, Master_Lunch_Dashboard, All_Lunch_Registrants, All_Registrants | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
 | 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Registrant_Notifications, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, what each program sends its registrants, who is waiting for an appointment |
 | ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
@@ -878,11 +878,15 @@ themselves: **a yellow column header with a ✍️ in it is yours**, and everyth
 else is rebuilt. Type in a rebuilt column and your work is lost at the next
 sync — most tabs will warn you at the moment you try.
 
-The one tab with **no** editable columns at all is **Lunch_Roster**: it is
+The one tab with **no** editable columns at all is **All_Lunch_Registrants**: it is
 rebuilt from scratch every hour, names and all. To add somebody to the lunch
 list, use **⚡ Quick Mark**.
 
-### 1. Master_Program_Dashboard
+### 1. All_Program_Sessions
+*Renamed from **All_Program_Sessions** in September 2026 — the tab, its rows,
+its formatting and its links are the same ones; only the name on the tab changed.
+The workbook renames it for you the first time it opens after the update.*
+
 Your at-a-glance view. Three sections stacked top to bottom:
 
 - **📍 Today at Each Location** — what's running today and how many are signed up
@@ -1061,7 +1065,7 @@ date the block says so rather than sitting empty.
 Only the **four soonest** location/month forms are pinned, with a line saying
 how many more there are. Everything above the schedule is frozen, so each
 pinned row is a row of screen the schedule doesn't get; the later months are
-on **Master_Program_Dashboard** like every other form, on any
+on **All_Program_Sessions** like every other form, on any
 `Lunch @ …` row.
 
 See [The lunch-only sign-up form](#the-lunch-only-sign-up-form) for what
@@ -1111,7 +1115,7 @@ registered.
 > can be down for four of them — Joan orders four every lunch day and they are
 > all hers. What a tick on `Lunch_Served` records is that a **person** was
 > handed their food; how much of it they took is the four consumption counts
-> beside it. [Lunch_Roster](#3-lunch_roster) shows both per person, which is
+> beside it. [All_Lunch_Registrants](#3-lunch_roster) shows both per person, which is
 > where you reconcile them by eye.
 
 > **Neither number counts form answers.** Somebody who signs up for
@@ -1120,7 +1124,7 @@ registered.
 > form asks — is **one lunch on the order, not three**. Names are matched the
 > same way they are everywhere else in the workbook, so `Jane Smith`,
 > `jane smith` and `Jane  Smith` are one person. The merge is not silent: the
-> `Requests_Merged` column on [Lunch_Roster](#3-lunch_roster) says how many
+> `Requests_Merged` column on [All_Lunch_Registrants](#3-lunch_roster) says how many
 > extra requests each person made, so you can see it happened.
 >
 > A row with **no name on it** is never merged into another — an empty name is
@@ -1137,7 +1141,7 @@ registered.
 `Day_1_In-Person` · `Day_1_Takeaway` · `Subs_In-Person` · `Subs_Takeaway` ·
 `In_Fridge` are **not typed here any more** — they're totaled automatically
 from the five per-person meal counts on the Registrants tab (see
-[Registrant_Dash](#4-registrant_dash) below), the same
+[All_Registrants](#4-registrant_dash) below), the same
 way `Served_Confirmed` is totaled from `Lunch_Served`. A cell only updates once
 the Registrants tab actually reports a meal for that date+location — it never
 gets blanked back out, so a number typed here before this existed (or on a date
@@ -1151,7 +1155,7 @@ an addition to them: a row reading *40 ordered · 14 takeaway · 8 carried over*
 means eight of that fourteen left the building on a later day. It fills in by
 itself from `Meal_Source` on the Registrants tab, and stays blank on every
 ordinary day — see
-[Registrant_Dash](#4-registrant_dash).
+[All_Registrants](#4-registrant_dash).
 
 **`Standard_Buffer` and `Tester_Buffer` aren't typed here either.** They're
 **read from Config** on every render, for that row's location and Hot/Cold type.
@@ -1181,7 +1185,7 @@ the row is left plain so the numbers read as numbers. `Event_Date` keeps its
 month tint, `Lunch_Type` goes grey on `Not Serving`, the ✍️ columns keep their
 yellow, and a hand-edited row's `Manual_Override` cell goes purple.
 
-### 3. Lunch_Roster
+### 3. All_Lunch_Registrants
 **Who** is eating — one row per person, per date, per location.
 `Master_Lunch_Dashboard` tells you how many meals to order; this tells you
 whose they are. It's the list to hand the meals out against, and the list to
@@ -1214,7 +1218,7 @@ real registrant row and they appear here on the next render — see
 Only people appear here. A catered day nobody has signed up for yet contributes
 no rows — its `0` is on the dashboard, where a zero means something.
 
-### 4. Registrant_Dash
+### 4. All_Registrants
 One row **per person, per session** — guests get their own rows, not a note on
 someone else's.
 
@@ -1241,7 +1245,16 @@ item on the menu, because on a serving day it's the only one you need.
    **everyone else on Member_Roll**, then **➕ Someone not on this list…** for
    a name that's on neither.
 4. Tick **Attended**, **Lunch**, **Sign up for lunch**, **Register them for
-   this session**, or a combination, and press the button.
+   this session**, **Add to waitlist**, or a combination, and press the button.
+
+   **Add to waitlist** is the one that can't be combined with the others: it
+   says the person has *no* seat and *no* meal on order, which is the opposite
+   of every mark beside it, so ticking it clears them. Use it when the session
+   is full — on somebody who isn't on the list yet (it adds a waitlisted row)
+   or on somebody who is (their seat and their lunch go straight back, and the
+   session's count drops by one there and then). Taking them back off the
+   waitlist is a `Program_Status` change on the Registrants tab, or an untick
+   on the program leader's own sheet.
 
    On a `[Personalized Assistance]` session a fourth box appears between the
    name and the ticks — **Appointment time** — listing the chairs that are
@@ -1580,7 +1593,7 @@ always meant on its own.
   **This applies to the lunch too:** changing somebody's standing lunch changes
   what gets booked from then on, and leaves rows that already exist alone. To
   add a meal to a date they are already down for, use **Sign up for lunch** on
-  that session, or edit the row on `Registrant_Dash`.
+  that session, or edit the row on `All_Registrants`.
 - **You can change your mind later**, either by ticking **…and a lunch every
   time** at the desk again — a tick at the counter is a person saying what the
   arrangement is now, so it updates a member who is already on the list — or by
@@ -1597,7 +1610,7 @@ for lunch**, press **Sign up**.
 
 They're now on the order for that day: `Lunch_Status` = `Needed`,
 `Lunch_Type` taken from that day's menu, and **nothing marked served**. They
-appear on [Lunch_Roster](#3-lunch_roster) on the next render, and in
+appear on [All_Lunch_Registrants](#3-lunch_roster) on the next render, and in
 `Registered_Count` on the lunch dashboard.
 
 Someone pre-registering for a **month** of lunches is the same thing once per
@@ -1706,7 +1719,7 @@ are backfilled from the session table the next time this tab is drawn.
 | ✍️ `Earlier_Appointment` | **Appointment programs only.** `☎️ Call if earlier` · `Keeping this time` · blank. From the form's own question, or type it in when they tell you on the phone — it's what the [call list](#personalized-assistance-appointments) is built from. Blank means **no**: nobody unasked gets rung about moving their appointment |
 | ✍️ `Contacted` | Tick — this person has been reached out to |
 | ✍️ `Confirmed` | Tick — they said they're coming |
-| ✍️ `Waitlisted` | Tick — the program leader's own waitlist, separate from `Program_Status` above |
+| ✍️ `Waitlisted` | Tick — **moves them onto the waitlist**: `Program_Status` and `Lunch_Status` both become `Waitlisted` on the next sync, so the seat and the meal go back. Untick it to put them back on, which works whenever the session has room |
 | ✍️ `Dropped` | Tick — they said they're not coming |
 | ✍️ `Leader_Notes` | Anything else worth knowing about them for this session |
 | `Primary_Registrant` | `Self`, or the name of whoever brought them |
@@ -1736,7 +1749,7 @@ will be overwritten if you type in it (you'll get a warning if you try).
 >
 > * `Registered_Count` on [Master_Lunch_Dashboard](#2-master_lunch_dashboard)
 >   counts **four meals** for her,
-> * [Lunch_Roster](#3-lunch_roster) shows **one row** — hers — reading `4`
+> * [All_Lunch_Registrants](#3-lunch_roster) shows **one row** — hers — reading `4`
 >   under `Meals`,
 > * the [printed sign-in sheet](#printed-sign-in-sheets) prints `4` in her
 >   `MEALS ORDERED` box instead of a `1` you'd have to cross out.
@@ -2000,7 +2013,7 @@ for itself. Each is split down the middle:
 
 | Recomputed | Yours |
 |---|---|
-| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
+| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
 
 This is where "Marion always brings her sister" or "cold lunch only, no dairy"
 lives. People stay on the roll even after their sessions age out, so the notes
@@ -2555,8 +2568,8 @@ month-at-a-time case this form exists for. The description says outright, in
 its first line, that this books a meal and **not** a program.
 
 **Where the registrations land.** Exactly where every other registration
-lands: rows on **Registrant_Dash**, a name on
-[Lunch_Roster](#3-lunch_roster), and a number in `Registered_Count` on the
+lands: rows on **All_Registrants**, a name on
+[All_Lunch_Registrants](#3-lunch_roster), and a number in `Registered_Count` on the
 lunch dashboard. The `Event` column reads `Lunch @ Narberth — Chx Parm` — the
 place and the dish, the same as the session row it came from.
 
@@ -2564,9 +2577,9 @@ A few things worth knowing:
 
 - **Signing up here and on a program's form for the same day is one meal,
   not two** — the counts are per person (see
-  [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `Lunch_Roster`
+  [Master_Lunch_Dashboard](#2-master_lunch_dashboard)). Their `All_Lunch_Registrants`
   row shows both under `Programs` with `Requests_Merged` = 1.
-- The dates are **on** Master_Program_Dashboard as sessions like any other and
+- The dates are **on** All_Program_Sessions as sessions like any other and
   **visible there**, each named `Lunch @ <location> — <dish>`, with a blank
   `Calendar_Source` — because there is no calendar event behind them. That
   blank is what stops them being swept into triage.
@@ -2606,7 +2619,7 @@ A few things worth knowing:
 > Every registration sync now checks each live form and rebuilds any that are
 > still on an older layout, **keeping the same link**, so calendar invites,
 > dashboard links and edit links all keep working. Nothing on
-> Registrant_Dash changes. No more than five forms are rebuilt per
+> All_Registrants changes. No more than five forms are rebuilt per
 > sync, so a big backlog drains itself over a few hours rather than blowing the
 > execution budget in one go.
 
@@ -2632,7 +2645,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 
 | Item | What it does |
 |---|---|
-| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, or register them for a program (an appointment time included) with no form — location, session, name, then Attended / Lunch / Sign up for lunch / Register them. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, register them for a program (an appointment time included) with no form, or put them on the waitlist for a full one — location, session, name, then Attended / Lunch / Sign up for lunch / Register them / Add to waitlist. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **🔄 Update Everything Now** | Catches the workbook up with the calendars *and* the forms, in that order. This is the one to press when you have just changed something and want to see it. It is the same pair of passes the system runs on its own every hour |
 
@@ -2834,7 +2847,7 @@ back in as the zero it is. A line under the header says so on the sheet itself.
 - One page unless the roster doesn't fit, then as many as it needs.
 
 The last four columns line up **one-for-one** with the meal counts on
-Registrant_Dash, so typing a finished sheet back in is
+All_Registrants, so typing a finished sheet back in is
 column-for-column with nothing to reinterpret.
 
 You can print for a **lunch-only day** (a meal with no programming behind it) —
@@ -2891,7 +2904,7 @@ waitlisted" on every strip.
 | **Program_Status** | what *the system* says — Active, Waitlisted, Cancelled |
 | **✍️ Contacted** | tick — I have reached out to this person |
 | **✍️ Confirmed** | tick — they told me they are coming |
-| **✍️ Waitlisted** | tick — no seat for them yet |
+| **✍️ Waitlisted** | tick — **moves them onto the waitlist**: the seat and the lunch go back, and the row turns peach. Untick it to put them back on |
 | **✍️ Dropped** | tick — they told me they are not coming |
 | **✍️ Leader_Notes** | anything else worth knowing |
 
@@ -2899,16 +2912,29 @@ The five **yellow** columns are the leader's. Everything else fills in by
 itself, and typing over it gets a warning — a correction typed into `Name` does
 not move the registration, it just gets overwritten at the next refresh.
 
-**Waitlisted is not the same as `Program_Status: Waitlisted`.** They answer
-different questions. `Program_Status` is what the system worked out from
-`Max_Capacity`. The tick is what the leader decided about somebody they have
-actually spoken to. Ticking one does not move the other — both are on the sheet
-so you can see both.
+**The two ticks that do something outside the sheet** are `Dropped` and
+`Waitlisted`, and the difference between them is that one can be taken back.
+
+`Dropped` is a cancellation: the seat and the lunch go back on the next sync,
+the leader's note rides along as the reason, and putting the person back is a
+phone call to the office.
+
+`Waitlisted` moves them onto the waitlist — `Program_Status` and `Lunch_Status`
+both become `Waitlisted`, so the seat and the meal go back the same way, and
+the whole row is washed pale peach on the next refresh so a leader scanning for
+"how many chairs" can see at a glance who is waiting. **Unticking it puts them
+back on**, whenever the session actually has room: a full session, or one staff
+have closed with `[Waitlist Only]`, promotes nobody, and the row simply stays
+waitlisted until there is a seat (the office is told).
+
+Only a place the leader made can be given back this way. Somebody the system
+waitlisted because the session was already full stays where they are — that is
+a queue `Max_Capacity` decides, and an untick must not jump it.
 
 ### The marks come back
 
 Every hourly registration sync reads each shared sheet's five columns back into
-**Registrant_Dash**, where they are five real columns on every registrant row.
+**All_Registrants**, where they are five real columns on every registrant row.
 So the leader's ticks show up in the workbook, and staff can see who has
 been contacted without opening anything.
 
@@ -2918,7 +2944,7 @@ refresh remembers exactly what it sent out. On the way back:
 - a cell the leader **changed** wins;
 - a cell they **never touched** leaves the workbook's own value alone.
 
-So a status you fix on Registrant_Dash is not clobbered by a stale copy sitting
+So a status you fix on All_Registrants is not clobbered by a stale copy sitting
 open in somebody's browser tab, and unticking a box works as an undo rather than
 being ignored as "empty".
 
@@ -2992,7 +3018,7 @@ by name so their three rows sit together.
 |---|---|
 | ✍️ **Leader_Name** | who they are. Used to address their emails |
 | ✍️ **Email** | where their sheet and their alerts go. Several are fine, separated by commas |
-| ✍️ **Program** | the program title, exactly as it appears on Master_Program_Dashboard. The cell offers a dropdown of what the calendar has actually produced |
+| ✍️ **Program** | the program title, exactly as it appears on All_Program_Sessions. The cell offers a dropdown of what the calendar has actually produced |
 | ✍️ **Location** | which site. **Both** this and Program are required — see below |
 | ✍️ **Notify_Roster_Changes** | tick to email this person when this program's roster moves — see [Roster change alerts](#roster-change-alerts) |
 | `Sheet_Link` | fills in by itself: the shared sign-up sheet for this program, once one exists |
@@ -3088,7 +3114,7 @@ size changed** — which is a change you set out chairs for.
 
 ## Putting a registration link on the website
 
-**The link you want is `Form_Response_Link`** on Master_Program_Dashboard — the
+**The link you want is `Form_Response_Link`** on All_Program_Sessions — the
 one that reads **View Live Form**. That is the published form, the same page a
 registrant reaches from the calendar. (`Edit_Form_Link` is the editor, for you,
 and must never go on a website.)
@@ -3168,7 +3194,7 @@ them" has to mean.
 in an email, on a flyer, or in a calendar invite opens the same form it always
 did. Nothing goes to the trash and no calendar event is touched.
 
-**What survives:** all registrations. Rows on Registrant_Dash are untouched,
+**What survives:** all registrations. Rows on All_Registrants are untouched,
 club memberships are untouched, "sign up for every date" registrants are
 untouched — the form they are recorded against still exists.
 
@@ -3228,7 +3254,7 @@ tying you to the broken object.
 system controls is updated for you. A link in an email somebody sent last week,
 or on a printed flyer, points at a trashed form.
 
-**What survives:** all registrations. Rows on Registrant_Dash are
+**What survives:** all registrations. Rows on All_Registrants are
 untouched, club memberships are untouched, and "sign up for every date"
 registrants are carried across to the new form so they keep being booked onto
 dates the series gains later.
@@ -3396,7 +3422,7 @@ past deletion has no business overruling that. Re-reading the *same* response
 the deletion was aimed at stays blocked, however many times it comes round.
 
 > **To record that somebody isn't coming, don't use this.** Set their
-> `Program_Status` to `Cancelled` on **Registrant_Dash** — the row
+> `Program_Status` to `Cancelled` on **All_Registrants** — the row
 > and the history stay, and the catering counts drop them either way.
 
 **About deleting the form responses.** Deleting the rows doesn't touch the
@@ -3493,7 +3519,7 @@ attempt makes duplicates).
 
 Press it once and let it run — expect a few minutes for a small calendar and
 up to half an hour for a big one, and watch rows appear on
-**Master_Program_Dashboard** as it goes. Pressing it again is harmless:
+**All_Program_Sessions** as it goes. Pressing it again is harmless:
 anything already imported is skipped, which also makes it the way to recover
 if an import was interrupted. When it finishes, run **Sync Registrations** (or
 just wait for the hourly run) to pull in responses to any forms that already
@@ -3515,8 +3541,8 @@ one of them in the current layout.
 
 | Rebuilt from what's already here | Left completely alone |
 |---|---|
-| Master_Program_Dashboard | Your **calendars** — not read, not written |
-| Registrant_Dash | Your **registration forms** — none opened or changed |
+| All_Program_Sessions | Your **calendars** — not read, not written |
+| All_Registrants | Your **registration forms** — none opened or changed |
 | Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
 | Master_Lunch_Dashboard (hand-entered columns kept) | |
 | Deleted_Event_Triage | |
@@ -3753,7 +3779,7 @@ everybody out.
 ## Old months
 
 Every date-sorted tab grows in one direction forever. A year in, the **Past**
-section of Registrant_Dash is thousands of rows nobody scrolls
+section of All_Registrants is thousands of rows nobody scrolls
 through.
 
 **What happens now.** Past rows older than **this month and last month** are
@@ -3888,10 +3914,10 @@ Only (no program)**), pick or type their name, tick **Sign up for lunch**. See
 For a month of lunches, repeat once per date; the dialog keeps the location.
 
 **See exactly who is eating on a given day**
-**Lunch_Roster** — one row per person per date and location, with the programs
+**All_Lunch_Registrants** — one row per person per date and location, with the programs
 they signed up for, whether they've been served, and their phone number. That's
 the list to hand meals out against and to type into CoPilot. See
-[Lunch_Roster](#3-lunch_roster).
+[All_Lunch_Registrants](#3-lunch_roster).
 
 **Check how many lunches actually went out**
 Compare `Registered_Count` (what the forms said) with `Served_Confirmed` (what
@@ -3903,7 +3929,7 @@ Put it in `Usual_Guests` on **Member_Roll**. It stays there forever — nothing
 overwrites your columns on that tab.
 
 **Cancel one person's registration**
-On **Registrant_Dash**, set their `Program_Status` to `Cancelled`.
+On **All_Registrants**, set their `Program_Status` to `Cancelled`.
 The `Manual_Override` cell turns purple and the row is protected from being
 overwritten — and the **lunch numbers update immediately**, with a toast
 telling you the new count:
@@ -3953,7 +3979,7 @@ same person, so a person doesn't get double-counted or double-catered — includ
 across several programs on the same day, which is what stops three lunch
 requests from one person becoming three meals on the order.
 
-**The dashboards are rebuilt, not patched.** Master_Program_Dashboard and the
+**The dashboards are rebuilt, not patched.** All_Program_Sessions and the
 Today blocks are regenerated from scratch each sync. Only the pencil columns on
 Master_Lunch_Dashboard and manually-marked registrant rows survive.
 
@@ -4116,7 +4142,7 @@ Rebuild Quick Mark Lists** (or the **↻ reload** link in the dialog itself).
 
 If the times are still missing after a rebuild, the session isn't flagged as an
 appointment one: check `Personalized_Assistance` is ticked on its
-**Master_Program_Dashboard** row, and that the calendar event carries
+**All_Program_Sessions** row, and that the calendar event carries
 `[Personalized Assistance]` — the tick comes from the calendar, and an untagged
 event has no slots to offer. The time picker only appears when you tick
 **Register them** (you are booking a slot) or **🕐 Move them to a different
@@ -4227,7 +4253,7 @@ That's the first-import problem — too many forms to build in one run. Press
 skips whatever already came through. Then press **Check Triggers** to be sure
 the schedule is back (the batched import does that itself at the end).
 
-**Programs vanished from Master_Program_Dashboard**
+**Programs vanished from All_Program_Sessions**
 The system removes a session when its calendar event is gone — but it now
 refuses to do that *en masse*: if more than a handful of sessions look deleted
 at once, it changes nothing, logs why, and tells the admin address, because
@@ -4241,7 +4267,7 @@ If sessions did disappear (from an older version), get them back with:
    the forms already linked in the calendar events.
 2. Ask your developer to run `restoreTriagedRegistrants()` from the Apps
    Script editor — that moves people back from **Deleted_Event_Triage** onto
-   **Registrant_Dash** for every session that's back. This is
+   **All_Registrants** for every session that's back. This is
    worth doing before anything else touches those rows: registrations that
    were already imported *only* exist on those tabs, so re-syncing the forms
    will not bring them back.
@@ -4252,7 +4278,7 @@ developer can run `confirmLargeTriage()` and then press **Sync Cal** — that
 permits exactly one oversized sweep.
 
 **"Import Everything" seems stuck**
-Look at **Master_Program_Dashboard** — if rows are still appearing every few
+Look at **All_Program_Sessions** — if rows are still appearing every few
 minutes, it's working. It gives up on its own if two batches in a row make no
 progress, and tells you so. To stop it by hand, ask your developer to run
 `cancelBootstrapCalendars()` from the Apps Script editor; that restores every

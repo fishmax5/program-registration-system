@@ -253,7 +253,8 @@ function lift(name) {
 const DOM = {};
 function node(shown) { return { checked: false, style: { display: shown ? 'block' : 'none' } }; }
 function resetDom() {
-  ['register', 'standing', 'standingLunch', 'signup', 'lunch'].forEach(id => { DOM[id] = node(true); });
+  ['register', 'standing', 'standingLunch', 'signup', 'lunch', 'attended', 'waitlist']
+    .forEach(id => { DOM[id] = node(true); });
   ['standingLabel', 'standingLunchLabel', 'servedBox', 'mealsBox'].forEach(id => { DOM[id] = node(false); });
 }
 resetDom();
@@ -267,8 +268,10 @@ vm.runInContext(
   'function showAppointmentTimes() {}' +
   'function appointmentSession() { return appointment; }' +
   lift('registerChanged') + lift('standingChanged') + lift('showMealBoxes') +
+  lift('waitlistChanged') + lift('clearWaitlistTick') +
   ';this.registerChanged = registerChanged; this.standingChanged = standingChanged;' +
-  'this.showMealBoxes = showMealBoxes;' +
+  'this.showMealBoxes = showMealBoxes; this.waitlistChanged = waitlistChanged;' +
+  'this.clearWaitlistTick = clearWaitlistTick;' +
   'this.setDom = function (d) { DOM = d; }; this.setAppointment = function (v) { appointment = v; };',
   ui, { filename: 'quick-mark-dialog' });
 ui.setDom(DOM);
@@ -341,6 +344,29 @@ check('appointment: so is the lunch rider', shown('standingLunchLabel'), false);
 check('appointment: and both are cleared',
   [DOM.standing.checked, DOM.standingLunch.checked], [false, false]);
 ui.setAppointment(false);
+
+// THE WAITLIST TICK, which says the opposite of every mark beside it. The
+// server refuses the combination outright (applyQuickMarkLocked()); the dialog
+// exists so nobody ever reaches that refusal.
+resetDom(); ui.setDom(DOM);
+DOM.register.checked = true;
+DOM.attended.checked = true; DOM.lunch.checked = true; DOM.signup.checked = true;
+ui.registerChanged();
+DOM.standing.checked = true;
+ui.standingChanged();
+DOM.waitlist.checked = true;
+ui.waitlistChanged();
+check('waitlist: the three marks are cleared',
+  [DOM.attended.checked, DOM.lunch.checked, DOM.signup.checked], [false, false, false]);
+check('waitlist: a standing place is cleared too — it is the opposite promise',
+  [DOM.standing.checked, DOM.standingLunch.checked], [false, false]);
+check('waitlist: and the standing tick is off screen', shown('standingLabel'), false);
+
+// And back the other way: ticking a mark takes the waitlist off.
+DOM.attended.checked = true;
+ui.clearWaitlistTick();
+check('a mark unticks the waitlist', DOM.waitlist.checked, false);
+check('…and register is offered its standing rider again', shown('standingLabel'), true);
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

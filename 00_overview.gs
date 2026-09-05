@@ -3,9 +3,13 @@
  *  🗓️  CALENDAR & FORM MANAGER  —  Program Registration + Lunch Ordering
  * ============================================================================
  *  Sheets:
- *    - Master_Program_Dashboard : "Today at Each Location" + participation
- *      metrics + the full per-session table, now split into an "Upcoming
- *      Sessions" sub-table and a "Past Sessions" sub-table (see section 7).
+ *    - All_Program_Sessions : renamed from All_Program_Sessions (Sept 2026;
+ *      LEGACY_SHEET_RENAMES carries an existing workbook's tab across in
+ *      place). "Today at Each Location" + the full
+ *      per-session table, now split into an "Upcoming Sessions" sub-table
+ *      and a "Past Sessions" sub-table (see section 7). The participation
+ *      metrics used to sit here too, and now sit on Master_Program_Dashboard, below —
+ *      they are monthly reasoning, and this table is one row per DAY.
  *      The session table no longer carries a Manual_Override column — it's
  *      fully calendar-derived every render (Location/Type_Tag stay
  *      editable dropdowns, but nothing on this table is protected from a
@@ -13,6 +17,33 @@
  *      is the first column, and the old separate Month column has been
  *      replaced everywhere by simply color-tinting the Event_Date cell
  *      itself (see getMonthColor()/applyMonthColorTint()).
+ *    - Master_Program_Dashboard            : the same sessions, one row per PROGRAM-
+ *      MONTH — one program, one location, one month, which is the unit
+ *      buildEventGroups() already makes one FORM for. Fourteen of the
+ *      session table's columns are program-month facts printed once per
+ *      session; this is the other half of that join written out on its own,
+ *      with the schedule collapsed into a phrase ("Tue 9:30 AM - 11:30 AM ·
+ *      4 sessions") and lunch collapsed to one row per location per month.
+ *      A [Grouped] run of dates, which has one form and no month of its own,
+ *      is one row filed under its FIRST month. It also carries the
+ *      participation metrics block and one line the month grain makes
+ *      possible — how many of this month's programs have nobody down as
+ *      leading them (a COUNT off Program_Leaders; nothing is shared or sent
+ *      from here) — and its Sessions cell links through to that group's own
+ *      block of rows on the session table.
+ *      DERIVED AND READ-ONLY, WITH ONE WINDOW IN IT: nothing reads this tab,
+ *      nothing is stored on it that is not already on a session row, and
+ *      deleting it changes no behavior anywhere (the next dashboard render
+ *      draws it again). Written from the session rows the render already
+ *      holds, never from a second read of that tab. The window is Leader /
+ *      Leader_Source: read off Program_Leaders on every render and never read
+ *      back, so typing a name there ADDS a row on THAT tab (with the email
+ *      tick clear) instead of storing a second answer to "who may read this
+ *      roster" here. Leader_Source says 'matched' while a Title_Match
+ *      proposal behind the name is still unconfirmed, and those cells carry
+ *      the yellow please-look-at-this wash. Because leaderProgramKey() has no
+ *      month in it, every future month of the same program shows the same
+ *      leader with nothing carried anywhere. See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.
@@ -20,7 +51,7 @@
  *      location (LOCATION_COLOR_MAP / buildLocationRowTintRules()) — except
  *      the month-tinted Event_Date cell and the yellow hand-entry columns,
  *      which keep their own meaning.
- *    - Registrant_Dash          : one row per person per session, split
+ *    - All_Registrants          : one row per person per session, split
  *      into "Upcoming Registrants" / "Past Registrants" sub-tables. Leads
  *      with Event_Date (like every other date-bearing tab), then Location,
  *      Event and Event_Time so staff never scroll to see which session a row
@@ -48,7 +79,7 @@
  *      owner — see the multi-account note below). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
- *      first-column/month-tint treatment as Registrant_Dash.
+ *      first-column/month-tint treatment as All_Registrants.
  *
  *  Notable behaviors:
  *    - All-day calendar events are skipped entirely.
@@ -117,7 +148,7 @@
  *      rebuild, which is what a question typed onto a live form by hand never
  *      survived. Three rules keep it additive: a custom question may not take a
  *      title the template reads by name (refused, with a note), its answers go
- *      into ONE Registrant_Dash column (Form_Answers) so the table's shape
+ *      into ONE All_Registrants column (Form_Answers) so the table's shape
  *      never depends on another tab, and it is added to both branch pages
  *      before "Anything Else?" without touching a page break or a template
  *      item. getAdminNotesResponse() reads "Anything Else?" BY TITLE for the
@@ -200,7 +231,14 @@
  *      same hourly registration sync as everything else here — no new
  *      trigger. Replaces Program_Options' old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
- *      a sync runs (migrateProgramLeaderAddresses()).
+ *      a sync runs (migrateProgramLeaderAddresses()). Title_Match is the
+ *      other direction: comma-separated phrases ("yoga") meaning "a program
+ *      whose title contains this is mine", so a NEW program nobody has typed
+ *      a row for gets one proposed for the matching leader instead of
+ *      running all month attributed to nobody. A proposal is a real row with
+ *      the notify tick clear and a note saying which phrase found it — a
+ *      phrase never overrides a typed row, and never shares or sends
+ *      anything by itself.
  *    - REGISTRANT NOTIFICATIONS (the Registrant_Notifications tab, sections
  *      9e and 9h): what each PROGRAM sends the people signed up for it. One
  *      row per program, and a TICK BOX PER CHANNEL because the channels are
@@ -369,7 +407,7 @@
  *    - The template calls setCollectEmail(true) and
  *      setAllowResponseEdits(true) — a submitter's email becomes a real
  *      identity key, Google auto-sends a receipt with an edit link, and
- *      Form_Source on Registrant_Dash links straight to that
+ *      Form_Source on All_Registrants links straight to that
  *      person's own submission (response.getEditResponseUrl()) instead of
  *      to the shared form editor.
  *    - Allergies / dietary needs is its own required-free text field,
@@ -380,7 +418,7 @@
  *    - Party_ID (= the Google Form response ID) and Party_Size (headcount
  *      including the registrant) are stamped on every row from the same
  *      submission, so staff can see "party of 3, one no-show" at a glance
- *      on Registrant_Dash.
+ *      on All_Registrants.
  *    - Name-based identity (dedup / manual-edit protection / the "sign up
  *      for all dates" registry) is matched case/whitespace-insensitively
  *      via normalizeNameKey() — "Jane Smith" and "jane smith " are the same
@@ -438,7 +476,7 @@
  *      re-reading the response the deletion was aimed at does not. See section
  *      5c.
  *    - QUICK MARK IS A DIALOG, not a band of cells above the tables. See
- *      section 6d for what that fixed. Registrant_Dash's tables start at row 1.
+ *      section 6d for what that fixed. All_Registrants's tables start at row 1.
  *    - RENAMING A PROGRAM MOVES IT, RATHER THAN REPLACING IT. cleanTitle is an
  *      input to computeEventId(), the group key, computeClubKey() and
  *      Program_Options' key, so a title change used to re-key a program's

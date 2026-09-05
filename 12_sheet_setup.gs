@@ -80,12 +80,12 @@ function initSheet() {
  *
  *   REBUILT (from the rows already on each tab)
  *     Config (older layouts are backed up, current ones kept as-is)
- *     Master_Program_Dashboard    — with triage OFF
- *     Registrant_Dash             — the tables only; Quick Mark is a dialog
+ *     All_Program_Sessions    — with triage OFF
+ *     All_Registrants             — the tables only; Quick Mark is a dialog
  *     Deleted_Event_Triage
  *     Lunch_Schedule              — including the new ADD block
  *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
- *     Lunch_Roster                — rebuilt with it, from the same rollup
+ *     All_Lunch_Registrants                — rebuilt with it, from the same rollup
  *     Member_Roll / Program_Options — staff columns never touched
  *     Tab order, column widths, dropdowns, conditional formatting
  *
@@ -122,8 +122,8 @@ function rebuildLayoutFromSheet() {
     }
   };
 
-  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = read(SHEET_NAMES.REGISTRANT_DASH, HEADERS.Registrant_Dash, 'Event_ID');
+  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.All_Program_Sessions, 'Event_ID');
+  const registrantRows = read(SHEET_NAMES.REGISTRANT_DASH, HEADERS.All_Registrants, 'Event_ID');
   const triageRows = read(SHEET_NAMES.TRIAGE, HEADERS.Deleted_Event_Triage, 'Event_ID');
   const menuRows = read(SHEET_NAMES.LUNCH_SCHEDULE, HEADERS.Lunch_Schedule, 'Event_Date');
 

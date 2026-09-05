@@ -18,7 +18,7 @@ function renderTriageSheet(force, allRows) {
 }
 
 /**
- * Shared formatting for Registrant_Dash AND Deleted_Event_Triage
+ * Shared formatting for All_Registrants AND Deleted_Event_Triage
  * — both carry the same Manual_Override / Program_Status / Lunch_Status /
  * Order_Ahead_Flag / Event_Date columns, just with Triage adding a few
  * extra trailing columns that don't need special styling beyond zebra.

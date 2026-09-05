@@ -58,6 +58,8 @@ this.getProgramLeadersWantingAlerts = getProgramLeadersWantingAlerts;
 this.invalidateProgramLeaderIndex = invalidateProgramLeaderIndex;
 this.buildProgramLeaderIndex = buildProgramLeaderIndex;
 this.parseLeaderNotifyTiming = parseLeaderNotifyTiming;
+this.leaderNotifyTimingDaysBefore = leaderNotifyTimingDaysBefore;
+this.leaderNotifyTimingMaxDays = leaderNotifyTimingMaxDays;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -66,6 +68,9 @@ this.LEADER_NOTIFY_TIMING_LIST = LEADER_NOTIFY_TIMING_LIST;
 this.LEADER_NOTIFY_TIMING_EACH_CHANGE = LEADER_NOTIFY_TIMING_EACH_CHANGE;
 this.PROGRAM_LEADERS_MIGRATED_PROP_KEY = PROGRAM_LEADERS_MIGRATED_PROP_KEY;
 this.__setLeaderIndex = function (rows) { __programLeaderIndexCache = rows; };
+this.attachProgramLeaderRow = attachProgramLeaderRow;
+this.programLeaderNames = programLeaderNames;
+this.isTitleMatchedLeaderRow = isTitleMatchedLeaderRow;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -92,8 +97,8 @@ check('Notify_Timing is a Program_Leaders column',
 check('...and the refresh never overwrites it',
   sandbox.PROGRAM_LEADERS_STAFF_COLUMNS.indexOf('Notify_Timing') !== -1, true);
 check('and the notes column on a registrant row is now the leader\'s',
-  [sandbox.HEADERS.Registrant_Dash.indexOf('Instructor_Notes') === -1,
-    sandbox.HEADERS.Registrant_Dash.indexOf('Leader_Notes') !== -1],
+  [sandbox.HEADERS.All_Registrants.indexOf('Instructor_Notes') === -1,
+    sandbox.HEADERS.All_Registrants.indexOf('Leader_Notes') !== -1],
   [true, true]);
 
 // ---------------------------------------------------------------------------
@@ -271,7 +276,7 @@ check('a leader who ticked the box but has no address is not a send',
 // ---------------------------------------------------------------------------
 
 const timing = sandbox.parseLeaderNotifyTiming;
-const EACH = { mode: 'each_change', days: 0 };
+const EACH = { mode: 'each_change', days: 0, weekday: -1 };
 
 check('a blank cell keeps doing what a ticked box has always done', timing(''), EACH);
 check('...and so does a cell nobody has typed into at all',
@@ -279,11 +284,11 @@ check('...and so does a cell nobody has typed into at all',
 check('the dropdown\'s own default reads as the diff channel',
   timing(sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE), EACH);
 check('a day count reads as the countdown channel',
-  timing('3 days before each date'), { mode: 'days_before', days: 3 });
+  timing('3 days before each date'), { mode: 'days_before', days: 3, weekday: -1 });
 check('one day is singular, and still a day count',
-  timing('1 day before each date'), { mode: 'days_before', days: 1 });
+  timing('1 day before each date'), { mode: 'days_before', days: 1, weekday: -1 });
 check('case and stray spacing are what somebody typed, not what they meant',
-  timing('  2 DAYS BEFORE each date  '), { mode: 'days_before', days: 2 });
+  timing('  2 DAYS BEFORE each date  '), { mode: 'days_before', days: 2, weekday: -1 });
 // Out of range falls back rather than silencing: a leader who somehow ends up
 // with "0 days" or "30 days" in the cell still hears from us.
 check('a day count past the week this supports falls back to the diff channel',
@@ -291,13 +296,43 @@ check('a day count past the week this supports falls back to the diff channel',
 check('...and so does one that is not a countdown at all',
   [timing('0 days before each date'), timing('when I feel like it')], [EACH, EACH]);
 
-check('the dropdown offers the diff channel and one entry per day of the week',
-  sandbox.LEADER_NOTIFY_TIMING_LIST.length, 8);
+// The weekday channel: the same digest, due on a fixed day of the week rather
+// than a fixed count. The failure this pins is a Thursday class on a
+// "Thursday before" row resolving to zero days — i.e. the morning of — rather
+// than to the week before.
+check('a weekday reads as the weekday channel',
+  timing('The Thursday before each date'), { mode: 'weekday', days: 7, weekday: 4 });
+check('...however it was spelled',
+  timing('  thursday before  '), { mode: 'weekday', days: 7, weekday: 4 });
+check('...and a weekday with no "before" is not a timing at all',
+  timing('Thursday'), EACH);
+
+const daysBefore = sandbox.leaderNotifyTimingDaysBefore;
+const thursday = timing('The Thursday before each date');
+check('a Tuesday session on a Thursday row is due five days ahead',
+  daysBefore(thursday, new Date(2026, 8, 8)), 5);
+check('a session ON that weekday is due the week before, never the morning of',
+  daysBefore(thursday, new Date(2026, 8, 10)), 7);
+check('a day count ignores the session date it is handed',
+  daysBefore(timing('3 days before each date'), new Date(2026, 8, 8)), 3);
+check('the diff channel is never due as a digest',
+  daysBefore(EACH, new Date(2026, 8, 8)), 0);
+check('a weekday row is scanned for out to the whole week',
+  [sandbox.leaderNotifyTimingMaxDays(thursday),
+   sandbox.leaderNotifyTimingMaxDays(timing('2 days before each date')),
+   sandbox.leaderNotifyTimingMaxDays(EACH)],
+  [7, 2, 0]);
+
+check('the dropdown offers the diff channel, one entry per day count and one per weekday',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.length, 15);
 check('...starting with the default',
   sandbox.LEADER_NOTIFY_TIMING_LIST[0], sandbox.LEADER_NOTIFY_TIMING_EACH_CHANGE);
 check('...and every offered value parses back to what it says',
-  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(1).map(label => timing(label).days),
+  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(1, 8).map(label => timing(label).days),
   [1, 2, 3, 4, 5, 6, 7]);
+check('...weekdays included',
+  sandbox.LEADER_NOTIFY_TIMING_LIST.slice(8).map(label => timing(label).weekday),
+  [0, 1, 2, 3, 4, 5, 6]);
 
 // The column has to actually be READ off the tab, not just parse well.
 const timedRow = new Array(leaderHeaders.length).fill('');
@@ -316,14 +351,128 @@ sandbox.invalidateProgramLeaderIndex();
 const rebuilt = sandbox.buildProgramLeaderIndex();
 
 check('the cell on the tab reaches the leader index',
-  rebuilt['bridge club|narberth'][0].timing, { mode: 'days_before', days: 3 });
+  rebuilt['bridge club|narberth'][0].timing, { mode: 'days_before', days: 3, weekday: -1 });
 // ...and out the other side, because 66 filters its two passes on it.
 check('...and rides along to the pass that has to choose a channel',
   sandbox.getProgramLeadersWantingAlerts()[0].programs[0].timing,
-  { mode: 'days_before', days: 3 });
+  { mode: 'days_before', days: 3, weekday: -1 });
 
 activeSpreadsheet = null;
 sandbox.invalidateProgramLeaderIndex();
+
+// ---------------------------------------------------------------------------
+// attachProgramLeaderRow() — the ONE write this tab takes from somewhere else
+// (Master_Program_Dashboard's Leader dropdown, via 18_edit_handlers.gs).
+//
+// The rule it exists to keep: that dropdown must not become a second place
+// who-leads-what is stored. So it writes a real row HERE, and everything below
+// is about what it refuses to do while writing it — which is where the privacy
+// boundary actually lives.
+// ---------------------------------------------------------------------------
+{
+  /** A leader tab that records the row written to it, and where. */
+  function writableLeaderSheet(rows) {
+    const grid = [new Array(leaderHeaders.length).fill(''), leaderHeaders.slice()]
+      .concat(rows.map(r => r.slice()));
+    const state = { grid, wroteAt: null, wrote: null };
+    const sheet = {
+      state,
+      getName: () => 'Program_Leaders',
+      getLastRow: () => grid.length,
+      getLastColumn: () => leaderHeaders.length,
+      getMaxRows: () => 100,
+      insertRowsAfter: () => {},
+      getRange: (row, col, numRows, numCols) => ({
+        getValues: () => {
+          const out = [];
+          for (let i = 0; i < (numRows || 1); i++) {
+            const source = grid[row - 1 + i] || new Array(leaderHeaders.length).fill('');
+            out.push(source.slice(col - 1, col - 1 + (numCols || 1)));
+          }
+          return out;
+        },
+        setValues: values => {
+          state.wroteAt = row;
+          state.wrote = values[0];
+          while (grid.length < row) grid.push(new Array(leaderHeaders.length).fill(''));
+          grid[row - 1] = values[0].slice();
+          return sheet.getRange(row, col, numRows, numCols);
+        }
+      })
+    };
+    return sheet;
+  }
+
+  const row = (name, email, program, location, notes) => {
+    const r = new Array(leaderHeaders.length).fill('');
+    r[leaderMap['Leader_Name']] = name;
+    r[leaderMap['Email']] = email;
+    r[leaderMap['Program']] = program;
+    r[leaderMap['Location']] = location;
+    r[leaderMap['Staff_Notes']] = notes || '';
+    return r;
+  };
+
+  const use = sheet => {
+    activeSpreadsheet = { getSheetByName: n => (n === sandbox.SHEET_NAMES.PROGRAM_LEADERS ? sheet : null) };
+    sandbox.invalidateProgramLeaderIndex();
+    return sheet;
+  };
+
+  // A leader already down for one class, attached to a second.
+  let sheet = use(writableLeaderSheet([row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth')]));
+  let result = sandbox.attachProgramLeaderRow('Jane Doe', 'Tai Chi', 'Ashbridge');
+  check('attaching a leader writes a row', [result.status, sheet.state.wroteAt], ['added', 4]);
+  check('...naming the program and the location asked for',
+    [sheet.state.wrote[leaderMap['Program']], sheet.state.wrote[leaderMap['Location']]],
+    ['Tai Chi', 'Ashbridge']);
+  check('...with the address taken off their existing row, not retyped',
+    sheet.state.wrote[leaderMap['Email']], 'jane@x.com');
+  // THE LINE THAT MATTERS: attaching somebody is not putting them on a mailing
+  // list. A dropdown that turned mail on is the one version of this that can
+  // email a roster to the wrong person.
+  check('...and the notification tick CLEAR',
+    sheet.state.wrote[leaderMap['Notify_Roster_Changes']], false);
+  check('...and it is not a title match, so Master_Program_Dashboard reads it as typed',
+    sandbox.isTitleMatchedLeaderRow(sheet.state.wrote[leaderMap['Staff_Notes']]), false);
+
+  // Idempotent: the same attachment twice is one row. An hourly render plus a
+  // second look at the dropdown must not grow the tab.
+  sheet = use(writableLeaderSheet([row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth')]));
+  result = sandbox.attachProgramLeaderRow('Jane Doe', 'Chair Yoga', 'Narberth');
+  check('attaching somebody who is already down for it writes nothing',
+    [result.status, sheet.state.wroteAt], ['exists', null]);
+
+  // IT ONLY ADDS. Sam does not lose their row because Kit was picked.
+  sheet = use(writableLeaderSheet([row('Sam Reed', 'sam@x.com', 'Book Club', 'Narberth')]));
+  sandbox.attachProgramLeaderRow('Kit Alvarez', 'Book Club', 'Narberth');
+  check('a new leader is added beside the old one, never over it',
+    [sheet.state.grid[2][leaderMap['Leader_Name']], sheet.state.wrote[leaderMap['Leader_Name']]],
+    ['Sam Reed', 'Kit Alvarez']);
+  check('...and a name nobody has an address for yet says so rather than guessing',
+    sheet.state.wrote[leaderMap['Email']], '');
+
+  check('a row with no program or location is refused outright',
+    sandbox.attachProgramLeaderRow('Jane Doe', '', 'Narberth').status, 'refused');
+  activeSpreadsheet = { getSheetByName: () => null };
+  sandbox.invalidateProgramLeaderIndex();
+  check('and so is one with no tab to write to',
+    sandbox.attachProgramLeaderRow('Jane Doe', 'Chair Yoga', 'Narberth').status, 'refused');
+
+  // The dropdown's own list: every name once, including a leader who so far
+  // has only Title_Match phrases and no program row for the index to key on.
+  use(writableLeaderSheet([
+    row('Sam Reed', 'sam@x.com', 'Book Club', 'Narberth'),
+    row('Jane Doe', 'jane@x.com', 'Chair Yoga', 'Narberth'),
+    row('Jane Doe', 'jane@x.com', 'Tai Chi', 'Ashbridge'),
+    row('Ada Frost', 'ada@x.com', '', '')
+  ]));
+  check('the dropdown offers each name once, phrase-only leaders included',
+    sandbox.programLeaderNames(), ['Ada Frost', 'Jane Doe', 'Sam Reed']);
+
+  activeSpreadsheet = null;
+  sandbox.invalidateProgramLeaderIndex();
+}
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

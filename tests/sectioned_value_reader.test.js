@@ -148,7 +148,7 @@ const shuffledLinked = [
 
 // A HYPERLINK in a cell is exactly the difference between the two readers, and
 // the values reader is the RIGHT one for a consumer that only wants to look:
-// Registrant_Dash's Event_Time is a formula, and the formula string is not a
+// All_Registrants's Event_Time is a formula, and the formula string is not a
 // time anything can parse.
 const linked = fakeSheet(grid, { 2: { 2: '=HYPERLINK("http://x","Jane Smith")' } });
 check('the values reader hands back what the cell shows',

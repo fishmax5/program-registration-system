@@ -33,7 +33,7 @@
 // a printed flyer, is not.
 //
 // WHAT IT DOES NOT COST: registrations. Responses already imported are rows on
-// Registrant_Dash and are untouched. Responses NOT yet imported
+// All_Registrants and are untouched. Responses NOT yet imported
 // would be destroyed with the form, so this imports them first and refuses to
 // go on if that import fails — losing a registration to a maintenance action
 // is the one outcome that would make this tool not worth having.
@@ -94,7 +94,7 @@ function destroyAndRebuildAllForms() {
     return null;
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map);
   if (plan.length === 0) {
@@ -240,7 +240,7 @@ function runFormRebuildSweep(registrySheet, plan) {
   // taken fresh — otherwise a new form could be built listing a session that
   // was triaged away between the click and the work.
   const confirmed = new Set(plan.map(item => item.oldFormId));
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const currentPlan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
     .filter(item => confirmed.has(item.oldFormId));
@@ -487,7 +487,7 @@ function runFormRebuildSweepSlice() {
         return { stop: `stopped — could not import outstanding registrations (${imported.err})` };
       }
 
-      const headers = HEADERS.Master_Program_Dashboard;
+      const headers = HEADERS.All_Program_Sessions;
       const map = getIndexMap(headers);
       const confirmedSet = new Set(state.confirmed);
       const doneSet = new Set(state.done);

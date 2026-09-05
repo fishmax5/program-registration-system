@@ -163,13 +163,19 @@ function buildAppMenu(ui, includeAdmin) {
       // roster work: it is what somebody has to know to serve the person, and
       // it is edited by the same people who keep the rosters.
       .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', 'openRegularNeedsTab')
+      // Beside the standing notes because it is the same tab's other half: who
+      // the office knows, as against what it knows about them. The dedupe runs
+      // on every write already (section 77) — this is the item for the
+      // afternoon somebody has just pasted a list in and wants the number.
+      .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', 'showMemberRollImportDialog')
+      .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
       // the hourly sync already — these are for when somebody does not want to
       // wait an hour.
-      .addItem('Share a Sign-Up Sheet with a Program Leader\u2026', 'showProgramLeaderSheetDialog')
-      .addItem('Refresh Program Leader Sheets Now', 'refreshProgramLeaderSheetsNow')
+      .addItem('Share a Program Registrant Sheet\u2026', 'showProgramLeaderSheetDialog')
+      .addItem('Refresh Program Registrant Sheets Now', 'refreshProgramLeaderSheetsNow')
       .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
       // The countdown-channel twin of the item above — see Notify_Timing on
       // Program_Leaders for which leaders are on which.
@@ -232,6 +238,10 @@ function buildAppMenu(ui, includeAdmin) {
       // The \u21bb link inside the Quick Mark dialog does the same thing. This is
       // for the other order \u2014 rebuild the lists first, THEN walk to the desk.
       .addItem('Rebuild Quick Mark Lists', 'rebuildQuickMarkListsNow')
+      // The month view is redrawn by every dashboard render; this is for
+      // somebody who deleted the tab, or who wants it caught up without
+      // waiting for the next sync. See 78_program_month_dashboard.gs.
+      .addItem('Rebuild the Program Month View', 'renderProgramMonthSheetNow')
       // The check-in page queues its marks and a trigger writes them; this is
       // the "write them NOW" for somebody standing over the tab wondering
       // where this morning's ticks are. See flushCheckInQueue().
@@ -257,7 +267,7 @@ function buildAppMenu(ui, includeAdmin) {
       // THE WEEKEND, ON PURPOSE. A Saturday on a program calendar is as often
       // a rental or a placeholder as a program, so this lists the Sat/Sun
       // dates that are not loaded yet and loads only the ones somebody ticks.
-      // It adds dates; it changes nothing about what the sync does. See 77.
+      // It adds dates; it changes nothing about what the sync does. See 80.
       .addItem('\ud83d\uddd3\ufe0f Load Weekend Events\u2026', 'showWeekendEventLoaderDialog')
       .addSeparator()
       // EVERYTHING ABOUT A LINK THAT LOOKS WRONG, BEHIND ONE ITEM. There were
@@ -281,7 +291,7 @@ function buildAppMenu(ui, includeAdmin) {
       // them. Every folder lookup used to create at My Drive ROOT, so a year
       // of forms, leader sheets and sign-in documents can be sitting loose
       // there. This files them under the folder the workbook lives in. It
-      // moves files; it changes no link and deletes nothing. See section 79.
+      // moves files; it changes no link and deletes nothing. See section 82.
       .addItem('\ud83d\uddc2\ufe0f Organize Generated Files (one-time)', 'organizeGeneratedFiles')
       // ONE-TIME, for a workbook upgraded from the version that put the office
       // on every event's guest list: it takes those addresses back off the
@@ -459,7 +469,7 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('syncCalendars', () =>
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
   // AN HOUR AFTER THE CALENDAR SYNC, not alongside it: this reads
-  // Registrant_Dash and the dashboard, and wants that hour's syncCalendars()
+  // All_Registrants and the dashboard, and wants that hour's syncCalendars()
   // run — whatever it moved or added overnight — reflected before it prints,
   // not raced against it. See autoCreateTodaysSignInSheets() (45).
   removed += resetTriggersForHandler('autoCreateTodaysSignInSheets', () =>

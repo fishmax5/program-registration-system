@@ -155,7 +155,7 @@ function syncLunchOnlySessions(registrySheet) {
   const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   if (!menuSheet) return {};
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
   // NOT the calendar's 60-day window — see LUNCH_SIGNUP_LOOKAHEAD_MONTHS.
@@ -543,6 +543,10 @@ function getLunchOnlyFormLinks() {
 defineLazyGlobal_('TAB_GROUPS', () => ([
   { color: PALETTE.TAB_TODAY, names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
+    // Immediately after the tab it is a view of, and after rather than before
+    // it: the session table is the one staff open every morning, and a derived
+    // summary does not get to be the first thing in the workbook.
+    SHEET_NAMES.PROGRAM_MONTH,
     SHEET_NAMES.LUNCH_DASHBOARD,
     SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.REGISTRANT_DASH
@@ -848,7 +852,7 @@ function writeSectionBanner(sheet, row, numCols, text, options) {
  * column names stay on screen however far down somebody scrolls.
  *
  * "The table that is the tab" is the rule, and it is not always the topmost
- * table: Master_Program_Dashboard opens with a Today block and a metrics
+ * table: All_Program_Sessions opens with a Today block and a metrics
  * block, and freezing at those left the session table's headers — the thing
  * five hundred rows are read against — scrolling away with everything else.
  * Whatever a tab puts above its main table comes along in the frozen band.

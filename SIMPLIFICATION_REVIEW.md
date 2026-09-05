@@ -176,10 +176,10 @@ Every tab was assessed for whether it earns its place:
 
 | Tab | Grain | Verdict |
 |---|---|---|
-| `Master_Program_Dashboard` | session | Core. Keep |
-| `Registrant_Dash` | person × session | Core. Keep |
+| `All_Program_Sessions` | session | Core. Keep |
+| `All_Registrants` | person × session | Core. Keep |
 | `Master_Lunch_Dashboard` | date × location | Core. Keep |
-| `Lunch_Roster` | person × date × location | **Different grain from the dashboard** — one is counts, one is names, and both were asked for explicitly. Keep |
+| `All_Lunch_Registrants` | person × date × location | **Different grain from the dashboard** — one is counts, one is names, and both were asked for explicitly. Keep |
 | `Lunch_Schedule` | date × location | Core. Keep |
 | `Config` | settings | Keep |
 | `Club_Members` | person × club | Keep |
@@ -187,12 +187,12 @@ Every tab was assessed for whether it earns its place:
 | `Assistance_Requests` | request | Keep — but see the workflow gap below |
 | `Member_Roll` | person | Thin: feeds Quick Mark's name list, plus staff notes. Keep |
 | `Program_Options` | program × location | **Thinnest.** One functional column (`Instructor_Email`); the rest are display-only or staff notes |
-| `Deleted_Event_Triage` | person × session | **The real merge candidate** — 37 columns duplicating `Registrant_Dash`'s entire schema plus four |
+| `Deleted_Event_Triage` | person × session | **The real merge candidate** — 37 columns duplicating `All_Registrants`'s entire schema plus four |
 
 Two are genuinely mergeable:
 
 **`Deleted_Event_Triage` could be a status value, not a tab.** It duplicates
-every column of `Registrant_Dash` and adds four. A `Program_Status = 'Triaged'`
+every column of `All_Registrants` and adds four. A `Program_Status = 'Triaged'`
 plus the four extra columns on the main tab would remove a 37-column tab and
 its whole parallel read/write path — the single biggest structural
 simplification available.
@@ -365,4 +365,4 @@ day names on dates, and brackets that hold sentences no longer doing anything.
 4. **Split the pure functions into their own file** and grow the test suite
    (§5). Highest maintenance value.
 5. **Then, in a quiet month, merge `Deleted_Event_Triage` into
-   `Registrant_Dash`** as a status (§3).
+   `All_Registrants`** as a status (§3).

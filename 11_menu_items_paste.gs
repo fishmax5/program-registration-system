@@ -930,7 +930,7 @@ function refreshFormsForLunchDates(pairs, options) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return blank;
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return blank;
   const map = getIndexMap(headers);

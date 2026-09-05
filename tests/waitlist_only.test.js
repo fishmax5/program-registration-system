@@ -195,7 +195,7 @@ check('while the cap typed on ONE date still applies to the group', groups[0].ca
 // registration to exceed. `used >= 0` is not a test anything can fail.
 console.log('\n-- registrations for a forced session are waitlisted --');
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 const entry = {
   eventId: 'evt-yoga-16', eventDate: new RealDate(2026, 8, 16), location: 'Narberth',
   cleanTitle: 'Chair Yoga', eventTime: '1:00 PM – 2:00 PM', maxCapacity: 0
@@ -240,9 +240,9 @@ console.log('\n-- the form says so before somebody submits --');
 // that already happened when the seats ran out; the tick has to reach the
 // uncapped ones, which is where a respondent would otherwise be waitlisted with
 // no warning whatever.
-const registryMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
+const registryMap = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
 function registryRow(values) {
-  const row = new Array(sandbox.HEADERS.Master_Program_Dashboard.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Program_Sessions.length).fill('');
   Object.keys(values).forEach(key => { row[registryMap[key]] = values[key]; });
   return row;
 }

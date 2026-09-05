@@ -1,6 +1,6 @@
 // ============================================================================
 // 22. LIVE LINKS TO THE FILES THIS SYSTEM PRODUCES
-//     (program leader sheets, printed sign-in PDFs)
+//     (program registrant sheets, printed sign-in PDFs)
 // ============================================================================
 //
 // Two of this project's outputs live OUTSIDE the workbook: the spreadsheet a
@@ -12,8 +12,8 @@
 // So every tab that already has a row for a session now carries the links to
 // that session's files, rebuilt on each render:
 //
-//   Master_Program_Dashboard   Leader_Sheet_Link + Sign_In_Sheet_Link
-//   Registrant_Dash            Leader_Sheet_Link + Sign_In_Sheet_Link
+//   All_Program_Sessions   Registrant_Sheet_Link + Sign_In_Sheet_Link
+//   All_Registrants            Registrant_Sheet_Link + Sign_In_Sheet_Link
 //   Master_Lunch_Dashboard     Sign_In_Sheet_Link   (a meal has no leader)
 //
 // THE COLUMNS ARE DERIVED, NOT STORED. Nothing here reads back what is in the
@@ -61,8 +61,8 @@ const SIGN_IN_SHEET_REGISTRY_MAX_ENTRIES = 800;
  */
 const SIGN_IN_SHEET_LINK_LABEL = '📋 Sign-In Sheet';
 
-/** The label a program leader sheet link reads as. */
-const LEADER_SHEET_LINK_LABEL = '📋 Leader Sheet';
+/** The label a program registrant sheet link reads as. */
+const LEADER_SHEET_LINK_LABEL = '📋 Registrant Sheet';
 
 let __signInSheetRegistryCache = null;
 let __signInSheetRegistryDirty = false;
@@ -168,7 +168,7 @@ function backfillSignInSheetRegistry() {
   if (!requireAuthorizedAdmin('Rebuild Sign-In Sheet Links')) return { matched: 0, skipped: 0, opened: 0 };
   if (!confirmConsequentialAction('Rebuild sign-in sheet links?',
     'Every sheet already sitting in either sign-in sheet folder is set to "anyone with the link can edit" ' +
-    '(the same fix already applied to registration forms and program leader sheets), so a printed sheet ' +
+    '(the same fix already applied to registration forms and program registrant sheets), so a printed sheet ' +
     'opens for whoever clicks its dashboard link, not only whoever printed it.', true)) {
     return { matched: 0, skipped: 0, opened: 0 };
   }
@@ -247,7 +247,7 @@ function signInSheetLinkFormula(dateValue, location) {
  * when that program has never been shared.
  *
  * Keyed by leaderProgramKey(title, location) — title AND location, which is
- * the privacy boundary the leader sheets are built around (see 46). A program
+ * the privacy boundary the registrant sheets are built around (see 46). A program
  * running in two buildings has two sheets, and this hands each row its own.
  */
 function leaderSheetLinkFormula(title, location) {
@@ -272,7 +272,7 @@ function leaderSheetLinkFormula(title, location) {
 function stampGeneratedFileLinks(rows, map, options) {
   options = options || {};
   const signInIdx = map['Sign_In_Sheet_Link'];
-  const leaderIdx = map['Leader_Sheet_Link'];
+  const leaderIdx = map['Registrant_Sheet_Link'];
   const titleIdx = options.titleColumn === undefined ? undefined : map[options.titleColumn];
   if (signInIdx === undefined && leaderIdx === undefined) return rows;
   if (map['Event_Date'] === undefined || map['Location'] === undefined) return rows;

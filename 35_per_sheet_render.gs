@@ -5,7 +5,7 @@
 function renderRegistrantsSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const rows = allRows || getSectionedRows(sheet, headers, 'Event_ID');
   backfillRegistrantEventTimes(ss, headers, rows);
   // Same derived pair as the session table, keyed off this row's own program
@@ -89,7 +89,7 @@ function buildEventTimeByEventId(ss) {
   const sheet = book.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const out = {};
   if (!sheet) return out;
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();

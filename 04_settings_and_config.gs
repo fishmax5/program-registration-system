@@ -122,7 +122,7 @@ const ADMIN_NOTIFICATION_MAX_ROWS = 5;
  *                          waiting for a phone call, and whoever makes that
  *                          call is rarely whoever reads the digest.
  *
- * BEING AN EDITOR of the leader sheets and forms this system shares is
+ * BEING AN EDITOR of the registrant sheets and forms this system shares is
  * deliberately NOT a category. It is not mail at all, it is standing access to
  * a file, and a checkbox of its own for one Drive grant would suggest
  * otherwise.
@@ -301,7 +301,7 @@ const MEAL_SOURCE_LOOKAHEAD_DAYS = 7;
 const MEAL_SOURCE_MAX_OPTIONS = 40;
 /** Full set of Type choices offered on Lunch_Schedule / Master_Lunch_Dashboard. */
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
-/** Registrant_Dash' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
+/** All_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
 
 /**
@@ -498,7 +498,7 @@ const FORMS_FOLDER_NAME = 'Program Registration Forms';
  * under the folder the workbook itself lives in.
  *
  * It used to do its own Drive-wide getFoldersByName() and its own root-level
- * createFolder(). getOrCreateSystemFolder() (`79`) is that lookup done in the
+ * createFolder(). getOrCreateSystemFolder() (`82`) is that lookup done in the
  * one place every folder this system keeps now shares: inside the anchor
  * first, adopting a stray folder of the same name if there is one, and
  * creating inside the anchor otherwise. FORMS_FOLDER_ID still wins outright —

@@ -119,6 +119,48 @@ function doorDay(payload) {
  * workbook already reaches — so the visit can be entered by hand.
  */
 function doorSignIn(payload) {
+  const args = parseCheckInPayload(payload);
+  const res = doorSignInOne(payload);
+  if (res && res.needsPin) return res;
+
+  // THE REST OF THE HOUSEHOLD, one sign-in each. A couple who share a phone
+  // number arrive together and the person screen offers to sign them both in
+  // (see readWalkInDay()'s household), but they are two members with two sets
+  // of rows and each one is written exactly as if they had been tapped
+  // themselves — same lock, same row matching, same walk-in row for a session
+  // they were not down for. Nothing about this is a group registration.
+  //
+  // Each is its own call rather than a loop inside walkInSignIn(), so one
+  // companion failing (a name that no longer matches a row, a lock that
+  // expired mid-party) neither takes down the rest nor loses its own
+  // notification: doorSignInOne() reports every failure separately.
+  const party = Array.isArray(args.party) ? args.party.slice(0, DOOR_PARTY_MAX) : [];
+  const lines = (res && res.lines) ? res.lines.slice() : [];
+  party.forEach(companion => {
+    const one = Object.assign({}, companion, {
+      location: args.location, dateKey: args.dateKey, pin: args.pin,
+      // A companion is never the one who answers the membership question or
+      // sets up a recurring booking — those were asked of the person at the
+      // desk, about themselves.
+      recurring: 'none', member: ''
+    });
+    const got = doorSignInOne(one);
+    if (got && got.lines) got.lines.forEach(line => lines.push(line));
+    else if (got && got.message) lines.push(`${companion.name || 'Someone'}: ${got.message}`);
+  });
+  if (res && party.length) res.lines = lines;
+  return res;
+}
+
+/**
+ * HOW MANY PEOPLE ONE TAP CAN SIGN IN. A household is a household; a screen
+ * offering to sign in twelve people is a grouping that has gone wrong
+ * somewhere upstream, and the door is not where that should be discovered.
+ */
+const DOOR_PARTY_MAX = 8;
+
+/** One person, signed in and reported — the body doorSignIn() had before it took a party. */
+function doorSignInOne(payload) {
   let res;
   try {
     res = walkInSignIn(payload);

@@ -73,9 +73,9 @@ function eq(name, actual, expected) {
     `got      ${JSON.stringify(actual)}\n     expected ${JSON.stringify(expected)}`);
 }
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 function blankRow(over) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   Object.keys(over || {}).forEach(k => { row[map[k]] = over[k]; });
   return row;
 }

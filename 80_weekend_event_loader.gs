@@ -1,5 +1,5 @@
 // ============================================================================
-// 77. LOADING WEEKEND EVENTS ON PURPOSE  (the one-off, not a change to sync)
+// 80. LOADING WEEKEND EVENTS ON PURPOSE  (the one-off, not a change to sync)
 // ============================================================================
 //
 // The ordinary sync treats every event in its window the same way, and that is

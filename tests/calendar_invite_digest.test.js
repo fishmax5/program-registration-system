@@ -61,9 +61,9 @@ checkTrue('the ticked category is still read — for the digest',
 // ---------------------------------------------------------------------------
 // Who each address belongs to, for a digest a person can read.
 // ---------------------------------------------------------------------------
-const lrMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const lrMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 const row = name => {
-  const r = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const r = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   r[lrMap['Name']] = name[0];
   r[lrMap['Email']] = name[1];
   return r;

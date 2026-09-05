@@ -716,7 +716,7 @@ function getOrCreateTemplateForm() {
   const form = FormApp.create('TEMPLATE — Registration Form Base (do not edit or delete)');
   addTemplateItemsToForm(form);
 
-  // Same reason every registration form and program leader sheet opens itself
+  // Same reason every registration form and program registrant sheet opens itself
   // up the moment it is created (see openUpFileToAnyoneWithLink()): the
   // template is created by whoever ran this, but copied by makeCopy() every
   // time a program's form is built — routinely a DIFFERENT account, on the
@@ -728,7 +728,7 @@ function getOrCreateTemplateForm() {
   // FILED, not left where FormApp.create() dropped it. Every other file this
   // system makes goes into a folder of its own kind; the template is one of a
   // kind, so it sits in the system folder itself beside the workbook. Without
-  // this it stayed in My Drive root — which is exactly the mess `79` exists
+  // this it stayed in My Drive root — which is exactly the mess `82` exists
   // to stop, and the template was the most conspicuous piece of it.
   const systemRoot = getSystemRootFolder();
   if (systemRoot) {

@@ -89,9 +89,9 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const sessionHeaders = sandbox.HEADERS.Master_Program_Dashboard;
+const sessionHeaders = sandbox.HEADERS.All_Program_Sessions;
 const sessionMap = sandbox.getIndexMap(sessionHeaders);
-const regHeaders = sandbox.HEADERS.Registrant_Dash;
+const regHeaders = sandbox.HEADERS.All_Registrants;
 const regMap = sandbox.getIndexMap(regHeaders);
 
 function row(map, headers, values) {

@@ -307,7 +307,7 @@ function recoverDeletedForms() {
     return null;
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
@@ -402,7 +402,7 @@ function recoverDeletedForms() {
  * run. A lost form with nothing upcoming is reported and left alone.
  */
 function offerToRebuildLostForms(registrySheet, goneRefs, result) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const lost = {};
   goneRefs.forEach(ref => { lost[ref.formId] = ref; });

@@ -64,9 +64,9 @@ sandbox.__setLeaderRegistry({
 // ---------------------------------------------------------------------------
 // The session table: both links, keyed off the row's own program and day.
 // ---------------------------------------------------------------------------
-const pdMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
+const pdMap = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
 function sessionRow(values) {
-  const row = new Array(sandbox.HEADERS.Master_Program_Dashboard.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Program_Sessions.length).fill('');
   Object.keys(values).forEach(k => { row[pdMap[k]] = values[k]; });
   return row;
 }
@@ -91,10 +91,10 @@ check('the day\'s sign-in sheet lands on its session row',
   rows[0][pdMap['Sign_In_Sheet_Link']],
   `=HYPERLINK("https://drive/pdf1","${sandbox.SIGN_IN_SHEET_LINK_LABEL}")`);
 check('and so does the leader sheet for that program in that building',
-  rows[0][pdMap['Leader_Sheet_Link']],
-  '=HYPERLINK("https://docs.google.com/spreadsheets/d/sheet1/edit","📋 Leader Sheet")');
+  rows[0][pdMap['Registrant_Sheet_Link']],
+  '=HYPERLINK("https://docs.google.com/spreadsheets/d/sheet1/edit","📋 Registrant Sheet")');
 check('the same program in another building gets neither',
-  [rows[1][pdMap['Sign_In_Sheet_Link']], rows[1][pdMap['Leader_Sheet_Link']]], ['', '']);
+  [rows[1][pdMap['Sign_In_Sheet_Link']], rows[1][pdMap['Registrant_Sheet_Link']]], ['', '']);
 check('a link to a file that is gone is cleared, not left standing',
   rows[2][pdMap['Sign_In_Sheet_Link']], '');
 
@@ -109,19 +109,19 @@ sandbox.stampGeneratedFileLinks([lunchRow], lunchMap, {});
 check('the meal row points at the same PDF the session row does',
   lunchRow[lunchMap['Sign_In_Sheet_Link']], rows[0][pdMap['Sign_In_Sheet_Link']]);
 check('and carries no leader sheet column at all',
-  lunchMap['Leader_Sheet_Link'], undefined);
+  lunchMap['Registrant_Sheet_Link'], undefined);
 
 // ---------------------------------------------------------------------------
 // Registrants: one row per person, each pointing at their own session's files.
 // ---------------------------------------------------------------------------
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
-const regRow = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
+const regRow = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
 regRow[regMap['Event_Date']] = DAY;
 regRow[regMap['Location']] = 'Narberth';
 regRow[regMap['Event']] = 'Chair Yoga';
 sandbox.stampGeneratedFileLinks([regRow], regMap, { titleColumn: 'Event' });
 check('a registrant row reaches the leader sheet by its Event column',
-  regRow[regMap['Leader_Sheet_Link']], rows[0][pdMap['Leader_Sheet_Link']]);
+  regRow[regMap['Registrant_Sheet_Link']], rows[0][pdMap['Registrant_Sheet_Link']]);
 
 // ---------------------------------------------------------------------------
 // A tab written before these columns existed has no index for them, and the

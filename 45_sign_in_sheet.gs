@@ -99,7 +99,7 @@
 // name goes in Notes and their ordered meal is ADDED to the registrant's own
 // MEALS ORDERED count — a guest is a second mouth, so guest meals sum where a
 // duplicate's do not. This is a document-only fold: nothing here writes back to
-// Registrant_Dash, so the guest's own row keeps its own meal count everywhere
+// All_Registrants, so the guest's own row keeps its own meal count everywhere
 // else in the workbook.
 // ============================================================================
 
@@ -247,7 +247,7 @@ function listSignInSheetOptions() {
   try {
     const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (dash) {
-      const headers = HEADERS.Master_Program_Dashboard;
+      const headers = HEADERS.All_Program_Sessions;
       const map = getIndexMap(headers);
       getSectionedRows(dash, headers, 'Event_ID').forEach(row => {
         note(row[map['Event_Date']], row[map['Location']], row[map['Clean_Title']], false);
@@ -467,7 +467,7 @@ function createSignInSheetDoc(sessionValue, include) {
  * while nobody is watching, which is exactly what that switch exists to stop.
  *
  * SAME LOCK AND SAME REASON AS syncRegistrations(): building a sheet reads
- * Registrant_Dash and then read-modify-writes the sign-in sheet registry (a
+ * All_Registrants and then read-modify-writes the sign-in sheet registry (a
  * single Script Property everything else that prints one also touches), so
  * two overlapping runs racing that property is worse than one waiting a few
  * seconds for the other.
@@ -555,12 +555,12 @@ function autoCreateTodaysSignInSheetsInternal() {
  *
  * GUESTS FOLD INTO THEIR REGISTRANT and DUPLICATES FOLD INTO ONE PERSON — see
  * the two passes below. Both are document-only folds: nothing here writes back
- * to Registrant_Dash.
+ * to All_Registrants.
  */
 function collectSignInSheetData(dateKey, location, includeEveryone) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const date = parseDateKey(dateKey);
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const registrantRows = sheet ? getSectionedRows(sheet, headers, 'Event_ID') : [];
@@ -1141,7 +1141,7 @@ function openOrCreateSignInSheetDoc(data, title) {
   }
 
   const doc = DocumentApp.create(title);
-  // Same reason every form, leader sheet and printed PDF opens itself up the
+  // Same reason every form, registrant sheet and printed PDF opens itself up the
   // moment it exists (see openUpFileToAnyoneWithLink()): whoever builds this
   // is not necessarily whoever later clicks the Sign_In_Sheet_Link on the
   // dashboard (69_generated_file_links.gs), and Drive hands a new file to its
@@ -1300,7 +1300,7 @@ function writeSignInSheetTable(body, rows, options) {
 
 /**
  * The Drive folder the live sign-in documents are filed in — inside the
- * folder the workbook lives in, via getOrCreateSystemFolder() (`79`). It used
+ * folder the workbook lives in, via getOrCreateSystemFolder() (`82`). It used
  * to search the whole Drive by name and create at My Drive ROOT when it found
  * nothing, which is where every one of these landed on a fresh workbook.
  */

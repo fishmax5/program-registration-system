@@ -62,12 +62,12 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 const DAY = new Date(2026, 8, 3); // Thursday 3 September 2026, local
 
-/** A Registrant_Dash row with only the columns a sign-in sheet reads. */
+/** A All_Registrants row with only the columns a sign-in sheet reads. */
 function registrantRow(values) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   Object.keys(values).forEach(k => { row[map[k]] = values[k]; });
   return row;
 }
