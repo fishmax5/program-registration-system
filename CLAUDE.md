@@ -425,3 +425,15 @@ the merge that brought `79`–`81` in; the prefix is all that changed.
 | File | | What is in it |
 |---|--:|---|
 | `82_drive_organization.gs` | 427 | **The anchor.** Every folder this system keeps was found with a Drive-WIDE `getFoldersByName` and created with a parent-less `createFolder` — that is, in My Drive root. `getSystemRootFolder()` is the folder the WORKBOOK sits in, remembered in Script Properties, and `getOrCreateSystemFolder()` is the one lookup all five now share: inside the anchor first, adopting (and renaming) a stray folder of that name if there is one — never duplicating it, because the files in it have live links — and creating inside the anchor otherwise. `moveDriveFileInto()` is `50`'s `moveTo`-then-`addFile` pair generalized, and never throws. Plus `organizeGeneratedFiles()`, the Admin one-time sweep: everything with an id in a registry, then My Drive root by name AND MIME type (`STRAY_FILE_PATTERNS`). |
+
+### One row per month (83)
+
+Numbered after `82` (the Drive-organization file) for the usual reason — never
+renumber, and this landed last. Safe there: behavior only, its schema
+(`SHEET_NAMES.METRICS`, `HEADERS.Metrics`, `METRICS_STAFF_COLUMNS`) lives in
+`03` like every other tab's, its own `const` stands alone, and everything it
+calls into `34`, `40` and `43` is a hoisted function.
+
+| File | | What is in it |
+|---|--:|---|
+| `83_monthly_metrics.gs` | 708 | The `Metrics` tab: one stored row per calendar month, and the year-over-year block built on those rows rather than on `All_Registrants`. **The rule the file exists for:** a month whose registrant rows have been archived recounts to `null`, not to zero — overwriting a captured month with a count of nothing would report a collapse that never happened. It is the ONE tab in this workbook that is a record rather than a projection of the rows still on the other tabs, and `collapseOldPastMonths` is why it has to be. Counted through the same readers `43` uses, so the two blocks cannot disagree about what a registration is. Runs monthly (`captureMonthlyMetricsTrigger`, the 2nd at 4am) and on demand (`refreshMetricsTabNow`, under Settings & Fixes).<br><br>Its own `HEADERS.Metrics` key is spelled for the TAB, unlike the session table's — there is no second tab called `Metrics` for it to collide with. |

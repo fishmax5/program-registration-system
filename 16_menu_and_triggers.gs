@@ -247,6 +247,11 @@ function buildAppMenu(ui, includeAdmin) {
       // where this morning's ticks are. See flushCheckInQueue().
       .addItem('Write Queued Check-Ins Now', 'flushCheckInQueueNow')
       .addSeparator()
+      // The Metrics tab writes itself on the 2nd of every month. This is for
+      // the other order — somebody looking at the year-over-year block today
+      // and wanting the month running counted in.
+      .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
 
@@ -483,6 +488,15 @@ function writeTriggers(force, takingOwnership) {
   // the desk's own roster loads flush it sooner anyway.
   removed += resetTriggersForHandler('flushCheckInQueueTrigger', () =>
     ScriptApp.newTrigger('flushCheckInQueueTrigger').timeBased().everyMinutes(5).create());
+  // THE MONTH JUST ENDED, WRITTEN DOWN. Metrics is the one tab that is a
+  // record rather than a projection (see 83_monthly_metrics.gs): a month has
+  // to be counted while its rows are still in the workbook, because a
+  // year-over-year comparison outlives them. The 2nd rather than the 1st so a
+  // registration marked the morning after a month-end session is already in;
+  // 4am for the same reason every other nightly job runs then.
+  removed += resetTriggersForHandler('captureMonthlyMetricsTrigger', () =>
+    ScriptApp.newTrigger('captureMonthlyMetricsTrigger')
+      .timeBased().onMonthDay(2).atHour(4).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
@@ -506,7 +520,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 monthly metrics, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
