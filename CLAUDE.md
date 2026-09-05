@@ -104,7 +104,7 @@ Line counts are a rough guide to what you are about to load.
 | `30_registry_counts.gs` | 162 | Active / waitlist / remaining-seat counts. |
 | `31_form_shape_and_migration.gs` | 396 | Is a live form still on the current template, and migrating it if not. |
 | `32_dashboard_link_repair.gs` | 1257 | Every way a registration link drifts from its session, diagnosed and repaired. |
-| `33_calendar_invitations.gs` | 457 | Registrants as guests on the real calendar event. |
+| `33_calendar_invitations.gs` | 738 | Registrants — and nobody else — as guests on the real calendar event. The office is told by mail instead: one digest per pass naming who was invited to what and how (`notifyOfficeOfCalendarInvites`), plus the one-time Admin sweep that takes staff addresses back off the events they are still on (`removeAdminGuestsFromCalendarEvents`). |
 
 ### Tabs the staff work in (34–42)
 

@@ -215,9 +215,12 @@ function seedAdminNotificationEmailsTable(sheet) {
     Leader_Roster_Alerts: 'BCC on the roster-change email a program leader gets when somebody joins, '
       + 'drops or changes on their program.',
     Registrant_Reminders: 'BCC on the reminder emails registrants get before a session they signed up for.',
-    Calendar_Invite_Guest: 'Added as a GUEST on any calendar event registrants are invited to, so it '
-      + 'lands in this person\'s own calendar. Google emails them the invitation itself, and once they '
-      + 'are on an event they stay on it. Only events that have at least one registrant are ever touched.',
+    Calendar_Invite_Guest: 'Emailed a digest after each sync that adds or removes calendar guests: '
+      + 'every session whose guest list changed, who was invited to it, who came off, and that Google '
+      + 'sent each of them the invitation. One message per sync, and nothing at all when a sync changes '
+      + 'nothing. This person is NOT put on the events themselves — that is what this used to do, and '
+      + 'Admin \u25b8 Repair \u25b8 "Remove Office Guests from Calendar Events" takes them back off the '
+      + 'ones they are still on.',
     Appointment_Requests: 'Emailed when a sync files somebody onto the "'
       + SHEET_NAMES.ASSISTANCE_REQUESTS + '" tab: they asked for a personalized-assistance appointment '
       + 'and none of the times offered worked. One email per sync, listing only the new requests, with '

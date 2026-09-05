@@ -276,6 +276,11 @@ function buildAppMenu(ui, includeAdmin) {
       // once and teaches the registry about what is already in it. New PDFs
       // register themselves as they are built. See backfillSignInSheetRegistry().
       .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+      // ONE-TIME, for a workbook upgraded from the version that put the office
+      // on every event's guest list: it takes those addresses back off the
+      // upcoming events (the office is mailed a digest instead now — see
+      // section 5b). Safe to press twice; a run that hits its cap says so.
+      .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
