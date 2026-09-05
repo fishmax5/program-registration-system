@@ -324,6 +324,11 @@ function buildAppMenu(ui, includeAdmin) {
         .addSeparator()
         // Both READ-ONLY, and named so. They measure; they change nothing.
         .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        // The measurement half of the retired-calendar sweep. Its action half
+        // is behind the Destructive door below — but this report is the only
+        // thing that names WHICH calendar the leftover rows are from, and the
+        // calendar ID is the whole question, so it is read first. See 83.
+        .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths'))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
@@ -338,7 +343,12 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('\ud83e\ude79 Rebuild Forms In Place (keeps links)\u2026', 'rebuildAllFormsInPlace')
         .addItem('\ud83d\udca3 Destroy & Rebuild Forms\u2026', 'destroyAndRebuildAllForms')
         .addSeparator()
-        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')));
+        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')
+        // Takes every session row off a calendar this workbook no longer
+        // reads. Registrants go to Triage rather than being deleted and no
+        // form is touched, but a whole location can leave the table in one
+        // press \u2014 which is what puts it here. Read the report first. See 83.
+        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')));
   } else {
     // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
     // execution contexts cannot resolve the signed-in account at all — and

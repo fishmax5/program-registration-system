@@ -425,3 +425,14 @@ the merge that brought `79`–`81` in; the prefix is all that changed.
 | File | | What is in it |
 |---|--:|---|
 | `82_drive_organization.gs` | 427 | **The anchor.** Every folder this system keeps was found with a Drive-WIDE `getFoldersByName` and created with a parent-less `createFolder` — that is, in My Drive root. `getSystemRootFolder()` is the folder the WORKBOOK sits in, remembered in Script Properties, and `getOrCreateSystemFolder()` is the one lookup all five now share: inside the anchor first, adopting (and renaming) a stray folder of that name if there is one — never duplicating it, because the files in it have live links — and creating inside the anchor otherwise. `moveDriveFileInto()` is `50`'s `moveTo`-then-`addFile` pair generalized, and never throws. Plus `organizeGeneratedFiles()`, the Admin one-time sweep: everything with an id in a registry, then My Drive root by name AND MIME type (`STRAY_FILE_PATTERNS`). |
+
+### Session rows left behind by a calendar (83)
+
+Behavior only, numbered last for the usual reason: it declares no constant
+anything else derives from, and everything it reaches for — `CALENDAR_MAP`,
+`HEADERS`, `renderProgramDashboard`, `moveRegistrantsToTriage` — it reads at
+CALL time or through a hoisted function declaration.
+
+| File | | What is in it |
+|---|--:|---|
+| `83_orphaned_session_rows.gs` | 297 | **A calendar that left, not a date that did.** `triageDeletedSessions` (`43`) removes a session whose calendar EVENT went; by design it leaves alone any row it cannot attribute to a calendar it just read, which is what stops one unreadable calendar cancelling a location — and which also means a retired, recreated or repointed calendar leaves a residue nothing reaches, re-importing beside itself under the new ID. `findOrphanedSessionRows` is the pure split, scoped by `Calendar_Source` alone: a blank one is a lunch or hand-typed row and is never in scope, and a CONFIGURED calendar's rows never are either — nothing here reads a calendar, so a calendar that merely failed to load cannot be read as a retired one, which is also why this needs no size limit where triage does (a retired location legitimately IS most of the table). `describeOrphanedSessionRows` names each calendar ID in full with its rows, programs and date span, and is shared by `reportOrphanedSessionRows` (read-only, ungated) and the confirmation `removeOrphanedSessionRows` asks — menu-only, never a trigger, gated as `Remove Leftover Calendar Rows`. Registrants MOVE to `Deleted_Event_Triage` rather than being deleted, which is why `moveRegistrantsToTriage` (`26`) now takes optional wording: "the event is gone" would be a lie about a session whose event may still sit on a calendar we no longer read. The retired calendar's forms are left alone — a link already in circulation still opens. |

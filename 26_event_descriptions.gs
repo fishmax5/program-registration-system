@@ -889,8 +889,23 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
   }
 }
 
-/** Moves any All_Registrants rows tied to a deleted event into the Triage tab. */
-function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
+/**
+ * Moves any All_Registrants rows tied to a deleted event into the Triage tab.
+ *
+ * options.triageNote / options.adminHeading / options.adminReason override the
+ * wording, because WHY a session went is the only thing the person confirming
+ * with the registrant has to go on. The defaults describe triage's own case (a
+ * calendar event that vanished); removeOrphanedSessionRows() (83) passes its
+ * own, because "the event is gone" would be a lie about a session whose event
+ * may still be sitting on a calendar this workbook simply no longer reads.
+ */
+function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo, options) {
+  options = options || {};
+  const triageNote = options.triageNote ||
+    'Original calendar event no longer found during sync — please confirm with the registrant.';
+  const adminHeading = options.adminHeading || 'Deleted events sent to triage';
+  const adminReason = options.adminReason ||
+    'its calendar event is gone; registrants need confirming';
   const headers = HEADERS.All_Registrants;
   const allRows = getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
@@ -910,7 +925,7 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
     triageRow[tMap['Deleted_Event_Title']] = info.cleanTitle;
     triageRow[tMap['Deleted_Event_Location']] = info.location;
     triageRow[tMap['Flagged_Date']] = flaggedNow;
-    triageRow[tMap['Triage_Notes']] = 'Original calendar event no longer found during sync — please confirm with the registrant.';
+    triageRow[tMap['Triage_Notes']] = triageNote;
     newTriageRows.push(triageRow);
   });
 
@@ -926,8 +941,8 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
   log(`Moved ${newTriageRows.length} registrant row(s) to "${SHEET_NAMES.TRIAGE}".`);
   Object.keys(deletedEventInfo).forEach(eventId => {
     const info = deletedEventInfo[eventId];
-    noteForAdmin('Deleted events sent to triage',
-      `${info.cleanTitle} (${info.location}) — its calendar event is gone; registrants need confirming.`);
+    noteForAdmin(adminHeading,
+      `${info.cleanTitle} (${info.location}) — ${adminReason}.`);
   });
 }
 
