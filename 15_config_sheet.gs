@@ -30,7 +30,7 @@ function writeConfigStructure(sheet) {
   // BEFORE anything is written: a section past the grid's edge is not a
   // cosmetic problem, it is a throw. Every Config tab built before the Admin
   // Notification Emails table ends at column 25, a new sheet has 26, and the
-  // table wants 27-31 — so the room is asked for first, on every rebuild,
+  // table wants 27-32 — so the room is asked for first, on every rebuild,
   // rather than the whole tab failing to draw on the one that needs it.
   ensureSheetColumns(sheet, configLastColumn());
 
@@ -217,7 +217,11 @@ function seedAdminNotificationEmailsTable(sheet) {
     Registrant_Reminders: 'BCC on the reminder emails registrants get before a session they signed up for.',
     Calendar_Invite_Guest: 'Added as a GUEST on any calendar event registrants are invited to, so it '
       + 'lands in this person\'s own calendar. Google emails them the invitation itself, and once they '
-      + 'are on an event they stay on it. Only events that have at least one registrant are ever touched.'
+      + 'are on an event they stay on it. Only events that have at least one registrant are ever touched.',
+    Appointment_Requests: 'Emailed when a sync files somebody onto the "'
+      + SHEET_NAMES.ASSISTANCE_REQUESTS + '" tab: they asked for a personalized-assistance appointment '
+      + 'and none of the times offered worked. One email per sync, listing only the new requests, with '
+      + 'their phone number and email on it. Nothing is sent when a sync files none.'
   };
   ADMIN_NOTIFICATION_CATEGORIES.forEach(category => {
     sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + category.offset, ADMIN_NOTIFICATION_MAX_ROWS, 1)
@@ -228,14 +232,18 @@ function seedAdminNotificationEmailsTable(sheet) {
 /**
  * What the two retired cells stand for in the table that replaced them, as
  * table rows: [Email, Sync_Digest, Leader_Roster_Alerts, Registrant_Reminders,
- * Calendar_Invite_Guest].
+ * Calendar_Invite_Guest, Appointment_Requests].
  *
  * The categories each old cell is ticked for are exactly what it used to do,
  * so nothing that was going out stops going out and nothing new starts:
  *   Admin_Notification_Email -> Sync_Digest
  *   Archive_Copy_Email       -> Leader alerts + Registrant reminders +
  *                               Calendar invite guest
- * ONE ADDRESS IN BOTH CELLS IS ONE ROW with all four ticked, never two rows —
+ * Appointment_Requests is ticked for NOBODY: it is a category neither old cell
+ * ever stood for, and an upgrade must not start mailing somebody something
+ * they were never getting. Whoever wants it ticks it.
+ *
+ * ONE ADDRESS IN BOTH CELLS IS ONE ROW with every old tick on it, never two rows —
  * a duplicate would BCC the same person twice off the same daily quota.
  *
  * Shared by the migration that WRITES these rows and by the reader that falls
@@ -248,8 +256,8 @@ function legacyAdminNotificationRowValues(adminEmail, archiveEmail) {
   const sameAddress = !!admin && !!archive && admin.toLowerCase() === archive.toLowerCase();
 
   const rows = [];
-  if (admin) rows.push([admin, true, sameAddress, sameAddress, sameAddress]);
-  if (archive && !sameAddress) rows.push([archive, false, true, true, true]);
+  if (admin) rows.push([admin, true, sameAddress, sameAddress, sameAddress, false]);
+  if (archive && !sameAddress) rows.push([archive, false, true, true, true, false]);
   return rows;
 }
 
@@ -1150,6 +1158,34 @@ function notifyAdmin(subject, body) {
     return true;
   } catch (err) {
     log(`⚠️ Could not send admin notification to "${emails.join(', ')}" (${err}).`);
+    return false;
+  }
+}
+
+/**
+ * An email to the addresses ticked for ONE category, rather than to the sync
+ * digest's readers.
+ *
+ * notifyAdmin() above is 'syncDigest' and always will be — it is the digest's
+ * own sender. This is the same plumbing for a category that is not a fault
+ * report and should not wait for one: a category nobody has ticked sends
+ * nothing at all, which is what an empty table has always meant here.
+ *
+ * Deliberately NOT through sendRationedEmail() (76), for the reason its banner
+ * gives about notifyAdmin(): these are a handful of internal addresses, and a
+ * quota floor that silently drops one of them is worse than the send failing
+ * loudly.
+ */
+function notifyAdminCategory(categoryKey, subject, body) {
+  const emails = adminEmailsForCategory(categoryKey);
+  if (emails.length === 0) return false;
+  const to = emails.join(',');
+  try {
+    MailApp.sendEmail(to, subject, body);
+    log(`Sent ${categoryKey} notification to ${emails.join(', ')}: ${subject}`);
+    return true;
+  } catch (err) {
+    log(`⚠️ Could not send ${categoryKey} notification to "${emails.join(', ')}" (${err}).`);
     return false;
   }
 }

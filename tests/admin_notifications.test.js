@@ -166,16 +166,16 @@ function useSheet(sheet) {
 // 1. The table decides, per person, per category.
 // ---------------------------------------------------------------------------
 useSheet(fakeConfigSheet(tableCells([
-  ['Dana@example.org', true, false, false, true],
-  ['lee@example.org', false, true, true, false],
-  ['', true, true, true, true],                    // ticks against nobody
-  ['not-an-address', true, true, true, true],      // a half-typed cell
-  ['dana@example.org', false, false, false, true]  // the same person again
+  ['Dana@example.org', true, false, false, true, false],
+  ['lee@example.org', false, true, true, false, true],
+  ['', true, true, true, true, true],                     // ticks against nobody
+  ['not-an-address', true, true, true, true, true],       // a half-typed cell
+  ['dana@example.org', false, false, false, true, false]  // the same person again
 ])));
 
 check('a row reads back as its ticks', sandbox.getAdminNotificationRows()[0],
   { email: 'Dana@example.org', syncDigest: true, leaderRosterAlerts: false,
-    registrantReminders: false, calendarInviteGuest: true });
+    registrantReminders: false, calendarInviteGuest: true, appointmentRequests: false });
 check('ticks against a blank row, or a cell that is not an address, send nothing',
   sandbox.getAdminNotificationRows().length, 3);
 check('the sync digest goes to whoever is ticked for it, and nobody else',
@@ -184,6 +184,10 @@ check('and a category nobody ticked reaches nobody',
   sandbox.adminEmailsForCategory('leaderRosterAlerts'), ['lee@example.org']);
 check('one person entered twice is one address, not two off the same quota',
   sandbox.adminEmailsForCategory('calendarInviteGuest'), ['dana@example.org']);
+// Its own tick, and its own person: whoever rings the people waiting for an
+// appointment is not whoever reads the sync digest.
+check('appointment requests go to whoever is ticked for them, and nobody else',
+  sandbox.adminEmailsForCategory('appointmentRequests'), ['lee@example.org']);
 check('editor access is every address in the table, ticked or not',
   sandbox.getAllAdminNotificationEmails(), ['dana@example.org', 'lee@example.org']);
 
@@ -258,10 +262,14 @@ sandbox.migrateLegacyAdminNotificationColumns(migrated);
 sandbox.invalidateConfigCaches();
 check('both addresses land on the table', sandbox.getAdminNotificationRows(), [
   { email: 'admin@example.org', syncDigest: true, leaderRosterAlerts: false,
-    registrantReminders: false, calendarInviteGuest: false },
+    registrantReminders: false, calendarInviteGuest: false, appointmentRequests: false },
   { email: 'office@example.org', syncDigest: false, leaderRosterAlerts: true,
-    registrantReminders: true, calendarInviteGuest: true }
+    registrantReminders: true, calendarInviteGuest: true, appointmentRequests: false }
 ]);
+// NOT ticked by the migration for anybody: neither retired cell ever stood for
+// it, and an upgrade must not start mailing somebody something new.
+check('and nobody is carried onto the appointment-request tick',
+  sandbox.adminEmailsForCategory('appointmentRequests'), []);
 ok('and the columns they came from are cleared',
   migrated.cleared.indexOf(`${ROW1},${sandbox.RETIRED_ADMIN_NOTIFICATION_COL.col}`) !== -1 &&
   migrated.cleared.indexOf(`1,${sandbox.RETIRED_ARCHIVE_COPY_COL.col}`) !== -1);
@@ -274,16 +282,16 @@ check('running it a second time changes nothing', JSON.stringify(migrated.grid),
 
 // ONE ADDRESS IN BOTH CELLS IS ONE ROW. Two rows would BCC the same person
 // twice off the same daily quota, and read as two people on the tab.
-check('an address that was in both cells is one row with all four ticks',
+check('an address that was in both cells is one row with every old tick on it',
   sandbox.legacyAdminNotificationRowValues('office@example.org', 'OFFICE@example.org'),
-  [['office@example.org', true, true, true, true]]);
+  [['office@example.org', true, true, true, true, false]]);
 check('and an empty pair carries nothing across',
   sandbox.legacyAdminNotificationRowValues('', ''), []);
 
 // A table somebody has already filled in is never written over, even while the
 // old cells are still standing.
 const held = useSheet(fakeConfigSheet(Object.assign({}, legacyCells,
-  tableCells([['dana@example.org', true, true, true, true]]))));
+  tableCells([['dana@example.org', true, true, true, true, true]]))));
 sandbox.migrateLegacyAdminNotificationColumns(held);
 sandbox.invalidateConfigCaches();
 check('a filled-in table is left exactly as it was',
