@@ -25,8 +25,8 @@
 //
 // Governed by Config's "📧 Calendar Invitations" switch (see
 // CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op. Under
-// that switch, each PROGRAM says whether it wants invitations at all, in
-// Program_Options' Notify_Mode column — see section 9e.
+// that switch, each PROGRAM says whether it wants invitations at all, with
+// Registrant_Notifications' Add_To_Calendar tick — see sections 9e and 9h.
 // ============================================================================
 
 /** Who we have already put on which event's guest list: { Event_ID: [email...] }. */
@@ -126,8 +126,8 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
       isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
     // THE PROGRAM'S OWN SETTING, under the Config switch already checked
-    // above: a program whose Notify_Mode says reminders only, or nothing at
-    // all, keeps its guest list empty. See section 9e.
+    // above: a program with Add_To_Calendar unticked keeps its guest list
+    // empty, whatever else it sends. See section 9e.
     if (!notificationPolicyForSession(session).invite) return;
     sessionByEventId[eventId] = session;
   });

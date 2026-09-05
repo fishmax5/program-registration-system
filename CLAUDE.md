@@ -211,7 +211,7 @@ function, and its own top-level `const`s stand alone.
 
 | File | | What is in it |
 |---|--:|---|
-| `70_registrant_notifications.gs` | 526 | How often each program writes to the people signed up for it: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites (`33`) and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
+| `70_registrant_notifications.gs` | 458 | How often each program writes to the people signed up for it: the policy the calendar invites (`33`) and the reminder emails both read — resolved from `Registrant_Notifications`' tick boxes (`78`) — and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
 
 ### Cancellation (71)
 
@@ -367,3 +367,13 @@ their number.
 available. It is not part of the normal loop: **do not run it as a build step,
 and do not treat its output as the source.** `Code.bundle.gs` is gitignored;
 edits belong in the numbered files.
+
+### The tab those notifications are set on (78)
+
+Behavior and one schema-free constant block, numbered last for the usual
+reason: everything it calls is a hoisted function, `70` reaches it the same
+way, and its own `const`s stand alone.
+
+| File | | What is in it |
+|---|--:|---|
+| `78_registrant_notifications_tab.gs` | 409 | `Registrant_Notifications` — one row per program (the `Event` × `Location` grain `Program_Options` uses) and **a tick box per channel, none of them exclusive**: `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders` (any further day counts) and `Confirm_On_Booking`. `refreshRegistrantNotifications` writes it beside the memory tabs; `policyFromNotificationRow` is what `70` resolves a session's policy through. An unticked box means off, which is only honest because **a row is never born blank** — a new one is seeded from the retired `Notify_Mode` / `Reminder_Days` cells where the workbook had them (`readLegacyNotifyModeRows`, the one-time carry-over that must run before `refreshProgramOptions` rewrites that tab without them) and from the program's kind otherwise. |

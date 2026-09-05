@@ -1,5 +1,5 @@
 // ============================================================================
-// 6c. MEMORY TABS  (Member_Roll / Program_Options)
+// 6c. MEMORY TABS  (Member_Roll / Program_Options / Registrant_Notifications)
 // ============================================================================
 //
 // Everything else in this workbook is derived: wipe it, re-sync, and it comes
@@ -46,6 +46,12 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // round, every address a site has been keeping is gone before anything
     // reads it. See migrateProgramLeaderAddresses().
     refreshProgramLeadersTab(ss, sessions);
+    // ALSO BEFORE refreshProgramOptions(), and for the same reason: the
+    // notifications tab carries Program_Options' retired Notify_Mode /
+    // Reminder_Days cells across, off the live sheet, and the refresh below is
+    // the write that finally rewrites that tab without them. See
+    // readLegacyNotifyModeRows() in section 9h.
+    refreshRegistrantNotifications(ss, sessions);
     refreshProgramOptions(ss, sessions);
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
@@ -277,19 +283,6 @@ function refreshProgramOptions(ss, sessionRows) {
   });
 
   writeMemoryTab(sheet, headers, outRows, programOptionsTabOptions());
-
-  // The dropdowns run past the last row so the blank line under it has them
-  // too (see MEMORY_TAB_SPARE_ROWS). Notify_Mode is a CLOSED list — every
-  // legal answer is known, and a typo there would quietly change who gets
-  // told about their appointment. Reminder_Days is open: the suggestions are
-  // the cadences anyone actually asks for, and "14, 7, 1" is still valid.
-  applyMemoryTabValidation(sheet, headers, outRows.length, {
-    lists: { Notify_Mode: NOTIFY_MODE_LIST },
-    openLists: { Reminder_Days: REMINDER_DAYS_SUGGESTIONS }
-  });
-  // The tab those settings are read from has just been rewritten; anything
-  // asking again in this execution must see the rows as they now stand.
-  invalidateNotificationPolicyCache();
 
   log(`Program_Options refreshed: ${outRows.length} program(s).`);
 }

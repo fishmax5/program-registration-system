@@ -75,7 +75,8 @@ const LEGACY_INSTRUCTOR_EMAIL_COLUMN = 'Instructor_Email';
  * BLANK OR UNRECOGNIZED READS AS "At each registration" — a typo, or a
  * workbook upgrading from before this column existed, must keep doing exactly
  * what a ticked Notify_Roster_Changes has always done rather than going
- * silent. The same reasoning as an unrecognized Notify_Mode in section 9e.
+ * silent. The same reasoning as an unrecognized Notify_Timing's neighbour in
+ * section 9e: a cell nobody typed correctly is not an instruction to stop.
  */
 const LEADER_NOTIFY_TIMING_EACH_CHANGE = 'At each registration';
 
