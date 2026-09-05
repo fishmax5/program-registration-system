@@ -55,6 +55,64 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
 }
 
 /**
+ * THE ROLL WRITES BACK: what we know about how to reach somebody, onto the
+ * rows that go out of this workbook.
+ *
+ * Member_Roll's Phone/Email are the newest contact details this person has
+ * ever given on any form. A registrant row only ever carries what THAT
+ * submission typed — and plenty of rows are made by something that never
+ * asked: a club catch-up, an "every date" catch-up, a door sign-in, a guest
+ * entered by name. Those rows reached the Registrants tab, the program leader
+ * sheets and the sign-in sheets with two empty columns, for people the
+ * workbook has had a phone number for all along.
+ *
+ * So before the Registrants tab is written, every row missing a phone or an
+ * email is filled from the roll. Only BLANKS are filled: what somebody typed
+ * on their own registration is the better answer for that session, and a
+ * staff correction typed into the row is never overwritten by a stale one.
+ * Idempotent — the roll is recomputed from these same rows afterwards, so a
+ * filled-in row hands back the value it was just given.
+ *
+ * Mutates the rows in place (they are the array about to be written) and
+ * returns how many cells it filled.
+ */
+function applyMemberRollContacts(registrantRows) {
+  if (!registrantRows || registrantRows.length === 0) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rollHeaders = HEADERS.Member_Roll;
+  const rollMap = getIndexMap(rollHeaders);
+  const roll = readSimpleTableValues(getOrCreateSheet(ss, SHEET_NAMES.MEMBER_ROLL), rollHeaders);
+  if (roll.length === 0) return 0;
+
+  const byKey = {};
+  roll.forEach(row => {
+    const key = normalizeNameKey(row[rollMap['Name']]);
+    if (!key) return;
+    byKey[key] = {
+      phone: String(row[rollMap['Phone']] || '').trim(),
+      email: String(row[rollMap['Email']] || '').trim()
+    };
+  });
+
+  const map = getIndexMap(HEADERS.Registrant_Dash);
+  let filled = 0;
+  registrantRows.forEach(row => {
+    const known = byKey[normalizeNameKey(row[map['Name']])];
+    if (!known) return;
+    if (known.phone && !String(row[map['Phone']] || '').trim()) {
+      row[map['Phone']] = known.phone;
+      filled++;
+    }
+    if (known.email && !String(row[map['Email']] || '').trim()) {
+      row[map['Email']] = known.email;
+      filled++;
+    }
+  });
+  if (filled > 0) log(`Member_Roll contact details filled in ${filled} blank registrant cell(s).`);
+  return filled;
+}
+
+/**
  * One row per unique person, keyed on normalizeNameKey(Name). Recomputes the
  * history columns, carries the staff columns forward untouched, and keeps a
  * person on the roll even after their sessions age out — a member who came
@@ -84,7 +142,7 @@ function refreshMemberRoll(ss, registrantRows) {
     if (!key) return;
     const d = coerceDate(row[lrMap['Event_Date']]);
     if (!people[key]) {
-      people[key] = { name, times: 0, first: d, last: d, locations: {}, lunches: {}, phone: '', email: '', contactAt: null };
+      people[key] = { name, times: 0, first: d, last: d, locations: {}, phone: '', email: '', contactAt: null };
     }
     const p = people[key];
     p.name = name; // last spelling seen wins for DISPLAY; the key stays stable
@@ -104,8 +162,6 @@ function refreshMemberRoll(ss, registrantRows) {
     }
     const loc = String(row[lrMap['Location']] || '').trim();
     if (loc) p.locations[loc] = true;
-    const lunch = String(row[lrMap['Lunch_Type']] || '').trim();
-    if (lunch && lunch !== 'No Lunch') p.lunches[lunch] = (p.lunches[lunch] || 0) + 1;
   });
 
   // Anyone already on the roll but absent from the current history stays,
@@ -127,7 +183,6 @@ function refreshMemberRoll(ss, registrantRows) {
     row[map['First_Seen']] = p.first || '';
     row[map['Last_Seen']] = p.last || '';
     row[map['Locations']] = Object.keys(p.locations).sort().join(', ');
-    row[map['Usual_Lunch']] = pickMostFrequent(p.lunches);
     outRows.push(row);
     seen[key] = true;
   });

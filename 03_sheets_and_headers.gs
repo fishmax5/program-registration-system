@@ -380,10 +380,19 @@ defineLazyGlobal_('HEADERS', () => ({
    * standing notes attached, instead of a string that has to be re-learned
    * every time.
    *
-   * Times_Seen/First_Seen/Last_Seen/Locations/Usual_Lunch are RECOMPUTED from
-   * the registrant history on every refresh; Usual_Guests, Dietary_Notes,
+   * Times_Seen/First_Seen/Last_Seen/Locations are RECOMPUTED from the
+   * registrant history on every refresh; Usual_Guests, Dietary_Notes,
    * Contact and Staff_Notes are never touched once written — see
    * MEMBER_ROLL_STAFF_COLUMNS.
+   *
+   * There used to be a Usual_Lunch column here — the meal this person had
+   * ordered most often. It was removed: a member's dietary needs are what
+   * staff actually act on, and those live in Dietary_Notes, while the meal
+   * for a given session is on the row that session made. A "usually gets the
+   * hot lunch" cell was read as a standing instruction it never was. The
+   * column simply disappears on the next refresh: writeMemoryTab() rewrites
+   * the tab whole, and readSimpleTable() projects by header NAME, so a roll
+   * still carrying the old column loses it without losing a staff note.
    */
   //
   // Phone/Email are RECOMPUTED (the most recent non-blank one this person gave
@@ -391,7 +400,7 @@ defineLazyGlobal_('HEADERS', () => ({
   // columns. Contact stays a staff column: it is where a note like "reach her
   // daughter Ann first" belongs, and that is not something a form can supply.
   Member_Roll: [
-    'Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations', 'Usual_Lunch',
+    'Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen', 'Locations',
     'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'
   ],
   /**
