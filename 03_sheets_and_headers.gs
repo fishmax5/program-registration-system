@@ -29,6 +29,12 @@ const SHEET_NAMES = {
   // at two sites, and an address column on a program row could only ever
   // answer that question in one direction.
   PROGRAM_LEADERS: 'Program_Leaders',
+  // How each program talks to the people signed up for it — see section 9g.
+  // One row per program, the same Event x Location grain Program_Options
+  // uses, and a tick box per channel because the channels are not exclusive:
+  // a program can put people on the calendar AND write to them a week out AND
+  // write again the morning of.
+  REGISTRANT_NOTIFICATIONS: 'Registrant_Notifications',
   CLUB_MEMBERS: 'Club_Members',
   // The two tabs behind [Personalized Assistance] and the per-program extra
   // questions — see ASSISTANCE_TAG and section 6g.
@@ -449,17 +455,57 @@ defineLazyGlobal_('HEADERS', () => ({
    * now, one row per leader-and-program, and migrateProgramLeaderAddresses()
    * carries the old column's values across before this layout drops it.
    *
-   * Notify_Mode and Reminder_Days are the staff's answer to "how often does
-   * this program write to the people signed up for it?" — a dropdown and a
-   * list of day counts, both read by section 9e. Left blank, a program is
-   * notified the way its KIND normally is, which for everything except
-   * Personalized Assistance is exactly what this workbook did before the two
-   * columns existed.
+   * Notify_Mode and Reminder_Days USED TO LIVE HERE TOO, and went the same
+   * way for the same reason: one dropdown and one day list could not say that
+   * a program invites its people AND writes a week out AND writes again the
+   * morning of. Registrant_Notifications holds the answer now, one tick box
+   * per channel, and refreshRegistrantNotifications() carries the two old
+   * columns' values across before this layout drops them.
    */
   Program_Options: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-    'Notify_Mode', 'Reminder_Days', 'Staff_Notes'
+    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'
+  ],
+  /**
+   * Registrant_Notifications — WHAT EACH PROGRAM SENDS THE PEOPLE ON IT.
+   *
+   * Same grain as Program_Options (one row per Clean_Title x Location, which
+   * is one row standing for every session that program ever runs), because
+   * that is the grain the question is actually asked at: nobody decides
+   * per-date whether a class reminds its people, they decide it once for the
+   * class. The left columns are recomputed so a row can be found and read in
+   * context; everything from Add_To_Calendar rightwards is the staff's.
+   *
+   * THE CHANNELS ARE NOT EXCLUSIVE, and that is the whole point of splitting
+   * them into tick boxes rather than the single Notify_Mode dropdown this
+   * replaces. A dropdown could say "invite + reminders" but never "invite,
+   * plus a week out, plus the morning of, and nothing in between":
+   *
+   *   Add_To_Calendar    put each registrant on the real calendar event's
+   *                      guest list, so Google's own reminders and any change
+   *                      to the event reach them without this workbook doing
+   *                      anything further.
+   *   Week_Before        an email 7 days before the session.
+   *   Day_Before         an email 1 day before.
+   *   Morning_Of         an email on the day itself.
+   *   Other_Reminders    any other day counts, comma-separated ("14, 3"). Adds
+   *                      to the three boxes; it does not replace them.
+   *   Confirm_On_Booking a confirmation the moment somebody registers. This is
+   *                      where an appointment's own time is stated — a
+   *                      calendar event has ONE description shared by every
+   *                      guest, so "your appointment is at 2:15" can only be
+   *                      said in an email.
+   *
+   * A NEW ROW IS BORN TICKED THE WAY ITS KIND IS NORMALLY NOTIFIED
+   * (defaultNotificationPolicy), never blank. Unticked has to mean OFF for a
+   * tick box to be honest, so "nobody has decided yet" cannot also be blank —
+   * the refresh decides on the program's behalf when it first writes the row,
+   * and from then on the boxes say exactly what happens.
+   */
+  Registrant_Notifications: [
+    'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date',
+    'Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
+    'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
@@ -588,7 +634,14 @@ const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
 const MEMBER_ROLL_STAFF_COLUMNS = ['Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 /** Program_Options columns the refresh must never overwrite. */
 const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Notify_Mode', 'Reminder_Days', 'Staff_Notes'];
+  'Staff_Notes'];
+
+/**
+ * Registrant_Notifications columns the refresh must never overwrite — every
+ * one of the six answers, because the tab exists to be filled in.
+ */
+const REGISTRANT_NOTIFICATION_STAFF_COLUMNS = ['Add_To_Calendar', 'Week_Before', 'Day_Before',
+  'Morning_Of', 'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.
