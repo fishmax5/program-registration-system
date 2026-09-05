@@ -72,6 +72,10 @@ const ADMIN_GATED_ACTIONS = [
   'Check Triggers',
   'Take Over Trigger Ownership',
   'Release My Triggers',
+  // Moves every generated file in Drive at once. Nothing is deleted and no
+  // link changes, but "where did all my forms go" is not a question anybody
+  // should be able to raise by mis-clicking a menu.
+  'Organize Generated Files',
   // Overriding a safety limit is exactly the kind of decision this is for.
   'Confirm Large Triage'
 ];

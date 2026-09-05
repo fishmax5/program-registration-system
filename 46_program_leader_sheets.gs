@@ -707,8 +707,10 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
 // --- creating and sharing one ------------------------------------------------
 
 /**
- * The Drive folder these sheets are filed in, renaming the one they used to
- * live in rather than creating a second beside it.
+ * The Drive folder these sheets are filed in — inside the folder the workbook
+ * lives in, renaming the one they used to live in rather than creating a
+ * second beside it. Both halves are getOrCreateSystemFolder()'s (`79`): the
+ * legacy name is passed to it, and it renames and adopts what it finds.
  *
  * Every existing sheet is reached by fileId out of the registry, so nothing
  * would BREAK if this made a new folder — the old files would just sit in a
@@ -718,28 +720,7 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
  * call on the first pass after the rename and none afterwards.
  */
 function getOrCreateProgramLeaderSheetFolder() {
-  const folders = DriveApp.getFoldersByName(LEADER_SHEET_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-
-  const legacy = DriveApp.getFoldersByName(LEGACY_LEADER_SHEET_FOLDER_NAME);
-  if (legacy.hasNext()) {
-    const folder = legacy.next();
-    try {
-      folder.setName(LEADER_SHEET_FOLDER_NAME);
-      log(`Renamed Drive folder "${LEGACY_LEADER_SHEET_FOLDER_NAME}" to "${LEADER_SHEET_FOLDER_NAME}".`);
-      return folder;
-    } catch (err) {
-      // Somebody else's folder, or a Drive that said no. The sheets in it are
-      // still reachable by id, so this is a cosmetic loss — use it as it is
-      // rather than starting a second folder over a failed rename.
-      log(`ℹ️ Could not rename "${LEGACY_LEADER_SHEET_FOLDER_NAME}" (${err}) — filing new sheets there anyway.`);
-      return folder;
-    }
-  }
-
-  const folder = DriveApp.createFolder(LEADER_SHEET_FOLDER_NAME);
-  log(`Created Drive folder "${LEADER_SHEET_FOLDER_NAME}" for shared program leader rosters.`);
-  return folder;
+  return getOrCreateSystemFolder(LEADER_SHEET_FOLDER_NAME, [LEGACY_LEADER_SHEET_FOLDER_NAME]);
 }
 
 /**
@@ -962,14 +943,13 @@ function createProgramLeaderSheet(programValue) {
   if (isNew) {
     file = SpreadsheetApp.create(`Sign-Up Sheet — ${title} (${location})`);
     // Moved rather than copied: create() drops it in My Drive root, and a
-    // folder of these is what keeps them findable a year from now.
-    try {
-      const driveFile = DriveApp.getFileById(file.getId());
-      getOrCreateProgramLeaderSheetFolder().addFile(driveFile);
-      DriveApp.getRootFolder().removeFile(driveFile);
-    } catch (err) {
-      log(`ℹ️ Could not file the new program leader sheet into "${LEADER_SHEET_FOLDER_NAME}" (${err}) — it is in My Drive.`);
-    }
+    // folder of these is what keeps them findable a year from now. Through
+    // moveDriveFileInto() (`79`) rather than the addFile()/removeFile() pair
+    // this used to do inline — that pair throws outright on a shared drive,
+    // so on a Workspace setup EVERY new leader sheet stayed in My Drive.
+    moveDriveFileInto(DriveApp.getFileById(file.getId()),
+      getOrCreateProgramLeaderSheetFolder(),
+      `the program leader sheet for "${title}"`);
   }
 
   const entry = {

@@ -725,6 +725,16 @@ function getOrCreateTemplateForm() {
   // only reaches it retroactively if someone remembers to run it.
   openUpFileToAnyoneWithLink(form.getId(), 'the form template');
 
+  // FILED, not left where FormApp.create() dropped it. Every other file this
+  // system makes goes into a folder of its own kind; the template is one of a
+  // kind, so it sits in the system folder itself beside the workbook. Without
+  // this it stayed in My Drive root — which is exactly the mess `79` exists
+  // to stop, and the template was the most conspicuous piece of it.
+  const systemRoot = getSystemRootFolder();
+  if (systemRoot) {
+    moveDriveFileInto(DriveApp.getFileById(form.getId()), systemRoot, 'the form template');
+  }
+
   props.setProperty(TEMPLATE_FORM_PROP_KEY, form.getId());
   log(`Created template registration form: ${form.getId()}`);
   return form;

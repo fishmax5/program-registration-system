@@ -1085,13 +1085,13 @@ const FORM_IMAGE_FOLDER_NAME = 'Form Images';
  */
 const FORM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** The folder the builder's uploads go in, made on first use. */
+/**
+ * The folder the builder's uploads go in, made on first use — inside the
+ * folder the workbook lives in, via getOrCreateSystemFolder() (`79`) rather
+ * than the Drive-wide search and root-level create it used to do.
+ */
 function getOrCreateFormImageFolder() {
-  const folders = DriveApp.getFoldersByName(FORM_IMAGE_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-  const folder = DriveApp.createFolder(FORM_IMAGE_FOLDER_NAME);
-  log(`Created Drive folder "${FORM_IMAGE_FOLDER_NAME}" for pictures put on forms.`);
-  return folder;
+  return getOrCreateSystemFolder(FORM_IMAGE_FOLDER_NAME);
 }
 
 /**

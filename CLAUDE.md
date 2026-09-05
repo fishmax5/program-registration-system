@@ -377,3 +377,13 @@ way, and its own `const`s stand alone.
 | File | | What is in it |
 |---|--:|---|
 | `78_registrant_notifications_tab.gs` | 409 | `Registrant_Notifications` — one row per program (the `Event` × `Location` grain `Program_Options` uses) and **a tick box per channel, none of them exclusive**: `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders` (any further day counts) and `Confirm_On_Booking`. `refreshRegistrantNotifications` writes it beside the memory tabs; `policyFromNotificationRow` is what `70` resolves a session's policy through. An unticked box means off, which is only honest because **a row is never born blank** — a new one is seeded from the retired `Notify_Mode` / `Reminder_Days` cells where the workbook had them (`readLegacyNotifyModeRows`, the one-time carry-over that must run before `refreshProgramOptions` rewrites that tab without them) and from the program's kind otherwise. |
+
+### Where the generated files live (79)
+
+Behavior plus its own two constants, numbered last for the usual reason:
+nothing else derives from them, and `04`, `05`, `45`, `46` and `55` all reach
+it through hoisted function declarations.
+
+| File | | What is in it |
+|---|--:|---|
+| `79_drive_organization.gs` | 452 | **The anchor.** Every folder this system keeps was found with a Drive-WIDE `getFoldersByName` and created with a parent-less `createFolder` — that is, in My Drive root. `getSystemRootFolder()` is the folder the WORKBOOK sits in, remembered in Script Properties, and `getOrCreateSystemFolder()` is the one lookup all five now share: inside the anchor first, adopting (and renaming) a stray folder of that name if there is one — never duplicating it, because the files in it have live links — and creating inside the anchor otherwise. `moveDriveFileInto()` is `50`'s `moveTo`-then-`addFile` pair generalized, and never throws. Plus `organizeGeneratedFiles()`, the Admin one-time sweep: everything with an id in a registry, then My Drive root by name AND MIME type (`STRAY_FILE_PATTERNS`). |

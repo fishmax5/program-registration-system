@@ -276,6 +276,13 @@ function buildAppMenu(ui, includeAdmin) {
       // once and teaches the registry about what is already in it. New PDFs
       // register themselves as they are built. See backfillSignInSheetRegistry().
       .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+      // ONE-TIME, beside the item above because it is the same kind of job:
+      // catching the workbook up on files it made before it knew where to put
+      // them. Every folder lookup used to create at My Drive ROOT, so a year
+      // of forms, leader sheets and sign-in documents can be sitting loose
+      // there. This files them under the folder the workbook lives in. It
+      // moves files; it changes no link and deletes nothing. See section 79.
+      .addItem('\ud83d\uddc2\ufe0f Organize Generated Files (one-time)', 'organizeGeneratedFiles')
       // ONE-TIME, for a workbook upgraded from the version that put the office
       // on every event's guest list: it takes those addresses back off the
       // upcoming events (the office is mailed a digest instead now — see

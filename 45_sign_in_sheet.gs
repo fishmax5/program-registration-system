@@ -1151,7 +1151,8 @@ function openOrCreateSignInSheetDoc(data, title) {
   try {
     // DocumentApp.create() lands in My Drive root; move it into the folder the
     // rest of them live in. A failure here costs filing, not the document.
-    DriveApp.getFileById(doc.getId()).moveTo(getOrCreateSignInSheetDocFolder());
+    moveDriveFileInto(DriveApp.getFileById(doc.getId()), getOrCreateSignInSheetDocFolder(),
+      `the sign-in sheet "${title}"`);
   } catch (err) {
     log(`ℹ️ Could not file the new sign-in document into "${SIGN_IN_DOC_FOLDER_NAME}" (${err}) — ` +
       'it is in your Drive root.');
@@ -1297,13 +1298,14 @@ function writeSignInSheetTable(body, rows, options) {
   }
 }
 
-/** Find-or-create the Drive folder the live sign-in documents are filed in. */
+/**
+ * The Drive folder the live sign-in documents are filed in — inside the
+ * folder the workbook lives in, via getOrCreateSystemFolder() (`79`). It used
+ * to search the whole Drive by name and create at My Drive ROOT when it found
+ * nothing, which is where every one of these landed on a fresh workbook.
+ */
 function getOrCreateSignInSheetDocFolder() {
-  const folders = DriveApp.getFoldersByName(SIGN_IN_DOC_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-  const folder = DriveApp.createFolder(SIGN_IN_DOC_FOLDER_NAME);
-  log(`Created Drive folder "${SIGN_IN_DOC_FOLDER_NAME}" for the live sign-in sheets.`);
-  return folder;
+  return getOrCreateSystemFolder(SIGN_IN_DOC_FOLDER_NAME);
 }
 
 /**
@@ -1316,7 +1318,5 @@ function getOrCreateSignInSheetDocFolder() {
  * workbook that never printed a single PDF.
  */
 function getOrCreateSignInSheetFolder() {
-  const folders = DriveApp.getFoldersByName(SIGN_IN_SHEET_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-  return DriveApp.createFolder(SIGN_IN_SHEET_FOLDER_NAME);
+  return getOrCreateSystemFolder(SIGN_IN_SHEET_FOLDER_NAME);
 }

@@ -493,7 +493,17 @@ const LAST_SYNC_PROP_KEY = 'LAST_FORM_SYNC_TIME';
 const FORMS_FOLDER_ID = '';
 const FORMS_FOLDER_NAME = 'Program Registration Forms';
 
-/** Returns the dedicated forms folder — by hardcoded ID if set, else find-or-create by name. */
+/**
+ * The dedicated forms folder — by hardcoded ID if set, else found-or-created
+ * under the folder the workbook itself lives in.
+ *
+ * It used to do its own Drive-wide getFoldersByName() and its own root-level
+ * createFolder(). getOrCreateSystemFolder() (`79`) is that lookup done in the
+ * one place every folder this system keeps now shares: inside the anchor
+ * first, adopting a stray folder of the same name if there is one, and
+ * creating inside the anchor otherwise. FORMS_FOLDER_ID still wins outright —
+ * a center that pinned an id pinned it for a reason.
+ */
 function getOrCreateFormsFolder() {
   if (FORMS_FOLDER_ID) {
     try {
@@ -502,14 +512,7 @@ function getOrCreateFormsFolder() {
       log(`⚠️ FORMS_FOLDER_ID "${FORMS_FOLDER_ID}" could not be opened (${err}) — falling back to a by-name lookup.`);
     }
   }
-  const folders = DriveApp.getFoldersByName(FORMS_FOLDER_NAME);
-  if (folders.hasNext()) {
-    const folder = folders.next();
-    log(`📋 Using existing "${FORMS_FOLDER_NAME}" folder — copy this ID into FORMS_FOLDER_ID to skip this lookup next time: ${folder.getId()}`);
-    return folder;
-  }
-  const folder = DriveApp.createFolder(FORMS_FOLDER_NAME);
-  log(`Created Drive folder "${FORMS_FOLDER_NAME}" for generated registration forms. 📋 Copy this ID into FORMS_FOLDER_ID: ${folder.getId()}`);
-  return folder;
+  return getOrCreateSystemFolder(FORMS_FOLDER_NAME);
 }
+
 
