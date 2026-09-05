@@ -51,7 +51,7 @@ Line counts are a rough guide to what you are about to load.
 | File | | What is in it |
 |---|--:|---|
 | `00_overview.gs` | 503 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
-| `01_logging_and_access.gs` | 211 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
+| `01_logging_and_access.gs` | 264 | `log()`, the admin-only gate — which applies to `ADMIN_GATED_ACTIONS` and nothing else, so a repair or a read is open to whoever can open the workbook — and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 972 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. Plus the one tag that describes a DATE rather than a program — `Waitlist Only`, which closes a single session to new Active registrations whatever its capacity says — and the two lists that keep the difference straight: `PROGRAM_FLAG_COLUMNS` (ticked onto every row of a program) and `SESSION_FLAG_COLUMNS` (ticked onto the row you clicked, and nowhere else). |
 | `03_sheets_and_headers.gs` | 696 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.** |
@@ -77,7 +77,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `16_menu_and_triggers.gs` | 597 | `onOpen`, the menu tree, trigger installation. |
+| `16_menu_and_triggers.gs` | 607 | `onOpen`, the menu tree (the Admin submenu is now attached for everyone — the gate lives inside its destructive items, not on the menu), trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
 | `18_edit_handlers.gs` | 1853 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount. |
 
@@ -277,6 +277,16 @@ it is there when they call it.
 | File | | What is in it |
 |---|--:|---|
 | `76_rationed_mailer.gs` | 254 | `sendRationedEmail` — the plumbing every send to somebody outside the workbook shares: the once-per-execution read of `MailApp.getRemainingDailyQuota()` and the floor each caller refuses to dig below, the office BCC the caller resolves from its own Config category (each address counted as its own message, because it is one), the send, the refused address remembered so the run stops paying to be told no twice, and the caller's ledger written only once the message is away. **The policies stay with their callers** — who is written to, what it says, how often, and how much of the day's hundred messages a pass may spend live in `66` and `70`. `notifyAdmin` (`15`) deliberately does not come through here; the banner says why. |
+
+### The weekend, on purpose (77)
+
+Behavior only, and numbered last for the usual reason: its two constants stand
+alone, everything it calls is a hoisted function, and nothing else reads it at
+load time.
+
+| File | | What is in it |
+|---|--:|---|
+| `77_weekend_event_loader.gs` | 322 | `showWeekendEventLoaderDialog` — the Sat/Sun dates in a window (today through the end of next month by default, with its own two date boxes) that are NOT yet on the dashboard, ticked one at a time and loaded through the sync's own `processCalendarGroup`. A weekend event on a program calendar is as often a rental or a placeholder as a program, so this is the deliberate one-off; it changes nothing about which events `syncCalendars` considers. |
 
 ## Conventions
 

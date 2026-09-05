@@ -45,8 +45,13 @@
  * by name — which is the reason the split was never a security boundary in
  * the first place, and part of why the day-to-day half is no longer gated:
  * it was stopping the desk from working while stopping nobody who meant harm.
- * requireAuthorizedAdmin() inside each ADMIN function is still the actual
- * gate for that half, and it is what must be kept correct.
+ * requireAuthorizedAdmin() inside a gated ADMIN function is still the actual
+ * gate, and it is what must be kept correct — but it now covers only the
+ * irreversible and trigger-touching items (ADMIN_GATED_ACTIONS), so the
+ * submenu is ATTACHED FOR EVERYONE. Hiding it never protected anything, and
+ * hiding it from an account onOpen could not identify — a simple trigger
+ * frequently cannot — was how a genuine admin ended up with no Admin menu at
+ * all. The destructive items inside still refuse; the repairs no longer do.
  */
 function onOpen() {
   try {
@@ -54,7 +59,7 @@ function onOpen() {
   } catch (err) {
     log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
   }
-  buildAppMenu(SpreadsheetApp.getUi(), isAuthorizedAdmin());
+  buildAppMenu(SpreadsheetApp.getUi(), true);
 }
 
 /**
@@ -249,6 +254,11 @@ function buildAppMenu(ui, includeAdmin) {
       // the sync's own parser \u2014 and says which brackets it read, which it
       // ignored, and whether the dashboard agrees. See section 4c-bis.
       .addItem('\ud83c\udff7\ufe0f Read an Event\'s Tags\u2026', 'showEventTagInspectorDialog')
+      // THE WEEKEND, ON PURPOSE. A Saturday on a program calendar is as often
+      // a rental or a placeholder as a program, so this lists the Sat/Sun
+      // dates that are not loaded yet and loads only the ones somebody ticks.
+      // It adds dates; it changes nothing about what the sync does. See 77.
+      .addItem('\ud83d\uddd3\ufe0f Load Weekend Events\u2026', 'showWeekendEventLoaderDialog')
       .addSeparator()
       // EVERYTHING ABOUT A LINK THAT LOOKS WRONG, BEHIND ONE ITEM. There were
       // four here \u2014 check the tab against itself, check the calendar against
