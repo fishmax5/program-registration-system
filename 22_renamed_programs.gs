@@ -16,9 +16,10 @@
 //      Link_Display is set to Hide.
 //   3. computeClubKey() is built from the title, so a renamed CLUB's standing
 //      roster stops matching any session and silently stops booking anybody.
-//   4. Program_Options is keyed by Event + Location, so the staff's own notes
-//      (Room_Or_Setup, Typical_Attendance...) are orphaned and a blank row
-//      appears under the new name. Also silent.
+//   4. Program_Options and Registrant_Notifications are keyed by Event +
+//      Location, so the staff's own notes (Room_Or_Setup, Typical_Attendance,
+//      and every notification tick) are orphaned and a blank row appears
+//      under the new name. Also silent.
 //
 // WHY NOT JUST RE-KEY EVENT_ID OFF SOMETHING STABLER. The obvious fix is to
 // key off the calendar's own event UID instead of the title. It was rejected:
@@ -305,6 +306,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameTombstoneKeys(combined);
   renameClubRosterKeys(ss, renames);
   renameProgramOptionRows(ss, renames);
+  renameRegistrantNotificationRows(ss, renames);
   renameProgramLeaderRows(ss, renames);
 
   renames.forEach(rename => {

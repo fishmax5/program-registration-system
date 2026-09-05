@@ -269,7 +269,7 @@ const DASH_HEADERS = ['Event_Date', 'Location', 'Clean_Title', 'Event_Time',
 const REG_HEADERS = ['Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended',
   'Lunch_Served', 'Lunch_Status', 'Phone', 'Event_ID'];
 const ROLL_HEADERS = ['Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen',
-  'Locations', 'Usual_Lunch', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+  'Locations', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 
 // A sheet the way the readers expect one: a grid, read whole or in ranges.
 function gridSheet(name, values) {

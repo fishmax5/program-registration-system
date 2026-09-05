@@ -736,6 +736,10 @@ function recordAssistanceRequests(requests) {
   });
 
   if (added === 0) return 0;
+  // The rows this run actually filed, kept aside before the sort below mixes
+  // them in with everything already on the tab: the email is about what is
+  // new, and a digest of the whole backlog every hour is a digest nobody reads.
+  const filed = existing.slice(existing.length - added);
   existing.sort((a, b) => {
     const da = coerceDate(a[map['Received']]);
     const db = coerceDate(b[map['Received']]);
@@ -746,7 +750,54 @@ function recordAssistanceRequests(requests) {
   noteForAdmin('Appointment requests needing a date',
     `${added} person/people asked for a personalized-assistance appointment outside the times offered. ` +
     `See the "${SHEET_NAMES.ASSISTANCE_REQUESTS}" tab.`);
+  // AND, for whoever is actually going to ring these people, their own email
+  // with the numbers in it — see the Appointment_Requests tick on Config's
+  // Admin Notification Emails table. The digest line above stays where it is:
+  // the two are read by different people, and often by nobody in common.
+  //
+  // Guarded, and after the tab is written: a request that is safely on the
+  // tab and unannounced is recoverable by looking at the tab; a mail failure
+  // that lost the row would not be.
+  try {
+    sendAssistanceRequestNotification(filed, map);
+  } catch (err) {
+    log(`⚠️ Could not email this run's appointment requests (${err}) — they are on the tab.`);
+  }
   return added;
+}
+
+/**
+ * The one email per sync about the requests just filed, to the addresses
+ * ticked for 'appointmentRequests'.
+ *
+ * Everything needed to make the call is in the body — name, number, email, the
+ * program and location they asked about, and what they typed — because the
+ * alternative is opening the workbook to find out whether this is worth
+ * opening the workbook for. Nobody ticked means nothing sent.
+ */
+function sendAssistanceRequestNotification(rows, map) {
+  if (!rows || rows.length === 0) return false;
+  const lines = [
+    `${rows.length} person/people asked for a personalized-assistance appointment at a time we have not `,
+    'scheduled yet. They have NOT been booked into anything — each one is waiting to hear from somebody.',
+    ''
+  ];
+  rows.forEach(row => {
+    const value = header => String(row[map[header]] || '').trim();
+    const received = coerceDate(row[map['Received']]);
+    lines.push(`• ${value('Name') || '(no name given)'}`);
+    lines.push(`    Asked about: ${[value('Program'), value('Location')].filter(Boolean).join(' — ') || '(not recorded)'}`);
+    lines.push(`    Contact: ${[value('Phone'), value('Email')].filter(Boolean).join('  ·  ') || '(none given)'}`);
+    if (value('Answers')) lines.push(`    They said: ${value('Answers')}`);
+    if (received) lines.push(`    Received: ${formatDateLabel(received)}`);
+    lines.push('');
+  });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  lines.push(`Work them through on the "${SHEET_NAMES.ASSISTANCE_REQUESTS}" tab — Status there is yours to move.`);
+  if (ss) lines.push(ss.getUrl());
+  return notifyAdminCategory('appointmentRequests',
+    `[Calendar & Form Manager] ${rows.length} appointment request(s) need a date`,
+    lines.join('\n'));
 }
 
 /** Writes the requests tab: newest first, Status as a dropdown, the response ID hidden. */

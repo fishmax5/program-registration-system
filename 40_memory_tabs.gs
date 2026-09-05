@@ -1,5 +1,5 @@
 // ============================================================================
-// 6c. MEMORY TABS  (Member_Roll / Program_Options)
+// 6c. MEMORY TABS  (Member_Roll / Program_Options / Registrant_Notifications)
 // ============================================================================
 //
 // Everything else in this workbook is derived: wipe it, re-sync, and it comes
@@ -46,12 +46,76 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // round, every address a site has been keeping is gone before anything
     // reads it. See migrateProgramLeaderAddresses().
     refreshProgramLeadersTab(ss, sessions);
+    // ALSO BEFORE refreshProgramOptions(), and for the same reason: the
+    // notifications tab carries Program_Options' retired Notify_Mode /
+    // Reminder_Days cells across, off the live sheet, and the refresh below is
+    // the write that finally rewrites that tab without them. See
+    // readLegacyNotifyModeRows() in section 9h.
+    refreshRegistrantNotifications(ss, sessions);
     refreshProgramOptions(ss, sessions);
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
     // reference material, not the system of record.
     log(`⚠️ Could not refresh the memory tabs (${err}) — the rest of the sync is unaffected.`);
   }
+}
+
+/**
+ * THE ROLL WRITES BACK: what we know about how to reach somebody, onto the
+ * rows that go out of this workbook.
+ *
+ * Member_Roll's Phone/Email are the newest contact details this person has
+ * ever given on any form. A registrant row only ever carries what THAT
+ * submission typed — and plenty of rows are made by something that never
+ * asked: a club catch-up, an "every date" catch-up, a door sign-in, a guest
+ * entered by name. Those rows reached the Registrants tab, the program leader
+ * sheets and the sign-in sheets with two empty columns, for people the
+ * workbook has had a phone number for all along.
+ *
+ * So before the Registrants tab is written, every row missing a phone or an
+ * email is filled from the roll. Only BLANKS are filled: what somebody typed
+ * on their own registration is the better answer for that session, and a
+ * staff correction typed into the row is never overwritten by a stale one.
+ * Idempotent — the roll is recomputed from these same rows afterwards, so a
+ * filled-in row hands back the value it was just given.
+ *
+ * Mutates the rows in place (they are the array about to be written) and
+ * returns how many cells it filled.
+ */
+function applyMemberRollContacts(registrantRows) {
+  if (!registrantRows || registrantRows.length === 0) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rollHeaders = HEADERS.Member_Roll;
+  const rollMap = getIndexMap(rollHeaders);
+  const roll = readSimpleTableValues(getOrCreateSheet(ss, SHEET_NAMES.MEMBER_ROLL), rollHeaders);
+  if (roll.length === 0) return 0;
+
+  const byKey = {};
+  roll.forEach(row => {
+    const key = normalizeNameKey(row[rollMap['Name']]);
+    if (!key) return;
+    byKey[key] = {
+      phone: String(row[rollMap['Phone']] || '').trim(),
+      email: String(row[rollMap['Email']] || '').trim()
+    };
+  });
+
+  const map = getIndexMap(HEADERS.All_Registrants);
+  let filled = 0;
+  registrantRows.forEach(row => {
+    const known = byKey[normalizeNameKey(row[map['Name']])];
+    if (!known) return;
+    if (known.phone && !String(row[map['Phone']] || '').trim()) {
+      row[map['Phone']] = known.phone;
+      filled++;
+    }
+    if (known.email && !String(row[map['Email']] || '').trim()) {
+      row[map['Email']] = known.email;
+      filled++;
+    }
+  });
+  if (filled > 0) log(`Member_Roll contact details filled in ${filled} blank registrant cell(s).`);
+  return filled;
 }
 
 /**
@@ -88,7 +152,7 @@ function refreshMemberRoll(ss, registrantRows) {
     if (!key) return;
     const d = coerceDate(row[lrMap['Event_Date']]);
     if (!people[key]) {
-      people[key] = { name, times: 0, first: d, last: d, locations: {}, lunches: {}, phone: '', email: '', contactAt: null };
+      people[key] = { name, times: 0, first: d, last: d, locations: {}, phone: '', email: '', contactAt: null };
     }
     const p = people[key];
     p.name = name; // last spelling seen wins for DISPLAY; the key stays stable
@@ -108,8 +172,6 @@ function refreshMemberRoll(ss, registrantRows) {
     }
     const loc = String(row[lrMap['Location']] || '').trim();
     if (loc) p.locations[loc] = true;
-    const lunch = String(row[lrMap['Lunch_Type']] || '').trim();
-    if (lunch && lunch !== 'No Lunch') p.lunches[lunch] = (p.lunches[lunch] || 0) + 1;
   });
 
   // Anyone already on the roll but absent from the current history stays,
@@ -145,7 +207,6 @@ function refreshMemberRoll(ss, registrantRows) {
     row[map['First_Seen']] = p.first || '';
     row[map['Last_Seen']] = p.last || '';
     row[map['Locations']] = Object.keys(p.locations).sort().join(', ');
-    row[map['Usual_Lunch']] = pickMostFrequent(p.lunches);
     // Merged_From is neither recomputed nor a staff column — it is the dedupe's
     // own receipt (section 77), and a refresh that dropped it would erase the
     // record of every merge the moment the next sync ran.
@@ -303,19 +364,6 @@ function refreshProgramOptions(ss, sessionRows) {
   });
 
   writeMemoryTab(sheet, headers, outRows, programOptionsTabOptions());
-
-  // The dropdowns run past the last row so the blank line under it has them
-  // too (see MEMORY_TAB_SPARE_ROWS). Notify_Mode is a CLOSED list — every
-  // legal answer is known, and a typo there would quietly change who gets
-  // told about their appointment. Reminder_Days is open: the suggestions are
-  // the cadences anyone actually asks for, and "14, 7, 1" is still valid.
-  applyMemoryTabValidation(sheet, headers, outRows.length, {
-    lists: { Notify_Mode: NOTIFY_MODE_LIST },
-    openLists: { Reminder_Days: REMINDER_DAYS_SUGGESTIONS }
-  });
-  // The tab those settings are read from has just been rewritten; anything
-  // asking again in this execution must see the rows as they now stand.
-  invalidateNotificationPolicyCache();
 
   log(`Program_Options refreshed: ${outRows.length} program(s).`);
 }

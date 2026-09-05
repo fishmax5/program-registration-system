@@ -45,8 +45,13 @@
  * by name — which is the reason the split was never a security boundary in
  * the first place, and part of why the day-to-day half is no longer gated:
  * it was stopping the desk from working while stopping nobody who meant harm.
- * requireAuthorizedAdmin() inside each ADMIN function is still the actual
- * gate for that half, and it is what must be kept correct.
+ * requireAuthorizedAdmin() inside a gated ADMIN function is still the actual
+ * gate, and it is what must be kept correct — but it now covers only the
+ * irreversible and trigger-touching items (ADMIN_GATED_ACTIONS), so the
+ * submenu is ATTACHED FOR EVERYONE. Hiding it never protected anything, and
+ * hiding it from an account onOpen could not identify — a simple trigger
+ * frequently cannot — was how a genuine admin ended up with no Admin menu at
+ * all. The destructive items inside still refuse; the repairs no longer do.
  */
 function onOpen() {
   try {
@@ -54,7 +59,7 @@ function onOpen() {
   } catch (err) {
     log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
   }
-  buildAppMenu(SpreadsheetApp.getUi(), isAuthorizedAdmin());
+  buildAppMenu(SpreadsheetApp.getUi(), true);
 }
 
 /**
@@ -179,8 +184,8 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
       .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')
       // Beside the invitations because they are the two channels one
-      // Notify_Mode cell governs, and this is the one that can say "your
-      // appointment is at 2:15". See section 9e.
+      // Registrant_Notifications row governs, and this is the one that can
+      // say "your appointment is at 2:15". See sections 9e and 9h.
       .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
@@ -259,6 +264,11 @@ function buildAppMenu(ui, includeAdmin) {
       // the sync's own parser \u2014 and says which brackets it read, which it
       // ignored, and whether the dashboard agrees. See section 4c-bis.
       .addItem('\ud83c\udff7\ufe0f Read an Event\'s Tags\u2026', 'showEventTagInspectorDialog')
+      // THE WEEKEND, ON PURPOSE. A Saturday on a program calendar is as often
+      // a rental or a placeholder as a program, so this lists the Sat/Sun
+      // dates that are not loaded yet and loads only the ones somebody ticks.
+      // It adds dates; it changes nothing about what the sync does. See 80.
+      .addItem('\ud83d\uddd3\ufe0f Load Weekend Events\u2026', 'showWeekendEventLoaderDialog')
       .addSeparator()
       // EVERYTHING ABOUT A LINK THAT LOOKS WRONG, BEHIND ONE ITEM. There were
       // four here \u2014 check the tab against itself, check the calendar against
@@ -276,6 +286,11 @@ function buildAppMenu(ui, includeAdmin) {
       // once and teaches the registry about what is already in it. New PDFs
       // register themselves as they are built. See backfillSignInSheetRegistry().
       .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+      // ONE-TIME, for a workbook upgraded from the version that put the office
+      // on every event's guest list: it takes those addresses back off the
+      // upcoming events (the office is mailed a digest instead now — see
+      // section 5b). Safe to press twice; a run that hits its cap says so.
+      .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for

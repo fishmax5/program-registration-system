@@ -244,6 +244,12 @@ function syncRegistrationsInternal() {
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);
+  // BEFORE the write, so every consumer of these rows below — the Registrants
+  // tab, the dashboards, the program leader sheets, the sign-in sheets — sees
+  // the phone number and email the workbook already knows, not the blanks a
+  // club catch-up or a door sign-in left. Fills blanks only; see
+  // applyMemberRollContacts().
+  step('filling in known contact details', () => applyMemberRollContacts(combinedRegistrantRows));
   // THE ONE STEP WHOSE FAILURE STOPS THE CLOCK. Everything else here can be
   // skipped and picked up next hour; this is the write that puts the imported
   // registrations on the sheet, and if it does not land, advancing

@@ -22,14 +22,64 @@ function log(msg) {
 // button; this is the cause fix — keep the button out of reach of every
 // account except the ones meant to hold it.
 //
-// Gated here are the STRUCTURAL/DESTRUCTIVE entry points: anything that
-// rebuilds tabs, creates/deletes triggers, runs the multi-slice calendar
-// import, or overrides a safety limit. Left UNGATED on purpose: the routine
-// syncCalendars()/syncRegistrations() triggers and the onEdit/onOpen simple
-// triggers — those need to keep running no matter which account's session
-// happens to be open, and they already have their own safety nets (the
-// triage size limit, the bootstrap-active checks, sync-token priming).
+// WHAT IS GATED IS NOW A LIST, AND IT IS A SHORT ONE. The gate used to sit on
+// every admin-menu entry point, which put a sign-in check in front of things
+// nobody needs protecting from: reading an event's tags, resizing a column,
+// running the Form & Link Doctor, saving a tab order, asking what the triggers
+// are doing. Every one of those either only looks, or repairs something in
+// place and can be run again. The cost of gating them was real and one-sided —
+// the person at the desk who noticed the problem could not press the button
+// that fixes it, and the refusal named an account they cannot sign in as.
+//
+// So the gate is now ADMIN_GATED_ACTIONS: the irreversible ones, and the ones
+// that create or destroy triggers (see writeTriggers()'s own doc comment — a
+// second account's click there spawns a whole extra, undetectable set of
+// calendar-edit triggers, which is what this section was written for).
+// requireAuthorizedAdmin() passes anything not on that list, so a call site
+// stays exactly where it is and simply stops refusing.
+//
+// Left UNGATED as it always was: the routine syncCalendars()/syncRegistrations()
+// triggers and the onEdit/onOpen simple triggers — those need to keep running
+// no matter which account's session happens to be open, and they already have
+// their own safety nets (the triage size limit, the bootstrap-active checks,
+// sync-token priming).
 // ============================================================================
+
+/**
+ * The actions the sign-in check still applies to, by the exact `actionName`
+ * their call site passes to requireAuthorizedAdmin(). Everything else is open
+ * to whoever can open the workbook.
+ *
+ * ADD A NAME HERE when you add an action that cannot be undone by pressing
+ * something else, or that touches installable triggers. Spelling matters — a
+ * name that does not match its call site's string silently un-gates it, which
+ * is why every entry below is copied from the call rather than retyped.
+ */
+const ADMIN_GATED_ACTIONS = [
+  // Irreversible: forms replaced or links reissued, registrations removed.
+  'Destroy and Rebuild Forms',
+  'Cancel Destroy-and-Rebuild Sweep',
+  'Rebuild Forms In Place',
+  'Cancel In-Place Rebuild',
+  'Cleanup Never-Policy Forms',
+  'Delete Registrations',
+  // Structural: tabs merged away, the whole workbook imported from scratch.
+  'Merge Legacy Tabs',
+  'Import Everything (First Run)',
+  'Cancel Large-Setup Import',
+  'Initialize + Sync Everything',
+  // Installable triggers — the original reason this section exists.
+  'Check Triggers',
+  'Take Over Trigger Ownership',
+  'Release My Triggers',
+  // Overriding a safety limit is exactly the kind of decision this is for.
+  'Confirm Large Triage'
+];
+
+/** Does this action still ask who is signed in? */
+function isAdminGatedAction(actionName) {
+  return ADMIN_GATED_ACTIONS.indexOf(String(actionName || '')) !== -1;
+}
 
 /**
  * Google accounts allowed to run a structural/destructive action. Edit this
@@ -119,6 +169,9 @@ function isAuthorizedAdmin() {
  * calendar import.
  */
 function requireAuthorizedAdmin(actionName) {
+  // NOT ON THE LIST MEANS NOT GATED. See ADMIN_GATED_ACTIONS — the check now
+  // covers the irreversible actions and the trigger ones, and nothing else.
+  if (!isAdminGatedAction(actionName)) return true;
   if (isAuthorizedAdmin()) return true;
   const email = getCurrentUserEmail();
   const whoami = email ? `you're signed in as ${email}` : `your account could not be identified`;

@@ -60,7 +60,8 @@ const CONFIG_LAYOUT = {
   ADMIN_NOTIFICATIONS: {
     title: '📧 Admin Notification Emails',
     startCol: 27,
-    headers: ['Email', 'Sync_Digest', 'Leader_Roster_Alerts', 'Registrant_Reminders', 'Calendar_Invite_Guest']
+    headers: ['Email', 'Sync_Digest', 'Leader_Roster_Alerts', 'Registrant_Reminders', 'Calendar_Invite_Guest',
+      'Appointment_Requests']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -112,10 +113,19 @@ const ADMIN_NOTIFICATION_MAX_ROWS = 5;
  *                          invited to (section 5b). Was Archive_Copy_Email.
  *                          A guest, not a CC — Google mails them the invitation
  *                          itself — so it is a tick per person, not a BCC line.
+ *   APPOINTMENT_REQUESTS   Emailed when a sync files somebody onto
+ *                          Assistance_Requests: a person who wanted a
+ *                          personalized-assistance appointment and could not
+ *                          be offered a time (see ASSISTANCE_NO_TIME_CHOICE).
+ *                          Its own tick rather than a line in the sync digest
+ *                          because it is not a fault report — it is a person
+ *                          waiting for a phone call, and whoever makes that
+ *                          call is rarely whoever reads the digest.
  *
  * BEING AN EDITOR of the registrant sheets and forms this system shares is
  * deliberately NOT a category. It is not mail at all, it is standing access to
- * a file, and a fifth checkbox for one Drive grant would suggest otherwise.
+ * a file, and a checkbox of its own for one Drive grant would suggest
+ * otherwise.
  * Every address in the table gets it, ticked or not, which is what
  * Archive_Copy_Email always did — see openUpFileToAnyoneWithLink().
  */
@@ -123,7 +133,8 @@ const ADMIN_NOTIFICATION_CATEGORIES = [
   { key: 'syncDigest', header: 'Sync_Digest', offset: 1 },
   { key: 'leaderRosterAlerts', header: 'Leader_Roster_Alerts', offset: 2 },
   { key: 'registrantReminders', header: 'Registrant_Reminders', offset: 3 },
-  { key: 'calendarInviteGuest', header: 'Calendar_Invite_Guest', offset: 4 }
+  { key: 'calendarInviteGuest', header: 'Calendar_Invite_Guest', offset: 4 },
+  { key: 'appointmentRequests', header: 'Appointment_Requests', offset: 5 }
 ];
 
 /**

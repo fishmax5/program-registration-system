@@ -869,7 +869,7 @@ window:
 |---|---|---|---|
 | 🟩 green | **Today** | All_Program_Sessions, Master_Lunch_Dashboard, All_Lunch_Registrants, All_Registrants | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
-| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, who is waiting for an appointment |
+| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Registrant_Notifications, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, what each program sends its registrants, who is waiting for an appointment |
 | ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
 
 **Which cells may I type in?** That is a question about *columns*, not tabs, so
@@ -1999,7 +1999,7 @@ change out to the forms**, exactly like hand-editing a row does.
 Neither needs an authorized admin account — adding a menu row this way is the
 same capability as hand-editing the tab, just faster.
 
-### 6. Member_Roll, Program_Options and Program_Leaders — your own notes
+### 6. Member_Roll, Program_Options, Program_Leaders and Registrant_Notifications — your own notes
 
 These three tabs are the only ones holding knowledge the system can't work out
 for itself. Each is split down the middle:
@@ -2013,7 +2013,7 @@ for itself. Each is split down the middle:
 
 | Recomputed | Yours |
 |---|---|
-| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations`, `Usual_Lunch` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
+| `Times_Seen`, `First_Seen`, `Last_Seen`, `Locations` | `Confirmed_Member`, `Usual_Guests`, `Dietary_Notes`, `Contact`, `Staff_Notes` |
 
 This is where "Marion always brings her sister" or "cold lunch only, no dairy"
 lives. People stay on the roll even after their sessions age out, so the notes
@@ -2049,6 +2049,40 @@ automatically; nothing needs re-typing.**
 
 Full detail, including the roster-change emails it can send: see
 **[Program leaders](#program-leaders)**.
+
+**Registrant_Notifications** — one row per program per location, and this is
+where you say what that program sends the people signed up for it:
+
+| Recomputed | Yours |
+|---|---|
+| `Type_Tag`, `Sessions_Tracked`, `Next_Date` | `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders`, `Confirm_On_Booking`, `Staff_Notes` |
+
+**Tick as many as apply — they add up.** A program can put its registrants on
+the calendar event *and* email them a week out *and* email them again the
+morning of; that is four ticks, not a choice between them.
+
+| Tick | What it does |
+|---|---|
+| `Add_To_Calendar` | Puts each registrant on the real calendar event's guest list, so Google's own reminders and any change to the event reach them |
+| `Week_Before` | An email 7 days before the session |
+| `Day_Before` | An email 1 day before |
+| `Morning_Of` | An email on the day itself |
+| `Other_Reminders` | Any other day counts, comma-separated — `14, 3` |
+| `Confirm_On_Booking` | An email the moment somebody registers. For a Personalized Assistance program this is where **their own appointment time** is stated — a calendar event has one description shared by every guest, so "your appointment is at 2:15" can only be said in mail |
+
+**An unticked box means that message is not sent**, so a row is never created
+blank: a brand-new program arrives ticked the way its kind is normally notified
+(everything ordinary invited and nothing more; an appointment program also
+confirmed and reminded the day before). Change it whenever you like — the next
+sync reads whatever the boxes say.
+
+This replaces the old `Notify_Mode` dropdown and `Reminder_Days` cell on
+Program_Options. **Your existing settings are carried across automatically; a
+program that was set to "Calendar invite + reminders, 7 and 1" comes back with
+`Add_To_Calendar`, `Week_Before` and `Day_Before` ticked.**
+
+Config's **📧 Calendar Invitations** switch still wins over every row: set to
+"Do not invite", nobody joins a guest list whatever is ticked here.
 
 ### 7. Config
 Eight small settings blocks:

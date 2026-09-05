@@ -23,10 +23,20 @@
 //   would re-add the same guests, and Google treats each add as an event
 //   update worth notifying about.
 //
+// THE OFFICE IS NOT A GUEST. Addresses ticked for Calendar_Invite_Guest on
+// Config's Admin Notification Emails table used to be added to the event
+// alongside the registrants, which put every session anybody signed up for
+// onto four or five staff calendars and mailed them a Google invitation for
+// each one. They are told the same thing by mail instead: one digest per run
+// (notifyOfficeOfCalendarInvites) naming every session that changed, who was
+// invited to it and who came off. Staff addresses already sitting on events
+// from the old behaviour are taken off by the one-time Admin item
+// removeAdminGuestsFromCalendarEvents().
+//
 // Governed by Config's "📧 Calendar Invitations" switch (see
 // CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op. Under
-// that switch, each PROGRAM says whether it wants invitations at all, in
-// Program_Options' Notify_Mode column — see section 9e.
+// that switch, each PROGRAM says whether it wants invitations at all, with
+// Registrant_Notifications' Add_To_Calendar tick — see sections 9e and 9h.
 // ============================================================================
 
 /** Who we have already put on which event's guest list: { Event_ID: [email...] }. */
@@ -97,7 +107,7 @@ function partitionInviteEmails(rows, lrMap, sessionByEventId) {
  */
 function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options) {
   const onlyEventIds = (options && options.onlyEventIds) || null;
-  const result = { invited: 0, removed: 0, eventsTouched: 0, deferred: 0, skipped: false };
+  const result = { invited: 0, removed: 0, eventsTouched: 0, deferred: 0, digests: 0, skipped: false };
   if (!shouldInviteRegistrants()) {
     result.skipped = true;
     return result;
@@ -126,8 +136,8 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
       isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
     };
     // THE PROGRAM'S OWN SETTING, under the Config switch already checked
-    // above: a program whose Notify_Mode says reminders only, or nothing at
-    // all, keeps its guest list empty. See section 9e.
+    // above: a program with Add_To_Calendar unticked keeps its guest list
+    // empty, whatever else it sends. See section 9e.
     if (!notificationPolicyForSession(session).invite) return;
     sessionByEventId[eventId] = session;
   });
@@ -140,16 +150,14 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     (registrantsSheet ? getSectionedRows(registrantsSheet, lrHeaders, 'Event_ID') : []);
 
   const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessionByEventId);
+  const nameByEmail = registrantNamesByEmail(rows, lrMap);
   const ledger = getCalendarInviteLedger();
   const eventIds = Object.keys(sessionByEventId);
-  // The office's copy of what goes out: everyone ticked for
-  // Calendar_Invite_Guest on Config's Admin Notification Emails table, and
-  // nobody at all when that column is empty. They are added as guests of any
-  // event a REGISTRANT is invited to and never on their own: an event with
-  // nobody on it is not something the office needs a Google invitation for,
-  // and inviting them to every event on the calendar would bury the ones that
-  // matter.
-  const officeGuests = adminEmailsForCategory('calendarInviteGuest');
+  // What the office is told about afterwards, rather than added to. One entry
+  // per event this pass actually changed; the digest is sent once at the end,
+  // so a run that touches thirty sessions is one message and not thirty
+  // calendar invitations.
+  const changes = [];
 
   for (const eventId of eventIds) {
     const already = new Set(ledger[eventId] || []);
@@ -157,17 +165,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     const drop = unwanted[eventId] || new Set();
 
     const toAdd = Array.from(want).filter(email => !already.has(email));
-    // Once an office address is on an event it stays on it — a session whose
-    // last registrant cancels is exactly the change the office wants to see,
-    // and Google would otherwise mail them a cancellation for a session that
-    // is still happening.
-    if (want.size > 0) {
-      officeGuests.forEach(guest => {
-        if (!already.has(guest) && toAdd.indexOf(guest) === -1) toAdd.push(guest);
-      });
-    }
-    const toRemove = Array.from(drop).filter(email =>
-      already.has(email) && !want.has(email) && officeGuests.indexOf(email) === -1);
+    const toRemove = Array.from(drop).filter(email => already.has(email) && !want.has(email));
     if (toAdd.length === 0 && toRemove.length === 0) continue;
 
     if (result.eventsTouched >= MAX_INVITE_EVENTS_PER_RUN) {
@@ -184,10 +182,13 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     }
 
     let changed = false;
+    const addedHere = [];
+    const removedHere = [];
     toAdd.forEach(email => {
       try {
         event.addGuest(email);
         already.add(email);
+        addedHere.push(email);
         result.invited++;
         changed = true;
       } catch (err) {
@@ -198,6 +199,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
       try {
         event.removeGuest(email);
         already.delete(email);
+        removedHere.push(email);
         result.removed++;
         changed = true;
       } catch (err) {
@@ -209,10 +211,18 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
       ledger[eventId] = Array.from(already);
       __calendarInviteLedgerDirty = true;
       result.eventsTouched++;
+      changes.push({
+        session,
+        added: addedHere.map(email => describeInvitee(email, nameByEmail)),
+        removed: removedHere.map(email => describeInvitee(email, nameByEmail))
+      });
     }
   }
 
   saveCalendarInviteLedger();
+  // AFTER the ledger is saved: a digest that failed to send must not be able
+  // to cost the run the record of guests it did add.
+  result.digests = notifyOfficeOfCalendarInvites(changes);
   if (result.invited > 0 || result.removed > 0) {
     log(`Calendar invitations: ${result.invited} guest(s) added, ${result.removed} removed, ` +
       `across ${result.eventsTouched} event(s)` + (result.deferred > 0 ? `; ${result.deferred} left for the next run.` : '.'));
@@ -455,3 +465,274 @@ function inviteRegistrantsForSessions(eventIds) {
 }
 
 
+
+// ============================================================================
+// 5b-ii. WHAT THE OFFICE IS TOLD  (the digest that replaced the guest list)
+// ============================================================================
+//
+// The office used to find out who had been invited to what by being invited
+// to it themselves. That is the one thing this file will not do any more (see
+// the banner at the top), so the same information is written out instead:
+// after each pass, one plain-text message per address ticked for
+// Calendar_Invite_Guest, naming every session whose guest list changed, who
+// was added, who was taken off, and — the part a guest list never said — HOW
+// each of them was told, which is Google's own calendar invitation.
+//
+// One message per run, not per session: a sync that catches up on thirty
+// sessions is one thing that happened, and thirty separate emails about it is
+// the same burial by volume the guest list caused.
+// ============================================================================
+
+/**
+ * The floor this pass will not dig the day's hundred messages below.
+ *
+ * Lower than the registrant reminders' reserve (REMINDER_QUOTA_RESERVE, ten):
+ * a digest is the office learning something slightly sooner than the workbook
+ * would have told them anyway, and a member being told about their own
+ * appointment is not. When the quota is that close to gone, the member's
+ * message is the one that should still be affordable.
+ */
+const INVITE_DIGEST_QUOTA_RESERVE = 4;
+
+/** Registrant rows as { email: name }, first name seen per address. */
+function registrantNamesByEmail(rows, lrMap) {
+  const names = {};
+  (rows || []).forEach(row => {
+    const email = String(row[lrMap['Email']] || '').trim().toLowerCase();
+    if (!email || names[email]) return;
+    const name = String(row[lrMap['Name']] || '').trim();
+    if (name) names[email] = name;
+  });
+  return names;
+}
+
+/** "Ada Lovelace <ada@example.org>", or just the address when we have no name. */
+function describeInvitee(email, nameByEmail) {
+  const name = (nameByEmail || {})[String(email || '').toLowerCase()];
+  return name ? `${name} <${email}>` : String(email || '');
+}
+
+/** The digest's subject line. */
+function buildCalendarInviteDigestSubject(changes) {
+  const invited = (changes || []).reduce((n, c) => n + c.added.length, 0);
+  const removed = (changes || []).reduce((n, c) => n + c.removed.length, 0);
+  const parts = [];
+  if (invited > 0) parts.push(`${invited} invited`);
+  if (removed > 0) parts.push(`${removed} removed`);
+  return `Calendar invitations: ${parts.join(', ') || 'no changes'} ` +
+    `across ${(changes || []).length} session(s)`;
+}
+
+/**
+ * The digest's body. Plain text for the same reason every other message this
+ * project sends is (see buildRegistrantReminderBody): it is read on a phone at
+ * a desk, and an HTML mail that renders as markup is worse than no mail.
+ */
+function buildCalendarInviteDigestBody(changes) {
+  const lines = [
+    'Registrations were added to (or taken off) these Google Calendar events.',
+    'Everyone listed under "invited" was added as a guest on the event, and',
+    'Google emailed them its own calendar invitation. Everyone under "removed"',
+    'was taken off it, which Google also emailed them about.',
+    '',
+    'Nobody in the office is on these guest lists any more — this message is',
+    'the copy. Who receives it is the Calendar_Invite_Guest column on the',
+    'Config tab.',
+    ''
+  ];
+  (changes || []).forEach(change => {
+    const session = change.session || {};
+    lines.push(`${formatDateLabel(session.date)} — ${session.title || '(untitled)'}` +
+      (session.location ? ` (${session.location})` : ''));
+    if (change.added.length > 0) {
+      lines.push(`  invited (Google calendar invitation): ${change.added.join(', ')}`);
+    }
+    if (change.removed.length > 0) {
+      lines.push(`  removed (Google cancellation): ${change.removed.join(', ')}`);
+    }
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+/**
+ * Mails the digest to every address ticked for Calendar_Invite_Guest. Returns
+ * how many messages actually went.
+ *
+ * Sent to each address in its own message rather than one message BCC'd to
+ * all of them, because sendRationedEmail() counts a BCC as its own message
+ * anyway (it is one) and a direct message is the one a member of staff can
+ * reply to and forward without wondering who else has it.
+ *
+ * Never throws, and never blocks the pass: an office that was not told about
+ * a set of invitations is a smaller problem than a sync that failed after
+ * sending them.
+ */
+function notifyOfficeOfCalendarInvites(changes) {
+  if (!changes || changes.length === 0) return 0;
+  let sent = 0;
+  try {
+    const office = adminEmailsForCategory('calendarInviteGuest');
+    if (office.length === 0) return 0;
+    const subject = buildCalendarInviteDigestSubject(changes);
+    const body = buildCalendarInviteDigestBody(changes);
+    office.forEach(address => {
+      const outcome = sendRationedEmail({
+        to: address,
+        subject,
+        body,
+        reserve: INVITE_DIGEST_QUOTA_RESERVE
+      });
+      if (outcome.status === 'sent') sent++;
+      else if (outcome.status === 'failed') {
+        log(`⚠️ Could not send the calendar-invitation digest to ${address} (${outcome.error}).`);
+      }
+    });
+  } catch (err) {
+    log(`⚠️ Calendar-invitation digest could not be sent (${err}).`);
+    return sent;
+  }
+  if (sent > 0) log(`Calendar invitations: digest sent to ${sent} office address(es).`);
+  return sent;
+}
+
+// ============================================================================
+// 5b-iii. THE ONE-TIME CLEANUP  (taking the office back off the guest lists)
+// ============================================================================
+//
+// Every event this workbook invited anybody to while the old behaviour was
+// live has the office's addresses on it. Nothing above removes them: the pass
+// only ever takes off somebody whose REGISTRATION changed, and a staff address
+// has no registration. So this Admin item does it once.
+//
+// UPCOMING ONLY, like everything else here. Removing somebody from a past
+// event mails them a cancellation for something that already happened, and a
+// guest list nobody will look at again is not worth that.
+//
+// Resumable and safe to run twice: every event it has looked at is recorded,
+// so a second run costs a property read rather than a calendar round trip per
+// event, and a run that hits the cap picks up where it left off.
+// ============================================================================
+
+/** Events this sweep has already looked at: { Event_ID: true }. */
+const ADMIN_GUEST_CLEANUP_PROP_KEY = 'ADMIN_GUEST_CLEANUP_V1';
+
+/** How many events one execution will open. The item is re-runnable. */
+const MAX_ADMIN_GUEST_CLEANUP_EVENTS_PER_RUN = 60;
+
+/**
+ * Which of an event's guests are office addresses to take off.
+ *
+ * Pure, and separate from the sweep, because "is this address staff?" is the
+ * whole decision: everybody on Config's Admin Notification Emails table,
+ * ticked for anything or nothing, and nobody else. A registrant who happens
+ * to also be on that table would be removed — which is correct, because this
+ * workbook put them there as staff, and the next sync re-adds them from their
+ * registration.
+ */
+function calendarInviteAdminCleanupTargets(guestEmails, adminEmails) {
+  const admin = {};
+  (adminEmails || []).forEach(email => { admin[String(email || '').trim().toLowerCase()] = true; });
+  return dedupePreservingOrder((guestEmails || [])
+    .map(email => String(email || '').trim().toLowerCase())
+    .filter(email => email && admin[email]));
+}
+
+function getAdminGuestCleanupState() {
+  const raw = PropertiesService.getScriptProperties().getProperty(ADMIN_GUEST_CLEANUP_PROP_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+function saveAdminGuestCleanupState(state) {
+  PropertiesService.getScriptProperties()
+    .setProperty(ADMIN_GUEST_CLEANUP_PROP_KEY, JSON.stringify(state));
+}
+
+/**
+ * MENU ENTRY (Admin ▸ Repair). Takes every Admin Notification Emails address
+ * off the guest list of every upcoming session's calendar event, and out of
+ * the invitation ledger so no later pass reasons about them again.
+ */
+function removeAdminGuestsFromCalendarEvents() {
+  const adminEmails = getAllAdminNotificationEmails();
+  if (adminEmails.length === 0) {
+    toastIfPossible('There are no addresses on Config’s Admin Notification Emails table to remove.');
+    return 'No admin addresses are configured, so there was nothing to take off any event.';
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regMap = getIndexMap(regHeaders);
+  const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+  const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
+
+  const todayKey = formatDateKey(new Date());
+  const seen = getAdminGuestCleanupState();
+  const ledger = getCalendarInviteLedger();
+  let removed = 0;
+  let eventsTouched = 0;
+  let looked = 0;
+  let deferred = 0;
+
+  for (const row of rows) {
+    const eventId = String(row[regMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[regMap['Event_Date']]);
+    const calendarId = String(row[regMap['Calendar_Source']] || '').trim();
+    if (!eventId || !date || !calendarId) continue;
+    if (formatDateKey(date) < todayKey) continue; // upcoming only
+    if (seen[eventId]) continue;
+    if (looked >= MAX_ADMIN_GUEST_CLEANUP_EVENTS_PER_RUN) { deferred++; continue; }
+
+    const session = {
+      eventId, date, calendarId,
+      title: String(row[regMap['Clean_Title']] || '').trim(),
+      location: String(row[regMap['Location']] || '').trim()
+    };
+    const event = findCalendarEventForSession(session);
+    looked++;
+    if (!event) { seen[eventId] = true; continue; }
+
+    let guests = [];
+    try {
+      guests = event.getGuestList().map(guest => guest.getEmail());
+    } catch (err) {
+      log(`⚠️ Could not read the guest list for "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
+      continue; // NOT marked seen: an unread event is one to try again.
+    }
+
+    let changedHere = false;
+    calendarInviteAdminCleanupTargets(guests, adminEmails).forEach(email => {
+      try {
+        event.removeGuest(email);
+        removed++;
+        changedHere = true;
+      } catch (err) {
+        log(`⚠️ Could not remove ${email} from "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
+      }
+    });
+    if (changedHere) eventsTouched++;
+
+    // The ledger too, whether or not the calendar had them: an address left
+    // in it is one a later pass would count as "already invited".
+    if (Array.isArray(ledger[eventId])) {
+      const kept = ledger[eventId].filter(email =>
+        adminEmails.indexOf(String(email || '').trim().toLowerCase()) === -1);
+      if (kept.length !== ledger[eventId].length) {
+        ledger[eventId] = kept;
+        __calendarInviteLedgerDirty = true;
+      }
+    }
+    seen[eventId] = true;
+  }
+
+  saveCalendarInviteLedger();
+  saveAdminGuestCleanupState(seen);
+  if (removed > 0) invalidateCalendarEventsCache();
+
+  const summary = `Removed ${removed} office guest(s) from ${eventsTouched} upcoming event(s); ` +
+    `${looked} event(s) checked` +
+    (deferred > 0 ? `. ${deferred} left — run it again to finish.` : '.');
+  log(`removeAdminGuestsFromCalendarEvents: ${summary}`);
+  toastIfPossible(summary);
+  return summary;
+}

@@ -564,6 +564,9 @@ defineLazyGlobal_('TAB_GROUPS', () => ([
     // Beside Program_Options, which is the tab it was carved out of and the
     // one somebody is already on when they go looking for who leads a class.
     SHEET_NAMES.PROGRAM_LEADERS,
+    // And beside both: who leads a program and what that program sends its
+    // registrants are the two questions asked in the same sitting.
+    SHEET_NAMES.REGISTRANT_NOTIFICATIONS,
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
   { color: PALETTE.TAB_ARCHIVE, names: [

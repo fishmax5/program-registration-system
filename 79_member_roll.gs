@@ -355,7 +355,7 @@ function mergeMemberRollRow(target, extra, map) {
   // are the better-attested. Display_Name/Nickname/Household_Override are on
   // this list rather than the notes list below for the same reason: they are
   // single answers, not accumulating text.
-  ['Phone', 'Email', 'Usual_Lunch', 'Usual_Guests', 'First_Name', 'Last_Name',
+  ['Phone', 'Email', 'Usual_Guests', 'First_Name', 'Last_Name',
    'Display_Name', 'Nickname', 'Household_Override'].forEach(header => {
     if (map[header] === undefined) return;
     if (String(target[map[header]] || '').trim()) return;

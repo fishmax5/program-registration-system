@@ -50,15 +50,15 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `00_overview.gs` | 539 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
-| `01_logging_and_access.gs` | 211 | `log()`, the admin-only gate for destructive actions, and the "are you sure?" prompts. |
+| `00_overview.gs` | 547 | Nothing but the project's header comment: every tab, the sync flow, the first-run path. **Read this first** — it is the cheapest orientation in the repo. |
+| `01_logging_and_access.gs` | 264 | `log()`, the admin-only gate — which applies to `ADMIN_GATED_ACTIONS` and nothing else, so a repair or a read is open to whoever can open the workbook — and the "are you sure?" prompts. |
 | `01a_lazy_globals.gs` | 63 | `defineLazyGlobal_` — the one helper that makes file load order stop mattering. Read the banner before adding a constant derived from another file's. |
 | `02_palette_and_tags.gs` | 972 | `PALETTE` and every color derived from it; `EVENT_TYPES`; the bracket tags (`Shared`, `Club`, `No Registration`, `Personalized Assistance`) and the regexes that recognize them in a calendar title. Plus the one tag that describes a DATE rather than a program — `Waitlist Only`, which closes a single session to new Active registrations whatever its capacity says — and the two lists that keep the difference straight: `PROGRAM_FLAG_COLUMNS` (ticked onto every row of a program) and `SESSION_FLAG_COLUMNS` (ticked onto the row you clicked, and nowhere else). |
-| `03_sheets_and_headers.gs` | 770 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.**Member_Roll's household and name columns are described here; what they MEAN is `77`. Note the one place a tab's name and its schema key deliberately disagree: the session tab is `All_Program_Sessions` (renamed from `All_Program_Sessions` in September 2026, carried across in place by `LEGACY_SHEET_RENAMES`) but its header list is still keyed `HEADERS.All_Program_Sessions` — a schema key is read by code, a tab name by people. Same reasoning as `LEADER_SHEET_REGISTRY_PROP_KEY` still being spelled `INSTRUCTOR_SHEET_REGISTRY_V1`. |
-| `04_settings_and_config.gs` | 504 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off, and the Admin Notification Emails table (`ADMIN_NOTIFICATION_CATEGORIES`: who in the office is copied on which outbound mail, replacing the retired single Admin Notification / Archive Copy cells) — plus locations, addresses, and the forms Drive folder. |
+| `03_sheets_and_headers.gs` | 911 | `SHEET_NAMES`, `HEADERS` (the column list for every tab), legacy renames and header aliases, per-tab staff-owned column lists. **The schema.**Member_Roll's household and name columns are described here; what they MEAN is `77`. Note the one place a tab's name and its schema key deliberately disagree: the session tab is `All_Program_Sessions` (renamed from `All_Program_Sessions` in September 2026, carried across in place by `LEGACY_SHEET_RENAMES`) but its header list is still keyed `HEADERS.All_Program_Sessions` — a schema key is read by code, a tab name by people. Same reasoning as `LEADER_SHEET_REGISTRY_PROP_KEY` still being spelled `INSTRUCTOR_SHEET_REGISTRY_V1`. |
+| `04_settings_and_config.gs` | 515 | `CONFIG_LAYOUT` and the settings on the Config tab — meal buffers, order-ahead days, catering policy, link display, calendar invites, automation on/off, and the Admin Notification Emails table (`ADMIN_NOTIFICATION_CATEGORIES`: who in the office is copied on which outbound mail, replacing the retired single Admin Notification / Archive Copy cells) — plus locations, addresses, and the forms Drive folder. |
 | `05_form_template.gs` | 1173 | `TEMPLATE_VERSION` and the shape of the generated Google Form: item titles, page titles, the roster grid, attendance-mode choices, guests, the meal totals, and the page navigation helpers every form-shaping path writes through (`setNavigationAfterPage`). **Bump `TEMPLATE_VERSION` when the form's structure changes — page navigation counts.** |
 | `06_registries_and_locks.gs` | 152 | The groupKey→Form_ID registry in Script Properties, the all-dates registry, template-version tracking, and the script locks. |
-| `07_dates_and_labels.gs` | 624 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
+| `07_dates_and_labels.gs` | 649 | `TIMEZONE`, date formatting, and the capacity/meal hints a form's date label carries. |
 | `08_execution_caches.gs` | 491 | The per-execution memo caches the sync hot paths use, and their invalidation — including `openFormCached()`, the one `FormApp.openById()` per form per run. |
 | `09_lunch_schedule_lookup.gs` | 403 | Reading `Lunch_Schedule` by date × location. |
 | `10_form_date_labels.gs` | 749 | Fingerprinted writes of date labels onto a live form (`applyFormDateLabels`). |
@@ -69,15 +69,15 @@ Line counts are a rough guide to what you are about to load.
 | File | | What is in it |
 |---|--:|---|
 | `12_sheet_setup.gs` | 213 | `initSheet` and the `Lunch_Schedule` tab's own setup. |
-| `13_lunch_only_signup_form.gs` | 1032 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. Also the shared sheet-shaping helpers it grew around: `autosizeColumns`, and `ensureSheetColumns` (a layout that outgrows a tab's column count is a throw, not a resize). |
+| `13_lunch_only_signup_form.gs` | 1039 | The lunch-only sign-up form — the one form built from `Lunch_Schedule` rather than the calendar. Also the shared sheet-shaping helpers it grew around: `autosizeColumns`, and `ensureSheetColumns` (a layout that outgrows a tab's column count is a throw, not a resize). |
 | `14_saved_column_widths.gs` | 463 | "This column should be this wide, always." |
-| `15_config_sheet.gs` | 1203 | Drawing and validating the Config tab, reading its settings back (`getAdminNotificationRows` / `adminEmailsForCategory` among them), and `notifyAdmin`. |
+| `15_config_sheet.gs` | 1242 | Drawing and validating the Config tab, reading its settings back (`getAdminNotificationRows` / `adminEmailsForCategory` among them), and `notifyAdmin`. |
 
 ### Menus, triggers, and edits (16–18)
 
 | File | | What is in it |
 |---|--:|---|
-| `16_menu_and_triggers.gs` | 597 | `onOpen`, the menu tree, trigger installation. |
+| `16_menu_and_triggers.gs` | 622 | `onOpen`, the menu tree (the Admin submenu is now attached for everyone — the gate lives inside its destructive items, not on the menu), trigger installation. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
 | `18_edit_handlers.gs` | 2062 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount, and the Member_Roll edits that mean something (`handleMemberRollEdit`: a `Display_Name` correction carried across every tab, a `Household_Override` recomputed). Plus `handleProgramMonthEdit` — the `Master_Program_Dashboard` Leader dropdown, the one edit anywhere that writes to `Program_Leaders` from another tab: it asks first (this decides who may read a roster), only ever ADDS a row, refuses a fill-down, and answers a cleared cell by saying that nothing was removed and where a leader actually is. |
 
@@ -88,7 +88,7 @@ Line counts are a rough guide to what you are about to load.
 | `19_calendar_incremental_sync.gs` | 245 | `onCalendarChange` and sync tokens. |
 | `20_calendar_sync.gs` | 356 | `syncCalendars` — the entry point and its shape. |
 | `21_description_tag_readers.gs` | 844 | What the system reads out of a calendar event's description, and the tag inspector. |
-| `22_renamed_programs.gs` | 794 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. Also `reconcileProgramFlagColumns` / `reconcileSessionFlagColumns` — the sync bringing the dashboard's tick boxes back into line with the calendar, keyed per program and per date respectively. |
+| `22_renamed_programs.gs` | 796 | A title change that must not cost you the roster: detection and the rename map applied across every tab and ledger. Also `reconcileProgramFlagColumns` / `reconcileSessionFlagColumns` — the sync bringing the dashboard's tick boxes back into line with the calendar, keyed per program and per date respectively. |
 | `23_reconcile_sessions.gs` | 996 | Reconciling session times, assistance settings, club tags, No-Registration effects, and the registration horizon against the calendar. |
 | `24_calendar_groups.gs` | 526 | `buildEventGroups` / `processCalendarGroup` — grouping events into the thing that gets one form. |
 | `25_bootstrap.gs` | 554 | `bootstrapCalendars` — the sliced first import, for setups too large for one execution. |
@@ -98,13 +98,13 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `27_registration_import.gs` | 453 | `syncRegistrations` — the entry point. |
+| `27_registration_import.gs` | 476 | `syncRegistrations` — the entry point. |
 | `28_deletion_tombstones.gs` | 517 | Why a deleted registration stays deleted. |
 | `29_form_response_processing.gs` | 615 | `processFormResponse` — one response into registrant rows, guests and meals included. |
 | `30_registry_counts.gs` | 162 | Active / waitlist / remaining-seat counts. |
 | `31_form_shape_and_migration.gs` | 396 | Is a live form still on the current template, and migrating it if not. |
 | `32_dashboard_link_repair.gs` | 1257 | Every way a registration link drifts from its session, diagnosed and repaired. |
-| `33_calendar_invitations.gs` | 457 | Registrants as guests on the real calendar event. |
+| `33_calendar_invitations.gs` | 738 | Registrants — and nobody else — as guests on the real calendar event. The office is told by mail instead: one digest per pass naming who was invited to what and how (`notifyOfficeOfCalendarInvites`), plus the one-time Admin sweep that takes staff addresses back off the events they are still on (`removeAdminGuestsFromCalendarEvents`). |
 
 ### Tabs the staff work in (34–42)
 
@@ -116,18 +116,18 @@ Line counts are a rough guide to what you are about to load.
 | `37_regular_needs.gs` | 592 | The standing notes a desk would otherwise have to memorize. |
 | `38_quick_mark_index.gs` | 2019 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions — and `applyQuickMarkLocked`, where the desk's five ticks land (the fifth, **Add to waitlist**, goes through `71`'s writer rather than setting a status here). Also `warmQuickMarkIndexIfCold` (the five-minute rebuild that keeps a stored index there to inline) and `reportOptimisticQuickMarkFailure` (a refused mark told to the office, because the desk has already moved on). |
 | `39_triage_sheet.gs` | 391 | Sessions the calendar stopped mentioning. |
-| `40_memory_tabs.gs` | 608 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). Also `stampMemberHouseholds` / `refreshMemberHouseholds` — where the household grouping decided in `77` meets the roll. What is particular to a roll of PEOPLE — the name split, the dedupe, retirement, the paste — is `79`, and both writers here go through its `writeMemberRollTab()`. |
+| `40_memory_tabs.gs` | 656 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). Also `stampMemberHouseholds` / `refreshMemberHouseholds` — where the household grouping decided in `77` meets the roll. What is particular to a roll of PEOPLE — the name split, the dedupe, retirement, the paste — is `79`, and both writers here go through its `writeMemberRollTab()`. |
 | `41_club_rosters.gs` | 448 | `Club_Members`. |
-| `42_legacy_tab_merge.gs` | 382 | Merging tabs from older layouts. |
+| `42_legacy_tab_merge.gs` | 385 | Merging tabs from older layouts. |
 
 ### Dashboards and printed output (43–46)
 
 | File | | What is in it |
 |---|--:|---|
-| `43_program_dashboard.gs` | 1016 | `renderProgramDashboard`. Still the home of the metrics block's arithmetic and every one of its column notes (`computeProgramMetrics` / `writeProgramMetricsSection`) — the block itself is now DRAWN on `Master_Program_Dashboard` (`78`), the tab whose grain it matches. |
+| `43_program_dashboard.gs` | 1036 | `renderProgramDashboard`. Still the home of the metrics block's arithmetic and every one of its column notes (`computeProgramMetrics` / `writeProgramMetricsSection`) — the block itself is now DRAWN on `Master_Program_Dashboard` (`78`), the tab whose grain it matches. |
 | `44_lunch_dashboard.gs` | 1131 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 1322 | The desk's sheet for one day and one building — a **live Google Doc**, rebuilt in place so the link never goes stale, filed in `Sign-In Sheets`. Lunch on page one, everybody on page two. One row per PERSON (`signInPersonKey` / `dedupeSignInEntries`: a duplicate's meals take the MAXIMUM, a guest's ADD), and two washes for how a meal is handled — yellow it leaves the building, purple it needs doing something with here. It used to export a PDF and throw the document away; `getOrCreateSignInSheetFolder()` is all that is left of that, for the backfill in `69`. |
-| `46_program_leader_sheets.gs` | 1535 | **Program registrant sheets** — a live roster shared out of the workbook, banded by session. One sheet per program (not per date), so a link handed out in September is still right in March. Built on the menu, automatically a week before a program's next session for EVERY program (`ensureRegistrantSheetsForUpcomingPrograms`, capped per run), and automatically for a leader who asked to be notified whenever their program runs (`ensureProgramLeaderSheetsForNotifyingLeaders`). The identifiers still say "leader" for the same reason `LEADER_SHEET_REGISTRY_PROP_KEY` still says "instructor"; only the words a person reads changed. Two of its five leader-owned ticks reach outside the sheet: `Dropped` (a cancellation) and `Waitlisted` (a waitlisting, and the only one that can be taken back) — the second is washed peach on the row, `isLeaderSheetWaitlistedRow`. |
+| `46_program_leader_sheets.gs` | 1627 | **Program registrant sheets** — a live roster shared out of the workbook, banded by session. One sheet per program (not per date), so a link handed out in September is still right in March. Built on the menu, automatically a week before a program's next session for EVERY program (`ensureRegistrantSheetsForUpcomingPrograms`, capped per run), and automatically for a leader who asked to be notified whenever their program runs (`ensureProgramLeaderSheetsForNotifyingLeaders`). The identifiers still say "leader" for the same reason `LEADER_SHEET_REGISTRY_PROP_KEY` still says "instructor"; only the words a person reads changed. Two of its five leader-owned ticks reach outside the sheet: `Dropped` (a cancellation) and `Waitlisted` (a waitlisting, and the only one that can be taken back) — the second is washed peach on the row, `isLeaderSheetWaitlistedRow`. |
 
 ### Repair and last resorts (47–51)
 
@@ -146,7 +146,7 @@ Line counts are a rough guide to what you are about to load.
 | `52_appointments_and_slots.gs` | 450 | Slot arithmetic, appointment choice labels, booked-time reads. |
 | `53_program_questions.gs` | 507 | The `Program_Questions` tab parsed into form items, and its refusals. |
 | `54_custom_questions.gs` | 439 | Putting those questions on a form and taking them back off — fingerprints and applied-title tracking. |
-| `55_assistance_sync_and_images.gs` | 1592 | Refreshing appointment slots across forms, appointment responses, the assistance report, and form images. |
+| `55_assistance_sync_and_images.gs` | 1643 | Refreshing appointment slots across forms, appointment responses, the assistance report, and form images. |
 
 ### Reviews (56–59)
 
@@ -178,8 +178,8 @@ either.
 
 | File | | What is in it |
 |---|--:|---|
-| `65_program_leaders.gs` | 1078 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks, and `Notify_Timing` — the closed dropdown deciding WHEN a ticked leader hears from `66`: at each change, N days before a date, or on a fixed weekday before one (`parseLeaderNotifyTiming`, `leaderNotifyTimingDaysBefore`) — plus the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it, and `attachProgramLeaderRow` — the single write this tab accepts from elsewhere (`Master_Program_Dashboard`'s Leader cell), which only ever adds a row, takes the address off the leader's own other rows, and leaves the notify tick clear. Also `Title_Match`, the phrases that let a program find its leader instead of the other way round (`proposeProgramLeaderRowsFromTitles`): a program nobody has typed a row for is PROPOSED to a matching leader as a concrete row with the notify tick clear — a phrase never overrides a typed row, never shares anything and never sends anything, because `buildProgramLeaderIndex()` still reads concrete rows only. |
-| `66_program_leader_notifications.gs` | 985 | **Two channels, one tick.** Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. And the day-before digests for a leader whose `Notify_Timing` is a day count or a weekday instead: one email per session, N days ahead of it (a weekday row working its own count out per session, so one answer covers a Tuesday class and a Saturday one), listing who is on the roster — with its own ledger so an hourly pass sends it once. |
+| `65_program_leaders.gs` | 1079 | The `Program_Leaders` tab: who leads what, their addresses, their notification ticks, and `Notify_Timing` — the closed dropdown deciding WHEN a ticked leader hears from `66`: at each change, N days before a date, or on a fixed weekday before one (`parseLeaderNotifyTiming`, `leaderNotifyTimingDaysBefore`) — plus the one-time migration that carries `Program_Options`' old `Instructor_Email` column onto it, and `attachProgramLeaderRow` — the single write this tab accepts from elsewhere (`Master_Program_Dashboard`'s Leader cell), which only ever adds a row, takes the address off the leader's own other rows, and leaves the notify tick clear. Also `Title_Match`, the phrases that let a program find its leader instead of the other way round (`proposeProgramLeaderRowsFromTitles`): a program nobody has typed a row for is PROPOSED to a matching leader as a concrete row with the notify tick clear — a phrase never overrides a typed row, never shares anything and never sends anything, because `buildProgramLeaderIndex()` still reads concrete rows only. |
+| `66_program_leader_notifications.gs` | 990 | **Two channels, one tick.** Roster-change alerts: the stored per-program snapshot, the diff against it, and the one email per leader per sync that comes out of it. And the day-before digests for a leader whose `Notify_Timing` is a day count or a weekday instead: one email per session, N days ahead of it (a weekday row working its own count out per session, so one answer covers a Tuesday class and a Saturday one), listing who is on the roster — with its own ledger so an hourly pass sends it once. |
 
 ### Two months at the door (67)
 
@@ -211,7 +211,7 @@ function, and its own top-level `const`s stand alone.
 
 | File | | What is in it |
 |---|--:|---|
-| `70_registrant_notifications.gs` | 526 | How often each program writes to the people signed up for it: `Program_Options`' `Notify_Mode` / `Reminder_Days`, the policy the calendar invites (`33`) and the reminder emails both read, and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
+| `70_registrant_notifications.gs` | 458 | How often each program writes to the people signed up for it: the policy the calendar invites (`33`) and the reminder emails both read — resolved from `Registrant_Notifications`' tick boxes (`81`) — and the ledger that stops an hourly sync repeating a send. The appointment time a shared calendar description cannot carry is stated here. |
 
 ### Cancellation (71)
 
@@ -248,7 +248,7 @@ and its schema (`SHEET_NAMES`, `HEADERS.Member_Roll`) lives in `03`.
 
 | File | | What is in it |
 |---|--:|---|
-| `74_door_day_and_sign_in.gs` | 743 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
+| `74_door_day_and_sign_in.gs` | 750 | `readWalkInDay` — one building, one date: the programs on, who is expected and what each is already down for, the meal, and the member roll for the search box; `walkInDay`, its PIN-gated endpoint (`doorDay` in `72` is the date-aware one the app calls); `readWalkInMembers` and its per-execution memo; and `walkInSignIn`, the one place a door sign-in becomes rows — every mark through `applyQuickMarkFromDialog`, plus `recordWalkInMember` for somebody the roll has never heard of. |
 
 ### The sliced-job runner (75)
 
@@ -393,3 +393,24 @@ available. It is not part of the normal loop: **do not run it as a build step,
 and do not treat its output as the source.** `Code.bundle.gs` is gitignored;
 edits belong in the numbered files.
 
+### The weekend, on purpose (80)
+
+Behavior only, and numbered last for the usual reason: its two constants stand
+alone, everything it calls is a hoisted function, and nothing else reads it at
+load time. It was `77` on `main` until the merge that brought `77`–`79` in;
+renumbering it was the one way to keep both, and the prefix is all that changed.
+
+| File | | What is in it |
+|---|--:|---|
+| `80_weekend_event_loader.gs` | 322 | `showWeekendEventLoaderDialog` — the Sat/Sun dates in a window (today through the end of next month by default, with its own two date boxes) that are NOT yet on the dashboard, ticked one at a time and loaded through the sync's own `processCalendarGroup`. A weekend event on a program calendar is as often a rental or a placeholder as a program, so this is the deliberate one-off; it changes nothing about which events `syncCalendars` considers. |
+
+### The tab those notifications are set on (81)
+
+Behavior and one schema-free constant block, numbered last for the usual
+reason: everything it calls is a hoisted function, `70` reaches it the same
+way, and its own `const`s stand alone. It was `78` on `main` before the same
+merge; see `80` above.
+
+| File | | What is in it |
+|---|--:|---|
+| `81_registrant_notifications_tab.gs` | 409 | `Registrant_Notifications` — one row per program (the `Event` × `Location` grain `Program_Options` uses) and **a tick box per channel, none of them exclusive**: `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders` (any further day counts) and `Confirm_On_Booking`. `refreshRegistrantNotifications` writes it beside the memory tabs; `policyFromNotificationRow` is what `70` resolves a session's policy through. An unticked box means off, which is only honest because **a row is never born blank** — a new one is seeded from the retired `Notify_Mode` / `Reminder_Days` cells where the workbook had them (`readLegacyNotifyModeRows`, the one-time carry-over that must run before `refreshProgramOptions` rewrites that tab without them) and from the program's kind otherwise. |
