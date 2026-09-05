@@ -72,6 +72,33 @@ function warmQuickMarkIndexCache() {
 }
 
 /**
+ * REBUILDS THE LISTS ONLY IF THERE ARE NONE STORED — the other half of the
+ * bargain warmQuickMarkIndexCache() makes.
+ *
+ * The warm above runs at the end of a registrations sync, which is hourly. In
+ * between, everything that adds a name or a session to the lists drops them
+ * (invalidateQuickMarkIndexCache) — a desk registration, a walk-in, a form
+ * import — and from that moment until the next sync there is nothing stored
+ * for showQuickMarkDialog() to inline. The dialog then opens on "Loading the
+ * sessions…" and the desk waits out a five-tab build with somebody standing
+ * there, which is the one wait this whole cache exists to remove.
+ *
+ * So it is rebuilt on the five-minute pass the door's queue already runs on
+ * (flushCheckInQueueTrigger), where nobody is waiting for it. Cheap when there
+ * is nothing to do — a cache read, and a tab read behind it — which is the
+ * normal case, and the reason this can afford to run that often.
+ */
+function warmQuickMarkIndexIfCold() {
+  try {
+    if (readCachedQuickMarkIndex() || readSheetQuickMarkIndex()) return;
+    refreshQuickMarkIndex();
+    log('warmQuickMarkIndexIfCold: the Quick Mark lists were cold and have been rebuilt.');
+  } catch (err) {
+    log(`ℹ️ Could not pre-build the Quick Mark lists on the five-minute pass (${err}).`);
+  }
+}
+
+/**
  * Drops the stored index. Called by everything that can add a NAME or a
  * SESSION to the lists — a walk-in, a desk registration, a registrations
  * import — so nobody is ever offered a dropdown that has just gone wrong.
@@ -837,10 +864,55 @@ function applyQuickMarkFromDialog(args) {
   // A short wait, and an honest answer when it expires: the person at the desk
   // can press the button again in a moment, which is a far better outcome than
   // either a hang or a mark on the wrong row.
-  return withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), {
+  const result = withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), {
     ok: false,
     message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
   });
+  reportOptimisticQuickMarkFailure(args, result);
+  return result;
+}
+
+/**
+ * A QUICK MARK THE DESK WAS ALREADY TOLD HAD WORKED, AND WHICH THEN DID NOT.
+ *
+ * The dialog marks optimistically — it draws the mark as done and clears for
+ * the next person in the queue rather than holding still through the lock wait
+ * and the write (see submit()). Which means a refusal — the lock timed out,
+ * the appointment slot went in between, there is no lunch on that date — has
+ * nobody looking at it by the time it exists. So it is told to the office
+ * instead, the same way the door app reports a sign-in that did not land. The
+ * dialog also strikes its own log line through if it is still open; this is
+ * the half that survives it being closed.
+ *
+ * Does nothing unless the caller said `optimistic` — a mark made from anywhere
+ * that IS waiting for the answer reports it by returning it, as it always has.
+ * needsConfirm is not a failure either: it is the walk-in question, asked
+ * because the dialog's copy of the lists disagreed with the sheet, and the
+ * dialog asks it and sends the mark again.
+ *
+ * Never allowed to throw: the mark has already failed, and a mailer that fails
+ * on top of it must not turn an answer the dialog can still show into an
+ * exception it cannot.
+ */
+function reportOptimisticQuickMarkFailure(args, result) {
+  if (!args || !args.optimistic || !result || result.ok || result.needsConfirm) return;
+  try {
+    const name = String(args.name || '(no name)').trim();
+    const where = [String(args.session || '').trim(), String(args.location || '').trim()]
+      .filter(Boolean).join(' · ');
+    log(`⚠️ Quick Mark did not save for "${name}"${where ? ` (${where})` : ''}: ${result.message}`);
+    notifyAdmin(`Quick Mark did not save: ${name}`,
+      'A mark made at the desk was shown as done and then refused, so whoever made it has ' +
+      'probably moved on to the next person.\n\n' +
+      `Name: ${name}\n` +
+      `Session: ${where || '(none chosen)'}\n` +
+      `Ticked: ${describeQuickMark(!!args.attended, !!args.lunch, !!args.signup, !!args.register, !!args.waitlist)}\n` +
+      (args.appointmentTime ? `Appointment: ${args.appointmentTime}\n` : '') +
+      `\nWhat the workbook said:\n${result.message}\n\n` +
+      'Nothing was written. Check the row, and mark it again from Quick Mark if it is still needed.');
+  } catch (err) {
+    log(`ℹ️ Could not report a failed Quick Mark (${err}).`);
+  }
 }
 
 /**
@@ -872,7 +944,7 @@ function applyQuickMarkForHousehold(args) {
     return applyQuickMarkFromDialog(base); // a household of one is just a person
   }
 
-  return withScriptLock(DESK_LOCK_WAIT_MS, () => {
+  const result = withScriptLock(DESK_LOCK_WAIT_MS, () => {
     const messages = [];
     let ok = false;
     let namesChanged = false;
@@ -907,6 +979,11 @@ function applyQuickMarkForHousehold(args) {
     ok: false,
     message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
   });
+  // The household path holds the lock itself and calls applyQuickMarkLocked()
+  // directly, so it never passes through the report above. Same desk, same
+  // optimistic hand-back, same office to tell.
+  reportOptimisticQuickMarkFailure(base, result);
+  return result;
 }
 
 /** The body of applyQuickMarkFromDialog(), which holds the lock for it. */

@@ -112,9 +112,9 @@ Line counts are a rough guide to what you are about to load.
 |---|--:|---|
 | `34_sectioned_tables.gs` | 649 | The Upcoming/Past split every date-bearing tab uses. **The sectioned reader is used everywhere — change it carefully.** |
 | `35_per_sheet_render.gs` | 105 | Per-sheet render wrappers. |
-| `36_quick_mark_dialog.gs` | 1043 | Quick Mark, the sign-in desk tool on the menu — including **Add to waitlist**, the one tick that clears every mark beside it (no seat, no meal). |
+| `36_quick_mark_dialog.gs` | 1355 | Quick Mark, the sign-in desk tool on the menu — including **Add to waitlist**, the one tick that clears every mark beside it (no seat, no meal). Its writes are **optimistic**: pressing Mark draws the mark as done and clears for the next person while the sheet write runs underneath, with the walk-in question asked from the dialog's own lists first (`walkInNames`) rather than from a `needsConfirm` round trip after. |
 | `37_regular_needs.gs` | 592 | The standing notes a desk would otherwise have to memorize. |
-| `38_quick_mark_index.gs` | 1823 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions — and `applyQuickMarkLocked`, where the desk's five ticks land (the fifth, **Add to waitlist**, goes through `71`'s writer rather than setting a status here). |
+| `38_quick_mark_index.gs` | 2019 | The cached index Quick Mark and the door pages both read, plus walk-ins and lunch-only sessions — and `applyQuickMarkLocked`, where the desk's five ticks land (the fifth, **Add to waitlist**, goes through `71`'s writer rather than setting a status here). Also `warmQuickMarkIndexIfCold` (the five-minute rebuild that keeps a stored index there to inline) and `reportOptimisticQuickMarkFailure` (a refused mark told to the office, because the desk has already moved on). |
 | `39_triage_sheet.gs` | 391 | Sessions the calendar stopped mentioning. |
 | `40_memory_tabs.gs` | 608 | `Member_Roll` / `Program_Options`, and the shared writer every staff-authored tab is drawn with (`writeMemoryTab`, `readSimpleTable`, the spare validation band). Also `stampMemberHouseholds` / `refreshMemberHouseholds` — where the household grouping decided in `77` meets the roll. What is particular to a roll of PEOPLE — the name split, the dedupe, retirement, the paste — is `79`, and both writers here go through its `writeMemberRollTab()`. |
 | `41_club_rosters.gs` | 448 | `Club_Members`. |
@@ -164,7 +164,7 @@ Line counts are a rough guide to what you are about to load.
 | `60_check_in_page_server.gs` | 1168 | `doGet` and `DOOR_ROUTES` — the ordered table of every page this one deployment serves (cancel first, the door app last and matching everything, including a retired `?mode=walkin`/`walk-in`/`legacy` bookmark), which `checkInPageUrl` also builds its `?mode=` from so a link and the router cannot drift. Plus `checkInRosterModeRequested`, the PIN gate, the roster read, and the mark/register handlers. |
 | `61_check_in_page_html.gs` | 1490 | `buildCheckInHtml` — the whole served page, one template literal. |
 | `62_walk_in_page.gs` | 36 | **Retired (September 2026) — a banner and nothing else.** The sign-in page for people who never registered; replaced by the door app (`73`). Kept, empty, because a file here is never renumbered or removed. Its server half is `74`; `checkInRosterModeRequested` went to `60`. |
-| `63_check_in_store.gs` | 789 | The door's own store: a roster it reads, a queue it writes. |
+| `63_check_in_store.gs` | 796 | The door's own store: a roster it reads, a queue it writes. Its five-minute flush trigger also re-warms Quick Mark's lists when a desk write has dropped them. |
 | `64_walk_in_day_store.gs` | 336 | The sign-in page's boot snapshot: today, per building, stored so the page draws it before it asks. **Deliberately not invalidated** — see its banner. |
 
 ### Program leaders (65–66)
