@@ -54,6 +54,7 @@ const sandbox = {
       if (pattern === 'MMM d') return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
       if (pattern === 'EEE MMM d') return `${DAYS[date.getDay()]} ${MONTHS[date.getMonth()]} ${date.getDate()}`;
       if (pattern === 'EEE') return DAYS[date.getDay()];
+      if (pattern === 'MMMM yyyy') return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
       if (pattern === 'd') return String(date.getDate());
       if (pattern === 'h:mm a') {
         const h = date.getHours() % 12 || 12;
@@ -86,6 +87,10 @@ vm.runInContext(src + `
 this.describeProgramMonthSchedule = describeProgramMonthSchedule;
 this.worstProgramMonthStatus = worstProgramMonthStatus;
 this.programMonthSessionsCell = programMonthSessionsCell;
+this.detectProgramMonthRecurrence = detectProgramMonthRecurrence;
+this.programMonthLinkParts = programMonthLinkParts;
+this.hyperlinkFormulaUrl = hyperlinkFormulaUrl;
+this.NO_REGISTRATION_LINK_LABEL = NO_REGISTRATION_LINK_LABEL;
 this.programMonthSessionRowNumbers = programMonthSessionRowNumbers;
 this.programMonthLeaderCoverage = programMonthLeaderCoverage;
 this.computeProgramMetrics = computeProgramMetrics;
@@ -150,11 +155,14 @@ const cell = (row, header) => row[monthMap[header]];
     [Object.prototype.toString.call(cell(row, 'Month_Start')), cell(row, 'Month_Start').getDate(), cell(row, 'Month_Start').getMonth()],
     ['[object Date]', 1, 8]);
   check('Sessions counts the group', cell(row, 'Sessions'), '4 sessions');
-  check('Schedule says the weekday and the times',
-    cell(row, 'Schedule'), 'Tue 9:30 AM – 11:30 AM · 4 sessions');
-  check('Registered sums the group', cell(row, 'Registered'), 24);
-  check('Max_Capacity sums the caps', cell(row, 'Max_Capacity'), 48);
-  check('Fill is the group total', cell(row, 'Fill'), '50%');
+  // FOUR TUESDAYS IN A ROW IS "WEEKLY", and saying so is the point: the same
+  // phrase without it is equally true of a class that ran on the 1st, 8th,
+  // 15th and 29th, and the difference is what somebody plans around.
+  check('Schedule heads with the cadence, then the weekday and the times',
+    cell(row, 'Schedule'), 'Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions');
+  // THE FOUR COUNTING COLUMNS AS ONE PHRASE. Nobody reads a Registered
+  // without the capacity beside it, and Fill was arithmetic on those two.
+  check('Seats is the whole count in one cell', cell(row, 'Seats'), '24 / 48 · 50%');
   check('Status is the group\'s worst', cell(row, 'Status'), '🟡 Almost Full');
   check('Group_Key is the form', cell(row, 'Group_Key'), 'form::FORM_A');
 }
@@ -176,7 +184,10 @@ const cell = (row, header) => row[monthMap[header]];
   check('the fallback key says what it grouped on',
     cell(built.rows[0], 'Group_Key'), 'plain::Coffee Hour::Narberth::2026-09');
   check('the two-session fallback group counts two', cell(built.rows[0], 'Sessions'), '2 sessions');
-  check('the flags collapse into one cell', cell(built.rows[0], 'Flags'), 'No Registration');
+  // THE FLAGS ARE TICK BOXES ON THIS TAB NOW, not words in a joined cell —
+  // real booleans, so the cell is something a person can click.
+  check('a program flag reads as a ticked box on the program-month row',
+    [cell(built.rows[0], 'No_Registration'), cell(built.rows[0], 'Club')], [true, false]);
 }
 
 // --- 3. A [Shared] group across two locations is ONE row --------------------
@@ -189,7 +200,7 @@ const cell = (row, header) => row[monthMap[header]];
   check('one form across two locations is one row', built.rows.length, 1);
   check('Location is worded by describeLocations()',
     cell(built.rows[0], 'Location'), 'Narberth + Ashbridge');
-  check('a club reads as one', cell(built.rows[0], 'Flags'), 'Club');
+  check('a club reads as one ticked box', cell(built.rows[0], 'Club'), true);
 }
 
 // --- 4. An all-uncapped group's Fill is BLANK, never 0% ---------------------
@@ -200,9 +211,27 @@ const cell = (row, header) => row[monthMap[header]];
   ];
   const built = sandbox.buildProgramMonthRows(rows, sessionMap);
   const row = built.rows[0];
-  check('uncapped Fill is blank', cell(row, 'Fill'), '');
-  check('uncapped Max_Capacity is blank', cell(row, 'Max_Capacity'), '');
-  check('registrations are still counted', cell(row, 'Registered'), 12);
+  check('an uncapped group says "unlimited", never 0%', cell(row, 'Seats'), '12 · unlimited');
+  // ...and the note still shows its working, which is where the reason lives.
+  const seatNote = built.notes.filter(n => n.row === row && n.header === 'Seats')[0];
+  check('the seat note says there is no percentage to give',
+    !!seatNote && seatNote.text.indexOf('no percentage') > -1, true);
+}
+
+// Nobody registered and nothing capped: an empty cell, not "0 · unlimited".
+{
+  const row = sandbox.buildProgramMonthRows(
+    [session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_E' })], sessionMap).rows[0];
+  check('a group nobody has signed up for has nothing to say about seats',
+    cell(row, 'Seats'), '');
+}
+
+// A waitlist is part of the same sentence.
+{
+  const row = sandbox.buildProgramMonthRows([
+    session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_W', active: 12, capacity: 12, waitlist: 2 })
+  ], sessionMap).rows[0];
+  check('somebody queueing is said in the same cell', cell(row, 'Seats'), '12 / 12 · 100% · 2 waiting');
 }
 
 // A group where only SOME sessions have a cap takes its percentage off the
@@ -212,8 +241,15 @@ const cell = (row, header) => row[monthMap[header]];
     session({ at: [2026, 8, 4, 11, 0], formId: 'FORM_M', active: 5, capacity: 10 }),
     session({ at: [2026, 8, 11, 11, 0], formId: 'FORM_M', active: 40 })
   ];
-  const row = sandbox.buildProgramMonthRows(rows, sessionMap).rows[0];
-  check('a partly-capped group takes its fill off the capped sessions', cell(row, 'Fill'), '50%');
+  const built = sandbox.buildProgramMonthRows(rows, sessionMap);
+  const row = built.rows[0];
+  // AND DOES NOT PRINT "45 / 10", which is a nonsense: the 45 and the 10 are
+  // two different populations, so the cell says which is which.
+  check('a partly-capped group takes its fill off the capped sessions',
+    cell(row, 'Seats'), '45 · 10 capped seats · 50%');
+  const note = built.notes.filter(n => n.row === row && n.header === 'Seats')[0];
+  check('and says so, because 45 / 10 is otherwise a nonsense',
+    !!note && note.text.indexOf('uncapped') > -1, true);
 }
 
 // --- 5. Lunch collapses to one row per location per month -------------------
@@ -249,10 +285,113 @@ const cell = (row, header) => row[monthMap[header]];
   const built = sandbox.buildProgramMonthRows(rows, sessionMap);
   check('a moved session makes the schedule read "times vary"',
     cell(built.rows[0], 'Schedule'), '3 sessions · times vary');
+  const scheduleNote = built.notes.filter(n => n.header === 'Schedule')[0];
   check('the outlier is named in a note, on the Schedule cell',
-    [built.notes.length, built.notes[0].header, built.notes[0].text.indexOf('Tue Sep 15') > -1],
-    [1, 'Schedule', true]);
+    [!!scheduleNote, scheduleNote && scheduleNote.text.indexOf('Tue Sep 15') > -1],
+    [true, true]);
 }
+
+// --- A REPEAT IS NAMED, AND SO ARE THE WEEKS IT IS MISSING ------------------
+//
+// "Tue 9:30 AM · 4 sessions" is true of a class that runs every Tuesday and
+// equally true of one that ran on the 1st, 8th, 22nd and 29th. The difference
+// is the whole of what somebody at a desk wants to know, and the second case
+// is the one that gets a room booked on a day nothing happens.
+{
+  const weekly = [1, 8, 15, 22].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_WK' }));
+  const built = sandbox.buildProgramMonthRows(weekly, sessionMap);
+  check('four Tuesdays in a row read as weekly',
+    cell(built.rows[0], 'Schedule'), 'Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions');
+  const note = built.notes.filter(n => n.header === 'Schedule')[0];
+  check('and the note lists the dates',
+    [!!note, note && note.text.indexOf('Tue Sep 1') > -1, note && note.text.indexOf('Tue Sep 22') > -1],
+    [true, true, true]);
+}
+
+// A GAP IS SAID IN THE CELL, not only in the note: it is the one thing about a
+// repeat that "weekly" does not already imply, so a reader who never opens the
+// note must still be told the run has a hole in it.
+{
+  const skipping = [1, 8, 22, 29].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_SK' }));
+  const built = sandbox.buildProgramMonthRows(skipping, sessionMap);
+  check('a missing week is still weekly, and says a week is missing',
+    cell(built.rows[0], 'Schedule'), 'Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions · 1 skipped');
+  const note = built.notes.filter(n => n.header === 'Schedule')[0];
+  check('the note names the week with nothing on it',
+    !!note && note.text.indexOf('Tue Sep 15') > -1, true);
+  // AND DOES NOT CALL IT CANCELLED. The calendar has no event that week and
+  // nothing here can tell a session that was called off from one that was
+  // never scheduled.
+  check('...without claiming to know why',
+    !!note && note.text.indexOf('called off from one that was never scheduled') > -1, true);
+}
+
+// THE CADENCE IS THE SMALLEST GAP, not the commonest. A weekly class that
+// misses a week has gaps [1, 2, 1]; reading that as "every 2 weeks" would be
+// arithmetic winning an argument against the plain fact that it runs Tuesdays.
+{
+  const fortnightly = [1, 15, 29].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_FN' }));
+  check('a genuine fortnightly run is named as one',
+    cell(sandbox.buildProgramMonthRows(fortnightly, sessionMap).rows[0], 'Schedule'),
+    'Every 2 weeks · Tue 9:30 AM – 11:30 AM · 3 sessions');
+}
+
+// WHAT IT REFUSES TO CALL A REPEAT. A phrase like "weekly" that is only mostly
+// true is worse than no phrase at all — it is the sentence somebody plans
+// around — so two sessions is not a pattern, and neither is a run whose gaps
+// are not whole weeks.
+{
+  const twice = [1, 8].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_TW' }));
+  check('two sessions a week apart are two sessions a week apart',
+    cell(sandbox.buildProgramMonthRows(twice, sessionMap).rows[0], 'Schedule'),
+    'Tue 9:30 AM – 11:30 AM · 2 sessions');
+  const uneven = [1, 8, 11].map(d => session({ at: [2026, 8, d, 9, 30], formId: 'F_UN' }));
+  check('a run with a non-weekly gap is not called weekly',
+    sandbox.detectProgramMonthRecurrence(uneven.map((row, i) => ({
+      row, date: row[sessionMap['Event_Date']], times: '9:30 AM – 11:30 AM'
+    }))), null);
+  // Times that disagree never reach the detector at all — the cell says so.
+  const moved = [
+    session({ at: [2026, 8, 1, 9, 30], formId: 'F_MV' }),
+    session({ at: [2026, 8, 8, 9, 30], formId: 'F_MV' }),
+    session({ at: [2026, 8, 15, 14, 0], formId: 'F_MV' })
+  ];
+  check('a moved session is not a weekly class', 
+    cell(sandbox.buildProgramMonthRows(moved, sessionMap).rows[0], 'Schedule'),
+    '3 sessions · times vary');
+}
+
+// --- THE THREE LINK COLUMNS AS ONE CELL -------------------------------------
+//
+// A cell holds one =HYPERLINK() formula, which is why three links were three
+// columns three words wide that nobody ever sorted or read — only clicked. One
+// cell of rich text holds a link per run.
+{
+  const withLinks = session({ at: [2026, 8, 1, 9, 30], formId: 'F_L' });
+  withLinks[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/live","View Live Form")';
+  withLinks[sessionMap['Registrant_Sheet_Link']] = 'https://docs.example/roster';
+  const built = sandbox.buildProgramMonthRows([withLinks], sessionMap);
+  check('the words are on the sheet, in the order they are wanted',
+    cell(built.rows[0], 'Links'), 'Register · Roster');
+  check('and the URLs travel beside them for the rich-text pass',
+    built.links[0].parts,
+    [{ label: 'Register', url: 'https://forms.example/live' },
+     { label: 'Roster', url: 'https://docs.example/roster' }]);
+}
+// A link cell holding WORDS rather than a link keeps its words: losing them
+// would turn "this program deliberately takes no registrations" into an empty
+// cell, which reads as a broken one.
+{
+  const blocked = session({ at: [2026, 8, 1, 9, 30], formId: '', title: 'Coffee Hour' });
+  blocked[sessionMap['Form_Response_Link']] = sandbox.NO_REGISTRATION_LINK_LABEL;
+  const built = sandbox.buildProgramMonthRows([blocked], sessionMap);
+  check('a link column holding words prints the words, unlinked',
+    [cell(built.rows[0], 'Links'), built.links[0].parts[0].url],
+    [sandbox.NO_REGISTRATION_LINK_LABEL, '']);
+}
+check('a URL is read back out of a HYPERLINK formula',
+  sandbox.hyperlinkFormulaUrl('=HYPERLINK("https://x.test/a","Go")'), 'https://x.test/a');
+check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— no registration —'), '');
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------
 {
@@ -396,16 +535,27 @@ const cell = (row, header) => row[monthMap[header]];
   };
   const build = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, index).rows;
 
+  const buildAll = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, index);
+
   const yoga = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })])[0];
-  check('the leader is read off Program_Leaders',
-    [cell(yoga, 'Leader'), cell(yoga, 'Leader_Source')], ['Jane Doe', 'typed']);
+  check('the leader is read off Program_Leaders', cell(yoga, 'Leader'), 'Jane Doe');
 
   const book = build([session({ at: [2026, 8, 2, 9, 30], title: 'Book Club', formId: 'F_B' })])[0];
   check('a program with two leaders prints both', cell(book, 'Leader'), 'Sam Reed, Kit Alvarez');
 
-  const paint = build([session({ at: [2026, 8, 3, 9, 30], title: 'Watercolor', formId: 'F_W' })])[0];
-  check('an unconfirmed title match says so, which is what gets it the wash',
-    [cell(paint, 'Leader'), cell(paint, 'Leader_Source')], ['Ada Frost', 'matched']);
+  // LEADER_SOURCE IS NOT A COLUMN ANY MORE. An unconfirmed Title_Match
+  // proposal travels beside the rows instead, which is what the yellow wash
+  // and its cell note are applied from — the word 'typed' was a column spent
+  // on the ordinary case, and 'matched' was already being said by the colour.
+  const paintBuilt = buildAll([session({ at: [2026, 8, 3, 9, 30], title: 'Watercolor', formId: 'F_W' })]);
+  const paint = paintBuilt.rows[0];
+  check('an unconfirmed title match is flagged for the wash, not printed in a column',
+    [cell(paint, 'Leader'), paintBuilt.matched.length, paintBuilt.matched[0] === paint],
+    ['Ada Frost', 1, true]);
+  check('...and a typed leader is not washed',
+    buildAll([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'F_Y' })]).matched.length, 0);
+  check('Leader_Source has left the layout',
+    sandbox.HEADERS.Master_Program_Dashboard.indexOf('Leader_Source'), -1);
 
   const cafe = build([
     session({ at: [2026, 8, 4, 9, 30], title: 'Memory Cafe', formId: 'F_C', location: 'Narberth' }),
@@ -415,14 +565,17 @@ const cell = (row, header) => row[monthMap[header]];
     [cell(cafe, 'Location'), cell(cafe, 'Leader')], ['Narberth + Ashbridge', 'Lee Park']);
 
   const nobody = build([session({ at: [2026, 8, 6, 9, 30], title: 'Tai Chi', formId: 'F_T' })])[0];
-  check('a program nobody leads is blank, and blank about its source too',
-    [cell(nobody, 'Leader'), cell(nobody, 'Leader_Source')], ['', '']);
+  check('a program nobody leads is blank', cell(nobody, 'Leader'), '');
 
   const lunchRow = build([session({
     at: [2026, 8, 7, 12, 0], formId: '', title: 'Lunch @ Narberth — Chx Parm',
     eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_7` })])[0];
   check('lunch has no leader row and is not made to look like it does',
-    [cell(lunchRow, 'Leader'), cell(lunchRow, 'Leader_Source')], ['', '']);
+    cell(lunchRow, 'Leader'), '');
+  // ...and no flag boxes either: an unticked box is an answer, and there is no
+  // question here to answer.
+  check('and lunch carries no program flags',
+    [cell(lunchRow, 'Club'), cell(lunchRow, 'Type_Tag')], ['', '']);
 
   // Called with no index at all — every test above this section — the columns
   // are blank rather than guessed at, and nothing is read from anywhere.

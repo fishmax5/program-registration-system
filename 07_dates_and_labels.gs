@@ -435,6 +435,24 @@ function makeHyperlinkFormula(url, label) {
 }
 
 /**
+ * The URL back out of one of those, or '' for anything that is not one.
+ *
+ * The link columns on the session table hold `=HYPERLINK(...)` formulas, and
+ * a cell that collapses three of them into one run of rich text needs the
+ * URLs rather than the formulas. A bare URL is accepted too, because a row
+ * written by hand or by an older version of this workbook holds one — and a
+ * cell holding words (NO_REGISTRATION_LINK_LABEL, say) yields nothing, which
+ * is the caller's cue to print it as plain text.
+ */
+function hyperlinkFormulaUrl(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  if (!text) return '';
+  const match = text.match(/^=HYPERLINK\(\s*"([^"]*)"/i);
+  if (match) return match[1];
+  return /^https?:\/\//i.test(text) ? text : '';
+}
+
+/**
  * THE FORM-SPAN A SESSION BELONGS TO — 'FIXED' for a [Grouped] series, which
  * takes one form for its whole run, else the month label, because a Regular
  * program takes one form per calendar month (see buildEventGroups()).
@@ -609,12 +627,23 @@ const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
 /**
  * The same date cell shown as its MONTH alone — "September 2026".
  *
- * Master_Program_Dashboard's session table reads by month rather than by day:
- * the day is already in Event_Time's row and in the calendar, and a column of
- * thirty near-identical dates is noise there. The cell still holds the real
- * start datetime, so partitionByDate(), collapseOldPastMonths() and the
- * Event_Time formulas that read it are untouched — only what a person sees
- * changes. See applyMonthColorTint(), whose `format` argument carries it.
+ * FOR A ROW THAT IS A MONTH, AND NOTHING ELSE. Master_Program_Dashboard's
+ * Month_Start is the 1st of the month and stands for every session in it, so
+ * printing it as "Tue 9/1/2026" states a weekday and a day-of-month that are
+ * not facts about the row: nothing happens on the 1st, and the program does
+ * not run on Tuesdays because September started on one.
+ *
+ * IT IS NOT FOR A ROW THAT IS A SESSION, and it was applied to one for a
+ * while — the session table showed thirty rows all reading "September 2026",
+ * which is the single most useful column on the tab spent saying the same
+ * thing thirty times. A session's row keeps DATE_DISPLAY_FORMAT: the weekday
+ * is half of how a program is known here (see above), and the drill-through
+ * from a month row lands on a block of days a person then has to tell apart.
+ *
+ * The cell still holds the real date underneath either way, so
+ * partitionByDate(), collapseOldPastMonths() and the Event_Time formulas that
+ * read it are untouched — only what a person sees changes. See
+ * applyMonthColorTint(), whose `format` argument carries it.
  */
 const MONTH_DISPLAY_FORMAT = 'MMMM yyyy';
 

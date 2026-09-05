@@ -14,6 +14,18 @@
 // program-month, with the schedule collapsed into a phrase a person reads
 // instead of four rows they compare.
 //
+// TEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN. A tab that exists so
+// four rows read as one line is not doing its job at nineteen columns wide —
+// that is not a line somebody reads, it is a line they scroll. So the rule
+// describeProgramMonthSchedule() was written under became the rule for the
+// whole tab: THE FACT GOES IN THE CELL, THE FOLLOW-UP QUESTION GOES IN A CELL
+// NOTE. Type_Tag stands alone; Seats is the four counting columns as one
+// sentence with its working in the note; Links is four link columns as one
+// cell of rich text; Leader_Source is a yellow wash and a note. The three
+// program FLAGS went the other way — from words in a joined cell to real tick
+// boxes, because a person on this row is as likely to want to change one as to
+// read it (see the flag banner further down).
+//
 // IT IS DERIVED, READ-ONLY, AND PURELY ADDITIVE — that is the whole design
 // constraint, and everything below follows from it:
 //
@@ -64,22 +76,63 @@
 const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key'];
 
 /**
- * The three program-wide flags, in the order they read best in one cell.
- * Written out rather than derived from PROGRAM_FLAG_COLUMNS' own wording,
- * because that list's `describeOn` is a sentence about a change ("X is now a
- * club") and this is a label in a table.
+ * The three program-wide flag columns this tab offers as tick boxes, in the
+ * order they read best.
+ *
+ * Read off PROGRAM_FLAG_COLUMNS rather than spelled out, so a flag added there
+ * cannot quietly fail to appear here — but read through a FUNCTION rather than
+ * a top-level const, because PROGRAM_FLAG_COLUMNS is a lazy global in another
+ * file and reading one at load time is the hazard 01a_lazy_globals.gs exists
+ * to stop.
  */
-const PROGRAM_MONTH_FLAG_LABELS = {
-  Club: 'Club',
-  No_Registration: 'No Registration',
-  Personalized_Assistance: 'Assistance'
-};
+function programMonthFlagColumns() {
+  return PROGRAM_FLAG_COLUMNS.map(flag => flag.column);
+}
 
 /** Worst-first. A group reads as its unhappiest session, so one full date is not hidden by three open ones. */
 const PROGRAM_MONTH_STATUS_ORDER = ['🔴 Waitlist Only', '🟡 Almost Full', '🟢 Open', '🟢 Unlimited'];
 
 /** Separates the parts of one collapsed cell — the same interpunct the rest of the workbook uses. */
 const PROGRAM_MONTH_JOINER = ' · ';
+
+/**
+ * The three links a program-month has, in the order they are wanted, with the
+ * word each one is printed as.
+ *
+ * ONE CELL OF RICH TEXT, not three columns. They were three columns three
+ * words wide that nobody ever sorted, filtered or read — only clicked — and
+ * they pushed Status and the seat counts off the side of a screen to do it.
+ * The header they are read off is the session table's; the label is what a
+ * person sees.
+ */
+const PROGRAM_MONTH_LINK_PARTS = [
+  { header: 'Form_Response_Link', label: 'Register' },
+  { header: 'Edit_Form_Link', label: 'Edit form' },
+  // Registrant_Sheet_Link and Sign_In_Sheet_Link are what 69 stamps on the
+  // session rows. The month tab used to ask for 'Leader_Sheet_Link', which is
+  // the OLD spelling of the first of those: it survives in
+  // LEGACY_HEADER_ALIASES for reading a sheet, but HEADERS.All_Program_Sessions
+  // is keyed by the new name, so getIndexMap() had nothing under it and the
+  // column was blank on every row of every workbook. Collapsing the block into
+  // one cell is what made that visible.
+  { header: 'Registrant_Sheet_Link', label: 'Roster' },
+  { header: 'Sign_In_Sheet_Link', label: 'Sign-in' }
+];
+
+/**
+ * How many sessions it takes before "weekly" is a claim about a program rather
+ * than a coincidence.
+ *
+ * Two sessions a week apart is two sessions a week apart. Three is a pattern,
+ * and three is also the point at which listing the dates in the cell stops
+ * being the better answer.
+ */
+const PROGRAM_MONTH_RECURRENCE_MIN_SESSIONS = 3;
+
+/** The repeats this tab is willing to name, by the number of weeks between sessions. */
+const PROGRAM_MONTH_RECURRENCE_WORDS = { 1: 'Weekly', 2: 'Every 2 weeks', 3: 'Every 3 weeks', 4: 'Monthly' };
+
+const PROGRAM_MONTH_MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
  * The key a session row is filed under.
@@ -104,15 +157,94 @@ function programMonthGroupKey(row, map, monthKey) {
 }
 
 /**
- * "Tue 9:30 AM – 11:00 AM · 4 sessions", or "4 sessions · times vary" when
- * they do not agree — which is the line that earns this tab its keep. A person
- * reading one phrase learns what four rows of a session table were there to
- * tell them, and learns it faster.
+ * WHOLE WEEKS BETWEEN TWO SESSIONS, or null when they are not a whole number
+ * of weeks apart. Rounded off the day count rather than the millisecond count,
+ * because a Tuesday in March and a Tuesday in November are 23 or 25 hours
+ * apart across a clock change and a program does not stop being weekly for it.
+ */
+function programMonthWeeksBetween(earlier, later) {
+  const days = Math.round((later.getTime() - earlier.getTime()) / PROGRAM_MONTH_MS_PER_DAY);
+  return days > 0 && days % 7 === 0 ? days / 7 : null;
+}
+
+/**
+ * IS THIS PROGRAM A REPEAT, and which weeks of it are missing?
  *
- * WHEN THEY DISAGREE, THE OUTLIERS GO IN A CELL NOTE rather than into the
- * cell. "Times vary" is the fact; WHICH Tuesday is at 2pm is the follow-up
- * question, and a follow-up question answered in the cell would make the
- * common case unreadable to serve the rare one.
+ * The question the tab was not answering. "Tue 9:30 AM – 11:30 AM · 4
+ * sessions" is true of a class that runs every Tuesday and equally true of one
+ * that ran on the 2nd, the 9th, the 23rd and the 30th — and the difference
+ * between those two is the whole of what somebody at a desk wants to know.
+ * "Weekly" is the headline; the week that is NOT there is the follow-up.
+ *
+ * Deliberately strict about what it will call a repeat: at least three
+ * sessions (two a week apart is two sessions a week apart), all on the same
+ * weekday at the same time, and every gap a whole number of weeks. Anything
+ * else falls through to the plain shape, because a phrase like "weekly" that
+ * is only mostly true is worse than no phrase at all — it is the sentence
+ * somebody plans a room booking around.
+ *
+ * A GAP IS NOT LABELLED CANCELLED. The calendar has no event that week, and
+ * nothing in this workbook can tell a session that was called off from one
+ * that was never scheduled — a holiday, a term break, a room that was
+ * double-booked in June. The note says which weeks have no session and lets
+ * the reader supply the reason they already know.
+ *
+ * Returns { weeks, word, skipped: [Date] } or null.
+ */
+function detectProgramMonthRecurrence(sessions) {
+  if (!sessions || sessions.length < PROGRAM_MONTH_RECURRENCE_MIN_SESSIONS) return null;
+  const dated = sessions.filter(s => s.date);
+  if (dated.length !== sessions.length) return null;
+
+  const first = dated[0];
+  const firstSig = `${Utilities.formatDate(first.date, TIMEZONE, 'EEE')}|${first.times || ''}`;
+  const gaps = [];
+  for (let i = 1; i < dated.length; i++) {
+    const sig = `${Utilities.formatDate(dated[i].date, TIMEZONE, 'EEE')}|${dated[i].times || ''}`;
+    if (sig !== firstSig) return null;
+    const weeks = programMonthWeeksBetween(dated[i - 1].date, dated[i].date);
+    if (weeks === null) return null;
+    gaps.push(weeks);
+  }
+
+  // THE SMALLEST GAP IS THE CADENCE, not the commonest one. A weekly class
+  // that misses a week has gaps [1, 2, 1]; reading that as "every 2 weeks
+  // with an extra session" would be arithmetic winning an argument against
+  // the plain fact that it runs on Tuesdays.
+  const weeks = Math.min.apply(null, gaps);
+  const word = PROGRAM_MONTH_RECURRENCE_WORDS[weeks];
+  if (!word) return null;
+
+  // The dates the cadence says should be there, and are not.
+  const present = {};
+  dated.forEach(s => { present[formatDateKey(s.date)] = true; });
+  const skipped = [];
+  const last = dated[dated.length - 1].date;
+  for (let step = 1; ; step++) {
+    const when = new Date(first.date.getTime() + step * weeks * 7 * PROGRAM_MONTH_MS_PER_DAY);
+    if (formatDateKey(when) > formatDateKey(last)) break;
+    if (!present[formatDateKey(when)]) skipped.push(when);
+    if (step > 200) break; // a corrupt date is not worth an infinite loop
+  }
+  return { weeks, word, skipped, signature: firstSig };
+}
+
+/**
+ * "Weekly · Tue 9:30 AM – 11:30 AM · 4 sessions", or "Tue 9:30 AM – 11:00 AM ·
+ * 4 sessions" when the dates do not repeat, or "4 sessions · times vary" when
+ * they do not even agree — which is the line that earns this tab its keep. A
+ * person reading one phrase learns what four rows of a session table were
+ * there to tell them, and learns it faster.
+ *
+ * THE HEADLINE IS THE CADENCE WHERE THERE IS ONE. "Weekly" first, because it
+ * is the fact that makes the other two redundant: told a class is weekly on
+ * Tuesdays, nobody needs the dates read out. Told it runs four times, they do.
+ *
+ * WHEN THERE IS SOMETHING MORE TO SAY, IT GOES IN A CELL NOTE rather than into
+ * the cell — the outliers of a schedule that does not agree with itself, and
+ * the weeks a repeat is missing. Which Tuesday is at 2pm, and which Tuesday
+ * has nothing on it at all, are follow-up questions; answered in the cell they
+ * would make the common case unreadable to serve the rare one.
  */
 function describeProgramMonthSchedule(sessions) {
   const count = sessions.length;
@@ -131,7 +263,25 @@ function describeProgramMonthSchedule(sessions) {
   if (distinct.length === 1 && shapes.length > 0 && shapes[0].weekday) {
     const one = shapes[0];
     const phrase = one.times ? `${one.weekday} ${one.times}` : one.weekday;
-    return { text: `${phrase}${PROGRAM_MONTH_JOINER}${count} ${plural}`, note: '' };
+    const repeat = detectProgramMonthRecurrence(sessions);
+    if (!repeat) {
+      return { text: `${phrase}${PROGRAM_MONTH_JOINER}${count} ${plural}`, note: '' };
+    }
+    const dates = sessions.map(s => Utilities.formatDate(s.date, TIMEZONE, 'EEE MMM d'));
+    let text = `${repeat.word}${PROGRAM_MONTH_JOINER}${phrase}${PROGRAM_MONTH_JOINER}${count} ${plural}`;
+    let note = `${repeat.word}, ${phrase}.\n\nOn:\n${dates.join('\n')}`;
+    if (repeat.skipped.length > 0) {
+      const missed = repeat.skipped.map(d => Utilities.formatDate(d, TIMEZONE, 'EEE MMM d'));
+      // SAID IN THE CELL TOO, not only in the note. A gap is the one thing
+      // about a repeat that is not implied by the word "weekly", so a reader
+      // who never opens the note must still be told the run has a hole in it.
+      text += `${PROGRAM_MONTH_JOINER}${missed.length} skipped`;
+      note += `\n\nNo session on:\n${missed.join('\n')}\n\n` +
+        `The calendar has nothing that week. This workbook cannot tell a session that was ` +
+        `called off from one that was never scheduled — a holiday, a term break, a room ` +
+        `already taken.`;
+    }
+    return { text, note };
   }
 
   // The commonest shape is the baseline; everything else is named. Counted
@@ -159,19 +309,135 @@ function describeProgramMonthSchedule(sessions) {
   return { text: `${count} ${plural}${PROGRAM_MONTH_JOINER}times vary`, note };
 }
 
-/** The flags this group carries, collapsed into one cell. */
-function describeProgramMonthFlags(sessions, map) {
-  const on = [];
+/**
+ * Is this flag on for the group? { Club: true, No_Registration: false, ... }
+ *
+ * ANY session carrying the flag means the GROUP does. These describe a
+ * program, not a date — buildEventGroups() sets them on the group and never
+ * unsets them per session — so a row that has not caught up with a tick yet is
+ * a stale row, not a disagreement worth reporting.
+ *
+ * REAL BOOLEANS, not the words the session table may hold. A workbook old
+ * enough to have "Club" typed in the Club column reads back as ticked
+ * (isFlagColumnValue), and writing `true` here is what lets the cell be a
+ * checkbox somebody can click rather than a string they have to match.
+ */
+function readProgramMonthFlags(sessions, map) {
+  const out = {};
   PROGRAM_FLAG_COLUMNS.forEach(flag => {
     if (map[flag.column] === undefined) return;
-    // ANY session carrying the flag means the GROUP does. These describe a
-    // program, not a date — buildEventGroups() sets them on the group and
-    // never unsets them per session — so a row that has not caught up with a
-    // tick yet is a stale row, not a disagreement worth reporting.
-    const anyOn = sessions.some(s => isFlagColumnValue(s.row[map[flag.column]], flag.regex));
-    if (anyOn) on.push(PROGRAM_MONTH_FLAG_LABELS[flag.column] || flag.column);
+    out[flag.column] = sessions.some(s => isFlagColumnValue(s.row[map[flag.column]], flag.regex));
   });
-  return on.join(PROGRAM_MONTH_JOINER);
+  return out;
+}
+
+/**
+ * WHAT SORT OF THING IS THIS — the Type_Tag, in one cell.
+ *
+ * A group with two types prints both: a program whose sessions disagree about
+ * what kind of thing they are is worth seeing rather than averaging.
+ *
+ * The three FLAGS used to be folded in here as words ("Class · Club"). They
+ * are tick boxes of their own on this tab now — see PROGRAM_FLAG_COLUMNS and
+ * the flag block in HEADERS.Master_Program_Dashboard — because a person
+ * looking at this row is as likely to want to CHANGE one as to read it, and a
+ * word in a joined cell is not something you can tick.
+ */
+function describeProgramMonthKind(sessions, map) {
+  const parts = [];
+  sessions.forEach(s => {
+    const type = String(s.row[map['Type_Tag']] || '').trim();
+    if (type && parts.indexOf(type) === -1) parts.push(type);
+  });
+  return parts.join(PROGRAM_MONTH_JOINER);
+}
+
+/**
+ * HOW FULL IS IT — the four counting columns as one phrase.
+ *
+ *   "12 / 20 · 60% · 2 waiting"     capped, and somebody is queueing
+ *   "12 / 20 · 60%"                 capped
+ *   "12 · unlimited"                no cap on anything in the group
+ *   "—"                             nobody, and nothing to say about it
+ *
+ * FOUR COLUMNS THAT WERE ONE SENTENCE. Nobody reads a Registered without
+ * looking at the capacity beside it, Fill was arithmetic on those two printed
+ * in a column of its own, and Waitlist was blank or zero on almost every row.
+ *
+ * BLANK CAPACITY IS "unlimited", NEVER "0" AND NEVER "0%" — the same
+ * discipline percentageOrNull() exists for on the metrics block. Most programs
+ * here are uncapped, and "0% full" would be a bare-faced lie about a month of
+ * open-door sessions.
+ *
+ * The note is where the sum is shown its working: which window the numbers
+ * cover, and how many of the group's sessions actually carried a cap. A group
+ * where three sessions are capped at 20 and a fourth is open has a real total
+ * and a fill worked out over the three, and a reader who is not told that will
+ * eventually find it out by being wrong in front of somebody.
+ */
+function describeProgramMonthSeats(counts) {
+  const registered = counts.registered || 0;
+  const waitlist = counts.waitlist || 0;
+  const capped = counts.cappedSessions || 0;
+  const parts = [];
+
+  if (capped > 0) {
+    const fill = percentageOrNull(counts.cappedRegistered || 0, counts.capacity || 0);
+    // "45 / 10" WOULD BE A NONSENSE, so a partly-capped group does not print
+    // one. Where every session has a cap, the pair reads as it should. Where
+    // only some do, the total registered and the capped seats are two
+    // different populations and the cell says which is which — the
+    // alternative, printing only the capped sessions' registrations, would
+    // silently lose forty people from the count.
+    parts.push(capped < counts.sessions
+      ? `${registered}${PROGRAM_MONTH_JOINER}${counts.capacity} capped seats`
+      : `${registered} / ${counts.capacity}`);
+    if (fill !== null) parts.push(`${fill}%`);
+  } else if (registered > 0) {
+    parts.push(`${registered}${PROGRAM_MONTH_JOINER}unlimited`);
+  }
+  if (waitlist > 0) parts.push(`${waitlist} waiting`);
+  const text = parts.length > 0 ? parts.join(PROGRAM_MONTH_JOINER) : '';
+
+  const lines = [`${registered} registered${counts.window ? ` ${counts.window}` : ''}.`];
+  if (capped > 0) {
+    lines.push(`${counts.capacity} seat(s) across ${capped} capped session(s)` +
+      (capped < counts.sessions ? ` — the other ${counts.sessions - capped} are uncapped, and ` +
+        `the percentage is worked out over the capped ones only.` : '.'));
+  } else {
+    lines.push('No session in this group has a capacity, so there is no percentage to give.');
+  }
+  if (waitlist > 0) lines.push(`${waitlist} on the waitlist.`);
+  return { text, note: lines.join('\n\n') };
+}
+
+/**
+ * THE THREE LINKS AS ONE CELL — [{ label, url }], in the order they are
+ * wanted, skipping the ones this group has not got.
+ *
+ * A link cell that holds words rather than a link (NO_REGISTRATION_LINK_LABEL,
+ * on a [No Registration] program) comes back as a part with no url, so the
+ * words are still printed. Losing them would turn "this program deliberately
+ * takes no registrations" into an empty cell, which reads as a broken one.
+ */
+function programMonthLinkParts(firstNonBlank) {
+  const parts = [];
+  PROGRAM_MONTH_LINK_PARTS.forEach(part => {
+    const raw = firstNonBlank(part.header);
+    const text = String(raw === null || raw === undefined ? '' : raw).trim();
+    if (!text) return;
+    const url = hyperlinkFormulaUrl(text);
+    // A formula the parser did not recognize is printed as its own label
+    // rather than as a formula: a cell reading =HYPERLINK(...) in the middle
+    // of a sentence is worse than the words it was standing for.
+    parts.push(url ? { label: part.label, url } : { label: text, url: '' });
+  });
+  return parts;
+}
+
+/** The plain-text fallback the rich-text pass writes over — and what is left if it fails. */
+function describeProgramMonthLinks(parts) {
+  return parts.map(p => p.label).join(PROGRAM_MONTH_JOINER);
 }
 
 /** The group's worst status, or '' when no session on it says anything. */
@@ -212,10 +478,21 @@ function programMonthNumber(value) {
  * the Leader columns come back blank: this function still writes nothing
  * anywhere, and the leader it would have printed is not a fact it holds.
  *
- * Returns { rows, notes }: `notes` is keyed by the row ARRAY (not its index),
- * because the rows are about to be split into Upcoming and Past and sorted,
- * and an index into the list handed back here would be an index into a list
- * that no longer exists by the time the notes are written.
+ * Returns { rows, notes, links, matched }. All three side-channels are keyed
+ * by the row ARRAY (not its index), because the rows are about to be split
+ * into Upcoming and Past and sorted, and an index into the list handed back
+ * here would be an index into a list that no longer exists by the time they
+ * are applied:
+ *
+ *   notes    the cell notes — a schedule's outliers and skipped weeks, a
+ *            seat count's working.
+ *   links    [{ label, url }] per row, for the one cell of rich text the
+ *            three link columns became. The row itself carries the plain
+ *            words, so a workbook where the rich-text pass fails still reads.
+ *   matched  the rows whose Leader came off an unconfirmed Title_Match
+ *            proposal. This is what Leader_Source used to be a whole column
+ *            for; it is a wash and a note now, so it travels beside the rows
+ *            instead of on them.
  */
 function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex) {
   const headers = HEADERS.Master_Program_Dashboard;
@@ -247,6 +524,8 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
 
   const rows = [];
   const notes = [];
+  const links = [];
+  const matched = [];
   order.forEach(key => {
     const group = groups[key];
     const sessions = group.sessions.slice().sort((a, b) => a.date - b.date);
@@ -269,12 +548,6 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
         capacity += cap;
         cappedRegistered += programMonthNumber(s.row[sessionMap['Active_Count']]);
       }
-    });
-
-    const types = [];
-    sessions.forEach(s => {
-      const type = String(s.row[sessionMap['Type_Tag']] || '').trim();
-      if (type && types.indexOf(type) === -1) types.push(type);
     });
 
     // The first non-blank wins for each link. They are group facts printed on
@@ -311,28 +584,33 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
       ? describeDateSpan(sessions[0].date, sessions[sessions.length - 1].date)
       : schedule.text;
 
+    const seats = describeProgramMonthSeats({
+      registered, waitlist, capacity, cappedRegistered, cappedSessions,
+      sessions: sessions.length,
+      window: describeProgramMonthWindow(group.monthStart)
+    });
+    const linkParts = programMonthLinkParts(firstNonBlank);
+
     const out = new Array(headers.length).fill('');
     out[map['Month_Start']] = group.monthStart;
     out[map['Location']] = describeLocations(locations);
     out[map['Program']] = isLunch
       ? `Lunch @ ${locations[0] || 'this location'}`
       : String(first[sessionMap['Clean_Title']] || '');
-    out[map['Type_Tag']] = types.join(PROGRAM_MONTH_JOINER);
-    out[map['Flags']] = isLunch ? '' : describeProgramMonthFlags(sessions, sessionMap);
+    out[map['Type_Tag']] = isLunch ? '' : describeProgramMonthKind(sessions, sessionMap);
+    // A MEAL CARRIES NO PROGRAM FLAGS. It is not a program (see the note
+    // above), so its boxes are left blank rather than drawn unticked: an
+    // unticked box is an answer, and there is no question here to answer.
+    if (!isLunch) {
+      const flags = readProgramMonthFlags(sessions, sessionMap);
+      programMonthFlagColumns().forEach(column => {
+        if (map[column] !== undefined) out[map[column]] = !!flags[column];
+      });
+    }
     out[map['Schedule']] = scheduleCell;
     out[map['Sessions']] = sessionsCell;
-    out[map['Registered']] = registered;
-    out[map['Max_Capacity']] = cappedSessions > 0 ? capacity : '';
-    // BLANK, NEVER 0%, when nothing in the group has a cap — the same
-    // discipline percentageOrNull() exists for on the metrics block. Most
-    // programs here are uncapped, and "0% full" would be a bare-faced lie
-    // about a month of open-door sessions.
-    const fill = percentageOrNull(cappedRegistered, capacity);
-    out[map['Fill']] = fill === null ? '' : `${fill}%`;
-    out[map['Waitlist']] = waitlist;
-    out[map['Form_Response_Link']] = firstNonBlank('Form_Response_Link');
-    out[map['Edit_Form_Link']] = firstNonBlank('Edit_Form_Link');
-    out[map['Leader_Sheet_Link']] = firstNonBlank('Leader_Sheet_Link');
+    out[map['Seats']] = seats.text;
+    out[map['Links']] = describeProgramMonthLinks(linkParts);
     out[map['Status']] = isLunch ? '' : worstProgramMonthStatus(sessions, sessionMap);
     // Lunch has no leader row and never will — it is not a program (see the
     // note above), and a blank here is the true answer rather than a gap.
@@ -340,15 +618,22 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
       ? { name: '', source: '' }
       : programMonthLeaderCell(String(first[sessionMap['Clean_Title']] || ''), locations, leaderIndex);
     out[map['Leader']] = leader.name;
-    out[map['Leader_Source']] = leader.source;
     out[map['Form_ID']] = String(first[sessionMap['Form_ID']] || '');
     out[map['Group_Key']] = key;
 
     rows.push(out);
+    if (linkParts.length > 0) links.push({ row: out, parts: linkParts });
+    if (leader.source === PROGRAM_MONTH_LEADER_SOURCE_MATCHED) matched.push(out);
     if (!isLunch && schedule.note) notes.push({ row: out, header: 'Schedule', text: schedule.note });
+    if (!isLunch && seats.note) notes.push({ row: out, header: 'Seats', text: seats.note });
   });
 
-  return { rows, notes };
+  return { rows, notes, links, matched };
+}
+
+/** "in September 2026" — what the seat note's numbers are a sum over. */
+function describeProgramMonthWindow(monthStart) {
+  return monthStart ? `in ${Utilities.formatDate(monthStart, TIMEZONE, MONTH_DISPLAY_FORMAT)}` : '';
 }
 
 /**
@@ -446,67 +731,126 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     collapseOldMonths: false
   });
 
-  // `rows` rides along with each zone so anything working per-row — the
-  // matched-leader wash — can read the values it is about to format without
-  // going back to the sheet for what it just wrote. protectDerivedColumns()
-  // reads start and count and ignores the rest.
   const zones = [
-    { start: result.upcomingDataStart, count: upcoming.length, rows: upcoming },
-    { start: result.pastDataStart, count: past.length, rows: past }
+    { start: result.upcomingDataStart, count: upcoming.length },
+    { start: result.pastDataStart, count: past.length }
   ];
 
   const rules = [];
   const locationRanges = [];
   zones.forEach(z => {
     if (z.count < 1) return;
-    ['Registered', 'Max_Capacity', 'Waitlist'].forEach(h => {
-      sheet.getRange(z.start, map[h] + 1, z.count, 1).setNumberFormat('0');
-    });
     // The month tint the sectioned writer applies for itself on every other
     // tab. It keys off a column literally named Event_Date, and this tab's
     // date is Month_Start — so it is applied here rather than by changing what
     // that shared writer is defined against.
-    applyMonthColorTint(sheet, map['Month_Start'] + 1, z.start, z.count);
+    // ...and reads as "September 2026", not "Tue 9/1/2026". The row IS the
+    // month: the 1st of it is where the value has to sit for partitionByDate()
+    // and the sectioned readers, and it is not a day anything happens on.
+    applyMonthColorTint(sheet, map['Month_Start'] + 1, z.start, z.count, MONTH_DISPLAY_FORMAT);
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text)
         .setBackground(EVENT_STATUS_COLORS[text])
         .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
     });
     locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
-    washMatchedProgramMonthLeaders(sheet, map, z.rows, z.start, z.count);
   });
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
   writeProgramMonthNotes(sheet, map, built.notes, upcoming, past, result);
+  writeProgramMonthLinkCells(sheet, map, built.links, upcoming, past, result);
+  washMatchedProgramMonthLeaders(sheet, map, built.matched, upcoming, past, result);
 
-  // EVERY column BUT THE LEADER PAIR, because every other column here is
-  // derived from the session rows and an edit to one would be overwritten by
-  // the next sync without ever having changed anything — which is precisely
-  // what the warning says. Leader is the exception the phase-4 banner
-  // explains: it is derived too, but from Program_Leaders, and typing in it
-  // writes there. Leader_Source is REPORTED, so it keeps its warning; it says
-  // which kind of row the name came off, and typing over that changes nothing
-  // but what the tab claims about itself.
-  protectDerivedColumns(sheet, headers, headers.filter(h => h !== 'Leader'), zones);
+  // EVERY column BUT THE FOUR A PERSON MAY TOUCH, because every other column
+  // here is derived from the session rows and an edit to one would be
+  // overwritten by the next sync without ever having changed anything — which
+  // is precisely what the warning says.
+  //
+  // The four exceptions are windows, not drawers (see the banners below):
+  // Leader is read off Program_Leaders and written back to it, and the three
+  // program flags are read off the session rows and written back to them and
+  // to the calendar. Every one of them is still derived; none of them is
+  // stored here.
+  const editable = [PROGRAM_MONTH_LEADER_COLUMN].concat(programMonthFlagColumns());
+  protectDerivedColumns(sheet, headers, headers.filter(h => editable.indexOf(h) === -1), zones);
   applyProgramMonthLeaderValidation(sheet, map, zones,
     [result.upcomingHeaderRow, result.pastHeaderRow], programLeaderNames());
+  applyProgramMonthFlagCheckboxes(sheet, map, zones,
+    [result.upcomingHeaderRow, result.pastHeaderRow]);
   applyColumnVisibility(sheet, headers, PROGRAM_MONTH_HIDDEN_COLUMNS);
   freezeRowsSafely(sheet, result.upcomingHeaderRow);
   freezeColumnsSafely(sheet, 3); // month, location, program name
   autosizeColumns(sheet, { force: !!force, minCols: numCols });
 }
 
-/** The outlier notes, placed by finding each row's array in the written sections. */
+/**
+ * WHICH SHEET ROW ONE OF THESE ROW ARRAYS LANDED ON, or 0.
+ *
+ * Every per-row pass after the write — the notes, the link cells, the
+ * unconfirmed-leader wash — needs the same answer, and none of them can hold
+ * an index: the rows were split into Upcoming and Past and sorted between
+ * being built and being written. The row ARRAY is the identity that survives
+ * that, so it is what the side-channels are keyed by.
+ */
+function programMonthRowPosition(row, upcoming, past, result) {
+  let at = upcoming.indexOf(row);
+  if (at !== -1) return result.upcomingDataStart + at;
+  at = past.indexOf(row);
+  if (at !== -1) return result.pastDataStart + at;
+  return 0; // a row that was not written can't be annotated
+}
+
+/** The cell notes — a schedule's outliers and skipped weeks, a seat count's working. */
 function writeProgramMonthNotes(sheet, map, notes, upcoming, past, result) {
   if (!notes || notes.length === 0) return;
   notes.forEach(note => {
-    let at = upcoming.indexOf(note.row);
-    let start = result.upcomingDataStart;
-    if (at === -1) { at = past.indexOf(note.row); start = result.pastDataStart; }
-    if (at === -1) return; // a row that was not written can't be annotated
-    sheet.getRange(start + at, map[note.header] + 1).setNote(note.text);
+    const row = programMonthRowPosition(note.row, upcoming, past, result);
+    if (!row) return;
+    sheet.getRange(row, map[note.header] + 1).setNote(note.text);
   });
+}
+
+/**
+ * THE THREE LINKS AS ONE CELL YOU CAN CLICK THREE PLACES IN.
+ *
+ * A cell holds ONE =HYPERLINK() formula, which is why three links were three
+ * columns. Rich text holds a link per RUN, so "Register · Edit form · Roster"
+ * is one cell with three live words in it — and the two columns that bought
+ * back go to Seats and Status, which people actually read.
+ *
+ * The plain words are already on the sheet (the row carries them), so this is
+ * a pass that adds links to text rather than one that writes the text. A
+ * workbook where it throws — an older Apps Script runtime, a protected range —
+ * keeps a cell that says the right words and does not link them, which is a
+ * cosmetic loss and not a broken tab. Caught per row for that reason, and
+ * logged once rather than per row.
+ */
+function writeProgramMonthLinkCells(sheet, map, links, upcoming, past, result) {
+  if (!links || links.length === 0) return;
+  if (map['Links'] === undefined) return;
+  let failed = 0;
+  links.forEach(entry => {
+    const row = programMonthRowPosition(entry.row, upcoming, past, result);
+    if (!row) return;
+    try {
+      const text = describeProgramMonthLinks(entry.parts);
+      const builder = SpreadsheetApp.newRichTextValue().setText(text);
+      let at = 0;
+      entry.parts.forEach((part, i) => {
+        if (i > 0) at += PROGRAM_MONTH_JOINER.length;
+        const end = at + part.label.length;
+        if (part.url) builder.setLinkUrl(at, end, part.url);
+        at = end;
+      });
+      sheet.getRange(row, map['Links'] + 1).setRichTextValue(builder.build());
+    } catch (err) {
+      failed++;
+    }
+  });
+  if (failed > 0) {
+    log(`\u2139\ufe0f ${failed} ${SHEET_NAMES.PROGRAM_MONTH} link cell(s) were left as plain words.`);
+  }
 }
 
 // ============================================================================
@@ -684,7 +1028,20 @@ function renderProgramMonthSheetNow() {
 // month and nothing to carry anywhere. tests/program_month.test.js pins it.
 // ============================================================================
 
-/** Leader_Source' two words. A row proposed by a Title_Match phrase that nobody has confirmed yet, or one somebody typed. */
+/**
+ * WHERE A LEADER'S NAME CAME FROM — a row proposed by a Title_Match phrase
+ * that nobody has confirmed yet, or one somebody typed.
+ *
+ * This was a COLUMN on the tab, printing one of these two words beside every
+ * name. It is a side-channel now (buildProgramMonthRows' `matched`) feeding
+ * the yellow wash and a cell note, because 'typed' was a word spent on the
+ * ordinary case and 'matched' was already being said twice — the pair of cells
+ * took the wash as well. See washMatchedProgramMonthLeaders().
+ *
+ * The two values still have names because programMonthLeaderCell() is a pure
+ * function the tests read, and "the leader came off an unconfirmed proposal"
+ * deserves a word rather than a bare boolean.
+ */
 const PROGRAM_MONTH_LEADER_SOURCE_MATCHED = 'matched';
 const PROGRAM_MONTH_LEADER_SOURCE_TYPED = 'typed';
 
@@ -740,7 +1097,7 @@ function programMonthLeaderCell(title, locations, index) {
  * a leader row, and the dialog says where one is deleted.
  */
 function applyProgramMonthLeaderValidation(sheet, map, zones, headerRows, names) {
-  const column = map['Leader'] + 1;
+  const column = map[PROGRAM_MONTH_LEADER_COLUMN] + 1;
   zones.forEach(z => {
     if (z.count < 1) return;
     applyOpenValueListValidationBounded(sheet, column, names, z.start, z.count);
@@ -753,8 +1110,8 @@ function applyProgramMonthLeaderValidation(sheet, map, zones, headerRows, names)
         `that shares a roster and sends the mail. Emails stay off until you tick them there.\n\n` +
         `Nothing here removes a leader: clear the cell and the next render reads the same name ` +
         `back off ${SHEET_NAMES.PROGRAM_LEADERS}, which is where a row is deleted.\n\n` +
-        `"${PROGRAM_MONTH_LEADER_SOURCE_MATCHED}" means a Title_Match phrase proposed that row and ` +
-        `nobody has checked it yet.`);
+        `A YELLOW cell means a Title_Match phrase proposed that name and nobody has checked ` +
+        `it yet.`);
     } catch (err) { /* the header row moved out from under us; the dropdown is the point */ }
   });
 }
@@ -764,21 +1121,95 @@ function applyProgramMonthLeaderValidation(sheet, map, zones, headerRows, names)
  * yellow the other tabs use for "please look at this", used here for exactly
  * that and nowhere else on the tab.
  *
- * One getRangeList() per section rather than a setBackground() per row: a year
+ * THIS IS WHAT LEADER_SOURCE USED TO BE A COLUMN FOR. That column held one of
+ * two words, and the interesting one — 'matched', an unconfirmed Title_Match
+ * proposal — was already being said twice, because the pair of cells took this
+ * wash as well. A column that repeats what the colour beside it already says
+ * is a column, and this tab had four too many. The wash carries it now, with a
+ * cell note saying what the yellow means: the fact in the cell, the follow-up
+ * in the note, the same rule as everywhere else here.
+ *
+ * One getRangeList() per render rather than a setBackground() per row: a year
  * of unconfirmed matches would otherwise be a hundred round trips on a tab
  * nobody asked to be slow.
  */
-function washMatchedProgramMonthLeaders(sheet, map, rows, start, count) {
-  if (count < 1) return;
+function washMatchedProgramMonthLeaders(sheet, map, matched, upcoming, past, result) {
+  if (!matched || matched.length === 0) return;
+  const column = map[PROGRAM_MONTH_LEADER_COLUMN] + 1;
   const a1 = [];
-  for (let i = 0; i < count; i++) {
-    if (String(rows[i][map['Leader_Source']] || '') !== PROGRAM_MONTH_LEADER_SOURCE_MATCHED) continue;
-    a1.push(sheet.getRange(start + i, map['Leader'] + 1, 1, 2).getA1Notation());
-  }
+  matched.forEach(row => {
+    const at = programMonthRowPosition(row, upcoming, past, result);
+    if (at) a1.push(sheet.getRange(at, column, 1, 1).getA1Notation());
+  });
   if (a1.length === 0) return;
   try {
-    sheet.getRangeList(a1).setBackground(MANUAL_ENTRY_CELL_TINT);
+    const list = sheet.getRangeList(a1);
+    list.setBackground(MANUAL_ENTRY_CELL_TINT);
+    list.setNote(`A ${SHEET_NAMES.PROGRAM_LEADERS} Title_Match phrase proposed this name and ` +
+      `nobody has checked it yet.\n\nIt shares nothing and sends nothing on its own. Delete the ` +
+      `note on that row there once you have confirmed it, and the yellow goes.`);
   } catch (err) {
     log(`\u2139\ufe0f Could not wash the matched leader cells on ${SHEET_NAMES.PROGRAM_MONTH} (${err}).`);
   }
+}
+
+// ============================================================================
+// THE PROGRAM FLAGS, WHICH ARE WINDOWS FOR THE SAME REASON LEADER IS
+// ============================================================================
+//
+// Club, No_Registration and Personalized_Assistance describe a PROGRAM. They
+// lived on the session table, which meant they were ticked onto every one of
+// that program's twelve rows — eleven identical checkboxes whose only job was
+// to not disagree with the twelfth, kept in line by spreadFlagToSiblingRows()
+// on the way in and reconcileProgramFlagColumns() on the way back. This is the
+// row that IS the program, so this is where the question belongs.
+//
+// NOTHING IS STORED HERE. A tick is read off the session rows on every render
+// (readProgramMonthFlags) and a tick typed here is written STRAIGHT BACK to
+// them, and onto the calendar, by handleProgramMonthFlagEdit() in 18 — which
+// reuses the same spread and the same pending-flag queue the session table's
+// own handler has always used. Untick a box and re-render and the answer comes
+// from the same place it did before: the calendar's tags, via the session
+// rows. So the tab is still derived, and there is still exactly one record of
+// whether a program is a club.
+// ============================================================================
+
+/** The one column on this tab a person types a name into. */
+const PROGRAM_MONTH_LEADER_COLUMN = 'Leader';
+
+/**
+ * Real checkboxes on the three flag columns, and the note above each that says
+ * what ticking one actually does.
+ *
+ * The note matters more here than on the session table it moved from: there,
+ * a tick was visibly one of twelve identical boxes and plainly a property of
+ * the program. Here it is one box on one row, and the thing it reaches — every
+ * session of that program, and the calendar event behind each one — is not
+ * visible from the cell.
+ */
+function applyProgramMonthFlagCheckboxes(sheet, map, zones, headerRows) {
+  PROGRAM_FLAG_COLUMNS.forEach(flag => {
+    if (map[flag.column] === undefined) return;
+    const column = map[flag.column] + 1;
+    zones.forEach(z => {
+      if (z.count < 1) return;
+      try {
+        sheet.getRange(z.start, column, z.count, 1)
+          .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+          .setHorizontalAlignment('center');
+      } catch (err) {
+        log(`\u2139\ufe0f Could not draw the ${flag.column} checkboxes on ` +
+          `${SHEET_NAMES.PROGRAM_MONTH} (${err}).`);
+      }
+    });
+    (headerRows || []).forEach(row => {
+      if (!row) return;
+      try {
+        sheet.getRange(row, column).setNote(
+          `${flag.onQuestion('This program')}\n\n${flag.onDetail('It')}\n\n` +
+          `Ticking this box here changes the whole PROGRAM, not one date: every one of its ` +
+          `session rows is ticked to match and [${flag.tag}] is written onto its calendar events.`);
+      } catch (err) { /* the header row moved out from under us; the box is the point */ }
+    });
+  });
 }

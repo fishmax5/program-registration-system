@@ -218,8 +218,24 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS =
  * link column. Form_Response_Link ("View Live Form") stays visible — it is the
  * link staff actually hand out — while Edit_Form_Link and the bare Form_ID are
  * for troubleshooting only.
+ *
+ * THE THREE PROGRAM FLAGS ARE ON THIS LIST NOW, and that is a change of where
+ * a question is ASKED rather than of where it is answered. Club,
+ * No_Registration and Personalized_Assistance describe a PROGRAM, so they were
+ * ticked onto every one of its session rows — twelve identical checkboxes,
+ * eleven of which existed only so the twelfth could not disagree. They are
+ * offered on Master_Program_Dashboard now, which has one row per program, and
+ * this table keeps the columns because it is still where the answer is
+ * STORED: reconcileProgramFlagColumns() writes them from the calendar, the
+ * month tab reads them back, and handleProgramFlagEdit() still works on the
+ * row for anybody who unhides them.
+ *
+ * Waitlist_Only is deliberately NOT on this list. It is the flag that
+ * describes a DATE (see SESSION_FLAG_COLUMNS), so this is the only tab that
+ * can offer it, and it is the whole reason the two lists are kept apart.
  */
-const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month'];
+const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Club', 'No_Registration', 'Personalized_Assistance',
+  'Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month'];
 const MANUAL_ENTRY_HEADER_COLOR = PALETTE.ENTRY_HEADER;
 const MANUAL_ENTRY_CELL_TINT = PALETTE.ENTRY_TINT;
 /**

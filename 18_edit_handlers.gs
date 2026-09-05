@@ -309,7 +309,14 @@ function handleProgramMonthEdit(e, sheet) {
   if (!headerRow) return;
 
   const sheetMap = getHeaderMapAt(sheet, headerRow);
-  const leaderCol = sheetMap['Leader'];
+
+  // THE FLAG CHECKBOXES FIRST. An edit lands in exactly one column, and
+  // handleProgramMonthFlagEdit() reports whether that column was one of
+  // theirs — the same shape handleProgramDashboardEdit() uses for the same
+  // three flags on the tab they moved from.
+  if (handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow)) return;
+
+  const leaderCol = sheetMap[PROGRAM_MONTH_LEADER_COLUMN];
   if (!leaderCol) return;
   const firstCol = e.range.getColumn();
   const lastCol = firstCol + e.range.getNumColumns() - 1;
@@ -395,6 +402,172 @@ function handleProgramMonthEdit(e, sheet) {
   toastIfPossible(`${typed} added to ${SHEET_NAMES.PROGRAM_LEADERS} for "${title}" at ${location}` +
     (result.email ? '' : ' — with no email address yet, so nothing can be shared until you add one') +
     '. Emails are off until you tick them there.');
+}
+
+/**
+ * A TICK OF Club / No_Registration / Personalized_Assistance ON THE MONTH TAB.
+ *
+ * Returns TRUE when the edit belonged to one of those columns, so the caller
+ * can stop looking.
+ *
+ * WHY THE BOX IS HERE AT ALL. These three describe a PROGRAM. They lived on
+ * the session table, so a program with twelve dates carried twelve identical
+ * checkboxes — eleven of which existed only so the twelfth could not disagree
+ * with them, kept in line by spreadFlagToSiblingRows() going in and
+ * reconcileProgramFlagColumns() coming back. Master_Program_Dashboard has one
+ * row per program. This is the row the question belongs on.
+ *
+ * NOTHING IS STORED ON THIS TAB, and that is unchanged. The tick is written
+ * STRAIGHT THROUGH to every session row of the program and queued for the
+ * calendar; the next render reads the answer back off those rows. Untick a box
+ * and the tab does not remember the tick — the session rows do, until the
+ * calendar's own tags say otherwise. So there is still exactly one record of
+ * whether a program is a club, and it is still the calendar.
+ *
+ * THE SAME TWO-STEP DELIVERY as handleProgramFlagEdit(), because this runs on
+ * the same simple onEdit path with no authorization for CalendarApp: the sheet
+ * writes happen now, the [Club] tag reaches the calendar seconds later through
+ * onProgramFlagEditInstallable() draining the pending-flag queue. If that
+ * trigger is not installed, the entry waits for the next Sync Cal and nothing
+ * is lost.
+ *
+ * NO CONFIRMATION DIALOG, for the reason handleProgramFlagEdit() gives: a
+ * checkbox is already the question, the answer and the undo. The toast says
+ * what was reached.
+ */
+function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
+  let flag = null;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  PROGRAM_FLAG_COLUMNS.forEach(candidate => {
+    const col = sheetMap[candidate.column];
+    if (col && col >= firstCol && col <= lastCol) flag = candidate;
+  });
+  if (!flag) return false;
+
+  const editedRow = e.range.getRow();
+  const numRows = e.range.getNumRows();
+  const flagCol = sheetMap[flag.column];
+  const readCell = (row, name) => (sheetMap[name]
+    ? String(sheet.getRange(row, sheetMap[name]).getValue() || '').trim() : '');
+
+  const targets = [];
+  let lunchRows = 0;
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (row <= headerRow) continue;
+    const groupKey = readCell(row, 'Group_Key');
+    if (!groupKey) continue; // a banner, a spacer, or the metrics block
+    // A MEAL IS NOT A PROGRAM and has no calendar event to tag — the same
+    // refusal the Leader cell makes, for the same reason.
+    if (groupKey.indexOf('lunch::') === 0) { lunchRows++; continue; }
+    const title = readCell(row, 'Program');
+    if (!title) continue;
+    targets.push({
+      row, title,
+      formId: readCell(row, 'Form_ID'),
+      on: isTruthyCheckbox(sheet.getRange(row, flagCol).getValue())
+    });
+  }
+  if (targets.length === 0) {
+    if (lunchRows > 0) toastIfPossible('⚠️ Lunch is not a program — there is nothing to tag.');
+    return true;
+  }
+
+  let sessionRows = 0;
+  let calendars = 0;
+  targets.forEach(target => {
+    const applied = applyProgramMonthFlagToSessions(flag, target);
+    sessionRows += applied.rows;
+    calendars += applied.calendars;
+  });
+
+  const headline = targets.length === 1
+    ? describeFlagState(flag, targets[0].title, targets[0].on)
+    : `${targets.length} program(s) updated`;
+  if (sessionRows === 0) {
+    // NOTHING WAS REACHED, and the box is now lying. The tab is derived, so
+    // the next render will clear it — but saying nothing here is how "I ticked
+    // it and nothing happened" becomes unreportable.
+    toastIfPossible(`⚠️ ${headline}, but no session row on ${SHEET_NAMES.PROGRAM_DASHBOARD} ` +
+      `matched — nothing was changed, and the next render will clear this box.`);
+    return true;
+  }
+  toastIfPossible(`${headline} — ${sessionRows} session row(s) ticked to match. ` +
+    (calendars > 0
+      ? `Writing [${flag.tag}] to the calendar; the forms follow on the next Sync Cal.`
+      : `No calendar could be identified, so run Sync Cal to push the tag.`));
+  return true;
+}
+
+/**
+ * Writes one program-month row's flag onto every session row of that program,
+ * and queues the calendar tag per calendar.
+ *
+ * MATCHED BY Form_ID WHERE THERE IS ONE, and that is the same identity
+ * buildProgramMonthRows() grouped the row under — so the rows this touches are
+ * exactly the rows the tick was displayed from. A [Shared] program running at
+ * two buildings has one form and two calendars, which is why the queue entries
+ * are made per DISTINCT calendar found rather than once for the program: the
+ * tag has to be written into both buildings' events.
+ *
+ * The fallback is Clean_Title, for the rows that genuinely have no form —
+ * [No Registration] programs and rows somebody typed in by hand. Deliberately
+ * NOT title-plus-location: the month row for a shared program says "Narberth +
+ * Ashbridge", and matching on that would match nothing at all.
+ *
+ * Returns { rows, calendars }.
+ */
+function applyProgramMonthFlagToSessions(flag, target) {
+  const out = { rows: 0, calendars: 0 };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return out;
+
+  const zones = getSectionZones(registrySheet, 'Event_ID');
+  if (zones.length === 0) return out;
+  const map = getLiveHeaderMap(registrySheet, zones[0].headerRow, HEADERS.All_Program_Sessions);
+  const flagCol = map[flag.column];
+  const titleCol = map['Clean_Title'];
+  const calCol = map['Calendar_Source'];
+  if (flagCol === undefined || titleCol === undefined || calCol === undefined) return out;
+  const formCol = map['Form_ID'];
+
+  const seenCalendars = {};
+  zones.forEach(zone => {
+    const count = zone.dataEnd - zone.dataStart + 1;
+    if (count < 1) return;
+    const titles = registrySheet.getRange(zone.dataStart, titleCol + 1, count, 1).getValues();
+    const calendars = registrySheet.getRange(zone.dataStart, calCol + 1, count, 1).getValues();
+    const forms = formCol === undefined
+      ? null : registrySheet.getRange(zone.dataStart, formCol + 1, count, 1).getValues();
+    const flagRange = registrySheet.getRange(zone.dataStart, flagCol + 1, count, 1);
+    const flags = flagRange.getValues();
+
+    let touched = false;
+    for (let r = 0; r < count; r++) {
+      const rowForm = forms ? String(forms[r][0] || '').trim() : '';
+      const rowTitle = String(titles[r][0] || '').trim();
+      const sameProgram = target.formId ? rowForm === target.formId : rowTitle === target.title;
+      if (!sameProgram) continue;
+      const calendarId = String(calendars[r][0] || '').trim();
+      if (calendarId) seenCalendars[calendarId] = rowTitle || target.title;
+      out.rows++;
+      if (isTruthyCheckbox(flags[r][0]) === target.on && typeof flags[r][0] === 'boolean') continue;
+      flags[r] = [target.on];
+      touched = true;
+    }
+    if (touched) {
+      flagRange.setValues(flags);
+      invalidateSectionedRowsCache(registrySheet);
+    }
+  });
+
+  Object.keys(seenCalendars).forEach(calendarId => {
+    recordPendingProgramFlag(flag.column, calendarId, seenCalendars[calendarId], target.on);
+    out.calendars++;
+  });
+  return out;
 }
 
 /** Puts a Master_Program_Dashboard cell back to what it held. The tab is derived; the cell was never the record. */

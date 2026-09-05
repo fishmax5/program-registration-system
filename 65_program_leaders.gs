@@ -252,7 +252,7 @@ const LEADER_TITLE_MATCH_MAX_PROGRAMS = 10;
  * stop saying it. The Staff_Notes stamp is already the thing a person deletes
  * when they have checked the row, so it is also the honest answer to "has
  * anybody checked this?" — which is exactly what Master_Program_Dashboard's
- * Leader_Source reports.
+ * the month tab's yellow leader wash reports.
  */
 const LEADER_TITLE_MATCH_NOTE_PREFIX = 'Matched on "';
 
@@ -646,7 +646,7 @@ function buildProgramLeaderIndex() {
       programLocation: location,
       // Whether this row is still a PROPOSAL nobody has confirmed. Read here
       // because this is already the one read of the tab per execution, and
-      // Master_Program_Dashboard's Leader_Source is a report on the same rows the
+      // Master_Program_Dashboard's leader wash is a report on the same rows the
       // sharing paths use — a second read to answer it would be a second
       // answer waiting to disagree with this one.
       matched: isTitleMatchedLeaderRow(row[map['Staff_Notes']])

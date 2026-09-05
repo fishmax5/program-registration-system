@@ -22,8 +22,18 @@
  *      buildEventGroups() already makes one FORM for. Fourteen of the
  *      session table's columns are program-month facts printed once per
  *      session; this is the other half of that join written out on its own,
- *      with the schedule collapsed into a phrase ("Tue 9:30 AM - 11:30 AM ·
- *      4 sessions") and lunch collapsed to one row per location per month.
+ *      with the schedule collapsed into a phrase ("Weekly · Tue 9:30 AM -
+ *      11:30 AM · 4 sessions", and a note naming any week the run skips)
+ *      and lunch collapsed to one row per location per month.
+ *      TEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN. The rule is
+ *      the schedule cell's, applied to the whole tab: THE FACT GOES IN THE
+ *      CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE. Seats is the four
+ *      counting columns as one sentence ("12 / 20 · 60% · 2 waiting", or
+ *      "12 · unlimited"), Links is the form, its editor and the two generated
+ *      sheets as one cell of rich text with a live link per word, and the
+ *      three PROGRAM FLAGS — Club, No Registration, Personalized Assistance —
+ *      are tick boxes here rather than twelve identical copies of themselves
+ *      on the session table.
  *      A [Grouped] run of dates, which has one form and no month of its own,
  *      is one row filed under its FIRST month. It also carries the
  *      participation metrics block and one line the month grain makes
@@ -35,15 +45,21 @@
  *      nothing is stored on it that is not already on a session row, and
  *      deleting it changes no behavior anywhere (the next dashboard render
  *      draws it again). Written from the session rows the render already
- *      holds, never from a second read of that tab. The window is Leader /
- *      Leader_Source: read off Program_Leaders on every render and never read
- *      back, so typing a name there ADDS a row on THAT tab (with the email
- *      tick clear) instead of storing a second answer to "who may read this
- *      roster" here. Leader_Source says 'matched' while a Title_Match
- *      proposal behind the name is still unconfirmed, and those cells carry
- *      the yellow please-look-at-this wash. Because leaderProgramKey() has no
- *      month in it, every future month of the same program shows the same
- *      leader with nothing carried anywhere. See section 7b.
+ *      holds, never from a second read of that tab. FOUR WINDOWS, NOT ONE,
+ *      and every one of them still derived:
+ *        LEADER is read off Program_Leaders on every render and never read
+ *        back, so typing a name ADDS a row on THAT tab (with the email tick
+ *        clear) instead of storing a second answer to "who may read this
+ *        roster" here. A yellow cell means a Title_Match phrase proposed the
+ *        name and nobody has confirmed it — which is what the retired
+ *        Leader_Source column used to say in words beside the colour already
+ *        saying it. Because leaderProgramKey() has no month in it, every
+ *        future month of the same program shows the same leader with nothing
+ *        carried anywhere.
+ *        THE THREE PROGRAM FLAGS are read off the session rows and written
+ *        straight back to them — and to the calendar, through the same
+ *        pending-flag queue the session table's own tick has always used.
+ *      See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.

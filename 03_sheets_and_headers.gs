@@ -232,22 +232,62 @@ defineLazyGlobal_('HEADERS', () => ({
   /**
    * Master_Program_Dashboard — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
    *
+   * THIRTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen,
+   * and three of the thirteen are tick boxes this tab did not use to have. The tab
+   * exists so that four session rows read as one line, and a line nineteen
+   * columns wide is not one a person reads — it is one they scroll. So the
+   * columns that were always read TOGETHER are now written together, in the
+   * shape describeProgramMonthSchedule() set for the whole tab: THE FACT GOES
+   * IN THE CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE.
+   *
+   *   Seats     Registered + Max_Capacity + Fill + Waitlist.
+   *             "12 / 20 · 60% · 2 waiting", or "12 · unlimited". Nobody
+   *             reads a Registered without looking at the capacity beside it,
+   *             and Fill was arithmetic on the other two printed in its own
+   *             column. The note carries how the sum was made.
+   *   Links     Form_Response_Link, Edit_Form_Link, Registrant_Sheet_Link and
+   *             Sign_In_Sheet_Link, in one cell of rich text with a live link
+   *             per word. They were columns three words wide that nobody ever
+   *             sorted, filtered or read — only clicked — and one of them
+   *             (spelled Leader_Sheet_Link, a name no session row carries) had
+   *             been blank on every row of every workbook without anybody
+   *             noticing. A fourth link costs nothing now.
+   *
+   * THE THREE PROGRAM FLAGS LIVE HERE NOW — Club, No_Registration and
+   * Personalized_Assistance, as real tick boxes on the row of the thing they
+   * describe. They were on the session table, where they were ticked onto
+   * EVERY row of a program because they are facts about the program and not
+   * about a date: twelve identical checkboxes, eleven of which existed only so
+   * that the twelfth could not disagree with them. This is the row that IS the
+   * program, so it is the row that carries them; the session table keeps the
+   * columns as hidden plumbing (PROGRAM_DASHBOARD_HIDDEN_COLUMNS), because
+   * they are still where the answer is stored and where the calendar sync
+   * reconciles it.
+   *
+   * They are WINDOWS, like Leader, and for the same reason: ticking one writes
+   * through to every session row of that program and queues the tag onto the
+   * calendar (handleProgramMonthFlagEdit in 18), and the next render reads the
+   * answer back off the session rows. Nothing is stored here.
+   *
+   * LEADER_SOURCE IS GONE, and nothing was lost with it. It held one of two
+   * words, 'typed' or 'matched', and 'matched' — an unconfirmed Title_Match
+   * proposal — was already being said twice: the pair of cells took the yellow
+   * manual-entry wash as well. The wash and a cell note on the Leader cell say
+   * it on their own, in the place a person is already looking.
+   *
    * Month_Start LEADS THE ROW AND IS A REAL DATE (the 1st of the month), for
    * the same reason Event_Date leads every other date-bearing tab: it is what
    * partitionByDate() / writeUpcomingPastSections() / getSectionedRows() are
    * defined against. A month written as the words "September 2026" would have
    * needed a second sectioned reader, and this tab is not worth one.
    *
-   * LEADER AND LEADER_SOURCE ARE NOT STORAGE. They are the one pair of
-   * columns on this tab that a person may type into, and what they type is
-   * written straight onto Program_Leaders — the tab that actually shares a
-   * roster and sends the mail. Nothing here is ever read back as the answer to
-   * "who leads this": the next render reads it off Program_Leaders again. Two
-   * records disagreeing about who may read a roster is found out the day
-   * somebody is emailed a class they do not teach, so there is only ever one.
-   * Leader_Source says which kind of row the name came off — 'typed', or
-   * 'matched' where a Title_Match phrase proposed it and nobody has confirmed
-   * it yet (see the TITLE MATCHING banner in 65_program_leaders.gs).
+   * LEADER IS NOT STORAGE. It is the one column on this tab that a person may
+   * type into, and what they type is written straight onto Program_Leaders —
+   * the tab that actually shares a roster and sends the mail. Nothing here is
+   * ever read back as the answer to "who leads this": the next render reads it
+   * off Program_Leaders again. Two records disagreeing about who may read a
+   * roster is found out the day somebody is emailed a class they do not teach,
+   * so there is only ever one.
    *
    * Form_ID trails at the end with Group_Key, hidden like the session table's
    * plumbing block (PROGRAM_MONTH_HIDDEN_COLUMNS): Form_ID is how the rows are
@@ -255,10 +295,9 @@ defineLazyGlobal_('HEADERS', () => ({
    * the formula bar when something has gone wrong, not for scanning.
    */
   Master_Program_Dashboard: [
-    'Month_Start', 'Location', 'Program', 'Leader', 'Leader_Source',
-    'Type_Tag', 'Flags', 'Schedule', 'Sessions',
-    'Registered', 'Max_Capacity', 'Fill', 'Waitlist',
-    'Form_Response_Link', 'Edit_Form_Link', 'Leader_Sheet_Link', 'Status',
+    'Month_Start', 'Location', 'Program', 'Leader', 'Type_Tag',
+    'Club', 'No_Registration', 'Personalized_Assistance',
+    'Schedule', 'Sessions', 'Seats', 'Links', 'Status',
     'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
