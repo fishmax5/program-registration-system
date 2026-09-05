@@ -1,4 +1,4 @@
-// PER-PROGRAM NOTIFICATION SETTINGS: what one Registrant_Notifications row means.
+// PER-PROGRAM NOTIFICATION SETTINGS: what one Program_Settings row means.
 //
 // The whole feature is six answers a member of staff ticks, and the cost of
 // reading them wrong runs both ways. Read too loosely and a program that never
@@ -44,8 +44,13 @@ this.policyFromNotificationRow = policyFromNotificationRow;
 this.policyFromLegacyCells = policyFromLegacyCells;
 this.writeNotificationTicks = writeNotificationTicks;
 this.getIndexMap = getIndexMap;
-this.REGISTRANT_NOTIFICATION_STAFF_COLUMNS = REGISTRANT_NOTIFICATION_STAFF_COLUMNS;
+this.PROGRAM_SETTINGS_STAFF_COLUMNS = PROGRAM_SETTINGS_STAFF_COLUMNS;
+this.LEGACY_REGISTRANT_NOTIFICATION_COLUMNS = LEGACY_REGISTRANT_NOTIFICATION_COLUMNS;
+this.SHEET_NAMES = SHEET_NAMES;
+this.LEGACY_SHEET_RENAMES = LEGACY_SHEET_RENAMES;
+this.LEGACY_PROGRAM_OPTIONS_SHEET_NAME = LEGACY_PROGRAM_OPTIONS_SHEET_NAME;
 this.NOTIFICATION_CHECKBOX_COLUMNS = NOTIFICATION_CHECKBOX_COLUMNS;
+this.seedNotificationHalf = seedNotificationHalf;
 this.REMINDER_CONFIRMATION_OFFSET = REMINDER_CONFIRMATION_OFFSET;
 this.HEADERS = HEADERS;
 
@@ -61,7 +66,7 @@ function check(name, actual, expected) {
 function checkTrue(name, actual) { check(name, !!actual, true); }
 
 const M = sandbox.LEGACY_NOTIFY_MODES;
-const NOTIFY_HEADERS = sandbox.HEADERS.Registrant_Notifications;
+const NOTIFY_HEADERS = sandbox.HEADERS.Program_Settings;
 const notifyMap = sandbox.getIndexMap(NOTIFY_HEADERS);
 
 /** A row with the given ticks, everything else blank. */
@@ -78,17 +83,44 @@ const readRow = (ticks, isAssistance) =>
 // ---------------------------------------------------------------------------
 ['Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of', 'Other_Reminders',
   'Confirm_On_Booking'].forEach(h => {
-  checkTrue(`${h} is a Registrant_Notifications column`, NOTIFY_HEADERS.indexOf(h) !== -1);
+  checkTrue(`${h} is a Program_Settings column`, NOTIFY_HEADERS.indexOf(h) !== -1);
   // A refresh that overwrote one of these would wipe the setting every hour.
   checkTrue(`the refresh never overwrites ${h}`,
-    sandbox.REGISTRANT_NOTIFICATION_STAFF_COLUMNS.indexOf(h) !== -1);
+    sandbox.PROGRAM_SETTINGS_STAFF_COLUMNS.indexOf(h) !== -1);
+  // ...and the merge has to be able to lift it off the retired tab.
+  checkTrue(`${h} is carried off the retired notifications tab`,
+    sandbox.LEGACY_REGISTRANT_NOTIFICATION_COLUMNS.indexOf(h) !== -1);
 });
 // The retired pair is gone from the tab it used to live on, so nothing reads
 // half the answer off a stale column.
-check('Notify_Mode has left Program_Options',
-  sandbox.HEADERS.Program_Options.indexOf('Notify_Mode'), -1);
-check('Reminder_Days has left Program_Options',
-  sandbox.HEADERS.Program_Options.indexOf('Reminder_Days'), -1);
+check('Notify_Mode has left the program tab', NOTIFY_HEADERS.indexOf('Notify_Mode'), -1);
+check('Reminder_Days has left the program tab', NOTIFY_HEADERS.indexOf('Reminder_Days'), -1);
+
+// ---------------------------------------------------------------------------
+// THE MERGE. Two tabs at one grain became one, and the three columns that
+// carried the OTHER half of a program's settings have to have come with it —
+// a merged tab missing Room_Or_Setup is a workbook that lost years of notes.
+// ---------------------------------------------------------------------------
+['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'].forEach(h => {
+  checkTrue(`${h} survived the merge onto Program_Settings`, NOTIFY_HEADERS.indexOf(h) !== -1);
+  checkTrue(`the refresh never overwrites ${h}`,
+    sandbox.PROGRAM_SETTINGS_STAFF_COLUMNS.indexOf(h) !== -1);
+});
+// ONE Staff_Notes, not two. Both retired tabs had one; a merged layout with a
+// pair of them is a tab where half your notes are in the column you are not
+// looking at.
+check('exactly one Staff_Notes column',
+  NOTIFY_HEADERS.filter(h => h === 'Staff_Notes').length, 1);
+// An existing workbook's Program_Options tab is carried across in place, or
+// every note on it is orphaned on a tab nothing asks for.
+check('the old tab is renamed in place rather than abandoned',
+  sandbox.LEGACY_SHEET_RENAMES[sandbox.SHEET_NAMES.PROGRAM_SETTINGS],
+  sandbox.LEGACY_PROGRAM_OPTIONS_SHEET_NAME);
+// The notifications tab is NOT renamed — two tabs cannot both become one by
+// being renamed, and its ticks are migrated instead.
+checkTrue('the notifications tab is not carried across by a rename',
+  Object.keys(sandbox.LEGACY_SHEET_RENAMES).every(k =>
+    [].concat(sandbox.LEGACY_SHEET_RENAMES[k]).indexOf('Registrant_Notifications') === -1));
 
 // ---------------------------------------------------------------------------
 // THE CHANNELS ADD UP. This is the whole reason the dropdown was replaced.
@@ -110,7 +142,7 @@ const mailOnly = readRow({ Day_Before: true });
 check('reminders without the guest list',
   [mailOnly.invite, mailOnly.remind, mailOnly.days], [false, true, [1]]);
 
-// An UNTICKED row is a decision, not an oversight — refreshRegistrantNotifications()
+// An UNTICKED row is a decision, not an oversight — seedNotificationHalf()
 // is what guarantees a row is never born blank (see section 9h).
 const silent = readRow({});
 check('an all-blank row sends nothing, even for an appointment program',
@@ -231,6 +263,80 @@ check('the confirmation subject is not a countdown',
     .indexOf('Reminder'), -1);
 checkTrue('a countdown subject names the program',
   sandbox.buildRegistrantReminderSubject(session, 1).indexOf('Personalized Assistance') !== -1);
+
+// ---------------------------------------------------------------------------
+// SEEDING A ROW'S NOTIFICATION HALF — the merge's whole promise in one
+// function. Newest-first, and never blank.
+//
+// The failure being pinned is the loud-in-hindsight one: on the first sync
+// after the two tabs became one, every row on the merged tab is an old
+// Program_Options row with no tick columns on it. If the seed did not run for
+// those rows, or ran and preferred the blanks it found, the workbook would
+// silence every program it has at once and nothing on screen would say so.
+// ---------------------------------------------------------------------------
+const blankRow = () => new Array(NOTIFY_HEADERS.length).fill('');
+const seed = (legacyTicks, legacyModes, isAssistance, prior) => {
+  const row = blankRow();
+  const from = sandbox.seedNotificationHalf(row, notifyMap, 'chair yoga|narberth',
+    legacyTicks, legacyModes, !!isAssistance, prior || null);
+  return { row, from, policy: sandbox.policyFromNotificationRow(row, notifyMap, !!isAssistance) };
+};
+const ticksFor = values => ({
+  'chair yoga|narberth': { title: 'Chair Yoga', location: 'Narberth', values }
+});
+
+// 1. What somebody ticked on the retired tab wins outright.
+const fromTicks = seed(ticksFor({
+  Add_To_Calendar: true, Week_Before: true, Other_Reminders: '14', Confirm_On_Booking: false
+}), { 'chair yoga|narberth': { mode: M.NONE, reminderDays: '' } });
+check("the retired tab's own ticks beat the dropdown behind them",
+  [fromTicks.from, fromTicks.policy.invite, fromTicks.policy.days],
+  ['ticks', true, [14, 7]]);
+
+// 2. ...including a DELIBERATE SILENCE. Every box clear on that tab is an
+//    answer somebody gave, and re-seeding it from the kind's default would
+//    switch a silenced program back on.
+const silenced = seed(ticksFor({
+  Add_To_Calendar: false, Week_Before: false, Day_Before: false, Morning_Of: false,
+  Other_Reminders: '', Confirm_On_Booking: false
+}), {});
+check('a program somebody silenced stays silenced',
+  [silenced.from, silenced.policy.invite, silenced.policy.remind],
+  ['ticks', false, false]);
+
+// 3. No ticks to carry, but the older dropdown had something to say.
+const fromMode = seed({}, { 'chair yoga|narberth': { mode: M.INVITE_ONLY, reminderDays: '' } });
+check('the retired dropdown is the next answer down',
+  [fromMode.from, fromMode.policy.invite, fromMode.policy.remind],
+  ['mode', true, false]);
+
+// 4. Nothing anywhere: the program's KIND, never a blank row.
+const fromDefault = seed({}, {});
+check('a program with no history is ticked the way its kind is notified',
+  [fromDefault.from, fromDefault.policy.invite, fromDefault.policy.remind],
+  ['default', true, false]);
+const appointment = seed({}, {}, true);
+check('...and an appointment program is written to as well as invited',
+  [appointment.policy.invite, appointment.policy.remind, appointment.policy.confirmTime],
+  [true, true, true]);
+
+// 5. STAFF_NOTES IS JOINED, NEVER PICKED. Both retired tabs had one, both were
+//    typed by hand, and choosing between two sentences on somebody's behalf is
+//    how a note about a wheelchair ramp disappears.
+const priorRow = blankRow();
+priorRow[notifyMap['Staff_Notes']] = 'Big room, 20 chairs.';
+const joined = seed(ticksFor({ Add_To_Calendar: true, Staff_Notes: 'Do not email in August.' }),
+  {}, false, priorRow);
+check("both tabs' notes survive the merge",
+  joined.row[notifyMap['Staff_Notes']], 'Big room, 20 chairs.\nDo not email in August.');
+// The same note on both tabs is one note, not the same sentence twice. (The
+// caller has already copied the prior row's notes into the row by this point;
+// here the row is blank, so an identical note simply adds nothing.)
+const dedup = seed(ticksFor({ Add_To_Calendar: true, Staff_Notes: 'Big room, 20 chairs.' }),
+  {}, false, priorRow);
+check('...and the same note on both is not doubled',
+  dedup.row[notifyMap['Staff_Notes']], '');
+
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

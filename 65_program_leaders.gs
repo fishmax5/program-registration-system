@@ -55,7 +55,7 @@
  */
 const PROGRAM_LEADERS_MIGRATED_PROP_KEY = 'PROGRAM_LEADERS_MIGRATED_FROM_OPTIONS_V1';
 
-/** The old column the addresses are carried across from. Gone from HEADERS.Program_Options; still on older sheets. */
+/** The old column the addresses are carried across from. Gone from HEADERS.Program_Settings; still on older sheets. */
 const LEGACY_INSTRUCTOR_EMAIL_COLUMN = 'Instructor_Email';
 
 
@@ -458,9 +458,9 @@ function programLeadersTabOptions() {
  * used to lead it. Rows that match nothing get a note on the cell rather than
  * being removed; see the unmatched handling below.
  *
- * Called from refreshMemoryTabs(), BEFORE refreshProgramOptions(), which is
+ * Called from refreshMemoryTabs(), BEFORE refreshProgramSettings(), which is
  * load-bearing on a workbook that has not migrated yet: the migration reads
- * Instructor_Email off the live Program_Options sheet, and the Program_Options
+ * Instructor_Email off the live program tab, and the Program_Settings
  * refresh is what finally rewrites that tab without the column.
  */
 function refreshProgramLeadersTab(ss, sessionRows) {
@@ -881,11 +881,11 @@ function firstBlankProgramLeaderRow(sheet, nameColumn) {
 // --- carrying the old column across ------------------------------------------
 
 /**
- * Moves Program_Options' old Instructor_Email addresses onto this tab, ONCE.
+ * Moves the old Instructor_Email addresses onto this tab, ONCE.
  *
- * THE FAILURE THIS PREVENTS is the quiet one. HEADERS.Program_Options no
- * longer lists Instructor_Email, so the next Program_Options render writes the
- * tab without it — and every address a site has been maintaining for a year
+ * THE FAILURE THIS PREVENTS is the quiet one. HEADERS.Program_Settings does
+ * not list Instructor_Email, so the next render of that tab writes it without
+ * the column — and every address a site has been maintaining for a year
  * goes with it, with nothing on screen to say so. The sheets would keep
  * working (they are shared already) and the next one created would silently
  * share with nobody.
@@ -910,7 +910,7 @@ function migrateProgramLeaderAddresses(ss, leaderSheet) {
   // Marked done either way. A workbook with nothing to carry (a fresh install,
   // or one where the column was always blank) has completed this migration
   // just as surely as one that moved forty addresses, and leaving the marker
-  // unset would mean re-reading Program_Options on every sync forever.
+  // unset would mean re-reading that tab on every sync forever.
   const existing = {};
   const headers = HEADERS.Program_Leaders;
   const map = getIndexMap(headers);
@@ -941,17 +941,17 @@ function migrateProgramLeaderAddresses(ss, leaderSheet) {
     // asked about, as a side effect of an upgrade, is a mail-out — see
     // section 9d. Somebody chooses this per leader, on purpose.
     row[map['Notify_Roster_Changes']] = false;
-    row[map['Staff_Notes']] = 'Carried over from Program_Options — add the leader\'s name.';
+    row[map['Staff_Notes']] = 'Carried over from the old program tab — add the leader\'s name.';
     added.push(row);
   });
 
   if (added.length > 0) {
     writeMemoryTab(leaderSheet, headers, rows.concat(added), programLeadersTabOptions());
     invalidateProgramLeaderIndex();
-    log(`Program_Leaders: carried ${added.length} address(es) over from Program_Options' old ` +
+    log(`Program_Leaders: carried ${added.length} address(es) over from the old program tab's ` +
       `${LEGACY_INSTRUCTOR_EMAIL_COLUMN} column.`);
     noteForAdmin('Program leader addresses moved to their own tab',
-      `${added.length} address(es) that lived in Program_Options' ${LEGACY_INSTRUCTOR_EMAIL_COLUMN} ` +
+      `${added.length} address(es) that lived in the old ${LEGACY_INSTRUCTOR_EMAIL_COLUMN} ` +
       `column are now rows on the ${SHEET_NAMES.PROGRAM_LEADERS} tab, where a leader also has a name ` +
       `and can be sent roster-change emails. Nothing was lost and nothing was turned on — the ` +
       `notification tick starts clear on every carried-over row.`);
@@ -971,14 +971,16 @@ function migrateProgramLeaderAddresses(ss, leaderSheet) {
  * { programKey: { title, location, emails } } off Program_Options' old address
  * column, read straight from the sheet.
  *
- * By HEADER NAME on the live sheet, deliberately: HEADERS.Program_Options no
- * longer contains the column, so readSimpleTable() cannot return it. This is
- * the one place in the project that has to look at a sheet the layout has
- * already stopped describing.
+ * By HEADER NAME on the live sheet, deliberately: HEADERS.Program_Settings
+ * does not contain the column, so readSimpleTable() cannot return it. This is
+ * one of the two places in the project that has to look at a sheet the layout
+ * has already stopped describing (the other is readLegacyNotifyModeRows), and
+ * they share programSettingsSheetForLegacyRead() so that neither can be caught
+ * out by the tab being mid-rename.
  */
 function readLegacyInstructorEmails(ss) {
   const found = {};
-  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
+  const sheet = programSettingsSheetForLegacyRead(ss);
   if (!sheet) return found;
 
   const lastRow = sheet.getLastRow();
@@ -989,7 +991,7 @@ function readLegacyInstructorEmails(ss) {
   try {
     grid = sheet.getRange(1, 1, lastRow, lastCol).getValues();
   } catch (err) {
-    log(`ℹ️ Could not read ${SHEET_NAMES.PROGRAM_OPTIONS} for its old address column (${err}).`);
+    log(`ℹ️ Could not read ${SHEET_NAMES.PROGRAM_SETTINGS} for its old address column (${err}).`);
     return found;
   }
 
@@ -1015,7 +1017,7 @@ function readLegacyInstructorEmails(ss) {
 /**
  * A program renamed on the calendar takes its leader rows with it.
  *
- * The same reasoning as renameProgramOptionRows(): this tab is keyed by
+ * The same reasoning as renameProgramSettingRows(): this tab is keyed by
  * Program + Location and holds something nothing can regenerate — who leads
  * the class. Without this the leader is stranded under the old name, the
  * renamed program looks like it has nobody, and the next sync would share its

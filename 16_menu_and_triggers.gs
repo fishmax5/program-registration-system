@@ -184,7 +184,7 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
       .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')
       // Beside the invitations because they are the two channels one
-      // Registrant_Notifications row governs, and this is the one that can
+      // Program_Settings row governs, and this is the one that can
       // say "your appointment is at 2:15". See sections 9e and 9h.
       .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')

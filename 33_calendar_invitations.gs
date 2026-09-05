@@ -36,7 +36,7 @@
 // Governed by Config's "📧 Calendar Invitations" switch (see
 // CALENDAR_INVITE_OPTIONS); off means this whole section is a no-op. Under
 // that switch, each PROGRAM says whether it wants invitations at all, with
-// Registrant_Notifications' Add_To_Calendar tick — see sections 9e and 9h.
+// Program_Settings' Add_To_Calendar tick — see sections 9e and 9h.
 // ============================================================================
 
 /** Who we have already put on which event's guest list: { Event_ID: [email...] }. */

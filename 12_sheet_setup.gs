@@ -47,7 +47,7 @@ function initSheet() {
   initPlaceholderSheet(ss, SHEET_NAMES.LUNCH_ROSTER, 'Run "Sync Registrations" from the menu to populate the lunch name list.');
 
   renderProgramDashboard(true);
-  refreshMemoryTabs(null, null); // builds Member_Roll / Program_Options, empty on a fresh workbook
+  refreshMemoryTabs(null, null); // builds Member_Roll / Program_Settings, empty on a fresh workbook
   renderClubMembersSheet([]);   // and the (empty) club roster, so its columns exist from day one
   // Both empty on a fresh workbook, and both need their columns and dropdowns
   // to exist before anybody can use them — a tab staff are told to type into
@@ -86,7 +86,7 @@ function initSheet() {
  *     Lunch_Schedule              — including the new ADD block
  *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
  *     All_Lunch_Registrants                — rebuilt with it, from the same rollup
- *     Member_Roll / Program_Options — staff columns never touched
+ *     Member_Roll / Program_Settings — staff columns never touched
  *     Tab order, column widths, dropdowns, conditional formatting
  *
  *   NOT TOUCHED

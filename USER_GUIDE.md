@@ -869,7 +869,7 @@ window:
 |---|---|---|---|
 | 🟩 green | **Today** | All_Program_Sessions, Master_Lunch_Dashboard, All_Lunch_Registrants, All_Registrants | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
-| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Options, Program_Leaders, Registrant_Notifications, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, what each program sends its registrants, who is waiting for an appointment |
+| 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Settings, Program_Leaders, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, what each program sends its registrants, who is waiting for an appointment |
 | ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
 
 **Which cells may I type in?** That is a question about *columns*, not tabs, so
@@ -1999,7 +1999,7 @@ change out to the forms**, exactly like hand-editing a row does.
 Neither needs an authorized admin account — adding a menu row this way is the
 same capability as hand-editing the tab, just faster.
 
-### 6. Member_Roll, Program_Options, Program_Leaders and Registrant_Notifications — your own notes
+### 6. Member_Roll, Program_Settings and Program_Leaders — your own notes
 
 These three tabs are the only ones holding knowledge the system can't work out
 for itself. Each is split down the middle:
@@ -2021,16 +2021,30 @@ don't evaporate. `Confirmed_Member` is a plain checkbox — tick it once you've
 personally verified someone as a real member, independent of how many times
 the recomputed history shows them attending.
 
-**Program_Options** — one row per program per location:
+**Program_Settings** — one row per program per location, holding everything
+standing that is true of it: **how it runs**, and **what it sends**.
 
-| Recomputed | Yours |
-|---|---|
-| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup`, `Staff_Notes` |
+| Recomputed | Yours — how it runs | Yours — what it sends |
+|---|---|---|
+| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup` | `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders`, `Confirm_On_Booking` |
 
-"Needs the big room." "Usually 8 even though it's capped at 12."
+...and one `Staff_Notes` at the end for anything else. "Needs the big room."
+"Usually 8 even though it's capped at 12." "Don't email in August."
+
+> **This used to be two tabs**, `Program_Options` and
+> `Registrant_Notifications`. They had one row per program per location each,
+> were rebuilt in the same sync from the same rows, and asked two halves of one
+> question about one thing. **Your `Program_Options` tab is renamed in place —
+> every note on it is exactly where you left it — and every tick box from
+> `Registrant_Notifications` is copied onto it the first time a sync runs.** The
+> old notifications tab is left in the workbook as
+> `Registrant_Notifications (retired)` so you can check it against the new one;
+> nothing reads it any more, so delete it whenever you're happy.
 
 Who **leads** this program used to be a column here (`Instructor_Email`). It has
 its own tab now, for the reason below.
+
+The notification half is worth its own read — see just below.
 
 **Program_Leaders** — one row per leader per program per location:
 
@@ -2044,18 +2058,14 @@ a class. It never adds a row and never removes one.
 
 A leader is a **person**, who may run three classes at two sites — which is
 exactly what a single address column on a program row could not say, and why
-this moved off Program_Options. **Your existing addresses are carried across
+this moved off the program tab. **Your existing addresses are carried across
 automatically; nothing needs re-typing.**
 
 Full detail, including the roster-change emails it can send: see
 **[Program leaders](#program-leaders)**.
 
-**Registrant_Notifications** — one row per program per location, and this is
-where you say what that program sends the people signed up for it:
-
-| Recomputed | Yours |
-|---|---|
-| `Type_Tag`, `Sessions_Tracked`, `Next_Date` | `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders`, `Confirm_On_Booking`, `Staff_Notes` |
+**The notification half of Program_Settings** — where you say what a program
+sends the people signed up for it.
 
 **Tick as many as apply — they add up.** A program can put its registrants on
 the calendar event *and* email them a week out *and* email them again the
@@ -2076,8 +2086,8 @@ blank: a brand-new program arrives ticked the way its kind is normally notified
 confirmed and reminded the day before). Change it whenever you like — the next
 sync reads whatever the boxes say.
 
-This replaces the old `Notify_Mode` dropdown and `Reminder_Days` cell on
-Program_Options. **Your existing settings are carried across automatically; a
+These replace the old `Notify_Mode` dropdown and `Reminder_Days` cell.
+**Your existing settings are carried across automatically; a
 program that was set to "Calendar invite + reminders, 7 and 1" comes back with
 `Add_To_Calendar`, `Week_Before` and `Day_Before` ticked.**
 
@@ -3039,7 +3049,7 @@ one is simply not matched to anything.
 
 ### Where the addresses went
 
-This tab replaces **Program_Options' old `Instructor_Email` column**, and the
+This tab replaces the program tab's **old `Instructor_Email` column**, and the
 first sync after this upgrade **carries every address across automatically**.
 Nothing is lost. The carried-over rows arrive with the address filled in, the
 name blank (the old column never held one) and a note in Staff_Notes asking you
@@ -3051,7 +3061,7 @@ email as a side effect of an upgrade is a mail-out nobody consented to, so
 somebody ticks each box on purpose.
 
 If a program is renamed on the calendar, its leader rows follow it onto the new
-name — the same as Program_Options and everything else keyed by program title.
+name — the same as Program_Settings and everything else keyed by program title.
 
 ---
 
@@ -3328,7 +3338,7 @@ to do considerably less.
 **What moves across:** the sessions themselves (and therefore every registrant
 attached to them, past and future), anything already in
 `Deleted_Event_Triage`, the club roster if it's a club, your standing notes on
-`Program_Options`, and the record of who has already been sent a calendar
+`Program_Settings`, and the record of who has already been sent a calendar
 invitation. The **form is kept and renamed to match**, so every registration
 link already handed out keeps working and stops advertising the old name.
 
@@ -3338,7 +3348,7 @@ link already handed out keeps working and stops advertising the old name.
 > sessions were deleted and twelve unrelated ones appeared". You'd get the
 > sessions swept into `Deleted_Event_Triage`, which is at least visible. The
 > other three losses were silent: a renamed **club** stopped booking its
-> standing roster and said nothing, your `Program_Options` notes were stranded
+> standing roster and said nothing, your `Program_Settings` notes were stranded
 > under the old name, and the invite ledger forgot who it had already emailed.
 
 **It has to be sure first.** A rename is only distinguishable from "one program
@@ -3546,7 +3556,7 @@ one of them in the current layout.
 | Lunch_Schedule (+ the ADD block) | The **triggers** — automation keeps running as it was |
 | Master_Lunch_Dashboard (hand-entered columns kept) | |
 | Deleted_Event_Triage | |
-| Member_Roll / Program_Options (your notes kept) | |
+| Member_Roll / Program_Settings (your notes kept) | |
 | Club_Members (the roster is kept exactly as it is) | |
 | Config, tab order, widths, dropdowns, colours | |
 

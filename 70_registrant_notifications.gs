@@ -2,7 +2,7 @@
 // 9e. REGISTRANT NOTIFICATIONS  (how often each program tells its people)
 // ============================================================================
 //
-// One row per program, on Registrant_Notifications (section 9h), answering
+// One row per program, on Program_Settings (section 9h), answering
 // "how much does this program talk to the people signed up for it?" — because
 // the honest answer
 // differs by program and always has. A drop-in coffee morning that fifty
@@ -148,10 +148,10 @@ function parseReminderDays(value) {
 }
 
 /**
- * { programKey: policy } read off Registrant_Notifications once per execution.
- * The tab is a few hundred rows at most and both the invitation pass and the
- * reminder pass want it, so it is read once and memoized rather than re-opened
- * per session.
+ * { programKey: policy } read off Program_Settings once per execution. The tab
+ * is a few hundred rows at most and both the invitation pass and the reminder
+ * pass want it, so it is read once and memoized rather than re-opened per
+ * session.
  */
 let __notificationPolicyRowsCache = null;
 
@@ -163,9 +163,9 @@ function readNotificationPolicyRows() {
   if (__notificationPolicyRowsCache) return __notificationPolicyRowsCache;
   const out = {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_NOTIFICATIONS) : null;
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS) : null;
   if (sheet) {
-    const headers = HEADERS.Registrant_Notifications;
+    const headers = HEADERS.Program_Settings;
     const map = getIndexMap(headers);
     readSimpleTableValues(sheet, headers).forEach(row => {
       const key = notificationProgramKey(row[map['Event']], row[map['Location']]);
@@ -177,7 +177,7 @@ function readNotificationPolicyRows() {
   return out;
 }
 
-/** The key Registrant_Notifications rows and session rows are matched on. */
+/** The key Program_Settings rows and session rows are matched on. */
 function notificationProgramKey(title, location) {
   return `${normalizeNameKey(title)}|${normalizeNameKey(location)}`;
 }
@@ -187,14 +187,14 @@ function notificationProgramKey(title, location) {
  * its kind's default where there is not.
  *
  * A program the calendar has only just introduced has no row until the next
- * Registrant_Notifications refresh, and a session must not go unnotified in
+ * Program_Settings refresh, and a session must not go unnotified in
  * the meantime: an absent ROW is its kind's default. An absent TICK, on a row
  * that exists, is a decision — see 9h.
  */
 function notificationPolicyForSession(session) {
   const row = readNotificationPolicyRows()[notificationProgramKey(session.title, session.location)];
   if (!row) return defaultNotificationPolicy(!!session.isAssistance);
-  return policyFromNotificationRow(row, getIndexMap(HEADERS.Registrant_Notifications),
+  return policyFromNotificationRow(row, getIndexMap(HEADERS.Program_Settings),
     !!session.isAssistance);
 }
 
@@ -425,7 +425,7 @@ function buildRegistrantReminderBody(session, person, offset, daysAway) {
  * MENU ENTRY: run the reminder pass now instead of waiting for the next sync.
  *
  * Reads both tables fresh — whoever pressed this has just ticked a box on
- * Registrant_Notifications and expects that tick counted — and clears the
+ * Program_Settings and expects that tick counted — and clears the
  * policy memo first for the same reason.
  */
 function sendRegistrantRemindersNow() {
@@ -453,6 +453,6 @@ function sendRegistrantRemindersNow() {
   toastIfPossible(result.sent > 0
     ? `Reminders sent ✅ — ${result.sent} email(s)` + (result.held > 0
       ? `, ${result.held} held for the next run.` : '.')
-    : `Nobody is due a reminder right now — tick a reminder on ${SHEET_NAMES.REGISTRANT_NOTIFICATIONS} ` +
+    : `Nobody is due a reminder right now — tick a reminder on ${SHEET_NAMES.PROGRAM_SETTINGS} ` +
       `to choose which programs send them.`);
 }

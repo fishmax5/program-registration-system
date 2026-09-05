@@ -1,8 +1,8 @@
 // THE PROGRAM_LEADERS TAB, and the migration that fills it.
 //
 // THE EXPENSIVE FAILURE this guards is a silent one. Who leads a program used
-// to be Program_Options' Instructor_Email column; HEADERS.Program_Options no
-// longer lists it, so the very next render of that tab writes it away. If the
+// to be the program tab's Instructor_Email column; HEADERS.Program_Settings
+// does not list it, so the very next render of that tab writes it away. If the
 // addresses have not been carried across by then, a year of somebody's
 // maintenance is gone with nothing on screen to say so — the shared sheets
 // keep working (they were shared already) and only the NEXT sheet created
@@ -63,6 +63,7 @@ this.leaderNotifyTimingMaxDays = leaderNotifyTimingMaxDays;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
+this.LEGACY_PROGRAM_OPTIONS_SHEET_NAME = LEGACY_PROGRAM_OPTIONS_SHEET_NAME;
 this.PROGRAM_LEADERS_STAFF_COLUMNS = PROGRAM_LEADERS_STAFF_COLUMNS;
 this.LEADER_NOTIFY_TIMING_LIST = LEADER_NOTIFY_TIMING_LIST;
 this.LEADER_NOTIFY_TIMING_EACH_CHANGE = LEADER_NOTIFY_TIMING_EACH_CHANGE;
@@ -85,12 +86,12 @@ const leaderHeaders = sandbox.HEADERS.Program_Leaders;
 const leaderMap = sandbox.getIndexMap(leaderHeaders);
 
 // ---------------------------------------------------------------------------
-// Program_Options no longer has the column, so nothing may read it by header
+// The program tab no longer has the column, so nothing may read it by header
 // list. This is what the migration has to work around.
 // ---------------------------------------------------------------------------
 
-check('the address column is gone from the Program_Options layout',
-  sandbox.HEADERS.Program_Options.indexOf('Instructor_Email'), -1);
+check('the address column is gone from the Program_Settings layout',
+  sandbox.HEADERS.Program_Settings.indexOf('Instructor_Email'), -1);
 check('Notify_Timing is a Program_Leaders column',
   leaderHeaders.indexOf('Notify_Timing') !== -1, true);
 // A refresh that owned this column would wipe the setting every hour.
@@ -194,7 +195,13 @@ function fakeLeaderSheet(existingRows) {
   return sheet;
 }
 
-const ss = { getSheetByName: name => (name === sandbox.SHEET_NAMES.PROGRAM_OPTIONS ? legacySheet : null) };
+// UNDER ITS OLD NAME. The migration runs before the merged refresh has had a
+// chance to rename the tab, so programSettingsSheetForLegacyRead() has to find
+// it either way round — this fixture is the "not renamed yet" half.
+const ss = {
+  getSheetByName: name =>
+    (name === sandbox.LEGACY_PROGRAM_OPTIONS_SHEET_NAME ? legacySheet : null)
+};
 
 // A leader row somebody already typed for Chair Yoga, with a NAME on it — the
 // thing the old column could never hold.

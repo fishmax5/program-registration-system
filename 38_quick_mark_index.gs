@@ -320,7 +320,7 @@ function unpackCachedText(packed) {
  * It used to fetch each list as you got to it — one server round trip when you
  * picked a location, another when you picked a session, and each of those
  * re-reading whole tabs (the registrants tab twice over, the program
- * dashboard, Program_Options, Lunch_Schedule, Member_Roll). At a sign-in desk
+ * dashboard, Program_Settings, Lunch_Schedule, Member_Roll). At a sign-in desk
  * that is a wait between every single selection, thirty times in a row, and it
  * is what made the tool "too slow to be useful".
  *
@@ -564,7 +564,7 @@ function orderQuickMarkChoices(choices) {
  * makeLunchOnlyEventId() — which the lunch dashboard counts like any other.
  *
  * Sources, unioned: the session table (authoritative, past and future),
- * Program_Options (so an aged-off program is still offered), the registrant
+ * Program_Settings (so an aged-off program is still offered), the registrant
  * rows (anything hand-added), and Lunch_Schedule (the lunch-only days).
  */
 function collectKnownProgramChoices(location, registrantRows) {
@@ -635,9 +635,9 @@ function collectKnownProgramChoices(location, registrantRows) {
   }
 
   try {
-    const options = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
+    const options = ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS);
     if (options) {
-      const headers = HEADERS.Program_Options;
+      const headers = HEADERS.Program_Settings;
       const map = getIndexMap(headers);
       readSimpleTableValues(options, headers).forEach(row => {
         // The dateless fallback entry for every program this workbook has
@@ -646,7 +646,7 @@ function collectKnownProgramChoices(location, registrantRows) {
       });
     }
   } catch (err) {
-    log(`ℹ️ Quick Mark could not read Program_Options for its program list (${err}).`);
+    log(`ℹ️ Quick Mark could not read ${SHEET_NAMES.PROGRAM_SETTINGS} for its program list (${err}).`);
   }
 
   const lrMap = getIndexMap(HEADERS.All_Registrants);
@@ -738,7 +738,7 @@ function lunchOnlyRowTitle(location, dateKey) {
  * Is `title` the name of a lunch-only session? Matched by SHAPE, not equality:
  * the dish is part of the name and changes when a menu is retyped, and the old
  * "🥡 Lunch Only (no program)" is still sitting in registrant rows and
- * Program_Options entries written before the rename.
+ * Program_Settings entries written before the rename.
  */
 function isLunchOnlyProgramTitle(title) {
   const text = String(title || '').trim();

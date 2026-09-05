@@ -45,19 +45,26 @@ const SHEET_NAMES = {
   LUNCH_SCHEDULE: 'Lunch_Schedule',
   TRIAGE: 'Deleted_Event_Triage',
   MEMBER_ROLL: 'Member_Roll',
-  PROGRAM_OPTIONS: 'Program_Options',
+  // EVERYTHING STANDING THAT IS TRUE OF A PROGRAM, on one row.
+  //
+  // This was two tabs — Program_Options ("the big room, and about twelve
+  // people come") and Registrant_Notifications ("invite them, and write the
+  // morning of"). They had the SAME GRAIN (one row per Clean_Title x
+  // Location), the SAME KEY, the same recomputed left half, and they were
+  // refreshed from the same session rows in the same pass. Two tabs answering
+  // one question about one program is two tabs to find, two rows to keep in
+  // step through a rename, and two places for the same program to be missing
+  // from. See section 6c / 9h and LEGACY_SHEET_RENAMES below: an existing
+  // workbook's Program_Options tab is carried across in place and the
+  // notification tab's ticks are migrated onto it.
+  PROGRAM_SETTINGS: 'Program_Settings',
   // Who leads what, where to write to them, and whether they want to hear
   // about it when their roster moves — see section 9c. Separate from
-  // Program_Options because a leader is a PERSON who may lead three programs
+  // Program_Settings because a leader is a PERSON who may lead three programs
   // at two sites, and an address column on a program row could only ever
-  // answer that question in one direction.
+  // answer that question in one direction. This is the tab the NO WILDCARDS
+  // privacy rule lives on, and it is why the merge above stopped where it did.
   PROGRAM_LEADERS: 'Program_Leaders',
-  // How each program talks to the people signed up for it — see section 9g.
-  // One row per program, the same Event x Location grain Program_Options
-  // uses, and a tick box per channel because the channels are not exclusive:
-  // a program can put people on the calendar AND write to them a week out AND
-  // write again the morning of.
-  REGISTRANT_NOTIFICATIONS: 'Registrant_Notifications',
   CLUB_MEMBERS: 'Club_Members',
   // The two tabs behind [Personalized Assistance] and the per-program extra
   // questions — see ASSISTANCE_TAG and section 6g.
@@ -69,6 +76,24 @@ const SHEET_NAMES = {
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
+
+/**
+ * The two tab names Program_Settings replaces, spelled out for the migrations
+ * that still have to LOOK at them.
+ *
+ * Program_Options is renamed in place by LEGACY_SHEET_RENAMES, so the name is
+ * only needed by the one-time readers that run BEFORE the first merged write
+ * (readLegacyInstructorEmails, readLegacyNotifyModeRows) and may therefore
+ * meet the tab under either name — see programSettingsSheetForLegacyRead().
+ *
+ * Registrant_Notifications is NOT renamed: a workbook that has both would
+ * otherwise lose one of them. Its staff ticks are copied onto the merged tab
+ * once (migrateRegistrantNotificationTicks) and the tab is then marked
+ * retired, so nothing is thrown away by a migration nobody watched run.
+ */
+const LEGACY_PROGRAM_OPTIONS_SHEET_NAME = 'Program_Options';
+const LEGACY_REGISTRANT_NOTIFICATIONS_SHEET_NAME = 'Registrant_Notifications';
+const RETIRED_SHEET_NAME_SUFFIX = ' (retired)';
 
 /**
  * Tabs this workbook used to call something else -> what they are called now.
@@ -108,7 +133,16 @@ const LEGACY_SHEET_RENAMES = {
   // because Program_Sessions is a name somebody could plausibly have given a
   // tab of their own.
   'All_Program_Sessions': ['Program_Sessions', 'Master_Program_Dashboard'],
-  'Master_Program_Dashboard': 'Program_Month'
+  'Master_Program_Dashboard': 'Program_Month',
+  // Renamed September 2026, when Program_Options and Registrant_Notifications
+  // became one tab. Program_Options is the one carried across IN PLACE,
+  // because it is the older of the two and holds the column nothing can
+  // regenerate (Room_Or_Setup, Typical_Attendance, years of Staff_Notes):
+  // renaming it keeps the rows, the formatting and every reference to it.
+  // The notification tab's ticks are copied onto it afterwards by a migration
+  // rather than by a rename — two tabs cannot both become one tab by being
+  // renamed, and the ticks are what "an unticked box means off" is standing on.
+  'Program_Settings': LEGACY_PROGRAM_OPTIONS_SHEET_NAME
 };
 /**
  * Column layouts. Every date-bearing sheet now leads with Event_Date (its
@@ -564,44 +598,32 @@ defineLazyGlobal_('HEADERS', () => ({
     'Active', 'Auto_Note', 'Last_Applied', 'Added_By', 'Added_On', 'Staff_Notes', 'Need_ID'
   ],
   /**
-   * Program_Options — one row per unique PROGRAM (Clean_Title x Location),
-   * same split: the left columns are recomputed, the right columns are the
-   * staff's own standing notes about how that program actually runs.
+   * Program_Settings — ONE ROW PER PROGRAM (Clean_Title x Location), and
+   * everything standing that is true of it.
    *
-   * Instructor_Email USED TO LIVE HERE and no longer does. It answered "who
-   * leads this program" and nothing else, which is the wrong half of the
-   * question the moment you want to write to a person rather than to a
-   * program: one address column on a program row cannot say that Jane leads
-   * three of these, cannot carry whether Jane wants to be emailed, and gives
-   * a leader who moves sites three cells to find. Program_Leaders holds it
-   * now, one row per leader-and-program, and migrateProgramLeaderAddresses()
-   * carries the old column's values across before this layout drops it.
+   * The usual memory-tab split: the left columns are recomputed every refresh
+   * so a row can be found and read in context, and everything from
+   * Typical_Attendance rightwards is the staff's own (see
+   * PROGRAM_SETTINGS_STAFF_COLUMNS). The right half is now two half-tabs'
+   * worth of answers, in the order somebody actually asks them — how the
+   * program RUNS first, then what it SENDS.
    *
-   * Notify_Mode and Reminder_Days USED TO LIVE HERE TOO, and went the same
-   * way for the same reason: one dropdown and one day list could not say that
-   * a program invites its people AND writes a week out AND writes again the
-   * morning of. Registrant_Notifications holds the answer now, one tick box
-   * per channel, and refreshRegistrantNotifications() carries the two old
-   * columns' values across before this layout drops them.
-   */
-  Program_Options: [
-    'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup', 'Staff_Notes'
-  ],
-  /**
-   * Registrant_Notifications — WHAT EACH PROGRAM SENDS THE PEOPLE ON IT.
+   * WHY THE TWO TABS BECAME ONE. Program_Options and Registrant_Notifications
+   * had the same grain, the same key, the same recomputed left half, and were
+   * written from the same session rows in the same pass of refreshMemoryTabs().
+   * Everything that made them two tabs was the order they were built in. What
+   * it cost was real: a program had to be found twice, a rename had to move
+   * two rows (22 and 9h each carried their own copy of that code), and a
+   * program present on one tab and missing from the other was a state nothing
+   * reported.
    *
-   * Same grain as Program_Options (one row per Clean_Title x Location, which
-   * is one row standing for every session that program ever runs), because
-   * that is the grain the question is actually asked at: nobody decides
-   * per-date whether a class reminds its people, they decide it once for the
-   * class. The left columns are recomputed so a row can be found and read in
-   * context; everything from Add_To_Calendar rightwards is the staff's.
+   * HOW THE PROGRAM RUNS:
+   *   Typical_Attendance  what usually turns up.
+   *   Usual_Capacity      the cap to suggest, seeded from a consistent calendar.
+   *   Room_Or_Setup       the room, the chairs, the projector.
    *
-   * THE CHANNELS ARE NOT EXCLUSIVE, and that is the whole point of splitting
-   * them into tick boxes rather than the single Notify_Mode dropdown this
-   * replaces. A dropdown could say "invite + reminders" but never "invite,
-   * plus a week out, plus the morning of, and nothing in between":
+   * WHAT IT SENDS THE PEOPLE ON IT — the channels are NOT exclusive, which is
+   * the whole reason these are tick boxes and not one dropdown:
    *
    *   Add_To_Calendar    put each registrant on the real calendar event's
    *                      guest list, so Google's own reminders and any change
@@ -623,9 +645,30 @@ defineLazyGlobal_('HEADERS', () => ({
    * tick box to be honest, so "nobody has decided yet" cannot also be blank —
    * the refresh decides on the program's behalf when it first writes the row,
    * and from then on the boxes say exactly what happens.
+   *
+   * ONE Staff_Notes, at the end, where it has always been. The two tabs each
+   * had one; the merge joins them rather than picking a winner.
+   *
+   * Instructor_Email USED TO LIVE HERE (on Program_Options) and no longer
+   * does. It answered "who leads this program" and nothing else, which is the
+   * wrong half of the question the moment you want to write to a person rather
+   * than to a program: one address column on a program row cannot say that
+   * Jane leads three of these, cannot carry whether Jane wants to be emailed,
+   * and gives a leader who moves sites three cells to find. Program_Leaders
+   * holds it now, one row per leader-and-program, and
+   * migrateProgramLeaderAddresses() carries the old column's values across
+   * before this layout drops it.
+   *
+   * Notify_Mode and Reminder_Days USED TO LIVE HERE TOO, and went the same
+   * way for the same reason: one dropdown and one day list could not say that
+   * a program invites its people AND writes a week out AND writes again the
+   * morning of. The six columns above are the answer now, and
+   * readLegacyNotifyModeRows() carries the two old cells across before this
+   * layout drops them.
    */
-  Registrant_Notifications: [
-    'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date',
+  Program_Settings: [
+    'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
+    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
     'Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
     'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'
   ],
@@ -779,16 +822,17 @@ const ASSISTANCE_REQUEST_STATUSES = ['New', 'Contacted', 'Scheduled', 'Closed'];
  */
 const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'Usual_Guests',
   'Dietary_Notes', 'Contact', 'Household_Override', 'Staff_Notes', 'Status', 'Retired_Date'];
-/** Program_Options columns the refresh must never overwrite. */
-const PROGRAM_OPTIONS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Staff_Notes'];
-
 /**
- * Registrant_Notifications columns the refresh must never overwrite — every
- * one of the six answers, because the tab exists to be filled in.
+ * Program_Settings columns the refresh must never overwrite — the two
+ * half-tabs' worth of staff answers this tab was merged out of, in one list.
+ *
+ * Every one of them, because the right half of this tab exists to be filled
+ * in: the three standing facts about how the program runs, and the six that
+ * say what it sends the people on it.
  */
-const REGISTRANT_NOTIFICATION_STAFF_COLUMNS = ['Add_To_Calendar', 'Week_Before', 'Day_Before',
-  'Morning_Of', 'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
+const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
+  'Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
+  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

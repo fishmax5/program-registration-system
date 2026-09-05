@@ -229,7 +229,7 @@
  *      who signed up, who is gone, who came off the waitlist, whose party
  *      grew. A sync where nothing changed sends nothing at all. Rides the
  *      same hourly registration sync as everything else here — no new
- *      trigger. Replaces Program_Options' old Instructor_Email column, whose
+ *      trigger. Replaces the program tab's old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
  *      a sync runs (migrateProgramLeaderAddresses()). Title_Match is the
  *      other direction: comma-separated phrases ("yoga") meaning "a program
@@ -239,9 +239,20 @@
  *      the notify tick clear and a note saying which phrase found it — a
  *      phrase never overrides a typed row, and never shares or sends
  *      anything by itself.
- *    - REGISTRANT NOTIFICATIONS (the Registrant_Notifications tab, sections
- *      9e and 9h): what each PROGRAM sends the people signed up for it. One
- *      row per program, and a TICK BOX PER CHANNEL because the channels are
+ *    - PROGRAM SETTINGS (the Program_Settings tab, sections 6c, 9e and 9h):
+ *      ONE ROW PER PROGRAM, and everything standing that is true of it. The
+ *      left of the row is recomputed; the right is yours. How the program
+ *      RUNS — Typical_Attendance, Usual_Capacity, Room_Or_Setup — and then
+ *      what it SENDS the people signed up for it.
+ *
+ *      This was two tabs, Program_Options and Registrant_Notifications, at
+ *      the same grain and with the same key, refreshed in the same pass from
+ *      the same session rows. Your Program_Options tab is RENAMED in place
+ *      and every tick you had on the notifications tab is copied onto it the
+ *      first time a sync runs; the old notifications tab is left in the
+ *      workbook, marked retired, for you to check against and delete.
+ *
+ *      What it sends: a TICK BOX PER CHANNEL, because the channels are
  *      not exclusive — Add_To_Calendar puts registrants on the real event's
  *      guest list; Week_Before, Day_Before and Morning_Of are emails this
  *      workbook sends 7, 1 and 0 days out; Other_Reminders adds any further
@@ -252,9 +263,9 @@
  *      OWN appointment time, when they book and again the day before. That
  *      time can only be said in mail: a calendar event has one description
  *      shared by every guest. From then on the ticks are the whole answer,
- *      and an unticked box means that message is not sent. Replaces
- *      Program_Options' old Notify_Mode / Reminder_Days pair, whose settings
- *      are carried onto the new tab automatically the first time a sync runs.
+ *      and an unticked box means that message is not sent. Replaces the old
+ *      Notify_Mode / Reminder_Days pair, whose settings are carried onto the
+ *      boxes automatically the first time a sync runs.
  *      Every send is ledgered per person per offset, so an hourly sync never
  *      repeats one. Config's "Calendar Invitations" switch still wins over
  *      any row.
@@ -479,7 +490,7 @@
  *      section 6d for what that fixed. All_Registrants's tables start at row 1.
  *    - RENAMING A PROGRAM MOVES IT, RATHER THAN REPLACING IT. cleanTitle is an
  *      input to computeEventId(), the group key, computeClubKey() and
- *      Program_Options' key, so a title change used to re-key a program's
+ *      Program_Settings' key, so a title change used to re-key a program's
  *      sessions (triaging every one of them and their registrants), detach a
  *      club's standing roster, and orphan the staff's own notes — three of
  *      those four silently. detectRenamedPrograms() now recognizes the pattern

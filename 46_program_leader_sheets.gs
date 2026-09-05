@@ -90,7 +90,7 @@
 // for a registrant whose marks were all just cleared.
 //
 // THE PRIVACY BOUNDARY is one program AT ONE LOCATION — the same grain as
-// Program_Options and Program_Leaders, and the reason the key carries both.
+// Program_Settings and Program_Leaders, and the reason the key carries both.
 // Somebody teaching Chair Yoga at Narberth has no business reading Ashbridge's
 // roster, and a per-title sheet would hand it to them.
 // ============================================================================

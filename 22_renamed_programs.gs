@@ -16,10 +16,11 @@
 //      Link_Display is set to Hide.
 //   3. computeClubKey() is built from the title, so a renamed CLUB's standing
 //      roster stops matching any session and silently stops booking anybody.
-//   4. Program_Options and Registrant_Notifications are keyed by Event +
-//      Location, so the staff's own notes (Room_Or_Setup, Typical_Attendance,
-//      and every notification tick) are orphaned and a blank row appears
-//      under the new name. Also silent.
+//   4. Program_Settings is keyed by Event + Location, so the staff's own
+//      notes (Room_Or_Setup, Typical_Attendance, and every notification tick)
+//      are orphaned and a blank row appears under the new name. Also silent.
+//      That used to be TWO stores and two near-identical repairs; it is one
+//      tab and one repair now — see renameProgramSettingRows().
 //
 // WHY NOT JUST RE-KEY EVENT_ID OFF SOMETHING STABLER. The obvious fix is to
 // key off the calendar's own event UID instead of the title. It was rejected:
@@ -289,8 +290,8 @@ function buildRenameIdMap(candidate, map) {
  *   the session table (Event_ID + Clean_Title), the registrant rows and the
  *   triage rows (both join on Event_ID and display the title), the calendar
  *   invite ledger and the deletion tombstones (both keyed by Event_ID), the
- *   club roster (keyed by a hash of the title) and Program_Options (keyed by
- *   title + location, and holding the staff's own notes).
+ *   club roster (keyed by a hash of the title) and Program_Settings (keyed by
+ *   title + location, and holding the staff's own notes and ticks).
  */
 function applyProgramRenames(registrySheet, renames) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -305,8 +306,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameInviteLedgerKeys(combined);
   renameTombstoneKeys(combined);
   renameClubRosterKeys(ss, renames);
-  renameProgramOptionRows(ss, renames);
-  renameRegistrantNotificationRows(ss, renames);
+  renameProgramSettingRows(ss, renames);
   renameProgramLeaderRows(ss, renames);
 
   renames.forEach(rename => {
@@ -507,31 +507,40 @@ function renameClubRosterKeys(ss, renames) {
 }
 
 /**
- * How Program_Options is written, in one place — refreshProgramOptions() is
- * not the only thing that rewrites the tab any more (see
- * renameProgramOptionRows()), and a second copy of these options is a second
- * chance for the tab to come back missing its banner or its date formats.
+ * How Program_Settings is written, in one place — refreshProgramSettings() is
+ * not the only thing that rewrites the tab (see renameProgramSettingRows()),
+ * and a second copy of these options is a second chance for the tab to come
+ * back missing its banner, its date formats or its tinted columns.
  */
-function programOptionsTabOptions() {
+function programSettingsTabOptions() {
   return {
-    banner: '📋 Program Options',
-    bannerNote: 'Every program this workbook has ever run, with your standing notes against each one.',
-    staffColumns: PROGRAM_OPTIONS_STAFF_COLUMNS,
+    banner: '📋 Program Settings',
+    bannerNote: 'Every program this workbook has ever run: how it runs, and what it sends the ' +
+      'people signed up for it. Tick as many channels as apply — they add up, and an unticked ' +
+      'box means that message is not sent.',
+    staffColumns: PROGRAM_SETTINGS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
     numberColumns: ['Sessions_Tracked']
   };
 }
 
 /**
- * THE OTHER SILENT ONE. Program_Options is keyed by Event + Location and holds
- * columns nothing else can regenerate — Room_Or_Setup, Typical_Attendance and
- * the staff's own notes. Without this the notes stay stranded under the old
- * name and the program reappears with an empty row.
+ * THE OTHER SILENT ONE. Program_Settings is keyed by Event + Location and
+ * holds columns nothing else can regenerate — Room_Or_Setup,
+ * Typical_Attendance, the staff's own notes, and every notification tick.
+ * Without this the answers stay stranded under the old name, and the program
+ * reappears with a row seeded from its kind's default: quietly notified the
+ * way a stranger would be, in the big room nobody booked.
+ *
+ * ONE REPAIR, where there were two. Program_Options and
+ * Registrant_Notifications each had their own copy of this function, differing
+ * in the tab they opened and in nothing else. A rename that moved one and not
+ * the other left the two halves of a program's settings under two names.
  */
-function renameProgramOptionRows(ss, renames) {
-  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
+function renameProgramSettingRows(ss, renames) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS);
   if (!sheet) return;
-  const headers = HEADERS.Program_Options;
+  const headers = HEADERS.Program_Settings;
   const map = getIndexMap(headers);
   const rows = readSimpleTable(sheet, headers);
   if (rows.length === 0) return;
@@ -539,8 +548,7 @@ function renameProgramOptionRows(ss, renames) {
   const titleMap = {};
   renames.forEach(rename => { titleMap[normalizeNameKey(rename.oldTitle)] = rename.newTitle; });
 
-  const identityOf = row =>
-    `${normalizeNameKey(row[map['Event']])}|${normalizeNameKey(row[map['Location']])}`;
+  const identityOf = row => notificationProgramKey(row[map['Event']], row[map['Location']]);
 
   const renamed = [];
   const untouched = [];
@@ -568,8 +576,11 @@ function renameProgramOptionRows(ss, renames) {
     kept.push(row);
   });
 
-  writeMemoryTab(sheet, headers, kept, programOptionsTabOptions());
-  log(`Renamed program(s): moved ${renamed.length} Program_Options row(s) onto the new name` +
+  writeMemoryTab(sheet, headers, kept, programSettingsTabOptions());
+  // The tab section 9e reads its policies off has just been rewritten.
+  invalidateNotificationPolicyCache();
+  log(`Renamed program(s): moved ${renamed.length} ${SHEET_NAMES.PROGRAM_SETTINGS} row(s) onto ` +
+    `the new name` +
     (kept.length < rows.length ? `, dropping ${rows.length - kept.length} blank duplicate(s)` : '') + '.');
 }
 
