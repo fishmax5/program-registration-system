@@ -91,6 +91,10 @@ this.detectProgramMonthRecurrence = detectProgramMonthRecurrence;
 this.programMonthLinkParts = programMonthLinkParts;
 this.hyperlinkFormulaUrl = hyperlinkFormulaUrl;
 this.NO_REGISTRATION_LINK_LABEL = NO_REGISTRATION_LINK_LABEL;
+this.SHEET_NAMES = SHEET_NAMES;
+this.describeProgramMonthNotify = describeProgramMonthNotify;
+this.notificationProgramKey = notificationProgramKey;
+this.writeNotificationTicks = writeNotificationTicks;
 this.programMonthSessionRowNumbers = programMonthSessionRowNumbers;
 this.programMonthLeaderCoverage = programMonthLeaderCoverage;
 this.computeProgramMetrics = computeProgramMetrics;
@@ -392,6 +396,86 @@ const cell = (row, header) => row[monthMap[header]];
 check('a URL is read back out of a HYPERLINK formula',
   sandbox.hyperlinkFormulaUrl('=HYPERLINK("https://x.test/a","Go")'), 'https://x.test/a');
 check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— no registration —'), '');
+
+// --- ROOM AND NOTIFY, READ OFF PROGRAM_SETTINGS -----------------------------
+//
+// Two facts about a program that live on another tab, shown on the row that IS
+// that program. READ-ONLY, both of them: Program_Settings' tick boxes are only
+// honest because an unticked box means off, and a second place to tick them
+// would be a second answer to "does this program email its people".
+{
+  const settingsHeaders = sandbox.HEADERS.Program_Settings;
+  const settingsMap = sandbox.getIndexMap(settingsHeaders);
+  const settingsRow = fields => {
+    const row = new Array(settingsHeaders.length).fill('');
+    row[settingsMap['Event']] = fields.title;
+    row[settingsMap['Location']] = fields.location;
+    row[settingsMap['Room_Or_Setup']] = fields.room || '';
+    sandbox.writeNotificationTicks(row, settingsMap, fields.policy ||
+      { invite: false, remind: false, days: [], confirmTime: false });
+    return row;
+  };
+  const index = {};
+  const put = fields => {
+    index[sandbox.notificationProgramKey(fields.title, fields.location)] = settingsRow(fields);
+  };
+  put({ title: 'Chair Yoga', location: 'Narberth', room: 'Big room, 20 chairs',
+    policy: { invite: true, remind: true, days: [7, 0], confirmTime: false } });
+  put({ title: 'Quiet Hour', location: 'Narberth', room: '' });
+  // One form, two buildings, two different rooms — which is exactly the thing
+  // somebody setting up needs to be told.
+  put({ title: 'Memory Cafe', location: 'Narberth', room: 'Lounge',
+    policy: { invite: true, remind: false, days: [], confirmTime: false } });
+  put({ title: 'Memory Cafe', location: 'Ashbridge', room: 'Hall B',
+    policy: { invite: true, remind: false, days: [], confirmTime: false } });
+
+  const build = rows => sandbox.buildProgramMonthRows(rows, sessionMap, null, null, index);
+
+  const yoga = build([session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })]);
+  check('Notify is the tick boxes as one phrase, soonest last',
+    cell(yoga.rows[0], 'Notify'), 'Cal · 7d · AM');
+  check('Room is the standing note about where it runs',
+    cell(yoga.rows[0], 'Room'), 'Big room, 20 chairs');
+  const notifyNote = yoga.notes.filter(n => n.header === 'Notify')[0];
+  check('and the note says where the answer is actually changed',
+    !!notifyNote && notifyNote.text.indexOf(sandbox.SHEET_NAMES.PROGRAM_SETTINGS) > -1, true);
+
+  // BLANK AND "Silent" ARE DIFFERENT ANSWERS. Blank is a program with no row
+  // yet — notified the way its kind is until the next refresh writes one.
+  // "Silent" is a row somebody has cleared every box on. One is a gap and one
+  // is a decision, and only one of them is worth acting on.
+  const quiet = build([session({ at: [2026, 8, 2, 9, 30], title: 'Quiet Hour', formId: 'S_Q' })]);
+  check('a row with every box clear reads as a decision', cell(quiet.rows[0], 'Notify'), 'Silent');
+  const unknown = build([session({ at: [2026, 8, 3, 9, 30], title: 'Brand New', formId: 'S_N' })]);
+  check('a program with no settings row yet is blank, not Silent',
+    cell(unknown.rows[0], 'Notify'), '');
+  const unknownNote = unknown.notes.filter(n => n.header === 'Notify')[0];
+  check('...and its note says the row has not been written yet',
+    !!unknownNote && unknownNote.text.indexOf('no row for this program yet') > -1, true);
+
+  // A shared program prints BOTH rooms and ONE notify phrase: the channels are
+  // a property of the program, the room is a property of the building.
+  const cafe = build([
+    session({ at: [2026, 8, 4, 9, 30], title: 'Memory Cafe', formId: 'S_C', location: 'Narberth' }),
+    session({ at: [2026, 8, 5, 9, 30], title: 'Memory Cafe', formId: 'S_C', location: 'Ashbridge' })
+  ]);
+  check('a shared program prints both rooms and one notify phrase',
+    [cell(cafe.rows[0], 'Room'), cell(cafe.rows[0], 'Notify')], ['Lounge · Hall B', 'Cal']);
+
+  // Lunch is not a program and has no settings row to look up.
+  const lunchRow = build([session({
+    at: [2026, 8, 7, 12, 0], formId: '', title: 'Lunch @ Narberth — Chx Parm',
+    eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_7` })]).rows[0];
+  check('lunch has neither a room nor a notify policy',
+    [cell(lunchRow, 'Room'), cell(lunchRow, 'Notify')], ['', '']);
+
+  // Handed no index at all — every other test in this file — the two columns
+  // are blank rather than guessed at, and nothing is read from anywhere.
+  const unlit = sandbox.buildProgramMonthRows(
+    [session({ at: [2026, 8, 1, 9, 30], title: 'Chair Yoga', formId: 'S_Y' })], sessionMap).rows[0];
+  check('with no settings index in hand the columns stay blank',
+    [cell(unlit, 'Room'), cell(unlit, 'Notify')], ['', '']);
+}
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------
 {

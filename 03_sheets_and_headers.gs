@@ -232,14 +232,28 @@ defineLazyGlobal_('HEADERS', () => ({
   /**
    * Master_Program_Dashboard — one row per program-month (see SHEET_NAMES.PROGRAM_MONTH).
    *
-   * THIRTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen,
-   * and three of the thirteen are tick boxes this tab did not use to have. The tab
+   * FIFTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen —
+   * and of the fifteen, three are tick boxes and two are facts off
+   * Program_Settings that this tab did not use to be able to show at all.
+   * The count went down while what the row SAYS went up, which is the whole
+   * point: the columns that came off were the ones nobody read on their own. The tab
    * exists so that four session rows read as one line, and a line nineteen
    * columns wide is not one a person reads — it is one they scroll. So the
    * columns that were always read TOGETHER are now written together, in the
    * shape describeProgramMonthSchedule() set for the whole tab: THE FACT GOES
    * IN THE CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE.
    *
+   *   Notify    the six notification tick boxes on Program_Settings, as one
+   *             phrase — "Cal · 7d · AM". READ-ONLY, and read fresh on every
+   *             render off the one memoized read of that tab the invitation
+   *             and reminder passes already make. Nothing is stored: the
+   *             ticks are the answer, this is a window onto them, and the
+   *             place to change one is the tab that owns it.
+   *   Room      Program_Settings' Room_Or_Setup, same read, same rule. "The
+   *             big room, projector" is a fact about the program that a
+   *             person planning a month wants beside its schedule, and
+   *             sending them to another tab for one cell is how a note nobody
+   *             reads stays a note nobody reads.
    *   Seats     Registered + Max_Capacity + Fill + Waitlist.
    *             "12 / 20 · 60% · 2 waiting", or "12 · unlimited". Nobody
    *             reads a Registered without looking at the capacity beside it,
@@ -297,7 +311,7 @@ defineLazyGlobal_('HEADERS', () => ({
   Master_Program_Dashboard: [
     'Month_Start', 'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Schedule', 'Sessions', 'Seats', 'Links', 'Status',
+    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify', 'Links', 'Status',
     'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed

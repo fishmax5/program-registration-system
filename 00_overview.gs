@@ -59,6 +59,13 @@
  *        THE THREE PROGRAM FLAGS are read off the session rows and written
  *        straight back to them — and to the calendar, through the same
  *        pending-flag queue the session table's own tick has always used.
+ *      And two cells that are windows with no handle: ROOM and NOTIFY, read
+ *      off Program_Settings on every render through the same memoized read
+ *      the invitation and reminder passes make. Notify is the six tick boxes
+ *      as one phrase ("Cal · 7d · AM"), where BLANK means that tab has no row
+ *      for the program yet and "Silent" means somebody cleared every box —
+ *      a gap and a decision, told apart. Both are READ-ONLY: an unticked box
+ *      only means "off" while there is one place to tick it.
  *      See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split

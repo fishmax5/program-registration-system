@@ -352,6 +352,122 @@ function describeProgramMonthKind(sessions, map) {
   return parts.join(PROGRAM_MONTH_JOINER);
 }
 
+// ============================================================================
+// THE TWO CELLS READ OFF PROGRAM_SETTINGS
+// ============================================================================
+//
+// Room and Notify are the same kind of thing as Leader, one step further out:
+// facts about a program that live on a tab of their own, shown on the row that
+// IS that program because that is where somebody is standing when they want
+// them.
+//
+// READ-ONLY, BOTH OF THEM, and that is not a limitation to work around later.
+// Program_Settings' right half is the staff's, and the tick boxes there are
+// only honest because an unticked box means off (see 81's banner). A second
+// place to tick them would be a second answer to "does this program email its
+// people", discovered by somebody being emailed. Leader is writable because a
+// leader's row can only be ADDED and the writer refuses everything else;
+// there is no equivalent shape for six booleans and a sentence about a room.
+//
+// ONE READ, and not a new one. readNotificationPolicyRows() already memoizes
+// the whole tab per execution for the invitation pass and the reminder pass;
+// this is a third caller of the same memo, so the tab is not opened again and
+// the three cannot disagree about what it says.
+// ============================================================================
+
+/** The joiner between a Notify summary's parts — tighter than the cell joiner, because it is a list of tokens. */
+const PROGRAM_MONTH_NOTIFY_JOINER = ' · ';
+
+/** What a Notify cell says when the row exists and every box on it is clear. */
+const PROGRAM_MONTH_NOTIFY_SILENT = 'Silent';
+
+/**
+ * "Cal · 7d · AM · Confirm" — six tick boxes as one phrase.
+ *
+ * A DAY COUNT IS PRINTED AS A DAY COUNT ("7d"), except the morning of, which
+ * is "AM": "0d" is arithmetic, and nobody says a reminder goes out zero days
+ * before. Soonest LAST, the order they actually send in, which is the order
+ * policyFromNotificationRow() already puts them in.
+ *
+ * BLANK AND "Silent" ARE DIFFERENT ANSWERS, and the difference is the whole
+ * reason this is worth a column. Blank means Program_Settings has no row for
+ * this program yet — a new program, notified the way its kind is until the
+ * next refresh writes it one. "Silent" means the row is there and somebody
+ * has cleared every box on it. One is a gap and one is a decision, and a cell
+ * that showed them the same way would hide the only one worth acting on.
+ */
+function describeProgramMonthNotify(policy) {
+  if (!policy) return '';
+  const parts = [];
+  if (policy.invite) parts.push('Cal');
+  (policy.days || []).forEach(day => parts.push(day === 0 ? 'AM' : `${day}d`));
+  if (policy.confirmTime) parts.push('Confirm');
+  return parts.length > 0 ? parts.join(PROGRAM_MONTH_NOTIFY_JOINER) : PROGRAM_MONTH_NOTIFY_SILENT;
+}
+
+/** The note under a Notify cell: the phrase spelled out, and where it is changed. */
+function describeProgramMonthNotifyNote(policy) {
+  const lines = [];
+  if (!policy) {
+    lines.push(`${SHEET_NAMES.PROGRAM_SETTINGS} has no row for this program yet.`);
+    lines.push('Until it does, its registrants are notified the way a program of its kind ' +
+      'normally is. The next sync writes the row.');
+  } else {
+    lines.push(policy.invite
+      ? 'Registrants are added to the real calendar event\'s guest list.'
+      : 'Registrants are NOT added to the calendar event.');
+    const days = policy.days || [];
+    if (days.length === 0) {
+      lines.push('No reminder emails are sent.');
+    } else {
+      lines.push('Reminder emails:\n' + days.map(day => day === 0
+        ? '• on the morning of the session'
+        : `• ${day} day${day === 1 ? '' : 's'} before`).join('\n'));
+    }
+    if (policy.confirmTime) {
+      lines.push('A confirmation is emailed the moment somebody registers — which is the only ' +
+        'place an appointment\'s own time can be stated.');
+    }
+  }
+  lines.push(`READ-ONLY here. Tick the boxes on ${SHEET_NAMES.PROGRAM_SETTINGS} — that tab owns ` +
+    `the answer, and a second place to tick them would be a second answer.`);
+  return lines.join('\n\n');
+}
+
+/**
+ * The Program_Settings row(s) behind one program-month, resolved into
+ * { room, notify, note }.
+ *
+ * A [Shared] program is TWO rows on that tab — one per building, because that
+ * is the grain it is keyed at — so both are read and their rooms are both
+ * printed: one form, two buildings, and quite possibly two different rooms,
+ * which is exactly the thing somebody setting up needs to be told. The notify
+ * summary takes the FIRST row that has one: the channels are a property of the
+ * program rather than of the building, and printing "Cal · 7d / Cal · 7d"
+ * would be a column of the same phrase twice.
+ */
+function programMonthSettingsCell(title, locations, index) {
+  const empty = { room: '', notify: '', note: '' };
+  if (!index || !title) return empty;
+  const map = getIndexMap(HEADERS.Program_Settings);
+  const rooms = [];
+  let policy = null;
+  let found = false;
+  (locations || []).forEach(location => {
+    const row = index[notificationProgramKey(title, location)];
+    if (!row) return;
+    found = true;
+    const room = String(row[map['Room_Or_Setup']] || '').trim();
+    if (room && rooms.indexOf(room) === -1) rooms.push(room);
+    if (!policy) policy = policyFromNotificationRow(row, map, false);
+  });
+  return {
+    room: rooms.join(PROGRAM_MONTH_JOINER),
+    notify: found ? describeProgramMonthNotify(policy) : '',
+    note: describeProgramMonthNotifyNote(found ? policy : null)
+  };
+}
+
 /**
  * HOW FULL IS IT — the four counting columns as one phrase.
  *
@@ -475,8 +591,12 @@ function programMonthNumber(value) {
  * what it always was.
  *
  * `leaderIndex` — buildProgramLeaderIndex(), if the caller has it. Omitted,
- * the Leader columns come back blank: this function still writes nothing
+ * the Leader column comes back blank: this function still writes nothing
  * anywhere, and the leader it would have printed is not a fact it holds.
+ *
+ * `settingsIndex` — readNotificationPolicyRows(), the memoized read of
+ * Program_Settings the invitation and reminder passes already make. Omitted,
+ * Room and Notify come back blank, for the same reason.
  *
  * Returns { rows, notes, links, matched }. All three side-channels are keyed
  * by the row ARRAY (not its index), because the rows are about to be split
@@ -494,7 +614,7 @@ function programMonthNumber(value) {
  *            for; it is a wash and a note now, so it travels beside the rows
  *            instead of on them.
  */
-function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex) {
+function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex, settingsIndex) {
   const headers = HEADERS.Master_Program_Dashboard;
   const map = getIndexMap(headers);
   const groups = {};
@@ -618,6 +738,14 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
       ? { name: '', source: '' }
       : programMonthLeaderCell(String(first[sessionMap['Clean_Title']] || ''), locations, leaderIndex);
     out[map['Leader']] = leader.name;
+    // Lunch is not a program and has no Program_Settings row — there is
+    // nothing to look up, and a blank is the true answer rather than a gap.
+    const settings = isLunch
+      ? { room: '', notify: '', note: '' }
+      : programMonthSettingsCell(String(first[sessionMap['Clean_Title']] || ''), locations,
+        settingsIndex);
+    out[map['Room']] = settings.room;
+    out[map['Notify']] = settings.notify;
     out[map['Form_ID']] = String(first[sessionMap['Form_ID']] || '');
     out[map['Group_Key']] = key;
 
@@ -626,6 +754,7 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex)
     if (leader.source === PROGRAM_MONTH_LEADER_SOURCE_MATCHED) matched.push(out);
     if (!isLunch && schedule.note) notes.push({ row: out, header: 'Schedule', text: schedule.note });
     if (!isLunch && seats.note) notes.push({ row: out, header: 'Seats', text: seats.note });
+    if (!isLunch && settings.note) notes.push({ row: out, header: 'Notify', text: settings.note });
   });
 
   return { rows, notes, links, matched };
@@ -680,10 +809,22 @@ function renderProgramMonthDashboard(force, options) {
     log(`\u2139\ufe0f Could not read the leader index for ${SHEET_NAMES.PROGRAM_MONTH}'s Leader column (${err}).`);
   }
 
+  // THE SAME memoized read of Program_Settings the invitation pass and the
+  // reminder pass make — a third caller of one memo, not a third read of one
+  // tab. Caught rather than thrown: a settings tab that cannot be read costs
+  // two columns, not the tab.
+  let settingsIndex = null;
+  try {
+    settingsIndex = readNotificationPolicyRows();
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read ${SHEET_NAMES.PROGRAM_SETTINGS} for ` +
+      `${SHEET_NAMES.PROGRAM_MONTH}'s Room and Notify columns (${err}).`);
+  }
+
   const built = buildProgramMonthRows(sessionRows, sessionMap, {
     gid: sessionSheet ? sessionSheet.getSheetId() : null,
     rowNumbersByEventId: programMonthSessionRowNumbers(sessionSheet, sessionMap)
-  }, leaderIndex);
+  }, leaderIndex, settingsIndex);
   writeProgramMonthSheet(sheet, built, force, metrics);
   log(`Master_Program_Dashboard: ${built.rows.length} program-month row(s) from ${sessionRows.length} session row(s).`);
   return built;
