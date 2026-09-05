@@ -127,7 +127,7 @@ Line counts are a rough guide to what you are about to load.
 | `43_program_dashboard.gs` | 988 | `renderProgramDashboard`. |
 | `44_lunch_dashboard.gs` | 1131 | `updateMasterLunchDashboard` and the catering counts. |
 | `45_sign_in_sheet.gs` | 1322 | The desk's sheet for one day and one building — a **live Google Doc**, rebuilt in place so the link never goes stale, filed in `Sign-In Sheets`. Lunch on page one, everybody on page two. One row per PERSON (`signInPersonKey` / `dedupeSignInEntries`: a duplicate's meals take the MAXIMUM, a guest's ADD), and two washes for how a meal is handled — yellow it leaves the building, purple it needs doing something with here. It used to export a PDF and throw the document away; `getOrCreateSignInSheetFolder()` is all that is left of that, for the backfill in `69`. |
-| `46_program_leader_sheets.gs` | 1395 | A live roster shared out of the workbook to a program leader, banded by session — built on the menu, or automatically for a leader who asked to be notified about it (`ensureProgramLeaderSheetsForNotifyingLeaders`). |
+| `46_program_leader_sheets.gs` | 1464 | A live roster shared out of the workbook to a program leader, banded by session — built on the menu, or automatically for a leader who asked to be notified about it (`ensureProgramLeaderSheetsForNotifyingLeaders`). |
 
 ### Repair and last resorts (47–51)
 

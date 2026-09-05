@@ -364,6 +364,11 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
   if (programKeys.length === 0) return 0;
 
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
+  // WHICH PROGRAM KEYS THE SESSION TABLE ACTUALLY OFFERS THIS RUN — the same
+  // keys buildLeaderSheetRowsByProgram() bucketed under, computed here so an
+  // empty sheet can say which half of the join came up short. See
+  // describeEmptyLeaderSheet().
+  const sessionProgramKeys = leaderProgramKeysInWindow(sessionRows);
   let pushed = 0;
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
@@ -371,7 +376,17 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
     try {
       const file = SpreadsheetApp.openById(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-      writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
+      const rows = byProgram[programKey] || [];
+      // A SHEET THAT COMES OUT EMPTY IS A FACT WORTH A LINE. It is written
+      // either way — a program with nobody on it yet is a real answer — but
+      // "nobody registered" and "this sheet is keyed to a program the session
+      // table no longer has" look identical on the sheet and are nothing alike
+      // to fix, and the second one is silent forever otherwise.
+      if (rows.length === 0) {
+        log(`ℹ️ Program leader sheet for "${entry.title}" (${entry.location}) was refreshed EMPTY — ` +
+          describeEmptyLeaderSheet(programKey, sessionProgramKeys));
+      }
+      writeProgramLeaderSheetTab(tab, entry, rows);
       pushed++;
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
       // ensureProgramLeaderSheetAccess() existed was shared with its creator and
@@ -400,6 +415,73 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
 }
 
 /**
+ * { Event_ID: programKey } for every session inside the leader-sheet window.
+ *
+ * The join buildLeaderSheetRowsByProgram() rests on, lifted out so
+ * pushProgramLeaderSheets() can ask the SAME question a second way — which
+ * program keys the session table offers at all — without the two drifting.
+ * A registrant row belongs to a program via its Event_ID, not its Event text:
+ * the session table is what knows a session's title and location, and a
+ * renamed program's older registrant rows still carry the old title.
+ */
+function leaderProgramKeyByEventId(sessionRows) {
+  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const today = parseDateKey(formatDateKey(new Date()));
+  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
+
+  const byEventId = {};
+  (sessionRows || []).forEach(row => {
+    const eventId = String(row[sessionMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[sessionMap['Event_Date']]);
+    if (!eventId || !date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < from || dateKey > to) return;
+    byEventId[eventId] =
+      leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+  });
+  return byEventId;
+}
+
+/** The distinct program keys the session table offers inside that window. */
+function leaderProgramKeysInWindow(sessionRows) {
+  const keys = {};
+  const byEventId = leaderProgramKeyByEventId(sessionRows);
+  Object.keys(byEventId).forEach(eventId => { keys[byEventId[eventId]] = true; });
+  return keys;
+}
+
+/**
+ * Why a leader sheet came out with no roster on it — the sentence that turns a
+ * blank sheet into something somebody can act on.
+ *
+ * There are two ways to write nothing, and they are fixed in opposite places:
+ *
+ *   1. THE SESSION TABLE STILL HAS THIS PROGRAM. Then the window genuinely
+ *      holds nobody yet — a program that has not opened for registration, or a
+ *      class everybody cancelled. Nothing to do.
+ *   2. THE SESSION TABLE HAS NO SESSION UNDER THIS KEY AT ALL. The sheet is
+ *      stranded: its registry key is `title|location`, so a program renamed on
+ *      the calendar (or moved between buildings) keys the sheet to a name the
+ *      session table no longer uses, and it will refresh empty every hour
+ *      forever while the registrations sit correctly on the Registrants tab.
+ *      Rebuilding the sheet from the menu re-keys it to the current name.
+ */
+function describeEmptyLeaderSheet(programKey, sessionProgramKeys) {
+  if (sessionProgramKeys && sessionProgramKeys[programKey]) {
+    return `the session table has this program in the window ` +
+      `(${LEADER_SHEET_BACK_DAYS} days back, ${LEADER_SHEET_FORWARD_DAYS} forward) ` +
+      `but nobody is registered on those sessions yet.`;
+  }
+  return `NO session in the window (${LEADER_SHEET_BACK_DAYS} days back, ` +
+    `${LEADER_SHEET_FORWARD_DAYS} forward) carries this sheet's program key. ` +
+    `The sheet is keyed to the program's title and location as they were when it was made, ` +
+    `so a program renamed or moved on the calendar strands it here — the registrations are ` +
+    `fine on the Registrants tab. Rebuild the sheet from ${APP_MENU_NAME} ▸ program leader ` +
+    `sheets to re-key it to the current name.`;
+}
+
+/**
  * { programKey: [program leader sheet row, ...] } for every program in the
  * registry's window, built ONCE from the rows the caller already has in hand
  * rather than re-reading either tab per program.
@@ -409,21 +491,8 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
  * renamed program's older registrant rows still carry the old title.
  */
 function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
-  const today = parseDateKey(formatDateKey(new Date()));
-  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
-  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
-  const programByEventId = {};
-  (sessionRows || []).forEach(row => {
-    const eventId = String(row[sessionMap['Event_ID']] || '').trim();
-    const date = coerceDate(row[sessionMap['Event_Date']]);
-    if (!eventId || !date) return;
-    const dateKey = formatDateKey(date);
-    if (dateKey < from || dateKey > to) return;
-    programByEventId[eventId] =
-      leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
-  });
+  const programByEventId = leaderProgramKeyByEventId(sessionRows);
 
   const map = getIndexMap(HEADERS.Registrant_Dash);
   const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
