@@ -77,7 +77,11 @@ const ADMIN_GATED_ACTIONS = [
   // should be able to raise by mis-clicking a menu.
   'Organize Generated Files',
   // Overriding a safety limit is exactly the kind of decision this is for.
-  'Confirm Large Triage'
+  'Confirm Large Triage',
+  // Takes whole sessions off the table when a calendar is retired. The
+  // read-only report beside it (reportOrphanedSessionRows) is deliberately NOT
+  // here — measuring is open to whoever can open the workbook; removing is not.
+  'Remove Leftover Calendar Rows'
 ];
 
 /** Does this action still ask who is signed in? */

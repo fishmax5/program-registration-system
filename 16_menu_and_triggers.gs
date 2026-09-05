@@ -247,6 +247,11 @@ function buildAppMenu(ui, includeAdmin) {
       // where this morning's ticks are. See flushCheckInQueue().
       .addItem('Write Queued Check-Ins Now', 'flushCheckInQueueNow')
       .addSeparator()
+      // The Metrics tab writes itself on the 2nd of every month. This is for
+      // the other order — somebody looking at the year-over-year block today
+      // and wanting the month running counted in.
+      .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
 
@@ -324,6 +329,11 @@ function buildAppMenu(ui, includeAdmin) {
         .addSeparator()
         // Both READ-ONLY, and named so. They measure; they change nothing.
         .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        // The measurement half of the retired-calendar sweep. Its action half
+        // is behind the Destructive door below — but this report is the only
+        // thing that names WHICH calendar the leftover rows are from, and the
+        // calendar ID is the whole question, so it is read first. See 84.
+        .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths'))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
@@ -338,7 +348,12 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('\ud83e\ude79 Rebuild Forms In Place (keeps links)\u2026', 'rebuildAllFormsInPlace')
         .addItem('\ud83d\udca3 Destroy & Rebuild Forms\u2026', 'destroyAndRebuildAllForms')
         .addSeparator()
-        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')));
+        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')
+        // Takes every session row off a calendar this workbook no longer
+        // reads. Registrants go to Triage rather than being deleted and no
+        // form is touched, but a whole location can leave the table in one
+        // press \u2014 which is what puts it here. Read the report first. See 84.
+        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')));
   } else {
     // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
     // execution contexts cannot resolve the signed-in account at all — and
@@ -483,6 +498,15 @@ function writeTriggers(force, takingOwnership) {
   // the desk's own roster loads flush it sooner anyway.
   removed += resetTriggersForHandler('flushCheckInQueueTrigger', () =>
     ScriptApp.newTrigger('flushCheckInQueueTrigger').timeBased().everyMinutes(5).create());
+  // THE MONTH JUST ENDED, WRITTEN DOWN. Metrics is the one tab that is a
+  // record rather than a projection (see 83_monthly_metrics.gs): a month has
+  // to be counted while its rows are still in the workbook, because a
+  // year-over-year comparison outlives them. The 2nd rather than the 1st so a
+  // registration marked the morning after a month-end session is already in;
+  // 4am for the same reason every other nightly job runs then.
+  removed += resetTriggersForHandler('captureMonthlyMetricsTrigger', () =>
+    ScriptApp.newTrigger('captureMonthlyMetricsTrigger')
+      .timeBased().onMonthDay(2).atHour(4).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
@@ -506,7 +530,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 monthly metrics, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
