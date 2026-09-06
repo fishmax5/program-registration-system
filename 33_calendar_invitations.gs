@@ -142,11 +142,19 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   const { wanted, unwanted } = partitionInviteEmails(rows, lrMap, sessionByEventId);
   const ledger = getCalendarInviteLedger();
   const eventIds = Object.keys(sessionByEventId);
-  // The office's copy of what goes out. Blank = copy nobody (see
-  // getArchiveCopyEmail). It is added as a guest of any event a REGISTRANT is
-  // invited to and never on its own: an event with nobody on it is not
-  // something the office needs a Google invitation for, and inviting it to
-  // every event on the calendar would bury the ones that matter.
+  // The office is NO LONGER INVITED to these events. It used to be added as a
+  // guest of every event a registrant was invited to, which put a Google
+  // invitation — and later a change notice, and a cancellation — in the
+  // office's calendar for every session the centre runs. What the office
+  // actually asked for was a record of who was invited to what, and that is
+  // now one line a day in the digest (see 74) instead of a calendar full of
+  // events nobody at the desk is attending.
+  //
+  // AN ADDRESS ALREADY ON AN EVENT STAYS ON IT. Removing it would make Google
+  // mail a cancellation for a session that is still happening, to the one
+  // mailbox least able to tell that apart from a real cancellation. The
+  // filter below keeps it seated wherever a previous run put it; it simply is
+  // not added anywhere new.
   const archiveCopy = getArchiveCopyEmail().toLowerCase();
 
   for (const eventId of eventIds) {
@@ -155,11 +163,6 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     const drop = unwanted[eventId] || new Set();
 
     const toAdd = Array.from(want).filter(email => !already.has(email));
-    // Once the archive address is on an event it stays on it — a session
-    // whose last registrant cancels is exactly the change the office wants
-    // to see, and Google would otherwise mail them a cancellation for a
-    // session that is still happening.
-    if (archiveCopy && want.size > 0 && !already.has(archiveCopy)) toAdd.push(archiveCopy);
     const toRemove = Array.from(drop).filter(email =>
       already.has(email) && !want.has(email) && email !== archiveCopy);
     if (toAdd.length === 0 && toRemove.length === 0) continue;
@@ -200,6 +203,17 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     });
 
     if (changed) {
+      // What the office's guest seat used to say, said once a day instead.
+      if (toAdd.length > 0) {
+        noteForOffice('Registrants invited to calendar events',
+          `${session.title} on ${formatDateLabel(session.date)} (${session.location}) — ` +
+          `${toAdd.length} invited`);
+      }
+      if (toRemove.length > 0) {
+        noteForOffice('Registrants uninvited from calendar events',
+          `${session.title} on ${formatDateLabel(session.date)} (${session.location}) — ` +
+          `${toRemove.length} removed`);
+      }
       ledger[eventId] = Array.from(already);
       __calendarInviteLedgerDirty = true;
       result.eventsTouched++;
@@ -207,6 +221,7 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
   }
 
   saveCalendarInviteLedger();
+  saveOfficeDigestQueue();
   if (result.invited > 0 || result.removed > 0) {
     log(`Calendar invitations: ${result.invited} guest(s) added, ${result.removed} removed, ` +
       `across ${result.eventsTouched} event(s)` + (result.deferred > 0 ? `; ${result.deferred} left for the next run.` : '.'));

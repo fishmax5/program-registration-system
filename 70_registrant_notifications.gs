@@ -361,23 +361,23 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
         return;
       }
       try {
-        // BCC'd to the archive address, like every other message this workbook
-        // sends outside the organization — a reminder about somebody's
-        // appointment is a record of what they were told, and the desk needs
-        // to be able to find it. Blank means copy nobody. A BCC costs its own
-        // message against the daily quota this loop is rationing, so it is
-        // counted rather than treated as free.
-        const archiveCopy = getArchiveCopyEmail();
-        const options = {
+        // NOT BCC'd to the archive address any more. A reminder is still a
+        // record of what somebody was told and the desk still needs to be able
+        // to find it — but a day of reminders is hundreds of messages, and a
+        // copy of each one buries the mailbox it was meant to inform. Each is
+        // noted for the office's daily digest instead (see 74), which lists
+        // them all in one message and costs nothing against the daily mail
+        // quota this loop is rationing.
+        const subject = buildRegistrantReminderSubject(item.session, offset);
+        MailApp.sendEmail({
           to: email,
-          subject: buildRegistrantReminderSubject(item.session, offset),
+          subject: subject,
           body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
             item.daysAway)
-        };
-        if (archiveCopy) options.bcc = archiveCopy;
-        MailApp.sendEmail(options);
+        });
         result.sent++;
-        quota -= archiveCopy ? 2 : 1;
+        quota -= 1;
+        noteForOffice('Reminders emailed to registrants', `${email} — ${subject}`);
         sentFor[stamp] = true;
         ledger[eventId] = sentFor;
         __reminderLedgerDirty = true;
@@ -396,6 +396,7 @@ function sendRegistrantReminders(sessionRows, registrantRows) {
   result.eventsTouched = Object.keys(ledger).length;
   pruneRegistrantReminderLedger(liveEventIds, todayKey);
   saveRegistrantReminderLedger();
+  saveOfficeDigestQueue();
 
   if (result.sent > 0 || result.held > 0) {
     log(`Registrant reminders: ${result.sent} email(s) sent` +

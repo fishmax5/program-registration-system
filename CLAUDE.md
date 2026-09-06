@@ -236,6 +236,12 @@ previous door page.
 | `72_door_app.gs` | 246 | The server half: the date-aware day read (`doorDay`), the recurring-registration writes (`applyDoorRecurring` — the rest of the month, or a club place), the either-kind contact rule, and the membership hand-off stub (`sendMembershipEmail` — **still a TODO: it records the request, it does not send**). |
 | `73_door_app_html.gs` | 700 | `buildDoorAppHtml` — the whole served app, one template literal, four screens redrawn into one `<main>`. |
 
+### One message a day to the office (74)
+
+| File | | What is in it |
+|---|--:|---|
+| `74_office_digest.gs` | 208 | The archive copy address used to be BCC'd on every leader alert and registrant reminder, added as a guest on every event registrants were invited to, and made an editor of every file shared out of the workbook — several hundred copies in a busy week, which is the same as none. Those copies are gone; each is noted here instead (`noteForOffice`, persisted once per sweep by `saveOfficeDigestQueue`), and `sendOfficeDailyDigest` carries the whole list in one email a day at 17:00. **A quiet day sends nothing**, a failed send keeps the queue, and past `OFFICE_DIGEST_MAX_LINES` the queue counts without remembering (a Script Property is 9KB). An address a previous run already seated on an event or a file is left there — removing it would mail a cancellation for a session that is still happening. Behavior only; nothing earlier reads it at load time. |
+
 ## Conventions
 
 - **Comments carry the reasoning.** This codebase explains *why* a thing is
@@ -314,3 +320,4 @@ their number.
 available. It is not part of the normal loop: **do not run it as a build step,
 and do not treat its output as the source.** `Code.bundle.gs` is gitignored;
 edits belong in the numbered files.
+

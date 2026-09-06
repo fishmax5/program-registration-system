@@ -61,11 +61,18 @@ const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
  * folder is one particular person's mailbox, and routinely not the person who
  * has to answer for what was sent.
  *
- * So one address gets a copy of all three: BCC'd on leader alerts, added as a
- * guest on any event registrants are invited to, and made an editor of every
- * file this system shares. It is a Config cell rather than a constant so the
- * office can repoint or empty it without a code change — BLANK means "copy
- * nobody", exactly like the admin notification address above it.
+ * So one address is told about all three. It USED to be told by being copied
+ * on each one as it happened — BCC'd on every leader alert, added as a guest
+ * on every event registrants were invited to, made an editor of every file
+ * shared out of the workbook. That is as unreadable as it sounds: a busy week
+ * is several hundred messages, a calendar full of sessions nobody at the desk
+ * is attending, and a Drive of "shared with you" entries.
+ *
+ * It now receives ONE EMAIL A DAY listing all of it instead — see
+ * `74_office_digest.gs`. Same facts, one message, and a day with nothing on it
+ * sends nothing. It is a Config cell rather than a constant so the office can
+ * repoint or empty it without a code change — BLANK means "record nothing",
+ * exactly like the admin notification address above it.
  *
  * The default below is seeded on a fresh Config tab only; a workbook whose
  * cell has already been cleared by hand stays cleared.

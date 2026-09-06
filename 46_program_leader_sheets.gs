@@ -822,12 +822,16 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
 
   // The people this system runs as. Named editors survive a link-sharing
   // setting later being tightened by hand, which is the point of doing both.
-  // The archive copy address joins the accounts that run this system as a
-  // named editor: the office asked to be on everything shared out of the
-  // workbook, and a named editor survives the link sharing below being
-  // tightened by hand later. Blank = nobody extra (see getArchiveCopyEmail).
+  //
+  // THE ARCHIVE COPY ADDRESS IS NOT ONE OF THEM ANY MORE. It used to be added
+  // as an editor of every file shared out of the workbook, which filled the
+  // office's Drive with a "shared with you" entry per program per term. What
+  // the office wanted was to know what had been shared and with whom, so the
+  // share is reported in the daily digest instead (see 74) and the file itself
+  // stays openable by its link. An address a previous run already made an
+  // editor is left alone — nothing here removes access.
   const wanted = listAuthorizedAdminEmails()
-    .concat([getTriggerOwner(), getCurrentUserEmail(), getArchiveCopyEmail()])
+    .concat([getTriggerOwner(), getCurrentUserEmail()])
     .map(e => String(e || '').trim().toLowerCase())
     .filter(e => e.indexOf('@') > 0);
   dedupePreservingOrder(wanted).forEach(email => {
@@ -1002,6 +1006,8 @@ function createProgramLeaderSheet(programValue) {
     try {
       file.addEditor(email);
       shared.push(email);
+      noteForOffice('Program leader sheets shared',
+        `"${title}" (${location}) shared with ${email} — ${file.getUrl()}`);
     } catch (err) {
       // NOT fatal, and not silent either. An address that bounces off Drive
       // (a typo, a personal address a Workspace policy will not share with) is
@@ -1013,6 +1019,8 @@ function createProgramLeaderSheet(programValue) {
         `anyone with its link can open it, so sending them the link by hand works.`);
     }
   });
+
+  saveOfficeDigestQueue();
 
   log(`Program leader sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
     `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es), ` +

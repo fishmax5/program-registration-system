@@ -200,11 +200,15 @@ function seedArchiveCopyRow(sheet) {
     cell.setValue(DEFAULT_ARCHIVE_COPY_EMAIL);
     log(`Seeded default Archive Copy Address ("${DEFAULT_ARCHIVE_COPY_EMAIL}") on "${SHEET_NAMES.CONFIG}".`);
   }
-  cell.setNote('One address copied on everything this system sends outside the organization:\n'
-    + '  • BCC on every program leader roster-change email.\n'
-    + '  • Added as a guest on any calendar event registrants are invited to.\n'
-    + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
-    + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
+  cell.setNote('One address that receives ONE EMAIL A DAY listing everything this system sent '
+    + 'outside the organization:\n'
+    + '  • Roster-change emails sent to program leaders.\n'
+    + '  • Reminder emails sent to registrants.\n'
+    + '  • Calendar events registrants were invited to (and uninvited from).\n'
+    + '  • Program leader sheets shared, and with whom.\n\n'
+    + 'It is no longer BCC\'d, invited or added as an editor on each individual send — a busy '
+    + 'week of that was unreadable. A day with nothing on it sends no email.\n\n'
+    + 'Leave blank to record nothing. This is not the same as the Admin Notification address, '
     + 'which receives the internal per-sync digest and nothing else.');
 }
 

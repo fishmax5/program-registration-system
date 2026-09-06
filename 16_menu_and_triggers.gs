@@ -172,7 +172,11 @@ function buildAppMenu(ui, includeAdmin) {
       // Beside the invitations because they are the two channels one
       // Notify_Mode cell governs, and this is the one that can say "your
       // appointment is at 2:15". See section 9e.
-      .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
+      .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow')
+      // The office's copy of all of the above, as one message rather than one
+      // per send. Normally a daily trigger; this is for when somebody wants
+      // today's record before the evening. See section 74.
+      .addItem('Send the Office\u2019s Daily Record Now', 'sendOfficeDigestNow'))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
       // else here is worth pressing. Everything below acts on one program;
@@ -439,6 +443,14 @@ function writeTriggers(force, takingOwnership) {
   // the desk's own roster loads flush it sooner anyway.
   removed += resetTriggersForHandler('flushCheckInQueueTrigger', () =>
     ScriptApp.newTrigger('flushCheckInQueueTrigger').timeBased().everyMinutes(5).create());
+  // THE OFFICE'S DAILY RECORD, once a day at the end of the working day.
+  // Everything this system sends outside the organization is noted through
+  // the day and carried out in one message here (see section 74) — it
+  // replaced a BCC, a calendar guest seat and a Drive share on every
+  // individual send. Late enough that the day it describes is over; a day
+  // with nothing on it sends nothing at all.
+  removed += resetTriggersForHandler('sendOfficeDailyDigest', () =>
+    ScriptApp.newTrigger('sendOfficeDailyDigest').timeBased().everyDays(1).atHour(17).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
@@ -462,7 +474,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 1 daily, 1 hourly, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily, 1 hourly, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);

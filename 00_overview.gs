@@ -40,7 +40,8 @@
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
  *      an optional Admin Notification Email + an Archive Copy Address (the
- *      one address copied on everything sent outside the organization) +
+ *      one address that receives a DAILY RECORD of everything sent outside
+ *      the organization — section 74) +
  *      Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
  *      owner — see the multi-account note below). Unaffected by the

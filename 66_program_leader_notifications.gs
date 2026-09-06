@@ -477,17 +477,17 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     }
 
     try {
-      // BCC, not CC: the leader is being told about their own roster, and a
-      // visible office address on it invites a reply-all thread nobody at the
-      // desk wants. Blank means copy nobody. Every BCC'd recipient costs a
-      // message against the same MailApp daily quota this loop is rationing,
-      // so it is counted below rather than treated as free.
-      const archiveCopy = getArchiveCopyEmail();
-      const options = { to: leader.email, subject: buildLeaderAlertSubject(programs), body: buildLeaderAlertBody(leader, programs) };
-      if (archiveCopy) options.bcc = archiveCopy;
-      MailApp.sendEmail(options);
+      // NO BCC. The office used to be copied on every one of these as it went
+      // out, which on a week of cancellations is a mailbox nobody can read.
+      // The alert is noted for the daily digest instead (see 74), which costs
+      // no message against the quota this loop is rationing and states the
+      // same fact once, in a list.
+      const subject = buildLeaderAlertSubject(programs);
+      MailApp.sendEmail({ to: leader.email, subject: subject, body: buildLeaderAlertBody(leader, programs) });
       sent++;
-      quota -= archiveCopy ? 2 : 1;
+      quota -= 1;
+      noteForOffice('Roster change alerts emailed to program leaders',
+        `${leader.email} — ${subject}`);
       programs.forEach(program => { told[program.key] = true; });
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
         `${programs.reduce((sum, p) => sum + p.changes.length, 0)} change(s).`);
@@ -535,6 +535,7 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
   });
 
   writeProgramLeaderNotifyState(state);
+  saveOfficeDigestQueue();
 
   if (baselined.length > 0) {
     log(`Roster alerts: recorded a first baseline for ${baselined.length} program(s) — nothing sent for those.`);
