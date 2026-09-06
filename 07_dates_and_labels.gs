@@ -50,13 +50,23 @@ function getHeaderMapAt(sheet, headerRow) {
 }
 
 /**
- * Scans down row-by-row (up to maxRowsToScan) for EVERY row that contains
- * uniqueHeaderText anywhere in it, returning all matching row numbers. Every
- * date-bearing tab now has TWO such header rows (Upcoming + Past sub-tables
- * — see section 6), so this replaces the old single-header-row finder.
+ * Scans down row-by-row for EVERY row that contains uniqueHeaderText anywhere
+ * in it, returning all matching row numbers. Every date-bearing tab now has
+ * TWO such header rows (Upcoming + Past sub-tables — see section 6), so this
+ * replaces the old single-header-row finder.
+ *
+ * HOW FAR IT READS. maxRowsToScan is a CEILING, not a target: the scan stops
+ * at getLastRow() — the tab's real extent — and maxRowsToScan only caps that
+ * on a workbook whose grid has grown past anything a header search should be
+ * paying for. (A tab whose trailing rows were cleared but not deleted still
+ * reports a large getLastRow(); that read is honest, and bounded by the
+ * ceiling like any other.) `endRow` narrows it further for a caller that
+ * already knows where the tables end — see getLunchScheduleEndRow().
  */
-function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan) {
-  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), maxRowsToScan || 3000);
+function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan, endRow) {
+  const ceiling = maxRowsToScan || 3000;
+  const bound = endRow ? Math.min(endRow, ceiling) : ceiling;
+  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), bound);
   const lastCol = Math.max(sheet.getLastColumn(), 1);
   if (lastRow < 1) return [];
   const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
@@ -67,7 +77,7 @@ function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan) {
   return rows;
 }
 
-/** Locates Master_Program_Dashboard's session-table header rows (unique marker: 'Event_ID'). */
+/** Locates All_Program_Sessions's session-table header rows (unique marker: 'Event_ID'). */
 function findProgramSessionHeaderRows(sheet) {
   return findAllHeaderRows(sheet, 'Event_ID', 5000);
 }
@@ -107,9 +117,18 @@ function migrateLegacySheetNames(ss) {
 
 /** The rename half of getOrCreateSheet(), without the "create it if it isn't there" half. */
 function getOrCreateSheetRenameOnly(ss, name) {
-  const formerName = LEGACY_SHEET_RENAMES[name];
-  if (!formerName) return null;
-  const former = ss.getSheetByName(formerName);
+  // A LIST of former names is a tab that has been renamed more than once,
+  // written newest-first: whichever one this workbook stopped at is the one
+  // to bring forward. See LEGACY_SHEET_RENAMES.
+  const entry = LEGACY_SHEET_RENAMES[name];
+  if (!entry) return null;
+  const candidates = Array.isArray(entry) ? entry : [entry];
+  let formerName = null;
+  let former = null;
+  for (let i = 0; i < candidates.length; i++) {
+    former = ss.getSheetByName(candidates[i]);
+    if (former) { formerName = candidates[i]; break; }
+  }
   if (!former) return null;
   try {
     former.setName(name);
@@ -145,6 +164,17 @@ function applyValueListValidationBounded(sheet, colIndex, options, startRow, num
 }
 
 /**
+ * Same idea for a YES/NO cell: a checkbox, which is TRUE or FALSE and cannot
+ * be typed into as "y", "yes please" or a stray space. Every tick box in the
+ * workbook is built on this one implementation.
+ */
+function applyCheckboxValidationBounded(sheet, colIndex, startRow, numRows) {
+  if (!colIndex || colIndex < 1 || numRows < 1) return;
+  const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
+}
+
+/**
  * Same, but SUGGESTING rather than restricting: the list drops down, and a
  * value that isn't on it is still accepted. For cells where the list is a
  * convenience and the vocabulary is genuinely open — a walk-in's name, a
@@ -174,6 +204,15 @@ function applyManualOverrideValidationRange(sheet, colIndex, startRow) {
 
 function applyManualOverrideValidationBounded(sheet, colIndex, startRow, numRows) {
   applyValueListValidationBounded(sheet, colIndex, MANUAL_OVERRIDE_OPTIONS, startRow, numRows);
+}
+
+/**
+ * The registrant tabs' flavour: the same three states plus "Remove This Row",
+ * the mark removeMarkedRegistrants() sweeps. See
+ * REGISTRANT_REMOVE_OVERRIDE_OPTION for why it is a mark and not an action.
+ */
+function applyRegistrantManualOverrideValidationBounded(sheet, colIndex, startRow, numRows) {
+  applyValueListValidationBounded(sheet, colIndex, REGISTRANT_MANUAL_OVERRIDE_OPTIONS, startRow, numRows);
 }
 
 /**
@@ -298,6 +337,9 @@ function labelManualEntryColumns(sheet, headerRow, headers, manualColumnNames) {
   manualColumnNames.forEach(name => {
     const idx = headers.indexOf(name);
     if (idx === -1) return;
+    // A HEADER cell, which is what every sectioned read projects its columns
+    // by — so this is a write the cache has to hear about like any other.
+    invalidateSectionedRowsCache(sheet);
     sheet.getRange(headerRow, idx + 1)
       .setValue(`${MANUAL_ENTRY_PREFIX} ${name}`)
       .setBackground(MANUAL_ENTRY_HEADER_COLOR)
@@ -402,6 +444,24 @@ function makeHyperlinkFormula(url, label) {
 }
 
 /**
+ * The URL back out of one of those, or '' for anything that is not one.
+ *
+ * The link columns on the session table hold `=HYPERLINK(...)` formulas, and
+ * a cell that collapses three of them into one run of rich text needs the
+ * URLs rather than the formulas. A bare URL is accepted too, because a row
+ * written by hand or by an older version of this workbook holds one — and a
+ * cell holding words (NO_REGISTRATION_LINK_LABEL, say) yields nothing, which
+ * is the caller's cue to print it as plain text.
+ */
+function hyperlinkFormulaUrl(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  if (!text) return '';
+  const match = text.match(/^=HYPERLINK\(\s*"([^"]*)"/i);
+  if (match) return match[1];
+  return /^https?:\/\//i.test(text) ? text : '';
+}
+
+/**
  * THE FORM-SPAN A SESSION BELONGS TO — 'FIXED' for a [Grouped] series, which
  * takes one form for its whole run, else the month label, because a Regular
  * program takes one form per calendar month (see buildEventGroups()).
@@ -443,10 +503,21 @@ function computeEventId(calendarId, cleanTitle, dateKey) {
   return digest.map(b => ((b < 0 ? b + 256 : b).toString(16)).padStart(2, '0')).join('').substring(0, 12);
 }
 
+/**
+ * WHAT A SESSION TAKING NO MORE PLACES READS AS. Spelled once because two
+ * different facts now produce it: a capped session that has filled up (below),
+ * and a session a human has forced to the waitlist whatever its capacity says
+ * (see WAITLIST_ONLY_TAG). Both mean the same thing to whoever is looking at
+ * the tab — the next person to sign up is on a list, not in the room — so they
+ * deliberately say it in the same words and take the same red from
+ * EVENT_STATUS_COLORS, which is keyed by this exact string.
+ */
+const WAITLIST_ONLY_STATUS = '🔴 Waitlist Only';
+
 function computeStatus(activeCount, maxCapacity) {
   if (maxCapacity <= 0) return '🟢 Open';
   const remaining = maxCapacity - activeCount;
-  if (remaining <= 0) return '🔴 Waitlist Only';
+  if (remaining <= 0) return WAITLIST_ONLY_STATUS;
   if (remaining <= Math.max(1, Math.ceil(maxCapacity * 0.15))) return '🟡 Almost Full';
   return '🟢 Open';
 }
@@ -563,6 +634,29 @@ function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
 const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
 
 /**
+ * The same date cell shown as its MONTH alone — "September 2026".
+ *
+ * FOR A DATE THAT STANDS FOR A MONTH, AND NOT FOR A DAY. It is what
+ * Master_Program_Dashboard's Schedule cell says a span in
+ * ("September 2026 – June 2027"), and what its per-month breakdown is written
+ * in.
+ *
+ * IT IS NOT FOR A ROW THAT IS A SESSION, and it was applied to one for a
+ * while — the session table showed thirty rows all reading "September 2026",
+ * which is the single most useful column on the tab spent saying the same
+ * thing thirty times. A session's row keeps DATE_DISPLAY_FORMAT: the weekday
+ * is half of how a program is known here (see above), and the drill-through
+ * from the program tab lands on a block of days a person then has to tell
+ * apart.
+ *
+ * The cell still holds the real date underneath either way, so
+ * partitionByDate(), collapseOldPastMonths() and the Event_Time formulas that
+ * read it are untouched — only what a person sees changes. See
+ * applyMonthColorTint(), whose `format` argument carries it.
+ */
+const MONTH_DISPLAY_FORMAT = 'MMMM yyyy';
+
+/**
  * Tints an Event_Date column's cells by month — the direct replacement for the
  * old separate Month column everywhere — and stamps DATE_DISPLAY_FORMAT while
  * it is there.
@@ -570,14 +664,18 @@ const DATE_DISPLAY_FORMAT = 'ddd M/d/yyyy';
  * The two belong together: this is called on exactly the Event_Date column of
  * exactly the tabs that have one, from writeUpcomingPastSections(), so it is
  * the one place that already knows where every date cell in the workbook is.
+ *
+ * `format` lets one tab say it wants its dates read differently —
+ * Master_Program_Dashboard passes MONTH_DISPLAY_FORMAT. Omitted, every tab
+ * gets DATE_DISPLAY_FORMAT as it always has.
  */
-function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows) {
+function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows, format) {
   if (numRows < 1) return;
   const range = sheet.getRange(startRow, colIndex1Based, numRows, 1);
   const values = range.getValues();
   const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : PALETTE.PAPER]; });
   range.setBackgrounds(backgrounds);
-  range.setNumberFormat(DATE_DISPLAY_FORMAT);
+  range.setNumberFormat(format || DATE_DISPLAY_FORMAT);
 }
 
 /** Builds a "text equals" conditional format rule across one or more explicit ranges. */

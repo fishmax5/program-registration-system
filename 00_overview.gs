@@ -3,9 +3,13 @@
  *  🗓️  CALENDAR & FORM MANAGER  —  Program Registration + Lunch Ordering
  * ============================================================================
  *  Sheets:
- *    - Master_Program_Dashboard : "Today at Each Location" + participation
- *      metrics + the full per-session table, now split into an "Upcoming
- *      Sessions" sub-table and a "Past Sessions" sub-table (see section 7).
+ *    - All_Program_Sessions : renamed from All_Program_Sessions (Sept 2026;
+ *      LEGACY_SHEET_RENAMES carries an existing workbook's tab across in
+ *      place). "Today at Each Location" + the full
+ *      per-session table, now split into an "Upcoming Sessions" sub-table
+ *      and a "Past Sessions" sub-table (see section 7). The participation
+ *      metrics used to sit here too, and now sit on Master_Program_Dashboard, below —
+ *      they are monthly reasoning, and this table is one row per DAY.
  *      The session table no longer carries a Manual_Override column — it's
  *      fully calendar-derived every render (Location/Type_Tag stay
  *      editable dropdowns, but nothing on this table is protected from a
@@ -13,6 +17,61 @@
  *      is the first column, and the old separate Month column has been
  *      replaced everywhere by simply color-tinting the Event_Date cell
  *      itself (see getMonthColor()/applyMonthColorTint()).
+ *    - Master_Program_Dashboard            : the same sessions, ONE ROW PER
+ *      PROGRAM — one title, at the building(s) it runs in, for as long as it
+ *      runs. Fourteen of the session table's columns are whole-program facts
+ *      printed once per session; this is the other half of that join written
+ *      out on its own, with the schedule collapsed into a phrase ("Weekly ·
+ *      Tue 9:30 AM - 11:30 AM · September 2026 - June 2027 · 38 sessions",
+ *      with the per-month breakdown and any week the run skips in a note) and
+ *      lunch collapsed to one row per location.
+ *      FIFTEEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN — at a
+ *      twelfth of the row count. The rule is the schedule cell's, applied to
+ *      the whole tab: THE FACT GOES IN THE CELL AND THE FOLLOW-UP QUESTION
+ *      GOES IN A CELL NOTE. Seats is the four counting columns as one
+ *      sentence ("12 / 20 · 60% · 2 waiting", or "12 · unlimited"), summed
+ *      over THIS MONTH AND NEXT rather than over the program's whole life;
+ *      Links is the form, its editor and the two generated sheets as one cell
+ *      of rich text with a live link per word; and the three PROGRAM FLAGS —
+ *      Club, No Registration, Personalized Assistance — are tick boxes here
+ *      rather than twelve identical copies of themselves on the session table.
+ *      Next_Date leads the row and carries the month tint; Last_Date closes
+ *      it; the split is Running / Not currently running rather than Upcoming
+ *      / Past, because a class running September to June is neither.
+ *      A [Grouped] run of dates, which has one form and no month of its own,
+ *      used to be filed awkwardly under its earliest month; there is no month
+ *      to file it under now. It also carries the participation metrics block
+ *      and one line the program grain makes possible — how many of the
+ *      programs we are running have nobody down as leading them (a COUNT off
+ *      Program_Leaders; nothing is shared or sent from here) — and its
+ *      Sessions cell links through to that program's NEXT day row on the
+ *      session table, which is where the month detail lives now.
+ *      DERIVED AND READ-ONLY, WITH ONE WINDOW IN IT: nothing reads this tab,
+ *      nothing is stored on it that is not already on a session row, and
+ *      deleting it changes no behavior anywhere (the next dashboard render
+ *      draws it again). Written from the session rows the render already
+ *      holds, never from a second read of that tab. FOUR WINDOWS, NOT ONE,
+ *      and every one of them still derived:
+ *        LEADER is read off Program_Leaders on every render and never read
+ *        back, so typing a name ADDS a row on THAT tab (with the email tick
+ *        clear) instead of storing a second answer to "who may read this
+ *        roster" here. A yellow cell means a Title_Match phrase proposed the
+ *        name and nobody has confirmed it — which is what the retired
+ *        Leader_Source column used to say in words beside the colour already
+ *        saying it. Because leaderProgramKey() has no month in it, every
+ *        future month of the same program shows the same leader with nothing
+ *        carried anywhere.
+ *        THE THREE PROGRAM FLAGS are read off the session rows and written
+ *        straight back to them — and to the calendar, through the same
+ *        pending-flag queue the session table's own tick has always used.
+ *      And two cells that are windows with no handle: ROOM and NOTIFY, read
+ *      off Program_Settings on every render through the same memoized read
+ *      the invitation and reminder passes make. Notify is the six tick boxes
+ *      as one phrase ("Cal · 7d · AM"), where BLANK means that tab has no row
+ *      for the program yet and "Silent" means somebody cleared every box —
+ *      a gap and a decision, told apart. Both are READ-ONLY: an unticked box
+ *      only means "off" while there is one place to tick it.
+ *      See section 7b.
  *    - Master_Lunch_Dashboard   : "Today's Lunch Needs" (unchanged, always
  *      at the very top) + the full catering schedule, now likewise split
  *      into "Upcoming Lunch Schedule" / "Past Lunch Schedule" sub-tables.
@@ -20,7 +79,7 @@
  *      location (LOCATION_COLOR_MAP / buildLocationRowTintRules()) — except
  *      the month-tinted Event_Date cell and the yellow hand-entry columns,
  *      which keep their own meaning.
- *    - Registrant_Dash          : one row per person per session, split
+ *    - All_Registrants          : one row per person per session, split
  *      into "Upcoming Registrants" / "Past Registrants" sub-tables. Leads
  *      with Event_Date (like every other date-bearing tab), then Location,
  *      Event and Event_Time so staff never scroll to see which session a row
@@ -39,15 +98,32 @@
  *      Upcoming/Past sub-tables like every other date-bearing tab.
  *    - Config                   : Meal Buffer Amounts (Location x Hot/Cold
  *      only — "Not Serving" never gets a buffer row) + Order Ahead Time +
- *      an optional Admin Notification Email + an Archive Copy Address (the
- *      one address that receives a DAILY RECORD of everything sent outside
- *      the organization — section 74) +
+ *      an Admin Notification Emails table (up to five people in the office,
+ *      each ticked for what they are copied on: the sync digest, leader
+ *      roster alerts, registrant reminders, calendar invitations — it
+ *      replaced the single Admin Notification Email and Archive Copy
+ *      Address cells. The alerts and reminders arrive as ONE DAILY RECORD
+ *      of what went out, section 85, not a copy of each send) +
  *      Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
- *      owner — see the multi-account note below). Unaffected by the
+ *      owner — see the multi-account note below) + Mail to Members &
+ *      Leaders (Pause_Outbound_Mail: set to "Yes" while repairing and
+ *      nothing leaves the office — no roster alerts, no reminders. Held
+ *      messages are DROPPED, not saved up, so releasing it never delivers
+ *      a pile of churn about registrations that only ever moved on paper.
+ *      The office's own digest and error mail are unaffected). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
- *      first-column/month-tint treatment as Registrant_Dash.
+ *      first-column/month-tint treatment as All_Registrants.
+ *    - Metrics                  : one row per calendar MONTH, and the only
+ *      tab that is a record rather than a projection of the rows still on
+ *      the other tabs. A month is counted once and written down (on the 2nd
+ *      of the following month, or from Settings & Fixes -> "Update Metrics
+ *      Now"), because the registrant rows a month was counted from are
+ *      eventually archived and a year-over-year comparison outlives them.
+ *      The block above the monthly rows is that comparison: the last twelve
+ *      complete months against the twelve before them, plus the month
+ *      running against the same month a year ago. See section 83.
  *
  *  Notable behaviors:
  *    - All-day calendar events are skipped entirely.
@@ -116,7 +192,7 @@
  *      rebuild, which is what a question typed onto a live form by hand never
  *      survived. Three rules keep it additive: a custom question may not take a
  *      title the template reads by name (refused, with a note), its answers go
- *      into ONE Registrant_Dash column (Form_Answers) so the table's shape
+ *      into ONE All_Registrants column (Form_Answers) so the table's shape
  *      never depends on another tab, and it is added to both branch pages
  *      before "Anything Else?" without touching a page break or a template
  *      item. getAdminNotesResponse() reads "Anything Else?" BY TITLE for the
@@ -197,35 +273,63 @@
  *      who signed up, who is gone, who came off the waitlist, whose party
  *      grew. A sync where nothing changed sends nothing at all. Rides the
  *      same hourly registration sync as everything else here — no new
- *      trigger. Replaces Program_Options' old Instructor_Email column, whose
+ *      trigger. Replaces the program tab's old Instructor_Email column, whose
  *      addresses are carried onto the new tab automatically the first time
- *      a sync runs (migrateProgramLeaderAddresses()).
- *    - REGISTRANT NOTIFICATIONS (Program_Options' Notify_Mode and
- *      Reminder_Days, section 9e): how often each PROGRAM writes to the
- *      people signed up for it. Two channels under one dropdown — the
- *      calendar invite that puts them on the real event's guest list, and a
- *      reminder email this workbook sends N days before, comma-separated,
- *      0 meaning the morning of. Left blank a program keeps its kind's usual
- *      behavior: everything ordinary is invited and nothing more, exactly as
- *      before these columns existed, while a Personalized Assistance program
- *      also emails the person their OWN appointment time — when they book,
- *      and again the day before. That time can only be said in mail: a
- *      calendar event has one description shared by every guest. Every send
- *      is ledgered per person per offset, so an hourly sync never repeats
- *      one. Config's "Calendar Invitations" switch still wins over any row.
+ *      a sync runs (migrateProgramLeaderAddresses()). Title_Match is the
+ *      other direction: comma-separated phrases ("yoga") meaning "a program
+ *      whose title contains this is mine", so a NEW program nobody has typed
+ *      a row for gets one proposed for the matching leader instead of
+ *      running all month attributed to nobody. A proposal is a real row with
+ *      the notify tick clear and a note saying which phrase found it — a
+ *      phrase never overrides a typed row, and never shares or sends
+ *      anything by itself.
+ *    - PROGRAM SETTINGS (the Program_Settings tab, sections 6c, 9e and 9h):
+ *      ONE ROW PER PROGRAM, and everything standing that is true of it. The
+ *      left of the row is recomputed; the right is yours. How the program
+ *      RUNS — Typical_Attendance, Usual_Capacity, Room_Or_Setup — and then
+ *      what it SENDS the people signed up for it.
+ *
+ *      This was two tabs, Program_Options and Registrant_Notifications, at
+ *      the same grain and with the same key, refreshed in the same pass from
+ *      the same session rows. Your Program_Options tab is RENAMED in place
+ *      and every tick you had on the notifications tab is copied onto it the
+ *      first time a sync runs; the old notifications tab is left in the
+ *      workbook, marked retired, for you to check against and delete.
+ *
+ *      What it sends: a TICK BOX PER CHANNEL, because the channels are
+ *      not exclusive — Add_To_Calendar puts registrants on the real event's
+ *      guest list; Week_Before, Day_Before and Morning_Of are emails this
+ *      workbook sends 7, 1 and 0 days out; Other_Reminders adds any further
+ *      day counts ("14, 3"); Confirm_On_Booking writes the moment somebody
+ *      registers. A new program's row is born ticked the way its KIND is
+ *      normally notified — everything ordinary invited and nothing more,
+ *      while a Personalized Assistance program also emails the person their
+ *      OWN appointment time, when they book and again the day before. That
+ *      time can only be said in mail: a calendar event has one description
+ *      shared by every guest. From then on the ticks are the whole answer,
+ *      and an unticked box means that message is not sent. Replaces the old
+ *      Notify_Mode / Reminder_Days pair, whose settings are carried onto the
+ *      boxes automatically the first time a sync runs.
+ *      Every send is ledgered per person per offset, so an hourly sync never
+ *      repeats one. Config's "Calendar Invitations" switch still wins over
+ *      any row.
  *    - ONE FORM TEMPLATE, ONE BRANCH POINT. Every group — Grouped or Regular
  *      — is built from the same template, and "Attendance Mode" is now on
  *      every form:
- *        "Everyone, every date"          -> one checkbox of who eats, applied
- *          to every session date, including dates added to a Grouped series
- *          afterward (see the ALL_DATES registry + applyAllDatesCatchup()).
- *        "Let me pick specific dates/people" -> the two roster grids,
- *          "Who is Attending Each Date?" and "Who Needs Lunch Each Date?",
- *          with dates as ROWS and PERSON_COLUMN_LABELS as COLUMNS. Full
- *          per-person, per-date resolution: any guest can attend/skip/eat
- *          independently of any other. Checking lunch WITHOUT attendance is
- *          not silently dropped — processFormResponse() reconciles it as
- *          attending and flags it in Admin_Notes.
+ *        "Everyone, every date"          -> one number, the TOTAL meals that
+ *          party wants (0 to MAX_MEALS_PER_SUBMISSION), applied to every
+ *          session date, including dates added to a Grouped series afterward
+ *          (see the ALL_DATES registry + applyAllDatesCatchup()).
+ *        "Let me pick specific dates/people" -> two grids, both with dates as
+ *          ROWS: "Who is Attending Each Date?" with PERSON_COLUMN_LABELS as
+ *          columns, and "How Many Meals Each Date?" with 0-4 as columns.
+ *          Full per-person, per-date attendance: any guest can attend or skip
+ *          independently of any other. MEALS, though, are one number per date
+ *          — see TEMPLATE_VERSION's v9 note — and land on the registrant's own
+ *          row, because a total is not divisible into people the form never
+ *          asked about. Ordering a meal on a date nobody ticked is not
+ *          silently dropped: processFormResponse() reconciles it as attending
+ *          and flags it in Admin_Notes.
  *      There is NO "how many guests?" question: page 1 has three optional
  *      guest-name fields and the headcount is simply how many were filled
  *      in. That kills two bugs by construction — the old "said 3, named 2,
@@ -332,30 +436,33 @@
  *    - AND REPAIRED IN PLACE BEFORE THEY ARE REBUILT. A rebuild is the
  *      sledgehammer: every question replaced, every pre-checked box
  *      regenerated, five forms an execution. Most template changes move far
- *      less than that — v8 moved page-navigation settings and nothing else —
- *      so runFormStateMigrations() (68_form_state_migrations.gs) runs first,
+ *      less than that — v8 moved page-navigation settings and nothing else,
+ *      v9 swapped three lunch questions for two — so
+ *      runFormStateMigrations() (68_form_state_migrations.gs) runs first,
  *      writing only what is wrong on each live form and stamping the form
  *      current when its migrations cover the whole of that version. What is
  *      left for the rebuild pass is the forms a migration could not recognize.
  *      A migration also says WHICH forms it is for, from the dashboard rows
  *      alone: the v8 routing repair is aimed at the single-session and
  *      appointment forms, the only two shapes whose respondents could ever
- *      meet the misplaced setting, so no other form is opened at all.
- *      Admin -> "Fix Form Page Routing (no rebuild)" forces the same sweep,
+ *      meet the misplaced setting, so no other form is opened at all. (The
+ *      v9 meal swap is for every form, and does its own cheap check on the
+ *      titles once the form is open.)
+ *      Admin -> "Fix Forms In Place (no rebuild)" forces the same sweep,
  *      and hands itself on until every form has been looked at.
- *    - NO LUNCH MEANS NO LUNCH QUESTION. The lunch grid only ever lists
+ *    - NO LUNCH MEANS NO LUNCH QUESTION. The meal grid only ever lists
  *      dates that actually serve lunch (buildDateLabelSets()), and when NO
  *      date on a form does — or the location never caters —
- *      syncLunchQuestionsOnForm() takes both roster lunch questions off the form
+ *      syncLunchQuestionsOnForm() takes both meal questions off the form
  *      entirely and says so in the description. They come back on their own
  *      if a catered date later appears. On the data side buildRegistrantRow()
  *      gates lunch demand on isLunchOfferedOn(), so the "everyone, every
- *      date" branch's single who-eats answer can't book a meal on a
+ *      date" branch's single meal total can't book a meal on a
  *      Not-Serving date.
  *    - The template calls setCollectEmail(true) and
  *      setAllowResponseEdits(true) — a submitter's email becomes a real
  *      identity key, Google auto-sends a receipt with an edit link, and
- *      Form_Source on Registrant_Dash links straight to that
+ *      Form_Source on All_Registrants links straight to that
  *      person's own submission (response.getEditResponseUrl()) instead of
  *      to the shared form editor.
  *    - Allergies / dietary needs is its own required-free text field,
@@ -366,7 +473,7 @@
  *    - Party_ID (= the Google Form response ID) and Party_Size (headcount
  *      including the registrant) are stamped on every row from the same
  *      submission, so staff can see "party of 3, one no-show" at a glance
- *      on Registrant_Dash.
+ *      on All_Registrants.
  *    - Name-based identity (dedup / manual-edit protection / the "sign up
  *      for all dates" registry) is matched case/whitespace-insensitively
  *      via normalizeNameKey() — "Jane Smith" and "jane smith " are the same
@@ -424,10 +531,10 @@
  *      re-reading the response the deletion was aimed at does not. See section
  *      5c.
  *    - QUICK MARK IS A DIALOG, not a band of cells above the tables. See
- *      section 6d for what that fixed. Registrant_Dash's tables start at row 1.
+ *      section 6d for what that fixed. All_Registrants's tables start at row 1.
  *    - RENAMING A PROGRAM MOVES IT, RATHER THAN REPLACING IT. cleanTitle is an
  *      input to computeEventId(), the group key, computeClubKey() and
- *      Program_Options' key, so a title change used to re-key a program's
+ *      Program_Settings' key, so a title change used to re-key a program's
  *      sessions (triaging every one of them and their registrants), detach a
  *      club's standing roster, and orphan the staff's own notes — three of
  *      those four silently. detectRenamedPrograms() now recognizes the pattern
@@ -446,7 +553,8 @@
  *      - Per-EXECUTION caches (Apps Script globals, which die with the run,
  *        so there is no cross-run staleness to reason about): the
  *        Lunch_Schedule meal index, Config's meal buffers + order-ahead
- *        days, per-form item lookups, and the calendar event fetch. Each is
+ *        days, open form handles (openFormCached()), per-form item lookups,
+ *        and the calendar event fetch. Each is
  *        dropped by whatever rewrites its source — invalidateMealInfoIndex()
  *        from renderLunchScheduleSheet(), invalidateConfigCaches() from
  *        buildConfigSheet(), invalidateFormItemIndex() from

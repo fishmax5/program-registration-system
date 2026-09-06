@@ -32,6 +32,14 @@
 //     out, so the common case doesn't idle.
 //   - The final slice rebuilds every trigger, renders the dashboard once,
 //     and clears the state.
+//
+// The STATE MACHINE behind those bullets — the watchdog, the slice counter,
+// the deadline, the stall detection, the hand-off trigger — is
+// runSlicedJob() in 74, shared with the three other sliced jobs. What stays
+// here is what is particular to an import: the lock held for the whole slice,
+// the automation pause re-asserted every slice, progress measured against the
+// remaining count, and every word the person reads. The stored state keeps
+// its key and its shape, so an import already in flight resumes untouched.
 // ============================================================================
 
 const BOOTSTRAP_ENTRY_NAME = 'bootstrapCalendars';
@@ -71,35 +79,22 @@ const BOOTSTRAP_MAX_STALLED_SLICES = 2;
 const BOOTSTRAP_STALE_MS = 2 * 60 * 60 * 1000;
 
 function getBootstrapState() {
-  const raw = PropertiesService.getScriptProperties().getProperty(BOOTSTRAP_STATE_PROP_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    log(`⚠️ Bootstrap state was unreadable (${err}) — treating it as finished.`);
-    return null;
-  }
+  return getSlicedJobState(BOOTSTRAP_STATE_PROP_KEY, 'Bootstrap');
 }
 
 function saveBootstrapState(state) {
-  PropertiesService.getScriptProperties().setProperty(BOOTSTRAP_STATE_PROP_KEY, JSON.stringify(state));
+  saveSlicedJobState(BOOTSTRAP_STATE_PROP_KEY, state);
 }
 
 function clearBootstrapState() {
-  PropertiesService.getScriptProperties().deleteProperty(BOOTSTRAP_STATE_PROP_KEY);
+  clearSlicedJobState(BOOTSTRAP_STATE_PROP_KEY);
 }
 
 /** Is a sliced import in flight right now, specifically? Stale state (see BOOTSTRAP_STALE_MS) reads as "no". */
 function isBootstrapImportActive() {
-  const state = getBootstrapState();
-  if (!state) return false;
-  const age = Date.now() - (state.lastSliceAt || state.startedAt || 0);
-  if (age > BOOTSTRAP_STALE_MS) {
-    log(`⚠️ Ignoring a large-setup import that hasn't advanced in ${Math.round(age / 60000)} minute(s) — ` +
-      `run ${BOOTSTRAP_ENTRY_NAME}() to restart it, or cancelBootstrapCalendars() to clear it.`);
-    return false;
-  }
-  return true;
+  return isSlicedJobActive(BOOTSTRAP_STATE_PROP_KEY, BOOTSTRAP_STALE_MS, minutes =>
+    `⚠️ Ignoring a large-setup import that hasn't advanced in ${minutes} minute(s) — ` +
+    `run ${BOOTSTRAP_ENTRY_NAME}() to restart it, or cancelBootstrapCalendars() to clear it.`);
 }
 
 /**
@@ -220,29 +215,35 @@ function resumeBootstrapCalendars() {
  * is a NEXT slice happens here.
  */
 function runBootstrapSlice() {
-  const state = getBootstrapState();
-  if (!state) {
-    // Nothing in flight — a leftover trigger firing after the job finished.
-    deleteBootstrapResumeTriggers();
-    return;
-  }
+  return runSlicedJob({
+    label: 'Bootstrap',
+    propKey: BOOTSTRAP_STATE_PROP_KEY,
+    resumeHandler: BOOTSTRAP_RESUME_HANDLER,
+    budgetMs: BOOTSTRAP_SLICE_BUDGET_MS,
+    resumeDelayMs: BOOTSTRAP_RESUME_DELAY_MS,
+    watchdogDelayMs: BOOTSTRAP_WATCHDOG_DELAY_MS,
+    maxSlices: BOOTSTRAP_MAX_SLICES,
+    maxStalledSlices: BOOTSTRAP_MAX_STALLED_SLICES,
 
-  // Armed BEFORE anything else, including the lock: from here on every exit
-  // path leaves exactly one live successor behind, so neither an outright
-  // kill nor a lock we couldn't get can strand the import. finishBootstrap()
-  // is what finally clears it.
-  armBootstrapResume(BOOTSTRAP_WATCHDOG_DELAY_MS);
-
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
-    log('Bootstrap slice: another execution holds the lock — the next slice will retry.');
-    return;
-  }
-
-  try {
-    state.slices++;
-    state.lastSliceAt = Date.now();
-    saveBootstrapState(state);
+    // THE LOCK IS HELD FOR THE WHOLE SLICE here, unlike the two form sweeps
+    // that take it per form: an import writes the session table, the
+    // registrant table and the dashboard continuously for four and a half
+    // minutes, and there is no point between two groups at which handing the
+    // workbook to a sync would leave a coherent picture. That is also why
+    // isDeskWorkBlocked() names this job and not the others.
+    around: slice => {
+      const lock = LockService.getScriptLock();
+      if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
+        log('Bootstrap slice: another execution holds the lock — the next slice will retry.');
+        return null; // the watchdog armed above brings the next slice
+      }
+      try {
+        return slice();
+      } finally {
+        flushPersistentRegistries(); // a killed slice's forms must never be forgotten
+        lock.releaseLock();
+      }
+    },
 
     // Re-asserted EVERY slice, not just at the start. An import runs for
     // half an hour across a dozen executions, and a single trigger that
@@ -251,74 +252,73 @@ function runBootstrapSlice() {
     // already touched back in onCalendarChange()'s queue, and the remaining
     // slices then fight a sync storm instead of importing. Costs one
     // getProjectTriggers() call per slice and normally removes nothing.
-    pauseAutomationForBootstrap();
+    beforeSlice: () => { pauseAutomationForBootstrap(); },
 
-    if (state.slices > BOOTSTRAP_MAX_SLICES) {
-      finishBootstrap(state, `stopped after ${BOOTSTRAP_MAX_SLICES} slices without finishing`);
-      return;
-    }
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (findProgramSessionHeaderRows(registrySheet).length === 0) {
-      renderProgramDashboard();
-    }
-
-    const doneBefore = state.groupsProcessed;
-    toastIfPossible(`Import chunk ${state.slices} running… (${doneBefore} program group(s) done so far)`);
-
-    const summary = importCalendarGroups(registrySheet, {
-      deadline: Date.now() + BOOTSTRAP_SLICE_BUDGET_MS,
-      // A 4.5-minute chunk is a long time to stare at an unchanged screen, so
-      // it reports in as it goes rather than only at the hand-off.
-      onGroupDone: partial => {
-        if (partial.groupsProcessed % BOOTSTRAP_TOAST_EVERY_GROUPS !== 0) return;
-        const done = doneBefore + partial.groupsProcessed;
-        const left = partial.groupsTotal - partial.groupsProcessed;
-        toastIfPossible(`Importing… ${done} program group(s), ${partial.eventsAdded} date(s) so far` +
-          (left > 0 ? ` — about ${left} left` : ''));
+    work: ctx => {
+      const state = ctx.state;
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
+      if (findProgramSessionHeaderRows(registrySheet).length === 0) {
+        renderProgramDashboard();
       }
-    });
-    state.groupsProcessed += summary.groupsProcessed;
-    state.eventsAdded += summary.eventsAdded;
-    state.formsCreated += summary.formsCreated;
-    state.formsReused += summary.formsReused;
-    state.groupsFailed += summary.groupsFailed;
-    log(`Bootstrap slice ${state.slices}: ${describeImportSummary(summary)}; ${summary.remaining} group(s) left.`);
 
-    if (!summary.outOfTime) {
-      finishBootstrap(state, null);
-      return;
-    }
+      const doneBefore = state.groupsProcessed;
+      toastIfPossible(`Import chunk ${state.slices} running… (${doneBefore} program group(s) done so far)`);
 
-    toastIfPossible(`Import chunk ${state.slices} done — ${state.groupsProcessed} program group(s) imported, ` +
-      `${summary.remaining} to go. Next chunk starts in ${Math.round(BOOTSTRAP_RESUME_DELAY_MS / 1000)}s.`);
+      // importCalendarGroups() runs the whole slice's loop itself, honouring
+      // the deadline between groups — a group is a Drive copy and a dozen
+      // Forms calls, and it is never interrupted part-way.
+      const summary = importCalendarGroups(registrySheet, {
+        deadline: ctx.deadline,
+        // A 4.5-minute chunk is a long time to stare at an unchanged screen, so
+        // it reports in as it goes rather than only at the hand-off.
+        onGroupDone: partial => {
+          if (partial.groupsProcessed % BOOTSTRAP_TOAST_EVERY_GROUPS !== 0) return;
+          const done = doneBefore + partial.groupsProcessed;
+          const left = partial.groupsTotal - partial.groupsProcessed;
+          toastIfPossible(`Importing… ${done} program group(s), ${partial.eventsAdded} date(s) so far` +
+            (left > 0 ? ` — about ${left} left` : ''));
+        }
+      });
+      state.groupsProcessed += summary.groupsProcessed;
+      state.eventsAdded += summary.eventsAdded;
+      state.formsCreated += summary.formsCreated;
+      state.formsReused += summary.formsReused;
+      state.groupsFailed += summary.groupsFailed;
+      log(`Bootstrap slice ${state.slices}: ${describeImportSummary(summary)}; ${summary.remaining} group(s) left.`);
 
-    // Still work to do. Guard against a group that can never succeed keeping
-    // this going forever: no forward movement twice running ends it.
-    const madeProgress = summary.groupsProcessed > 0 &&
-      (state.lastRemaining === null || summary.remaining < state.lastRemaining);
-    state.stalledSlices = madeProgress ? 0 : state.stalledSlices + 1;
-    state.lastRemaining = summary.remaining;
-    saveBootstrapState(state);
+      if (!summary.outOfTime) return { finished: true };
+      return { processed: summary.groupsProcessed, remaining: summary.remaining };
+    },
 
-    if (state.stalledSlices >= BOOTSTRAP_MAX_STALLED_SLICES) {
-      finishBootstrap(state, `stopped early — ${summary.remaining} group(s) could not be imported`);
-      return;
-    }
+    // Progress is measured against the REMAINING COUNT rather than by groups
+    // touched: this job keeps no list of what is left (the sheet is the
+    // record — a group with rows is skipped next time), so a slice that
+    // processed groups without reducing the remainder has not moved.
+    madeProgress: (state, result) => result.processed > 0 &&
+      (state.lastRemaining === null || state.lastRemaining === undefined ||
+        result.remaining < state.lastRemaining),
+    noteProgress: (state, result) => { state.lastRemaining = result.remaining; },
 
-    armBootstrapResume(BOOTSTRAP_RESUME_DELAY_MS); // replaces the watchdog with a prompt hand-off
-    log(`Bootstrap: handing off to the next slice in ${Math.round(BOOTSTRAP_RESUME_DELAY_MS / 1000)}s.`);
-  } catch (err) {
-    // An exception, unlike a timeout, is ours to handle: put the system back
-    // together rather than leaving automation paused.
-    log(`⚠️ Bootstrap slice failed (${err}) — restoring automation.`);
-    noteForAdmin('Large-setup import', `The import stopped with an error and automation was restored: ${err}`);
-    finishBootstrap(getBootstrapState() || state, `stopped by an error: ${err}`);
-  } finally {
-    flushPersistentRegistries(); // a killed slice's forms must never be forgotten
-    lock.releaseLock();
-  }
+    onHandOff: (state, result) => {
+      toastIfPossible(`Import chunk ${state.slices} done — ${state.groupsProcessed} program group(s) imported, ` +
+        `${result.remaining} to go. Next chunk starts in ${Math.round(BOOTSTRAP_RESUME_DELAY_MS / 1000)}s.`);
+      log(`Bootstrap: handing off to the next slice in ${Math.round(BOOTSTRAP_RESUME_DELAY_MS / 1000)}s.`);
+    },
+
+    overrunProblem: () => `stopped after ${BOOTSTRAP_MAX_SLICES} slices without finishing`,
+    stalledProblem: result => `stopped early — ${result.remaining} group(s) could not be imported`,
+
+    // ONE FAILURE ENDS IT, deliberately: this job tore automation down, and an
+    // exception it left unfinished would leave the triggers off.
+    onError: err => {
+      log(`⚠️ Bootstrap slice failed (${err}) — restoring automation.`);
+      noteForAdmin('Large-setup import', `The import stopped with an error and automation was restored: ${err}`);
+    },
+    errorProblem: err => `stopped by an error: ${err}`,
+
+    onDone: (state, problem) => finishBootstrap(state, problem)
+  });
 }
 
 /**
@@ -393,8 +393,7 @@ function pauseAutomationForBootstrap() {
 
 /** Replaces any pending hand-off with exactly one, `delayMs` out. */
 function armBootstrapResume(delayMs) {
-  deleteBootstrapResumeTriggers();
-  ScriptApp.newTrigger(BOOTSTRAP_RESUME_HANDLER).timeBased().after(delayMs).create();
+  armSlicedJobResume(BOOTSTRAP_RESUME_HANDLER, delayMs);
 }
 
 /**
@@ -429,13 +428,7 @@ function logProjectTriggers() {
 }
 
 function deleteBootstrapResumeTriggers() {
-  let removed = 0;
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() !== BOOTSTRAP_RESUME_HANDLER) return;
-    ScriptApp.deleteTrigger(t); // one-off triggers linger after firing; clear them out
-    removed++;
-  });
-  return removed;
+  return deleteSlicedJobResumeTriggers(BOOTSTRAP_RESUME_HANDLER);
 }
 
 /**
@@ -549,7 +542,7 @@ function findExistingFormIdFromEvents(events) {
     const found = findRegistrationLineInDescription(ev.getDescription() || '');
     if (!found) continue;
     try {
-      FormApp.openById(found.formId);
+      openFormCached(found.formId);
       return found.formId;
     } catch (err) {
       log(`⚠️ Found a Form ID marker (${found.formId}) in an event description, but it could not be opened (${err}) — ignoring.`);

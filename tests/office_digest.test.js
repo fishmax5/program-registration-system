@@ -1,13 +1,14 @@
 // THE OFFICE'S DAILY DIGEST: one message a day instead of a copy of each send.
 //
-// The archive copy address stopped being BCC'd, invited and shared with on
-// every individual send, so the ONLY thing that now tells the office what left
-// the organization is this queue. Which makes three properties load-bearing:
-// a note must survive the execution that made it (it is a different execution
-// that sends), a quiet day must send nothing at all (a daily "nothing
-// happened" is how an address gets filtered into a folder nobody opens), and a
-// send that fails must leave the queue intact rather than dropping a day of
-// record on the floor.
+// A tick on Config's Admin Notification Emails table used to put a copy of
+// every leader alert and every registrant reminder in somebody's inbox as it
+// went. It now means one email a day, so this queue is the ONLY thing that
+// tells the office what left the organization — which makes four properties
+// load-bearing: a note must survive the execution that made it (a different
+// execution sends it), a quiet day must send nothing at all (a daily "nothing
+// happened" is how an address gets filtered into a folder nobody opens), a
+// person must read only the categories they are ticked for, and a send that
+// fails must leave the queue intact rather than dropping a day of record.
 //
 // The cap is checked too: a Script Property is 9KB and a day of reminders is
 // hundreds of lines, so past the cap the queue keeps COUNTING without
@@ -20,7 +21,8 @@ const src = require('./helpers/source').readSource();
 const store = {};
 let sentMail = [];
 let mailThrows = false;
-let archiveEmail = 'office@example.org';
+// Who is ticked for what on Config's Admin Notification Emails table.
+let ticks = { leaderRosterAlerts: ['office@example.org'], registrantReminders: ['office@example.org'] };
 
 const sandbox = {
   console: { log: () => {} },
@@ -60,12 +62,12 @@ this.sendOfficeDailyDigest = sendOfficeDailyDigest;
 this.readOfficeDigestQueue_ = readOfficeDigestQueue_;
 this.OFFICE_DIGEST_PROP_KEY = OFFICE_DIGEST_PROP_KEY;
 this.OFFICE_DIGEST_MAX_LINES = OFFICE_DIGEST_MAX_LINES;
-// The Config tab is unreachable in this context, so the address is stubbed at
-// the one function every caller reads it through.
-this.__setArchive = fn => { getArchiveCopyEmail = fn; };
+// The Config tab is unreachable in this context, so the ticks are stubbed at
+// the two functions every caller reads them through.
+this.__setTicks = fn => { adminEmailsForCategory = fn; getAllAdminNotificationEmails = () => fn('filesShared'); };
 `, sandbox, { filename: 'program.gs' });
 
-sandbox.__setArchive(() => archiveEmail);
+sandbox.__setTicks(key => ticks[key] || []);
 
 let failures = 0;
 function check(name, actual, expected) {
@@ -79,60 +81,78 @@ function reset() {
   Object.keys(store).forEach(k => { delete store[k]; });
   sentMail = [];
   mailThrows = false;
-  archiveEmail = 'office@example.org';
+  ticks = { leaderRosterAlerts: ['office@example.org'], registrantReminders: ['office@example.org'] };
 }
 
 // A quiet day is silent.
 reset();
-check('an empty queue sends nothing', sandbox.sendOfficeDailyDigest(), false);
+check('an empty queue sends nothing', sandbox.sendOfficeDailyDigest(), 0);
 check('and no mail went out', sentMail.length, 0);
 
 // A note survives the execution that made it.
 reset();
-sandbox.noteForOffice('Reminders emailed to registrants', 'a@b.com — Tomorrow: Yoga');
+sandbox.noteForOffice('registrantReminders', 'a@b.com — Tomorrow: Yoga');
 check('a note is not stored until it is saved', sandbox.readOfficeDigestQueue_().lines, 0);
 sandbox.saveOfficeDigestQueue();
 check('saving persists it', sandbox.readOfficeDigestQueue_().lines, 1);
 checkTrue('and the property is really written', !!store[sandbox.OFFICE_DIGEST_PROP_KEY]);
 
-// One email, carrying every category, then an empty queue.
-sandbox.noteForOffice('Program leader sheets shared', '"Yoga" (Main) shared with leader@x.org');
+// One email per person, carrying their own sections, then an empty queue.
+sandbox.noteForOffice('leaderRosterAlerts', 'leader@x.org — Chair Yoga: 2 changes');
 sandbox.saveOfficeDigestQueue();
-check('the digest sends', sandbox.sendOfficeDailyDigest(), true);
-check('exactly one message', sentMail.length, 1);
-check('to the archive address', sentMail[0].to, 'office@example.org');
+check('the digest reaches one address', sandbox.sendOfficeDailyDigest(), 1);
+check('in exactly one message', sentMail.length, 1);
+check('to the ticked address', sentMail[0].to, 'office@example.org');
 checkTrue('listing the reminder', sentMail[0].body.indexOf('a@b.com — Tomorrow: Yoga') > -1);
-checkTrue('and the share', sentMail[0].body.indexOf('leader@x.org') > -1);
+checkTrue('and the roster alert', sentMail[0].body.indexOf('leader@x.org') > -1);
 check('and the queue is cleared', sandbox.readOfficeDigestQueue_().lines, 0);
-check('so a second run has nothing to send', sandbox.sendOfficeDailyDigest(), false);
+check('so a second run has nothing to send', sandbox.sendOfficeDailyDigest(), 0);
+
+// A person reads only the categories they are ticked for.
+reset();
+ticks = { leaderRosterAlerts: ['leaders@example.org'], registrantReminders: ['members@example.org'] };
+sandbox.noteForOffice('leaderRosterAlerts', 'leader@x.org — Chair Yoga: 2 changes');
+sandbox.noteForOffice('registrantReminders', 'a@b.com — Tomorrow: Yoga');
+sandbox.saveOfficeDigestQueue();
+check('two people, two messages', sandbox.sendOfficeDailyDigest(), 2);
+const toLeaders = sentMail.filter(m => m.to === 'leaders@example.org')[0];
+checkTrue('the roster reader gets the alerts', toLeaders.body.indexOf('leader@x.org') > -1);
+check('and nothing about the reminders', toLeaders.body.indexOf('a@b.com'), -1);
+
+// A section nobody is ticked for is never queued at all.
+reset();
+ticks = {};
+sandbox.noteForOffice('registrantReminders', 'a@b.com — Tomorrow: Yoga');
+sandbox.saveOfficeDigestQueue();
+check('an untouched table queues nothing', sandbox.readOfficeDigestQueue_().lines, 0);
+
+// Files shared reach every address on the table, ticked or not.
+reset();
+ticks = { filesShared: ['office@example.org', 'desk@example.org'] };
+sandbox.noteForOffice('filesShared', '"Yoga" (Main) shared with leader@x.org');
+sandbox.saveOfficeDigestQueue();
+check('everybody on the table hears about a share', sandbox.sendOfficeDailyDigest(), 2);
 
 // A failed send keeps the record.
 reset();
-sandbox.noteForOffice('Reminders emailed to registrants', 'a@b.com — Tomorrow: Yoga');
+sandbox.noteForOffice('registrantReminders', 'a@b.com — Tomorrow: Yoga');
 sandbox.saveOfficeDigestQueue();
 mailThrows = true;
-check('a send that throws reports failure', sandbox.sendOfficeDailyDigest(), false);
+check('a send that throws reaches nobody', sandbox.sendOfficeDailyDigest(), 0);
 check('and the queue survives for the next run', sandbox.readOfficeDigestQueue_().lines, 1);
 mailThrows = false;
-check('which then sends it', sandbox.sendOfficeDailyDigest(), true);
-
-// A blank address records nothing at all.
-reset();
-archiveEmail = '';
-sandbox.noteForOffice('Reminders emailed to registrants', 'a@b.com — Tomorrow: Yoga');
-sandbox.saveOfficeDigestQueue();
-check('a blank Archive Copy Address queues nothing', sandbox.readOfficeDigestQueue_().lines, 0);
+check('which then sends it', sandbox.sendOfficeDailyDigest(), 1);
 
 // Past the cap the queue counts without remembering.
 reset();
 const over = sandbox.OFFICE_DIGEST_MAX_LINES + 40;
 for (let i = 0; i < over; i++) {
-  sandbox.noteForOffice('Reminders emailed to registrants', `person${i}@b.com — Tomorrow`);
+  sandbox.noteForOffice('registrantReminders', `person${i}@b.com — Tomorrow`);
 }
 sandbox.saveOfficeDigestQueue();
 const queue = sandbox.readOfficeDigestQueue_();
 check('lines stop at the cap', queue.lines, sandbox.OFFICE_DIGEST_MAX_LINES);
-check('but the count is the truth', queue.categories['Reminders emailed to registrants'].count, over);
+check('but the count is the truth', queue.sections.registrantReminders.count, over);
 sandbox.sendOfficeDailyDigest();
 checkTrue('and the digest says how many it did not list',
   sentMail[0].body.indexOf(`…and ${over - sandbox.OFFICE_DIGEST_MAX_LINES} more`) > -1);

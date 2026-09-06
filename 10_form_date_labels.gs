@@ -76,14 +76,21 @@ function applyFormDateLabels(formId, attendanceLabels, lunchLabels, options) {
   if (!options.force && fingerprints[formId] === fingerprint) return false;
 
   try {
-    const form = options.form || FormApp.openById(formId);
+    const form = options.form || openFormCached(formId);
     const items = form.getItems();
-    // Found by either title: on a lunch-only form this same grid is the lunch
-    // question and has been renamed to say so. See LUNCH_ONLY_GRID.
-    findRosterGridItems(items).forEach(it => it.asCheckboxGridItem().setRows(attendanceLabels));
+    // EVERY DATE goes on the attendance grid — and on the lunch-only form's
+    // single grid, which carries every date because on that form every date IS
+    // a lunch date (see LUNCH_ONLY_GRID). Through setGridItemRows(), because
+    // those two are not the same KIND of grid any more: the attendance one is
+    // still a checkbox grid and the lunch-only one is a grid of meal counts.
+    findRosterGridItems(items).forEach(it => setGridItemRows(it, attendanceLabels));
+    // ONLY THE CATERED DATES go on the per-date meal grid. The lunch-only
+    // form's grid is excluded here by name: it is in both lists, and it has
+    // already had the full date list written to it above.
     if (lunchLabels && lunchLabels.length > 0) {
-      items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID)
-        .forEach(it => it.asCheckboxGridItem().setRows(lunchLabels));
+      items.filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID ||
+          it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID)
+        .forEach(it => setGridItemRows(it, lunchLabels));
     }
 
     // Type-guarded as well as titled, for the reason spelled out on
@@ -258,10 +265,12 @@ function withFormRetry(label, fn) {
  */
 function removeLunchQuestionsFromForm(form, locations, reason) {
   const where = describeLocations(Array.isArray(locations) ? locations : [locations]);
-  // The extra-meals question goes with them: it is a question ABOUT the meal,
-  // and asking how many extra of a meal nobody is serving is worse than not
-  // asking at all.
-  const doomed = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+  // The pre-v9 questions are in the list too, and deliberately: a form that
+  // has not been rebuilt yet is carrying those instead, and leaving them on a
+  // form with nothing to serve is exactly the noise this function exists to
+  // remove. A rebuilt form has none of them and the filter finds nothing.
+  const doomed = [TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT,
+    TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
     TEMPLATE_ITEM_TITLES.EXTRA_MEALS];
   const removed = deleteFormItems(form,
     form.getItems().filter(item => doomed.indexOf(item.getTitle()) !== -1),
@@ -289,36 +298,31 @@ function restoreLunchQuestionsOnForm(form) {
   const titles = form.getItems().map(it => it.getTitle());
   let restored = 0;
 
-  if (titles.indexOf(TEMPLATE_ITEM_TITLES.LUNCH_GRID) === -1) {
-    const gridItem = addLunchGridItem(form);
+  if (titles.indexOf(TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID) === -1 &&
+      titles.indexOf(TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID) === -1) {
+    const gridItem = addMealCountGridItem(form);
     const attendanceIdx = form.getItems().findIndex(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID);
     if (attendanceIdx !== -1) form.moveItem(gridItem.getIndex(), attendanceIdx + 1);
     restored++;
   }
 
-  if (titles.indexOf(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE) === -1) {
-    const checkboxItem = addAllDatesLunchItem(form);
+  if (titles.indexOf(TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT) === -1) {
+    const countItem = addAllDatesMealCountItem(form);
     const pageIdx = form.getItems().findIndex(it =>
       it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === TEMPLATE_PAGE_TITLES.ALL_DATES);
-    if (pageIdx !== -1) form.moveItem(checkboxItem.getIndex(), pageIdx + 1);
+    if (pageIdx !== -1) form.moveItem(countItem.getIndex(), pageIdx + 1);
     restored++;
   }
 
-  // One extra-meals question per BRANCH PAGE, the same as the template builds:
-  // a respondent meets exactly one of the two pages, and a single shared item
-  // could only live on one of them.
-  [TEMPLATE_PAGE_TITLES.ALL_DATES, TEMPLATE_PAGE_TITLES.SPECIFIC_DATES].forEach(pageTitle => {
-    if (countExtraMealsItemsOnPage(form, pageTitle) > 0) return;
-    const item = addExtraMealsItem(form);
-    // It belongs immediately after the last question on its page that is not
-    // one of the two closing ones — i.e. right behind the lunch question,
-    // which is what it is a follow-up to.
-    const anchorIdx = lastLunchQuestionIndexOnPage(form, pageTitle);
-    if (anchorIdx !== -1) form.moveItem(item.getIndex(), anchorIdx + 1);
-    restored++;
-  });
+  // THE PRE-v9 QUESTIONS GO, if this form still has them. A form reaching here
+  // mid-migration would otherwise end up asking both shapes of the same
+  // question — "who is eating" and "how many meals" — on the same page.
+  restored += deleteFormItems(form,
+    form.getItems().filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID ||
+      it.getTitle() === TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE ||
+      it.getTitle() === TEMPLATE_ITEM_TITLES.EXTRA_MEALS),
+    `the form ${form.getId()}`);
 
-  if (restored > 0) log(`Restored ${restored} lunch question(s) to form ${form.getId()} — it has catered dates again.`);
   return restored;
 }
 
@@ -343,30 +347,20 @@ function formPageItemRange(form, pageTitle) {
   return { items, start, end };
 }
 
-/** How many extra-meals questions one branch page carries — 0 or 1 in a healthy form. */
-function countExtraMealsItemsOnPage(form, pageTitle) {
-  const range = formPageItemRange(form, pageTitle);
-  if (!range) return 0;
-  let count = 0;
-  for (let i = range.start + 1; i < range.end; i++) {
-    if (range.items[i].getTitle() === TEMPLATE_ITEM_TITLES.EXTRA_MEALS) count++;
-  }
-  return count;
-}
-
 /**
- * The index of the last LUNCH question on a branch page — the grid on the
- * specific-dates page, the who-eats checkbox on the all-dates one — or the
- * page break itself when neither is there yet.
+ * The index of the last LUNCH question on a branch page — the meal grid on the
+ * specific-dates page, the all-dates meal count on the other — or the page
+ * break itself when neither is there yet.
  *
- * Used to park the extra-meals question directly behind whatever it is a
- * follow-up to, so a restored item does not land at the bottom of the form
- * under "Anything Else?" where it reads as a question about something else.
+ * Used to park a restored question directly behind whatever it belongs with,
+ * so it does not land at the bottom of the form under "Anything Else?" where
+ * it reads as a question about something else.
  */
 function lastLunchQuestionIndexOnPage(form, pageTitle) {
   const range = formPageItemRange(form, pageTitle);
   if (!range) return -1;
-  const lunchTitles = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+  const lunchTitles = [TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT,
+    TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
     TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID];
   let found = range.start;
   for (let i = range.start + 1; i < range.end; i++) {
@@ -474,23 +468,23 @@ function contextHasLunchDates(context) {
  * Turns a copy of the standard template into THE LUNCH-ONLY FORM: one grid,
  * one question, no attendance.
  *
- * The standard template asks two per-date questions — who is coming, and who
- * is eating. On a form whose entire subject is the meal those are the same
+ * The standard template asks two per-date questions — who is coming, and how
+ * many meals. On a form whose entire subject is the meal those are the same
  * question, and asking both produces the failure mode staff already know from
- * the paper sheets: somebody ticks the lunch row, leaves the attendance row
- * blank, and the import has to guess (processFormResponse() reconciles it with
- * a warning). So the LUNCH_GRID is deleted and the ATTENDANCE_GRID is renamed
- * to be the lunch question — the one that stays is the one every existing
- * lookup already finds, by index and by both titles, which is why this is a
- * rename rather than a swap.
+ * the paper sheets: somebody fills in the meal row, leaves the attendance row
+ * blank, and the import has to guess. So the ATTENDANCE_GRID is deleted and
+ * the MEAL_COUNT_GRID is renamed to be the whole of the form: a number above
+ * zero on a date IS the registration for that date.
  *
- * processFormResponse() reads a tick on that grid as "wants lunch" whenever
- * the session behind it is a lunch-only one, so nothing downstream has to know
- * which of the two titles the grid happened to carry.
+ * PRE-v9 IT WAS THE OTHER WAY AROUND — the attendance grid survived, retitled,
+ * and the meal grid went. That could not stay: the grid that survives has to
+ * be the one carrying the count, since on this form the count is the only fact
+ * there is. A form still in the old shape is rebuilt by the v9 migration, and
+ * a response collected on one still imports (LEGACY_LUNCH_ONLY_GRID_TITLE).
  *
- * The all-dates branch is left exactly as it is: its question is already
- * ALL_DATES_LUNCH_PEOPLE ("Who Needs Lunch?"), which is the right question on
- * this form without any change at all.
+ * The all-dates branch needs no change at all: its question is already
+ * ALL_DATES_MEAL_COUNT ("how many meals, every date"), which is exactly the
+ * right question on this form.
  *
  * Idempotent — it runs on every sync for every lunch-only form, and after the
  * first pass finds nothing to remove and nothing to rename.
@@ -498,33 +492,65 @@ function contextHasLunchDates(context) {
 function makeFormLunchOnly(form) {
   let changed = 0;
 
+  // Everything that is not this form's one question. The attendance grid goes
+  // because a meal IS the attendance here; the pre-v9 items go because they
+  // ask for meals in people. LEGACY_LUNCH_ONLY_GRID_TITLE is on the list for
+  // the same reason and is the case worth naming: on a pre-v9 lunch-only form
+  // that grid is the ONLY grid, so this deletes the whole of the form's
+  // question — which is why the meal grid is added back immediately below,
+  // before anything else can look at the form.
+  const doomedTitles = [TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID, TEMPLATE_ITEM_TITLES.LUNCH_GRID,
+    TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE, TEMPLATE_ITEM_TITLES.EXTRA_MEALS,
+    LEGACY_LUNCH_ONLY_GRID_TITLE];
   const removed = deleteFormItems(form,
-    form.getItems().filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.LUNCH_GRID),
+    form.getItems().filter(it => doomedTitles.indexOf(it.getTitle()) !== -1),
     `the lunch-only form ${form.getId()}`);
   changed += removed;
 
-  // Re-read: a deletion above shifted every later item's index.
+  // Re-read every time: each write above shifted the indexes under it.
+  if (!form.getItems().some(it => isMealCountGridTitle(it.getTitle()))) {
+    const grid = addMealCountGridItem(form);
+    // Where the roster grid it replaces used to be: the top of the
+    // specific-dates page. A grid appended to the end of the form would sit
+    // under "Anything Else?", on whichever page happens to be last.
+    const pageIdx = form.getItems().findIndex(it =>
+      it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
+    if (pageIdx !== -1) form.moveItem(grid.getIndex(), pageIdx + 1);
+    changed++;
+  }
+  if (!form.getItems().some(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT)) {
+    const countItem = addAllDatesMealCountItem(form);
+    const pageIdx = form.getItems().findIndex(it =>
+      it.getType() === FormApp.ItemType.PAGE_BREAK && it.getTitle() === TEMPLATE_PAGE_TITLES.ALL_DATES);
+    if (pageIdx !== -1) form.moveItem(countItem.getIndex(), pageIdx + 1);
+    changed++;
+  }
+
   form.getItems()
-    .filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID)
+    .filter(it => it.getTitle() === TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID)
     .forEach(it => {
       try {
-        it.asCheckboxGridItem()
+        it.asGridItem()
           .setTitle(TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID)
-          .setHelpText('Tick a box for each person on each date they want lunch.\n\n' +
-            NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER);
+          .setHelpText('Pick the TOTAL number of meals your party wants on each date — your own ' +
+            'included. Leave a date blank if you do not want lunch that day.\n\n' + MEAL_COUNT_HELP);
         changed++;
       } catch (err) {
-        log(`⚠️ Could not retitle the roster grid on lunch-only form ${form.getId()} (${err}).`);
+        log(`⚠️ Could not retitle the meal grid on lunch-only form ${form.getId()} (${err}).`);
       }
     });
 
   if (changed > 0) {
-    log(`Shaped form ${form.getId()} as lunch-only: ${removed} duplicate lunch grid(s) removed, roster grid renamed.`);
+    log(`Shaped form ${form.getId()} as lunch-only: ${removed} item(s) removed, one meal grid in their place.`);
     invalidateFormItemIndex(form.getId());
   }
   return changed;
 }
 
+/** True when `form` carries a meal-count grid under either of its two titles. */
+function hasMealCountGrid(form) {
+  return form.getItems().some(it => isMealCountGridTitle(it.getTitle()));
+}
 
 // ---------------------------------------------------------------------------
 // 1g. A FORM COVERING ONE SESSION  (the one-off event)

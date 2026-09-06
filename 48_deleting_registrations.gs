@@ -17,6 +17,12 @@
 //   - a program that was cancelled outright before it ever ran, where nobody
 //     wants a permanent list of people who were going to come.
 //
+// IT IS NOT THE ONLY WAY TO DELETE ANY MORE. This one works by SESSION, which
+// is the wrong shape for "this person was entered twice" — for that, mark the
+// row's Manual_Override "Remove This Row" and run the sweep on the menu
+// (section 83). Same tombstones, same guarantee that a removed row stays
+// removed; one row instead of a whole session, and no form responses touched.
+//
 // So it deletes, by session, and says so in the plainest words available. What
 // keeps it safe is not a soft delete but three gates: an admin check, an
 // explicit typed confirmation, and a summary of exactly how many rows on which
@@ -79,7 +85,7 @@ function listSessionsWithRegistrations() {
   const registrantsSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!registrantsSheet) return [];
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const backKey = formatDateKey(new Date(Date.now() - DELETE_REGISTRATIONS_WINDOW_BACK_DAYS * 86400000));
@@ -87,7 +93,7 @@ function listSessionsWithRegistrations() {
 
   const clubEventIds = collectClubEventIds();
   const byEvent = {};
-  readAllSectionedRows(registrantsSheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrantsSheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!eventId || !date) return;
@@ -127,9 +133,9 @@ function collectClubEventIds() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const ids = new Set();
   if (!sheet) return ids;
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     if (map['Club'] === undefined || !isClubColumnValue(row[map['Club']])) return;
     const eventId = String(row[map['Event_ID']] || '').trim();
     if (eventId) ids.add(eventId);
@@ -171,7 +177,7 @@ function buildDeleteRegistrationsHtml(sessions) {
 <h3>Delete registrations</h3>
 <p class="hint">
   Tick the sessions whose registrations should be <b>permanently deleted</b> from
-  Registrant_Dash. This is for test runs and duplicates — to record that somebody is no
+  All_Registrants. This is for test runs and duplicates — to record that somebody is no
   longer coming, set their Program_Status to <b>Cancelled</b> instead, which keeps the row and the
   history. The catering numbers are recalculated afterwards.
 </p>
@@ -270,9 +276,9 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return '⚠️ There is no registrants tab yet.';
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
-  const allRows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const allRows = getSectionedRows(sheet, headers, 'Event_ID');
 
   const keepRows = [];
   const doomedRows = [];
@@ -355,7 +361,7 @@ function deleteFormResponsesForRows(rows, map, wanted) {
   Object.keys(byForm).forEach(formId => {
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       failed += byForm[formId].size;
       log(`⚠️ Could not open form ${formId} to delete responses (${err}).`);
@@ -384,9 +390,9 @@ function buildFormIdByEventId() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const out = {};
   if (!sheet) return out;
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const formId = String(row[map['Form_ID']] || '').trim();
     if (eventId && formId) out[eventId] = formId;

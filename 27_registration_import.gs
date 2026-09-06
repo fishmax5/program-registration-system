@@ -78,16 +78,16 @@ function syncRegistrationsInternal() {
 
   // One read of each tab up front; both registry-derived structures below
   // are built from the same rows rather than scanning the sheet twice.
-  const sessionRows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registryIndex = buildRegistryIndex(registrySheet, sessionRows);
-  const existingRows = readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
+  const registryIndex = buildRegistryIndex(registrySheet);
+  const existingRows = getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
   const existingRowIndex = getExistingRegistrantIndex(existingRows);
   // What each session is already holding, so this run's waitlist decisions
   // start from the truth rather than from zero — see seedRegistryOccupancy().
   seedRegistryOccupancy(registryIndex, existingRows);
 
-  const formIds = getDistinctFormIds(registrySheet, sessionRows);
+  const formIds = getDistinctFormIds(registrySheet);
   const newRows = [];
   // Club joins are gathered across every response and written to the roster
   // ONCE, below — a tab rewrite per submission would be both slow and, on a
@@ -144,7 +144,7 @@ function syncRegistrationsInternal() {
     // A form that cannot be read is one form's problem; it must not be the
     // workbook's.
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       const responses = form.getResponses(lastSync);
       if (responses.length === 0) return; // don't pay for an item index on a form with nothing new
       const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
@@ -234,11 +234,22 @@ function syncRegistrationsInternal() {
     // applyLeaderDropsAsCancellations() for why it stamps these rows rather
     // than going through cancelRegistrantRows() — the tab is written below.
     applyLeaderDropsAsCancellations(existingRows);
+    // ...and the tick beside it, which was a note for exactly as long. Two-way,
+    // so a seat that comes free can be given back by unticking the box that
+    // gave it up. AFTER the drops, on purpose: a row cancelled a line above is
+    // refused here rather than being put in a queue it has left.
+    applyLeaderWaitlistTicks(existingRows, sessionRows);
   } catch (err) {
-    log(`⚠️ Could not read program leader sheets back in this run (${err}) — the registrations themselves are fine.`);
+    log(`⚠️ Could not read the program registrant sheets back in this run (${err}) — the registrations themselves are fine.`);
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);
+  // BEFORE the write, so every consumer of these rows below — the Registrants
+  // tab, the dashboards, the program leader sheets, the sign-in sheets — sees
+  // the phone number and email the workbook already knows, not the blanks a
+  // club catch-up or a door sign-in left. Fills blanks only; see
+  // applyMemberRollContacts().
+  step('filling in known contact details', () => applyMemberRollContacts(combinedRegistrantRows));
   // THE ONE STEP WHOSE FAILURE STOPS THE CLOCK. Everything else here can be
   // skipped and picked up next hour; this is the write that puts the imported
   // registrations on the sheet, and if it does not land, advancing
@@ -273,16 +284,37 @@ function syncRegistrationsInternal() {
   step('rebuilding the club roster tab', () =>
     renderClubMembersSheet(refreshClubMemberLabels(sessionRows)));
 
-  // The other half of the program leader round trip, and the reason this
+  // The other half of the registrant sheet round trip, and the reason this
   // feature needs NO TRIGGER OF ITS OWN: the rosters go back out on the same
   // hourly pass that just imported into them. Reaches outside the workbook, so
   // it sits down here with the invitations and carries its own guard.
   const settledRegistrantRows = reusableRows ||
-    readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID');
+    getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
+  // BEFORE THE PUSH, both of them, so a sheet born on this run is filled from
+  // the settled picture the same run rather than sitting empty for an hour.
+  //
+  // Two reasons a program gets a sheet, and they are deliberately separate.
+  // The horizon pass builds one for EVERY program a week before its next
+  // session (ensureRegistrantSheetsForUpcomingPrograms), which is the ordinary
+  // case. The leader pass builds one for a program whose leader has just
+  // ticked Notify_Roster_Changes whether or not it is running this week —
+  // somebody who asked to hear about a roster should have somewhere to look at
+  // it now, not in five weeks. Either may find the other already did it: both
+  // skip a program already in the registry.
+  try {
+    ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows);
+  } catch (err) {
+    log(`⚠️ Could not auto-create the upcoming programs' registrant sheets this run (${err}).`);
+  }
+  try {
+    ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
+  } catch (err) {
+    log(`⚠️ Could not auto-create registrant sheets for the notifying leaders this run (${err}).`);
+  }
   try {
     pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
   } catch (err) {
-    log(`⚠️ Could not refresh the program leader sheets this run (${err}).`);
+    log(`⚠️ Could not refresh the program registrant sheets this run (${err}).`);
   }
 
   // AFTER the push, deliberately. The alert email links to the shared sheet
@@ -296,6 +328,16 @@ function syncRegistrationsInternal() {
     notifyProgramLeadersOfRosterChanges(sessionRows, settledRegistrantRows);
   } catch (err) {
     log(`⚠️ Could not send the roster-change alerts this run (${err}) — the registrations themselves are fine.`);
+  }
+
+  // THE OTHER Notify_Timing CHANNEL, right after the diff pass and for the
+  // same reason it sits after the push above — see LEADER_DIGEST_QUOTA_RESERVE
+  // for why the order of these three mail passes (alerts, digests, reminders)
+  // is load-bearing against the shared daily quota.
+  try {
+    sendProgramLeaderDaySnapshotDigests(sessionRows, settledRegistrantRows);
+  } catch (err) {
+    log(`⚠️ Could not send the roster digests this run (${err}) — the registrations themselves are fine.`);
   }
 
   // LAST, on purpose: this is the only step that reaches outside the workbook
@@ -332,9 +374,13 @@ function syncRegistrationsInternal() {
   }
 }
 
-function getDistinctFormIds(registrySheet, sessionRows) {
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+// sessionRows dropped: getSectionedRows() below is now the per-execution cache
+// (08_execution_caches.gs), so a caller re-reading right after
+// syncRegistrationsInternal()'s own top-of-run read gets the same array back
+// for free — the hand-threaded parameter would only have duplicated it.
+function getDistinctFormIds(registrySheet) {
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const values = rows.map(row => row[map['Form_ID']]);
   return Array.from(new Set(values.filter(Boolean)));
@@ -348,10 +394,10 @@ function getDistinctFormIds(registrySheet, sessionRows) {
  * is what keeps two sites' sessions on the same date resolving to two
  * different registry entries instead of one.
  */
-function buildRegistryIndex(registrySheet, sessionRows) {
+function buildRegistryIndex(registrySheet) {
   const index = {};
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const labelOptionsByForm = buildLabelOptionsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
@@ -370,6 +416,13 @@ function buildRegistryIndex(registrySheet, sessionRows) {
       formId,
       eventId: row[map['Event_ID']],
       maxCapacity: Number(row[map['Max_Capacity']]) || 0,
+      // "This session takes nobody else, whatever the number beside it says."
+      // Read per SESSION, like the capacity it overrides — see
+      // WAITLIST_ONLY_TAG and processFormResponse(). Absent on a workbook still
+      // on the old layout, which reads as false: the column is the only place
+      // this is ever stated, so a missing one states nothing.
+      waitlistOnly: map['Waitlist_Only'] !== undefined &&
+        isWaitlistOnlyColumnValue(row[map['Waitlist_Only']]),
       eventDate,
       // What the session's clock time reads as on the registrant rows built
       // from this entry — see formatTimeRange().

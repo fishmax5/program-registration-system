@@ -272,6 +272,7 @@ function stampRegularNeedsOnRow(sheet, map, sheetRow, needs) {
     .filter(text => existing.indexOf(text) === -1);
   if (added.length === 0) return '';
   cell.setValue([existing, ...added.map(text => `🔔 ${text}`)].filter(Boolean).join(' · '));
+  invalidateSectionedRowsCache(sheet);
   return ` Noted: ${added.join('; ')}.`;
 }
 
@@ -449,6 +450,7 @@ function addRegularNeedFromDialog(args) {
     const at = Math.max(sheet.getLastRow() + 1, MEMORY_TAB_DATA_ROW);
     if (sheet.getMaxRows() < at) sheet.insertRowsAfter(sheet.getMaxRows(), at - sheet.getMaxRows());
     sheet.getRange(at, 1, 1, headers.length).setValues([row]);
+    invalidateSectionedRowsCache(sheet);
     ['Starts', 'Ends', 'Added_On'].forEach(h => {
       sheet.getRange(at, map[h] + 1, 1, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
     });
@@ -545,7 +547,7 @@ const QUICK_MARK_NAME_TIME_SEPARATOR = '|@|';
 /**
  * The most meals one Quick Mark can record in a single box. Not a rule about
  * what the workbook can hold — staff type any number onto the row — but the
- * same judgement MAX_EXTRA_MEALS makes about a control anybody can lean on: a
+ * same judgement MAX_MEALS_PER_SUBMISSION makes about a control anybody can lean on: a
  * mistyped 200 in a hurry should not reach the kitchen's order.
  */
 const QUICK_MARK_MAX_MEAL_COUNT = 20;
@@ -574,7 +576,11 @@ const QUICK_MARK_CACHE_KEY = 'QUICK_MARK_INDEX_V2';
  * stored copy that does not carry the CURRENT stamp is not an index: both
  * readers drop it and the next open rebuilds.
  */
-const QUICK_MARK_INDEX_SCHEMA = 3;
+// 4: each member now carries the spellings they can be found under and the
+// rest of their household (77_households_and_names.gs). A stored copy from
+// before that has neither, and a dialog reading it would silently offer no
+// household anywhere — the same shape of bug as the one above.
+const QUICK_MARK_INDEX_SCHEMA = 4;
 /**
  * CacheService caps one value at 100KB. The index for a workbook with a year
  * of history is bigger than that even gzipped, so it is stored as a manifest

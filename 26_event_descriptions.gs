@@ -340,11 +340,11 @@ function rewriteEventRegistrationLinks() {
 /** The rewrite itself, inside the lock. See rewriteEventRegistrationLinks(). */
 function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
   // Event_ID -> what the session table says this event's form is.
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const sessionByEventId = {};
-  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     const d = coerceDate(row[map['Event_Date']]);
     if (!eventId || !d || formatDateKey(d) < todayKey) return;
@@ -516,7 +516,7 @@ function getFormInfoForLink(formId, cache) {
   if (Object.prototype.hasOwnProperty.call(cache, formId)) return cache[formId];
   let info = null;
   try {
-    const form = FormApp.openById(formId);
+    const form = openFormCached(formId);
     info = { formId, publishedUrl: buildRegistrationUrl(form) };
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to rebuild its event link (${err}).`);
@@ -531,7 +531,7 @@ function getFormInfoForLink(formId, cache) {
  * rows (see buildDateLabelSets()) but still appear on the Dates checkbox.
  */
 function refreshFormForNewDates(formId, group, configInfo) {
-  const form = FormApp.openById(formId);
+  const form = openFormCached(formId);
   // FIRST, before anything else this function refreshes: a program renamed on
   // the calendar keeps its form (recovered from the event descriptions — see
   // renameFormForGroup()), and the form has to stop advertising the old name.
@@ -660,6 +660,9 @@ function createRegistrationForm(group, configInfo) {
   // every form, so Grouped and Regular groups no longer need separate bases.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
+  // NOT openFormCached(): a file id that came into existence one line ago can
+  // never be in the memo, so routing it through would buy nothing and would
+  // leave a handle behind for a form the failure path below is about to trash.
   const form = FormApp.openById(copiedFile.getId());
 
   // OPENED UP AT BIRTH, so the account that syncs this workbook can read the
@@ -787,7 +790,7 @@ function applyFormFooterNote(form, footerNote) {
  * the row rather than the form.
  */
 function writeEventRegistryRows(registrySheet, group, formInfo) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   // An appointment program's capacity is arithmetic, not a decision: however
   // many slots fit between the event's start and end IS how many people can be
@@ -809,7 +812,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Location']] = session.locationName;
     row[map['Clean_Title']] = group.cleanTitle;
     // The end time is stored so Event_Time can show a RANGE — see
-    // HEADERS.Master_Program_Dashboard and setEventTimeFormulas().
+    // HEADERS.All_Program_Sessions and setEventTimeFormulas().
     row[map['Event_End']] = endTime || '';
     // Fallback only — renderProgramDashboard() always overwrites this with
     // a =TEXT(...) formula (see that function for why a formula is required
@@ -837,11 +840,24 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
       : group.capacity;
     const isUncapped = !capacity || capacity <= 0;
 
+    // ONE DATE'S OWN ANSWER, not the group's — see WAITLIST_ONLY_TAG. This is
+    // the only column on the row read from `session` rather than from `group`,
+    // because it is the only thing a calendar event can say about itself that
+    // its siblings on the same form do not also say.
+    row[map['Waitlist_Only']] = session.waitlistOnly ? WAITLIST_ONLY_COLUMN_VALUE : false;
+
     row[map['Max_Capacity']] = isUncapped ? '' : capacity;
     row[map['Active_Count']] = 0;
-    row[map['Waitlist_Count']] = isUncapped ? '' : 0;
-    row[map['Remaining_Seats']] = isUncapped ? '' : capacity;
-    row[map['Status']] = isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity);
+    // A session forced to the waitlist reads FULL from the moment it is
+    // written, cap or no cap: nobody can take a place on it, so "🟢 Unlimited"
+    // beside a form that waitlists everybody would be the sheet contradicting
+    // itself. See recomputeCountsForZone(), which keeps saying so as the counts
+    // move.
+    row[map['Waitlist_Count']] = (isUncapped && !session.waitlistOnly) ? '' : 0;
+    row[map['Remaining_Seats']] = session.waitlistOnly ? 0 : (isUncapped ? '' : capacity);
+    row[map['Status']] = session.waitlistOnly
+      ? WAITLIST_ONLY_STATUS
+      : (isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity));
 
     // formInfo is null for a [No Registration] group — there is no form to
     // link to, and the link columns say so in words rather than sitting empty.
@@ -868,14 +884,30 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
 
   if (rows.length > 0) {
     registrySheet.getRange(registrySheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    invalidateSectionedRowsCache(registrySheet); // rows the cached read has never seen
     invalidateEventTimeIndex(); // new sessions, and therefore new times to look up
   }
 }
 
-/** Moves any Registrant_Dash rows tied to a deleted event into the Triage tab. */
-function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
-  const headers = HEADERS.Registrant_Dash;
-  const allRows = readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
+/**
+ * Moves any All_Registrants rows tied to a deleted event into the Triage tab.
+ *
+ * options.triageNote / options.adminHeading / options.adminReason override the
+ * wording, because WHY a session went is the only thing the person confirming
+ * with the registrant has to go on. The defaults describe triage's own case (a
+ * calendar event that vanished); removeOrphanedSessionRows() (84) passes its
+ * own, because "the event is gone" would be a lie about a session whose event
+ * may still be sitting on a calendar this workbook simply no longer reads.
+ */
+function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo, options) {
+  options = options || {};
+  const triageNote = options.triageNote ||
+    'Original calendar event no longer found during sync — please confirm with the registrant.';
+  const adminHeading = options.adminHeading || 'Deleted events sent to triage';
+  const adminReason = options.adminReason ||
+    'its calendar event is gone; registrants need confirming';
+  const headers = HEADERS.All_Registrants;
+  const allRows = getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
   const flaggedNow = new Date();
@@ -893,7 +925,7 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
     triageRow[tMap['Deleted_Event_Title']] = info.cleanTitle;
     triageRow[tMap['Deleted_Event_Location']] = info.location;
     triageRow[tMap['Flagged_Date']] = flaggedNow;
-    triageRow[tMap['Triage_Notes']] = 'Original calendar event no longer found during sync — please confirm with the registrant.';
+    triageRow[tMap['Triage_Notes']] = triageNote;
     newTriageRows.push(triageRow);
   });
 
@@ -903,20 +935,20 @@ function moveRegistrantsToTriage(registrantsSheet, deletedEventInfo) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const triageSheet = getOrCreateSheet(ss, SHEET_NAMES.TRIAGE);
-  const existingTriageRows = readAllSectionedRows(triageSheet, HEADERS.Deleted_Event_Triage, 'Event_ID');
+  const existingTriageRows = getSectionedRows(triageSheet, HEADERS.Deleted_Event_Triage, 'Event_ID');
   renderTriageSheet(false, existingTriageRows.concat(newTriageRows));
 
   log(`Moved ${newTriageRows.length} registrant row(s) to "${SHEET_NAMES.TRIAGE}".`);
   Object.keys(deletedEventInfo).forEach(eventId => {
     const info = deletedEventInfo[eventId];
-    noteForAdmin('Deleted events sent to triage',
-      `${info.cleanTitle} (${info.location}) — its calendar event is gone; registrants need confirming.`);
+    noteForAdmin(adminHeading,
+      `${info.cleanTitle} (${info.location}) — ${adminReason}.`);
   });
 }
 
 /**
  * The inverse of moveRegistrantsToTriage(): puts triaged rows back on
- * Registrant_Dash for every session that is on the dashboard
+ * All_Registrants for every session that is on the dashboard
  * again.
  *
  * Needed because a triage sweep is not recoverable from the forms. The import
@@ -939,12 +971,12 @@ function restoreTriagedRegistrants() {
   }
 
   const triageHeaders = HEADERS.Deleted_Event_Triage;
-  const regHeaders = HEADERS.Registrant_Dash;
+  const regHeaders = HEADERS.All_Registrants;
   const tMap = getIndexMap(triageHeaders);
   const rMap = getIndexMap(regHeaders);
 
-  const sessionRows = readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const sessionMap = getIndexMap(HEADERS.Master_Program_Dashboard);
+  const sessionRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
+  const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const liveEventIds = new Set(sessionRows.map(row => row[sessionMap['Event_ID']]).filter(Boolean));
   if (liveEventIds.size === 0) {
     log('restoreTriagedRegistrants: the session table is empty — import the calendar first, then run this again.');
@@ -952,11 +984,11 @@ function restoreTriagedRegistrants() {
   }
 
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const registrantRows = readAllSectionedRows(registrantsSheet, regHeaders, 'Event_ID');
+  const registrantRows = getSectionedRows(registrantsSheet, regHeaders, 'Event_ID');
   const present = new Set(registrantRows.map(row =>
     `${row[rMap['Event_ID']]}|${normalizeNameKey(row[rMap['Name']])}|${row[rMap['Person_Type']]}`));
 
-  const triageRows = readAllSectionedRows(triageSheet, triageHeaders, 'Event_ID');
+  const triageRows = getSectionedRows(triageSheet, triageHeaders, 'Event_ID');
   const stayInTriage = [];
   const restored = [];
 

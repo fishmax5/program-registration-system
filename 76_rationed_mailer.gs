@@ -1,0 +1,339 @@
+// ============================================================================
+// 9f. THE RATIONED MAILER  (one send, one quota, one bad-address rule)
+// ============================================================================
+//
+// Two passes in this workbook send mail to people outside it — the roster
+// alerts (section 9d) and the registrant reminders (section 9e) — and they
+// each grew the same four pieces of plumbing around MailApp.sendEmail:
+// ask what quota is left, add the office's BCC, send, and record it so the
+// next hourly sync does not send it again. Two copies of that is two places
+// for the same bug, and they had already drifted: one counted a refused
+// address against the run, the other retried it once per message.
+//
+// So the plumbing lives here, once, and NOTHING ELSE DOES. What to say, who
+// to say it to, how often, and how many of a scarce hundred messages this
+// particular pass may spend are decisions that differ per caller and stay in
+// 66 and 70 with the rest of their policy. This file knows only how to put
+// one message on the wire without spending somebody else's quota.
+//
+// ------------------------------------------------------------- THE QUOTA
+//
+// MailApp allows 100 messages a day on a consumer account and 1500 on
+// Workspace. It is a real, shared, daily resource: a message spent here is
+// not available to the pass that runs next hour, or to the one that runs
+// twenty lines later in the same execution.
+//
+// BOTH PASSES RUN IN ONE EXECUTION, roster alerts first (see
+// syncRegistrationsInternal), so the first one is in a position to take
+// everything the second one needed. Two things stop it:
+//
+//   1. ONE ESTIMATE, SHARED. The remaining quota is read once per execution
+//      and decremented as messages go out, so the reminder pass starts from
+//      what the alert pass actually left rather than from its own hopeful
+//      re-read. Every BCC'd office address is its own message against the same
+//      allowance, so a send is counted at one plus however many of them there
+//      are, never at one.
+//
+//   2. EACH CALLER NAMES A FLOOR IT WILL NOT DIG BELOW (`reserve`), and the
+//      pass that runs first names a floor high enough to leave the second one
+//      a working share — see LEADER_ALERT_QUOTA_RESERVE, which is why it is
+//      not the same number as REMINDER_QUOTA_RESERVE. Under both floors sits
+//      the handful of messages notifyAdmin() needs.
+//
+// notifyAdmin() deliberately does NOT come through here. It is one message to
+// one address saying something went wrong — quite possibly that mail is over
+// quota — and rationing the message that reports the shortage is exactly
+// backwards. It is small, it is rare, and it is what the floors are for.
+//
+// --------------------------------------------------------------- THE PAUSE
+//
+// One switch on Config stops every message this file would put on the wire —
+// Pause_Outbound_Mail, read here and nowhere else, so there is exactly one
+// place in the project where "is anybody allowed to hear from us right now?"
+// is answered. It is checked after the caller's own duplicate ledger and
+// before anything is spent.
+//
+// A PAUSED MESSAGE IS DROPPED, NOT QUEUED: recordSent() runs for it, so the
+// caller's ledger advances and the roster snapshot moves on. That is
+// deliberate and it is the whole point — see the banner over
+// OUTBOUND_MAIL_PAUSE_OPTIONS in section 1 for the repair this was built for.
+// A pause that saved everything up would deliver a week of churn about
+// registrations that never really changed, on the day somebody switched it
+// off.
+//
+// notifyAdmin() is not affected, here as everywhere else: the office still
+// hears what the workbook did, including how many messages the pause held.
+//
+// ------------------------------------------------- AN ADDRESS THAT IS REFUSED
+//
+// When MailApp refuses an address it will refuse it the same way in ten
+// seconds and the same way tomorrow, so the second attempt is a wasted
+// message off a quota somebody else could have used. A refusal is remembered
+// for the rest of the execution and every later message to that address is
+// suppressed without a send — which matters most to the reminder pass, where
+// one person can be due three messages about two sessions.
+//
+// It is remembered for the EXECUTION and no longer. A refusal is not proof
+// the address is bad — an over-quota send throws too — and a suppression list
+// that outlived the run would need a way to forgive an address that was only
+// ever the victim of a bad afternoon.
+//
+// -------------------------------------------------------------- THE LEDGER
+//
+// A send is recorded only once it is actually away. That is the invariant the
+// hourly sync depends on in both directions: a message recorded before it is
+// sent is a message nobody ever gets and nothing ever retries, and a message
+// sent without being recorded is a message the next sync sends again.
+//
+// The ledgers THEMSELVES stay with their callers, and there are still two of
+// them, under the keys they have always had. They are not the same shape —
+// one stores a roster snapshot per program, the other a set of stamps per
+// event — and a single writer is no reason to invent a third shape that both
+// would have to be migrated into.
+//
+// ------------------------------------------------------ WHY IT IS NUMBERED 74
+//
+// Last, like everything else that is behavior only. It defines two constants
+// nothing else derives from, reads no other file's constants at load time,
+// and its callers reach it through a hoisted function declaration, which
+// works whatever order the project's files are evaluated in.
+// ============================================================================
+
+/**
+ * What to assume is left when MailApp cannot be ASKED what is left.
+ *
+ * The quota call itself can throw — an authorization scope not yet granted,
+ * most often on the very first run after a deploy — and refusing to send
+ * anything because we could not ask would turn a permissions hiccup into
+ * silence. So it assumes the smaller of the two real allowances, which leaves
+ * each caller free to send up to its own per-run cap. A genuinely over-quota
+ * send throws on the send instead, which is handled.
+ */
+const RATIONED_MAIL_ASSUMED_QUOTA = 100;
+
+/** The reason string a suppressed message carries when the refusal is unknown. */
+const RATIONED_MAIL_REFUSED_REASON = 'the address was refused earlier in this run';
+
+/** The shared estimate, and the addresses this run has stopped trying. */
+let __rationedMailQuota = null;
+let __rationedMailRefused = {};
+
+/**
+ * How many messages this execution dropped because outbound mail is paused,
+ * and whether the office has been told about it yet.
+ *
+ * Counted rather than merely flagged because "nobody heard from us for a week"
+ * has to be answerable afterwards, and told ONCE rather than per message: a
+ * paused sync can drop fifty, and fifty identical lines in the digest is not
+ * fifty times the information.
+ */
+let __rationedMailPausedCount = 0;
+let __rationedMailPauseReported = false;
+
+/**
+ * How many more messages MailApp will accept today, as this execution
+ * understands it: read once, then decremented by what actually goes out.
+ *
+ * Read once rather than per send because every caller in one execution is
+ * spending from the same allowance, and because a per-send round trip to ask
+ * would cost more than it saves.
+ */
+function rationedMailRemainingQuota() {
+  if (__rationedMailQuota !== null) return __rationedMailQuota;
+  try {
+    const remaining = MailApp.getRemainingDailyQuota();
+    __rationedMailQuota = typeof remaining === 'number'
+      ? remaining : RATIONED_MAIL_ASSUMED_QUOTA;
+  } catch (err) {
+    log(`ℹ️ Could not read the remaining mail quota (${err}) — sending up to the per-run cap anyway.`);
+    __rationedMailQuota = RATIONED_MAIL_ASSUMED_QUOTA;
+  }
+  return __rationedMailQuota;
+}
+
+/**
+ * Forgets the shared estimate and the refused addresses.
+ *
+ * For a test, and for the menu entries that run a pass by hand: those are
+ * separate executions in production, but nothing stops two of them sharing
+ * one in a script that calls both.
+ */
+function resetRationedMailState() {
+  __rationedMailQuota = null;
+  __rationedMailRefused = {};
+  __rationedMailPausedCount = 0;
+  __rationedMailPauseReported = false;
+}
+
+/** How many messages this execution has dropped to the pause. For the tests and the log. */
+function rationedMailPausedCount() {
+  return __rationedMailPausedCount;
+}
+
+/**
+ * Is the switch on, and count this message against it.
+ *
+ * Wrapped rather than called inline so the read can never throw into the
+ * middle of a send: a Config tab that cannot be read is not a reason to hold
+ * mail — see DEFAULT_OUTBOUND_MAIL_PAUSED.
+ */
+function rationedMailIsPaused() {
+  try {
+    return isOutboundMailPaused();
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read the outbound-mail pause (${err}) \u2014 sending.`);
+    return false;
+  }
+}
+
+/**
+ * The `bcc` a caller handed over, as a list this can actually send and count:
+ * an array or a comma-separated string in, deduped lowercase addresses out.
+ *
+ * Anything with no "@" in it is dropped rather than sent to — a typo'd office
+ * address would otherwise cost a message per send to be told no, and the
+ * refusal would be remembered against a name nobody meant to use.
+ */
+function normalizeBccList(bcc) {
+  const raw = Array.isArray(bcc) ? bcc : String(bcc === null || bcc === undefined ? '' : bcc).split(',');
+  const seen = {};
+  const list = [];
+  raw.forEach(entry => {
+    const address = String(entry || '').trim().toLowerCase();
+    if (address.indexOf('@') <= 0 || seen[address]) return;
+    seen[address] = true;
+    list.push(address);
+  });
+  return list;
+}
+
+/**
+ * Sends one message, if the day's quota can afford it and the address has not
+ * already been refused this run.
+ *
+ * `request` is:
+ *   to           the recipient. Required.
+ *   subject      }
+ *   body         } plain text — see buildRegistrantReminderBody() for why.
+ *   reserve      the floor this caller will not dig the day's quota below.
+ *   bcc          who in the office is copied on this one: an array of
+ *                addresses, a comma-separated string, or nothing at all for a
+ *                message to `to` alone. The CALLER resolves it, because which
+ *                addresses those are is a policy question its own category on
+ *                Config answers — adminEmailsForCategory('leaderRosterAlerts')
+ *                for section 9d, ('registrantReminders') for 9e — and an empty
+ *                list means copy nobody, exactly as a blank cell used to.
+ *                BCC and not CC, because these messages tell one person about
+ *                their own registration and a visible office address on them
+ *                invites a reply-all thread nobody at the desk wants.
+ *   alreadySent  optional () => boolean: the caller's ledger, consulted before
+ *                the send. A caller may well have checked it already; this is
+ *                the check that is guaranteed to have run.
+ *   recordSent   optional () => void: called ONLY after the message is away.
+ *
+ * Returns { status, cost, error } where status is one of:
+ *   'sent'        it went. `cost` is what it took off the quota.
+ *   'duplicate'   alreadySent() said this one has already gone. Nothing spent.
+ *   'held'        sending it would have crossed the caller's reserve.
+ *   'paused'      outbound mail is paused on the Config tab. Nothing spent,
+ *                 and the message is DROPPED: recordSent() is called, so the
+ *                 caller's ledger advances and nothing is delivered late when
+ *                 the pause is lifted.
+ *   'suppressed'  this address was refused earlier in this run.
+ *   'failed'      MailApp refused it, `error` says how. The address is
+ *                 suppressed for the rest of the run.
+ *
+ * Never throws: every caller is a pass that rides the hourly sync, and a mail
+ * problem must not be able to fail a run that imported every registration
+ * correctly. The caller decides what a status other than 'sent' means for its
+ * own bookkeeping — which is why nothing here writes a ledger entry, logs a
+ * warning, or notes anything for the admin on a message that did not go.
+ */
+function sendRationedEmail(request) {
+  const req = request || {};
+  const result = { status: 'failed', cost: 0, error: null };
+
+  const to = String(req.to === null || req.to === undefined ? '' : req.to).trim();
+  if (!to) {
+    result.error = 'no address to send to';
+    return result;
+  }
+
+  if (typeof req.alreadySent === 'function' && req.alreadySent()) {
+    result.status = 'duplicate';
+    return result;
+  }
+
+  // ------------------------------------------------------- THE PAUSE
+  //
+  // After the duplicate check and before everything else: a message the
+  // caller's ledger has already accounted for is not a message this dropped.
+  //
+  // recordSent() IS CALLED, which is the whole design of this switch and the
+  // one line to read twice. The ledger advances and the roster snapshot moves
+  // on exactly as if the message had gone, so a pause DISCARDS what would
+  // have been said rather than saving it up — see the banner over
+  // OUTBOUND_MAIL_PAUSE_OPTIONS. Releasing the switch must not deliver a week
+  // of churn about registrations that were only ever repaired.
+  if (rationedMailIsPaused()) {
+    __rationedMailPausedCount++;
+    result.status = 'paused';
+    result.error = 'mail to members and leaders is paused on the Config tab';
+    log(`\u23f8\ufe0f Held (mail paused): "${req.subject || ''}" to ${to}.`);
+    if (!__rationedMailPauseReported) {
+      __rationedMailPauseReported = true;
+      noteForAdmin('Mail to members and leaders is paused',
+        `Nothing is being sent outside the office, and held messages are DROPPED rather than saved up. ` +
+        `Set Pause_Outbound_Mail back to "No" on the Config tab (${CONFIG_LAYOUT.OUTBOUND_MAIL.title}) ` +
+        `to resume. This run held at least one message; the log lists every one.`);
+    }
+    if (typeof req.recordSent === 'function') req.recordSent();
+    return result;
+  }
+
+  const refusedKey = to.toLowerCase();
+  if (__rationedMailRefused[refusedKey]) {
+    result.status = 'suppressed';
+    result.error = __rationedMailRefused[refusedKey];
+    return result;
+  }
+
+  const bccList = normalizeBccList(req.bcc);
+  // EACH BCC'd recipient costs its own message against the same daily quota
+  // this is rationing, so they are counted rather than treated as free — a
+  // three-name office list makes every send cost four, and a pass that ignored
+  // that would spend four times its share of a hundred.
+  const cost = 1 + bccList.length;
+  const reserve = Number(req.reserve) || 0;
+  if (rationedMailRemainingQuota() - cost < reserve) {
+    result.status = 'held';
+    result.error = 'the daily mail quota';
+    return result;
+  }
+
+  const options = {
+    to,
+    subject: String(req.subject === null || req.subject === undefined ? '' : req.subject),
+    body: String(req.body === null || req.body === undefined ? '' : req.body)
+  };
+  if (bccList.length > 0) options.bcc = bccList.join(',');
+
+  try {
+    MailApp.sendEmail(options);
+  } catch (err) {
+    // Not counted against the quota: a message MailApp would not take is a
+    // message it did not send. Remembered, so the next one to this address
+    // costs nothing at all.
+    __rationedMailRefused[refusedKey] = String(err) || RATIONED_MAIL_REFUSED_REASON;
+    result.error = err;
+    return result;
+  }
+
+  __rationedMailQuota = Math.max(0, rationedMailRemainingQuota() - cost);
+  result.status = 'sent';
+  result.cost = cost;
+  // AFTER the send and not before: a ledger entry written first is a message
+  // nobody receives and nothing retries.
+  if (typeof req.recordSent === 'function') req.recordSent();
+  return result;
+}

@@ -1,8 +1,8 @@
 // ============================================================================
-// 16g. THE DOOR APP'S PAGE  (setup, the name list, the person, the walk-in)
+// 16g. THE DOOR APP'S PAGE  (setup, names, the person, the walk-in, membership)
 // ============================================================================
 //
-// One served page with four screens and one address. What each screen is for
+// One served page with five screens and one address. What each screen is for
 // is in the section note of 72_door_app.gs; what is worth knowing HERE is why
 // it is one page rather than four:
 //
@@ -18,6 +18,12 @@
 //     twice or through esc(), because a member called O'Brien and a program
 //     called "Movie Night </script>" are both real and both end the page
 //     mid-sentence otherwise. See tests/check_in_page.test.js.
+//   - The membership screen (screen 5) is drawn from a form the OFFICE writes,
+//     so its question titles, help text and choices are somebody else's words
+//     arriving at runtime. They are never interpolated into this file's
+//     markup: they come back as data from doorMembershipForm() and every one
+//     of them is written with textContent. That screen uses no innerHTML at
+//     all, and tests/door_app.test.js holds that line.
 // ============================================================================
 
 /**
@@ -154,6 +160,12 @@ function buildDoorAppHtml(options) {
   var PERSON = null;       // { name, key, isNew, phone, email, registered[], ... }
   var PICKED = {};         // session value -> true
   var LUNCH = false;
+  // WHICH OF THIS PERSON'S HOUSEHOLD IS BEING SIGNED IN WITH THEM: member key
+  // -> true. Ticked by default for anyone the workbook expects today and has
+  // not already marked present — the couple who always arrive together are the
+  // reason this exists, and making them tap twice would be the same two taps
+  // as before. Cleared on every choose(), because it is about one visit.
+  var PARTY = {};
   var RECURRING = 'none';  // none | month | club
   // WHAT HAS BEEN TYPED INTO THE WALK-IN FORM, held outside the DOM. Picking a
   // radio redraws the whole screen (one render function, one truth about what
@@ -161,6 +173,16 @@ function buildDoorAppHtml(options) {
   // filled in would be the page losing their answer for them.
   var WALKIN = { name: '', email: '', phone: '' };
   var MEMBER = '';         // yes | no
+  // THE MEMBERSHIP APPLICATION (screen 5). The form as the server described it,
+  // and what has been answered so far — held out here rather than in the DOM
+  // for the same reason WALKIN is: this screen is redrawn whole, and a redraw
+  // that emptied a half-filled application would lose somebody's afternoon.
+  var MEMBERSHIP = null;   // { ok, usable, title, description, url, items[] }
+  var MEMBER_ANSWERS = {}; // item id -> string | string[]
+  var MEMBER_OTHER = {};   // item id -> what was typed into an "Other" box
+  // Who is applying, carried off the sign-in they just did so the application
+  // does not ask them to type their own name a second time.
+  var APPLICANT = { name: '', email: '', phone: '' };
   var RESULT = null;
   var busy = false;
   var pin = '';
@@ -274,6 +296,9 @@ function buildDoorAppHtml(options) {
     if (STEP === 'setup' || !SETUP) { setupBtn.classList.add('hide'); return drawSetup(main); }
     setupBtn.classList.remove('hide');
     if (STEP === 'done') return drawDone(main);
+    // BEFORE the day guard: the application is about a person, not about a day's
+    // list, and a day that failed to re-read must not be able to shut it.
+    if (STEP === 'membership') return drawMembership(main);
     if (!DAY) return drawEmpty(main);
     if (STEP === 'person') return drawPerson(main);
     if (STEP === 'walkin') return drawWalkIn(main);
@@ -416,9 +441,18 @@ function buildDoorAppHtml(options) {
     main.appendChild(footer());
   }
 
-  /** Sorted and headed on the LAST word of the name — the surname, usually. */
+  /**
+   * Sorted and headed on the LAST WORD OF THE NAME — the surname, usually.
+   *
+   * A TRAILING PARENTHETICAL IS NOT PART OF THE NAME. Somebody typed into a
+   * registration as "Robert Klein (wheelchair)" or "Jane Doe (grandmother)"
+   * still surnames Klein and Doe — the parenthetical is a note that rode along
+   * on the name field, and without stripping it first, sortKey() would read it
+   * as the last word and file the card under "(" instead of under K or D.
+   */
   function sortKey(name) {
-    var parts = String(name || '').trim().split(/\\s+/);
+    var stripped = String(name || '').replace(/\\s*\\([^()]*\\)\\s*$/, '').trim();
+    var parts = (stripped || String(name || '').trim()).split(/\\s+/);
     return (parts.length ? parts[parts.length - 1] : String(name || '')).toUpperCase();
   }
 
@@ -428,12 +462,28 @@ function buildDoorAppHtml(options) {
     var box = document.getElementById('results');
     box.innerHTML = '';
     if (needle.length < 2) return;
+    // MATCHED ON EVERY SPELLING, not just the one on the row: the search field carries
+    // the nickname a form's parenthetical was holding ("Robert (Bob) Kaplan"),
+    // so a volunteer typing what they actually call somebody finds them. See
+    // memberSearchNames() in 77_households_and_names.gs.
     var hits = (DAY.members || []).filter(function (m) {
-      return m.name.toLowerCase().indexOf(needle) !== -1;
+      var hay = m.search || m.name.toLowerCase();
+      return hay.indexOf(needle) !== -1;
     }).slice(0, 24);
     if (!hits.length) {
-      box.appendChild(el('p', 'hint', 'No member matches "' + typed +
-        '". Sign in as a walk-in below.'));
+      box.appendChild(el('p', 'hint', 'No member matches "' + typed + '".'));
+      // ONE TAP INTO THE WALK-IN FORM, NAME ALREADY IN IT. The old path made
+      // someone who typed a name and got no match scroll to the walk-in box,
+      // tap it, and retype the name they had just typed — WALKIN.name was
+      // reset to '' on that tap regardless of what was in the search box.
+      // Carrying the typed text straight into WALKIN here is what removes that.
+      box.appendChild(button('big', 'Sign in as a walk-in: ' + typed, function () {
+        PERSON = null; PICKED = {}; LUNCH = false; PARTY = {}; RECURRING = 'none'; MEMBER = '';
+        WALKIN = { name: typed, email: '', phone: '' };
+        STEP = 'walkin';
+        draw();
+        window.scrollTo(0, 0);
+      }));
       return;
     }
     hits.forEach(function (m) {
@@ -453,6 +503,21 @@ function buildDoorAppHtml(options) {
     if (p.here) bits.push('Already signed in');
     if ((p.registered || []).length) bits.push((p.registered || []).map(titleOf).join(', '));
     if (p.lunchRegistered) bits.push('lunch ordered');
+    // GUESTS LIVE UNDER THE MEMBER WHO BROUGHT THEM (see readWalkInDay()'s
+    // guest-folding), not as cards of their own — one line here says who else
+    // is in the party, and tapping this card signs the whole party in.
+    if ((p.guests || []).length) {
+      bits.push('with ' + (p.guests.length === 1 ? 'guest' : 'guests') + ': ' +
+        p.guests.map(function (g) { return g.name; }).join(', '));
+    }
+    // AN ORPHAN GUEST — the host is not expected today, so there is no party
+    // to fold this card into. Labelled rather than left to read as a stranger.
+    if (p.guestOf) bits.push('guest of ' + p.guestOf);
+    // The household on the card as well as on the screen behind it, so a
+    // volunteer scanning the list can see that finding one of them is enough.
+    if ((p.household || []).length) {
+      bits.push('with ' + p.household.map(function (m) { return m.name; }).join(', '));
+    }
     b.innerHTML = esc(p.name) + (bits.length ? '<span class="meta">' + esc(bits.join(' · ')) + '</span>' : '');
     b.onclick = function () { choose(p); };
     return b;
@@ -467,6 +532,10 @@ function buildDoorAppHtml(options) {
     // CONFIRMATION with the ticks live, so changing one is the same tap.
     (p.registered || []).forEach(function (v) { PICKED[v] = true; });
     LUNCH = !!p.lunchRegistered;
+    PARTY = {};
+    (p.household || []).forEach(function (m) {
+      if (m.expected && !m.here) PARTY[m.key] = true;
+    });
     RECURRING = 'none';
     MEMBER = '';
     STEP = 'person';
@@ -480,6 +549,13 @@ function buildDoorAppHtml(options) {
     main.appendChild(el('p', 'hint',
       'This is what you are down for on ' + DAY.dateLabel +
       '. Change anything that is wrong, then confirm.'));
+    // CONFIRMING FOR THE WHOLE PARTY. A guest nested under this person has no
+    // screen of their own — tapping "Confirm and sign in" below signs them in
+    // too, for whatever they are down for with this person (see walkInSignIn()).
+    if ((PERSON.guests || []).length) {
+      main.appendChild(el('p', 'hint',
+        'Signing in with ' + PERSON.guests.map(function (g) { return g.name; }).join(', ') + '.'));
+    }
 
     var list = el('ul', 'list', '');
     (DAY.programs || []).forEach(function (program) { list.appendChild(programItem(program)); });
@@ -487,6 +563,20 @@ function buildDoorAppHtml(options) {
       list.appendChild(el('p', 'hint', 'No programs are on at ' + DAY.location + ' that day.'));
     }
     main.appendChild(list);
+
+    // THE HOUSEHOLD, AFTER THE PROGRAMS AND BEFORE THE MEAL. A couple arrive
+    // together and are two members with two sets of rows; this is the one tap
+    // that stops the volunteer scrolling back up the alphabet to do the second
+    // one. Each is signed in for WHAT THEY THEMSELVES ARE DOWN FOR — the ticks
+    // above are this person's, not the household's — except somebody the
+    // workbook is not expecting today, who comes in on the ticks above because
+    // there is nothing else to put them on.
+    if ((PERSON.household || []).length) {
+      main.appendChild(el('h3', '', 'Signing in with'));
+      var party = el('ul', 'list', '');
+      PERSON.household.forEach(function (m) { party.appendChild(householdItem(m)); });
+      main.appendChild(party);
+    }
 
     var lunchList = el('ul', 'list', '');
     lunchList.appendChild(lunchItem(!!PERSON.lunchRegistered));
@@ -512,6 +602,7 @@ function buildDoorAppHtml(options) {
       list.appendChild(el('p', 'hint', 'No programs are on at ' + DAY.location + ' that day.'));
     }
     main.appendChild(list);
+
 
     var lunchList = el('ul', 'list', '');
     lunchList.appendChild(lunchItem(false));
@@ -544,7 +635,8 @@ function buildDoorAppHtml(options) {
       'You are added to today\\'s list and nothing else changes.',
       MEMBER === 'yes', function (v) { MEMBER = v; }));
     mem.appendChild(radioItem('member', 'no', 'Not yet',
-      'You can sign in and join today either way — the office will send you the membership form.',
+      'You can sign in and join today either way. After you sign in you can fill the ' +
+      'membership application in on this tablet.',
       MEMBER === 'no', function (v) { MEMBER = v; }));
     main.appendChild(mem);
 
@@ -555,6 +647,42 @@ function buildDoorAppHtml(options) {
     main.appendChild(button('plain', 'Back to the name list', function () {
       STEP = 'names'; PICKED = {}; LUNCH = false; draw();
     }));
+  }
+
+  /**
+   * One household member as a tick. Somebody already marked present is shown
+   * and NOT tickable — signing them in twice is not a thing the door should
+   * offer, and hiding them would leave the volunteer wondering where the wife
+   * went.
+   */
+  function householdItem(m) {
+    var locked = busy || !!m.here;
+    var li = el('li', 'item' + (m.here ? ' off' : (PARTY[m.key] ? ' on' : '')), '');
+    var label = document.createElement('label');
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !!PARTY[m.key] && !m.here;
+    box.disabled = locked;
+    box.onchange = function () {
+      if (box.checked) PARTY[m.key] = true; else delete PARTY[m.key];
+      li.className = 'item' + (box.checked ? ' on' : '');
+    };
+    var what = el('div', 'what', '');
+    var tag = m.here ? '<span class="tag yes">SIGNED IN</span>'
+      : (m.expected ? '<span class="tag yes">EXPECTED</span>'
+        : '<span class="tag no">NOT REGISTERED</span>');
+    var meta = [];
+    if (m.here) meta.push('Already signed in today.');
+    else if ((m.registered || []).length) meta.push((m.registered || []).map(titleOf).join(', '));
+    else if (m.expected) meta.push('Down for lunch only.');
+    else meta.push('Not down for anything today — ticking this signs them in for the same sessions.');
+    if (m.lunchRegistered) meta.push('lunch ordered');
+    what.innerHTML = tag + '<span class="title">' + esc(m.name) + '</span>' +
+      '<span class="meta">' + esc(meta.join(' — ')) + '</span>';
+    label.appendChild(box);
+    label.appendChild(what);
+    li.appendChild(label);
+    return li;
   }
 
   function programItem(program) {
@@ -665,10 +793,377 @@ function buildDoorAppHtml(options) {
     return li;
   }
 
+
+  // SCREEN 5 — the membership application, drawn from the live form.
+  //
+  // NOTHING BELOW KNOWS WHAT THE FORM ASKS. The server sends a description of
+  // the office's own form (doorMembershipForm) and every field on this screen
+  // is built from it, so the day somebody adds a question to the application
+  // the door starts asking it. What this screen owns is only HOW a question is
+  // drawn, and what happens to a question it cannot draw: named, with the real
+  // form's link beside it, never silently dropped.
+  //
+  // EVERY STRING HERE IS SOMEBODY ELSE'S TEXT — question titles, help text,
+  // choices, all typed into a Google Form by the office. It arrives as data
+  // rather than as markup and is written with textContent, so a question
+  // called "Fees </" + "script>" is a question, not the end of the page (written
+  // split here for the same reason). There is no innerHTML anywhere on this
+  // screen, deliberately.
+  function openMembership() {
+    MEMBERSHIP = null;
+    MEMBER_ANSWERS = {};
+    MEMBER_OTHER = {};
+    STEP = 'membership';
+    setBusy(true);
+    draw();
+    say('Opening the membership application...', '');
+    call('doorMembershipForm', {}, function (res) {
+      setBusy(false);
+      if (!res || res.needsPin) { draw(); return handle(res); }
+      MEMBERSHIP = res;
+      prefillMembership();
+      hideStatus();
+      draw();
+      window.scrollTo(0, 0);
+    });
+  }
+
+  /**
+   * WHAT THEY JUST TYPED, PUT BACK IN FRONT OF THEM. Somebody who has spelled
+   * their name and their phone number into the sign-in a moment ago should not
+   * have to do it twice, and a form nobody wants to start twice is a form that
+   * gets abandoned at the door.
+   *
+   * A GUESS, and only ever a guess: matched on what the question is CALLED,
+   * because the form is the office's and nothing here is allowed to assume its
+   * shape. Every prefilled box is an ordinary editable field — a wrong guess
+   * costs a person one correction, and a missed one costs them nothing.
+   */
+  function prefillMembership() {
+    if (!MEMBERSHIP || !MEMBERSHIP.items) return;
+    MEMBERSHIP.items.forEach(function (item) {
+      if (item.kind !== 'field' || item.type !== 'TEXT') return;
+      var title = String(item.title || '').toLowerCase();
+      if (/e.?mail/.test(title)) { if (APPLICANT.email) MEMBER_ANSWERS[item.id] = APPLICANT.email; return; }
+      if (/phone|mobile|cell|telephone/.test(title)) {
+        if (APPLICANT.phone) MEMBER_ANSWERS[item.id] = APPLICANT.phone;
+        return;
+      }
+      if (/name/.test(title) && APPLICANT.name) MEMBER_ANSWERS[item.id] = APPLICANT.name;
+    });
+  }
+
+  function drawMembership(main) {
+    if (!MEMBERSHIP) {
+      main.appendChild(el('p', 'hint', busy
+        ? 'Opening the membership application...'
+        : 'The application has not opened yet.'));
+      main.appendChild(button('plain', 'Try again', openMembership));
+      main.appendChild(membershipBack());
+      return;
+    }
+    main.appendChild(el('h2', '', MEMBERSHIP.title || 'Membership Application'));
+    if (MEMBERSHIP.description) main.appendChild(el('p', 'hint', MEMBERSHIP.description));
+    if (MEMBERSHIP.message) main.appendChild(el('div', 'banner', MEMBERSHIP.message));
+
+    // THE HONEST DEGRADE. The form could not be opened, or it asks something
+    // this screen cannot ask — either way the person gets the real form rather
+    // than a screen that would lose their answers.
+    if (!MEMBERSHIP.ok || !MEMBERSHIP.usable) {
+      if (MEMBERSHIP.url) main.appendChild(membershipLink('Open the membership application'));
+      main.appendChild(membershipBack());
+      return;
+    }
+
+    main.appendChild(el('p', 'hint',
+      'Fill this in here and it goes straight to the office. A staff member can help.'));
+    var list = el('ul', 'list', '');
+    (MEMBERSHIP.items || []).forEach(function (item) {
+      var drawn = membershipItem(item);
+      if (drawn) list.appendChild(drawn);
+    });
+    main.appendChild(list);
+
+    var go = button('big', 'Send my application', submitMembership);
+    go.id = 'go';
+    go.disabled = busy;
+    main.appendChild(go);
+    if (MEMBERSHIP.url) main.appendChild(membershipLink('Open the full form instead'));
+    main.appendChild(membershipBack());
+  }
+
+  function membershipBack() {
+    return button('plain', 'Not now — back to the name list', function () {
+      MEMBERSHIP = null; MEMBER_ANSWERS = {}; MEMBER_OTHER = {};
+      PERSON = null; RESULT = null; PICKED = {}; LUNCH = false;
+      RECURRING = 'none'; MEMBER = '';
+      WALKIN = { name: '', email: '', phone: '' };
+      STEP = 'names';
+      hideStatus();
+      draw();
+      window.scrollTo(0, 0);
+    });
+  }
+
+  /** The form's own link, as a button-shaped anchor. */
+  function membershipLink(text) {
+    var a = document.createElement('a');
+    a.className = 'plain';
+    a.href = MEMBERSHIP.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = text;
+    a.style.display = 'block';
+    a.style.textAlign = 'center';
+    a.style.textDecoration = 'none';
+    a.style.padding = '13px 14px';
+    a.style.marginTop = '8px';
+    a.style.border = '1px solid #DADCE0';
+    a.style.borderRadius = '8px';
+    a.style.background = '#fff';
+    a.style.color = '#1A73E8';
+    return a;
+  }
+
+  /** One item of the application: a heading, a field, or a question we cannot ask. */
+  function membershipItem(item) {
+    if (item.kind === 'display') {
+      var note = el('li', 'item', '');
+      var body = el('div', 'what', '');
+      body.style.padding = '14px 12px';
+      if (item.title) body.appendChild(el('span', 'title', item.title));
+      if (item.help) body.appendChild(el('span', 'meta', item.help));
+      if (!item.title && !item.help) return null;
+      note.appendChild(body);
+      return note;
+    }
+    if (item.kind === 'unsupported') {
+      var off = el('li', 'item off', '');
+      var offBody = el('div', 'what', '');
+      offBody.style.padding = '14px 12px';
+      offBody.appendChild(el('span', 'title', item.title || 'A question on the form'));
+      offBody.appendChild(el('span', 'meta warn',
+        'This one can only be answered on the full form — use the link at the bottom, ' +
+        'or ask a staff member.'));
+      off.appendChild(offBody);
+      return off;
+    }
+    var li = el('li', 'item', '');
+    var wrap = el('div', 'what', '');
+    wrap.style.padding = '14px 12px';
+    var label = el('label', 'field', item.title + (item.required ? ' *' : ''));
+    label.style.margin = '0 0 4px 0';
+    wrap.appendChild(label);
+    if (item.help) wrap.appendChild(el('p', 'hint', item.help));
+    membershipField(item).forEach(function (node) { wrap.appendChild(node); });
+    li.appendChild(wrap);
+    return li;
+  }
+
+  /** The input(s) for one answerable item — nodes only, in order. */
+  function membershipField(item) {
+    var id = 'mq' + item.id;
+    var value = MEMBER_ANSWERS[item.id];
+    if (item.type === 'PARAGRAPH_TEXT') {
+      var area = document.createElement('textarea');
+      area.id = id;
+      area.rows = 3;
+      area.style.width = '100%';
+      area.style.padding = '13px';
+      area.style.fontSize = '16px';
+      area.style.fontFamily = 'inherit';
+      area.style.border = '1px solid #DADCE0';
+      area.style.borderRadius = '8px';
+      area.value = value == null ? '' : String(value);
+      area.onchange = function () { MEMBER_ANSWERS[item.id] = area.value; };
+      return [area];
+    }
+    if (item.type === 'TEXT' || item.type === 'DATE' || item.type === 'TIME') {
+      var input = document.createElement('input');
+      input.id = id;
+      input.type = item.type === 'DATE' ? 'date' : (item.type === 'TIME' ? 'time' : 'text');
+      input.autocomplete = 'off';
+      input.value = value == null ? '' : String(value);
+      input.onchange = function () { MEMBER_ANSWERS[item.id] = input.value; };
+      return [input];
+    }
+    if (item.type === 'LIST' || item.type === 'SCALE') {
+      var select = document.createElement('select');
+      select.id = id;
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = item.type === 'SCALE' ? 'Pick a number' : 'Choose one';
+      select.appendChild(blank);
+      membershipChoices(item).forEach(function (choice) {
+        var option = document.createElement('option');
+        option.value = choice;
+        option.textContent = choice;
+        if (String(value) === choice) option.selected = true;
+        select.appendChild(option);
+      });
+      select.onchange = function () { MEMBER_ANSWERS[item.id] = select.value; };
+      var nodes = [select];
+      var ends = membershipScaleLabels(item);
+      if (ends) nodes.push(el('p', 'hint', ends));
+      return nodes;
+    }
+    if (item.type === 'MULTIPLE_CHOICE' || item.type === 'CHECKBOX') {
+      var many = item.type === 'CHECKBOX';
+      var picked = many
+        ? (Array.isArray(value) ? value.slice() : [])
+        : (value == null ? '' : String(value));
+      var boxes = [];
+      var group = el('div', '', '');
+      (item.choices || []).forEach(function (choice) {
+        group.appendChild(membershipChoiceRow(item, choice, many, picked, boxes, false));
+      });
+      if (item.hasOther) {
+        group.appendChild(membershipChoiceRow(item, 'Other', many, picked, boxes, true));
+        var other = document.createElement('input');
+        other.type = 'text';
+        other.id = id + 'other';
+        other.placeholder = 'Other — type it here';
+        other.value = MEMBER_OTHER[item.id] || '';
+        other.onchange = function () {
+          MEMBER_OTHER[item.id] = other.value;
+          // The typed words ARE the answer: Forms stores an "Other" response
+          // as whatever was written, not as the word "Other".
+          membershipCollectChoices(item, many, boxes);
+        };
+        group.appendChild(other);
+      }
+      return [group];
+    }
+    // Nothing else reaches here — describeMembershipItem() would have called it
+    // unsupported — but a field with no input at all must never look answerable.
+    return [el('p', 'hint', 'This question can only be answered on the full form.')];
+  }
+
+  /** One radio or checkbox line, wired back into MEMBER_ANSWERS. */
+  function membershipChoiceRow(item, choice, many, picked, boxes, isOther) {
+    var row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '10px';
+    row.style.padding = '8px 0';
+    row.style.fontWeight = 'normal';
+    var box = document.createElement('input');
+    box.type = many ? 'checkbox' : 'radio';
+    box.name = 'mq' + item.id;
+    box.value = choice;
+    box.setAttribute('data-other', isOther ? '1' : '');
+    box.style.width = '24px';
+    box.style.height = '24px';
+    box.checked = many
+      ? picked.indexOf(choice) !== -1
+      : picked === choice;
+    box.disabled = busy;
+    boxes.push({ box: box, choice: choice, isOther: isOther });
+    box.onchange = function () { membershipCollectChoices(item, many, boxes); };
+    row.appendChild(box);
+    row.appendChild(el('span', '', choice));
+    return row;
+  }
+
+  /** What is ticked right now, "Other" resolved to the words in its box. */
+  function membershipCollectChoices(item, many, boxes) {
+    var chosen = [];
+    boxes.forEach(function (entry) {
+      if (!entry.box.checked) return;
+      var text = entry.isOther ? String(MEMBER_OTHER[item.id] || '').trim() : entry.choice;
+      if (text) chosen.push(text);
+    });
+    MEMBER_ANSWERS[item.id] = many ? chosen : (chosen.length ? chosen[0] : '');
+  }
+
+  /** A scale's numbers, or a list's choices. */
+  function membershipChoices(item) {
+    if (item.type !== 'SCALE') return (item.choices || []).slice();
+    var out = [];
+    var low = Number(item.lowerBound);
+    var high = Number(item.upperBound);
+    if (isNaN(low) || isNaN(high) || high < low) return out;
+    for (var n = low; n <= high; n++) out.push(String(n));
+    return out;
+  }
+
+  function membershipScaleLabels(item) {
+    if (item.type !== 'SCALE') return '';
+    var bits = [];
+    if (item.lowerLabel) bits.push(item.lowerBound + ' = ' + item.lowerLabel);
+    if (item.upperLabel) bits.push(item.upperBound + ' = ' + item.upperLabel);
+    return bits.join('   ·   ');
+  }
+
+  /**
+   * Sent whole, and checked again on the server against the form's own items —
+   * what is refused here is only what can be refused without a round trip, so
+   * a required box nobody filled in is said at the door rather than after a
+   * wait. The server is what actually decides, because the form may have been
+   * edited since this screen opened.
+   */
+  function submitMembership() {
+    if (!MEMBERSHIP || !MEMBERSHIP.ok || !MEMBERSHIP.usable) return;
+    var answers = [];
+    var missing = '';
+    (MEMBERSHIP.items || []).forEach(function (item) {
+      if (item.kind !== 'field') return;
+      var value = MEMBER_ANSWERS[item.id];
+      var empty = value === undefined || value === null || value === '' ||
+        (Array.isArray(value) && !value.length);
+      if (empty) {
+        if (item.required && !missing) missing = item.title;
+        return;
+      }
+      answers.push({ id: item.id, value: value });
+    });
+    if (missing) return say('"' + missing + '" still needs an answer.', 'err');
+    if (!answers.length) return say('Fill the application in first.', 'err');
+    setBusy(true);
+    draw();
+    say('Sending your application...', '');
+    call('doorMembershipSubmit', {
+      name: APPLICANT.name,
+      location: SETUP ? SETUP.location : '',
+      answers: answers
+    }, function (res) {
+      setBusy(false);
+      if (!res || res.needsPin) { draw(); return handle(res); }
+      if (!res.ok) { draw(); return say(res.message || 'The application was not sent.', 'err'); }
+      RESULT = { ok: true, name: APPLICANT.name, message: res.message, lines: [] };
+      MEMBERSHIP = null;
+      MEMBER_ANSWERS = {};
+      MEMBER_OTHER = {};
+      MEMBER = '';
+      STEP = 'done';
+      draw();
+      window.scrollTo(0, 0);
+      say(res.message, 'ok');
+    });
+  }
+
   // ------------------------------------------------------------------ writes
   function submit() {
     var programs = Object.keys(PICKED);
     if (!programs.length && !LUNCH) return say('Tick what you are here for first.', 'err');
+    // EACH COMPANION SIGNS IN AS THEMSELVES — their own sessions, their own
+    // meal (see doorSignIn()). Only somebody the workbook is not expecting
+    // today falls back to this person's ticks, which is the walk-in case
+    // wearing a household's clothes: they came along, so put them where the
+    // person who brought them is going.
+    var party = [];
+    (PERSON.household || []).forEach(function (m) {
+      if (!PARTY[m.key] || m.here) return;
+      var theirs = (m.registered || []).slice();
+      party.push({
+        name: m.name,
+        phone: m.phone || '',
+        email: '',
+        newMember: false,
+        programs: theirs.length ? theirs : programs,
+        lunch: !!m.lunchRegistered
+      });
+    });
     send({
       name: PERSON.name,
       phone: PERSON.phone || '',
@@ -677,7 +1172,8 @@ function buildDoorAppHtml(options) {
       programs: programs,
       lunch: !!LUNCH,
       recurring: 'none',
-      member: ''
+      member: '',
+      party: party
     });
   }
 
@@ -719,25 +1215,75 @@ function buildDoorAppHtml(options) {
     });
   }
 
+  /**
+   * OPTIMISTIC. doorSignIn() is still a synchronous call under the hood —
+   * google.script.run has no true fire-and-forget from a browser — but
+   * nobody standing at a tablet should be made to wait through its lock
+   * waits and sheet writes to see anything happen. So this hands the tablet
+   * back NOW, showing the sign-in as done, and lets the real write finish
+   * underneath whatever screen comes next.
+   *
+   * A visitor who just said they are not a member yet goes straight to the
+   * membership application instead of the name list — that screen does not
+   * read RESULT or wait on this call either (see openMembership()), so there
+   * is nothing here it needs to wait for.
+   *
+   * If the write actually fails, the visitor has already moved on by the
+   * time anyone could know — so this does not surface an error on the
+   * tablet at all. doorSignIn() (section 16f) catches that server-side and
+   * emails staff through notifyAdmin() instead, which runs to completion
+   * whether or not the tablet is still listening. needsPin is the one
+   * exception: a stale PIN fails every sign-in after this one, not just
+   * this visitor's, so it still interrupts with the PIN screen.
+   */
   function send(payload) {
     payload.location = SETUP.location;
     payload.dateKey = SETUP.dateKey;
-    setBusy(true);
+    payload.pin = pin;
+    var offerMembership = payload.member === 'no';
+    var name = payload.name || '';
+
+    var partyNames = (payload.party || []).map(function (p) { return p.name; });
+    PERSON = null; PICKED = {}; LUNCH = false; PARTY = {};
+    RECURRING = 'none'; MEMBER = '';
+    WALKIN = { name: '', email: '', phone: '' };
+    if (offerMembership) {
+      APPLICANT = { name: name, email: payload.email || '', phone: payload.phone || '' };
+    } else {
+      STEP = 'names';
+      APPLICANT = { name: '', email: '', phone: '' };
+    }
     draw();
-    say('Signing you in...', '');
-    call('doorSignIn', payload, function (res) {
-      setBusy(false);
-      if (!res) { draw(); return handle(res); }
-      RESULT = res;
-      STEP = 'done';
-      draw();
-      window.scrollTo(0, 0);
-      say(res.message, res.ok ? 'ok' : 'err');
-      // Re-read rather than patch: the next person in the queue has to see
-      // this one as signed in, and the sheet is the truth. Quietly, because
-      // the volunteer is reading the receipt this would otherwise paper over.
-      syncDay();
-    });
+    window.scrollTo(0, 0);
+    say('✅ Signed in — ' + name +
+      (partyNames.length ? ' with ' + partyNames.join(', ') : ''), 'ok');
+    // Opened AFTER the toast is drawn, so "Signed in" is what the visitor
+    // sees first rather than being instantly overwritten by "Opening the
+    // membership application...".
+    if (offerMembership) openMembership();
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.needsPin) {
+          try { window.localStorage.removeItem('checkInPin'); } catch (err) { /* ignore */ }
+          pin = '';
+          STEP = 'names';
+          draw();
+          say(res.message || 'Wrong PIN — ask a staff member to sign back in.', 'err');
+          return showPin();
+        }
+        // Success is already on screen; a real failure was staff's problem
+        // the moment it happened (doorSignIn emailed it), not the tablet's.
+        // Re-read quietly so the next person in the queue sees this one as
+        // signed in, same as before.
+        syncDay();
+      })
+      .withFailureHandler(function () {
+        // Reported server-side already (see doorSignIn's own try/catch) for
+        // anything that got that far; a transport failure this raw never
+        // reached the server at all, and there is nothing left to tell.
+      })
+      .doorSignIn(JSON.stringify(payload));
   }
 
   function drawDone(main) {
@@ -746,10 +1292,24 @@ function buildDoorAppHtml(options) {
     var list = el('ul', 'result', '');
     ((RESULT && RESULT.lines) || []).forEach(function (line) { list.appendChild(el('li', '', line)); });
     main.appendChild(list);
+    // THE MEMBERSHIP APPLICATION, OFFERED WHERE THE ANSWER WAS GIVEN. Somebody
+    // who has just said "not a member yet" is standing here, signed in, with
+    // the tablet in their hands — which is the only moment the application is
+    // ever going to get filled in. Offered AFTER the sign-in rather than
+    // before it, because being on today's list is what they came for and a
+    // membership form must never be the thing standing between them and it.
+    if (RESULT && RESULT.ok && MEMBER === 'no') {
+      main.appendChild(el('p', 'hint',
+        'Not a member yet? You can fill the membership application in right here — ' +
+        'it goes straight to the office.'));
+      main.appendChild(button('big', 'Fill in the membership application', openMembership));
+    }
     main.appendChild(button('big', 'Done — next person', function () {
       PERSON = null; RESULT = null; PICKED = {}; LUNCH = false;
       RECURRING = 'none'; MEMBER = '';
       WALKIN = { name: '', email: '', phone: '' };
+      MEMBERSHIP = null; MEMBER_ANSWERS = {}; MEMBER_OTHER = {};
+      APPLICANT = { name: '', email: '', phone: '' };
       STEP = 'names';
       hideStatus();
       draw();

@@ -12,7 +12,7 @@
 //    and the whole row was then skipped on every later render. Typing
 //    Actual_Ordered — the column the tab exists for — therefore stopped
 //    Registered_Count ever moving again, while the same people went on
-//    appearing in the rollup and on Lunch_Roster.
+//    appearing in the rollup and on All_Lunch_Registrants.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -94,7 +94,7 @@ check('a location that never caters is ruled out', sandbox.lunchIsRuledOutOn(d(1
 check('the offer question still says no to a date with no menu',
   sandbox.isLunchOfferedOn(d(21), 'Narberth'), false);
 
-const lrMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const lrMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 // The all-dates branch: one lunch tick, applied to every date on the form.
 function lunchStatusFor(dayOfMonth, location) {
   const row = sandbox.buildRegistrantRow({

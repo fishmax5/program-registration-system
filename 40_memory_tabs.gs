@@ -1,5 +1,5 @@
 // ============================================================================
-// 6c. MEMORY TABS  (Member_Roll / Program_Options)
+// 6c. MEMORY TABS  (Member_Roll / Program_Settings)
 // ============================================================================
 //
 // Everything else in this workbook is derived: wipe it, re-sync, and it comes
@@ -11,7 +11,7 @@
 // Each tab is therefore split down the middle:
 //   LEFT  — recomputed from the registrant/session history every refresh.
 //           Never hand-edit; it will be overwritten.
-//   RIGHT — MEMBER_ROLL_STAFF_COLUMNS / PROGRAM_OPTIONS_STAFF_COLUMNS. Written
+//   RIGHT — MEMBER_ROLL_STAFF_COLUMNS / PROGRAM_SETTINGS_STAFF_COLUMNS. Written
 //           only by people, never by this script. Keyed by Name (or
 //           Event+Location), so a row keeps its notes as long as the key is
 //           stable — and normalizeNameKey() makes the key survive the casing
@@ -36,22 +36,88 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // reading the session table themselves when handed null, which is the
     // whole tab read twice per sync for the same rows.
     const sessions = sessionRows ||
-      readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
-        HEADERS.Master_Program_Dashboard, 'Event_ID');
-    // BEFORE refreshProgramOptions(), and that order is load-bearing on a
+      getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
+        HEADERS.All_Program_Sessions, 'Event_ID');
+    // BEFORE refreshProgramSettings(), and that order is load-bearing on a
     // workbook that has not migrated yet: refreshProgramLeadersTab() carries
-    // Program_Options' old Instructor_Email column onto its own tab, reading
-    // it off the live sheet — and the Program_Options refresh below is the
-    // write that finally rewrites that tab without the column. The other way
-    // round, every address a site has been keeping is gone before anything
-    // reads it. See migrateProgramLeaderAddresses().
+    // the old Instructor_Email column onto its own tab, reading it off the
+    // live sheet — and the refresh below is the write that finally rewrites
+    // that tab without the column. The other way round, every address a site
+    // has been keeping is gone before anything reads it. See
+    // migrateProgramLeaderAddresses().
+    //
+    // The two one-time carry-overs that USED to sit between these two lines —
+    // Notify_Mode / Reminder_Days off the same sheet, and the whole of the
+    // Registrant_Notifications tab — now run INSIDE refreshProgramSettings(),
+    // because the tab they are carried onto is the tab they are carried off.
+    // The order they need is still the same order, and it is now impossible to
+    // get wrong by moving a line: the reads happen before the write, in one
+    // function, with the marker set only once the write has landed.
     refreshProgramLeadersTab(ss, sessions);
-    refreshProgramOptions(ss, sessions);
+    refreshProgramSettings(ss, sessions);
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
     // reference material, not the system of record.
     log(`⚠️ Could not refresh the memory tabs (${err}) — the rest of the sync is unaffected.`);
   }
+}
+
+/**
+ * THE ROLL WRITES BACK: what we know about how to reach somebody, onto the
+ * rows that go out of this workbook.
+ *
+ * Member_Roll's Phone/Email are the newest contact details this person has
+ * ever given on any form. A registrant row only ever carries what THAT
+ * submission typed — and plenty of rows are made by something that never
+ * asked: a club catch-up, an "every date" catch-up, a door sign-in, a guest
+ * entered by name. Those rows reached the Registrants tab, the program leader
+ * sheets and the sign-in sheets with two empty columns, for people the
+ * workbook has had a phone number for all along.
+ *
+ * So before the Registrants tab is written, every row missing a phone or an
+ * email is filled from the roll. Only BLANKS are filled: what somebody typed
+ * on their own registration is the better answer for that session, and a
+ * staff correction typed into the row is never overwritten by a stale one.
+ * Idempotent — the roll is recomputed from these same rows afterwards, so a
+ * filled-in row hands back the value it was just given.
+ *
+ * Mutates the rows in place (they are the array about to be written) and
+ * returns how many cells it filled.
+ */
+function applyMemberRollContacts(registrantRows) {
+  if (!registrantRows || registrantRows.length === 0) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rollHeaders = HEADERS.Member_Roll;
+  const rollMap = getIndexMap(rollHeaders);
+  const roll = readSimpleTableValues(getOrCreateSheet(ss, SHEET_NAMES.MEMBER_ROLL), rollHeaders);
+  if (roll.length === 0) return 0;
+
+  const byKey = {};
+  roll.forEach(row => {
+    const key = normalizeNameKey(row[rollMap['Name']]);
+    if (!key) return;
+    byKey[key] = {
+      phone: String(row[rollMap['Phone']] || '').trim(),
+      email: String(row[rollMap['Email']] || '').trim()
+    };
+  });
+
+  const map = getIndexMap(HEADERS.All_Registrants);
+  let filled = 0;
+  registrantRows.forEach(row => {
+    const known = byKey[normalizeNameKey(row[map['Name']])];
+    if (!known) return;
+    if (known.phone && !String(row[map['Phone']] || '').trim()) {
+      row[map['Phone']] = known.phone;
+      filled++;
+    }
+    if (known.email && !String(row[map['Email']] || '').trim()) {
+      row[map['Email']] = known.email;
+      filled++;
+    }
+  });
+  if (filled > 0) log(`Member_Roll contact details filled in ${filled} blank registrant cell(s).`);
+  return filled;
 }
 
 /**
@@ -72,19 +138,23 @@ function refreshMemberRoll(ss, registrantRows) {
     if (key) existingByKey[key] = row;
   });
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
+
+  // ONE READ OF THE CORRECTIONS for the whole rebuild: a name staff have put
+  // right is put right again here, whatever the form response still says.
+  const corrections = readMemberNameCorrections();
 
   const people = {};
   rows.forEach(row => {
-    const name = String(row[lrMap['Name']] || '').trim();
+    const name = canonicalMemberName(row[lrMap['Name']], corrections);
     const key = normalizeNameKey(name);
     if (!key) return;
     const d = coerceDate(row[lrMap['Event_Date']]);
     if (!people[key]) {
-      people[key] = { name, times: 0, first: d, last: d, locations: {}, lunches: {}, phone: '', email: '', contactAt: null };
+      people[key] = { name, times: 0, first: d, last: d, locations: {}, phone: '', email: '', contactAt: null };
     }
     const p = people[key];
     p.name = name; // last spelling seen wins for DISPLAY; the key stays stable
@@ -104,8 +174,6 @@ function refreshMemberRoll(ss, registrantRows) {
     }
     const loc = String(row[lrMap['Location']] || '').trim();
     if (loc) p.locations[loc] = true;
-    const lunch = String(row[lrMap['Lunch_Type']] || '').trim();
-    if (lunch && lunch !== 'No Lunch') p.lunches[lunch] = (p.lunches[lunch] || 0) + 1;
   });
 
   // Anyone already on the roll but absent from the current history stays,
@@ -123,11 +191,28 @@ function refreshMemberRoll(ss, registrantRows) {
     // to lose to a skipped field.
     row[map['Phone']] = p.phone || (prior ? prior[map['Phone']] : '') || '';
     row[map['Email']] = p.email || (prior ? prior[map['Email']] : '') || '';
+    // THE REFRESH DOES NOT RENAME ANYBODY. A correction typed into
+    // Display_Name is carried out by handleMemberRollEdit() —> across every
+    // tab at once, under a confirmation, with the old spelling remembered
+    // (77_households_and_names.gs). Doing it here as well would let a rename
+    // happen quietly on the next sync with none of that: the Name column is
+    // what All_Registrants, Club_Members and Regular_Needs all match on, and
+    // changing it on this tab alone is exactly how a person's history is left
+    // behind under their old spelling.
+    //
+    // The nickname is read from whichever spelling is the fuller one, because
+    // that is where a parenthetical usually survives.
+    const display = prior ? String(prior[map['Display_Name']] || '').trim() : '';
+    row[map['Nickname']] = parseMemberName(display || p.name).nickname ||
+      parseMemberName(p.name).nickname;
     row[map['Times_Seen']] = p.times;
     row[map['First_Seen']] = p.first || '';
     row[map['Last_Seen']] = p.last || '';
     row[map['Locations']] = Object.keys(p.locations).sort().join(', ');
-    row[map['Usual_Lunch']] = pickMostFrequent(p.lunches);
+    // Merged_From is neither recomputed nor a staff column — it is the dedupe's
+    // own receipt (section 77), and a refresh that dropped it would erase the
+    // record of every merge the moment the next sync ran.
+    if (prior) row[map['Merged_From']] = prior[map['Merged_From']];
     outRows.push(row);
     seen[key] = true;
   });
@@ -135,8 +220,66 @@ function refreshMemberRoll(ss, registrantRows) {
     if (!seen[key]) outRows.push(existingByKey[key]);
   });
 
-  writeMemoryTab(sheet, headers, outRows, memberRollTabOptions());
-  log(`Member_Roll refreshed: ${outRows.length} member(s).`);
+  // Through section 79's writer, not writeMemoryTab() directly: the name
+  // split, the dedupe, the retired section and the Status dropdown are what
+  // make this a roll of people rather than a list of strings, and every path
+  // that writes this tab has to get all four. The household stamp happens
+  // inside it, AFTER the dedupe — who shares a telephone number with whom is a
+  // fact about the roll as it will be drawn, not as it was read.
+  const written = writeMemberRollTab(sheet, outRows);
+  log(`Member_Roll refreshed: ${written.active} active, ${written.retired} retired` +
+    `${written.merges.length ? `, ${written.merges.length} duplicate row(s) merged` : ''}.`);
+}
+
+/**
+ * THE HOUSEHOLD COLUMNS, WRITTEN ONTO ROWS THAT ARE ABOUT TO BE DRAWN.
+ *
+ * Kept apart from the loop above because it cannot be done a row at a time:
+ * who shares a phone number with whom is a fact about the whole roll, and the
+ * institutional-contact filter (HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN) needs to
+ * have seen every row before it can say which details to ignore. Everything
+ * about how the grouping is decided lives in 77_households_and_names.gs; this
+ * is only where the answer meets the sheet.
+ *
+ * Rows carried over from a roll that predates these columns pass through with
+ * their household cells blank, which reads correctly: not in one.
+ */
+function stampMemberHouseholds(rows, headers) {
+  const map = getIndexMap(headers);
+  if (map['Household_ID'] === undefined || map['Household'] === undefined) return;
+  const entries = rows.map(row => ({
+    key: normalizeNameKey(row[map['Name']]),
+    name: String(row[map['Name']] || '').trim(),
+    phone: row[map['Phone']],
+    email: row[map['Email']],
+    override: map['Household_Override'] === undefined ? '' : row[map['Household_Override']]
+  }));
+  const { byKey } = buildHouseholdAssignments(entries);
+  rows.forEach((row, i) => {
+    const found = byKey[entries[i].key];
+    row[map['Household_ID']] = found ? found.id : '';
+    // The OTHER people in it, not a list this row is already the first line
+    // of: a cell that reads "Jane Smith, Ray Smith" on Jane's own row is a
+    // cell staff have to read twice to learn one fact.
+    row[map['Household']] = found
+      ? found.members.filter(m => m.key !== entries[i].key).map(m => m.name).join(', ')
+      : '';
+  });
+}
+
+/**
+ * The household columns recomputed from the tab AS IT STANDS, without going
+ * back to the registrant history — what an edit to Household_Override wants.
+ * Ticking a box should not cost a full roll rebuild, and the only input that
+ * changed is on this tab already.
+ */
+function refreshMemberHouseholds(ss) {
+  const sheet = getOrCreateSheet(ss || SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.MEMBER_ROLL);
+  const headers = HEADERS.Member_Roll;
+  const rows = readSimpleTable(sheet, headers);
+  if (!rows.length) return 0;
+  writeMemberRollTab(sheet, rows);
+  return rows.length;
 }
 
 /**
@@ -149,29 +292,57 @@ function refreshMemberRoll(ss, registrantRows) {
 function memberRollTabOptions() {
   return {
     banner: '👤 Member Roll',
-    bannerNote: 'Everyone who has ever registered for anything, whichever form they came in on.',
+    bannerNote: 'Everyone who has ever registered for anything, whichever form they came in on. ' +
+      'Sorted by last name; retired members are below the divider at the bottom, with their notes intact.',
     staffColumns: MEMBER_ROLL_STAFF_COLUMNS,
-    dateColumns: ['First_Seen', 'Last_Seen'],
+    dateColumns: ['First_Seen', 'Last_Seen', 'Retired_Date'],
     numberColumns: ['Times_Seen']
   };
 }
 
-/** One row per unique program (Event x Location), same recomputed/staff split. */
-function refreshProgramOptions(ss, sessionRows) {
-  const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_OPTIONS);
-  const headers = HEADERS.Program_Options;
+/**
+ * ONE ROW PER UNIQUE PROGRAM (Event x Location) — how it runs and what it
+ * sends — with the same recomputed/staff split every memory tab has.
+ *
+ * This is two refreshes that used to sit one after the other in
+ * refreshMemoryTabs(), over the same session rows, building the same key, for
+ * two tabs of the same shape (see HEADERS.Program_Settings). One pass now,
+ * which is also the only way the seeding rules below can be stated once.
+ *
+ * THE ORDER INSIDE HERE IS THE MIGRATION, and it is why the reads are all up
+ * front: every one of them looks at a sheet this write is about to overwrite.
+ */
+function refreshProgramSettings(ss, sessionRows) {
+  // Renames an existing workbook's Program_Options tab in place — rows,
+  // formatting and Staff_Notes intact. See LEGACY_SHEET_RENAMES.
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_SETTINGS);
+  const headers = HEADERS.Program_Settings;
   const map = getIndexMap(headers);
 
   const existingByKey = {};
   readSimpleTable(sheet, headers).forEach(row => {
-    const key = `${normalizeNameKey(row[map['Event']])}|${normalizeNameKey(row[map['Location']])}`;
+    const key = notificationProgramKey(row[map['Event']], row[map['Location']]);
     if (key !== '|') existingByKey[key] = row;
   });
 
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  // --- the three reads that must happen before the write, newest first ------
+  //
+  // A row's SIX NOTIFICATION ANSWERS come from the first of these that has
+  // something to say, and "the row above already has them" is only true once
+  // the merge has run: on the very first merged write, `existingByKey` is the
+  // old Program_Options tab, whose rows are real and whose tick columns did
+  // not exist. Carrying those blanks forward as decisions would silence every
+  // program in the workbook on one sync — which is exactly the failure the
+  // "a row is never born blank" rule in HEADERS.Program_Settings exists to
+  // prevent, arriving through the back door.
+  const mergePending = !programSettingsMergeDone();
+  const legacyTicks = mergePending ? readLegacyRegistrantNotificationRows(ss) : {};
+  const legacyModes = readLegacyNotifyModeRows(ss);
+
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const rows = sessionRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
 
   const todayKey = formatDateKey(new Date());
   const programs = {};
@@ -179,14 +350,19 @@ function refreshProgramOptions(ss, sessionRows) {
     const title = String(row[regMap['Clean_Title']] || '').trim();
     const location = String(row[regMap['Location']] || '').trim();
     if (!title) return;
-    const key = `${normalizeNameKey(title)}|${normalizeNameKey(location)}`;
+    const key = notificationProgramKey(title, location);
     const d = coerceDate(row[regMap['Event_Date']]);
     if (!programs[key]) {
-      programs[key] = { title, location, sessions: 0, next: null, last: null, typeTag: '', caps: {} };
+      programs[key] = { title, location, sessions: 0, next: null, last: null,
+        typeTag: '', caps: {}, isAssistance: false };
     }
     const p = programs[key];
     p.sessions++;
     p.typeTag = normalizeTypeTag(row[regMap['Type_Tag']]);
+    // ANY assistance session makes the program an assistance program for this
+    // purpose: the default that matters is the one that states somebody's
+    // appointment time, and it must not depend on which session was read last.
+    if (isAssistanceColumnValue(row[regMap['Personalized_Assistance']])) p.isAssistance = true;
     if (d) {
       const dk = formatDateKey(d);
       if (dk >= todayKey && (!p.next || d < p.next)) p.next = d;
@@ -198,13 +374,21 @@ function refreshProgramOptions(ss, sessionRows) {
 
   const outRows = [];
   const seen = {};
+  let seeded = 0;
+  let mergedTicks = 0;
   Object.keys(programs)
     .sort((a, b) => programs[a].title.localeCompare(programs[b].title))
     .forEach(key => {
       const p = programs[key];
       const row = new Array(headers.length).fill('');
       const prior = existingByKey[key];
-      if (prior) PROGRAM_OPTIONS_STAFF_COLUMNS.forEach(h => { row[map[h]] = prior[map[h]]; });
+      if (prior) PROGRAM_SETTINGS_STAFF_COLUMNS.forEach(h => { row[map[h]] = prior[map[h]]; });
+      if (!prior || mergePending) {
+        const from = seedNotificationHalf(row, map, key, legacyTicks, legacyModes, p.isAssistance,
+          prior);
+        if (from === 'ticks') mergedTicks++;
+        if (!prior) seeded++;
+      }
       row[map['Event']] = p.title;
       row[map['Location']] = p.location;
       row[map['Type_Tag']] = p.typeTag;
@@ -217,26 +401,91 @@ function refreshProgramOptions(ss, sessionRows) {
       outRows.push(row);
       seen[key] = true;
     });
+  // A program the calendar has stopped mentioning keeps its row, its notes and
+  // its ticks: it is nearly always a series between terms, and coming back to
+  // find the decision gone is worse than a stale row.
   Object.keys(existingByKey).forEach(key => {
-    if (!seen[key]) outRows.push(existingByKey[key]);
+    if (seen[key]) return;
+    const row = existingByKey[key];
+    if (mergePending) {
+      if (seedNotificationHalf(row, map, key, legacyTicks, legacyModes, false, null) === 'ticks') {
+        mergedTicks++;
+      }
+    }
+    outRows.push(row);
+    seen[key] = true;
+  });
+  // AND A PROGRAM THAT ONLY THE RETIRED NOTIFICATIONS TAB HAD. The two tabs
+  // were built from the same rows and kept their own strays, so they had
+  // drifted: a row on one and not the other is precisely the state nothing
+  // reported while there were two. Nobody loses a tick box to this merge.
+  Object.keys(legacyTicks).forEach(key => {
+    if (seen[key]) return;
+    const legacy = legacyTicks[key];
+    const row = new Array(headers.length).fill('');
+    row[map['Event']] = legacy.title;
+    row[map['Location']] = legacy.location;
+    seedNotificationHalf(row, map, key, legacyTicks, legacyModes, false, null);
+    mergedTicks++;
+    outRows.push(row);
+    seen[key] = true;
   });
 
-  writeMemoryTab(sheet, headers, outRows, programOptionsTabOptions());
+  writeMemoryTab(sheet, headers, outRows, programSettingsTabOptions());
 
-  // The dropdowns run past the last row so the blank line under it has them
-  // too (see MEMORY_TAB_SPARE_ROWS). Notify_Mode is a CLOSED list — every
-  // legal answer is known, and a typo there would quietly change who gets
-  // told about their appointment. Reminder_Days is open: the suggestions are
-  // the cadences anyone actually asks for, and "14, 7, 1" is still valid.
+  // The tick boxes and the list run past the last row so the blank line under
+  // it has them too (see MEMORY_TAB_SPARE_ROWS). Other_Reminders is an OPEN
+  // list — the suggestions are the cadences people ask for, and "21, 10" is
+  // still a legal answer.
   applyMemoryTabValidation(sheet, headers, outRows.length, {
-    lists: { Notify_Mode: NOTIFY_MODE_LIST },
-    openLists: { Reminder_Days: REMINDER_DAYS_SUGGESTIONS }
+    checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
+    openLists: { Other_Reminders: OTHER_REMINDER_SUGGESTIONS }
   });
   // The tab those settings are read from has just been rewritten; anything
   // asking again in this execution must see the rows as they now stand.
   invalidateNotificationPolicyCache();
 
-  log(`Program_Options refreshed: ${outRows.length} program(s).`);
+  // Both markers, and only now: a marker set before the write would strand
+  // every carried-over answer on a sheet that then failed to be written.
+  markLegacyNotifyModeMigrationDone(legacyModes, seeded);
+  if (mergePending) markProgramSettingsMergeDone(ss, legacyTicks, mergedTicks);
+
+  log(`${SHEET_NAMES.PROGRAM_SETTINGS} refreshed: ${outRows.length} program(s).`);
+}
+
+/**
+ * Fills one row's six notification answers from the first source that has
+ * any, and returns which one it was.
+ *
+ * The order is newest-first, which is also most-deliberate-first: what
+ * somebody ticked on the retired notifications tab beats what the dropdown
+ * before it said, which beats the program's kind. `prior` is only consulted
+ * for its Staff_Notes — see below — because a prior row that HAD ticks would
+ * not have reached here (refreshProgramSettings only calls this while the
+ * merge is pending or the row is brand new).
+ *
+ * STAFF_NOTES IS JOINED, NEVER PICKED. Both retired tabs had one, both were
+ * typed by hand, and there is no reading of "which of these two sentences did
+ * they mean" that is safe to make on somebody's behalf.
+ */
+function seedNotificationHalf(row, map, key, legacyTicks, legacyModes, isAssistance, prior) {
+  const ticks = legacyTicks ? legacyTicks[key] : null;
+  if (ticks) {
+    NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { row[map[h]] = !!ticks.values[h]; });
+    row[map['Other_Reminders']] = ticks.values['Other_Reminders'] || '';
+    const priorNotes = String((prior ? prior[map['Staff_Notes']] : row[map['Staff_Notes']]) || '').trim();
+    const theirs = String(ticks.values['Staff_Notes'] || '').trim();
+    if (theirs && theirs !== priorNotes) {
+      row[map['Staff_Notes']] = priorNotes ? `${priorNotes}\n${theirs}` : theirs;
+    }
+    return 'ticks';
+  }
+  if (legacyModes && legacyModes[key]) {
+    writeNotificationTicks(row, map, policyFromLegacyCells(legacyModes[key], isAssistance));
+    return 'mode';
+  }
+  writeNotificationTicks(row, map, defaultNotificationPolicy(isAssistance));
+  return 'default';
 }
 
 /**
@@ -380,8 +629,11 @@ function readSimpleTable(sheet, headers) {
   const numCols = projection ? lastCol : headers.length;
   let rows = getRowsPreservingFormulas(sheet, MEMORY_TAB_DATA_ROW, 1, lastRow - MEMORY_TAB_DATA_ROW + 1, numCols);
   if (projection) rows = rows.map(row => projection.map(src => (src === -1 ? '' : row[src])));
-  // Blank trailing rows are not members.
-  return rows.filter(row => String(row[0] || '').trim() !== '');
+  // Blank trailing rows are not members. Neither is Member_Roll's retired
+  // divider, which is a real row on the sheet so that a person can see where
+  // the working roll stops — and which every reader has to skip. See
+  // MEMBER_ROLL_RETIRED_DIVIDER.
+  return rows.filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
 }
 
 /**
@@ -399,7 +651,7 @@ function readSimpleTableValues(sheet, headers) {
     `"${sheet.getName()}" row ${MEMORY_TAB_HEADER_ROW}`);
   return grid.slice(MEMORY_TAB_DATA_ROW - 1)
     .map(row => (projection ? projection.map(src => (src === -1 ? '' : row[src])) : row.slice(0, headers.length)))
-    .filter(row => String(row[0] || '').trim() !== '');
+    .filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
 }
 
 const MEMORY_TAB_BANNER_ROW = 1;
@@ -487,6 +739,13 @@ function applyMemoryTabValidation(sheet, headers, rowCount, spec) {
 /** Writes a memory tab: banner, header row, data, and the yellow staff-column wash. */
 function writeMemoryTab(sheet, headers, rows, options) {
   const numCols = headers.length;
+  // A layout that has grown a column since this tab was last drawn — the
+  // household and name columns did exactly that — must not meet a sheet that
+  // is still the old width halfway through a setValues().
+  ensureSheetColumns(sheet, numCols);
+  // Member_Roll and Program_Settings are read with the same sectioned readers
+  // as the date-bearing tabs, and this is the only thing that rewrites them.
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   sheet.getBandings().forEach(b => b.remove());

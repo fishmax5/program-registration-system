@@ -74,11 +74,11 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
-const dashMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
+const dashMap = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
 
 function reg(name, location, event, date, time, status) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   row[regMap['Name']] = name;
   row[regMap['Location']] = location;
   row[regMap['Event']] = event;
@@ -90,7 +90,7 @@ function reg(name, location, event, date, time, status) {
 }
 
 function session(title, location, start, end, assistance, slotMinutes) {
-  const row = new Array(sandbox.HEADERS.Master_Program_Dashboard.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Program_Sessions.length).fill('');
   row[dashMap['Clean_Title']] = title;
   row[dashMap['Location']] = location;
   row[dashMap['Event_Date']] = start;
@@ -109,7 +109,7 @@ const registrants = [reg('Ruth Kaplan', 'Narberth', 'Low-Cost Wills', WILLS_STAR
 const sessions = [session('Low-Cost Wills', 'Narberth', WILLS_START, WILLS_END, true)];
 
 const sectioned = (sheet, headers) =>
-  (headers === sandbox.HEADERS.Master_Program_Dashboard ? sessions : registrants);
+  (headers === sandbox.HEADERS.All_Program_Sessions ? sessions : registrants);
 sandbox.readAllSectionedRows = sectioned;
 // The index reads with the VALUES reader — see readAllSectionedRowValues().
 sandbox.readAllSectionedRowValues = sectioned;

@@ -16,9 +16,11 @@
 //      Link_Display is set to Hide.
 //   3. computeClubKey() is built from the title, so a renamed CLUB's standing
 //      roster stops matching any session and silently stops booking anybody.
-//   4. Program_Options is keyed by Event + Location, so the staff's own notes
-//      (Room_Or_Setup, Typical_Attendance...) are orphaned and a blank row
-//      appears under the new name. Also silent.
+//   4. Program_Settings is keyed by Event + Location, so the staff's own
+//      notes (Room_Or_Setup, Typical_Attendance, and every notification tick)
+//      are orphaned and a blank row appears under the new name. Also silent.
+//      That used to be TWO stores and two near-identical repairs; it is one
+//      tab and one repair now — see renameProgramSettingRows().
 //
 // WHY NOT JUST RE-KEY EVENT_ID OFF SOMETHING STABLER. The obvious fix is to
 // key off the calendar's own event UID instead of the title. It was rejected:
@@ -77,9 +79,9 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
     !group.noRegistration && !existingState.groupFormMap[group.groupKey]);
   if (unknown.length === 0) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return []; // a first import — nothing to rename FROM
 
   const liveTitles = collectLiveTitlesByCalendar(eventsByCalendar);
@@ -288,8 +290,8 @@ function buildRenameIdMap(candidate, map) {
  *   the session table (Event_ID + Clean_Title), the registrant rows and the
  *   triage rows (both join on Event_ID and display the title), the calendar
  *   invite ledger and the deletion tombstones (both keyed by Event_ID), the
- *   club roster (keyed by a hash of the title) and Program_Options (keyed by
- *   title + location, and holding the staff's own notes).
+ *   club roster (keyed by a hash of the title) and Program_Settings (keyed by
+ *   title + location, and holding the staff's own notes and ticks).
  */
 function applyProgramRenames(registrySheet, renames) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -304,7 +306,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameInviteLedgerKeys(combined);
   renameTombstoneKeys(combined);
   renameClubRosterKeys(ss, renames);
-  renameProgramOptionRows(ss, renames);
+  renameProgramSettingRows(ss, renames);
   renameProgramLeaderRows(ss, renames);
 
   renames.forEach(rename => {
@@ -318,7 +320,7 @@ function applyProgramRenames(registrySheet, renames) {
 
 /** The session table itself: new Event_ID and new Clean_Title, written in place. */
 function renameSessionTableRows(registrySheet, renames) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const titleByOldId = {};
   const idMap = {};
   renames.forEach(rename => Object.keys(rename.idMap).forEach(oldId => {
@@ -354,6 +356,7 @@ function renameSessionTableRows(registrySheet, renames) {
     if (!touched) return;
     idRange.setValues(ids);
     titleRange.setValues(titles);
+    invalidateSectionedRowsCache(registrySheet);
     invalidateEventTimeIndex(); // those Event_IDs are the index's keys
   });
 }
@@ -362,9 +365,9 @@ function renameSessionTableRows(registrySheet, renames) {
 function renameRegistrantRows(ss, renames, idMap) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return;
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const titleByOldId = buildTitleByOldId(renames);
 
   let changed = 0;
@@ -387,7 +390,7 @@ function renameTriageRows(ss, renames, idMap) {
   if (!sheet) return;
   const headers = HEADERS.Deleted_Event_Triage;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const titleByOldId = buildTitleByOldId(renames);
 
   let changed = 0;
@@ -504,31 +507,40 @@ function renameClubRosterKeys(ss, renames) {
 }
 
 /**
- * How Program_Options is written, in one place — refreshProgramOptions() is
- * not the only thing that rewrites the tab any more (see
- * renameProgramOptionRows()), and a second copy of these options is a second
- * chance for the tab to come back missing its banner or its date formats.
+ * How Program_Settings is written, in one place — refreshProgramSettings() is
+ * not the only thing that rewrites the tab (see renameProgramSettingRows()),
+ * and a second copy of these options is a second chance for the tab to come
+ * back missing its banner, its date formats or its tinted columns.
  */
-function programOptionsTabOptions() {
+function programSettingsTabOptions() {
   return {
-    banner: '📋 Program Options',
-    bannerNote: 'Every program this workbook has ever run, with your standing notes against each one.',
-    staffColumns: PROGRAM_OPTIONS_STAFF_COLUMNS,
+    banner: '📋 Program Settings',
+    bannerNote: 'Every program this workbook has ever run: how it runs, and what it sends the ' +
+      'people signed up for it. Tick as many channels as apply — they add up, and an unticked ' +
+      'box means that message is not sent.',
+    staffColumns: PROGRAM_SETTINGS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
     numberColumns: ['Sessions_Tracked']
   };
 }
 
 /**
- * THE OTHER SILENT ONE. Program_Options is keyed by Event + Location and holds
- * columns nothing else can regenerate — Room_Or_Setup, Typical_Attendance and
- * the staff's own notes. Without this the notes stay stranded under the old
- * name and the program reappears with an empty row.
+ * THE OTHER SILENT ONE. Program_Settings is keyed by Event + Location and
+ * holds columns nothing else can regenerate — Room_Or_Setup,
+ * Typical_Attendance, the staff's own notes, and every notification tick.
+ * Without this the answers stay stranded under the old name, and the program
+ * reappears with a row seeded from its kind's default: quietly notified the
+ * way a stranger would be, in the big room nobody booked.
+ *
+ * ONE REPAIR, where there were two. Program_Options and
+ * Registrant_Notifications each had their own copy of this function, differing
+ * in the tab they opened and in nothing else. A rename that moved one and not
+ * the other left the two halves of a program's settings under two names.
  */
-function renameProgramOptionRows(ss, renames) {
-  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS);
+function renameProgramSettingRows(ss, renames) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS);
   if (!sheet) return;
-  const headers = HEADERS.Program_Options;
+  const headers = HEADERS.Program_Settings;
   const map = getIndexMap(headers);
   const rows = readSimpleTable(sheet, headers);
   if (rows.length === 0) return;
@@ -536,8 +548,7 @@ function renameProgramOptionRows(ss, renames) {
   const titleMap = {};
   renames.forEach(rename => { titleMap[normalizeNameKey(rename.oldTitle)] = rename.newTitle; });
 
-  const identityOf = row =>
-    `${normalizeNameKey(row[map['Event']])}|${normalizeNameKey(row[map['Location']])}`;
+  const identityOf = row => notificationProgramKey(row[map['Event']], row[map['Location']]);
 
   const renamed = [];
   const untouched = [];
@@ -565,8 +576,11 @@ function renameProgramOptionRows(ss, renames) {
     kept.push(row);
   });
 
-  writeMemoryTab(sheet, headers, kept, programOptionsTabOptions());
-  log(`Renamed program(s): moved ${renamed.length} Program_Options row(s) onto the new name` +
+  writeMemoryTab(sheet, headers, kept, programSettingsTabOptions());
+  // The tab section 9e reads its policies off has just been rewritten.
+  invalidateNotificationPolicyCache();
+  log(`Renamed program(s): moved ${renamed.length} ${SHEET_NAMES.PROGRAM_SETTINGS} row(s) onto ` +
+    `the new name` +
     (kept.length < rows.length ? `, dropping ${rows.length - kept.length} blank duplicate(s)` : '') + '.');
 }
 
@@ -660,7 +674,10 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
         touched = true;
         changed++;
       }
-      if (touched) flagRange.setValues(current);
+      if (touched) {
+        flagRange.setValues(current);
+        invalidateSectionedRowsCache(registrySheet);
+      }
     });
   });
 
@@ -682,6 +699,109 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
   if (changed > 0 && Object.keys(ticked).length === 0 && Object.keys(unticked).length === 0) {
     log(`Rewrote ${changed} flag cell(s) as real checkboxes — same answers, tidier types.`);
   }
+  return changed;
+}
+
+/**
+ * THE SAME RECONCILE, ONE DATE AT A TIME — for SESSION_FLAG_COLUMNS
+ * (Waitlist_Only; see WAITLIST_ONLY_TAG).
+ *
+ * It exists for the reason the program version does: writeEventRegistryRows()
+ * only writes NEW rows, so a program whose dates are all already on the sheet
+ * never has its cells rewritten, and a tag typed straight into a calendar
+ * description — or a tick this workbook queued and delivered an hour ago —
+ * would otherwise never reach the column.
+ *
+ * WHAT IS DIFFERENT, and it is the whole reason this is not a fourth entry in
+ * PROGRAM_FLAG_COLUMNS: the expectation is keyed by calendar + title + DATE,
+ * and it is read off the SESSION rather than off the group. Keyed the program
+ * way, September's tick would be written onto every date of the program and
+ * every date of it would then untick together — which is precisely the
+ * behaviour this column exists to avoid.
+ *
+ * A row whose date this run saw no calendar event for is LEFT ALONE rather than
+ * unticked: the sync window is finite, past dates fall out of it, and "the
+ * calendar did not mention it" is not the same statement as "the calendar says
+ * no".
+ *
+ * Returns how many cells changed.
+ */
+function reconcileSessionFlagColumns(registrySheet, groups) {
+  if (!groups || groups.length === 0) return 0;
+
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return 0;
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title'] || !sheetMap['Event_Date']) return 0;
+
+  let changed = 0;
+  SESSION_FLAG_COLUMNS.forEach(flag => {
+    if (!sheetMap[flag.column]) return; // a workbook still on the old layout
+
+    // Sessions whose tick has not reached the calendar yet are left alone —
+    // same rule as the program reconcile, keyed by date like everything here.
+    const pendingKeys = pendingSessionKeysFor(flag.column);
+
+    const expected = {};
+    groups.forEach(group => {
+      group.sessions.forEach(session => {
+        const date = coerceDate(session.event.getStartTime());
+        if (!date) return;
+        const key = `${session.calendarId}|${group.cleanTitle}|${formatDateKey(date)}`;
+        // OR, not overwrite: a program that meets twice on one date is one row
+        // (computeEventId() is keyed by date), and either event carrying the
+        // tag closes the day.
+        expected[key] = !!expected[key] || !!session[flag.groupKey];
+      });
+    });
+    if (Object.keys(expected).length === 0) return;
+
+    const closed = [];
+    const opened = [];
+    headerRows.forEach((hRow, i) => {
+      const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+      const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+      if (!zone) return;
+
+      const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
+      const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
+      const dates = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1).getValues();
+      const flagRange = registrySheet.getRange(zone.start, sheetMap[flag.column], zone.count, 1);
+      const current = flagRange.getValues();
+
+      let touched = false;
+      for (let r = 0; r < zone.count; r++) {
+        const date = coerceDate(dates[r][0]);
+        if (!date) continue;
+        const title = String(titles[r][0] || '').trim();
+        const key = `${String(sources[r][0] || '').trim()}|${title}|${formatDateKey(date)}`;
+        if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
+        if (pendingKeys.has(key)) continue; // waiting to be written TO the calendar
+        const want = expected[key];
+        if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
+        if (isFlagColumnValue(current[r][0], flag.regex) !== want) {
+          (want ? closed : opened).push(`${title} ${formatDateLabel(date)}`);
+        }
+        current[r] = [want];
+        touched = true;
+        changed++;
+      }
+      if (touched) {
+        flagRange.setValues(current);
+        invalidateSectionedRowsCache(registrySheet);
+      }
+    });
+
+    if (closed.length > 0) {
+      log(`Ticked ${flag.column} on ${closed.length} session row(s) — the calendar says so: ` +
+        `${dedupePreservingOrder(closed).slice(0, 10).join(', ')}.`);
+    }
+    if (opened.length > 0) {
+      log(`Cleared ${flag.column} on ${dedupePreservingOrder(opened).slice(0, 10).join(', ')} — ` +
+        `no [${flag.tag}] on those calendar events any more, and the calendar is the source of truth. ` +
+        `To put it back, tick the box and let it reach the calendar.`);
+    }
+  });
   return changed;
 }
 

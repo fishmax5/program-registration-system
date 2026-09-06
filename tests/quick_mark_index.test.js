@@ -58,9 +58,9 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 function reg(name, location, event, date) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   row[map['Name']] = name;
   row[map['Location']] = location;
   row[map['Event']] = event;
@@ -84,10 +84,10 @@ const rows = [
 sandbox.readAllSectionedRows = () => rows;
 sandbox.readAllSectionedRowValues = () => rows;
 sandbox.collectKnownMembers = () => ['Mrs Okonkwo', 'Jane Smith'];
-// Program_Options is where the dateless "Chair Yoga, any date" fallback comes
+// Program_Settings is where the dateless "Chair Yoga, any date" fallback comes
 // from — the choice a desk picks when which date it was does not matter.
-const optMap = sandbox.getIndexMap(sandbox.HEADERS.Program_Options);
-const optionRow = new Array(sandbox.HEADERS.Program_Options.length).fill('');
+const optMap = sandbox.getIndexMap(sandbox.HEADERS.Program_Settings);
+const optionRow = new Array(sandbox.HEADERS.Program_Settings.length).fill('');
 optionRow[optMap['Event']] = 'Chair Yoga';
 optionRow[optMap['Location']] = 'Narberth';
 sandbox.readSimpleTable = () => [optionRow];

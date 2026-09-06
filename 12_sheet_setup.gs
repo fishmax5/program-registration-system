@@ -47,7 +47,7 @@ function initSheet() {
   initPlaceholderSheet(ss, SHEET_NAMES.LUNCH_ROSTER, 'Run "Sync Registrations" from the menu to populate the lunch name list.');
 
   renderProgramDashboard(true);
-  refreshMemoryTabs(null, null); // builds Member_Roll / Program_Options, empty on a fresh workbook
+  refreshMemoryTabs(null, null); // builds Member_Roll / Program_Settings, empty on a fresh workbook
   renderClubMembersSheet([]);   // and the (empty) club roster, so its columns exist from day one
   // Both empty on a fresh workbook, and both need their columns and dropdowns
   // to exist before anybody can use them — a tab staff are told to type into
@@ -80,13 +80,13 @@ function initSheet() {
  *
  *   REBUILT (from the rows already on each tab)
  *     Config (older layouts are backed up, current ones kept as-is)
- *     Master_Program_Dashboard    — with triage OFF
- *     Registrant_Dash             — the tables only; Quick Mark is a dialog
+ *     All_Program_Sessions    — with triage OFF
+ *     All_Registrants             — the tables only; Quick Mark is a dialog
  *     Deleted_Event_Triage
  *     Lunch_Schedule              — including the new ADD block
  *     Master_Lunch_Dashboard      — recomputed; hand-entered columns kept
- *     Lunch_Roster                — rebuilt with it, from the same rollup
- *     Member_Roll / Program_Options — staff columns never touched
+ *     All_Lunch_Registrants                — rebuilt with it, from the same rollup
+ *     Member_Roll / Program_Settings — staff columns never touched
  *     Tab order, column widths, dropdowns, conditional formatting
  *
  *   NOT TOUCHED
@@ -115,15 +115,15 @@ function rebuildLayoutFromSheet() {
     try {
       return name === SHEET_NAMES.LUNCH_SCHEDULE
         ? readLunchScheduleRows(sheet)
-        : readAllSectionedRows(sheet, headers, marker);
+        : getSectionedRows(sheet, headers, marker);
     } catch (err) {
       log(`⚠️ Rebuild: could not read "${name}" (${err}) — treating it as empty.`);
       return [];
     }
   };
 
-  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = read(SHEET_NAMES.REGISTRANT_DASH, HEADERS.Registrant_Dash, 'Event_ID');
+  const sessionRows = read(SHEET_NAMES.PROGRAM_DASHBOARD, HEADERS.All_Program_Sessions, 'Event_ID');
+  const registrantRows = read(SHEET_NAMES.REGISTRANT_DASH, HEADERS.All_Registrants, 'Event_ID');
   const triageRows = read(SHEET_NAMES.TRIAGE, HEADERS.Deleted_Event_Triage, 'Event_ID');
   const menuRows = read(SHEET_NAMES.LUNCH_SCHEDULE, HEADERS.Lunch_Schedule, 'Event_Date');
 

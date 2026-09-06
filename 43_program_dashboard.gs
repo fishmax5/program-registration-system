@@ -11,7 +11,7 @@
 // ============================================================================
 
 /**
- * options.registrantRows — already-in-memory Registrant_Dash
+ * options.registrantRows — already-in-memory All_Registrants
  * rows, to skip re-reading that tab. Honored only when this render's own
  * triage pass didn't rewrite the tab underneath them (see registrantsMoved).
  * Returns { registrantsMoved } so a caller holding those rows knows whether
@@ -31,10 +31,10 @@ function renderProgramDashboard(force, options) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
 
-  let sessionRows = options.sessionRows || readAllSectionedRows(sheet, headers, 'Event_ID');
+  let sessionRows = options.sessionRows || getSectionedRows(sheet, headers, 'Event_ID');
 
   const triageResult = options.skipTriage
     ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
@@ -70,7 +70,24 @@ function renderProgramDashboard(force, options) {
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
 
-  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force);
+  writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
+
+  // THE MONTH VIEW IS DRAWN FROM THE ROWS WE ARE HOLDING, not from a second
+  // read of the tab we have just written — see 78_program_month_dashboard.gs.
+  // It is derived and nothing reads it, so a failure to draw it must not cost
+  // the caller the session table it actually asked for: a broken derived view
+  // is a log line, not a failed sync.
+  try {
+    // metrics travels WITH the rows it was computed from. The block moved to
+    // the month tab in phase 2 and its arithmetic did not: it is still
+    // computeProgramMetrics() over the same lunch-filtered session rows and the
+    // same registrant scan, so not a digit of it changes by being drawn one tab
+    // to the right.
+    renderProgramMonthDashboard(force, { sessionRows, metrics });
+  } catch (err) {
+    log(`\u26a0\ufe0f Master_Program_Dashboard could not be rebuilt this run (${err}) \u2014 the session table is unaffected.`);
+  }
+
   return { registrantsMoved: triageResult.registrantsMoved };
 }
 
@@ -88,7 +105,7 @@ const TRIAGE_OVERRIDE_PROP_KEY = 'TRIAGE_OVERRIDE_ONCE';
 /**
  * Cross-checks in-memory session rows against what's genuinely still on the
  * calendars right now and drops any that are gone. Dropped sessions'
- * registrants are moved to Deleted_Event_Triage. Master_Program_Dashboard no
+ * registrants are moved to Deleted_Event_Triage. All_Program_Sessions no
  * longer has a Manual_Override column, so nothing can be protected from
  * this anymore — every session's presence is strictly calendar-derived.
  *
@@ -251,7 +268,7 @@ function refreshFormDateListsForForms(keptSessionRows, map, affectedFormIds) {
 }
 
 /**
- * One pass over Registrant_Dash powering BOTH the Today block and the
+ * One pass over All_Registrants powering BOTH the Today block and the
  * participation metrics. Four structures come out of it:
  *
  *   countsByEventId       { eventId: { active, waitlist, attended } }
@@ -291,8 +308,8 @@ function scanRegistrants(registrantsSheet, registrantRows) {
     monthsByPerson: {},
     earliestMonthByPerson: {}
   };
-  const headers = HEADERS.Registrant_Dash;
-  const rows = registrantRows || readAllSectionedRows(registrantsSheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Registrants;
+  const rows = registrantRows || getSectionedRows(registrantsSheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
@@ -452,6 +469,23 @@ function describeDateSpan(start, end) {
 }
 
 /**
+ * The month a month-over-month row is ABOUT, named as a month and nothing
+ * else. The row's own label already says which span it is ("This month",
+ * "Last month"), so spelling the partial span out as dates ("Sep 1–4") only
+ * asked the reader to work back from the days to the month they were after.
+ *
+ * The year is carried only when it is not the current one — which is exactly
+ * the case that needs it: every January, "Last month" is December of the year
+ * before, and a bare "December" there reads as the wrong December.
+ */
+function describeMonthOfSpan(start, now) {
+  const name = Utilities.formatDate(start, TIMEZONE, 'MMMM');
+  return start.getFullYear() === now.getFullYear()
+    ? name
+    : `${name} ${start.getFullYear()}`;
+}
+
+/**
  * Everything both blocks need about one span of dates, gathered in a single
  * pass so no two numbers on this dashboard can be drawn from different
  * populations.
@@ -560,7 +594,7 @@ function computeProgramMetrics(sessionRows, map, registrantScan, now) {
  * three weeks of every September, for no reason except the date.
  *
  * THE LIMIT WORTH KNOWING: "never seen before" means "has no earlier row on
- * Registrant_Dash". Someone whose earlier registrations were deleted — a
+ * All_Registrants". Someone whose earlier registrations were deleted — a
  * cleared test run, a purge — reads as new again. Old rows are hidden rather
  * than removed (see collapseOldPastMonths), so ordinary aging does not do
  * this; deletion does, and deletion is a deliberate act.
@@ -586,7 +620,7 @@ function computeMonthOverMonth(sessionRows, map, registrantScan, now, todayKey) 
     });
 
     return {
-      label: describeDateSpan(span.start, span.end),
+      label: describeMonthOfSpan(span.start, now),
       sessions: summary.sessions,
       registrations: summary.registrations,
       participants: summary.people.size,
@@ -646,6 +680,7 @@ function formatMetricChange(current, previous, options) {
  * written before Event_End existed: no end, no dash, just the start time.
  */
 function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
+  invalidateSectionedRowsCache(sheet);
   if (count < 1) return;
   const endColLetter = map['Event_End'] === undefined ? '' : columnToLetter(map['Event_End'] + 1);
   const formulas = [];
@@ -839,8 +874,9 @@ function styleMetricTable(sheet, startRow, numRows, numCols) {
   }
 }
 
-function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, metrics, force) {
+function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
+  invalidateSectionedRowsCache(sheet); // ...and its rows with them
   sheet.clear();
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
@@ -886,15 +922,32 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   row += todayRowsOut.length;
   row++; // spacer
 
-  // --- Section B: Program Metrics (near-term windows + month over month) ---
-  row = writeProgramMetricsSection(sheet, row, numCols, metrics);
-  row++; // spacer
-
+  // --- Section B: All Program Sessions, split into Upcoming / Past ---
+  //
+  // THE METRICS BLOCK USED TO SIT HERE, between the Today block and the
+  // sessions, and now sits on Master_Program_Dashboard (78_program_month_dashboard.gs).
+  // Every number in it is monthly reasoning — the next 7 and 30 days, this
+  // month against the same span of last — sitting on top of a table that is
+  // one row per DAY, and everything above the session table travels in the
+  // frozen band, so a dozen rows of it were a dozen rows of Tuesday nobody
+  // could see. It is drawn on the tab whose grain it matches instead.
+  //
+  // writeProgramMetricsSection() and computeProgramMetrics() STAY IN THIS
+  // FILE. They are defined against session rows, the words in them are about
+  // sessions, and moving the arithmetic as well as the drawing would have been
+  // the change that could alter a number. The month tab calls them.
+  //
   // --- Section C: All Program Sessions, split into Upcoming / Past ---
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
   const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
     upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions'
+    // Event_Date reads as DATE_DISPLAY_FORMAT — "Tue 9/16/2026" — which is the
+    // default and is now the point. This tab is one row per SESSION, and a
+    // session is known here by its weekday as much as by its name; it showed
+    // the MONTH for a while, which meant thirty rows of "September 2026" on
+    // the one column that could have told them apart. The month belongs on
+    // the tab whose rows ARE months (see MONTH_DISPLAY_FORMAT).
   });
 
   const dateColLetter = columnToLetter(map['Event_Date'] + 1);
@@ -933,6 +986,15 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
         .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
         .setHorizontalAlignment('center');
     });
+    // The fourth tick, drawn the same way and belonging to a different list on
+    // purpose: it closes ONE DATE rather than describing the program, so it is
+    // not in PROGRAM_FLAG_COLUMNS and is never spread to the program's other
+    // rows. See WAITLIST_ONLY_TAG and handleWaitlistOnlyEdit().
+    if (map['Waitlist_Only'] !== undefined) {
+      sheet.getRange(z.start, map['Waitlist_Only'] + 1, z.count, 1)
+        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+        .setHorizontalAlignment('center');
+    }
 
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
@@ -944,8 +1006,9 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
-  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, Club and
-  // No_Registration are the cells a human changes on this table, but none of
+  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, the flag
+  // checkboxes and Waitlist_Only are the cells a human changes on this table
+  // (PROGRAM_DASHBOARD_EDITABLE_COLUMNS), but none of
   // them is a blank waiting to be filled in — each always already holds a
   // real, calendar-derived value, and washing full columns of correct values
   // in "please type here" yellow read as columns of problems on the tab people
@@ -955,7 +1018,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   protectDerivedColumns(sheet, headers,
     ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
-      'Leader_Sheet_Link', 'Sign_In_Sheet_Link'],
+      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
 
   applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);

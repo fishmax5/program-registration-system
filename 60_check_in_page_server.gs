@@ -94,11 +94,13 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * tablet showing the wrong page, and nobody at a door can tell that is what
  * happened.
  *
- * THE OLD PAGES ARE STILL REACHABLE, by name, because they are not the same
- * tool: ?mode=session is the staff session roster (section 16) that marks
- * meals as they are handed over at the counter, and ?mode=walkin is the
- * previous door page, kept for one release so a bookmark that has not been
- * changed yet still opens something that works rather than nothing.
+ * THE STAFF ROSTER IS STILL REACHABLE, by name, because it is not the same
+ * tool: ?mode=session is the session roster (section 16) that marks meals as
+ * they are handed over at the counter. The previous door page (?mode=walkin)
+ * was retired in September 2026 — see the banner in 62_walk_in_page.gs — and
+ * that mode is no longer a branch here. It does not need to be: an
+ * unrecognized mode falls through to the door app, so a bookmark nobody
+ * re-typed opens the page whoever is holding it wanted.
  *
  * AND ONE PAGE IS NOT A DOOR PAGE AT ALL: ?mode=cancel&form=<id> is the link
  * inside a member's own calendar invitation, opened by the member, gated by
@@ -109,84 +111,181 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * chose. Anything else in the query string is ignored rather than refused: a
  * URL that has been through a QR code generator and back tends to collect
  * parameters.
+ *
+ * WHICH OF THOSE PAGES A REQUEST GETS IS DECLARED IN DOOR_ROUTES, below, not
+ * decided in doGet(). doGet() resolves the context every page needs, walks the
+ * table, and serves the first entry that claims the request.
  */
-function doGet(e) {
-  const params = (e && e.parameter) || {};
 
-  const requested = String(params.location || params.loc || '').trim();
-  const location = matchCheckInLocation(requested);
-  const pinRequired = isCheckInPinSet();
-  const mode = String(params.mode || params.view || '').trim().toLowerCase();
-
-  // THE CANCEL PAGE COMES FIRST, because it is the only one of these that is
-  // opened by a MEMBER rather than by staff — from the link inside the
-  // calendar invitation they were sent (see buildRegistrationLinkLine). It
-  // carries its own ?form= and needs no location pin and no PIN: a person
-  // cancelling their own booking is not standing at the door, and a page that
-  // asks a ninety-year-old for a four-digit staff code is a page that gets a
-  // phone call instead. It identifies them from their own contact details
-  // instead — see the section note in 71.
-  const cancelForm = String(params.form || '').trim();
-  if (/^cancel$/i.test(mode) && cancelForm) {
-    return HtmlService.createHtmlOutput(buildCancelPageHtml({
-      formId: cancelForm,
-      programLabel: cancelPageProgramLabel(cancelForm)
-    }))
-      .setTitle('Cancel Your Place')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-  }
-
-  let html;
-  let title;
-  if (checkInRosterModeRequested(params)) {
+/**
+ * EVERY PAGE THIS ONE DEPLOYMENT SERVES, IN THE ORDER THEY ARE TRIED.
+ *
+ * This was an if/else ladder inside doGet(), which hid three different things
+ * inside one shape: which page is answered FIRST (a rule, not an accident —
+ * see the cancel entry), how many spellings of a mode are accepted, and what
+ * each page is actually handed. checkInPageUrl() then wrote the same mode
+ * strings out by hand and agreed with the ladder only by convention, which is
+ * one rename away from a printed QR code that opens the wrong page.
+ *
+ * So the pages are declared once, here, and both the router and the link
+ * builder read this table:
+ *
+ *   id     what the route is called — what checkInPageUrl({ mode: … }) asks for
+ *   mode   the ?mode= this route's own URLs carry ('' = the default page)
+ *   match  does this request want this page? ORDER IS THE PRECEDENCE RULE:
+ *          the first match wins, so an entry's position is part of its meaning
+ *   build  the page itself, from the request and the shared context
+ *   title  the browser tab
+ *
+ * `ctx` is what every route would otherwise have to resolve for itself: the
+ * ?location= pin, whether a PIN is set, and the list of buildings.
+ *
+ * BUILT LAZILY (see 01a_lazy_globals.gs). The entries name functions and
+ * constants that live in sections 16b, 16f and 71 — other files, in a project
+ * that is one shared global scope evaluated in whatever order it happens to be
+ * stored in. Nothing here is read at load time, so an entry that one day
+ * mentions another file's constant (CHECK_IN_ROSTER_MODES is the obvious
+ * candidate) cannot turn into a ReferenceError on open.
+ */
+defineLazyGlobal_('DOOR_ROUTES', () => [
+  {
+    id: 'cancel',
+    mode: 'cancel',
+    title: 'Cancel Your Place',
+    // THE CANCEL PAGE COMES FIRST, because it is the only one of these that is
+    // opened by a MEMBER rather than by staff — from the link inside the
+    // calendar invitation they were sent (see buildRegistrationLinkLine). It
+    // carries its own ?form= and needs no location pin and no PIN: a person
+    // cancelling their own booking is not standing at the door, and a page that
+    // asks a ninety-year-old for a four-digit staff code is a page that gets a
+    // phone call instead. It identifies them from their own contact details
+    // instead — see the section note in 71.
+    match: params => /^cancel$/i.test(doorRequestedMode_(params))
+      && !!String((params && params.form) || '').trim(),
+    build: params => {
+      const formId = String(params.form || '').trim();
+      return buildCancelPageHtml({
+        formId: formId,
+        programLabel: cancelPageProgramLabel(formId)
+      });
+    }
+  },
+  {
+    id: 'session',
+    mode: 'session',
+    title: 'Check In',
     // THE STAFF ROSTER, unchanged. Only ever a STORED index, never a build:
     // a web app has no toast to apologise with, and a volunteer looking at a
     // spinner assumes the page is broken. ?page=register opens it on its
     // SECOND screen — the one that puts somebody on a future session, which a
     // program director keeps on the desk phone.
-    html = buildCheckInHtml(readyCheckInSessionIndex(), {
-      location, pinRequired,
+    match: params => checkInRosterModeRequested(params),
+    build: (params, ctx) => buildCheckInHtml(readyCheckInSessionIndex(), {
+      location: ctx.location,
+      pinRequired: ctx.pinRequired,
       page: /^register$/i.test(String(params.page || '').trim()) ? 'register' : 'checkin'
-    });
-    title = 'Check In';
-  } else if (mode === 'walkin' || mode === 'walk-in' || mode === 'legacy') {
-    html = buildWalkInHtml({
-      location,
-      pinRequired,
-      locations: checkInLocations(),
-      rosterUrl: checkInPageUrl({ location, mode: 'session' })
-    });
-    title = 'Sign In';
-  } else {
-    html = buildDoorAppHtml({
-      location,
-      pinRequired,
-      locations: checkInLocations(),
+    })
+  },
+  {
+    id: 'door',
+    mode: '',
+    title: 'Sign In',
+    // LAST, AND IT CLAIMS EVERYTHING LEFT. The door app is what a bare URL
+    // has to serve, and it is also what an unrecognized ?mode= gets: a query
+    // string that has been through a QR generator and back is ignored rather
+    // than refused, because "we do not know that parameter" is not a thing to
+    // show a queue of thirty people. That includes ?mode=walkin, walk-in and
+    // legacy — the retired door page's own spellings (see 62_walk_in_page.gs)
+    // — so a bookmark carrying one of those still opens a working page rather
+    // than an error.
+    match: () => true,
+    build: (params, ctx) => buildDoorAppHtml({
+      location: ctx.location,
+      pinRequired: ctx.pinRequired,
+      locations: ctx.locations,
       todayKey: formatDateKey(new Date())
-    });
-    title = 'Sign In';
+    })
   }
+]);
+
+/** The ?mode= (or its ?view= spelling) a request is asking for, normalized. */
+function doorRequestedMode_(params) {
+  return String((params && (params.mode || params.view)) || '').trim().toLowerCase();
+}
+
+/** The route with this id, or null. */
+function doorRouteById_(id) {
+  const wanted = String(id || '').trim().toLowerCase();
+  for (let i = 0; i < DOOR_ROUTES.length; i++) {
+    if (DOOR_ROUTES[i].id === wanted) return DOOR_ROUTES[i];
+  }
+  return null;
+}
+
+/**
+ * The web app: resolve what every page needs, then serve the first route that
+ * claims the request. See DOOR_ROUTES for what the pages are and why the order
+ * they are declared in is the order they are tried in.
+ */
+function doGet(e) {
+  const params = (e && e.parameter) || {};
+
+  const requested = String(params.location || params.loc || '').trim();
+  const ctx = {
+    location: matchCheckInLocation(requested),
+    pinRequired: isCheckInPinSet(),
+    locations: checkInLocations()
+  };
+
+  let route = null;
+  for (let i = 0; i < DOOR_ROUTES.length && !route; i++) {
+    if (DOOR_ROUTES[i].match(params)) route = DOOR_ROUTES[i];
+  }
+  // The last entry matches everything, so this is belt and braces: a table
+  // edited down to nothing still serves a page rather than a stack trace.
+  if (!route) route = doorRouteById_('door');
+
   // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). This page writes to the
   // workbook, and letting any site frame it is what turns a tap on somebody
   // else's page into a check-in on this one. Nothing needs to embed it — it is
   // opened on a tablet, not built into another site.
-  return HtmlService.createHtmlOutput(html)
-    .setTitle(title)
+  return HtmlService.createHtmlOutput(route.build(params, ctx))
+    .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** What ?mode= has to say to get the session roster instead of the door page. */
+const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];
+
+/**
+ * Is this request asking for the SESSION ROSTER (section 16) rather than the
+ * door page? Spelled several ways on purpose: the URL is typed by hand onto
+ * tablets and read off a printed card, and refusing "check-in" because the
+ * page is called "checkin" internally would be a page that mysteriously shows
+ * the wrong thing.
+ */
+function checkInRosterModeRequested(params) {
+  const mode = String((params && (params.mode || params.page || params.view)) || '')
+    .trim().toLowerCase();
+  return CHECK_IN_ROSTER_MODES.indexOf(mode) !== -1;
 }
 
 /**
  * One of this web app's own URLs — the base deployment address with a
  * ?location= pin and a ?mode= on it.
  *
- * Built in ONE place because it is written in three (the doGet() footer link,
- * the menu dialog's link list, and anything a QR code is generated from), and
- * three hand-assembled query strings is how one of them ends up missing the
- * mode and quietly serving the wrong page. Returns '' when the script has
+ * Built in ONE place because it is written in several (the menu dialog's link
+ * list, the cancel link inside a calendar invitation, and anything a QR code
+ * is generated from), and hand-assembled query strings are how one of them
+ * ends up missing the mode and quietly serving the wrong page. Returns '' when the script has
  * never been deployed, which every caller renders as "no link yet" rather
  * than as a broken one.
+ *
+ * THE ?mode= COMES OUT OF DOOR_ROUTES, so a link and the router cannot drift:
+ * whatever the caller calls the page, the URL carries the spelling the table
+ * says that route answers to.
  */
 function checkInPageUrl(options) {
   const opts = options || {};
@@ -194,9 +293,35 @@ function checkInPageUrl(options) {
   if (!base) return '';
   const parts = [];
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
-  if (opts.mode) parts.push(`mode=${encodeURIComponent(opts.mode)}`);
+  const mode = doorRouteUrlMode_(opts.mode);
+  if (mode) parts.push(`mode=${encodeURIComponent(mode)}`);
   if (!parts.length) return base;
   return `${base}${base.indexOf('?') === -1 ? '?' : '&'}${parts.join('&')}`;
+}
+
+/**
+ * What a caller's mode name is spelled as in a URL: the route's own ?mode=.
+ *
+ * A caller may name a route by its id ('session'), by that spelling, or by any
+ * of the other spellings the route accepts ('check-in', 'walk-in') — all of
+ * them come back as the one the table declares. A name no route claims is
+ * handed back untouched rather than dropped: this function normalizes links,
+ * it does not police them, and a mode nobody recognizes lands on the door app
+ * either way.
+ */
+function doorRouteUrlMode_(requested) {
+  const asked = String(requested || '').trim();
+  if (!asked) return '';
+  const wanted = asked.toLowerCase();
+  for (let i = 0; i < DOOR_ROUTES.length; i++) {
+    const route = DOOR_ROUTES[i];
+    // The default page has no ?mode= to offer, and its match() claims
+    // everything — asking it would turn every name into a blank.
+    if (!route.mode) continue;
+    if (route.id === wanted || route.mode.toLowerCase() === wanted) return route.mode;
+    if (route.match({ mode: asked })) return route.mode;
+  }
+  return asked;
 }
 
 /**
@@ -404,14 +529,14 @@ function buildLiveCheckInSessionIndex() {
   const dash = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const sessions = [];
   if (dash) {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     const todayKey = formatDateKey(new Date());
     const horizon = new Date();
     horizon.setDate(horizon.getDate() + CHECK_IN_LIVE_SESSION_DAYS);
     const horizonKey = formatDateKey(horizon);
     const seen = {};
-    readAllSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
+    getSectionedRowValues(dash, headers, 'Event_ID').forEach(row => {
       const title = String(row[map['Clean_Title']] || '').trim();
       const location = String(row[map['Location']] || '').trim();
       const date = coerceDate(row[map['Event_Date']]);
@@ -751,7 +876,7 @@ function clearCheckInMark(args) {
 function clearCheckInMarkLocked(args) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return { ok: false, message: 'There is no registrants tab yet.' };
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const target = findCheckInRow(sheet, map, args);
   if (!target) {
     return {
@@ -761,6 +886,7 @@ function clearCheckInMarkLocked(args) {
   }
   if (map['Attended'] !== undefined) sheet.getRange(target, map['Attended'] + 1).setValue(false);
   if (map['Lunch_Served'] !== undefined) sheet.getRange(target, map['Lunch_Served'] + 1).setValue(false);
+  invalidateSectionedRowsCache(sheet);
   return { ok: true, cleared: true, message: `Cleared ${args.name}.` };
 }
 
@@ -777,7 +903,7 @@ function findCheckInRow(sheet, map, args) {
   const nameKey = normalizeNameKey(args.name);
   const location = String(args.location || '').trim();
   const bookedTime = appointmentStartLabelOf(args.bookedTime);
-  const numCols = HEADERS.Registrant_Dash.length;
+  const numCols = HEADERS.All_Registrants.length;
   let found = 0;
   getSectionZones(sheet, 'Event_ID').forEach(zone => {
     if (found) return;
@@ -818,7 +944,7 @@ function findCheckInRow(sheet, map, args) {
 function readCheckInRoster(location, sessionValue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return [];
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const selection = parseQuickMarkProgramChoice(sessionValue);
   const wantedLocation = String(location || '').trim();
@@ -826,7 +952,7 @@ function readCheckInRoster(location, sessionValue) {
   const seen = {};
 
   // The VALUES reader, one pass over the tab — see readAllSectionedRowValues().
-  readAllSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
     const name = String(row[map['Name']] || '').trim();
     if (!name) return;
     if (wantedLocation && String(row[map['Location']] || '').trim() !== wantedLocation) return;

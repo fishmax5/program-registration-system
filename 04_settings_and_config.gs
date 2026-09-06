@@ -14,11 +14,6 @@ const CONFIG_LAYOUT = {
     startCol: 6,
     headers: ['Order_Ahead_Days']
   },
-  ADMIN_NOTIFICATIONS: {
-    title: '📧 Admin Notifications',
-    startCol: 8,
-    headers: ['Admin_Notification_Email']
-  },
   CATERING_POLICY: {
     title: '🍽️ Lunch Service by Location',
     startCol: 10,
@@ -44,40 +39,172 @@ const CONFIG_LAYOUT = {
     startCol: 21,
     headers: ['Registration_Open_Through']
   },
-  ARCHIVE_COPY: {
-    title: '🗄️ Archive Copy Address',
-    startCol: 23,
-    headers: ['Archive_Copy_Email']
+  MEMBERSHIP_FORM: {
+    title: '🪪 Membership Application Form',
+    startCol: 25,
+    headers: ['Membership_Form_Id']
+  },
+  // Deliberately last and off on its own past MEMBERSHIP_FORM rather than
+  // widened in place at its old column 8: every section between there and
+  // MEMBERSHIP_FORM (Catering Policy, Link Display, Automation, Calendar
+  // Invitations, Registration Horizon) is a LIVE setting on every workbook
+  // already running this project, keyed by column. Reflowing them to make
+  // room for four new checkbox columns would silently move
+  // Automation_Enabled, Trigger_Owner and the rest to columns nothing has
+  // written data into yet — which reads as blank, and a blank
+  // Automation_Enabled reads as "on" (see DEFAULT_AUTOMATION_ENABLED). That
+  // is a live-system safety hazard for one column count problem, so this
+  // table gets fresh columns instead and the two retired single-cell
+  // sections (see RETIRED_ADMIN_NOTIFICATION_COL / RETIRED_ARCHIVE_COPY_COL
+  // below) are read where they stand and then cleared, never shifted.
+  ADMIN_NOTIFICATIONS: {
+    title: '📧 Admin Notification Emails',
+    startCol: 27,
+    headers: ['Email', 'Sync_Digest', 'Leader_Roster_Alerts', 'Registrant_Reminders', 'Calendar_Invite_Guest',
+      'Appointment_Requests']
+  },
+  // Fresh columns past ADMIN_NOTIFICATIONS for the same reason that table got
+  // them: every section here is keyed by column on workbooks already running,
+  // so a new one is appended and nothing between is ever reflowed.
+  OUTBOUND_MAIL: {
+    title: '🔇 Mail to Members & Leaders',
+    startCol: 34,
+    headers: ['Pause_Outbound_Mail']
   }
 };
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
+// The blank columns between the blocks above. Columns 8 and 23 are blank too,
+// but they are not spacers — they are where the two retired sections stood
+// until the migration cleared them (RETIRED_ADMIN_NOTIFICATION_COL /
+// RETIRED_ARCHIVE_COPY_COL), and naming them here would invite somebody to
+// close the gap by moving a live section into one.
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26, 33];
 
 /**
- * WHY AN ARCHIVE COPY EXISTS AT ALL. Everything this system sends leaves the
+ * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the
  * organization: a roster alert goes to a program leader who is not on staff, a
- * calendar invitation goes to whoever typed an address into a registration
- * form, a leader's roster sheet is shared out of the workbook by link. None of
- * it lands anywhere the office can look at later — the trigger owner's Sent
- * folder is one particular person's mailbox, and routinely not the person who
- * has to answer for what was sent.
+ * reminder goes to a member, a calendar invitation goes to whoever typed an
+ * address into a registration form. None of it lands anywhere the office can
+ * look at later — the trigger owner's Sent folder is one particular person's
+ * mailbox, and routinely not the person who has to answer for what was sent.
  *
- * So one address is told about all three. It USED to be told by being copied
- * on each one as it happened — BCC'd on every leader alert, added as a guest
- * on every event registrants were invited to, made an editor of every file
- * shared out of the workbook. That is as unreadable as it sounds: a busy week
- * is several hundred messages, a calendar full of sessions nobody at the desk
- * is attending, and a Drive of "shared with you" entries.
+ * This was two single-address Config cells: Admin_Notification_Email (the
+ * per-sync digest) and Archive_Copy_Email (copied on everything else). One
+ * address each, the same address on all of it, and no way to say "the lunch
+ * coordinator wants the leader alerts but not the sync digest". The table
+ * replacing them (CONFIG_LAYOUT.ADMIN_NOTIFICATIONS) is that sentence: one row
+ * per person, one checkbox per category they are copied on.
  *
- * It now receives ONE EMAIL A DAY listing all of it instead — see
- * `74_office_digest.gs`. Same facts, one message, and a day with nothing on it
- * sends nothing. It is a Config cell rather than a constant so the office can
- * repoint or empty it without a code change — BLANK means "record nothing",
- * exactly like the admin notification address above it.
- *
- * The default below is seeded on a fresh Config tab only; a workbook whose
- * cell has already been cleared by hand stays cleared.
+ * NOTHING IS SEEDED INTO IT. An address nobody typed is an address nobody
+ * asked to hear from, so a fresh table means "tell nobody" — every category
+ * reads an empty list as "copy nobody", exactly as a blank cell always did.
+ * The two old cells are the one exception: a workbook that already had them
+ * filled in gets them carried across, ticked for the categories they used to
+ * cover (see migrateLegacyAdminNotificationColumns()).
  */
-const DEFAULT_ARCHIVE_COPY_EMAIL = 'admin@newhorizonsseniorcenter.org';
+const ADMIN_NOTIFICATION_MAX_ROWS = 5;
+
+/**
+ * The categories a row in that table can be ticked for, and where each
+ * checkbox sits relative to CONFIG_LAYOUT.ADMIN_NOTIFICATIONS.startCol (the
+ * Email column is offset 0). `key` is what the row object reads back as —
+ * see getAdminNotificationRows() and adminEmailsForCategory().
+ *
+ *   SYNC_DIGEST            The per-sync digest notifyAdmin() sends: waitlisted
+ *                          registrants, forms that failed to open, triaged
+ *                          events, a door sign-in that did not complete. Was
+ *                          Admin_Notification_Email.
+ *   LEADER_ROSTER_ALERTS   Listed in the daily record (section 85): every
+ *                          roster-change email a program leader was sent
+ *                          (section 9d). Was a BCC on each one, and before
+ *                          that Archive_Copy_Email.
+ *   REGISTRANT_REMINDERS   Listed in the daily record: every reminder a
+ *                          registrant was sent (section 9e). A day of those is
+ *                          hundreds of messages, which is why the copy is one
+ *                          list rather than one message apiece.
+ *   CALENDAR_INVITE_GUEST  Added as a GUEST on any event a registrant is
+ *                          invited to (section 5b). Was Archive_Copy_Email.
+ *                          A guest, not a CC — Google mails them the invitation
+ *                          itself — so it is a tick per person, not a BCC line.
+ *   APPOINTMENT_REQUESTS   Emailed when a sync files somebody onto
+ *                          Assistance_Requests: a person who wanted a
+ *                          personalized-assistance appointment and could not
+ *                          be offered a time (see ASSISTANCE_NO_TIME_CHOICE).
+ *                          Its own tick rather than a line in the sync digest
+ *                          because it is not a fault report — it is a person
+ *                          waiting for a phone call, and whoever makes that
+ *                          call is rarely whoever reads the digest.
+ *
+ * BEING AN EDITOR of the registrant sheets and forms this system shares is
+ * deliberately NOT a category. It is not mail at all, it is standing access to
+ * a file, and a checkbox of its own for one Drive grant would suggest
+ * otherwise.
+ * Every address in the table gets it, ticked or not, which is what
+ * Archive_Copy_Email always did — see openUpFileToAnyoneWithLink().
+ */
+const ADMIN_NOTIFICATION_CATEGORIES = [
+  { key: 'syncDigest', header: 'Sync_Digest', offset: 1 },
+  { key: 'leaderRosterAlerts', header: 'Leader_Roster_Alerts', offset: 2 },
+  { key: 'registrantReminders', header: 'Registrant_Reminders', offset: 3 },
+  { key: 'calendarInviteGuest', header: 'Calendar_Invite_Guest', offset: 4 },
+  { key: 'appointmentRequests', header: 'Appointment_Requests', offset: 5 }
+];
+
+/**
+ * RETIRED (September 2026), and named here only so the one-time migration can
+ * find them: the two single-address cells the table above replaced, at the
+ * columns they have always occupied. Nothing else reads these positions any
+ * more, and migrateLegacyAdminNotificationColumns() clears them once it has
+ * carried their values across — but only when the banner above the column
+ * still says what it said, so a column somebody has since repurposed by hand
+ * is left alone.
+ */
+const RETIRED_ADMIN_NOTIFICATION_COL = { title: '📧 Admin Notifications', col: 8 };
+const RETIRED_ARCHIVE_COPY_COL = { title: '🗄️ Archive Copy Address', col: 23 };
+
+/**
+ * THE MEMBERSHIP APPLICATION THE DOOR HANDS OUT.
+ *
+ * A Google Form that belongs to the OFFICE, not to this script: it is not one
+ * of the forms this system generates, nothing here decides its questions, and
+ * whoever processes memberships reads its answers in its own response sheet.
+ * The door app reads its items live and draws them as native fields (see
+ * membershipFormShape()), so editing the form is how the door's membership
+ * screen changes — there is no code edit and no redeploy in that loop.
+ *
+ * A CONFIG CELL RATHER THAN A CONSTANT for the usual reason: the office
+ * replaces this form eventually — a new season, a new fee table, a form
+ * somebody rebuilt because the old one filled up — and the replacement is a
+ * new file with a new id. Pasting an id (or the form's whole edit URL, which
+ * is what a browser hands you) into one cell must be the whole operation.
+ *
+ * BLANK MEANS NO APPLICATION AT THE DOOR. The membership screen is not
+ * offered, and a walk-in who says they are not a member yet is recorded for
+ * the office exactly as they were before this existed — which is the behavior
+ * every workbook had, and therefore the only safe reading of an empty cell.
+ *
+ * The default below is seeded onto a fresh Config tab only; a workbook whose
+ * cell has been cleared or repointed by hand stays as staff left it.
+ */
+const DEFAULT_MEMBERSHIP_FORM_ID = '1WCL32W4h3bgbgv4KrKEpnEXKO219lezypNAZ1XXGusk';
+
+/**
+ * A form id out of whatever is actually in that cell.
+ *
+ * Staff paste what their browser gave them, which is an edit URL
+ * ("https://docs.google.com/forms/d/<id>/edit") rather than a bare id — and a
+ * cell holding a URL that reads as "not configured" is a membership screen
+ * that silently never appears. Both shapes are accepted; anything with no
+ * id-shaped run of characters in it returns '' and is treated as blank.
+ */
+function parseFormIdFromConfigValue(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const fromUrl = text.match(/\/forms\/(?:u\/\d+\/)?d\/(?:e\/)?([A-Za-z0-9_-]{10,})/);
+  if (fromUrl) return fromUrl[1];
+  const bare = text.match(/^[A-Za-z0-9_-]{10,}$/);
+  return bare ? bare[0] : '';
+}
+
 const DEFAULT_MEAL_BUFFERS = { standardBufferAmount: 1, testerBufferAmount: 2 };
 const DEFAULT_ORDER_AHEAD_DAYS = 7;
 
@@ -186,7 +313,7 @@ const MEAL_SOURCE_LOOKAHEAD_DAYS = 7;
 const MEAL_SOURCE_MAX_OPTIONS = 40;
 /** Full set of Type choices offered on Lunch_Schedule / Master_Lunch_Dashboard. */
 const LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'Not Serving'];
-/** Registrant_Dash' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
+/** All_Registrants' own Lunch_Type domain — a PERSON'S lunch is Hot, Cold, or none, never "Not Serving" (that's a day-level fact). */
 const REGISTRANT_LUNCH_TYPE_OPTIONS = ['Hot', 'Cold', 'No Lunch'];
 
 /**
@@ -295,7 +422,7 @@ const DEFAULT_AUTOMATION_ENABLED = true;
  * next unpause would deliver a pile of changes nobody remembers making. It is
  * still listed by showTriggerStatus() as a trigger the workbook expects.
  */
-const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange'];
+const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange', 'autoCreateTodaysSignInSheets'];
 
 /** Every trigger writeTriggers() maintains — the automation ones plus the edit handler. */
 const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgramFlagEditInstallable']);
@@ -309,6 +436,62 @@ const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgram
  */
 const AUTOMATION_FLAG_CACHE_SECONDS = 60;
 const AUTOMATION_FLAG_CACHE_KEY = 'AUTOMATION_ENABLED_FLAG';
+
+// ---------------------------------------------------------------------------
+// THE OUTBOUND-MAIL PAUSE  (Config -> "🔇 Mail to Members & Leaders")
+// ---------------------------------------------------------------------------
+//
+// A SECOND SWITCH, BECAUSE IT ANSWERS A DIFFERENT QUESTION. Automation_Enabled
+// stops the syncs from running at all, which is not what somebody doing repair
+// work wants: they want the imports, the dashboards and the link repairs to
+// keep working — those are the repair — while nobody OUTSIDE the office hears
+// a word about it.
+//
+// The failure this exists for is a real one, and it is the shape every repair
+// has. Rows that were deleted came back on the next sync (a form rebuild, a
+// re-import, a catch-up), the roster diff in section 9d compared the roster
+// against its stored snapshot exactly as it is supposed to, and program
+// leaders were emailed about a dozen registrations that had never actually
+// changed. Nothing malfunctioned. The mail was simply reporting bookkeeping,
+// and there was no way to say "not while I am working".
+//
+// WHAT IT PAUSES: everything that leaves the organization, which is everything
+// that goes through sendRationedEmail() — the leader roster alerts and
+// day-before digests (66) and the registrant reminders (70). Calendar
+// invitations are NOT sent by this workbook (Google emails the guest when the
+// event is written), so pausing mail cannot stop those; take Invite_Registrants
+// off for that.
+//
+// WHAT IT DOES NOT PAUSE: notifyAdmin(), which is office mail about the
+// workbook itself. Silencing the channel that would tell you the repair went
+// wrong is exactly backwards, and it is not what anybody means by "don't email
+// the members".
+//
+// DISCARDED, NOT QUEUED — see sendRationedEmail(). A pause that held every
+// message and delivered the pile on release would be worse than useless for
+// the case it was built for: the whole point is that the churn never reaches
+// anybody. So a paused message counts as handled: its caller's ledger advances
+// and the roster snapshot moves on, exactly as if it had gone. The office is
+// told how many were dropped, once per run.
+//
+// FAILS OPEN, like the automation switch and for the same asymmetry: a Config
+// tab that is missing or mid-rebuild must never be able to silence a reminder
+// nobody knew was owed. Only the literal "Yes" pauses.
+// ---------------------------------------------------------------------------
+
+const OUTBOUND_MAIL_PAUSE_OPTIONS = ['No', 'Yes'];
+
+/** Blank, unreadable, anything but a deliberate "Yes": mail goes out. */
+const DEFAULT_OUTBOUND_MAIL_PAUSED = false;
+
+/**
+ * Cached across executions like the automation flag, and for the weaker
+ * version of the same reason: a sync sends in two passes and asks once per
+ * message. A minute of staleness on a pause somebody just set costs at most
+ * the tail of the run they set it during.
+ */
+const OUTBOUND_MAIL_PAUSE_CACHE_SECONDS = 60;
+const OUTBOUND_MAIL_PAUSE_CACHE_KEY = 'OUTBOUND_MAIL_PAUSED_FLAG';
 
 /** Script Property prefix for the per-handler "which accounts actually ran this" record. */
 const HANDLER_ATTRIBUTION_PROP_PREFIX = 'HANDLER_RUN_BY_';
@@ -378,7 +561,17 @@ const LAST_SYNC_PROP_KEY = 'LAST_FORM_SYNC_TIME';
 const FORMS_FOLDER_ID = '';
 const FORMS_FOLDER_NAME = 'Program Registration Forms';
 
-/** Returns the dedicated forms folder — by hardcoded ID if set, else find-or-create by name. */
+/**
+ * The dedicated forms folder — by hardcoded ID if set, else found-or-created
+ * under the folder the workbook itself lives in.
+ *
+ * It used to do its own Drive-wide getFoldersByName() and its own root-level
+ * createFolder(). getOrCreateSystemFolder() (`82`) is that lookup done in the
+ * one place every folder this system keeps now shares: inside the anchor
+ * first, adopting a stray folder of the same name if there is one, and
+ * creating inside the anchor otherwise. FORMS_FOLDER_ID still wins outright —
+ * a center that pinned an id pinned it for a reason.
+ */
 function getOrCreateFormsFolder() {
   if (FORMS_FOLDER_ID) {
     try {
@@ -387,14 +580,7 @@ function getOrCreateFormsFolder() {
       log(`⚠️ FORMS_FOLDER_ID "${FORMS_FOLDER_ID}" could not be opened (${err}) — falling back to a by-name lookup.`);
     }
   }
-  const folders = DriveApp.getFoldersByName(FORMS_FOLDER_NAME);
-  if (folders.hasNext()) {
-    const folder = folders.next();
-    log(`📋 Using existing "${FORMS_FOLDER_NAME}" folder — copy this ID into FORMS_FOLDER_ID to skip this lookup next time: ${folder.getId()}`);
-    return folder;
-  }
-  const folder = DriveApp.createFolder(FORMS_FOLDER_NAME);
-  log(`Created Drive folder "${FORMS_FOLDER_NAME}" for generated registration forms. 📋 Copy this ID into FORMS_FOLDER_ID: ${folder.getId()}`);
-  return folder;
+  return getOrCreateSystemFolder(FORMS_FOLDER_NAME);
 }
+
 

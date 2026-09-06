@@ -162,13 +162,20 @@ function tombstoneDateKey(entry) {
 }
 
 
-/** Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited OR Manually Added. */
+/**
+ * Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited
+ * or Manually Added — and for rows marked "Remove This Row", which are
+ * protected for the same reason by a different route: a mark that an hourly
+ * sync can overwrite with "Auto-Synced" is a mark that quietly disappears
+ * between somebody setting it and somebody running the sweep (section 83).
+ */
 function getProtectedRegistrantKeys(rows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const set = new Set();
   rows.forEach(row => {
     const override = String(row[map['Manual_Override']]).trim();
-    if (override === 'Manually Edited' || override === 'Manually Added') {
+    if (override === 'Manually Edited' || override === 'Manually Added' ||
+        override === REGISTRANT_REMOVE_OVERRIDE_OPTION) {
       set.add(`${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`);
     }
   });
@@ -207,7 +214,7 @@ function sessionOccupancy(registryEntry) {
  * one hour: a program capped at twelve took twelve MORE people every run, and
  * "#13 is waitlisted automatically" was true only of a thirteenth who
  * submitted inside the same sixty minutes as the other twelve. The
- * Master_Program_Dashboard's own Status went red on schedule, which is why
+ * All_Program_Sessions's own Status went red on schedule, which is why
  * this was invisible — the sheet said Waitlist Only while the rows underneath
  * it all said Active.
  *
@@ -223,7 +230,7 @@ function sessionOccupancy(registryEntry) {
  * separately.
  */
 function seedRegistryOccupancy(registryIndex, existingRows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const byEventId = {};
   (existingRows || []).forEach(row => {
     if (String(row[map['Program_Status']] || '').trim() !== 'Active') return;
@@ -248,7 +255,7 @@ function seedRegistryOccupancy(registryIndex, existingRows) {
 }
 
 function getExistingRegistrantIndex(rows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const index = new Map();
   rows.forEach(row => index.set(`${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`, row));
   return index;
@@ -285,12 +292,14 @@ function getResponseValueByTitle(formIndex, response, title) {
 /**
  * Same "check every branch page, return whichever instance was actually
  * part of this respondent's path" approach as getResponseValueByTitle(),
- * but for a checkbox-grid item (ATTENDANCE_GRID / LUNCH_GRID): returns
- * { rows, columns, values }, where values[rowIdx] is the array of checked
- * column labels for that row. Returns null if the title never had a real
- * answer (shouldn't happen for ATTENDANCE_GRID since every branch has one,
- * but LUNCH_GRID is legitimately absent whenever the response predates this
- * form structure or every date on the form is "Not Serving").
+ * but for a GRID item: returns { rows, columns, values }, where values[rowIdx]
+ * is that row's answer — an ARRAY of checked column labels on a checkbox grid
+ * (ATTENDANCE_GRID), a single string on a multiple-choice one
+ * (MEAL_COUNT_GRID, where a date can carry only one number). Returns null if
+ * the title never had a real answer (shouldn't happen for ATTENDANCE_GRID
+ * since every branch has one, but the meal grid is legitimately absent
+ * whenever the response predates this form structure or every date on the form
+ * is "Not Serving").
  *
  * getRows()/getColumns() are themselves remote calls, so the resolved grid
  * is memoized on the formIndex — every response on a form shares one read.
@@ -306,7 +315,12 @@ function getGridResponseByTitle(formIndex, response, title) {
     const itemId = item.getId();
     let shape = formIndex.gridShapeByItemId[itemId];
     if (!shape) {
-      const grid = item.asCheckboxGridItem();
+      // BY THE ITEM'S TYPE, not by its title. The two kinds of grid have
+      // different accessors and Apps Script refuses the wrong one outright
+      // ("Invalid conversion for item type: GRID"), which on this path would
+      // lose a whole form's responses rather than one answer.
+      const grid = item.getType() === FormApp.ItemType.GRID
+        ? item.asGridItem() : item.asCheckboxGridItem();
       shape = { rows: grid.getRows(), columns: grid.getColumns() };
       formIndex.gridShapeByItemId[itemId] = shape;
     }
@@ -358,7 +372,7 @@ function getAdminNotesResponse(formIndex, response) {
  * string — the whole of what an added question contributes to a row.
  *
  * ONE COLUMN, NOT ONE PER QUESTION. A column per question would mean
- * Registrant_Dash's shape changing every time somebody adds a question to any
+ * All_Registrants's shape changing every time somebody adds a question to any
  * program, which is precisely the "adding a question breaks things" this
  * feature exists to avoid: every render, every projection, every downstream
  * consumer would have to cope with a table whose columns depend on a different
@@ -383,14 +397,15 @@ function getCustomAnswersResponse(formIndex, response) {
 }
 
 /**
- * How many EXTRA meals one submission asked for, beyond one per person listed.
+ * PRE-v9: how many EXTRA meals one submission asked for, beyond one per person
+ * listed. Only ever reached now as the fallback in readMealCountResponse(),
+ * for a response collected against a v8 form.
  *
- * Zero for every form that does not carry the question (an appointment form, a
- * form whose location never caters, every response submitted before the
- * question existed) — getResponseValueByTitle() returns '' for all of those,
- * which is the same answer as "None" and needs no special case.
+ * Zero for every form that does not carry the question — getResponseValueByTitle()
+ * returns '' for all of those, which is the same answer as "None" and needs no
+ * special case.
  *
- * CAPPED at MAX_EXTRA_MEALS rather than trusted: the question is a list of
+ * CAPPED at MAX_EXTRA_MEALS rather than trusted: the question was a list of
  * fixed choices, so a number above the cap can only come from an edited form,
  * and an order of ninety meals should reach a person before it reaches the
  * kitchen. Anything unparseable is zero — the safe direction here, since the
@@ -402,6 +417,82 @@ function readExtraMealsResponse(formIndex, response) {
   const amount = Math.floor(Number(raw) || 0);
   if (!(amount > 0)) return 0;
   return Math.min(amount, MAX_EXTRA_MEALS);
+}
+
+/**
+ * HOW MANY MEALS ONE SUBMISSION ASKED FOR ON THE ALL-DATES BRANCH — the total
+ * for the whole party, the registrant included, applied to every date on the
+ * form that serves lunch.
+ *
+ * THREE SHAPES OF FORM ANSWER THIS, and they are tried in that order:
+ *
+ *  1. v9 — ALL_DATES_MEAL_COUNT, a number. Taken as given.
+ *  2. v8 — ALL_DATES_LUNCH_PEOPLE, a checkbox of who eats, plus EXTRA_MEALS.
+ *     The total is the people ticked (only those actually named — a tick in an
+ *     unnamed guest's box is nobody) plus the extras.
+ *  3. Neither — a form with no lunch question at all, or a response from
+ *     before either existed. Null, meaning "not asked", which the caller reads
+ *     as no lunch rather than as zero meals ordered.
+ *
+ * `people` is the resolved party from resolvePeopleOnResponse(), used only by
+ * the v8 path.
+ */
+function readMealCountResponse(formIndex, response, people) {
+  const direct = readMealCountAnswer(
+    getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT));
+  if (direct !== null) return direct;
+
+  const eaters = getResponseValueByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE);
+  const ticked = new Set(Array.isArray(eaters) ? eaters : (eaters ? [eaters] : []));
+  const extras = readExtraMealsResponse(formIndex, response);
+  if (ticked.size === 0 && extras === 0) return null;
+  const named = (people || []).filter(person => ticked.has(person.columnLabel)).length;
+  return Math.min(named + extras, MAX_MEALS_PER_SUBMISSION);
+}
+
+/**
+ * THE PER-DATE MEAL COUNTS off one response, as { plainRowLabel: count } is
+ * not what it returns — the row labels are the form's own and have to be
+ * resolved against the registry by the caller — so it hands back the grid it
+ * read plus a reader for one row:
+ *
+ *   { rows, countForRow(rowIdx) }   or null when the form asked nothing.
+ *
+ * Same three shapes as readMealCountResponse(), in the same order: the v9
+ * meal grid (a number per date), the v8 lunch grid (people ticked per date,
+ * plus the submission's extras on the registrant), or nothing.
+ */
+function readMealCountGridResponse(formIndex, response, people) {
+  const mealGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID) ||
+    getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID);
+  if (mealGrid) {
+    return {
+      rows: mealGrid.rows,
+      countForRow: rowIdx => {
+        const value = mealGrid.values[rowIdx];
+        // A multiple-choice grid answers with one string per row; a stray
+        // array (a grid somebody converted by hand) reads as its first entry
+        // rather than as nothing.
+        const count = readMealCountAnswer(Array.isArray(value) ? value[0] : value);
+        return count === null ? 0 : count;
+      }
+    };
+  }
+
+  const legacyGrid = getGridResponseByTitle(formIndex, response, TEMPLATE_ITEM_TITLES.LUNCH_GRID) ||
+    getGridResponseByTitle(formIndex, response, LEGACY_LUNCH_ONLY_GRID_TITLE);
+  if (!legacyGrid) return null;
+  const extras = readExtraMealsResponse(formIndex, response);
+  return {
+    rows: legacyGrid.rows,
+    countForRow: rowIdx => {
+      const ticked = legacyGrid.values[rowIdx] || [];
+      const list = Array.isArray(ticked) ? ticked : [ticked];
+      const named = (people || []).filter(person => list.indexOf(person.columnLabel) !== -1).length;
+      if (named === 0) return 0;
+      return Math.min(named + extras, MAX_MEALS_PER_SUBMISSION);
+    }
+  };
 }
 
 /**

@@ -207,5 +207,38 @@ const reserved = sandbox.reservedQuestionTitles();
   .forEach(t => check(`"${t}" is reserved`, reserved.has(t.toLowerCase()), true));
 check('"Zip Code" is not reserved', reserved.has('zip code'), false);
 
+// --- the email about the requests just filed --------------------------------
+// One email per sync, to whoever is ticked for it on Config, with everything
+// needed to make the call in the body. Nobody ticked means nothing sent.
+const sent = [];
+sandbox.MailApp.sendEmail = (to, subject, body) => sent.push({ to, subject, body });
+const reqMap = sandbox.getIndexMap(sandbox.HEADERS.Assistance_Requests);
+const reqRow = (values) => {
+  const row = new Array(sandbox.HEADERS.Assistance_Requests.length).fill('');
+  Object.keys(values).forEach(h => { row[reqMap[h]] = values[h]; });
+  return row;
+};
+const filedRows = [reqRow({
+  Received: new Date(2026, 8, 4, 10, 0), Program: 'Medicare Counseling', Location: 'Narberth',
+  Name: "Pat O'Brien", Phone: '610-555-0101', Email: 'pat@example.org',
+  Answers: 'Needs an evening'
+})];
+
+vm.runInContext("adminEmailsForCategory = function (key) { " +
+  "return key === 'appointmentRequests' ? ['heather@example.org'] : []; };", sandbox);
+check('nothing filed sends nothing', sandbox.sendAssistanceRequestNotification([], reqMap), false);
+check('the filed requests are emailed to whoever is ticked for them',
+  sandbox.sendAssistanceRequestNotification(filedRows, reqMap), true);
+check('as one message', sent.length, 1);
+check('to that address', sent[0].to, 'heather@example.org');
+check('the name is in it', sent[0].body.indexOf("Pat O'Brien") !== -1, true);
+check('and so is the phone number, so nobody has to open the workbook to ring',
+  sent[0].body.indexOf('610-555-0101') !== -1, true);
+
+vm.runInContext('adminEmailsForCategory = function () { return []; };', sandbox);
+check('and nobody ticked sends nothing at all',
+  sandbox.sendAssistanceRequestNotification(filedRows, reqMap), false);
+check('off nobody\'s quota', sent.length, 1);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -1,8 +1,8 @@
 /**
  * Dispatches to a per-sheet handler for tabs that carry a Manual_Override
  * column (Registrants, Lunch Dashboard) plus the Lunch_Schedule edit hook.
- * Master_Program_Dashboard's session table no longer has a Manual_Override
- * column at all (see HEADERS.Master_Program_Dashboard), so there's nothing
+ * All_Program_Sessions's session table no longer has a Manual_Override
+ * column at all (see HEADERS.All_Program_Sessions), so there's nothing
  * to auto-flip there anymore.
  */
 /**
@@ -39,10 +39,14 @@ function onEdit(e) {
       handleLunchScheduleEdit(e, sheet);
     } else if (name === SHEET_NAMES.PROGRAM_DASHBOARD) {
       handleProgramDashboardEdit(e, sheet);
+    } else if (name === SHEET_NAMES.PROGRAM_MONTH) {
+      handleProgramMonthEdit(e, sheet);
     } else if (name === SHEET_NAMES.CONFIG) {
       handleConfigEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
       handleClubMembersEdit(e, sheet);
+    } else if (name === SHEET_NAMES.MEMBER_ROLL) {
+      handleMemberRollEdit(e, sheet);
     }
   } catch (err) {
     // Say something. A silent catch here is how "I typed it and nothing
@@ -54,7 +58,7 @@ function onEdit(e) {
 }
 
 /**
- * Master_Program_Dashboard: the session table is rebuilt from the calendar on
+ * All_Program_Sessions: the session table is rebuilt from the calendar on
  * every render, so almost nothing typed here survives — EXCEPT the three
  * columns that describe how a program's registration works: Type_Tag, and the
  * Club / No_Registration checkboxes (PROGRAM_FLAG_COLUMNS). All three are real,
@@ -77,7 +81,7 @@ function handleProgramDashboardEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
 
   // A LUNCH-ONLY ROW HAS NO CALENDAR EVENT BEHIND IT, and everything below
   // this line works by writing a tag into an event description. Type_Tag,
@@ -93,6 +97,7 @@ function handleProgramDashboardEdit(e, sheet) {
   if (isLunchOnlyEventId(editedEventId)) {
     if (e.range.getNumRows() === 1 && e.range.getNumColumns() === 1) {
       e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      invalidateSectionedRowsCache(sheet); // the cell just went back to its old value
     }
     toastIfPossible(`⚠️ That is a lunch date, not a program — it has no calendar event to change. ` +
       `Edit it on ${SHEET_NAMES.LUNCH_SCHEDULE} instead.`);
@@ -104,6 +109,9 @@ function handleProgramDashboardEdit(e, sheet) {
   for (let i = 0; i < PROGRAM_FLAG_COLUMNS.length; i++) {
     if (handleProgramFlagEdit(e, sheet, zones, headerMap, PROGRAM_FLAG_COLUMNS[i])) return;
   }
+  // And the one that belongs to a single date rather than to the program — same
+  // queue, same trigger, no spread. See handleWaitlistOnlyEdit().
+  if (handleWaitlistOnlyEdit(e, sheet, zones, headerMap)) return;
 
   const typeCol = headerMap['Type_Tag'];
   if (typeCol === undefined) return;
@@ -256,6 +264,384 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
 }
 
 /**
+ * THE MASTER DASHBOARD'S LEADER CELL — the one cell on a derived tab that
+ * a person may type into, and the only edit anywhere that writes to
+ * Program_Leaders from somewhere else.
+ *
+ * THE HAZARD IT IS SHAPED AROUND. Program_Leaders is what shares a sign-up
+ * sheet and what sends a roster by email. A dropdown that stored its own
+ * answer would be a second record of who may read a roster, and two records
+ * disagreeing about that is found out the day somebody is emailed a class they
+ * do not teach. So this cell is a window: it is READ off Program_Leaders on
+ * every render (programMonthLeaderCell() in 78), and typing in it ADDS a row
+ * there. Nothing typed here is ever read back.
+ *
+ * IT ONLY ADDS — see attachProgramLeaderRow(), which is where that rule and
+ * its reasons live. Two consequences a person meets:
+ *
+ *   CLEARING THE CELL DELETES NOTHING. A row saying who led a class is a true
+ *   record whether or not they still lead it, and the next render simply reads
+ *   the same name back. The dialog says so in its own words, and says where a
+ *   leader is actually removed — on Program_Leaders, on the row whose deletion
+ *   is visibly the thing that stops a roster being shared.
+ *
+ *   REPLACING A NAME ADDS THE NEW ONE beside the old. The cell then prints
+ *   both, because both rows exist. That is the honest picture, and unpicking
+ *   the old one from here would be deleting a record from a tab nobody was
+ *   looking at.
+ *
+ * WHY IT ASKS. handleProgramFlagEdit() deliberately does not (a checkbox is
+ * its own question and its own undo). This is a dropdown holding a real value,
+ * and what it does is change who may read a roster — the single most
+ * consequential edit in the workbook that is not on the Admin menu.
+ *
+ * A simple onEdit, so: SpreadsheetApp only. Everything below is a sheet read,
+ * a sheet write and a dialog. invalidateProgramLeaderIndex() clears an
+ * in-memory variable, which is why it is reachable from here at all.
+ */
+function handleProgramMonthEdit(e, sheet) {
+  const headers = HEADERS.Master_Program_Dashboard;
+  const headerRows = findAllHeaderRows(sheet, 'Group_Key');
+  if (headerRows.length === 0) return;
+  const editedRow = e.range.getRow();
+  let headerRow = 0;
+  headerRows.forEach(row => { if (row < editedRow && row > headerRow) headerRow = row; });
+  if (!headerRow) return;
+
+  const sheetMap = getHeaderMapAt(sheet, headerRow);
+
+  // THE FLAG CHECKBOXES FIRST. An edit lands in exactly one column, and
+  // handleProgramMonthFlagEdit() reports whether that column was one of
+  // theirs — the same shape handleProgramDashboardEdit() uses for the same
+  // three flags on the tab they moved from.
+  if (handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow)) return;
+
+  const leaderCol = sheetMap[PROGRAM_MONTH_LEADER_COLUMN];
+  if (!leaderCol) return;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (leaderCol < firstCol || leaderCol > lastCol) return;
+
+  // A FILL-DOWN IS NOT ANSWERED, and it is not reverted either. Every row it
+  // lands on is a different program handing a different roster to the same
+  // person, which is the one shape of this edit nobody should be able to make
+  // with a drag — and there is no honest single question to ask about it. The
+  // tab is derived, so the next render puts every one of those cells back to
+  // what Program_Leaders says; the toast is what stops that looking like the
+  // edit silently working.
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) {
+    toastIfPossible(`⚠️ Leaders are attached one program at a time — nothing was written to ` +
+      `${SHEET_NAMES.PROGRAM_LEADERS}. The next render will put these cells back.`);
+    return;
+  }
+
+  const readCell = name => (sheetMap[name]
+    ? String(sheet.getRange(editedRow, sheetMap[name]).getValue() || '').trim() : '');
+  const groupKey = readCell('Group_Key');
+  const title = readCell('Program');
+  const location = readCell('Location');
+  const before = e.oldValue === undefined ? '' : String(e.oldValue).trim();
+  const typed = e.value === undefined ? '' : String(e.value).trim();
+
+  // A LUNCH ROW IS NOT A PROGRAM and has no leader row to write — the same
+  // refusal handleProgramDashboardEdit() makes for a lunch date, for the same
+  // reason: accepted on screen, reaching nothing, undone by the next render.
+  if (groupKey.indexOf('lunch::') === 0) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ Lunch is not a program and has no leader row.');
+    return;
+  }
+  if (!title || !location) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible('⚠️ That row has no program and location to attach a leader to.');
+    return;
+  }
+  // A SHARED PROGRAM IS ONE THING TO RUN AND TWO ROWS ON THE LEADER TAB — the
+  // privacy boundary there is one program at ONE location (see NO WILDCARDS in
+  // 65_program_leaders.gs), so attaching somebody to "Narberth + Ashbridge"
+  // would have to invent a grain that tab refuses to have. Sent to the tab
+  // where both rows can be typed deliberately, rather than resolved
+  // generously here.
+  if (location.indexOf(' + ') !== -1) {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ "${title}" runs at ${location} — that is two leader rows, one per building. ` +
+      `Add them on ${SHEET_NAMES.PROGRAM_LEADERS}.`);
+    return;
+  }
+
+  if (typed === '') {
+    // The non-destructive reading, said out loud. Nothing is deleted here, so
+    // the cell goes back to what Program_Leaders says rather than sitting
+    // blank until the next render quietly refills it.
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`Nothing was removed: clearing this cell does not take ${before || 'a leader'} off ` +
+      `"${title}". Delete their row on ${SHEET_NAMES.PROGRAM_LEADERS} — that is what stops the ` +
+      `roster being shared with them.`);
+    return;
+  }
+  if (normalizeNameKey(typed) === normalizeNameKey(before)) return;
+
+  if (!confirmCellEditOrRevert(e, `Attach ${typed} to "${title}" at ${location}?`,
+      `A row is added on ${SHEET_NAMES.PROGRAM_LEADERS} naming ${typed} as leading "${title}" at ` +
+      `${location}. That tab is what shares this program's sign-up sheet, so this decides who may ` +
+      `read its roster.\n\n` +
+      `Emails stay OFF until you tick Notify_Roster_Changes there.\n\n` +
+      (before ? `${before} is not removed — their row stays, and this cell will show both names ` +
+        `until you delete it on ${SHEET_NAMES.PROGRAM_LEADERS}.` : ''))) return;
+
+  const result = attachProgramLeaderRow(typed, title, location);
+  if (result.status === 'refused') {
+    revertProgramMonthCell(e, sheet);
+    toastIfPossible(`⚠️ ${typed} was not attached to "${title}" — ${result.note}.`);
+    return;
+  }
+  if (result.status === 'exists') {
+    toastIfPossible(`${typed} was already down as leading "${title}" at ${location}.`);
+    return;
+  }
+  toastIfPossible(`${typed} added to ${SHEET_NAMES.PROGRAM_LEADERS} for "${title}" at ${location}` +
+    (result.email ? '' : ' — with no email address yet, so nothing can be shared until you add one') +
+    '. Emails are off until you tick them there.');
+}
+
+/**
+ * A TICK OF Club / No_Registration / Personalized_Assistance ON THE MONTH TAB.
+ *
+ * Returns TRUE when the edit belonged to one of those columns, so the caller
+ * can stop looking.
+ *
+ * WHY THE BOX IS HERE AT ALL. These three describe a PROGRAM. They lived on
+ * the session table, so a program with twelve dates carried twelve identical
+ * checkboxes — eleven of which existed only so the twelfth could not disagree
+ * with them, kept in line by spreadFlagToSiblingRows() going in and
+ * reconcileProgramFlagColumns() coming back. Master_Program_Dashboard has one
+ * row per program. This is the row the question belongs on.
+ *
+ * NOTHING IS STORED ON THIS TAB, and that is unchanged. The tick is written
+ * STRAIGHT THROUGH to every session row of the program and queued for the
+ * calendar; the next render reads the answer back off those rows. Untick a box
+ * and the tab does not remember the tick — the session rows do, until the
+ * calendar's own tags say otherwise. So there is still exactly one record of
+ * whether a program is a club, and it is still the calendar.
+ *
+ * THE SAME TWO-STEP DELIVERY as handleProgramFlagEdit(), because this runs on
+ * the same simple onEdit path with no authorization for CalendarApp: the sheet
+ * writes happen now, the [Club] tag reaches the calendar seconds later through
+ * onProgramFlagEditInstallable() draining the pending-flag queue. If that
+ * trigger is not installed, the entry waits for the next Sync Cal and nothing
+ * is lost.
+ *
+ * NO CONFIRMATION DIALOG, for the reason handleProgramFlagEdit() gives: a
+ * checkbox is already the question, the answer and the undo. The toast says
+ * what was reached.
+ */
+function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
+  let flag = null;
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  PROGRAM_FLAG_COLUMNS.forEach(candidate => {
+    const col = sheetMap[candidate.column];
+    if (col && col >= firstCol && col <= lastCol) flag = candidate;
+  });
+  if (!flag) return false;
+
+  const editedRow = e.range.getRow();
+  const numRows = e.range.getNumRows();
+  const flagCol = sheetMap[flag.column];
+  const readCell = (row, name) => (sheetMap[name]
+    ? String(sheet.getRange(row, sheetMap[name]).getValue() || '').trim() : '');
+
+  const targets = [];
+  let lunchRows = 0;
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (row <= headerRow) continue;
+    const groupKey = readCell(row, 'Group_Key');
+    if (!groupKey) continue; // a banner, a spacer, or the metrics block
+    // A MEAL IS NOT A PROGRAM and has no calendar event to tag — the same
+    // refusal the Leader cell makes, for the same reason.
+    if (groupKey.indexOf('lunch::') === 0) { lunchRows++; continue; }
+    const title = readCell(row, 'Program');
+    if (!title) continue;
+    targets.push({ row, title, on: isTruthyCheckbox(sheet.getRange(row, flagCol).getValue()) });
+  }
+  if (targets.length === 0) {
+    if (lunchRows > 0) toastIfPossible('⚠️ Lunch is not a program — there is nothing to tag.');
+    return true;
+  }
+
+  let sessionRows = 0;
+  let calendars = 0;
+  targets.forEach(target => {
+    const applied = applyProgramMonthFlagToSessions(flag, target);
+    sessionRows += applied.rows;
+    calendars += applied.calendars;
+  });
+
+  const headline = targets.length === 1
+    ? describeFlagState(flag, targets[0].title, targets[0].on)
+    : `${targets.length} program(s) updated`;
+  if (sessionRows === 0) {
+    // NOTHING WAS REACHED, and the box is now lying. The tab is derived, so
+    // the next render will clear it — but saying nothing here is how "I ticked
+    // it and nothing happened" becomes unreportable.
+    toastIfPossible(`⚠️ ${headline}, but no session row on ${SHEET_NAMES.PROGRAM_DASHBOARD} ` +
+      `matched — nothing was changed, and the next render will clear this box.`);
+    return true;
+  }
+  toastIfPossible(`${headline} — ${sessionRows} session row(s) ticked to match. ` +
+    (calendars > 0
+      ? `Writing [${flag.tag}] to the calendar; the forms follow on the next Sync Cal.`
+      : `No calendar could be identified, so run Sync Cal to push the tag.`));
+  return true;
+}
+
+/**
+ * Writes one program row's flag onto every session row of that program,
+ * and queues the calendar tag per calendar.
+ *
+ * MATCHED BY Clean_Title, which is the grain the row is. Since the month left
+ * this tab, one row is one PROGRAM for as long as it runs — twelve months of a
+ * weekly class, and twelve forms — so matching on the row's Form_ID would tick
+ * one month's sessions and leave the other eleven disagreeing with the box
+ * that was just ticked. The flag is a fact about the program; the write is too.
+ *
+ * NOT title-plus-location, deliberately: the row for a [Shared] program says
+ * "Narberth + Ashbridge", which matches no session row at all. A program run
+ * at two buildings under one title is one program here, and ticking it ticks
+ * both — which is the same answer reconcileProgramFlagColumns() would arrive
+ * at from the calendar anyway.
+ *
+ * The queue entries are made per DISTINCT calendar found rather than once for
+ * the program: the tag has to be written into both buildings' events.
+ *
+ * Returns { rows, calendars }.
+ */
+function applyProgramMonthFlagToSessions(flag, target) {
+  const out = { rows: 0, calendars: 0 };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return out;
+
+  const zones = getSectionZones(registrySheet, 'Event_ID');
+  if (zones.length === 0) return out;
+  const map = getLiveHeaderMap(registrySheet, zones[0].headerRow, HEADERS.All_Program_Sessions);
+  const flagCol = map[flag.column];
+  const titleCol = map['Clean_Title'];
+  const calCol = map['Calendar_Source'];
+  if (flagCol === undefined || titleCol === undefined || calCol === undefined) return out;
+
+  const seenCalendars = {};
+  zones.forEach(zone => {
+    const count = zone.dataEnd - zone.dataStart + 1;
+    if (count < 1) return;
+    const titles = registrySheet.getRange(zone.dataStart, titleCol + 1, count, 1).getValues();
+    const calendars = registrySheet.getRange(zone.dataStart, calCol + 1, count, 1).getValues();
+    const flagRange = registrySheet.getRange(zone.dataStart, flagCol + 1, count, 1);
+    const flags = flagRange.getValues();
+
+    let touched = false;
+    for (let r = 0; r < count; r++) {
+      const rowTitle = String(titles[r][0] || '').trim();
+      if (normalizeNameKey(rowTitle) !== normalizeNameKey(target.title)) continue;
+      const calendarId = String(calendars[r][0] || '').trim();
+      if (calendarId) seenCalendars[calendarId] = rowTitle || target.title;
+      out.rows++;
+      if (isTruthyCheckbox(flags[r][0]) === target.on && typeof flags[r][0] === 'boolean') continue;
+      flags[r] = [target.on];
+      touched = true;
+    }
+    if (touched) {
+      flagRange.setValues(flags);
+      invalidateSectionedRowsCache(registrySheet);
+    }
+  });
+
+  Object.keys(seenCalendars).forEach(calendarId => {
+    recordPendingProgramFlag(flag.column, calendarId, seenCalendars[calendarId], target.on);
+    out.calendars++;
+  });
+  return out;
+}
+
+/** Puts a Master_Program_Dashboard cell back to what it held. The tab is derived; the cell was never the record. */
+function revertProgramMonthCell(e, sheet) {
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
+  e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+  invalidateSectionedRowsCache(sheet);
+}
+
+/**
+ * ONE SESSION CLOSED BY HAND — a tick of Waitlist_Only, which is the one
+ * checkbox on this table that means something about a DATE (see
+ * WAITLIST_ONLY_TAG and SESSION_FLAG_COLUMNS).
+ *
+ * Returns TRUE when the edit belonged to this column, so the caller can stop
+ * looking.
+ *
+ * The same two-step delivery as handleProgramFlagEdit(), for the same reason —
+ * a simple onEdit cannot write to a calendar, so the tick is queued here and
+ * stamped seconds later by the installable trigger. The differences are the
+ * whole feature:
+ *
+ *   - IT DOES NOT SPREAD. spreadFlagToSiblingRows() exists because a program
+ *     flag left on one row of twelve was saying something untrue about the
+ *     other eleven. Here the other eleven are genuinely unaffected: the room is
+ *     full on the 14th, not in November.
+ *   - IT QUEUES PER DATE. The entry carries the row's Event_Date, so two dates
+ *     of one program can be queued at once with opposite answers.
+ *
+ * A fill-down over a block of these is honoured row by row rather than being
+ * collapsed per program, which is the same rule read from the other end: every
+ * row it lands on is its own session.
+ */
+function handleWaitlistOnlyEdit(e, sheet, zones, headerMap) {
+  const flag = getSessionFlagByColumn('Waitlist_Only');
+  const flagCol = flag ? headerMap[flag.column] : undefined;
+  if (flagCol === undefined) return false;
+
+  const firstCol = e.range.getColumn();
+  const lastCol = firstCol + e.range.getNumColumns() - 1;
+  if (flagCol + 1 < firstCol || flagCol + 1 > lastCol) return false;
+
+  const editedRow = e.range.getRow();
+  const numRows = e.range.getNumRows();
+  const readCell = (row, name) =>
+    (headerMap[name] === undefined ? '' : sheet.getRange(row, headerMap[name] + 1).getValue());
+
+  const targets = [];
+  for (let r = 0; r < numRows; r++) {
+    const row = editedRow + r;
+    if (!isRowInAnyDataZone(zones, row)) continue;
+    const title = String(readCell(row, 'Clean_Title') || '').trim();
+    const calendarId = String(readCell(row, 'Calendar_Source') || '').trim();
+    const date = coerceDate(readCell(row, 'Event_Date'));
+    // No date means no session to close — and a dated queue entry is the only
+    // thing that keeps this tick off the program's other events.
+    if (!title || !calendarId || !date) continue;
+    targets.push({
+      row, title, calendarId,
+      dateKey: formatDateKey(date),
+      when: formatDateLabel(date),
+      on: isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue())
+    });
+  }
+  if (targets.length === 0) return true;
+
+  targets.forEach(t => recordPendingProgramFlag(flag.column, t.calendarId, t.title, t.on, t.dateKey));
+
+  const headline = targets.length === 1
+    ? describeFlagState(flag, targets[0].title, targets[0].on, targets[0].when)
+    : `${targets.length} session(s) updated`;
+  const consequence = targets.some(t => t.on)
+    ? `Everyone who signs up for ${targets.length === 1 ? 'it' : 'them'} from now on is waitlisted, ` +
+      `whatever the seats say. Nobody already registered is moved.`
+    : `Registrations for ${targets.length === 1 ? 'it' : 'them'} are decided by capacity again.`;
+  toastIfPossible(`${headline}. ${consequence} Writing [${flag.tag}] to the calendar.`);
+  return true;
+}
+
+/**
  * Puts the same tick on every other row of the same program, and reports how
  * many rows it changed.
  *
@@ -311,7 +697,10 @@ function spreadFlagToSiblingRows(sheet, zones, headerMap, flag, sourceRow, on) {
       touched = true;
       if (zone.dataStart + r !== sourceRow) changed++;
     }
-    if (touched) flagRange.setValues(flags);
+    if (touched) {
+      flagRange.setValues(flags);
+      invalidateSectionedRowsCache(sheet);
+    }
   });
   return changed;
 }
@@ -383,14 +772,19 @@ function onProgramFlagEditInstallable(e) {
   }
 }
 
-/** True when `e` covers a Club / No_Registration cell inside a data zone of the session table. */
+/**
+ * True when `e` covers a tag checkbox — a program one (Club, No_Registration,
+ * Personalized_Assistance) or a session one (Waitlist_Only) — inside a data
+ * zone of the session table. Both kinds queue an entry the installable trigger
+ * has to wait for, so both belong to this question.
+ */
 function editTouchesProgramFlagColumn(e, sheet) {
   const zone = findZoneForRow(getSectionZones(sheet, 'Event_ID'), e.range.getRow());
   if (!zone) return false;
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Master_Program_Dashboard);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Program_Sessions);
   const firstCol = e.range.getColumn();
   const lastCol = firstCol + e.range.getNumColumns() - 1;
-  return PROGRAM_FLAG_COLUMNS.some(flag => {
+  return PROGRAM_FLAG_COLUMNS.concat(SESSION_FLAG_COLUMNS).some(flag => {
     const col = headerMap[flag.column];
     return col !== undefined && col + 1 >= firstCol && col + 1 <= lastCol;
   });
@@ -423,12 +817,24 @@ function applyPendingProgramFlags() {
 function drainPendingProgramFlags(entries, result) {
   const delivered = [];
   entries.forEach(entry => {
-    const flag = getProgramFlagByColumn(entry.column);
+    const flag = getProgramFlagByColumn(entry.column) || getSessionFlagByColumn(entry.column);
     if (!flag || !entry.title || !entry.calendarId) {
       delivered.push(entry); // unreadable row — clearing it is the only sane end
       return;
     }
-    const outcome = stampProgramFlagOnCalendar(entry.title, entry.calendarId, flag, entry.on);
+    // ONE EVENT OR ALL OF THEM, decided by whether the entry names a date. A
+    // per-session flag that lost its date would otherwise be stamped across the
+    // whole program, which is the one thing it must never do — so a dated
+    // column with no date is refused rather than widened. See WAITLIST_ONLY_TAG.
+    if (flag.perSession && !entry.dateKey) {
+      log(`⚠️ Dropping a queued ${entry.column} change for "${entry.title}" — it names no date, and ` +
+        `this tag belongs to one session. Tick the box again on the row you meant.`);
+      delivered.push(entry);
+      return;
+    }
+    const outcome = flag.perSession
+      ? stampSessionFlagOnCalendarEvent(entry.title, entry.calendarId, entry.dateKey, flag, entry.on)
+      : stampProgramFlagOnCalendar(entry.title, entry.calendarId, flag, entry.on);
     if (!outcome.ok) {
       result.failed++;
       return;
@@ -465,38 +871,71 @@ function getPendingFlagSheet(createIfMissing) {
     freezeRowsSafely(sheet, 1);
     try { if (wasActive) ss.setActiveSheet(wasActive); } catch (err) { /* nothing to go back to */ }
     try { sheet.hideSheet(); } catch (err) { /* a lone or active tab cannot be hidden */ }
+    return sheet;
+  }
+  // A TAB WRITTEN BY AN EARLIER VERSION IS ONE COLUMN SHORT. Date_Key was
+  // appended when Waitlist_Only arrived (see PENDING_FLAG_HEADERS), and the
+  // entries already sitting there are program-wide ones that correctly have no
+  // date — so the header is widened in place and nothing is rewritten.
+  //
+  // Only on the WRITE path (`createIfMissing`), because that is the only caller
+  // that needs the wider tab: a read of a five-column tab already answers ''
+  // for the missing date, which is what those entries mean. A read has no
+  // business writing to the sheet it is reading.
+  try {
+    if (createIfMissing && sheet.getLastColumn() < PENDING_FLAG_HEADERS.length) {
+      sheet.getRange(1, 1, 1, PENDING_FLAG_HEADERS.length)
+        .setValues([PENDING_FLAG_HEADERS])
+        .setFontWeight('bold');
+    }
+  } catch (err) {
+    log(`ℹ️ Could not widen "${PENDING_FLAG_SHEET_NAME}" (${err}) — its entries still deliver.`);
   }
   return sheet;
 }
 
-/** Every outstanding entry: { column, calendarId, title, on, row }. */
+/**
+ * Every outstanding entry: { column, calendarId, title, on, dateKey, row }.
+ *
+ * `dateKey` is '' for every program-wide flag, which is all of
+ * PROGRAM_FLAG_COLUMNS, and 'yyyy-MM-dd' for a per-session one (Waitlist_Only —
+ * see WAITLIST_ONLY_TAG). A queue row written before that column existed is
+ * five values long and reads as '' here, which is the right answer for it.
+ */
 function readPendingProgramFlags() {
   const sheet = getPendingFlagSheet(false);
   if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  return sheet.getRange(2, 1, lastRow - 1, PENDING_FLAG_HEADERS.length).getValues()
+  // Never wider than the tab actually is: one written by an older version has
+  // no Date_Key column, and asking a range for more columns than the sheet
+  // holds throws. The missing value then reads as '' — "no date", which is
+  // exactly what every entry on such a tab means.
+  const width = Math.min(PENDING_FLAG_HEADERS.length, Math.max(1, sheet.getLastColumn()));
+  return sheet.getRange(2, 1, lastRow - 1, width).getValues()
     .map((row, i) => ({
       column: String(row[0] || '').trim(),
       calendarId: String(row[1] || '').trim(),
       title: String(row[2] || '').trim(),
       on: isTruthyCheckbox(row[3]),
+      dateKey: String(row[5] || '').trim(),
       row: i + 2
     }))
     .filter(entry => entry.column);
 }
 
 /**
- * Records (or replaces) one program's outstanding tick. Callable from a simple
- * onEdit — it is a spreadsheet write and nothing else.
+ * Records (or replaces) one outstanding tick — a program's, or a single
+ * session's when `dateKey` is given. Callable from a simple onEdit — it is a
+ * spreadsheet write and nothing else.
  */
-function recordPendingProgramFlag(flagColumn, calendarId, title, on) {
+function recordPendingProgramFlag(flagColumn, calendarId, title, on, dateKey) {
   try {
     const sheet = getPendingFlagSheet(true);
-    const key = pendingFlagKey(flagColumn, calendarId, title);
+    const key = pendingFlagKey(flagColumn, calendarId, title, dateKey);
     const existing = readPendingProgramFlags()
-      .filter(entry => pendingFlagKey(entry.column, entry.calendarId, entry.title) === key);
-    const values = [flagColumn, calendarId, title, !!on, new Date()];
+      .filter(entry => pendingFlagKey(entry.column, entry.calendarId, entry.title, entry.dateKey) === key);
+    const values = [flagColumn, calendarId, title, !!on, new Date(), String(dateKey || '')];
 
     if (existing.length > 0) {
       sheet.getRange(existing[0].row, 1, 1, values.length).setValues([values]);
@@ -539,6 +978,21 @@ function pendingProgramKeysFor(flagColumn) {
 }
 
 /**
+ * The same set for a SESSION flag, keyed `Calendar_Source|Clean_Title|dateKey`
+ * — the set reconcileSessionFlagColumns() must not touch. Entries with no date
+ * are skipped rather than widened to the program: a per-session flag that
+ * cannot say which session is not an instruction about all of them.
+ */
+function pendingSessionKeysFor(flagColumn) {
+  const keys = new Set();
+  readPendingProgramFlags().forEach(entry => {
+    if (entry.column !== flagColumn || !entry.dateKey) return;
+    keys.add(`${entry.calendarId}|${entry.title}|${entry.dateKey}`);
+  });
+  return keys;
+}
+
+/**
  * "Book Club is a club" / "Coffee Hour takes no registration" — one line, for
  * a toast or a list.
  *
@@ -550,9 +1004,12 @@ function pendingProgramKeysFor(flagColumn) {
  * both wrong and — on a tab where Club is a real neighbouring checkbox —
  * actively misleading about what had just been ticked.
  */
-function describeFlagState(flag, title, on) {
+function describeFlagState(flag, title, on, when) {
   const describe = on ? (flag && flag.describeOn) : (flag && flag.describeOff);
-  if (typeof describe === 'function') return describe(title);
+  // `when` is passed only by the session flags, whose subject is one date and
+  // whose wording says so ("Sep 14 'Chair Yoga' is waitlist-only"). A program
+  // flag's wording takes one argument and ignores it.
+  if (typeof describe === 'function') return describe(title, when);
   // A flag added without wording still says something true about itself.
   return `"${title}" ${on ? 'is now' : 'is no longer'} ${flag ? `[${flag.tag}]` : 'tagged'}`;
 }
@@ -596,10 +1053,10 @@ function applyProgramTagChangesToCalendar() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) { toastIfPossible('No program dashboard yet — run Sync Cal first.'); return 0; }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const byProgram = {};
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const title = String(row[map['Clean_Title']] || '').trim();
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
     const tag = normalizeTypeTag(row[map['Type_Tag']]);
@@ -805,6 +1262,91 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
       `[${flag.tag}] — the word is part of a bracketed note somebody wrote (something like "[Book ${flag.tag}]"), ` +
       `and removing it would have deleted their note. Edit those event descriptions by hand, or the next sync ` +
       `will tick the box again.`;
+    log(`⚠️ ${message}`);
+    noteForAdmin(`${flag.column} could not be removed from the calendar`, message);
+  }
+  return { stamped, ok: true, stuck };
+}
+
+/**
+ * THE SAME WRITE, AIMED AT ONE EVENT — the delivery half of a SESSION flag
+ * (SESSION_FLAG_COLUMNS; today that is Waitlist_Only, see WAITLIST_ONLY_TAG).
+ *
+ * Everything about it is deliberately narrower than stampProgramFlagOnCalendar():
+ * one calendar, one day, the first event on it whose title matches, and no
+ * [All Locations] reach at all. A program's other locations are running their
+ * own sessions with their own rooms and their own numbers, and "the Narberth
+ * session on the 14th is full" says nothing whatever about Ashbridge's.
+ *
+ * Reads the day directly rather than through getCalendarEventsForWindow(): the
+ * window cache is the whole sync horizon across every calendar, which is a lot
+ * of reading to do to find one afternoon, and this runs from a checkbox.
+ *
+ * Returns the same { stamped, ok } contract the program stamp does, and for the
+ * same reason — the queue has to tell "already agreed" apart from "could not
+ * read the calendar".
+ */
+function stampSessionFlagOnCalendarEvent(title, calendarId, dateKey, flag, on) {
+  if (!title || !calendarId || !dateKey || !flag) return { stamped: 0, ok: false };
+
+  // parseDateKey() answers with an Invalid Date rather than null for anything
+  // that is not a date key, and an Invalid Date is truthy — so it is tested for
+  // what it is. An unusable key can only come from a hand-edited queue row, and
+  // reporting it as delivered is the right end for it: retrying forever cannot
+  // make it parse.
+  const start = parseDateKey(dateKey);
+  if (!start || isNaN(start.getTime())) {
+    log(`⚠️ ${flag.column} change for "${title}": "${dateKey}" is not a date — dropping it.`);
+    return { stamped: 0, ok: true };
+  }
+
+  let events;
+  try {
+    const calendar = CalendarApp.getCalendarById(calendarId);
+    if (!calendar) throw new Error('calendar not found');
+    events = calendar.getEvents(start, new Date(start.getTime() + 24 * 60 * 60 * 1000));
+  } catch (err) {
+    log(`⚠️ ${flag.column} change for "${title}" on ${dateKey}: calendar ${calendarId} could not be read (${err}).`);
+    return { stamped: 0, ok: false };
+  }
+
+  const wanted = normalizeNameKey(title);
+  const matches = events.filter(ev => {
+    if (ev.isAllDayEvent()) return false;
+    const parsed = parseEventTitle(ev.getTitle());
+    return !!parsed && normalizeNameKey(parsed.cleanTitle) === wanted;
+  });
+  if (matches.length === 0) {
+    // NOT ok: the event may simply be outside what this calendar returned, and
+    // dropping the instruction would untick the box on the next sync with
+    // nothing to show for it. It stays queued and is retried.
+    log(`⚠️ ${flag.column} change for "${title}" on ${dateKey}: no matching event on that day — still queued.`);
+    return { stamped: 0, ok: false };
+  }
+
+  let stamped = 0;
+  let stuck = 0;
+  // Every match on the day, not just the first: a program that meets twice on
+  // one date is ONE row on the dashboard (they share an Event_ID — see
+  // computeEventId(), which is keyed by date), so tagging one of the two would
+  // leave the row's answer depending on which the sync read first.
+  matches.forEach(ev => {
+    const existing = ev.getDescription() || '';
+    const updated = setFlagBracketInDescription(existing, flag.regex, flag.tag, on);
+    if (!on && descriptionStillCarriesFlag(updated, flag.regex)) stuck++;
+    if (updated === existing) return;
+    ev.setDescription(updated);
+    stamped++;
+  });
+
+  if (stamped > 0) {
+    invalidateCalendarEventsCache(); // a description just changed under the cache
+    log(`${on ? 'Added' : 'Removed'} [${flag.tag}] on ${stamped} calendar event(s) for "${title}" on ${dateKey}.`);
+  }
+  if (stuck > 0) {
+    const message = `Unticking ${flag.column} for "${title}" on ${dateKey} left the event still reading as ` +
+      `[${flag.tag}] — the word is part of a bracketed note somebody wrote, and removing it would have ` +
+      `deleted their note. Edit that event's description by hand, or the next sync will tick the box again.`;
     log(`⚠️ ${message}`);
     noteForAdmin(`${flag.column} could not be removed from the calendar`, message);
   }
@@ -1231,7 +1773,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
     const survivor = candidates.sort((a, b) =>
       (tally[span][b].count - tally[span][a].count) || (tally[span][a].earliest - tally[span][b].earliest))[0];
     try {
-      const form = FormApp.openById(survivor);
+      const form = openFormCached(survivor);
       survivorBySpan[span] = survivor;
       linksBySpan[span] = {
         view: makeHyperlinkFormula(buildRegistrationUrl(form), 'View Live Form'),
@@ -1279,6 +1821,7 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
       idRange.setValues(ids);
       viewRange.setValues(views);
       editRange.setValues(edits);
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 
@@ -1292,9 +1835,9 @@ function repointProgramSessionsToOneForm(registrySheet, title) {
   // These forms now span locations. Record that where the next sync looks for
   // them, then relabel each one (buildFormSessionContext() sees the
   // multi-location rows and adds the location to every date label).
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const derived = { eventIds: new Set(), groupFormMap: {} };
   addSharedGroupKeysFromRows(derived, rows, map);
   Object.keys(derived.groupFormMap).forEach(key => {
@@ -1420,6 +1963,21 @@ function handleConfigEdit(e, sheet) {
       : 'Registration horizon cleared — every session is open again from the next sync.');
   }
 
+  // Pausing is always safe and is the whole point of the switch, so it does
+  // not ask; UNPAUSING is the one that says something out loud, because what
+  // was held while it was on is gone and the next thing that happens is real
+  // mail to real members.
+  const isMailPauseEdit = editedCol === CONFIG_LAYOUT.OUTBOUND_MAIL.startCol &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isMailPauseEdit) {
+    const pausing = String(e.value || '').trim().toLowerCase() === 'yes';
+    toastIfPossible(pausing
+      ? 'Mail to members and leaders is paused. Nothing goes out — and held messages are dropped, ' +
+        'not saved up. Calendar invitations are separate.'
+      : 'Mail to members and leaders is back on from the next sync. Nothing arrives late: anything ' +
+        'held while it was paused was dropped.');
+  }
+
   // Any Config edit can invalidate a cached read of it, confirmed or not.
   invalidateConfigCaches();
 }
@@ -1457,10 +2015,11 @@ function autoFlipManualOverride(sheet, headerMap0Based, editedRow, editedCol1Bas
   const current = String(cell.getValue()).trim();
   if (current === 'Auto-Synced' || current === '') {
     cell.setValue('Manually Edited');
+    invalidateSectionedRowsCache(sheet);
   }
 }
 
-/** Registrant_Dash: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
+/** All_Registrants: auto-flip on any hand-edit within a data zone, plus status-change toasts. */
 function handleRegistrantsEdit(e, sheet) {
   const editedRow = e.range.getRow();
   const editedCol = e.range.getColumn();
@@ -1469,7 +2028,7 @@ function handleRegistrantsEdit(e, sheet) {
   const zone = findZoneForRow(zones, editedRow);
   if (!zone) return;
 
-  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.Registrant_Dash);
+  const headerMap = getLiveHeaderMap(sheet, zone.headerRow, HEADERS.All_Registrants);
   autoFlipManualOverride(sheet, headerMap, editedRow, editedCol);
 
   // Computed from the RANGE, not just its top-left cell, so a fill-down or a
@@ -1483,6 +2042,15 @@ function handleRegistrantsEdit(e, sheet) {
 
   if (typeof e.value !== 'undefined') {
     const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
+
+    // MARKING IS NOT REMOVING, and the toast is where that gets said. Nothing
+    // is deleted until somebody runs the sweep on the menu — see section 83
+    // for why that separation is deliberate.
+    if (headerMap['Manual_Override'] !== undefined &&
+        editedCol === headerMap['Manual_Override'] + 1 &&
+        String(e.value).trim() === REGISTRANT_REMOVE_OVERRIDE_OPTION) {
+      toastIfPossible('🗑️ Marked for removal — nothing is deleted yet. Run "Remove Marked Registrants…" on the menu.');
+    }
 
     // Lunch_Served no longer implies Attended, on a direct edit any more than
     // through the Quick Mark dialog — one rule, wherever the tick happens. A
@@ -1550,7 +2118,7 @@ function recalculateCateringCounts(sheet, headerMap, editedRow, numRows) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrantRows = readAllSectionedRows(sheet, HEADERS.Registrant_Dash, 'Event_ID');
+    const registrantRows = getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID');
 
     const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
     if (registrySheet) {
@@ -1588,7 +2156,7 @@ function describeRecalculatedCounts(touched) {
   const headers = HEADERS.Master_Lunch_Dashboard;
   const map = getIndexMap(headers);
   const byKey = {};
-  readAllSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
+  getSectionedRows(sheet, headers, 'Standard_Buffer').forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
     if (!d) return;
     byKey[`${formatDateKey(d)}|${String(row[map['Location']] || '').trim()}`] = row;
@@ -1618,4 +2186,68 @@ function handleLunchDashboardEdit(e, sheet) {
   autoFlipManualOverride(sheet, headerMap, editedRow, e.range.getColumn());
 }
 
+/**
+ * Member_Roll: two of the staff columns do something when they change, and
+ * the rest are notes.
+ *
+ * DISPLAY_NAME IS A CORRECTION, not a label. A name typed into a public form
+ * is the key every other tab matches on (see 77_households_and_names.gs), so
+ * putting the right spelling here is a request to change it EVERYWHERE — on
+ * this person's registrations, their club memberships, their standing needs —
+ * and to keep changing it as the public goes on typing the old one. That is
+ * more than a cell edit, so it asks first, and puts the cell back on "no".
+ *
+ * HOUSEHOLD_OVERRIDE is the staff's answer when the shared-contact guess got
+ * a household wrong. It only ever needs the household columns recomputed off
+ * this tab, which is why it does not go anywhere near the registrant history.
+ */
+function handleMemberRollEdit(e, sheet) {
+  const headers = HEADERS.Member_Roll;
+  // Read off the tab's OWN header row, not the constant — a workbook whose
+  // roll has not been redrawn since these columns landed still holds the old
+  // order, and a map from HEADERS would aim a rename at whatever sits at that
+  // index instead. A column this tab hasn't got simply comes back undefined,
+  // and the branch below it does nothing.
+  const live = getHeaderMapAt(sheet, MEMORY_TAB_HEADER_ROW);
+  const map = {};
+  headers.forEach(h => { if (live[h]) map[h] = live[h] - 1; });
+  const row = e.range.getRow();
+  const col = e.range.getColumn();
+  if (row < MEMORY_TAB_DATA_ROW) return;
 
+  if (map['Household_Override'] !== undefined && col === map['Household_Override'] + 1) {
+    const count = refreshMemberHouseholds(sheet.getParent());
+    toastIfPossible(`👪 Households recomputed across ${count} member(s).`);
+    return;
+  }
+
+  if (map['Display_Name'] === undefined || map['Name'] === undefined) return;
+  if (col !== map['Display_Name'] + 1) return;
+  const corrected = String(e.value === undefined ? '' : e.value).trim();
+  if (!corrected) return; // cleared: nothing to carry anywhere
+  const current = String(sheet.getRange(row, map['Name'] + 1).getValue() || '').trim();
+  if (!current || normalizeNameKey(current) === normalizeNameKey(corrected)) return;
+
+  let ui = null;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    // No UI to ask through (a script-driven edit). The correction still runs
+    // — it is what somebody typed — and the log carries the record.
+    log(`handleMemberRollEdit: renaming without a confirmation (${err}).`);
+  }
+  if (ui) {
+    const answer = ui.alert('Correct this name everywhere?',
+      `"${current}" becomes "${corrected}" on every tab that carries it — registrations, ` +
+      'club rosters, standing needs — and any response that arrives under the old spelling ' +
+      'from now on will be filed under the new one.\n\nCorrect it?',
+      ui.ButtonSet.YES_NO);
+    if (answer !== ui.Button.YES) {
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      toastIfPossible('Left as it was — nothing was renamed.');
+      return;
+    }
+  }
+  const changed = applyMemberNameCorrection(current, corrected);
+  toastIfPossible(`✏️ "${current}" is now "${corrected}" — ${changed} cell(s) updated.`);
+}

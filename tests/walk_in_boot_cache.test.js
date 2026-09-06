@@ -1,26 +1,26 @@
-// THE SIGN-IN APP'S BOOT SNAPSHOT (section 16d) — the page draws today before
-// it asks for it.
+// THE SIGN-IN APP'S BOOT SNAPSHOT (section 16d) — today's list, stored so a
+// tablet does not have to wait for it.
 //
-// The sign-in page used to serve a document with no data in it and then spend
-// a round trip — two sectioned-tab passes and the whole member roll — finding
-// out what to draw. Every morning, on a tablet's wifi, that was a blue header
-// and the word "Reading..." in front of a queue. What this pins is the two
-// halves of the fix, and the ways each of them fails QUIETLY:
+// A door page that serves a document with no data in it and then spends a
+// round trip — two sectioned-tab passes and the whole member roll — finding
+// out what to draw is, every morning on a tablet's wifi, a blue header and the
+// word "Reading..." in front of a queue. The store is what that is paid out
+// of. What this pins is the store and the read that keeps it fed, and the ways
+// each of them fails QUIETLY:
 //
 //   1. THE STORE. A day is kept per building, with the member roll lifted out
 //      and kept once, and it is served ONLY for the date it was built on. A
 //      store that outlives its day is the worst failure this file has: a page
 //      showing yesterday's programs with yesterday's sign-ins ticked looks
 //      completely normal and records nothing.
-//   2. THE BOOT. The page inlines that store and paints it on the first frame,
-//      with the live read running behind it. So the assertion that matters is
-//      not "the page can render the snapshot" — it is that the names are on
-//      screen while NO server call has been answered yet, and that nothing on
-//      that first frame says "wait".
+//   2. IT IS TRIMMED TO A SIZE A PAGE CAN CARRY, and the roll is what gets
+//      dropped — it sits behind a search box, and the day itself does not.
+//   3. AND A BLOCKED DESK IS STILL A DOOR. A workbook mid-sweep answers the
+//      day read with the stored day rather than a refusal.
 //
-//   3. AND THE FRESH DAY WAITS ITS TURN. A background answer that redraws the
-//      screen while somebody is mid-sign-in moves the tick they are reaching
-//      for. It is held until the page is back at the name list.
+// The page that used to inline this snapshot (section 16b) was retired — see
+// the banner in 62_walk_in_page.gs; the door app's own boot is pinned in
+// door_app.test.js.
 const vm = require('vm');
 
 const src = require('./helpers/source').readSource();
@@ -254,225 +254,6 @@ ok('and the page is told the search box is still filling',
   trimmed.membersDeferred === true);
 ok('while the day itself always travels',
   trimmed.days.Narberth.people[0].name === 'Ada Cole');
-
-// ---------------------------------------------------------------------------
-// 5. THE BOOT ITSELF. The names are on screen before any server call has been
-//    answered, and nothing on that first frame says "wait".
-// ---------------------------------------------------------------------------
-const NASTY = 'O\'Brien </script><script>alert(1)</script> "quoted"';
-
-/** The one <script> body of a built page. */
-function scriptBody(html) {
-  const open = html.indexOf('<script>');
-  const close = html.indexOf('</script>', open);
-  return html.substring(open + '<script>'.length, close);
-}
-
-/** Enough of a DOM for the page's own draw() to run against. */
-function makeDom() {
-  const fixed = {};
-  function makeEl(tag) {
-    const node = {
-      tagName: String(tag).toUpperCase(), children: [], className: '', id: '',
-      style: {}, value: '', disabled: false, placeholder: '', type: '',
-      autocomplete: '', onclick: null, oninput: null,
-      setAttribute: () => {}, focus: () => {},
-      appendChild: child => { node.children.push(child); return child; }
-    };
-    let text = '';
-    let html = '';
-    Object.defineProperty(node, 'textContent', {
-      get: () => text, set: v => { text = String(v === undefined ? '' : v); }
-    });
-    // Setting innerHTML is how every draw() clears what it is replacing.
-    Object.defineProperty(node, 'innerHTML', {
-      get: () => html,
-      set: v => { html = String(v === undefined ? '' : v); node.children.length = 0; }
-    });
-    node.classList = {
-      add: c => {
-        if (node.className.split(/\s+/).indexOf(c) === -1) {
-          node.className = (node.className + ' ' + c).trim();
-        }
-      },
-      remove: c => {
-        node.className = node.className.split(/\s+/).filter(x => x && x !== c).join(' ');
-      },
-      contains: c => node.className.split(/\s+/).indexOf(c) !== -1
-    };
-    return node;
-  }
-  ['heading', 'subheading', 'pinbox', 'app', 'status', 'pin'].forEach(id => {
-    fixed[id] = makeEl('div');
-    fixed[id].id = id;
-  });
-  function find(node, id) {
-    if (node.id === id) return node;
-    for (let i = 0; i < node.children.length; i++) {
-      const hit = find(node.children[i], id);
-      if (hit) return hit;
-    }
-    return null;
-  }
-  return {
-    fixed,
-    document: {
-      createElement: makeEl,
-      getElementById: id => fixed[id] || find(fixed.app, id) || find(fixed.pinbox, id)
-    }
-  };
-}
-
-/** Everything a person standing at the tablet can read on the screen. */
-function screenText(node) {
-  let out = node.textContent + ' ' + String(node.innerHTML).replace(/<[^>]*>/g, ' ');
-  node.children.forEach(child => { out += ' ' + screenText(child); });
-  return out;
-}
-
-/** Finds the button whose label contains `text`, so a test can tap it. */
-function tap(node, text) {
-  if (node.onclick && screenText(node).indexOf(text) !== -1 &&
-    node.tagName === 'BUTTON') { node.onclick(); return true; }
-  for (let i = 0; i < node.children.length; i++) {
-    if (tap(node.children[i], text)) return true;
-  }
-  return false;
-}
-
-/**
- * Runs a built page's script the way a browser would, with every server call
- * PARKED rather than answered — which is the whole question this section is
- * about: what is on the screen while the round trip is still in the air.
- */
-function bootPage(html) {
-  const dom = makeDom();
-  const calls = [];
-  const store = {};
-  const ctx = {
-    console: { log: () => {} },
-    document: dom.document,
-    window: {
-      localStorage: {
-        getItem: k => (store[k] === undefined ? null : store[k]),
-        setItem: (k, v) => { store[k] = String(v); },
-        removeItem: k => { delete store[k]; }
-      },
-      setTimeout: () => 0,
-      clearTimeout: () => {}
-    },
-    google: {
-      script: {
-        run: {
-          withSuccessHandler(fn) { this._ok = fn; return this; },
-          withFailureHandler(fn) { this._err = fn; return this; },
-          walkInDay(json) { calls.push({ fn: 'walkInDay', payload: JSON.parse(json), ok: this._ok }); },
-          walkInSignIn(json) { calls.push({ fn: 'walkInSignIn', payload: JSON.parse(json), ok: this._ok }); },
-          // The "coming up" section's live read of this month and next. It is
-          // fired the first time somebody reaches step 2, so a stub without it
-          // is a page that throws on a tap rather than a page that is missing
-          // a list.
-          deskMonthSessions(json) { calls.push({ fn: 'deskMonthSessions', payload: JSON.parse(json), ok: this._ok }); }
-        }
-      }
-    }
-  };
-  vm.createContext(ctx);
-  vm.runInContext(scriptBody(html), ctx, { filename: 'walk_in_page.js' });
-  return { dom, calls, storage: store, text: () => screenText(dom.fixed.app) };
-}
-
-// A page served WITH a snapshot in it.
-reset();
-sandbox.writeWalkInDayStore({
-  schema: 1, dateKey: TODAY, builtAt: '8:40 AM', builtAtMs: 1,
-  members: [{ name: NASTY, key: 'nasty' }],
-  days: { Narberth: dayFor('Narberth', ['Ada Cole', NASTY]) }
-});
-const page = sandbox.buildWalkInHtml({
-  location: 'Narberth', pinRequired: false, locations: ['Narberth'],
-  rosterUrl: 'https://example.org/exec'
-});
-
-// The snapshot rides inside a template literal, so it is the same hazard the
-// check-in page's inlined lists are: a name carrying the two characters that
-// end a script tag would end the page mid-sentence.
-ok('the page still has exactly one closing script tag',
-  page.substring(page.indexOf('<script>')).split('</script>').length - 1 === 1);
-const literal = /var OPTS = JSON\.parse\(("(?:[^"\\]|\\.)*")\)/.exec(page);
-ok('the options and the snapshot are one string literal', !!literal);
-if (literal) {
-  const parsed = JSON.parse(JSON.parse(literal[1]));
-  ok('the literal parses back to the same snapshot',
-    parsed.boot.days.Narberth.people[1].name === NASTY);
-  ok('and carries the date the SERVER is on, not the tablet\'s idea of it',
-    parsed.todayKey === TODAY);
-}
-
-const warm = bootPage(page);
-ok('the names are on screen on the first frame',
-  warm.text().indexOf('Ada Cole') !== -1);
-// THE ASSERTION THIS FILE EXISTS FOR: nothing has answered yet.
-ok('and no server call has been answered to put them there',
-  warm.calls.length === 1 && warm.calls[0].fn === 'walkInDay');
-ok('nothing on that first frame says "Reading..."',
-  warm.dom.fixed.status.className.indexOf('show') === -1 &&
-  warm.text().indexOf('Reading today') === -1);
-ok('the footer says which list is on screen',
-  warm.text().indexOf('stored at 8:40 AM') !== -1);
-
-// The background answer lands and replaces it, silently.
-warm.calls[0].ok({ ok: true, day: liveDay('Narberth', ['Ada Cole', 'Cy Neale']) });
-ok('the fresh day replaces the stored one', warm.text().indexOf('Cy Neale') !== -1);
-ok('and the footer stops saying it is showing a stored list',
-  warm.text().indexOf('stored at') === -1 && warm.text().indexOf('Read at 9:00 AM') !== -1);
-ok('and the tablet keeps it for its own next boot',
-  !!warm.storage['walkInDay:Narberth'] &&
-  JSON.parse(warm.storage['walkInDay:Narberth']).dateKey === TODAY);
-
-// ---------------------------------------------------------------------------
-// 6. A page served with NOTHING stored opens the way it always did — asking,
-//    and saying so. A silent blank page would be worse than a spinner.
-// ---------------------------------------------------------------------------
-const cold = bootPage(sandbox.buildWalkInHtml({
-  location: 'Narberth', pinRequired: false, locations: ['Narberth'],
-  rosterUrl: '', boot: null
-}));
-ok('with nothing stored the page says it is reading',
-  cold.dom.fixed.status.className.indexOf('show') !== -1 &&
-  screenText(cold.dom.fixed.status).indexOf('Reading today') !== -1);
-ok('and there are no names on it until the read answers',
-  cold.text().indexOf('Ada Cole') === -1);
-cold.calls[0].ok({ ok: true, day: liveDay('Narberth', ['Ada Cole']) });
-ok('and the names arrive when it does', cold.text().indexOf('Ada Cole') !== -1);
-
-// A SNAPSHOT FOR ANOTHER DAY IS NOT A SNAPSHOT. The server sends its own date
-// with the page precisely so the tablet can refuse this.
-const staleBoot = bootPage(sandbox.buildWalkInHtml({
-  location: 'Narberth', pinRequired: false, locations: ['Narberth'], rosterUrl: '',
-  boot: {
-    dateKey: YESTERDAY, builtAt: '8:40 AM', members: [],
-    days: { Narberth: dayFor('Narberth', ['Ada Cole'], YESTERDAY) }
-  }
-}));
-ok('yesterday\'s snapshot is not drawn',
-  staleBoot.text().indexOf('Ada Cole') === -1);
-ok('and the page falls back to asking',
-  staleBoot.dom.fixed.status.className.indexOf('show') !== -1);
-
-// ---------------------------------------------------------------------------
-// 7. A BACKGROUND ANSWER DOES NOT REDRAW UNDER A THUMB. Somebody who has
-//    tapped their name is looking at a screen of ticks; moving them while a
-//    finger is on the way to one is how the wrong thing gets recorded.
-// ---------------------------------------------------------------------------
-const midFlow = bootPage(page);
-ok('tapping a name opens the second screen', tap(midFlow.dom.fixed.app, 'Ada Cole') &&
-  midFlow.text().indexOf('Hello, Ada Cole') !== -1);
-midFlow.calls[0].ok({ ok: true, day: liveDay('Narberth', ['Ada Cole', 'Cy Neale']) });
-ok('the background answer does not take the screen away',
-  midFlow.text().indexOf('Hello, Ada Cole') !== -1);
-ok('and going back to the name list is where it lands',
-  tap(midFlow.dom.fixed.app, 'Not you?') && midFlow.text().indexOf('Cy Neale') !== -1);
 
 // ---------------------------------------------------------------------------
 // 8. THE SERVER SIDE OF THE SAME PROMISE. walkInDay() is the background call
