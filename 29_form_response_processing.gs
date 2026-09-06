@@ -341,6 +341,25 @@ function supersedeRegistrantRow(row, map, supersededAt) {
 }
 
 /**
+ * Is this row a superseded one?
+ *
+ * Superseded rows are BOOKKEEPING, not registrations: the person is on the
+ * list once, under the row their latest submission wrote, and the old row is
+ * only there because an earlier submission put it there. Shown to a person it
+ * reads as a second seat — a name twice on a door list, twice on a sign-in
+ * sheet, twice in a dropdown at the desk — so nothing anybody reads shows one.
+ * The counts never did (they have always asked for 'Active'); this is the same
+ * rule applied to the lists.
+ *
+ * One predicate rather than a repeated string comparison, so the door, the
+ * desk and the registrants tab cannot drift apart about what "superseded"
+ * means.
+ */
+function isSupersededRegistrantRow(row, map) {
+  return String(row[map['Program_Status']] || '').trim() === 'Superseded';
+}
+
+/**
  * Resolves what actually gets STORED in a registrant row's Lunch_Type
  * column: the day's real Hot/Cold designation (from Lunch_Schedule, via
  * registryEntry's own date+location) for anyone who wants lunch, 'No Lunch'

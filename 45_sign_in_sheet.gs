@@ -574,6 +574,10 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     if (!d || formatDateKey(d) !== dateKey) return;
     if (String(row[map['Location']] || '').trim() !== location) return;
     const status = String(row[map['Program_Status']] || '').trim();
+    // Superseded rows are left out even of the everyone page: the person is
+    // already on it under the row their latest submission wrote, and a name
+    // printed twice at the door is read as two arrivals.
+    if (isSupersededRegistrantRow(row, map)) return;
     if (!includeEveryone && status !== 'Active') return;
 
     const program = String(row[map['Event']] || '').trim();

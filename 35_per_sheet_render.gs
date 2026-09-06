@@ -6,7 +6,8 @@ function renderRegistrantsSheet(force, allRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const headers = HEADERS.All_Registrants;
-  const rows = allRows || getSectionedRows(sheet, headers, 'Event_ID');
+  const rows = dropSupersededRegistrantRows(
+    allRows || getSectionedRows(sheet, headers, 'Event_ID'), headers);
   backfillRegistrantEventTimes(ss, headers, rows);
   // Same derived pair as the session table, keyed off this row's own program
   // and day — see 69_generated_file_links.gs.
@@ -19,6 +20,33 @@ function renderRegistrantsSheet(force, allRows) {
     force,
     afterWrite: applyRegistrantsFormatting
   });
+}
+
+/**
+ * Every row except the superseded ones, which this tab no longer carries.
+ *
+ * A resubmission still SUPERSEDES the row it replaces rather than overwriting
+ * it (see supersedeRegistrantRow()) — that is what gives the seat back and
+ * what keeps a later submission finding the current row instead of piling up
+ * duplicates. What changed is that the marked row is no longer written back
+ * out: it is a note about something that happened, and on a tab where every
+ * other row is a person expected at a session it reads as a second seat.
+ *
+ * Done at the RENDER rather than at each of the fifteen callers, because every
+ * one of them ends here and because the tab is what every other reader in the
+ * project reads (the door, the desk, the dashboards, the leader sheets) — one
+ * filter, and none of them can see one again.
+ *
+ * A dropped row costs nothing on the next sync: the identity index is keyed on
+ * the row the newest submission wrote, so the same response supersedes the
+ * same row again and the same row is dropped again. Rows that were superseded
+ * by hand rather than by a resubmission are the same case — the person is on
+ * the list under another row, or they are not on it at all.
+ */
+function dropSupersededRegistrantRows(rows, headers) {
+  const map = getIndexMap(headers || HEADERS.All_Registrants);
+  if (map['Program_Status'] === undefined) return rows || [];
+  return (rows || []).filter(row => !isSupersededRegistrantRow(row, map));
 }
 
 /**

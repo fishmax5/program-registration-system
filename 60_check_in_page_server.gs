@@ -955,6 +955,8 @@ function readCheckInRoster(location, sessionValue) {
   getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
     const name = String(row[map['Name']] || '').trim();
     if (!name) return;
+    // Their earlier submission, not a second person on the roster.
+    if (isSupersededRegistrantRow(row, map)) return;
     if (wantedLocation && String(row[map['Location']] || '').trim() !== wantedLocation) return;
     if (selection.title &&
       quickMarkTitleKey(row[map['Event']]) !== quickMarkTitleKey(selection.title)) return;

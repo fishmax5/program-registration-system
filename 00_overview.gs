@@ -484,10 +484,16 @@
  *      link — see setAllowResponseEdits(true) above) patches that one row
  *      in place. A DIFFERENT Party_ID for the same identity — a genuinely
  *      new submission — marks the old row Program_Status/Lunch_Status =
- *      'Superseded' (kept, not deleted, with a note in Admin_Notes) and
- *      inserts the new row as the live truth. 'Superseded' rows are
- *      excluded from every active/waitlist count automatically, the same
- *      way 'Cancelled' already was.
+ *      'Superseded' (with a note in Admin_Notes, which is what gives the
+ *      seat back and what keeps the NEXT submission finding one current
+ *      row) and inserts the new row as the live truth. 'Superseded' rows
+ *      were excluded from every active/waitlist count from the start, the
+ *      same way 'Cancelled' was; they are now left off the tab itself as
+ *      well — dropSupersededRegistrantRows() in 35_per_sheet_render.gs
+ *      filters them out of every write of All_Registrants, so no list
+ *      anybody reads (the door, the desk, the sign-in sheet, the leader
+ *      sheets) shows one person twice. The mark is unchanged; only what is
+ *      written back out is.
  *    - CANCELLATION HAS THREE DOORS AND ONE WRITER (section 67). Setting
  *      Program_Status = 'Cancelled' has always been how a seat comes back,
  *      and for a long time the only way to say it was to type it into the

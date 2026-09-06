@@ -395,6 +395,11 @@ function buildQuickMarkIndex() {
   registrantRows.forEach(row => {
     const rowName = String(row[map['Name']] || '').trim();
     if (!rowName) return;
+    // A superseded row is the same person's earlier submission — never a
+    // second name in the dropdown. The tab no longer keeps them (see
+    // dropSupersededRegistrantRows()); this covers a list built mid-sync,
+    // before the render that drops them has run.
+    if (isSupersededRegistrantRow(row, map)) return;
     const location = String(row[map['Location']] || '').trim();
     const title = String(row[map['Event']] || '').trim();
     const d = coerceDate(row[map['Event_Date']]);

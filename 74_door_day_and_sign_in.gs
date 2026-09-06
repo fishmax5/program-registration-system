@@ -190,6 +190,8 @@ function readWalkInDay(location, dateKeyOverride) {
       if (!d || formatDateKey(d) !== dateKey) return;
       const name = String(row[map['Name']] || '').trim();
       if (!name) return;
+      // Their earlier submission, not a second person at the door.
+      if (isSupersededRegistrantRow(row, map)) return;
       const key = normalizeNameKey(name);
       let person = peopleByKey[key];
       if (!person) {
