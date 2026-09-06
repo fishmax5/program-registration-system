@@ -29,13 +29,20 @@
 // write because a roll of PEOPLE has an answer that is safe by default; a
 // registration is a record of something that happened, and it does not.
 //
-// WHAT COUNTS AS ONE PERSON. Same session (Event_ID), and the same name once
-// the spelling is normalized: case and spacing (normalizeNameKey), the
-// correction map an earlier merge left behind (canonicalMemberName), and the
-// PARENTHETICAL — "Bob (Robert) Smith", 'Robert "Bob" Smith' and "Bob Smith"
-// are all filed under the same person, which is exactly what parseMemberName()
-// is for (section 77). Person_Type is part of the key: a registrant and their
-// guest are two people who share a session and often a surname.
+// WHAT COUNTS AS ONE PERSON, and it is deliberately generous — see
+// duplicateRegistrationKey() for why a review can afford to be. The same
+// SESSION (date + building + canonical title, not Event_ID: an appointment day
+// is one calendar event per slot and a [Shared] program one per building, so a
+// form row and a door row on one class carry two ids), the same kind of person
+// (Person_Type, with a blank read as Registrant because that is what the door
+// writes — a registrant and their guest are still two people who share a
+// session and often a surname), and the same name once the spelling is worn
+// down: case and spacing (normalizeNameKey), the correction map an earlier
+// merge left behind (canonicalMemberName), the PARENTHETICAL — "Bob (Robert)
+// Smith", 'Robert "Bob" Smith' and "Bob Smith" are one man, which is what
+// parseMemberName() is for (section 77) — and then the accents, the
+// punctuation, the suffix, "Smith, Bob", and the middle name or initial that
+// one form asks for and another does not.
 //
 // WHAT IS LEFT ALONE. A CANCELLED or superseded row is never grouped with a
 // live one. "They cancelled and then signed up again" is the history the
@@ -110,19 +117,104 @@ function showDuplicateRegistrationsDialog() {
  * The identity a duplicate is judged on: one session, one person, one kind of
  * person. Returns '' for a row that cannot be judged at all.
  *
- * The name goes through canonicalMemberName() FIRST (so a correction somebody
- * already made is applied) and parseMemberName() second (so the parenthetical
- * or the quoted nickname is lifted off rather than making a second person).
+ * DELIBERATELY LOOSER THAN AN EXACT MATCH ON THREE CELLS, because this is a
+ * REVIEW: a group somebody unticks costs a glance, and a duplicate this never
+ * offers costs a seat, a meal and a split set of marks that nobody finds. The
+ * first version keyed on Event_ID, the raw Person_Type and the normalized
+ * spelling, and missed the three duplicates that actually turn up:
+ *
+ *   • THE SESSION, not the calendar event. A person who registered on the form
+ *     and was then signed in at the door is two rows on one class — and often
+ *     two Event_IDs, because an appointment day is typed as one event per slot
+ *     and a [Shared] program as one per building. Judged on date + location +
+ *     canonical title (duplicateRegistrationSessionKey), those two rows are
+ *     one session again. Event_ID is still the fallback for a row that has no
+ *     date to be placed by.
+ *   • A BLANK Person_Type is a registrant. The door writes rows that leave it
+ *     empty; the import fills it in. A guest still never groups with the
+ *     person who brought them.
+ *   • THE SPELLING, further than the nickname. duplicateRegistrationNameKey()
+ *     also takes the accents off, drops the punctuation and the suffix, reads
+ *     "Smith, Bob" as "Bob Smith", and keys on the FIRST and LAST name only —
+ *     so a middle name or an initial typed on one row and not the other is one
+ *     person, not two.
  */
 function duplicateRegistrationKey(row, map) {
-  const eventId = String(row[map['Event_ID']] || '').trim();
-  const rawName = String(row[map['Name']] || '').trim();
-  if (!eventId || !rawName) return '';
-  const parsed = parseMemberName(canonicalMemberName(rawName));
-  const nameKey = normalizeNameKey(parsed.name || rawName);
-  if (!nameKey) return '';
-  const personType = normalizeNameKey(row[map['Person_Type']]);
-  return `${eventId}|${nameKey}|${personType}`;
+  const sessionKey = duplicateRegistrationSessionKey(row, map);
+  const nameKey = duplicateRegistrationNameKey(row[map['Name']]);
+  if (!sessionKey || !nameKey) return '';
+  return `${sessionKey}|${nameKey}|${duplicateRegistrationPersonType(row[map['Person_Type']])}`;
+}
+
+/**
+ * Which SESSION a row belongs to, for grouping purposes: the date, the
+ * building and the canonical program title, which is the unit a person thinks
+ * in and the unit a capacity is set on. Falls back to the Event_ID where the
+ * row carries no date — better a narrow key than none.
+ *
+ * quickMarkTitleKey() rather than the raw title, for the reason the desk's
+ * index uses it: a lunch-only row whose dish was retyped is still the same
+ * sitting.
+ */
+function duplicateRegistrationSessionKey(row, map) {
+  const date = coerceDate(row[map['Event_Date']]);
+  const title = quickMarkTitleKey(row[map['Event']]);
+  if (date && title) {
+    const location = String(row[map['Location']] || '').trim().toLowerCase();
+    return `s:${formatDateKey(date)}|${location}|${title.toLowerCase()}`;
+  }
+  return String(row[map['Event_ID']] || '').trim();
+}
+
+/** A blank Person_Type is a registrant — the door leaves it empty, the import fills it in. */
+function duplicateRegistrationPersonType(value) {
+  const type = normalizeNameKey(value);
+  return type || 'registrant';
+}
+
+/** Suffixes that are a courtesy and never a difference between two people. */
+const DUPLICATE_REGISTRATIONS_NAME_SUFFIXES = ['jr', 'sr', 'ii', 'iii', 'iv', 'md', 'phd', 'esq'];
+
+/**
+ * The spelling reduced to the person: canonicalMemberName() first (so a
+ * correction somebody already made is applied), parseMemberName() second (so
+ * the parenthetical or the quoted nickname is lifted off), then the wear a
+ * name picks up between one keyboard and another.
+ *
+ * FIRST AND LAST ONLY. "Robert J. Smith", "Robert James Smith" and "Robert
+ * Smith" are one man on a roster of a few hundred people, and the middle name
+ * is exactly the part one form asks for and another does not. It is also the
+ * one loosening here that can put two people in a group — a family with a
+ * shared first and last name and different middle ones — which is why the
+ * dialog lists every spelling it found and merges nothing on its own.
+ */
+function duplicateRegistrationNameKey(rawName) {
+  const raw = String(rawName || '').trim();
+  if (!raw) return '';
+  const parsed = parseMemberName(canonicalMemberName(raw));
+  let text = String(parsed.name || raw);
+  // Accents off, so Núñez and Nunez are one surname.
+  if (text.normalize) text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // "Smith, Bob" is how a roll exports and how nobody types a form.
+  const comma = text.indexOf(',');
+  if (comma > 0) text = `${text.slice(comma + 1)} ${text.slice(0, comma)}`;
+  // The apostrophe is DELETED and the rest turned into a space: O'Brien is one
+  // surname and splitting it would key this person on "Brien".
+  const parts = normalizeNameKey(text.replace(/['’`]/g, '').replace(/[.\-]/g, ' '))
+    .split(' ')
+    .filter(part => part && DUPLICATE_REGISTRATIONS_NAME_SUFFIXES.indexOf(part) === -1);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1]}`;
+}
+
+/**
+ * The key the IMPORT matches an existing row on (section 28), which is a
+ * different and stricter thing than the key this file groups duplicates by.
+ * Used to decide whether a dropped row needs a tombstone.
+ */
+function registrantImportKey(row, map) {
+  return registrantTombstoneKey(row[map['Event_ID']], row[map['Name']], row[map['Person_Type']]);
 }
 
 /** True for a row whose registration has already ended — see the banner. */
@@ -330,11 +422,19 @@ function collapseDuplicateRegistrationGroupsInternal(wanted) {
       mergeRegistrantRow(kept, row, map);
       dropped.push(row);
       const goneName = String(row[map['Name']] || '').trim();
-      // ONLY WHERE THE SPELLING DIFFERS — see the banner. Same spelling, same
-      // import key: nothing would re-create the row, and a tombstone on that
-      // key would suppress the row that was kept.
-      if (goneName && normalizeNameKey(goneName) !== normalizeNameKey(keptName)) {
+      // ONLY WHERE THE IMPORT WOULD WRITE THE ROW BACK — judged on the key the
+      // import itself matches on (Event_ID | spelling | Person_Type), not on
+      // the looser key this file groups by. Same import key as the row that
+      // stayed: nothing re-creates it, and a tombstone on that key would
+      // suppress the row that was KEPT. A different one — a second spelling,
+      // and now also a second Event_ID, since a group can span two calendar
+      // events for one session — is a row the next sync brings straight back.
+      if (registrantImportKey(row, map) !== registrantImportKey(kept, map)) {
         droppedNeedingTombstone.push(row);
+      }
+      // The rename is the durable half, and it is about SPELLING alone: two
+      // rows spelled the same on two Event_IDs need no correction remembered.
+      if (goneName && normalizeNameKey(goneName) !== normalizeNameKey(keptName)) {
         renames.push({ absorbed: goneName, kept: keptName });
       }
     });

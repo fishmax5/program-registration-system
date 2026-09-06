@@ -24,6 +24,8 @@ vm.runInContext(src + `
 ;this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.duplicateRegistrationKey = duplicateRegistrationKey;
+this.duplicateRegistrationNameKey = duplicateRegistrationNameKey;
+this.registrantImportKey = registrantImportKey;
 this.isDeadRegistrationRow = isDeadRegistrationRow;
 this.mergeRegistrantRow = mergeRegistrantRow;
 this.pickSurvivingRegistrantRow = pickSurvivingRegistrantRow;
@@ -65,6 +67,49 @@ check('two sessions are never one registration',
 check('a guest is not their registrant',
   keyOf({ Event_ID: 'e1', Name: 'Bob Smith', Person_Type: 'Guest' }) ===
   keyOf({ Event_ID: 'e1', Name: 'Bob Smith', Person_Type: 'Registrant' }), false);
+// ---------------------------------------------------------------------------
+// AND WHO IS THE SAME PERSON WHEN THE TWO ROWS WERE MADE DIFFERENT WAYS. Every
+// check below is a duplicate the first version of this file did not find.
+// ---------------------------------------------------------------------------
+const day = new Date(2026, 8, 15);
+const onForm = { Event_ID: 'e1', Event: 'Chair Yoga', Location: 'Main', Event_Date: day, Name: 'Bob Smith', Person_Type: 'Registrant' };
+// THE ONE THAT MATTERS MOST: an appointment day is one calendar event per
+// slot and a [Shared] program one per building, so the form row and the row
+// the desk wrote at the door sit on two Event_IDs and one class.
+check('one session typed as two calendar events is still one session',
+  sandbox.duplicateRegistrationKey(rowWith(onForm), map) ===
+  sandbox.duplicateRegistrationKey(rowWith(Object.assign({}, onForm, { Event_ID: 'e2' })), map), true);
+check('...but a different date is a different session',
+  sandbox.duplicateRegistrationKey(rowWith(onForm), map) ===
+  sandbox.duplicateRegistrationKey(rowWith(Object.assign({}, onForm, { Event_Date: new Date(2026, 8, 22) })), map), false);
+check('...and so is the same class at the other building',
+  sandbox.duplicateRegistrationKey(rowWith(onForm), map) ===
+  sandbox.duplicateRegistrationKey(rowWith(Object.assign({}, onForm, { Location: 'Annex' })), map), false);
+// The door leaves Person_Type empty; the import fills it in.
+check('a blank Person_Type is a registrant',
+  sandbox.duplicateRegistrationKey(rowWith(onForm), map) ===
+  sandbox.duplicateRegistrationKey(rowWith(Object.assign({}, onForm, { Person_Type: '' })), map), true);
+
+const nameKey = sandbox.duplicateRegistrationNameKey;
+check('a middle initial is not a second person', nameKey('Robert J. Smith'), nameKey('Robert Smith'));
+check('nor is a middle name', nameKey('Robert James Smith'), nameKey('Robert Smith'));
+check('nor a suffix', nameKey('Robert Smith Jr.'), nameKey('Robert Smith'));
+check('nor the accent somebody could not type', nameKey('Ana N\u00fa\u00f1ez'), nameKey('Ana Nunez'));
+check('nor an apostrophe', nameKey("Mary O'Brien"), nameKey('Mary OBrien'));
+check('a roll export reads as a name', nameKey('Smith, Bob'), nameKey('Bob Smith'));
+check('two surnames are still two people', nameKey('Bob Smith') === nameKey('Bob Jones'), false);
+check('and one name is left as it is', nameKey('Cher'), 'cher');
+
+// THE TOMBSTONE RULE, now that a group can span two Event_IDs: a dropped row
+// the import can still write back must be remembered, and one it cannot must
+// not be — a tombstone on the surviving row's own key would suppress it.
+check('a dropped row on another calendar event has a different import key',
+  sandbox.registrantImportKey(rowWith(onForm), map) ===
+  sandbox.registrantImportKey(rowWith(Object.assign({}, onForm, { Event_ID: 'e2' })), map), false);
+check('...and one spelled and filed identically has the same one',
+  sandbox.registrantImportKey(rowWith(onForm), map) ===
+  sandbox.registrantImportKey(rowWith(Object.assign({}, onForm, { Attended: true })), map), true);
+
 check('a row with no session cannot be judged at all', keyOf({ Name: 'Bob Smith' }), '');
 check('nor can a row with no name', keyOf({ Event_ID: 'e1' }), '');
 
