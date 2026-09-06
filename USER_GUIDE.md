@@ -1506,6 +1506,36 @@ never signed up is what the sign-in page above is for.
 > a session opens without reading a year of registrations. **Refresh list**
 > re-reads the sheet when you want to be sure.
 
+#### Duplicate registrations
+
+Somebody registers on the form, then arrives and can't be found in the list, so
+the desk signs them in as a walk-in. Now there are **two rows for one person on
+one session** — two seats against the capacity, two meals in the catering
+count, and the attendance tick on whichever row got clicked.
+
+**🗓️ Calendar & Form Manager ▸ 👩‍🏫 Rosters & Sharing ▸ 🔎 Review Duplicate
+Registrations…** finds them and shows you each one before anything happens:
+the session, both spellings of the name, and a line per row saying where it
+came from and what is on it. Everything is ticked to begin with; untick
+anything that is really two different people who share a name.
+
+What collapsing does:
+
+* keeps **one** row — the one that came from a form response, where there is one;
+* moves every tick onto it (attended, lunch served, contacted, confirmed);
+* takes the **highest** meal count of the group, never the total — two rows are
+  two records of one person's lunch, not two lunches;
+* joins the notes from both rows rather than choosing between them;
+* keeps the more active status, so a stale waitlist row can't take a seat back
+  off somebody who has one.
+
+Names spelled differently — "Bob Smith" and "Bob (Robert) Smith" — are treated
+as the same person, and after a merge the spelling that went away is filed
+under the one that stayed, so the next sync doesn't write the extra row back.
+
+**Cancelled rows are never listed.** Somebody who cancelled and then signed up
+again has two rows on purpose, and that is history worth keeping.
+
 #### Registering somebody at the desk or over the phone
 
 Somebody rings up, or stops at the front desk, and asks to be put down for
@@ -2026,10 +2056,17 @@ standing that is true of it: **how it runs**, and **what it sends**.
 
 | Recomputed | Yours — how it runs | Yours — what it sends |
 |---|---|---|
-| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup` | `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders`, `Confirm_On_Booking` |
+| `Type_Tag`, `Sessions_Tracked`, `Next_Date`, `Last_Date` | `Typical_Attendance`, `Usual_Capacity`, `Room_Or_Setup` | `Add_Guest_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders`, `Confirm_On_Booking` |
 
 ...and one `Staff_Notes` at the end for anything else. "Needs the big room."
 "Usually 8 even though it's capped at 12." "Don't email in August."
+
+**The tab is grouped by what kind of program each row is about** — monthly
+sign-ups, a whole series on one form, clubs, appointments, drop-ins, and a last
+group for programs the calendar has stopped mentioning (whose settings are kept
+for when they come back). The grey headings are not rows: nothing reads them,
+and you can't type in them. They are redrawn on every sync, so a program that
+changes kind moves to its new group by itself.
 
 > **This used to be two tabs**, `Program_Options` and
 > `Registrant_Notifications`. They had one row per program per location each,
@@ -2073,7 +2110,7 @@ morning of; that is four ticks, not a choice between them.
 
 | Tick | What it does |
 |---|---|
-| `Add_To_Calendar` | Puts each registrant on the real calendar event's guest list, so Google's own reminders and any change to the event reach them |
+| `Add_Guest_To_Calendar` | Adds each registrant **as a guest** on the real calendar event, so Google's own reminders and any change to the event reach them. It does *not* decide whether the event is on the calendar — that is the calendar's own, and unticking this only means the people signed up are not on the guest list. (It was called `Add_To_Calendar`; a workbook on the old header keeps its ticks.) |
 | `Week_Before` | An email 7 days before the session |
 | `Day_Before` | An email 1 day before |
 | `Morning_Of` | An email on the day itself |
@@ -2089,7 +2126,7 @@ sync reads whatever the boxes say.
 These replace the old `Notify_Mode` dropdown and `Reminder_Days` cell.
 **Your existing settings are carried across automatically; a
 program that was set to "Calendar invite + reminders, 7 and 1" comes back with
-`Add_To_Calendar`, `Week_Before` and `Day_Before` ticked.**
+`Add_Guest_To_Calendar`, `Week_Before` and `Day_Before` ticked.**
 
 Config's **📧 Calendar Invitations** switch still wins over every row: set to
 "Do not invite", nobody joins a guest list whatever is ticked here.
@@ -2676,6 +2713,7 @@ Everything else is grouped by the job it belongs to.
 | **Share a Sign-Up Sheet with a Program Leader…** | Pick a program at a location; get a small live spreadsheet holding just that roster, shared with its leader — see [Program leader sign-up sheets](#program-leader-sign-up-sheets) |
 | **Refresh Program Leader Sheets Now** | Reads every shared sheet's marks back in and sends the current rosters out again, instead of waiting for the next hourly sync |
 | **Send Roster Change Alerts Now** | Emails every leader who asked for them whatever has moved on their rosters since the last check — see [Roster change alerts](#roster-change-alerts) |
+| **🔎 Review Duplicate Registrations…** | Lists every person who has more than one row on the same session — the usual cause is registering on the form and then being signed in at the door — and collapses the ones you tick into a single row, keeping every mark, meal count and note. See [Duplicate registrations](#duplicate-registrations) |
 | **Personalized Assistance Schedule…** | Every upcoming appointment on a `[Personalized Assistance]` program, by day and program, in time order, with names, phone numbers, emails and answers. Select it and paste it into the email to the provider. See [Personalized assistance](#personalized-assistance-appointments) |
 | **Invite Registrants to Calendar Events…** | Tick the sessions to send calendar invitations for, now rather than at the next sync — see [Calendar Invitations](#-calendar-invitations) |
 

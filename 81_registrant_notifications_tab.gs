@@ -23,7 +23,8 @@
 // of a class that fills up. The channels are independent, so they are asked
 // independently: FOUR TICK BOXES AND A LIST, none of them exclusive.
 //
-//   Add_To_Calendar     the guest list on the real event.
+//   Add_Guest_To_Calendar  the registrant joins the real event's GUEST LIST.
+//                       Not whether the event is on the calendar — it always is.
 //   Week_Before         an email 7 days out.
 //   Day_Before          an email 1 day out.
 //   Morning_Of          an email on the day.
@@ -70,7 +71,7 @@ const NOTIFICATION_REMINDER_BOXES = [
 ];
 
 /** Every tick box on the tab, the calendar one included. */
-const NOTIFICATION_CHECKBOX_COLUMNS = ['Add_To_Calendar', 'Week_Before', 'Day_Before',
+const NOTIFICATION_CHECKBOX_COLUMNS = ['Add_Guest_To_Calendar', 'Week_Before', 'Day_Before',
   'Morning_Of', 'Confirm_On_Booking'];
 
 /** Suggestions for Other_Reminders. An open list: any day count is legal. */
@@ -106,6 +107,16 @@ const LEGACY_REGISTRANT_NOTIFICATION_COLUMNS = ['Add_To_Calendar', 'Week_Before'
   'Morning_Of', 'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
 
 /**
+ * Where a retired tab's column name lands on the merged tab.
+ *
+ * One entry, and it is the guest-list tick: Add_To_Calendar said something it
+ * did not mean (see LEGACY_HEADER_ALIASES) and is Add_Guest_To_Calendar now.
+ * The retired tab still holds the old spelling — nothing rewrites a tab that
+ * has been left in place on purpose — so the read translates it.
+ */
+const LEGACY_NOTIFICATION_COLUMN_RENAMES = { Add_To_Calendar: 'Add_Guest_To_Calendar' };
+
+/**
  * Has the one-time carry-over off the retired Notify_Mode / Reminder_Days
  * cells already run?
  *
@@ -131,7 +142,7 @@ const PROGRAM_SETTINGS_MERGE_PROP_KEY = 'REGISTRANT_NOTIFICATIONS_MERGED_V1';
 
 /** Writes a resolved policy back onto a row as ticks and a day list. */
 function writeNotificationTicks(row, map, policy) {
-  row[map['Add_To_Calendar']] = !!policy.invite;
+  row[map['Add_Guest_To_Calendar']] = !!policy.invite;
   row[map['Confirm_On_Booking']] = !!policy.confirmTime;
   const days = policy.remind ? (policy.days || []).slice() : [];
   const leftover = [];
@@ -165,7 +176,7 @@ function policyFromNotificationRow(row, map, isAssistance) {
   });
   days.sort((a, b) => b - a); // soonest LAST, so a session reads 7 then 1 then 0
   return {
-    invite: isTruthyCheckbox(row[map['Add_To_Calendar']]),
+    invite: isTruthyCheckbox(row[map['Add_Guest_To_Calendar']]),
     remind: days.length > 0,
     days: days,
     confirmTime: isTruthyCheckbox(row[map['Confirm_On_Booking']]),
@@ -344,7 +355,11 @@ function readLegacyRegistrantNotificationRows(ss) {
       if (key === '|') return;
       const values = {};
       wanted.forEach(h => {
-        values[h] = NOTIFICATION_CHECKBOX_COLUMNS.indexOf(h) === -1
+        // KEYED BY THE COLUMN THE VALUE IS GOING TO, not the one it came off:
+        // seedNotificationHalf() reads this by the merged tab's names, and the
+        // retired tab spells the guest-list tick Add_To_Calendar.
+        const target = LEGACY_NOTIFICATION_COLUMN_RENAMES[h] || h;
+        values[target] = NOTIFICATION_CHECKBOX_COLUMNS.indexOf(target) === -1
           ? row[header.indexOf(h)]
           : isTruthyCheckbox(row[header.indexOf(h)]);
       });

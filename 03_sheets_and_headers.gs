@@ -688,10 +688,19 @@ defineLazyGlobal_('HEADERS', () => ({
    * WHAT IT SENDS THE PEOPLE ON IT — the channels are NOT exclusive, which is
    * the whole reason these are tick boxes and not one dropdown:
    *
-   *   Add_To_Calendar    put each registrant on the real calendar event's
-   *                      guest list, so Google's own reminders and any change
-   *                      to the event reach them without this workbook doing
-   *                      anything further.
+   *   Add_Guest_To_Calendar
+   *                      ADD EACH REGISTRANT AS A GUEST on the real calendar
+   *                      event, so Google's own reminders and any change to
+   *                      the event reach them without this workbook doing
+   *                      anything further. It does NOT decide whether the
+   *                      event is on the calendar — the event is the
+   *                      calendar's, and this system never puts it there or
+   *                      takes it away. Unticked means the session still runs,
+   *                      still shows on the calendar, and the people signed up
+   *                      for it simply are not on its guest list. The column
+   *                      was called Add_To_Calendar, which read as though
+   *                      unticking it would hide the program; it is carried
+   *                      across by LEGACY_HEADER_ALIASES.
    *   Week_Before        an email 7 days before the session.
    *   Day_Before         an email 1 day before.
    *   Morning_Of         an email on the day itself.
@@ -732,7 +741,7 @@ defineLazyGlobal_('HEADERS', () => ({
   Program_Settings: [
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
     'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-    'Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
+    'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
     'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'
   ],
   /**
@@ -894,7 +903,7 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'U
  * say what it sends the people on it.
  */
 const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-  'Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
+  'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
   'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
 
 /**
@@ -1000,7 +1009,14 @@ const LEGACY_HEADER_ALIASES = {
   // banner. This column is DERIVED, rewritten from the registry on every
   // render, so the alias buys nothing but a first render that still shows the
   // link instead of a blank while the old header is on the sheet.
-  Registrant_Sheet_Link: ['Leader_Sheet_Link']
+  Registrant_Sheet_Link: ['Leader_Sheet_Link'],
+  // "Add_To_Calendar" was read by more than one person as "put this program ON
+  // the calendar" — i.e. as though unticking it would make the session
+  // disappear. It never meant that: the event belongs to the calendar and this
+  // workbook neither creates nor removes it. What the tick governs is the
+  // GUEST LIST, and the column says so now. The alias is what stops a rename
+  // costing every decision already ticked on Program_Settings.
+  Add_Guest_To_Calendar: ['Add_To_Calendar']
 };
 
 /** Headers for the small "Today at Each Location" section (A) inside All_Program_Sessions. */

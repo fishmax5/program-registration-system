@@ -63,6 +63,10 @@ const ADMIN_GATED_ACTIONS = [
   'Cancel In-Place Rebuild',
   'Cleanup Never-Policy Forms',
   'Delete Registrations',
+  // Folds two registrant rows into one and removes the extra. Every answer is
+  // carried onto the row that stays (section 83), but a row is still gone
+  // afterwards and nothing in this workbook puts it back.
+  'Collapse Duplicate Registrations',
   // Structural: tabs merged away, the whole workbook imported from scratch.
   'Merge Legacy Tabs',
   'Import Everything (First Run)',

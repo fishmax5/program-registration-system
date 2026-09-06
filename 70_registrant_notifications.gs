@@ -12,7 +12,7 @@
 // a member of staff having to remember to type it.
 //
 // SIX ANSWERS PER PROGRAM, all staff-owned and none of them exclusive —
-// Add_To_Calendar, Week_Before, Day_Before, Morning_Of, Other_Reminders and
+// Add_Guest_To_Calendar, Week_Before, Day_Before, Morning_Of, Other_Reminders and
 // Confirm_On_Booking. Section 9h owns the tab, what the columns mean, why a
 // new row is seeded rather than born blank, and the carry-over from the
 // Notify_Mode dropdown this replaced. This file owns what the answers DO.

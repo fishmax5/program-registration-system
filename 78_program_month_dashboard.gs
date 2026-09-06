@@ -76,8 +76,17 @@
  * Internal plumbing, hidden for the same reason the session table hides its
  * own: Form_ID is how these rows were grouped and Group_Key is what one row
  * IS, and neither is something anybody scans a tab for.
+ *
+ * ROOM IS HERE FOR A DIFFERENT REASON, and it is worth saying which: nobody is
+ * filling Room_Or_Setup in at the moment, so the column was a blank running
+ * the height of the tab — which on a front page reads as an answer ("no room
+ * booked") rather than as a question nobody has asked yet. It is HIDDEN, not
+ * removed: the cell is still written on every render (see
+ * programMonthSettingsCell()), so the day somebody starts keeping rooms on
+ * Program_Settings, taking this one name back off this list is the whole
+ * change.
  */
-const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key'];
+const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key', 'Room'];
 
 /**
  * The three program-wide flag columns this tab offers as tick boxes, in the

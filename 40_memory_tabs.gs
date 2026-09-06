@@ -178,7 +178,7 @@ function refreshMemberRoll(ss, registrantRows) {
 
   // Anyone already on the roll but absent from the current history stays,
   // with their computed columns left as they were.
-  const outRows = [];
+  const entries = [];
   const seen = {};
   Object.keys(people).sort((a, b) => people[a].name.localeCompare(people[b].name)).forEach(key => {
     const p = people[key];
@@ -354,7 +354,7 @@ function refreshProgramSettings(ss, sessionRows) {
     const d = coerceDate(row[regMap['Event_Date']]);
     if (!programs[key]) {
       programs[key] = { title, location, sessions: 0, next: null, last: null,
-        typeTag: '', caps: {}, isAssistance: false };
+        typeTag: '', caps: {}, isAssistance: false, isClub: false, noRegistration: false };
     }
     const p = programs[key];
     p.sessions++;
@@ -363,6 +363,17 @@ function refreshProgramSettings(ss, sessionRows) {
     // purpose: the default that matters is the one that states somebody's
     // appointment time, and it must not depend on which session was read last.
     if (isAssistanceColumnValue(row[regMap['Personalized_Assistance']])) p.isAssistance = true;
+    // The other two program flags, read the same way and for the same reason —
+    // they are what turn a Type_Tag into one of the six KINDS this tab is now
+    // grouped by (see programSettingsGroupOf()). A flag is ticked onto every
+    // session row of a program, so any one row saying so is the program saying
+    // so; a half-applied tick that has not reached every row yet must not put
+    // the program under two headings on consecutive renders.
+    if (regMap['Club'] !== undefined && isClubColumnValue(row[regMap['Club']])) p.isClub = true;
+    if (regMap['No_Registration'] !== undefined &&
+        isNoRegistrationColumnValue(row[regMap['No_Registration']])) {
+      p.noRegistration = true;
+    }
     if (d) {
       const dk = formatDateKey(d);
       if (dk >= todayKey && (!p.next || d < p.next)) p.next = d;
@@ -372,7 +383,7 @@ function refreshProgramSettings(ss, sessionRows) {
     if (cap > 0) p.caps[cap] = (p.caps[cap] || 0) + 1;
   });
 
-  const outRows = [];
+  const entries = [];
   const seen = {};
   let seeded = 0;
   let mergedTicks = 0;
@@ -398,7 +409,7 @@ function refreshProgramSettings(ss, sessionRows) {
       // Only SUGGEST a capacity where the calendar is consistent about it —
       // the staff column is theirs to set, so this never overwrites it.
       if (!row[map['Usual_Capacity']]) row[map['Usual_Capacity']] = pickMostFrequent(p.caps);
-      outRows.push(row);
+      entries.push({ row, group: programSettingsGroupOf(p) });
       seen[key] = true;
     });
   // A program the calendar has stopped mentioning keeps its row, its notes and
@@ -412,7 +423,11 @@ function refreshProgramSettings(ss, sessionRows) {
         mergedTicks++;
       }
     }
-    outRows.push(row);
+    // NO SESSIONS THIS PASS, SO NO KIND TO FILE IT UNDER. What the row's
+    // Type_Tag says is what the calendar said when it last ran, and a program
+    // between terms is exactly the case where that is out of date — so it goes
+    // under one honest heading rather than a guessed one.
+    entries.push({ row, group: PROGRAM_SETTINGS_INACTIVE_GROUP });
     seen[key] = true;
   });
   // AND A PROGRAM THAT ONLY THE RETIRED NOTIFICATIONS TAB HAD. The two tabs
@@ -427,9 +442,12 @@ function refreshProgramSettings(ss, sessionRows) {
     row[map['Location']] = legacy.location;
     seedNotificationHalf(row, map, key, legacyTicks, legacyModes, false, null);
     mergedTicks++;
-    outRows.push(row);
+    entries.push({ row, group: PROGRAM_SETTINGS_INACTIVE_GROUP });
     seen[key] = true;
   });
+
+  const grouped = groupProgramSettingsRows(entries, headers);
+  const outRows = grouped.rows;
 
   writeMemoryTab(sheet, headers, outRows, programSettingsTabOptions());
 
@@ -441,6 +459,10 @@ function refreshProgramSettings(ss, sessionRows) {
     checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
     openLists: { Other_Reminders: OTHER_REMINDER_SUGGESTIONS }
   });
+  // AFTER the validation, never before: applyMemoryTabValidation() puts a
+  // checkbox on every row in the band, headings included, and this is what
+  // takes them back off. See styleMemoryTabDividers().
+  styleMemoryTabDividers(sheet, headers, grouped.dividerOffsets);
   // The tab those settings are read from has just been rewritten; anything
   // asking again in this execution must see the rows as they now stand.
   invalidateNotificationPolicyCache();
@@ -450,7 +472,84 @@ function refreshProgramSettings(ss, sessionRows) {
   markLegacyNotifyModeMigrationDone(legacyModes, seeded);
   if (mergePending) markProgramSettingsMergeDone(ss, legacyTicks, mergedTicks);
 
-  log(`${SHEET_NAMES.PROGRAM_SETTINGS} refreshed: ${outRows.length} program(s).`);
+  log(`${SHEET_NAMES.PROGRAM_SETTINGS} refreshed: ${grouped.programCount} program(s) ` +
+    `in ${grouped.dividerOffsets.length} group(s).`);
+}
+
+/**
+ * THE TAB IS GROUPED BY WHAT KIND OF THING THE PROGRAM IS.
+ *
+ * One row per program, sorted by title, is the right shape for a list and the
+ * wrong one for a tab of DECISIONS: a drop-in with no form has no notification
+ * to make and no capacity to suggest, an appointment program's confirmation is
+ * the only place its time can be stated, and a club's roster carries across
+ * months. Alphabetical order interleaves all four, so somebody setting the
+ * reminders for the classes has to re-ask, on every row, which kind of thing
+ * they are looking at.
+ *
+ * The six kinds are section 13's (PROGRAM_FORM_TYPES), read off the same four
+ * controls everything else resolves them from — so a program is under the same
+ * heading here as the review dialog gives it, and there is no seventh
+ * vocabulary to keep in step. The seventh heading is not a kind: it is for the
+ * programs the calendar has stopped mentioning, whose rows are kept on purpose
+ * (see the loop above) and whose Type_Tag is the last thing that was true
+ * rather than something that is.
+ *
+ * The headings are REAL ROWS, so a person scrolling sees them; every reader of
+ * a memory tab skips them (isMemoryTabDividerValue), and a group with nothing
+ * in it is not drawn.
+ */
+const PROGRAM_SETTINGS_INACTIVE_GROUP = 'INACTIVE';
+
+/** The heading each group is drawn with, and the order the groups come in. */
+function programSettingsGroupLabel(group) {
+  if (group === PROGRAM_SETTINGS_INACTIVE_GROUP) {
+    return 'Not currently on the calendar (settings kept for when it comes back)';
+  }
+  const type = getProgramFormType(group);
+  return type ? type.label : group;
+}
+
+/** Which of section 13's six kinds a program's four controls resolve to. */
+function programSettingsGroupOf(program) {
+  const type = resolveProgramFormType({
+    typeTag: program.typeTag,
+    isClub: !!program.isClub,
+    noRegistration: !!program.noRegistration,
+    isAssistance: !!program.isAssistance
+  });
+  return type ? type.key : PROGRAM_SETTINGS_INACTIVE_GROUP;
+}
+
+/**
+ * Entries in, { rows, dividerOffsets, programCount } out — the rows with a
+ * heading in front of each non-empty group, and where those headings landed so
+ * they can be styled and un-checkboxed afterwards.
+ *
+ * Within a group the order is the one the tab has always had: by title.
+ */
+function groupProgramSettingsRows(entries, headers) {
+  const map = getIndexMap(headers);
+  const order = PROGRAM_FORM_TYPES.map(t => t.key).concat([PROGRAM_SETTINGS_INACTIVE_GROUP]);
+  const byGroup = {};
+  entries.forEach(entry => {
+    const group = order.indexOf(entry.group) === -1 ? PROGRAM_SETTINGS_INACTIVE_GROUP : entry.group;
+    if (!byGroup[group]) byGroup[group] = [];
+    byGroup[group].push(entry.row);
+  });
+
+  const rows = [];
+  const dividerOffsets = [];
+  let programCount = 0;
+  order.forEach(group => {
+    const groupRows = byGroup[group];
+    if (!groupRows || groupRows.length === 0) return;
+    groupRows.sort((a, b) => String(a[map['Event']] || '').localeCompare(String(b[map['Event']] || '')));
+    dividerOffsets.push(rows.length);
+    rows.push(memoryTabDividerRow(headers, `${programSettingsGroupLabel(group)} (${groupRows.length})`));
+    groupRows.forEach(row => { rows.push(row); programCount++; });
+  });
+  return { rows, dividerOffsets, programCount };
 }
 
 /**
@@ -629,11 +728,11 @@ function readSimpleTable(sheet, headers) {
   const numCols = projection ? lastCol : headers.length;
   let rows = getRowsPreservingFormulas(sheet, MEMORY_TAB_DATA_ROW, 1, lastRow - MEMORY_TAB_DATA_ROW + 1, numCols);
   if (projection) rows = rows.map(row => projection.map(src => (src === -1 ? '' : row[src])));
-  // Blank trailing rows are not members. Neither is Member_Roll's retired
-  // divider, which is a real row on the sheet so that a person can see where
-  // the working roll stops — and which every reader has to skip. See
-  // MEMBER_ROLL_RETIRED_DIVIDER.
-  return rows.filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
+  // Blank trailing rows are not members. Neither is a divider — Member_Roll's
+  // retired line, Program_Settings' kind headings — which is a real row on the
+  // sheet so a person can see where one half of the tab stops and the next
+  // begins, and which every reader has to skip. See isMemoryTabDividerValue().
+  return rows.filter(row => String(row[0] || '').trim() !== '' && !isMemoryTabDividerValue(row[0]));
 }
 
 /**
@@ -651,7 +750,58 @@ function readSimpleTableValues(sheet, headers) {
     `"${sheet.getName()}" row ${MEMORY_TAB_HEADER_ROW}`);
   return grid.slice(MEMORY_TAB_DATA_ROW - 1)
     .map(row => (projection ? projection.map(src => (src === -1 ? '' : row[src])) : row.slice(0, headers.length)))
-    .filter(row => String(row[0] || '').trim() !== '' && !isMemberRollDividerValue(row[0]));
+    .filter(row => String(row[0] || '').trim() !== '' && !isMemoryTabDividerValue(row[0]));
+}
+
+/**
+ * True for a row that is a HEADING rather than a record.
+ *
+ * Two tabs draw them now — Member_Roll's retired line and Program_Settings'
+ * one-per-kind groupings — and a third will want one, so the shape is a
+ * convention rather than a constant: a first cell that opens with three
+ * hyphens and a space. Nothing a person is called and no program title starts
+ * that way, and every reader of a memory tab filters on this, so a divider can
+ * never be mistaken for a row with a blank everything.
+ */
+function isMemoryTabDividerValue(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  if (!text) return false;
+  return text.indexOf('--- ') === 0 || isMemberRollDividerValue(text);
+}
+
+/**
+ * A divider row for `headers`, its words in the first column.
+ *
+ * Written through here rather than by hand so the marker stays one decision:
+ * see isMemoryTabDividerValue() for what makes it recognizable.
+ */
+function memoryTabDividerRow(headers, label) {
+  const row = new Array(headers.length).fill('');
+  row[0] = `--- ${String(label || '').trim()} ---`;
+  return row;
+}
+
+/**
+ * Greys and bolds every divider row on a freshly written memory tab, and takes
+ * the validation back off it: a heading with a checkbox in it invites somebody
+ * to tick a line that is not a program.
+ *
+ * `offsets` are 0-based positions within the data block.
+ */
+function styleMemoryTabDividers(sheet, headers, offsets) {
+  (offsets || []).forEach(offset => {
+    const row = MEMORY_TAB_DATA_ROW + offset;
+    if (row > sheet.getMaxRows()) return;
+    try {
+      const range = sheet.getRange(row, 1, 1, headers.length);
+      range.clearDataValidations();
+      range.setBackground(PALETTE.DISABLED)
+        .setFontWeight('bold')
+        .setFontColor(PALETTE.INK_MUTED);
+    } catch (err) {
+      log(`ℹ️ Could not style a "${sheet.getName()}" divider (${err}) — the tab is otherwise fine.`);
+    }
+  });
 }
 
 const MEMORY_TAB_BANNER_ROW = 1;

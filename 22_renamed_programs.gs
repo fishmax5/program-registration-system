@@ -516,7 +516,8 @@ function programSettingsTabOptions() {
   return {
     banner: '📋 Program Settings',
     bannerNote: 'Every program this workbook has ever run: how it runs, and what it sends the ' +
-      'people signed up for it. Tick as many channels as apply — they add up, and an unticked ' +
+      'people signed up for it. Grouped by what KIND of program it is, under grey headings ' +
+      'that are not rows. Tick as many channels as apply — they add up, and an unticked ' +
       'box means that message is not sent.',
     staffColumns: PROGRAM_SETTINGS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
@@ -576,6 +577,11 @@ function renameProgramSettingRows(ss, renames) {
     kept.push(row);
   });
 
+  // WITHOUT THE KIND HEADINGS, deliberately: a rename knows nothing about
+  // which sessions a program now has, and guessing a heading from a row's
+  // stale Type_Tag would file it under a kind it may no longer be. The rows
+  // are all here and all correct; refreshProgramSettings() draws the groupings
+  // back on the next sync. See groupProgramSettingsRows() (section 6c).
   writeMemoryTab(sheet, headers, kept, programSettingsTabOptions());
   // The tab section 9e reads its policies off has just been rewritten.
   invalidateNotificationPolicyCache();

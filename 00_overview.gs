@@ -281,8 +281,9 @@
  *      workbook, marked retired, for you to check against and delete.
  *
  *      What it sends: a TICK BOX PER CHANNEL, because the channels are
- *      not exclusive — Add_To_Calendar puts registrants on the real event's
- *      guest list; Week_Before, Day_Before and Morning_Of are emails this
+ *      not exclusive — Add_Guest_To_Calendar puts each registrant on the real
+ *      event's GUEST LIST (it does not decide whether the event is on the
+ *      calendar; that is the calendar's own); Week_Before, Day_Before and Morning_Of are emails this
  *      workbook sends 7, 1 and 0 days out; Other_Reminders adds any further
  *      day counts ("14, 3"); Confirm_On_Booking writes the moment somebody
  *      registers. A new program's row is born ticked the way its KIND is

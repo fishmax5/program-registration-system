@@ -169,6 +169,12 @@ function buildAppMenu(ui, includeAdmin) {
       // afternoon somebody has just pasted a list in and wants the number.
       .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', 'showMemberRollImportDialog')
       .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
+      // The same job one tab over, and deliberately NOT the same shape: a
+      // duplicate on the roll is a person listed twice and safe to fold, a
+      // duplicate REGISTRATION is a record of something that happened, so this
+      // one lists what it found and merges only what somebody ticks. See
+      // section 83.
+      .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', 'showDuplicateRegistrationsDialog')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride

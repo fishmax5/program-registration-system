@@ -46,6 +46,7 @@ this.writeNotificationTicks = writeNotificationTicks;
 this.getIndexMap = getIndexMap;
 this.PROGRAM_SETTINGS_STAFF_COLUMNS = PROGRAM_SETTINGS_STAFF_COLUMNS;
 this.LEGACY_REGISTRANT_NOTIFICATION_COLUMNS = LEGACY_REGISTRANT_NOTIFICATION_COLUMNS;
+this.LEGACY_NOTIFICATION_COLUMN_RENAMES = LEGACY_NOTIFICATION_COLUMN_RENAMES;
 this.SHEET_NAMES = SHEET_NAMES;
 this.LEGACY_SHEET_RENAMES = LEGACY_SHEET_RENAMES;
 this.LEGACY_PROGRAM_OPTIONS_SHEET_NAME = LEGACY_PROGRAM_OPTIONS_SHEET_NAME;
@@ -81,15 +82,19 @@ const readRow = (ticks, isAssistance) =>
 // ---------------------------------------------------------------------------
 // The columns exist, and every answer belongs to the staff.
 // ---------------------------------------------------------------------------
-['Add_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of', 'Other_Reminders',
+['Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of', 'Other_Reminders',
   'Confirm_On_Booking'].forEach(h => {
   checkTrue(`${h} is a Program_Settings column`, NOTIFY_HEADERS.indexOf(h) !== -1);
   // A refresh that overwrote one of these would wipe the setting every hour.
   checkTrue(`the refresh never overwrites ${h}`,
     sandbox.PROGRAM_SETTINGS_STAFF_COLUMNS.indexOf(h) !== -1);
   // ...and the merge has to be able to lift it off the retired tab.
+  // ...off whatever the retired tab called it: Add_Guest_To_Calendar is
+  // spelled Add_To_Calendar there, and the read translates it.
+  const legacyName = Object.keys(sandbox.LEGACY_NOTIFICATION_COLUMN_RENAMES)
+    .filter(k => sandbox.LEGACY_NOTIFICATION_COLUMN_RENAMES[k] === h)[0] || h;
   checkTrue(`${h} is carried off the retired notifications tab`,
-    sandbox.LEGACY_REGISTRANT_NOTIFICATION_COLUMNS.indexOf(h) !== -1);
+    sandbox.LEGACY_REGISTRANT_NOTIFICATION_COLUMNS.indexOf(legacyName) !== -1);
 });
 // The retired pair is gone from the tab it used to live on, so nothing reads
 // half the answer off a stale column.
@@ -126,14 +131,14 @@ checkTrue('the notifications tab is not carried across by a rename',
 // THE CHANNELS ADD UP. This is the whole reason the dropdown was replaced.
 // ---------------------------------------------------------------------------
 const everything = readRow({
-  Add_To_Calendar: true, Week_Before: true, Day_Before: true, Morning_Of: true,
+  Add_Guest_To_Calendar: true, Week_Before: true, Day_Before: true, Morning_Of: true,
   Other_Reminders: '14, 3', Confirm_On_Booking: true
 });
 check('every channel at once, soonest last',
   [everything.invite, everything.remind, everything.confirmTime, everything.days],
   [true, true, true, [14, 7, 3, 1, 0]]);
 
-const weekOnly = readRow({ Add_To_Calendar: true, Week_Before: true });
+const weekOnly = readRow({ Add_Guest_To_Calendar: true, Week_Before: true });
 check('a week out and the calendar, and nothing else',
   [weekOnly.invite, weekOnly.remind, weekOnly.confirmTime, weekOnly.days],
   [true, true, false, [7]]);
@@ -154,7 +159,7 @@ check('a day count already ticked is not sent twice', overlap.days, [2, 1]);
 
 // A tick box pasted in as text is still a tick.
 check('a pasted "TRUE" counts as ticked',
-  readRow({ Add_To_Calendar: 'TRUE' }).invite, true);
+  readRow({ Add_Guest_To_Calendar: 'TRUE' }).invite, true);
 
 // personalizeTime is a fact about the KIND of program, never a tick.
 check('an appointment row still states the person\'s own time',
@@ -287,7 +292,7 @@ const ticksFor = values => ({
 
 // 1. What somebody ticked on the retired tab wins outright.
 const fromTicks = seed(ticksFor({
-  Add_To_Calendar: true, Week_Before: true, Other_Reminders: '14', Confirm_On_Booking: false
+  Add_Guest_To_Calendar: true, Week_Before: true, Other_Reminders: '14', Confirm_On_Booking: false
 }), { 'chair yoga|narberth': { mode: M.NONE, reminderDays: '' } });
 check("the retired tab's own ticks beat the dropdown behind them",
   [fromTicks.from, fromTicks.policy.invite, fromTicks.policy.days],
@@ -297,7 +302,7 @@ check("the retired tab's own ticks beat the dropdown behind them",
 //    answer somebody gave, and re-seeding it from the kind's default would
 //    switch a silenced program back on.
 const silenced = seed(ticksFor({
-  Add_To_Calendar: false, Week_Before: false, Day_Before: false, Morning_Of: false,
+  Add_Guest_To_Calendar: false, Week_Before: false, Day_Before: false, Morning_Of: false,
   Other_Reminders: '', Confirm_On_Booking: false
 }), {});
 check('a program somebody silenced stays silenced',
@@ -325,14 +330,14 @@ check('...and an appointment program is written to as well as invited',
 //    how a note about a wheelchair ramp disappears.
 const priorRow = blankRow();
 priorRow[notifyMap['Staff_Notes']] = 'Big room, 20 chairs.';
-const joined = seed(ticksFor({ Add_To_Calendar: true, Staff_Notes: 'Do not email in August.' }),
+const joined = seed(ticksFor({ Add_Guest_To_Calendar: true, Staff_Notes: 'Do not email in August.' }),
   {}, false, priorRow);
 check("both tabs' notes survive the merge",
   joined.row[notifyMap['Staff_Notes']], 'Big room, 20 chairs.\nDo not email in August.');
 // The same note on both tabs is one note, not the same sentence twice. (The
 // caller has already copied the prior row's notes into the row by this point;
 // here the row is blank, so an identical note simply adds nothing.)
-const dedup = seed(ticksFor({ Add_To_Calendar: true, Staff_Notes: 'Big room, 20 chairs.' }),
+const dedup = seed(ticksFor({ Add_Guest_To_Calendar: true, Staff_Notes: 'Big room, 20 chairs.' }),
   {}, false, priorRow);
 check('...and the same note on both is not doubled',
   dedup.row[notifyMap['Staff_Notes']], '');
