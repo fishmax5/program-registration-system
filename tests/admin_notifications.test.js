@@ -239,11 +239,17 @@ check('and the rest of them', sandbox.getAllAdminNotificationEmails(),
 // throws and the whole Config tab fails to draw.
 const narrow = fakeConfigSheet(legacyCells, 26);
 sandbox.ensureSheetColumns(narrow, sandbox.configLastColumn());
-check('a rebuild widens the tab to fit the table', narrow.getMaxColumns(),
-  ADMIN.startCol + ADMIN.headers.length - 1);
+// Widened to the LAST column the layout claims, not to this table's own last
+// one: sections are appended past it as the workbook grows (the outbound-mail
+// pause is one), and pinning this to ADMIN would start failing the day one is.
+// What must stay true is that the table fits inside what the rebuild makes.
+check('a rebuild widens the tab to fit the layout', narrow.getMaxColumns(),
+  sandbox.configLastColumn());
+check('and the table fits inside it',
+  sandbox.configLastColumn() >= ADMIN.startCol + ADMIN.headers.length - 1, true);
 check('and asking again changes nothing',
   (sandbox.ensureSheetColumns(narrow, sandbox.configLastColumn()), narrow.getMaxColumns()),
-  ADMIN.startCol + ADMIN.headers.length - 1);
+  sandbox.configLastColumn());
 
 // A table somebody has filled in is the answer; the old cells are not consulted
 // behind it, or clearing a row would silently fall back to a year-old address.

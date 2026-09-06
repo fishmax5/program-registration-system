@@ -1094,9 +1094,9 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
   rules.push(...buildLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
-  writeProgramMonthNotes(sheet, map, built.notes, upcoming, past, result);
-  writeProgramMonthLinkCells(sheet, map, built.links, upcoming, past, result);
-  washMatchedProgramMonthLeaders(sheet, map, built.matched, upcoming, past, result);
+  writeProgramMonthNotes(sheet, map, built.notes, running, finished, result);
+  writeProgramMonthLinkCells(sheet, map, built.links, running, finished, result);
+  washMatchedProgramMonthLeaders(sheet, map, built.matched, running, finished, result);
 
   // EVERY column BUT THE FOUR A PERSON MAY TOUCH, because every other column
   // here is derived from the session rows and an edit to one would be

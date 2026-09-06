@@ -246,6 +246,31 @@ const MANUAL_ENTRY_CELL_TINT = PALETTE.ENTRY_TINT;
 const MANUAL_ENTRY_PREFIX = '✍️';
 
 const MANUAL_OVERRIDE_OPTIONS = ['Auto-Synced', 'Manually Edited', 'Manually Added'];
+
+/**
+ * THE FOURTH OPTION, AND THE ONLY ONE THAT IS AN INSTRUCTION.
+ *
+ * The other three describe a row's history: this one asks for the row to go.
+ * Removing a registrant used to mean the Delete Registrations dialog, which
+ * works by SESSION — the right shape for clearing a test run, and the wrong
+ * one for "this person was entered twice". Picking this in the column that is
+ * already on every row is the shape that fits one row.
+ *
+ * Nothing happens when it is picked. It is a mark, and the sweep that acts on
+ * it is a menu item (removeMarkedRegistrants(), section 83) — because deleting
+ * a row inside onEdit would delete it before the person who mis-clicked could
+ * read the toast, and because marking a handful and clearing them in one pass
+ * is how the job is actually done.
+ *
+ * It lives on the registrant-shaped tabs only (All_Registrants and the triage
+ * tab, which share applyRegistrantsFormatting()). Master_Lunch_Dashboard's
+ * Manual_Override keeps the plain three: there is no row to remove there.
+ */
+const REGISTRANT_REMOVE_OVERRIDE_OPTION = 'Remove This Row';
+
+/** Manual_Override's dropdown on the registrant tabs: the three states, plus the instruction. */
+const REGISTRANT_MANUAL_OVERRIDE_OPTIONS =
+  MANUAL_OVERRIDE_OPTIONS.concat([REGISTRANT_REMOVE_OVERRIDE_OPTION]);
 // 'Superseded' marks a row from an identity (Event_ID + Name + Person_Type)
 // that has since submitted again under a different Party_ID — see
 // buildRegistrantRow(). It's deliberately excluded from every active/

@@ -104,10 +104,24 @@
  *      replaced the single Admin Notification Email and Archive Copy
  *      Address cells) + Lunch Service by Location +
  *      Automation & Trigger Ownership (the kill switch and the trigger
- *      owner — see the multi-account note below). Unaffected by the
+ *      owner — see the multi-account note below) + Mail to Members &
+ *      Leaders (Pause_Outbound_Mail: set to "Yes" while repairing and
+ *      nothing leaves the office — no roster alerts, no reminders. Held
+ *      messages are DROPPED, not saved up, so releasing it never delivers
+ *      a pile of churn about registrations that only ever moved on paper.
+ *      The office's own digest and error mail are unaffected). Unaffected by the
  *      Upcoming/Past split (it's a settings tab, not a per-date log).
  *    - Deleted_Event_Triage     : same Upcoming/Past split + Event_Date
  *      first-column/month-tint treatment as All_Registrants.
+ *    - Metrics                  : one row per calendar MONTH, and the only
+ *      tab that is a record rather than a projection of the rows still on
+ *      the other tabs. A month is counted once and written down (on the 2nd
+ *      of the following month, or from Settings & Fixes -> "Update Metrics
+ *      Now"), because the registrant rows a month was counted from are
+ *      eventually archived and a year-over-year comparison outlives them.
+ *      The block above the monthly rows is that comparison: the last twelve
+ *      complete months against the twelve before them, plus the month
+ *      running against the same month a year ago. See section 83.
  *
  *  Notable behaviors:
  *    - All-day calendar events are skipped entirely.

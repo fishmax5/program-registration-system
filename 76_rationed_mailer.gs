@@ -45,6 +45,25 @@
 // quota — and rationing the message that reports the shortage is exactly
 // backwards. It is small, it is rare, and it is what the floors are for.
 //
+// --------------------------------------------------------------- THE PAUSE
+//
+// One switch on Config stops every message this file would put on the wire —
+// Pause_Outbound_Mail, read here and nowhere else, so there is exactly one
+// place in the project where "is anybody allowed to hear from us right now?"
+// is answered. It is checked after the caller's own duplicate ledger and
+// before anything is spent.
+//
+// A PAUSED MESSAGE IS DROPPED, NOT QUEUED: recordSent() runs for it, so the
+// caller's ledger advances and the roster snapshot moves on. That is
+// deliberate and it is the whole point — see the banner over
+// OUTBOUND_MAIL_PAUSE_OPTIONS in section 1 for the repair this was built for.
+// A pause that saved everything up would deliver a week of churn about
+// registrations that never really changed, on the day somebody switched it
+// off.
+//
+// notifyAdmin() is not affected, here as everywhere else: the office still
+// hears what the workbook did, including how many messages the pause held.
+//
 // ------------------------------------------------- AN ADDRESS THAT IS REFUSED
 //
 // When MailApp refuses an address it will refuse it the same way in ten
@@ -100,6 +119,18 @@ let __rationedMailQuota = null;
 let __rationedMailRefused = {};
 
 /**
+ * How many messages this execution dropped because outbound mail is paused,
+ * and whether the office has been told about it yet.
+ *
+ * Counted rather than merely flagged because "nobody heard from us for a week"
+ * has to be answerable afterwards, and told ONCE rather than per message: a
+ * paused sync can drop fifty, and fifty identical lines in the digest is not
+ * fifty times the information.
+ */
+let __rationedMailPausedCount = 0;
+let __rationedMailPauseReported = false;
+
+/**
  * How many more messages MailApp will accept today, as this execution
  * understands it: read once, then decremented by what actually goes out.
  *
@@ -130,6 +161,29 @@ function rationedMailRemainingQuota() {
 function resetRationedMailState() {
   __rationedMailQuota = null;
   __rationedMailRefused = {};
+  __rationedMailPausedCount = 0;
+  __rationedMailPauseReported = false;
+}
+
+/** How many messages this execution has dropped to the pause. For the tests and the log. */
+function rationedMailPausedCount() {
+  return __rationedMailPausedCount;
+}
+
+/**
+ * Is the switch on, and count this message against it.
+ *
+ * Wrapped rather than called inline so the read can never throw into the
+ * middle of a send: a Config tab that cannot be read is not a reason to hold
+ * mail — see DEFAULT_OUTBOUND_MAIL_PAUSED.
+ */
+function rationedMailIsPaused() {
+  try {
+    return isOutboundMailPaused();
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read the outbound-mail pause (${err}) \u2014 sending.`);
+    return false;
+  }
 }
 
 /**
@@ -181,6 +235,10 @@ function normalizeBccList(bcc) {
  *   'sent'        it went. `cost` is what it took off the quota.
  *   'duplicate'   alreadySent() said this one has already gone. Nothing spent.
  *   'held'        sending it would have crossed the caller's reserve.
+ *   'paused'      outbound mail is paused on the Config tab. Nothing spent,
+ *                 and the message is DROPPED: recordSent() is called, so the
+ *                 caller's ledger advances and nothing is delivered late when
+ *                 the pause is lifted.
  *   'suppressed'  this address was refused earlier in this run.
  *   'failed'      MailApp refused it, `error` says how. The address is
  *                 suppressed for the rest of the run.
@@ -203,6 +261,33 @@ function sendRationedEmail(request) {
 
   if (typeof req.alreadySent === 'function' && req.alreadySent()) {
     result.status = 'duplicate';
+    return result;
+  }
+
+  // ------------------------------------------------------- THE PAUSE
+  //
+  // After the duplicate check and before everything else: a message the
+  // caller's ledger has already accounted for is not a message this dropped.
+  //
+  // recordSent() IS CALLED, which is the whole design of this switch and the
+  // one line to read twice. The ledger advances and the roster snapshot moves
+  // on exactly as if the message had gone, so a pause DISCARDS what would
+  // have been said rather than saving it up — see the banner over
+  // OUTBOUND_MAIL_PAUSE_OPTIONS. Releasing the switch must not deliver a week
+  // of churn about registrations that were only ever repaired.
+  if (rationedMailIsPaused()) {
+    __rationedMailPausedCount++;
+    result.status = 'paused';
+    result.error = 'mail to members and leaders is paused on the Config tab';
+    log(`\u23f8\ufe0f Held (mail paused): "${req.subject || ''}" to ${to}.`);
+    if (!__rationedMailPauseReported) {
+      __rationedMailPauseReported = true;
+      noteForAdmin('Mail to members and leaders is paused',
+        `Nothing is being sent outside the office, and held messages are DROPPED rather than saved up. ` +
+        `Set Pause_Outbound_Mail back to "No" on the Config tab (${CONFIG_LAYOUT.OUTBOUND_MAIL.title}) ` +
+        `to resume. This run held at least one message; the log lists every one.`);
+    }
+    if (typeof req.recordSent === 'function') req.recordSent();
     return result;
   }
 

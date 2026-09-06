@@ -861,7 +861,7 @@ clickable "📝 Register for …" link. Leave it alone; the system keeps it curr
 
 ## The tabs
 
-Thirteen tabs is a lot to meet at once, so **the tab colours group them** — in
+Fifteen tabs is a lot to meet at once, so **the tab colours group them** — in
 the order they are worth looking at, left to right along the bottom of the
 window:
 
@@ -870,7 +870,7 @@ window:
 | 🟩 green | **Today** | All_Program_Sessions, Master_Lunch_Dashboard, All_Lunch_Registrants, All_Registrants | What a serving day is run from. These are the ones to open |
 | 🟦 blue | **Set up** | Lunch_Schedule, Config, Program_Questions | What you fill in ahead of time: the menu, the settings, the extra questions a form should ask |
 | 🟨 yellow | **Standing lists** | Member_Roll, Club_Members, Program_Settings, Program_Leaders, Assistance_Requests | Lists that outlive any one session — who the members are, who is in which club, who leads what, what each program sends its registrants, who is waiting for an appointment |
-| ⬜ grey | **Archive** | Deleted_Event_Triage | Where things go when they stop being current |
+| ⬜ grey | **Archive** | Deleted_Event_Triage, Metrics | Where things go when they stop being current — and, on Metrics, the record of how each month went once its rows are gone |
 
 **Which cells may I type in?** That is a question about *columns*, not tabs, so
 the colour doesn't try to answer it. The workbook answers it on the cells
@@ -2423,6 +2423,32 @@ Safety net. If a calendar event disappears but people had registered for it,
 their rows are moved here instead of being deleted, with a note. Follow up with
 those people, then clear the rows.
 
+### 12. Metrics
+One row per month, and a year-over-year summary above it.
+
+The top block compares the **last twelve complete months** against the twelve
+before them — sessions, registrations, participants, new people, attendance,
+seats filled, waitlisted, cancellations, club sessions, meals and lunch-only
+sign-ups — with an arrow saying which way each one moved. Underneath it is a
+second, smaller block: the month running against the same month last year.
+
+The twelve-month periods stop at the month just gone on purpose. Half of this
+month against a whole one would report a collapse in every column for the first
+few weeks of every month, so this month gets its own line instead.
+
+Below the summary is the record it is built from: one row per month, counted
+once and kept. **This is the only tab that keeps numbers after the rows behind
+them are gone.** Old registrations get archived, and a comparison computed from
+what is still on the tabs would show last year emptying out — so a month is
+counted while its rows are there and then written down. A month whose rows have
+since been archived is never recounted and never zeroed.
+
+It fills itself in on the 2nd of each month. To count the month running right
+now, use **Settings & Fixes → 📈 Update Metrics Now**.
+
+The **Notes** column is yours — "closed for renovations", "Thanksgiving week" —
+and it survives every recount.
+
 ---
 
 ## What registrants see
@@ -2738,6 +2764,7 @@ Everything else is grouped by the job it belongs to.
 |---|---|
 | **Sync Cal only** | Just the calendar half: reads the calendars, creates/updates forms, writes the registration links into event descriptions. Slower of the two |
 | **Sync Registrations only** | Just the forms half: pulls in new responses and recomputes every count. Use this when you know nothing on the calendar has changed |
+| **📈 Update Metrics Now** | Recounts every month still in the workbook and redraws the Metrics tab. It also fills itself in on the 2nd of each month |
 | **Show All Past Rows** | Un-hides collapsed old months — see [Old months](#old-months) |
 | **Resize All Sheets** | Tidies column widths only — safe any time |
 | **Write Queued Check-Ins Now** | Writes any marks the check-in page has queued straight to the registrations tab, instead of waiting for the trigger that does it every few minutes |

@@ -90,6 +90,11 @@ function styleConfigSheet(sheet) {
   const automationSection = CONFIG_LAYOUT.AUTOMATION;
   applyValueListValidationBounded(sheet, automationSection.startCol, AUTOMATION_ENABLED_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
+  // Same two-value dropdown, same reason: "paused", "off" and "hold" are not
+  // the same thing to isOutboundMailPaused(), and none of them stops anything.
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.OUTBOUND_MAIL.startCol,
+    OUTBOUND_MAIL_PAUSE_OPTIONS, CONFIG_DATA_START_ROW, 1);
+
   // Who is copied on what: a tick box per category, bounded to the rows the
   // table actually has, so the columns below it stay clean.
   const adminSection = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
@@ -109,6 +114,7 @@ function styleConfigSheet(sheet) {
   seedCalendarInviteRow(sheet);
   seedRegistrationHorizonRow(sheet);
   seedMembershipFormRow(sheet);
+  seedOutboundMailRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -349,6 +355,29 @@ function seedMembershipFormRow(sheet) {
     + 'recorded for the office to follow up, and nothing else happens.\n\n'
     + 'The account this script runs as must have EDIT access to the form, which is what the Forms API '
     + 'requires to open it. Without that the door shows a plain message and a link to the form itself.');
+}
+
+/**
+ * Seeds "No" and says, in the note, exactly what pausing does and does not
+ * reach — because the one thing a kill switch must never be is ambiguous
+ * about its own scope.
+ */
+function seedOutboundMailRow(sheet) {
+  const section = CONFIG_LAYOUT.OUTBOUND_MAIL;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(OUTBOUND_MAIL_PAUSE_OPTIONS[0]); // 'No'
+  }
+  cell.setNote('Set to "Yes" while you are repairing things, and nothing this workbook sends leaves the '
+    + 'office: no roster alerts or day-before digests to program leaders, no reminders to registrants.\n\n'
+    + 'Set it back to "No" when you are done. Anything other than "Yes" (including blank) means mail is on.\n\n'
+    + 'HELD MESSAGES ARE DROPPED, NOT SAVED UP. That is the point: a rebuild or a re-import that puts rows '
+    + 'back can otherwise email a leader about a dozen registrations that never changed. Nothing arrives '
+    + 'late when you switch it back on.\n\n'
+    + 'It does NOT stop calendar invitations — Google sends those itself when a guest is added to an event. '
+    + `Use ${CONFIG_LAYOUT.CALENDAR_INVITES.title} for those.\n\n`
+    + 'It does NOT stop the office being told what happened here: the sync digest and error mail still '
+    + 'arrive, and they say how many messages were held.');
 }
 
 /** Seeds "Show link" and explains the trade-off in the cell note. */
@@ -1059,6 +1088,58 @@ function clearAutomationFlagCache() {
   const cache = tryGetScriptCache();
   if (!cache) return;
   try { cache.remove(AUTOMATION_FLAG_CACHE_KEY); } catch (err) { /* non-fatal */ }
+}
+
+/**
+ * Is mail to people OUTSIDE the office held right now?
+ *
+ * Read by sendRationedEmail() and nowhere else, so there is exactly one place
+ * this can be got wrong — see the banner over OUTBOUND_MAIL_PAUSE_OPTIONS for
+ * what it does and does not cover. Cached the same two ways the automation
+ * flag is: a sync asks once per message, and a spreadsheet read apiece would
+ * cost more than the mail does.
+ *
+ * Only the literal "Yes" pauses. See DEFAULT_OUTBOUND_MAIL_PAUSED for why this
+ * fails open.
+ */
+function isOutboundMailPaused() {
+  if (__outboundMailPausedCache !== null) return __outboundMailPausedCache;
+
+  const cache = tryGetScriptCache();
+  if (cache) {
+    try {
+      const cached = cache.get(OUTBOUND_MAIL_PAUSE_CACHE_KEY);
+      if (cached === 'yes' || cached === 'no') {
+        __outboundMailPausedCache = cached === 'yes';
+        return __outboundMailPausedCache;
+      }
+    } catch (err) { /* cache is an optimization; never let it decide anything */ }
+  }
+
+  let raw = '';
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      raw = String(sheet.getRange(CONFIG_DATA_START_ROW,
+        CONFIG_LAYOUT.OUTBOUND_MAIL.startCol).getValue() || '').trim();
+    }
+  } catch (err) {
+    log(`\u26a0\ufe0f Could not read the ${CONFIG_LAYOUT.OUTBOUND_MAIL.title} section of Config (${err}) \u2014 mail is not paused.`);
+  }
+
+  const paused = raw === '' ? DEFAULT_OUTBOUND_MAIL_PAUSED : raw.toLowerCase() === 'yes';
+  if (cache) {
+    try { cache.put(OUTBOUND_MAIL_PAUSE_CACHE_KEY, paused ? 'yes' : 'no', OUTBOUND_MAIL_PAUSE_CACHE_SECONDS); } catch (err) { /* non-fatal */ }
+  }
+  __outboundMailPausedCache = paused;
+  return paused;
+}
+
+function clearOutboundMailPauseCache() {
+  const cache = tryGetScriptCache();
+  if (!cache) return;
+  try { cache.remove(OUTBOUND_MAIL_PAUSE_CACHE_KEY); } catch (err) { /* non-fatal */ }
 }
 
 /**

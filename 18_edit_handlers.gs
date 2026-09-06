@@ -1963,6 +1963,21 @@ function handleConfigEdit(e, sheet) {
       : 'Registration horizon cleared — every session is open again from the next sync.');
   }
 
+  // Pausing is always safe and is the whole point of the switch, so it does
+  // not ask; UNPAUSING is the one that says something out loud, because what
+  // was held while it was on is gone and the next thing that happens is real
+  // mail to real members.
+  const isMailPauseEdit = editedCol === CONFIG_LAYOUT.OUTBOUND_MAIL.startCol &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isMailPauseEdit) {
+    const pausing = String(e.value || '').trim().toLowerCase() === 'yes';
+    toastIfPossible(pausing
+      ? 'Mail to members and leaders is paused. Nothing goes out — and held messages are dropped, ' +
+        'not saved up. Calendar invitations are separate.'
+      : 'Mail to members and leaders is back on from the next sync. Nothing arrives late: anything ' +
+        'held while it was paused was dropped.');
+  }
+
   // Any Config edit can invalidate a cached read of it, confirmed or not.
   invalidateConfigCaches();
 }
@@ -2027,6 +2042,15 @@ function handleRegistrantsEdit(e, sheet) {
 
   if (typeof e.value !== 'undefined') {
     const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
+
+    // MARKING IS NOT REMOVING, and the toast is where that gets said. Nothing
+    // is deleted until somebody runs the sweep on the menu — see section 83
+    // for why that separation is deliberate.
+    if (headerMap['Manual_Override'] !== undefined &&
+        editedCol === headerMap['Manual_Override'] + 1 &&
+        String(e.value).trim() === REGISTRANT_REMOVE_OVERRIDE_OPTION) {
+      toastIfPossible('🗑️ Marked for removal — nothing is deleted yet. Run "Remove Marked Registrants…" on the menu.');
+    }
 
     // Lunch_Served no longer implies Attended, on a direct edit any more than
     // through the Quick Mark dialog — one rule, wherever the tick happens. A

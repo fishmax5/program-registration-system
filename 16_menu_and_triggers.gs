@@ -173,8 +173,14 @@ function buildAppMenu(ui, includeAdmin) {
       // duplicate on the roll is a person listed twice and safe to fold, a
       // duplicate REGISTRATION is a record of something that happened, so this
       // one lists what it found and merges only what somebody ticks. See
-      // section 83.
+      // section 85.
       .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', 'showDuplicateRegistrationsDialog')
+      // THE ONE-ROW DELETE, beside the roll tools because it is the same job
+      // at the other tab: a duplicate found while reading down a list. Mark
+      // the rows on All_Registrants (Manual_Override → "Remove This Row"),
+      // then press this. Section 83 says why marking and removing are two
+      // steps. Its session-wide sibling stays behind Admin → Destructive.
+      .addItem('\ud83d\uddd1\ufe0f Remove Marked Registrants\u2026', 'removeMarkedRegistrants')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
@@ -253,6 +259,11 @@ function buildAppMenu(ui, includeAdmin) {
       // where this morning's ticks are. See flushCheckInQueue().
       .addItem('Write Queued Check-Ins Now', 'flushCheckInQueueNow')
       .addSeparator()
+      // The Metrics tab writes itself on the 2nd of every month. This is for
+      // the other order — somebody looking at the year-over-year block today
+      // and wanting the month running counted in.
+      .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
 
@@ -287,23 +298,6 @@ function buildAppMenu(ui, includeAdmin) {
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
       .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
-      // ONE-TIME, and only worth pressing on a workbook that was printing
-      // sign-in sheets before those links existed: it reads the PDF folder
-      // once and teaches the registry about what is already in it. New PDFs
-      // register themselves as they are built. See backfillSignInSheetRegistry().
-      .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
-      // ONE-TIME, beside the item above because it is the same kind of job:
-      // catching the workbook up on files it made before it knew where to put
-      // them. Every folder lookup used to create at My Drive ROOT, so a year
-      // of forms, leader sheets and sign-in documents can be sitting loose
-      // there. This files them under the folder the workbook lives in. It
-      // moves files; it changes no link and deletes nothing. See section 82.
-      .addItem('\ud83d\uddc2\ufe0f Organize Generated Files (one-time)', 'organizeGeneratedFiles')
-      // ONE-TIME, for a workbook upgraded from the version that put the office
-      // on every event's guest list: it takes those addresses back off the
-      // upcoming events (the office is mailed a digest instead now — see
-      // section 5b). Safe to press twice; a run that hits its cap says so.
-      .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
@@ -312,6 +306,35 @@ function buildAppMenu(ui, includeAdmin) {
       // page routing; renaming it would strand the trigger that resumes it.
       .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', 'repairFormRoutingNow')
       .addSeparator()
+      // THE ONE-TIME JOBS, BEHIND ONE DOOR. Each of these is pressed once on a
+      // workbook upgraded from an older version and never again — they catch
+      // the workbook up on something it did before the code knew better — and
+      // three of them sitting between the everyday repairs made the Admin
+      // submenu read as a list of things to do rather than a list of things to
+      // reach for. Nothing was removed and nothing changed about what they do;
+      // they are simply no longer in the way. Each is safe to press twice.
+      .addSubMenu(ui.createMenu('\ud83e\uddf0 One-Time Jobs')
+        // Only worth pressing on a workbook that was printing sign-in sheets
+        // before those links existed: it reads the PDF folder once and teaches
+        // the registry about what is already in it. New PDFs register
+        // themselves as they are built. See backfillSignInSheetRegistry().
+        .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+        // The same kind of job one tab over: every folder lookup used to create
+        // at My Drive ROOT, so a year of forms, leader sheets and sign-in
+        // documents can be sitting loose there. This files them under the
+        // folder the workbook lives in. It moves files; it changes no link and
+        // deletes nothing. See section 82.
+        .addItem('\ud83d\uddc2\ufe0f Organize Generated Files', 'organizeGeneratedFiles')
+        // For a workbook upgraded from the version that put the office on every
+        // event's guest list: it takes those addresses back off the upcoming
+        // events (the office is mailed a digest instead now — see section 5b).
+        // A run that hits its cap says so.
+        .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
+        .addSeparator()
+        // THE FIRST RUN, which is the one-time job by definition. It was filed
+        // under "Setup & Reports" beside two read-only reports, which is how a
+        // full import came to sit one slot from something that only measures.
+        .addItem('\ud83c\udfc1 Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME))
       // ARRANGEMENTS SOMEBODY MAKES BY HAND that the next rebuild would
       // otherwise undo. They belong together because that is the one thing
       // they have in common. See section 2a-ii.
@@ -325,11 +348,17 @@ function buildAppMenu(ui, includeAdmin) {
         .addSeparator()
         .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
         .addItem('Release My Triggers', 'releaseMyTriggers'))
-      .addSubMenu(ui.createMenu('\ud83d\udcc4 Setup & Reports')
-        .addItem('Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME)
-        .addSeparator()
+      // REPORTS ONLY, now that the first-run import moved to One-Time Jobs
+      // above — which is what lets the label promise that nothing in here
+      // writes anything.
+      .addSubMenu(ui.createMenu('\ud83d\udcc4 Reports')
         // Both READ-ONLY, and named so. They measure; they change nothing.
         .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        // The measurement half of the retired-calendar sweep. Its action half
+        // is behind the Destructive door below — but this report is the only
+        // thing that names WHICH calendar the leftover rows are from, and the
+        // calendar ID is the whole question, so it is read first. See 84.
+        .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths'))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
@@ -344,7 +373,12 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('\ud83e\ude79 Rebuild Forms In Place (keeps links)\u2026', 'rebuildAllFormsInPlace')
         .addItem('\ud83d\udca3 Destroy & Rebuild Forms\u2026', 'destroyAndRebuildAllForms')
         .addSeparator()
-        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')));
+        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')
+        // Takes every session row off a calendar this workbook no longer
+        // reads. Registrants go to Triage rather than being deleted and no
+        // form is touched, but a whole location can leave the table in one
+        // press \u2014 which is what puts it here. Read the report first. See 84.
+        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')));
   } else {
     // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
     // execution contexts cannot resolve the signed-in account at all — and
@@ -489,6 +523,15 @@ function writeTriggers(force, takingOwnership) {
   // the desk's own roster loads flush it sooner anyway.
   removed += resetTriggersForHandler('flushCheckInQueueTrigger', () =>
     ScriptApp.newTrigger('flushCheckInQueueTrigger').timeBased().everyMinutes(5).create());
+  // THE MONTH JUST ENDED, WRITTEN DOWN. Metrics is the one tab that is a
+  // record rather than a projection (see 83_monthly_metrics.gs): a month has
+  // to be counted while its rows are still in the workbook, because a
+  // year-over-year comparison outlives them. The 2nd rather than the 1st so a
+  // registration marked the morning after a month-end session is already in;
+  // 4am for the same reason every other nightly job runs then.
+  removed += resetTriggersForHandler('captureMonthlyMetricsTrigger', () =>
+    ScriptApp.newTrigger('captureMonthlyMetricsTrigger')
+      .timeBased().onMonthDay(2).atHour(4).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
@@ -512,7 +555,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 monthly metrics, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
