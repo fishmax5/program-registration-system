@@ -162,13 +162,20 @@ function tombstoneDateKey(entry) {
 }
 
 
-/** Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited OR Manually Added. */
+/**
+ * Keys (Event_ID|normalized Name|Person_Type) for rows marked Manually Edited
+ * or Manually Added — and for rows marked "Remove This Row", which are
+ * protected for the same reason by a different route: a mark that an hourly
+ * sync can overwrite with "Auto-Synced" is a mark that quietly disappears
+ * between somebody setting it and somebody running the sweep (section 83).
+ */
 function getProtectedRegistrantKeys(rows) {
   const map = getIndexMap(HEADERS.All_Registrants);
   const set = new Set();
   rows.forEach(row => {
     const override = String(row[map['Manual_Override']]).trim();
-    if (override === 'Manually Edited' || override === 'Manually Added') {
+    if (override === 'Manually Edited' || override === 'Manually Added' ||
+        override === REGISTRANT_REMOVE_OVERRIDE_OPTION) {
       set.add(`${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`);
     }
   });

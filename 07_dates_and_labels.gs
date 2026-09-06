@@ -207,6 +207,15 @@ function applyManualOverrideValidationBounded(sheet, colIndex, startRow, numRows
 }
 
 /**
+ * The registrant tabs' flavour: the same three states plus "Remove This Row",
+ * the mark removeMarkedRegistrants() sweeps. See
+ * REGISTRANT_REMOVE_OVERRIDE_OPTION for why it is a mark and not an action.
+ */
+function applyRegistrantManualOverrideValidationBounded(sheet, colIndex, startRow, numRows) {
+  applyValueListValidationBounded(sheet, colIndex, REGISTRANT_MANUAL_OVERRIDE_OPTIONS, startRow, numRows);
+}
+
+/**
  * Deterministic color fallback for a location not in LOCATION_COLOR_MAP.
  *
  * Generated INTO the tint layer (see PALETTE) — pale enough to sit beside the

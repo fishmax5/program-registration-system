@@ -2043,6 +2043,15 @@ function handleRegistrantsEdit(e, sheet) {
   if (typeof e.value !== 'undefined') {
     const isProgramStatusCol = editedCol === headerMap['Program_Status'] + 1;
 
+    // MARKING IS NOT REMOVING, and the toast is where that gets said. Nothing
+    // is deleted until somebody runs the sweep on the menu — see section 83
+    // for why that separation is deliberate.
+    if (headerMap['Manual_Override'] !== undefined &&
+        editedCol === headerMap['Manual_Override'] + 1 &&
+        String(e.value).trim() === REGISTRANT_REMOVE_OVERRIDE_OPTION) {
+      toastIfPossible('🗑️ Marked for removal — nothing is deleted yet. Run "Remove Marked Registrants…" on the menu.');
+    }
+
     // Lunch_Served no longer implies Attended, on a direct edit any more than
     // through the Quick Mark dialog — one rule, wherever the tick happens. A
     // member can get a take-out meal without ever attending the session, so

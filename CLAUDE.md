@@ -77,7 +77,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `16_menu_and_triggers.gs` | 629 | `onOpen`, the menu tree (the Admin submenu is now attached for everyone — the gate lives inside its destructive items, not on the menu), trigger installation. |
+| `16_menu_and_triggers.gs` | 648 | `onOpen`, the menu tree (the Admin submenu is now attached for everyone — the gate lives inside its destructive items, not on the menu), trigger installation. The items pressed ONCE on a workbook upgraded from an older version — the two backfills, the guest sweep, and the first-run import — are collected behind Admin → **One-Time Jobs**, which is what lets the sibling submenu beside it be called `Reports` and mean it. |
 | `17_trigger_attribution.gs` | 371 | "Who is actually firing this handler?" — duplicate-account detection and trigger status. |
 | `18_edit_handlers.gs` | 2062 | `onEdit` and everything downstream: dashboard edits, program-flag edits and how they spread to sibling rows and back onto the calendar description, the per-session `Waitlist_Only` tick and the one calendar event it is stamped onto instead, Config edits, Registrants edits, catering recount, and the Member_Roll edits that mean something (`handleMemberRollEdit`: a `Display_Name` correction carried across every tab, a `Household_Override` recomputed). Plus `handleProgramMonthEdit` — the `Master_Program_Dashboard` Leader dropdown, the one edit anywhere that writes to `Program_Leaders` from another tab: it asks first (this decides who may read a roster), only ever ADDS a row, refuses a fill-down, and answers a cleared cell by saying that nothing was removed and where a leader actually is. |
 
@@ -416,6 +416,17 @@ merge; see `80` above.
 | File | | What is in it |
 |---|--:|---|
 | `81_registrant_notifications_tab.gs` | 430 | **The notification half of `Program_Settings`, and no longer a tab of its own.** A tick box per channel, none of them exclusive: `Add_To_Calendar`, `Week_Before`, `Day_Before`, `Morning_Of`, `Other_Reminders` (any further day counts) and `Confirm_On_Booking`; `policyFromNotificationRow` is what `70` resolves a session's policy through. What stayed here after the merge is the vocabulary and the two one-time carry-overs: `readLegacyNotifyModeRows` (the retired `Notify_Mode` / `Reminder_Days` cells) and `readLegacyRegistrantNotificationRows` / `markProgramSettingsMergeDone` (the retired tab's own ticks, lifted onto the merged row and the old tab left in the workbook marked retired rather than deleted). Both are read by `40`'s single refresh, before its write — which is the only order that works, and now the only order there is. |
+
+### Removing one registrant (83)
+
+Behavior only, numbered last for the usual reason: its own two constants stand
+alone, its schema is `HEADERS.All_Registrants` in `03` like every other tab's,
+and everything it calls — the tombstones, both renders, the two recounts — is a
+hoisted function.
+
+| File | | What is in it |
+|---|--:|---|
+| `83_remove_marked_registrants.gs` | 189 | **The one-row delete, as a mark and a sweep.** `48` deletes by SESSION, which is the right shape for a test run and the wrong one for "this person was entered twice" — so `Manual_Override` gained a fourth option on the registrant tabs, `REGISTRANT_REMOVE_OVERRIDE_OPTION` (`'Remove This Row'`, `02`), the one value in that column that is a request rather than a record and the one washed red (`39`). **Marking deletes nothing**: `removeMarkedRegistrants()` on the Rosters & Sharing menu is what sweeps, because a mis-click in a dropdown must not be permanent and because three duplicates found while reading down a roster are cleared in one pass. It names every row before it goes, records the tombstones (`28`) BEFORE the redraw — without which the import and both catch-ups rebuild every removed row on the next sync — redraws from the kept rows, and recomputes the session counts and the catering from those same rows. It leaves the form responses alone (the tombstone, not a deletion, is what keeps them from coming back as rows), and the mark itself is protected from re-derivation in `getProtectedRegistrantKeys()`, without which an hourly sync between the mark and the sweep quietly resets it to `Auto-Synced`. |
 
 ### Where the generated files live (82)
 

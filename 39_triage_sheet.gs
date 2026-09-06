@@ -61,7 +61,7 @@ function applyRegistrantsFormatting(sheet, headers, result) {
 
   zones.forEach(z => {
     if (z.count < 1) return;
-    applyManualOverrideValidationBounded(sheet, map['Manual_Override'] + 1, z.start, z.count);
+    applyRegistrantManualOverrideValidationBounded(sheet, map['Manual_Override'] + 1, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Program_Status'] + 1, PROGRAM_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Status'] + 1, LUNCH_STATUS_OPTIONS, z.start, z.count);
     applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, REGISTRANT_LUNCH_TYPE_OPTIONS, z.start, z.count);
@@ -132,6 +132,12 @@ function applyRegistrantsFormatting(sheet, headers, result) {
       const rule = buildTextEqualsRuleForRanges([overrideRange], text, MANUAL_OVERRIDE_COLOR);
       if (rule) rules.push(rule);
     });
+    // The one value in this column that is a REQUEST rather than a record, so
+    // it is the one that gets the alarm color: a row marked for removal should
+    // be findable by scrolling, not only by reading. See section 83.
+    const removeRule = buildTextEqualsRuleForRanges([overrideRange],
+      REGISTRANT_REMOVE_OVERRIDE_OPTION, PALETTE.SIGNAL_RED);
+    if (removeRule) rules.push(removeRule);
   });
 
   const activeZones = zones.filter(z => z.count > 0);

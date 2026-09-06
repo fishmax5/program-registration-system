@@ -17,6 +17,12 @@
 //   - a program that was cancelled outright before it ever ran, where nobody
 //     wants a permanent list of people who were going to come.
 //
+// IT IS NOT THE ONLY WAY TO DELETE ANY MORE. This one works by SESSION, which
+// is the wrong shape for "this person was entered twice" — for that, mark the
+// row's Manual_Override "Remove This Row" and run the sweep on the menu
+// (section 83). Same tombstones, same guarantee that a removed row stays
+// removed; one row instead of a whole session, and no form responses touched.
+//
 // So it deletes, by session, and says so in the plainest words available. What
 // keeps it safe is not a soft delete but three gates: an admin check, an
 // explicit typed confirmation, and a summary of exactly how many rows on which
