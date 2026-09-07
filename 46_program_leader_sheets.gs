@@ -779,6 +779,48 @@ function ensureProgramLeaderSheetAccess(file, describe) {
 }
 
 /**
+ * Adds an editor WITHOUT Drive mailing them about it.
+ *
+ * THE FAILURE IT PREVENTS. DriveApp.addEditor() always sends a "X shared a
+ * spreadsheet with you" notification, and this function runs on every sync
+ * against every generated file. The office accounts that are named editors of
+ * everything this workbook makes were getting one of those per file per run —
+ * hundreds of mails saying nothing they did not already know.
+ *
+ * The Drive advanced service is the only way to say "share, but do not mail":
+ * sendNotificationEmails is not exposed on DriveApp. If it is not enabled, or
+ * the call fails for any reason other than the permission already existing, we
+ * fall back to DriveApp so the SHARING still happens — a noisy share beats a
+ * file the office cannot open.
+ *
+ * Returns true if the address ended up an editor, false if Drive refused.
+ * Never throws.
+ */
+function addEditorWithoutNotifying_(driveFile, email) {
+  const address = String(email || '').trim();
+  if (!address) return false;
+  try {
+    if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.insert) {
+      Drive.Permissions.insert(
+        { role: 'writer', type: 'user', value: address },
+        driveFile.getId(),
+        { sendNotificationEmails: false, supportsAllDrives: true });
+      return true;
+    }
+  } catch (err) {
+    // Already an editor, the owner, or a Workspace policy saying no — all of
+    // which DriveApp reports the same way. Fall through and let it try.
+    log(`ℹ️ Drive would not add ${address} quietly (${err}) — falling back to DriveApp.`);
+  }
+  try {
+    driveFile.addEditor(address);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
  * THE SHARING THIS SYSTEM NEEDS ON EVERY FILE IT OWNS AND LATER HAS TO READ
  * BACK: the accounts that run it as named editors, and anyone with the link
  * able to edit.
@@ -830,14 +872,16 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
     .concat([getTriggerOwner(), getCurrentUserEmail(), getArchiveCopyEmail()])
     .map(e => String(e || '').trim().toLowerCase())
     .filter(e => e.indexOf('@') > 0);
+  // QUIETLY. These addresses are added again on every run, so a notification
+  // per file per run is hundreds of mails telling the office nothing it does
+  // not already know. See addEditorWithoutNotifying_().
   dedupePreservingOrder(wanted).forEach(email => {
-    try {
-      driveFile.addEditor(email);
+    if (addEditorWithoutNotifying_(driveFile, email)) {
       outcome.editors.push(email);
-    } catch (err) {
+    } else {
       // Adding yourself, adding the owner, or a Workspace policy saying no.
       // None of those is worth a line in the admin digest.
-      log(`ℹ️ Could not add ${email} as an editor of the ${label} (${err}).`);
+      log(`ℹ️ Could not add ${email} as an editor of the ${label}.`);
     }
   });
 

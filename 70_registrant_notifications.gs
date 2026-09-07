@@ -78,6 +78,29 @@ const REMINDER_CONFIRMATION_OFFSET = 'booked';
 const REMINDER_FORWARD_DAYS = 30;
 
 /**
+ * The earliest hour of the day a reminder email may go out, in TIMEZONE.
+ *
+ * THE FAILURE IT PREVENTS. This pass rides the hourly sync, so it ran at
+ * whatever hour the sync ran — including the small ones. People were getting
+ * "your appointment is tomorrow at 2:15" at 12:10am, which reads as a system
+ * malfunction even when the content is right, and wakes anyone whose phone is
+ * not on Do Not Disturb.
+ *
+ * Nothing is dropped by waiting: a reminder that is due before this hour is
+ * simply not sent yet, its ledger entry stays unwritten, and the first sync at
+ * or after this hour sends it. The "every offset already PASSED counts as due"
+ * rule in sendRegistrantReminders() is what makes that safe — a 0-day reminder
+ * held overnight still goes out on the morning of, not never.
+ */
+const REMINDER_EARLIEST_HOUR = 9;
+
+/** Is it late enough in the day to email registrants? */
+function isWithinRegistrantReminderHours(now) {
+  const at = now || new Date();
+  return Number(Utilities.formatDate(at, TIMEZONE, 'H')) >= REMINDER_EARLIEST_HOUR;
+}
+
+/**
  * The most reminder emails one run will send, and the slice of the daily mail
  * quota it leaves alone. Same reasoning as the roster alerts one file up: this
  * pass rides the hourly sync, a quiet hour sends nothing, and the hour that is
@@ -268,9 +291,17 @@ function notificationPolicyForSession(session) {
  * Runs off the two tables the sync has just settled, like the invitation pass
  * beside it, and is safe to call every hour: the ledger makes a repeat send
  * impossible and a sync with nothing due does no work beyond the read.
+ *
+ * options.ignoreQuietHours skips the REMINDER_EARLIEST_HOUR check — the menu
+ * item passes it, the hourly sync does not.
  */
-function sendRegistrantReminders(sessionRows, registrantRows) {
+function sendRegistrantReminders(sessionRows, registrantRows, options) {
   const result = { sent: 0, held: 0, eventsTouched: 0 };
+
+  // Too early in the day to write to anybody. Held, not skipped: the ledger is
+  // untouched, so the first sync at or after REMINDER_EARLIEST_HOUR sends
+  // everything that came due overnight. See the constant's banner.
+  if (!(options && options.ignoreQuietHours) && !isWithinRegistrantReminderHours()) return result;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const regHeaders = HEADERS.Master_Program_Dashboard;
@@ -486,6 +517,10 @@ function buildRegistrantReminderBody(session, person, offset, daysAway) {
  * Reads both tables fresh — whoever pressed this has just changed a
  * Notify_Mode cell and expects that cell counted — and clears the policy
  * memo first for the same reason.
+ *
+ * REMINDER_EARLIEST_HOUR does not apply here. It exists to stop the unattended
+ * hourly sync mailing people at 12:10am; a person who has just pressed the
+ * menu item is asking for the send now and gets it.
  */
 function sendRegistrantRemindersNow() {
   if (isBootstrapActive()) {
@@ -501,7 +536,7 @@ function sendRegistrantRemindersNow() {
 
   let result;
   try {
-    result = sendRegistrantReminders(sessionRows, registrantRows);
+    result = sendRegistrantReminders(sessionRows, registrantRows, { ignoreQuietHours: true });
   } catch (err) {
     log(`⚠️ Could not send the registrant reminders (${err}).`);
     toastIfPossible(`Could not send the reminders ⚠️ — ${err}`);
