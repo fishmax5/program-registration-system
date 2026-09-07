@@ -392,14 +392,12 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
         return;
       }
       try {
-        // CC'd to the archive address, like every other message this workbook
-        // sends — a reminder about somebody's appointment is a record of what
-        // they were told, and the desk needs to be able to find it. VISIBLE
-        // rather than hidden on purpose: a member who replies "I can't make
-        // it" replies to a thread the office is already on, instead of to an
-        // address that cannot answer. Blank means copy nobody. A CC costs its
-        // own message against the daily quota this loop is rationing, so it is
-        // counted rather than treated as free.
+        // The member's copy names the member and nobody else. The office gets
+        // its own forwarded copy, which is the thread the desk talks on — see
+        // sendWithOfficeCopy_() for why this is a forward and not a CC. Blank
+        // office address copies nobody. The copy costs its own message against
+        // the daily quota this loop is rationing, so it is counted rather than
+        // treated as free.
         const archiveCopy = getArchiveCopyEmail();
         const options = {
           to: email,
@@ -407,8 +405,9 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
           body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
             item.daysAway)
         };
-        if (archiveCopy) options.cc = archiveCopy;
-        MailApp.sendEmail(options);
+        sendWithOfficeCopy_(options,
+          `Reminder sent to ${name ? `${name} <${email}>` : email} about ` +
+          `"${item.session.title}" on ${formatDateLabel(item.session.date)}`);
         result.sent++;
         quota -= archiveCopy ? 2 : 1;
         sentFor[stamp] = true;

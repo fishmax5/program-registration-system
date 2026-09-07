@@ -201,10 +201,12 @@ function seedArchiveCopyRow(sheet) {
     log(`Seeded default Archive Copy Address ("${DEFAULT_ARCHIVE_COPY_EMAIL}") on "${SHEET_NAMES.CONFIG}".`);
   }
   cell.setNote('One address copied on everything this system sends:\n'
-    + '  • CC on every email this system sends — roster-change alerts to program\n'
-    + '    leaders, reminders to registrants, and the admin digest. It is a visible\n'
-    + '    CC on purpose: a reply-all lands on this address, so the notification\n'
-    + '    doubles as the thread the office answers on.\n'
+    + '  • CC on the roster-change alerts to program leaders and on the admin\n'
+    + '    digest — visible, so a reply-all reaches the desk and the notification\n'
+    + '    itself becomes the thread the office answers on.\n'
+    + '  • A separate forwarded copy ("[Office copy]") of every reminder sent to a\n'
+    + '    registrant. Forwarded rather than copied so the member never sees this\n'
+    + '    address: office staff reply-all on their copy without reaching them.\n'
     + '  • Added as a guest on any calendar event registrants are invited to.\n'
     + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
     + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
@@ -907,6 +909,57 @@ function claimTriggerOwnership(email) {
     // Not fatal: the triggers themselves were built successfully, and a
     // missing claim only costs the next admin a confirmation prompt.
     log(`⚠️ Triggers were rebuilt but the ownership claim could not be written to Config (${err}).`);
+  }
+}
+
+/** What marks an office copy in a subject line. Kept short: it is read in a list. */
+const OFFICE_COPY_SUBJECT_PREFIX = '[Office copy] ';
+
+/**
+ * Sends a message, then forwards a copy of it to the office.
+ *
+ * WHY A FORWARD RATHER THAN A CC. The office wants a thread it can talk on —
+ * "did anyone call her back?" belongs under the reminder that prompted it, not
+ * in a separate mail nobody can find. A visible CC gives them that, but it
+ * also puts the office address in front of every REGISTRANT who gets a
+ * reminder, and a member who replies-all is then mailing an internal thread.
+ *
+ * So the member's copy names nobody but the member, and the office gets its
+ * own copy of the same message a moment later, addressed to it alone. Office
+ * staff reply-all on that one as much as they like; it cannot reach the
+ * person the original was about, because they were never on it.
+ *
+ * The copy carries the same subject so a mail client files the two together
+ * (prefixed, so the desk can tell which is which at a glance) and a header
+ * line naming who actually received the original.
+ *
+ * NEVER THROWS FOR THE COPY'S SAKE. The primary send is what matters: if the
+ * forward fails, the member was still told and the failure is logged. An error
+ * raised here is the PRIMARY send failing, and callers depend on that — a
+ * reminder that did not go out must not be recorded as sent.
+ *
+ * Costs two messages against the MailApp daily quota when an office address is
+ * configured, one when it is blank — the same as the CC it replaces, which is
+ * why the loops that ration mail did not need to change their arithmetic.
+ */
+function sendWithOfficeCopy_(options, describeRecipient) {
+  MailApp.sendEmail(options);
+  const office = getArchiveCopyEmail();
+  if (!office) return;
+  const to = String(options.to || '').trim();
+  if (office.toLowerCase() === to.toLowerCase()) return;
+  try {
+    MailApp.sendEmail({
+      to: office,
+      subject: `${OFFICE_COPY_SUBJECT_PREFIX}${options.subject}`,
+      body: `${describeRecipient || `Sent to ${to}`}.\n` +
+        `Replies to this copy stay in the office — ${to} is not on it.\n\n` +
+        `${'-'.repeat(60)}\n\n${options.body}`
+    });
+  } catch (err) {
+    // The person was told, which is the part that had to happen. A missing
+    // office copy is worth a log line and nothing more.
+    log(`\u26a0\ufe0f Could not send the office copy of "${options.subject}" to ${office} (${err}).`);
   }
 }
 

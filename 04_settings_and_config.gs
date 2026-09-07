@@ -61,13 +61,18 @@ const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
  * folder is one particular person's mailbox, and routinely not the person who
  * has to answer for what was sent.
  *
- * So one address gets a copy of all three: CC'd on every email this workbook
- * sends (leader alerts, registrant reminders, the admin digest), added as a
- * guest on any event registrants are invited to, and made an editor of every
- * file this system shares. The copy is a VISIBLE CC rather than a hidden BCC
- * so the notification can be the thread the office answers on — a leader or a
- * member who replies-all reaches the desk, instead of an address that cannot
- * answer back. It is a Config cell rather than a constant so the
+ * So one address gets a copy of all three: on every email this workbook sends,
+ * added as a guest on any event registrants are invited to, and made an editor
+ * of every file this system shares.
+ *
+ * HOW IT IS COPIED depends on who else is on the message, and the difference
+ * matters. Mail that stays inside the organization — leader alerts, the admin
+ * digest — carries it as a VISIBLE CC, so a reply-all reaches the desk and the
+ * notification is itself the thread the office answers on. Mail to a
+ * REGISTRANT does not: the member's copy names the member alone, and the
+ * office is sent its own forwarded copy afterwards (sendWithOfficeCopy_).
+ * Office staff get their thread either way; a member never sees an internal
+ * address, and cannot reply onto the thread the desk is using. It is a Config cell rather than a constant so the
  * office can repoint or empty it without a code change — BLANK means "copy
  * nobody", exactly like the admin notification address above it.
  *
