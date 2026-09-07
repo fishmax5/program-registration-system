@@ -200,8 +200,11 @@ function seedArchiveCopyRow(sheet) {
     cell.setValue(DEFAULT_ARCHIVE_COPY_EMAIL);
     log(`Seeded default Archive Copy Address ("${DEFAULT_ARCHIVE_COPY_EMAIL}") on "${SHEET_NAMES.CONFIG}".`);
   }
-  cell.setNote('One address copied on everything this system sends outside the organization:\n'
-    + '  • BCC on every program leader roster-change email.\n'
+  cell.setNote('One address copied on everything this system sends:\n'
+    + '  • CC on every email this system sends — roster-change alerts to program\n'
+    + '    leaders, reminders to registrants, and the admin digest. It is a visible\n'
+    + '    CC on purpose: a reply-all lands on this address, so the notification\n'
+    + '    doubles as the thread the office answers on.\n'
     + '  • Added as a guest on any calendar event registrants are invited to.\n'
     + '  • Added as an editor of every program leader sheet and form this system shares.\n\n'
     + 'Leave blank to copy nobody. This is not the same as the Admin Notification address, '
@@ -910,12 +913,20 @@ function claimTriggerOwnership(email) {
 /**
  * Sends one admin email, if an address is configured. Never throws — a
  * failed notification must not take down the sync that triggered it.
+ *
+ * The archive copy address rides along on CC, as it does on every other
+ * message this workbook sends: the office is on the notification so the reply
+ * to it lands on the same thread rather than in somebody's private mailbox.
+ * Blank copies nobody, and a CC costs its own message against the daily quota.
  */
 function notifyAdmin(subject, body) {
   const email = getAdminNotificationEmail();
   if (!email) return false;
   try {
-    MailApp.sendEmail(email, subject, body);
+    const archiveCopy = getArchiveCopyEmail();
+    const options = { to: email, subject: subject, body: body };
+    if (archiveCopy && archiveCopy.toLowerCase() !== email.toLowerCase()) options.cc = archiveCopy;
+    MailApp.sendEmail(options);
     log(`Sent admin notification to ${email}: ${subject}`);
     return true;
   } catch (err) {

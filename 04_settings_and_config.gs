@@ -61,9 +61,13 @@ const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22];
  * folder is one particular person's mailbox, and routinely not the person who
  * has to answer for what was sent.
  *
- * So one address gets a copy of all three: BCC'd on leader alerts, added as a
+ * So one address gets a copy of all three: CC'd on every email this workbook
+ * sends (leader alerts, registrant reminders, the admin digest), added as a
  * guest on any event registrants are invited to, and made an editor of every
- * file this system shares. It is a Config cell rather than a constant so the
+ * file this system shares. The copy is a VISIBLE CC rather than a hidden BCC
+ * so the notification can be the thread the office answers on — a leader or a
+ * member who replies-all reaches the desk, instead of an address that cannot
+ * answer back. It is a Config cell rather than a constant so the
  * office can repoint or empty it without a code change — BLANK means "copy
  * nobody", exactly like the admin notification address above it.
  *

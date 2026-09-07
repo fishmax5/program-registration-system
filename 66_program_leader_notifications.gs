@@ -477,14 +477,17 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     }
 
     try {
-      // BCC, not CC: the leader is being told about their own roster, and a
-      // visible office address on it invites a reply-all thread nobody at the
-      // desk wants. Blank means copy nobody. Every BCC'd recipient costs a
-      // message against the same MailApp daily quota this loop is rationing,
-      // so it is counted below rather than treated as free.
+      // CC, not BCC, and deliberately so: the office asked to be VISIBLE on
+      // everything this workbook sends, because the notification is where the
+      // conversation about it then happens — a leader replies-all, the desk
+      // sees it, and the whole exchange stays on one thread instead of being
+      // re-typed into a separate mail nobody can find later. A hidden copy
+      // cannot be replied to. Blank means copy nobody. Every CC'd recipient
+      // costs a message against the same MailApp daily quota this loop is
+      // rationing, so it is counted below rather than treated as free.
       const archiveCopy = getArchiveCopyEmail();
       const options = { to: leader.email, subject: buildLeaderAlertSubject(programs), body: buildLeaderAlertBody(leader, programs) };
-      if (archiveCopy) options.bcc = archiveCopy;
+      if (archiveCopy) options.cc = archiveCopy;
       MailApp.sendEmail(options);
       sent++;
       quota -= archiveCopy ? 2 : 1;

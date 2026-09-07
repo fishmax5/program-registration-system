@@ -392,11 +392,13 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
         return;
       }
       try {
-        // BCC'd to the archive address, like every other message this workbook
-        // sends outside the organization — a reminder about somebody's
-        // appointment is a record of what they were told, and the desk needs
-        // to be able to find it. Blank means copy nobody. A BCC costs its own
-        // message against the daily quota this loop is rationing, so it is
+        // CC'd to the archive address, like every other message this workbook
+        // sends — a reminder about somebody's appointment is a record of what
+        // they were told, and the desk needs to be able to find it. VISIBLE
+        // rather than hidden on purpose: a member who replies "I can't make
+        // it" replies to a thread the office is already on, instead of to an
+        // address that cannot answer. Blank means copy nobody. A CC costs its
+        // own message against the daily quota this loop is rationing, so it is
         // counted rather than treated as free.
         const archiveCopy = getArchiveCopyEmail();
         const options = {
@@ -405,7 +407,7 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
           body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
             item.daysAway)
         };
-        if (archiveCopy) options.bcc = archiveCopy;
+        if (archiveCopy) options.cc = archiveCopy;
         MailApp.sendEmail(options);
         result.sent++;
         quota -= archiveCopy ? 2 : 1;
