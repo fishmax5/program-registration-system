@@ -2,26 +2,22 @@
 // 9e. REGISTRANT NOTIFICATIONS  (how often each program tells its people)
 // ============================================================================
 //
-// One cell per program, on Program_Options, answering "how much does this
-// program talk to the people signed up for it?" — because the honest answer
+// One row per program, on Program_Settings (section 9h), answering
+// "how much does this program talk to the people signed up for it?" — because
+// the honest answer
 // differs by program and always has. A drop-in coffee morning that fifty
 // people come to needs nothing beyond the calendar entry they already have.
 // A Personalized Assistance appointment is a promise to one person to be
 // somewhere at 2:15, and that person should be told 2:15, in writing, without
 // a member of staff having to remember to type it.
 //
-// TWO COLUMNS, both staff-owned (PROGRAM_OPTIONS_STAFF_COLUMNS):
+// SIX ANSWERS PER PROGRAM, all staff-owned and none of them exclusive —
+// Add_Guest_To_Calendar, Week_Before, Day_Before, Morning_Of, Other_Reminders and
+// Confirm_On_Booking. Section 9h owns the tab, what the columns mean, why a
+// new row is seeded rather than born blank, and the carry-over from the
+// Notify_Mode dropdown this replaced. This file owns what the answers DO.
 //
-//   Notify_Mode     — a dropdown: leave it on "Default for type" and the
-//                     program is notified the way its KIND is normally
-//                     notified (see defaultNotificationPolicy()). The other
-//                     values override that for this one program.
-//   Reminder_Days   — how many days BEFORE the session a reminder goes out,
-//                     comma-separated, 0 meaning the morning of. Blank takes
-//                     the mode's own default. Ignored entirely by the two
-//                     modes that send no reminders.
-//
-// WHAT THE MODES DRIVE. Two independent channels, deliberately:
+// WHAT THE TICKS DRIVE. Two independent channels, deliberately:
 //
 //   THE CALENDAR INVITE (section 5b) puts the person on the real event's
 //   guest list, and from then on Google's own reminders and any change to
@@ -38,9 +34,7 @@
 // THE CONFIG SWITCH STILL WINS. "📧 Calendar Invitations" set to "Do not
 // invite" means nobody is added to a guest list, whatever a program row says:
 // the tab decides which programs opt IN to a channel, never that a channel
-// switched off at the workbook level is on after all. Reminder emails have
-// their own switch on the same footing — REMINDERS_OFF_MODES below is about
-// per-program intent, not about overriding the workbook.
+// switched off at the workbook level is on after all.
 //
 // SENDING IS RECORDED, NOT RE-DERIVED. Every send is written to a ledger
 // keyed by event, person and offset, so an hourly sync that finds the same
@@ -48,26 +42,13 @@
 // mean twenty-four emails.
 // ============================================================================
 
-/** What Notify_Mode can say. The stored value is the visible string. */
-const NOTIFY_MODES = {
-  DEFAULT: 'Default for type',
-  INVITE_ONLY: 'Calendar invite only',
-  INVITE_AND_REMIND: 'Calendar invite + reminders',
-  REMIND_ONLY: 'Reminder emails only',
-  NONE: 'Do not notify'
-};
-const NOTIFY_MODE_LIST = Object.values(NOTIFY_MODES);
-
-/** Suggestions for the Reminder_Days cell. An open list: any day count is legal. */
-const REMINDER_DAYS_SUGGESTIONS = ['7', '3', '1', '7, 1', '1, 0', '0'];
-
-/** Reminder_Days when the cell is blank and the mode does send reminders. */
+/** The reminder cadence a program falls back to when nothing else says. */
 const DEFAULT_REMINDER_DAYS = [1];
 
 /**
  * The pseudo-offset a booking confirmation is recorded under.
  *
- * Not a day count and deliberately not expressible in Reminder_Days: it fires
+ * Not a day count and deliberately not expressible in Other_Reminders: it fires
  * on the registration, not on a countdown, and the ledger has to be able to
  * tell "we told them their time when they booked" apart from "we reminded
  * them the day before" — the two are both true and neither replaces the other.
@@ -86,11 +67,14 @@ const REMINDER_FORWARD_DAYS = 30;
  * malfunction even when the content is right, and wakes anyone whose phone is
  * not on Do Not Disturb.
  *
- * Nothing is dropped by waiting: a reminder that is due before this hour is
- * simply not sent yet, its ledger entry stays unwritten, and the first sync at
- * or after this hour sends it. The "every offset already PASSED counts as due"
- * rule in sendRegistrantReminders() is what makes that safe — a 0-day reminder
- * held overnight still goes out on the morning of, not never.
+ * Nothing is dropped by waiting: a reminder due before this hour is simply not
+ * sent yet, its ledger entry stays unwritten, and the first sync at or after
+ * this hour sends it. The "every offset already PASSED counts as due" rule in
+ * sendRegistrantReminders() is what makes that safe — a 0-day reminder held
+ * overnight still goes out on the morning of, not never.
+ *
+ * NOT the same thing as the pause switch (section 9f), which DROPS what it
+ * holds. This defers; nothing is lost.
  */
 const REMINDER_EARLIEST_HOUR = 9;
 
@@ -101,11 +85,19 @@ function isWithinRegistrantReminderHours(now) {
 }
 
 /**
- * The most reminder emails one run will send, and the slice of the daily mail
- * quota it leaves alone. Same reasoning as the roster alerts one file up: this
- * pass rides the hourly sync, a quiet hour sends nothing, and the hour that is
- * not quiet must not spend the whole workbook's mail on itself. Anything held
- * back keeps its ledger entry unwritten and goes out on the next pass.
+ * The most reminder emails one run will send, and the floor it will not dig
+ * the day's mail quota below (the `reserve` sendRationedEmail() is given, see
+ * section 9f). Same reasoning as the roster alerts one file up: this pass
+ * rides the hourly sync, a quiet hour sends nothing, and the hour that is not
+ * quiet must not spend the whole workbook's mail on itself. Anything held back
+ * keeps its ledger entry unwritten and goes out on the next pass.
+ *
+ * THE FLOOR IS THE LOWER OF THE TWO on purpose. The alert pass runs first in
+ * the same execution and stops at LEADER_ALERT_QUOTA_RESERVE precisely so
+ * there is something left here: a reminder names the time somebody is expected
+ * somewhere, which is worth nothing the day after. What stays under this floor
+ * is the handful of messages notifyAdmin() needs to report that any of this
+ * went wrong.
  */
 const MAX_REMINDER_EMAILS_PER_RUN = 40;
 const REMINDER_QUOTA_RESERVE = 10;
@@ -161,7 +153,7 @@ function defaultNotificationPolicy(isAssistance) {
 }
 
 /**
- * Reads "1, 0" / "7 and 1" / "3" out of a Reminder_Days cell into [1, 0].
+ * Reads "1, 0" / "7 and 1" / "3" out of an Other_Reminders cell into [1, 0].
  *
  * Deliberately forgiving about separators and deliberately strict about what
  * it keeps: whole days, not negative (a reminder after the event is not a
@@ -181,59 +173,11 @@ function parseReminderDays(value) {
   return days.sort((a, b) => b - a);
 }
 
-/** One Program_Options row's two cells resolved into a policy. */
-function resolveNotificationPolicy(mode, reminderDaysValue, isAssistance) {
-  const fallback = defaultNotificationPolicy(isAssistance);
-  const wanted = String(mode || '').trim().toLowerCase();
-  const chosen = NOTIFY_MODE_LIST.filter(m => m.toLowerCase() === wanted)[0];
-  if (wanted && !chosen) {
-    log(`ℹ️ Notify_Mode reads "${mode}", which is not one of ${NOTIFY_MODE_LIST.join(' / ')} — ` +
-      `that program is notified the way its kind usually is.`);
-  }
-  let policy;
-  switch (chosen) {
-    case NOTIFY_MODES.NONE:
-      policy = { invite: false, remind: false, days: [], confirmTime: false,
-        personalizeTime: fallback.personalizeTime };
-      break;
-    case NOTIFY_MODES.INVITE_ONLY:
-      policy = { invite: true, remind: false, days: [], confirmTime: false,
-        personalizeTime: fallback.personalizeTime };
-      break;
-    case NOTIFY_MODES.INVITE_AND_REMIND:
-      policy = { invite: true, remind: true, days: [], confirmTime: fallback.confirmTime,
-        personalizeTime: fallback.personalizeTime };
-      break;
-    case NOTIFY_MODES.REMIND_ONLY:
-      policy = { invite: false, remind: true, days: [], confirmTime: fallback.confirmTime,
-        personalizeTime: fallback.personalizeTime };
-      break;
-    default:
-      // "Default for type", blank, or a value nobody recognizes. An
-      // unrecognized cell is NOT treated as "do not notify": a typo must not
-      // be a way to silently stop telling people about their appointments.
-      policy = {
-        invite: fallback.invite, remind: fallback.remind, days: fallback.days.slice(),
-        confirmTime: fallback.confirmTime, personalizeTime: fallback.personalizeTime
-      };
-      break;
-  }
-  if (policy.remind) {
-    const typed = parseReminderDays(reminderDaysValue);
-    policy.days = typed.length > 0 ? typed
-      : (fallback.days.length > 0 ? fallback.days.slice() : DEFAULT_REMINDER_DAYS.slice());
-  } else {
-    policy.days = [];
-    policy.confirmTime = false;
-  }
-  return policy;
-}
-
 /**
- * { programKey: { mode, reminderDays } } read off Program_Options once per
- * execution. The tab is a few hundred rows at most and both the invitation
- * pass and the reminder pass want it, so it is read once and memoized rather
- * than re-opened per session.
+ * { programKey: policy } read off Program_Settings once per execution. The tab
+ * is a few hundred rows at most and both the invitation pass and the reminder
+ * pass want it, so it is read once and memoized rather than re-opened per
+ * session.
  */
 let __notificationPolicyRowsCache = null;
 
@@ -245,24 +189,21 @@ function readNotificationPolicyRows() {
   if (__notificationPolicyRowsCache) return __notificationPolicyRowsCache;
   const out = {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_OPTIONS) : null;
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS) : null;
   if (sheet) {
-    const headers = HEADERS.Program_Options;
+    const headers = HEADERS.Program_Settings;
     const map = getIndexMap(headers);
-    readSimpleTable(sheet, headers).forEach(row => {
+    readSimpleTableValues(sheet, headers).forEach(row => {
       const key = notificationProgramKey(row[map['Event']], row[map['Location']]);
       if (key === '|') return;
-      out[key] = {
-        mode: String(row[map['Notify_Mode']] || '').trim(),
-        reminderDays: row[map['Reminder_Days']]
-      };
+      out[key] = row;
     });
   }
   __notificationPolicyRowsCache = out;
   return out;
 }
 
-/** The key Program_Options rows and session rows are matched on. */
+/** The key Program_Settings rows and session rows are matched on. */
 function notificationProgramKey(title, location) {
   return `${normalizeNameKey(title)}|${normalizeNameKey(location)}`;
 }
@@ -271,13 +212,15 @@ function notificationProgramKey(title, location) {
  * The policy governing one SESSION — its program's row where there is one,
  * its kind's default where there is not.
  *
- * A program the staff have never touched has no row until the next
- * Program_Options refresh, and a session must not go unnotified in the
- * meantime: an absent row is the default, not silence.
+ * A program the calendar has only just introduced has no row until the next
+ * Program_Settings refresh, and a session must not go unnotified in
+ * the meantime: an absent ROW is its kind's default. An absent TICK, on a row
+ * that exists, is a decision — see 9h.
  */
 function notificationPolicyForSession(session) {
   const row = readNotificationPolicyRows()[notificationProgramKey(session.title, session.location)];
-  return resolveNotificationPolicy(row ? row.mode : '', row ? row.reminderDays : '',
+  if (!row) return defaultNotificationPolicy(!!session.isAssistance);
+  return policyFromNotificationRow(row, getIndexMap(HEADERS.Program_Settings),
     !!session.isAssistance);
 }
 
@@ -296,18 +239,18 @@ function notificationPolicyForSession(session) {
  * item passes it, the hourly sync does not.
  */
 function sendRegistrantReminders(sessionRows, registrantRows, options) {
-  const result = { sent: 0, held: 0, eventsTouched: 0 };
+  const result = { sent: 0, held: 0, paused: 0, eventsTouched: 0 };
 
-  // Too early in the day to write to anybody. Held, not skipped: the ledger is
-  // untouched, so the first sync at or after REMINDER_EARLIEST_HOUR sends
-  // everything that came due overnight. See the constant's banner.
+  // Too early in the day to write to anybody. Deferred, not dropped: the
+  // ledger is untouched, so the first sync at or after REMINDER_EARLIEST_HOUR
+  // sends everything that came due overnight. See the constant's banner.
   if (!(options && options.ignoreQuietHours) && !isWithinRegistrantReminderHours()) return result;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const sessions = sessionRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
   if (sessions.length === 0) return result;
 
   const today = new Date();
@@ -354,13 +297,12 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
     return result;
   }
 
-  const lrHeaders = HEADERS.Registrant_Dash;
+  const lrHeaders = HEADERS.All_Registrants;
   const lrMap = getIndexMap(lrHeaders);
   const rows = registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
+    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
 
   const ledger = getRegistrantReminderLedger();
-  let quota = registrantReminderRemainingQuota();
 
   rows.forEach(row => {
     const eventId = String(row[lrMap['Event_ID']] || '').trim();
@@ -386,41 +328,70 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
     const sentFor = ledger[eventId] || {};
     wanted.forEach(offset => {
       const stamp = `${email}|${offset}`;
-      if (sentFor[stamp]) return;
-      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN || quota <= REMINDER_QUOTA_RESERVE) {
+      // Read here as well as inside the send: a message that has already gone
+      // must not count against the per-run cap the way a held one does.
+      const alreadySent = () => !!sentFor[stamp];
+      if (alreadySent()) return;
+      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN) {
         result.held++;
         return;
       }
-      try {
-        // The member's copy names the member and nobody else. The office gets
-        // its own forwarded copy, which is the thread the desk talks on — see
-        // sendWithOfficeCopy_() for why this is a forward and not a CC. Blank
-        // office address copies nobody. The copy costs its own message against
-        // the daily quota this loop is rationing, so it is counted rather than
-        // treated as free.
-        const archiveCopy = getArchiveCopyEmail();
-        const options = {
-          to: email,
-          subject: buildRegistrantReminderSubject(item.session, offset),
-          body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
-            item.daysAway)
-        };
-        sendWithOfficeCopy_(options,
-          `Reminder sent to ${name ? `${name} <${email}>` : email} about ` +
-          `"${item.session.title}" on ${formatDateLabel(item.session.date)}`);
-        result.sent++;
-        quota -= archiveCopy ? 2 : 1;
-        sentFor[stamp] = true;
-        ledger[eventId] = sentFor;
-        __reminderLedgerDirty = true;
-      } catch (err) {
-        // NOT recorded, so the next pass tries again — and told to the admin,
-        // because an address MailApp refuses will refuse the same way tomorrow.
-        log(`⚠️ Could not send a reminder to ${email} for "${item.session.title}" ` +
-          `on ${formatDateLabel(item.session.date)} (${err}).`);
+
+      // The quota, the send itself, the refused-address rule and "record it
+      // only once it is away" are section 9f's. What is decided here is who is
+      // due a message, who in the office is copied (Config's
+      // Registrant_Reminders tick, and nobody by default), what it says, and
+      // how much of a scarce quota this pass may spend (`reserve`).
+      //
+      // officeCopy: the office gets its OWN message rather than a BCC line on
+      // the member's. Same addresses, same cost — but reply-all on it reaches
+      // the desk instead of the member, which is what makes the copy a thread
+      // the office can talk on. See THE OFFICE COPY in section 9f.
+      const outcome = sendRationedEmail({
+        to: email,
+        subject: buildRegistrantReminderSubject(item.session, offset),
+        body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
+          item.daysAway),
+        reserve: REMINDER_QUOTA_RESERVE,
+        bcc: adminEmailsForCategory('registrantReminders'),
+        officeCopy: true,
+        describeRecipient: `Reminder sent to ${name ? `${name} <${email}>` : email} about ` +
+          `"${item.session.title}" on ${formatDateLabel(item.session.date)}`,
+        alreadySent,
+        recordSent: () => {
+          sentFor[stamp] = true;
+          ledger[eventId] = sentFor;
+          __reminderLedgerDirty = true;
+        }
+      });
+
+      if (outcome.status === 'sent' || outcome.status === 'duplicate') {
+        if (outcome.status === 'sent') result.sent++;
+        return;
+      }
+      if (outcome.status === 'held') {
+        result.held++;
+        return;
+      }
+      // PAUSED IS NOT HELD. The mailer has already called recordSent() for it
+      // (see THE PAUSE in section 9f), so this reminder is spent, not queued:
+      // switching the pause off does not deliver yesterday's "your program is
+      // tomorrow" the day after. Counted so the run can say so, and no
+      // warning — nothing went wrong.
+      if (outcome.status === 'paused') {
+        result.paused++;
+        return;
+      }
+      // NOT recorded, so the next pass tries again. Told to the admin on the
+      // refusal itself — an address MailApp refuses will refuse the same way
+      // tomorrow — but not again for the messages suppressed behind it, which
+      // are the same bad address reported twice.
+      log(`⚠️ Could not send a reminder to ${email} for "${item.session.title}" ` +
+        `on ${formatDateLabel(item.session.date)} (${outcome.error}).`);
+      if (outcome.status === 'failed') {
         noteForAdmin('Reminders that could not be sent',
           `${email} could not be emailed about "${item.session.title}" on ` +
-          `${formatDateLabel(item.session.date)} (${err}). It will be tried again next sync.`);
+          `${formatDateLabel(item.session.date)} (${outcome.error}). It will be tried again next sync.`);
       }
     });
   });
@@ -433,6 +404,9 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
     log(`Registrant reminders: ${result.sent} email(s) sent` +
       (result.held > 0 ? `; ${result.held} held back by the per-run cap or the mail quota — ` +
         `they go out on the next sync.` : '.'));
+  }
+  if (result.paused > 0) {
+    log(`Registrant reminders: ${result.paused} email(s) dropped — mail to members and leaders is paused.`);
   }
   if (result.held > 0) {
     noteForAdmin('Reminders held back',
@@ -456,17 +430,6 @@ function pruneRegistrantReminderLedger(liveEventIds, todayKey) {
     delete ledger[eventId];
     __reminderLedgerDirty = true;
   });
-}
-
-/** As in the roster alerts: optimistic when the quota itself cannot be read. */
-function registrantReminderRemainingQuota() {
-  try {
-    const remaining = MailApp.getRemainingDailyQuota();
-    return typeof remaining === 'number' ? remaining : MAX_REMINDER_EMAILS_PER_RUN;
-  } catch (err) {
-    log(`ℹ️ Could not read the remaining mail quota (${err}) — sending up to the per-run cap anyway.`);
-    return MAX_REMINDER_EMAILS_PER_RUN;
-  }
 }
 
 /** "Your appointment on Tue, Mar 3, 2026" / "Reminder: Chair Yoga tomorrow". */
@@ -515,9 +478,9 @@ function buildRegistrantReminderBody(session, person, offset, daysAway) {
 /**
  * MENU ENTRY: run the reminder pass now instead of waiting for the next sync.
  *
- * Reads both tables fresh — whoever pressed this has just changed a
- * Notify_Mode cell and expects that cell counted — and clears the policy
- * memo first for the same reason.
+ * Reads both tables fresh — whoever pressed this has just ticked a box on
+ * Program_Settings and expects that tick counted — and clears the
+ * policy memo first for the same reason.
  *
  * REMINDER_EARLIEST_HOUR does not apply here. It exists to stop the unattended
  * hourly sync mailing people at 12:10am; a person who has just pressed the
@@ -530,10 +493,10 @@ function sendRegistrantRemindersNow() {
   }
   invalidateNotificationPolicyCache();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionRows = readAllSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.Master_Program_Dashboard, 'Event_ID');
-  const registrantRows = readAllSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID');
+  const sessionRows = getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
+  const registrantRows = getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
 
   let result;
   try {
@@ -548,6 +511,6 @@ function sendRegistrantRemindersNow() {
   toastIfPossible(result.sent > 0
     ? `Reminders sent ✅ — ${result.sent} email(s)` + (result.held > 0
       ? `, ${result.held} held for the next run.` : '.')
-    : `Nobody is due a reminder right now — set Notify_Mode on ${SHEET_NAMES.PROGRAM_OPTIONS} ` +
+    : `Nobody is due a reminder right now — tick a reminder on ${SHEET_NAMES.PROGRAM_SETTINGS} ` +
       `to choose which programs send them.`);
 }

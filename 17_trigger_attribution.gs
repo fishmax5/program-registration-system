@@ -183,7 +183,7 @@ function showTriggerStatus() {
     EXPECTED_TRIGGER_HANDLERS.forEach(handler => {
       if (counts[handler]) lines.push(`  ${handler}: ${counts[handler]}`);
     });
-    lines.push(`  Expected for the owner: syncCalendars 1, syncRegistrations 1, ` +
+    lines.push(`  Expected for the owner: syncCalendars 1, autoCreateTodaysSignInSheets 1, syncRegistrations 1, ` +
       `onCalendarChange ${Object.keys(CALENDAR_MAP).length}, onProgramFlagEditInstallable 1`);
     if (!counts['onProgramFlagEditInstallable']) {
       lines.push(`  ⚠️ No onProgramFlagEditInstallable trigger. Ticking Club / No_Registration still works,`);

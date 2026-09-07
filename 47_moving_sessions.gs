@@ -56,12 +56,12 @@ function listRepointableSessions() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const limitKey = formatDateKey(new Date(Date.now() + REPOINT_WINDOW_FORWARD_DAYS * 86400000));
 
-  return readAllSectionedRows(sheet, headers, 'Event_ID')
+  return getSectionedRows(sheet, headers, 'Event_ID')
     .map(row => {
       const date = coerceDate(row[map['Event_Date']]);
       const eventId = String(row[map['Event_ID']] || '').trim();
@@ -86,12 +86,12 @@ function listExistingForms() {
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) return [];
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
   const byForm = {};
 
-  readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
     const formId = String(row[map['Form_ID']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!formId || !date) return;
@@ -208,9 +208,9 @@ function repointSessionsToForm(eventIds, target) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return '⚠️ No program dashboard yet — run Sync Cal first.';
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const allRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const allRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const chosenRows = allRows.filter(row => wanted.has(String(row[map['Event_ID']] || '').trim()));
   if (chosenRows.length === 0) return '⚠️ Those sessions are no longer on the dashboard — try Sync Cal and reopen this.';
 
@@ -225,7 +225,7 @@ function repointSessionsToForm(eventIds, target) {
       formId = extractFormId(target.formRef);
       if (!formId) return '⚠️ That does not look like a form URL or ID.';
       try {
-        FormApp.openById(formId);
+        openFormCached(formId);
       } catch (err) {
         return `⚠️ Could not open form ${formId} (${err}). Check the ID, and that this account can edit it.`;
       }
@@ -243,7 +243,7 @@ function repointSessionsToForm(eventIds, target) {
     // The destination form now covers a different set of dates than it did a
     // moment ago; its grid rows have to say so, or a respondent cannot pick
     // the sessions that were just moved onto it.
-    const refreshedRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+    const refreshedRows = getSectionedRows(registrySheet, headers, 'Event_ID');
     refreshOneFormDateLabels(formId, refreshedRows, map, 'sessions moved onto this form');
     reapplySignUpOptionsForForm(formId, refreshedRows, map);
     flushPersistentRegistries();
@@ -297,7 +297,7 @@ function extractFormId(reference) {
 function writeFormIdOntoSessions(registrySheet, wanted, formId) {
   let links;
   try {
-    const form = FormApp.openById(formId);
+    const form = openFormCached(formId);
     links = {
       view: makeHyperlinkFormula(buildRegistrationUrl(form), 'View Live Form'),
       edit: makeHyperlinkFormula(form.getEditUrl(), 'Edit Form Settings')
@@ -344,6 +344,10 @@ function writeFormIdOntoSessions(registrySheet, wanted, formId) {
       idRange.setValues(ids);
       viewRange.setValues(views);
       editRange.setValues(edits);
+      // repointSessionsToForm() deliberately re-reads these rows straight
+      // after this returns — see the flush() there. It has to see the new
+      // Form_ID, not the one this just replaced.
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 
@@ -427,6 +431,9 @@ function createFormFromSpec(spec, formTitle, context) {
   // leaving an orphaned form in Drive for every attempt beyond the first.
   const templateForm = getOrCreateTemplateForm();
   const copiedFile = DriveApp.getFileById(templateForm.getId()).makeCopy(formTitle, getOrCreateFormsFolder());
+  // NOT openFormCached(): a file id that came into existence one line ago can
+  // never be in the memo, so routing it through would buy nothing and would
+  // leave a handle behind for a form the failure path below is about to trash.
   const form = FormApp.openById(copiedFile.getId());
   // The same opening-up createRegistrationForm() does, for the same reason:
   // whoever syncs this workbook is routinely not whoever made the form.
@@ -489,7 +496,7 @@ function reapplySignUpOptionsForForm(formId, sessionRows, map) {
   if (formRows.length === 0) return;
   const context = buildFormSessionContext(formId, formRows, map, getSharedFormIdSet());
   try {
-    applyAttendanceModeChoices(FormApp.openById(formId), {
+    applyAttendanceModeChoices(openFormCached(formId), {
       isFixed: context.isFixed || context.showTitle, // a combined form is a fixed list of dates
       isClub: context.isClub,
       programTitle: context.programTitle,

@@ -84,7 +84,7 @@ function readDeskMonthSessions(location) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
   const registrantRows = sheet
-    ? readAllSectionedRowValues(sheet, HEADERS.Registrant_Dash, 'Event_ID')
+    ? getSectionedRowValues(sheet, HEADERS.All_Registrants, 'Event_ID')
     : [];
   // Which appointment slots have already gone, read once for every session in
   // the two months rather than once per session — the same trick, and the same

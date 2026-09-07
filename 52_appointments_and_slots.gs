@@ -10,7 +10,7 @@
 //                              see ASSISTANCE_TAG for what the tag changes.
 //   Program_Questions          extra questions a single program needs asked,
 //                              added to its form without the parser, the
-//                              template migration, or Registrant_Dash's shape
+//                              template migration, or All_Registrants's shape
 //                              having to change — see HEADERS.Program_Questions.
 //
 // THE RULE BOTH OBEY: nothing here may make an EXISTING answer mean something
@@ -180,7 +180,7 @@ function appointmentStartLabelOf(eventTime) {
  * can have that time.
  */
 function readBookedAppointmentTimes(registrantRows) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const booked = {};
   (registrantRows || []).forEach(row => {
     const status = String(row[map['Program_Status']] || '').trim();
@@ -265,6 +265,9 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   //    Lunch is included: a counseling appointment is not a meal, and asking
   //    orders one.
   const doomed = findRosterGridItems(items)
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID))
+    .concat(byTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT))
+    // The pre-v9 pair as well, for a form that has not been rebuilt yet.
     .concat(byTitle(TEMPLATE_ITEM_TITLES.LUNCH_GRID))
     .concat(byTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE))
     .concat(byTitle(TEMPLATE_ITEM_TITLES.ALLERGIES))
@@ -318,8 +321,8 @@ function syncAssistanceQuestionsOnForm(form, context, choices) {
   changed += applyEarlierAppointmentQuestion(form);
   // 5. And, under that, lunch — but only where lunch is actually served on
   //    one of this form's days. Step 1 above deleted the two roster grids and
-  //    syncLunchQuestionsOnForm() takes the all-dates checkbox and the
-  //    extra-meals question off every appointment form, so this yes/no is the
+  //    syncLunchQuestionsOnForm() takes the all-dates meal count off every
+  //    appointment form, so this yes/no is the
   //    only lunch question such a form carries and there is nothing here for
   //    the two passes to fight over.
   changed += applyAppointmentLunchQuestion(form,

@@ -21,10 +21,10 @@
  * nothing to delete and nothing to write.
  */
 function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registrantRows) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   if (map['Personalized_Assistance'] === undefined) return 0; // a workbook still on the old layout
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
 
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -35,8 +35,8 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
   if (assistanceFormIds.length === 0) return 0;
 
   const booked = readBookedAppointmentTimes(registrantRows ||
-    readAllSectionedRows(getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.REGISTRANT_DASH),
-      HEADERS.Registrant_Dash, 'Event_ID'));
+    getSectionedRows(getOrCreateSheet(SpreadsheetApp.getActiveSpreadsheet(), SHEET_NAMES.REGISTRANT_DASH),
+      HEADERS.All_Registrants, 'Event_ID'));
   const sharedFormIds = getSharedFormIdSet();
   let touched = 0;
 
@@ -75,7 +75,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
     if (fingerprints[key] === fingerprint) { skipped++; return; }
 
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       const written = syncAssistanceQuestionsOnForm(form, context, choices);
       touched += written;
       if (written > 0) {
@@ -125,7 +125,7 @@ function refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, registra
  * reports what it saw, per program:
  *
  *   - which sessions the workbook thinks are appointments (the
- *     Personalized_Assistance tick on Master_Program_Dashboard, which is what
+ *     Personalized_Assistance tick on All_Program_Sessions, which is what
  *     every other part of this feature reads);
  *   - how many free slots each form is offering, and out of how many;
  *   - what changed on the form, or that nothing needed to;
@@ -143,9 +143,9 @@ function rebuildAssistanceFormsNow() {
     toastIfPossible('⚠️ There is no program dashboard yet — run Sync Cal once.');
     return;
   }
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(dash, headers, 'Event_ID');
+  const rows = getSectionedRows(dash, headers, 'Event_ID');
   const lines = [];
   const todayKey = formatDateKey(new Date());
 
@@ -189,7 +189,7 @@ function rebuildAssistanceFormsNow() {
   const marked = programs.filter(p => p.marked > 0);
   if (marked.length === 0) {
     lines.push('  (nothing — no session on the dashboard has its Personalized_Assistance box ticked)');
-    lines.push('  Tick it on Master_Program_Dashboard, or put [Personalized Assistance] in the');
+    lines.push('  Tick it on All_Program_Sessions, or put [Personalized Assistance] in the');
     lines.push('  calendar event\'s description, then run Sync Cal.');
   }
   marked.forEach(p => {
@@ -272,8 +272,8 @@ function rebuildAssistanceFormsNow() {
   if (assistanceFormIds.length === 0) {
     lines.push('  (none to do)');
   } else {
-    const booked = readBookedAppointmentTimes(readAllSectionedRows(
-      getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.Registrant_Dash, 'Event_ID'));
+    const booked = readBookedAppointmentTimes(getSectionedRows(
+      getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID'));
     const sharedFormIds = getSharedFormIdSet();
     assistanceFormIds.forEach(formId => {
       const context = buildFormSessionContext(formId, byForm[formId], map, sharedFormIds);
@@ -285,7 +285,7 @@ function rebuildAssistanceFormsNow() {
         // ASSISTANCE_NO_TIME_CHOICE. Counting it as one is how a form with
         // nothing free reads as "1 time available".
         const free = choices.filter(c => c !== ASSISTANCE_NO_TIME_CHOICE).length;
-        const changed = syncAssistanceQuestionsOnForm(FormApp.openById(formId), context, choices);
+        const changed = syncAssistanceQuestionsOnForm(openFormCached(formId), context, choices);
         lines.push(`  ${name} — ${free} free appointment time(s) across ${upcoming.length} upcoming ` +
           `session(s); ${changed > 0 ? `${changed} change(s) written` : 'already correct'}` +
           `; asks about an earlier appointment`);
@@ -524,7 +524,7 @@ function describeFormField(registryIndex, formId, field) {
  * very submission (an edited response re-choosing its own time).
  */
 function existingAppointmentHolder(existingRowIndex, eventId, eventTime, ownNames) {
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const own = new Set((ownNames || []).map(normalizeNameKey));
   const wanted = appointmentStartLabelOf(eventTime);
   let holder = '';
@@ -554,7 +554,7 @@ function existingAppointmentHolder(existingRowIndex, eventId, eventTime, ownName
 function describeRepeatAppointment(registryEntry, name, existingRowIndex, maxPerMonth) {
   const limit = Number(maxPerMonth || 0);
   if (!limit || !name) return '';
-  const map = getIndexMap(HEADERS.Registrant_Dash);
+  const map = getIndexMap(HEADERS.All_Registrants);
   const key = normalizeNameKey(name);
   const month = getMonthLabel(registryEntry.eventDate);
   const program = String(registryEntry.cleanTitle || '').trim();
@@ -736,6 +736,10 @@ function recordAssistanceRequests(requests) {
   });
 
   if (added === 0) return 0;
+  // The rows this run actually filed, kept aside before the sort below mixes
+  // them in with everything already on the tab: the email is about what is
+  // new, and a digest of the whole backlog every hour is a digest nobody reads.
+  const filed = existing.slice(existing.length - added);
   existing.sort((a, b) => {
     const da = coerceDate(a[map['Received']]);
     const db = coerceDate(b[map['Received']]);
@@ -746,7 +750,54 @@ function recordAssistanceRequests(requests) {
   noteForAdmin('Appointment requests needing a date',
     `${added} person/people asked for a personalized-assistance appointment outside the times offered. ` +
     `See the "${SHEET_NAMES.ASSISTANCE_REQUESTS}" tab.`);
+  // AND, for whoever is actually going to ring these people, their own email
+  // with the numbers in it — see the Appointment_Requests tick on Config's
+  // Admin Notification Emails table. The digest line above stays where it is:
+  // the two are read by different people, and often by nobody in common.
+  //
+  // Guarded, and after the tab is written: a request that is safely on the
+  // tab and unannounced is recoverable by looking at the tab; a mail failure
+  // that lost the row would not be.
+  try {
+    sendAssistanceRequestNotification(filed, map);
+  } catch (err) {
+    log(`⚠️ Could not email this run's appointment requests (${err}) — they are on the tab.`);
+  }
   return added;
+}
+
+/**
+ * The one email per sync about the requests just filed, to the addresses
+ * ticked for 'appointmentRequests'.
+ *
+ * Everything needed to make the call is in the body — name, number, email, the
+ * program and location they asked about, and what they typed — because the
+ * alternative is opening the workbook to find out whether this is worth
+ * opening the workbook for. Nobody ticked means nothing sent.
+ */
+function sendAssistanceRequestNotification(rows, map) {
+  if (!rows || rows.length === 0) return false;
+  const lines = [
+    `${rows.length} person/people asked for a personalized-assistance appointment at a time we have not `,
+    'scheduled yet. They have NOT been booked into anything — each one is waiting to hear from somebody.',
+    ''
+  ];
+  rows.forEach(row => {
+    const value = header => String(row[map[header]] || '').trim();
+    const received = coerceDate(row[map['Received']]);
+    lines.push(`• ${value('Name') || '(no name given)'}`);
+    lines.push(`    Asked about: ${[value('Program'), value('Location')].filter(Boolean).join(' — ') || '(not recorded)'}`);
+    lines.push(`    Contact: ${[value('Phone'), value('Email')].filter(Boolean).join('  ·  ') || '(none given)'}`);
+    if (value('Answers')) lines.push(`    They said: ${value('Answers')}`);
+    if (received) lines.push(`    Received: ${formatDateLabel(received)}`);
+    lines.push('');
+  });
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  lines.push(`Work them through on the "${SHEET_NAMES.ASSISTANCE_REQUESTS}" tab — Status there is yours to move.`);
+  if (ss) lines.push(ss.getUrl());
+  return notifyAdminCategory('appointmentRequests',
+    `[Calendar & Form Manager] ${rows.length} appointment request(s) need a date`,
+    lines.join('\n'));
 }
 
 /** Writes the requests tab: newest first, Status as a dropdown, the response ID hidden. */
@@ -800,12 +851,12 @@ function getAssistanceScheduleData(daysAhead) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
   const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
-  const sMap = getIndexMap(HEADERS.Master_Program_Dashboard);
-  const rMap = getIndexMap(HEADERS.Registrant_Dash);
+  const sMap = getIndexMap(HEADERS.All_Program_Sessions);
+  const rMap = getIndexMap(HEADERS.All_Registrants);
   if (sMap['Personalized_Assistance'] === undefined) return { days: [], earlier: [] };
 
   const assistanceEventIds = {};
-  readAllSectionedRows(registrySheet, HEADERS.Master_Program_Dashboard, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID').forEach(row => {
     if (!isAssistanceColumnValue(row[sMap['Personalized_Assistance']])) return;
     const id = String(row[sMap['Event_ID']] || '').trim();
     if (id) assistanceEventIds[id] = true;
@@ -818,7 +869,7 @@ function getAssistanceScheduleData(daysAhead) {
 
   const byDay = {};
   const earlierList = [];
-  readAllSectionedRows(registrantsSheet, HEADERS.Registrant_Dash, 'Event_ID').forEach(row => {
+  getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID').forEach(row => {
     const eventId = String(row[rMap['Event_ID']] || '').trim();
     if (!assistanceEventIds[eventId]) return;
     const status = String(row[rMap['Program_Status']] || '').trim();
@@ -1034,13 +1085,13 @@ const FORM_IMAGE_FOLDER_NAME = 'Form Images';
  */
 const FORM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
-/** The folder the builder's uploads go in, made on first use. */
+/**
+ * The folder the builder's uploads go in, made on first use — inside the
+ * folder the workbook lives in, via getOrCreateSystemFolder() (`82`) rather
+ * than the Drive-wide search and root-level create it used to do.
+ */
 function getOrCreateFormImageFolder() {
-  const folders = DriveApp.getFoldersByName(FORM_IMAGE_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-  const folder = DriveApp.createFolder(FORM_IMAGE_FOLDER_NAME);
-  log(`Created Drive folder "${FORM_IMAGE_FOLDER_NAME}" for pictures put on forms.`);
-  return folder;
+  return getOrCreateSystemFolder(FORM_IMAGE_FOLDER_NAME);
 }
 
 /**
@@ -1183,9 +1234,9 @@ function listFormContextsForMatching() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return [];
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const byForm = groupRegistryRowsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
   return Object.keys(byForm)
@@ -1536,9 +1587,9 @@ function pushProgramQuestionsToForms(options) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const byForm = groupRegistryRowsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
   invalidateProgramQuestionSpecs(); // the whole point of this menu item is to re-read the tab
@@ -1561,7 +1612,7 @@ function pushProgramQuestionsToForms(options) {
       (((before.titles || []).length > 0) || !!String(before.description || ''));
     if (wanted.length === 0 && !everApplied) return;
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       let n = syncCustomQuestionsOnForm(form, context, wanted);
       // THE DESCRIPTION ROWS ARE NOT ITEMS, and this menu item used to push
       // only items. syncCustomQuestionsOnForm() filters every "Form

@@ -62,7 +62,7 @@ function getLunchScheduleEndRow(sheet) {
 
 /** Every real schedule row on the tab, ADD block excluded. */
 function readLunchScheduleRows(sheet) {
-  return readAllSectionedRows(sheet, HEADERS.Lunch_Schedule, 'Event_Date', getLunchScheduleEndRow(sheet));
+  return getSectionedRows(sheet, HEADERS.Lunch_Schedule, 'Event_Date', getLunchScheduleEndRow(sheet));
 }
 
 /** The tab's Upcoming/Past data zones, ADD block excluded. */
@@ -145,7 +145,10 @@ function normalizeLunchScheduleCells(e, sheet) {
     }
   });
 
-  if (changed) range.setValues(values);
+  if (changed) {
+    range.setValues(values);
+    invalidateSectionedRowsCache(sheet);
+  }
   // Before the sign-up check below: it asks getMealInfoForDate() what the
   // schedule says, and the answer has to be what was just typed.
   invalidateMealInfoIndex();
@@ -210,6 +213,7 @@ function harvestPastedMenuRows(sheet, add) {
     const needed = after.firstRow + back.length - 1;
     if (sheet.getMaxRows() < needed) sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
     sheet.getRange(after.firstRow, 1, back.length, LUNCH_ADD_HEADERS.length).setValues(back);
+    invalidateSectionedRowsCache(sheet);
   }
 
   // A pasted month routinely contains "Not Serving" rows, and one of them can
@@ -926,8 +930,8 @@ function refreshFormsForLunchDates(pairs, options) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return blank;
 
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return blank;
   const map = getIndexMap(headers);
 
@@ -1004,7 +1008,7 @@ function refreshOneFormDateLabels(formId, sessionRows, map, context) {
   let form = null;
   let questionsChanged = 0;
   try {
-    form = FormApp.openById(formId);
+    form = openFormCached(formId);
     questionsChanged = syncLunchQuestionsOnForm(form, formContext.locations, lunchDateLabels.length > 0, formContext);
   } catch (err) {
     log(`⚠️ Could not open form ${formId} to re-check its lunch questions after a ${context} (${err}).`);

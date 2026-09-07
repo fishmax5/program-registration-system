@@ -36,7 +36,33 @@
 // page and the form ended before the branch page carrying Allergies, "Anything
 // Else?" and every question from Program_Questions.
 // See tests/form_page_routing.test.js.
-const TEMPLATE_VERSION = 8;
+//
+// v9 CHANGES WHAT A LUNCH QUESTION ASKS FOR. Every lunch question on the form
+// used to be a question about PEOPLE — tick who is eating, in a column per
+// person, then a separate list for "extra meals beyond one each". A meal and a
+// person are not the same thing, and asking for one in terms of the other made
+// somebody bringing three guests do arithmetic the form should be doing: name
+// the guests, tick four boxes, then work out that the four meals they actually
+// want is "none extra".
+//
+// So the guests are still named — the roster, the sign-in sheet and the
+// calendar invite all need them — and the meals are now asked for as ONE TOTAL,
+// including the person filling the form in: 0 to MAX_MEALS_PER_SUBMISSION.
+// Three questions become two:
+//
+//   ALL_DATES_LUNCH_PEOPLE (checkbox: You/Guest 1/2/3)  ⟶  ALL_DATES_MEAL_COUNT (0-4)
+//   LUNCH_GRID (checkbox grid: dates x people)          ⟶  MEAL_COUNT_GRID (dates x 0-4)
+//   EXTRA_MEALS (list: none/1..6)                       ⟶  gone, folded into the total
+//
+// It is a structure bump of the loudest kind — two items change TYPE and one
+// disappears — so every live form has to be rebuilt onto it, which is what the
+// stamp above is for and what isFormOnCurrentTemplate() now recognizes: a form
+// still carrying any of the three questions on the left is stale by
+// definition. Responses collected against the old shape keep importing:
+// readMealCountResponse() and readMealCountGridResponse() fall back to the
+// per-person answers and the extra-meals list when the new questions are not
+// on the response (see 29_form_response_processing.gs).
+const TEMPLATE_VERSION = 9;
 const TEMPLATE_FORM_PROP_KEY = `TEMPLATE_FORM_ID_V${TEMPLATE_VERSION}`;
 
 /** Stable marker titles used to find-and-customize specific items after copying a template. */
@@ -46,24 +72,42 @@ defineLazyGlobal_('TEMPLATE_ITEM_TITLES', () => ({
   GUEST_COUNT: 'How many guests are you bringing?',
   // Roster grids: rows = dates, columns = PERSON_COLUMN_LABELS.
   ATTENDANCE_GRID: 'Who is Attending Each Date?',
+  /**
+   * The per-date meal question: rows are the dates lunch is served on, columns
+   * are 0 to MAX_MEALS_PER_SUBMISSION, and the answer on a row is the TOTAL
+   * number of meals that party wants that day — the registrant's own included.
+   *
+   * A multiple-choice grid, so one date can only carry one answer. See
+   * TEMPLATE_VERSION's v9 note for why this replaced a checkbox grid of people.
+   */
+  MEAL_COUNT_GRID: 'How Many Meals Each Date?',
+  /** PRE-v9: the per-date lunch question as a person-per-column checkbox grid. Read, never written. */
   LUNCH_GRID: 'Who Needs Lunch Each Date?',
   ALLERGIES: 'Allergies / Dietary Needs',
   ADDITIONAL_NOTES: 'Anything Else?',
   ATTENDANCE_MODE: 'How would you like to sign up?',
+  /** PRE-v9: the all-dates lunch question as a person-per-box checkbox. Read, never written. */
   ALL_DATES_LUNCH_PEOPLE: 'Who Needs Lunch? (Applies to Every Date)',
   /**
-   * The extra-meals question, asked once per submission beside the lunch
-   * question on whichever branch page the respondent lands on.
+   * The all-dates branch's meal question: one total, 0 to
+   * MAX_MEALS_PER_SUBMISSION, applied to every date on the submission that
+   * serves lunch. The counterpart of MEAL_COUNT_GRID on the branch where a
+   * respondent has said the dates are all the same to them.
+   */
+  ALL_DATES_MEAL_COUNT: 'How Many Meals? (Applies to Every Date)',
+  /**
+   * PRE-v9: "how many meals do you want ON TOP of one each?", asked once per
+   * submission beside the lunch question.
    *
-   * It exists because a meal and a person are not the same thing and the form
+   * It existed because a meal and a person are not the same thing and the form
    * had no way to say so: somebody who collects four meals could only be
    * entered as four people, which puts three invented names on the roster, the
-   * sign-in sheet and the party count. See Meals_Ordered on Registrant_Dash.
+   * sign-in sheet and the party count.
    *
-   * Answered ONCE and applied to every date on the submission that asked for
-   * lunch, which is what a standing order actually is — "four meals, every
-   * lunch day". A one-off extra on a single date is a Quick Mark edit or a
-   * number typed on the row, not a question worth asking sixteen times.
+   * v9 asks for the TOTAL instead (MEAL_COUNT_GRID / ALL_DATES_MEAL_COUNT),
+   * which is the same fact without the subtraction. The title stays here
+   * because responses submitted against a v8 form are still imported from it —
+   * see readMealCountResponse().
    */
   EXTRA_MEALS: 'Extra Meals (Beyond One Each)',
   /**
@@ -100,29 +144,80 @@ defineLazyGlobal_('TEMPLATE_ITEM_TITLES', () => ({
    */
   APPOINTMENT_LUNCH: 'Would you like lunch on the day of your appointment?',
   /**
-   * What the ATTENDANCE_GRID is RETITLED TO on a lunch-only form, where
-   * "which dates are you coming" and "which dates do you want lunch" are the
-   * same question and asking both would be asking twice.
+   * What the MEAL_COUNT_GRID is RETITLED TO on a lunch-only form, where
+   * "which dates are you coming" and "how many meals do you want" are the same
+   * question and asking both would be asking twice. The ATTENDANCE_GRID is the
+   * one that goes (see makeFormLunchOnly()); a number above zero on this grid
+   * IS the attendance.
    *
    * A retitle rather than a second item, because one grid is the honest shape
    * of that form — but it does mean the grid can arrive under either of two
-   * titles, and every lookup of it has to accept both. There are exactly two
-   * (findRosterGridItems() writes the rows, findRosterGridResponse() reads the
-   * answers) and they are the reason this is a named constant rather than a
-   * string in the retitle.
+   * titles, and every lookup of it has to accept both.
+   *
+   * PRE-v9 IT WAS THE OTHER WAY AROUND: the ATTENDANCE_GRID survived, under
+   * this title, as a person-per-column checkbox grid — see
+   * LEGACY_LUNCH_ONLY_GRID_TITLE, which is what those forms and their
+   * responses still carry.
    */
-  LUNCH_ONLY_GRID: 'Who Needs Lunch on Each Date?'
+  LUNCH_ONLY_GRID: 'How Many Meals on Each Date?'
 }));
 
-/** Both titles the per-date roster grid can carry — see LUNCH_ONLY_GRID. */
+/**
+ * The title the lunch-only form's single grid carried BEFORE v9, when it was
+ * the ATTENDANCE_GRID retitled rather than the MEAL_COUNT_GRID retitled — a
+ * checkbox grid of people, not a count. Never written any more; read so a
+ * response collected on such a form still imports.
+ */
+const LEGACY_LUNCH_ONLY_GRID_TITLE = 'Who Needs Lunch on Each Date?';
+
+/**
+ * Every title a per-date grid can carry, whatever it is asking — the two
+ * current ones, the lunch-only retitle, and both pre-v9 spellings. This is the
+ * list for "find the grids on this form" (setting rows, deleting them off an
+ * appointment form); reading an ANSWER goes by the specific title, since what
+ * a grid means depends on which one it is.
+ */
 const ROSTER_GRID_TITLES = [
   TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID,
+  TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID,
+  LEGACY_LUNCH_ONLY_GRID_TITLE
+];
+
+/**
+ * The grids that hold MEAL COUNTS — the per-date one, and the lunch-only
+ * form's retitled copy of it. Both are multiple-choice grids whose columns are
+ * MEAL_COUNT_CHOICES.
+ */
+const MEAL_COUNT_GRID_TITLES = [
+  TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID,
   TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID
 ];
+
+/** True when this item title is a grid of meal counts rather than of people. */
+function isMealCountGridTitle(title) {
+  return MEAL_COUNT_GRID_TITLES.indexOf(String(title || '')) !== -1;
+}
 
 /** The roster-grid items on `form`, under whichever title they carry. */
 function findRosterGridItems(items) {
   return (items || []).filter(it => ROSTER_GRID_TITLES.indexOf(it.getTitle()) !== -1);
+}
+
+/**
+ * Sets a grid item's rows without the caller having to know which KIND of grid
+ * it is. The attendance grid is a checkbox grid and the meal-count grids are
+ * multiple-choice grids, and Apps Script will not let one be cast as the
+ * other: asCheckboxGridItem() on a GRID item answers "Invalid conversion for
+ * item type: GRID". Judged by the item's own TYPE rather than by its title, so
+ * a form left mid-migration — the new title on an old item, or the reverse —
+ * still gets its dates written instead of throwing the whole label pass away.
+ */
+function setGridItemRows(item, rows) {
+  if (item.getType() === FormApp.ItemType.GRID) {
+    item.asGridItem().setRows(rows);
+    return;
+  }
+  item.asCheckboxGridItem().setRows(rows);
 }
 
 /**
@@ -563,20 +658,18 @@ const TEMPLATE_GRID_PLACEHOLDER_ROW = '(dates will be filled in automatically)';
  *
  *   MODE    "How would you like to sign up?" (required), branching to:
  *
- *   "Sign Up For Every Date"  ALL_DATES_LUNCH_PEOPLE checkbox (who eats,
- *                             applied to every session date, including dates
- *                             added to a Grouped series later)
- *                             + EXTRA_MEALS                       -> SUBMIT
+ *   "Sign Up For Every Date"  ALL_DATES_MEAL_COUNT list (0-4 meals in total,
+ *                             applied to every session date that serves lunch,
+ *                             including dates added to a Grouped series later)
+ *                                                                 -> SUBMIT
  *
- *   "Pick Your Dates"         ATTENDANCE_GRID + LUNCH_GRID roster grids,
- *                             dates as rows and PERSON_COLUMN_LABELS as
- *                             columns
- *                             + EXTRA_MEALS                       -> SUBMIT
+ *   "Pick Your Dates"         ATTENDANCE_GRID (dates x PERSON_COLUMN_LABELS)
+ *                             + MEAL_COUNT_GRID (dates x 0-4)     -> SUBMIT
  *
- * EXTRA_MEALS is on both branch pages because a respondent meets exactly one of
- * them, and it goes wherever the lunch question goes: syncLunchQuestionsOnForm()
- * strips and restores all three together, since "how many extra?" is a question
- * about a meal nobody is serving on a form that offers none.
+ * WHO is coming is still asked per person; HOW MANY MEALS is asked as one
+ * total per date, the registrant's own included — see TEMPLATE_VERSION's v9
+ * note. Both meal questions come off a form with nothing to serve and go back
+ * on when it has (syncLunchQuestionsOnForm()).
  *
  * Both branch pages end with Allergies and an "Anything Else?" catch-all whose
  * HELP TEXT carries the per-location footer note.
@@ -614,7 +707,7 @@ function getOrCreateTemplateForm() {
   const existingId = props.getProperty(TEMPLATE_FORM_PROP_KEY);
   if (existingId) {
     try {
-      return FormApp.openById(existingId);
+      return openFormCached(existingId);
     } catch (err) {
       log(`⚠️ Stored template form ${existingId} could not be opened (${err}) — building a fresh template.`);
     }
@@ -622,6 +715,25 @@ function getOrCreateTemplateForm() {
 
   const form = FormApp.create('TEMPLATE — Registration Form Base (do not edit or delete)');
   addTemplateItemsToForm(form);
+
+  // Same reason every registration form and program registrant sheet opens itself
+  // up the moment it is created (see openUpFileToAnyoneWithLink()): the
+  // template is created by whoever ran this, but copied by makeCopy() every
+  // time a program's form is built — routinely a DIFFERENT account, on the
+  // hourly triggers. Leaving the template itself unshared means the very
+  // first copy attempt from another account fails, and openUpAllFormSharing()
+  // only reaches it retroactively if someone remembers to run it.
+  openUpFileToAnyoneWithLink(form.getId(), 'the form template');
+
+  // FILED, not left where FormApp.create() dropped it. Every other file this
+  // system makes goes into a folder of its own kind; the template is one of a
+  // kind, so it sits in the system folder itself beside the workbook. Without
+  // this it stayed in My Drive root — which is exactly the mess `82` exists
+  // to stop, and the template was the most conspicuous piece of it.
+  const systemRoot = getSystemRootFolder();
+  if (systemRoot) {
+    moveDriveFileInto(DriveApp.getFileById(form.getId()), systemRoot, 'the form template');
+  }
 
   props.setProperty(TEMPLATE_FORM_PROP_KEY, form.getId());
   log(`Created template registration form: ${form.getId()}`);
@@ -678,15 +790,13 @@ function addTemplateItemsToForm(form) {
 
   // --- Branch A: every date ---------------------------------------------
   const allDatesPage = form.addPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.ALL_DATES);
-  addAllDatesLunchItem(form);
-  addExtraMealsItem(form);
+  addAllDatesMealCountItem(form);
   addClosingQuestions(form);
 
   // --- Branch B: per-date roster ----------------------------------------
   const specificPage = form.addPageBreakItem().setTitle(TEMPLATE_PAGE_TITLES.SPECIFIC_DATES);
   addAttendanceGridItem(form);
-  addLunchGridItem(form);
-  addExtraMealsItem(form);
+  addMealCountGridItem(form);
   addClosingQuestions(form);
 
   // Navigation, written last so every page it names already exists — and
@@ -719,16 +829,93 @@ function addTemplateItemsToForm(form) {
 /** The "no guests" choice. A word rather than "0" — it is an answer, not a quantity. */
 const GUEST_COUNT_NONE_LABEL = 'Just me — no guests';
 
-/** The "no extras" choice on the extra-meals question, for the same reason. */
+/** PRE-v9: the "no extras" choice on the extra-meals question. Read, never written. */
 const EXTRA_MEALS_NONE_LABEL = 'None — one meal each is right';
 
-/**
- * The largest extra order a form will take. Not a limit on what the workbook
- * can hold — staff type any number into Meals_Ordered — but a limit on what a
- * public form will accept without a person in the loop, the same judgement
- * MAX_GUESTS makes: an order of thirty meals is a conversation, not a tick.
- */
+/** PRE-v9: the largest EXTRA order a v8 form would take, still the cap when one of its responses is read. */
 const MAX_EXTRA_MEALS = 6;
+
+/**
+ * The largest TOTAL order a form will take: the registrant plus
+ * MAX_GUESTS, which is as many people as one submission can name.
+ *
+ * Not a limit on what the workbook can hold — staff type any number into
+ * Meals_Ordered — but a limit on what a public form will accept without a
+ * person in the loop, the same judgement MAX_GUESTS makes: an order of thirty
+ * meals is a conversation, not a tick. Somebody who needs more is told to ring,
+ * in the help text of both meal questions.
+ */
+const MAX_MEALS_PER_SUBMISSION = MAX_GUESTS + 1;
+
+/**
+ * The choices on both meal questions: "0" through MAX_MEALS_PER_SUBMISSION, as
+ * strings, because a Forms choice is text.
+ *
+ * ZERO IS A REAL ANSWER and leads the list — "I am coming, I do not want
+ * lunch" is a thing a great many people mean, and before v9 they said it by
+ * ticking nobody, which is indistinguishable from not having noticed the
+ * question. Its label says so in words for the same reason
+ * GUEST_COUNT_NONE_LABEL does; readMealCountAnswer() takes the leading number
+ * off whatever it is given, so the wording can change without breaking a
+ * response.
+ */
+const MEAL_COUNT_NONE_LABEL = '0 — no lunch, thank you';
+
+const MEAL_COUNT_CHOICES = (() => {
+  const choices = [MEAL_COUNT_NONE_LABEL];
+  for (let n = 1; n <= MAX_MEALS_PER_SUBMISSION; n++) choices.push(String(n));
+  return choices;
+})();
+
+/**
+ * The help text both meal questions share: what the number means, and that it
+ * includes the person answering.
+ *
+ * "INCLUDING YOURSELF" IS THE WHOLE SENTENCE. The question this replaced asked
+ * for meals BEYOND one each, and somebody who read that question and now reads
+ * this one will otherwise answer the old one — three guests, "3", and a party
+ * of four gets three meals.
+ */
+// LAZY, because it names CENTER_PHONE — a constant from another file, and a
+// top-level read of one is the load-order hazard 01a_lazy_globals.gs exists to
+// remove.
+defineLazyGlobal_('MEAL_COUNT_HELP', () =>
+  'The TOTAL number of meals you want, including your own — so if you are coming with two ' +
+  'guests and all three of you are eating, that is 3. Choose "0" if nobody in your party ' +
+  `wants lunch. Need more than ${MAX_MEALS_PER_SUBMISSION}? Please call us on ${CENTER_PHONE} ` +
+  'and we will sort it out with you.');
+
+/**
+ * ONE ANSWER OFF A MEAL QUESTION, as a number of meals — or null when the
+ * question was not answered at all.
+ *
+ * NULL AND ZERO ARE DIFFERENT, and both callers depend on it: zero is somebody
+ * saying "no lunch", null is a response that never met the question — a v8
+ * form, an appointment form, a form with nothing to serve — where the answer
+ * has to be looked for somewhere else before it can be called no lunch. See
+ * readMealCountResponse().
+ *
+ * Parses the LEADING NUMBER rather than the whole label, so
+ * MEAL_COUNT_NONE_LABEL ("0 — no lunch, thank you") reads as 0 and the wording
+ * of it can change without stranding every response collected under the old
+ * one. Anything with no number in front of it is null, not zero: an
+ * unrecognizable answer is a question we have not really been told the answer
+ * to.
+ *
+ * CAPPED at MAX_MEALS_PER_SUBMISSION rather than trusted — the question is a
+ * list of fixed choices, so a larger number can only come from an edited form,
+ * and an order of ninety meals should reach a person before it reaches the
+ * kitchen.
+ */
+function readMealCountAnswer(value) {
+  const raw = String(value === 0 ? '0' : (value || '')).trim();
+  if (!raw) return null;
+  const match = raw.match(/^-?\d+/);
+  if (!match) return null;
+  const amount = Math.floor(Number(match[0]));
+  if (!isFinite(amount) || amount <= 0) return 0;
+  return Math.min(amount, MAX_MEALS_PER_SUBMISSION);
+}
 
 /** Page title for the N-guest page. Distinct per count so form.getItems() lookups are unambiguous. */
 function guestPageTitle(guestCount) {
@@ -855,33 +1042,25 @@ function addClosingQuestions(form) {
   form.addParagraphTextItem().setTitle(TEMPLATE_ITEM_TITLES.ADDITIONAL_NOTES);
 }
 
-/** The all-dates branch's who-eats checkbox. Appended wherever the cursor is — callers position it. */
-function addAllDatesLunchItem(form) {
-  return form.addCheckboxItem().setTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE)
-    .setChoiceValues(PERSON_COLUMN_LABELS)
-    .setHelpText('Tick everyone who will be eating. This applies only to the dates lunch is ' +
-      'actually served on.\n\n' + NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER);
-}
-
 /**
- * The extra-meals question. A LIST, not a free-text number: an open box
- * collects "2 for my sister", "maybe 1?" and "n/a", none of which is a number,
- * and this answer goes straight into a count the kitchen orders against.
+ * The all-dates branch's meal question: one total for the whole party, applied
+ * to every date on the form that serves lunch. Appended wherever the cursor is
+ * — callers position it.
  *
- * "None" leads, because it is the true answer for almost everyone and a
- * required question whose first choice is a number invites a stray pick.
- * Appended wherever the cursor is — callers position it.
+ * A LIST, not a free-text number: an open box collects "2 for my sister",
+ * "maybe 1?" and "n/a", none of which is a number, and this answer goes
+ * straight into a count the kitchen orders against.
+ *
+ * NOT REQUIRED. It sits on the branch a respondent takes to say "every date is
+ * the same to me", and a required question about food is a required question
+ * about something they may simply not want; an unanswered one reads as no
+ * lunch, which is the reading a person can correct at the desk.
  */
-function addExtraMealsItem(form) {
-  const choices = [EXTRA_MEALS_NONE_LABEL];
-  for (let n = 1; n <= MAX_EXTRA_MEALS; n++) choices.push(String(n));
-  return form.addListItem().setTitle(TEMPLATE_ITEM_TITLES.EXTRA_MEALS)
-    .setChoiceValues(choices)
-    .setHelpText('Everyone you have listed above who is having lunch already gets one meal. ' +
-      'Only answer this if you need MORE than that — an extra meal to take home, or meals you ' +
-      'collect for yourself on top of your own. They are added to the person filling in this form, ' +
-      `on every date above that you asked for lunch on. Need more than ${MAX_EXTRA_MEALS} extra? ` +
-      `Please call us on ${CENTER_PHONE}.`);
+function addAllDatesMealCountItem(form) {
+  return form.addListItem().setTitle(TEMPLATE_ITEM_TITLES.ALL_DATES_MEAL_COUNT)
+    .setChoiceValues(MEAL_COUNT_CHOICES)
+    .setHelpText('This applies to every date on this form that lunch is actually served on.\n\n' +
+      MEAL_COUNT_HELP);
 }
 
 /** The per-date attendance roster grid. Rows are set later by applyFormDateLabels(). */
@@ -892,12 +1071,22 @@ function addAttendanceGridItem(form) {
     .setRows([TEMPLATE_GRID_PLACEHOLDER_ROW]).setColumns(PERSON_COLUMN_LABELS);
 }
 
-/** The per-date lunch roster grid. Rows are set later by applyFormDateLabels(). */
-function addLunchGridItem(form) {
-  return form.addCheckboxGridItem().setTitle(TEMPLATE_ITEM_TITLES.LUNCH_GRID)
-    .setHelpText('Only the dates lunch is served on appear here. Tick a box for each person on ' +
-      'each date they want lunch.\n\n' + NO_GUESTS_NOTE + '\n\n' + GUEST_ORDER_REMINDER)
-    .setRows([TEMPLATE_GRID_PLACEHOLDER_ROW]).setColumns(PERSON_COLUMN_LABELS);
+/**
+ * The per-date meal grid: one row per lunch date, one column per possible
+ * total. Rows are set later by applyFormDateLabels().
+ *
+ * A MULTIPLE-CHOICE grid rather than a checkbox one, which is the whole point:
+ * a date can carry exactly one number, so "how many meals on the 4th?" has one
+ * answer instead of a set of ticks that have to be counted and reconciled. A
+ * date left blank is no meal that day — the same reading an empty row of
+ * tick-boxes always had.
+ */
+function addMealCountGridItem(form) {
+  return form.addGridItem().setTitle(TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID)
+    .setHelpText('Only the dates lunch is served on appear here. Pick the TOTAL number of meals ' +
+      'your party wants on each date — your own included. Leave a date blank if nobody wants ' +
+      'lunch that day.\n\n' + MEAL_COUNT_HELP)
+    .setRows([TEMPLATE_GRID_PLACEHOLDER_ROW]).setColumns(MEAL_COUNT_CHOICES);
 }
 
 /**

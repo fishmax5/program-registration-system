@@ -32,8 +32,8 @@
  * the capacity hints this still exists to write — is fresh.
  */
 function refreshFormShapeForAllForms(registrySheet) {
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -68,7 +68,7 @@ function refreshFormCapacityLabelsForAllForms(registrySheet) {
   return refreshFormShapeForAllForms(registrySheet);
 }
 
-/** { Form_ID: [session rows] } from a batch of Master_Program_Dashboard rows. Rows with no form are skipped. */
+/** { Form_ID: [session rows] } from a batch of All_Program_Sessions rows. Rows with no form are skipped. */
 function groupRegistryRowsByForm(rows, map) {
   const byForm = {};
   rows.forEach(row => {
@@ -101,6 +101,16 @@ function isFormOnCurrentTemplate(form) {
   const titles = items.map(it => it.getTitle());
   if (titles.indexOf(LEGACY_GUEST_COUNT_TITLE) !== -1) return false;
   if (titles.indexOf(LEGACY_FOOTER_ITEM_TITLE) !== -1) return false;
+  // THE PRE-v9 LUNCH QUESTIONS ARE PROOF OF AN OLD FORM, and they have to be
+  // judged here rather than by the `required` list below: the v9 questions are
+  // legitimately ABSENT from a form with nothing to serve, so "does it have
+  // the new ones?" would mark every no-lunch form stale forever. Their
+  // presence, on the other hand, is unambiguous — nothing writes them any more
+  // (see TEMPLATE_VERSION's v9 note), so a form carrying one was built before
+  // the change and is asking for meals in people rather than in numbers.
+  const preV9 = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.EXTRA_MEALS, LEGACY_LUNCH_ONLY_GRID_TITLE];
+  if (preV9.some(title => titles.indexOf(title) !== -1)) return false;
   // AN APPOINTMENT FORM IS A CURRENT FORM. syncAssistanceQuestionsOnForm()
   // deliberately removes the mode question and both roster grids and puts the
   // time question in their place, so judging it by the date-based checklist
@@ -136,7 +146,7 @@ function isFormOnCurrentTemplate(form) {
  * cost is that responses already collected against the OLD questions lose
  * their per-question answers when those questions are deleted — which is why
  * this runs from syncRegistrations() only AFTER that run has imported
- * everything new. Rows already on Registrant_Dash are the record
+ * everything new. Rows already on All_Registrants are the record
  * of those registrations and are untouched.
  */
 function rebuildFormFromCurrentTemplate(form, context) {
@@ -267,8 +277,8 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
   const limit = options.limit || MAX_FORM_REBUILDS_PER_RUN;
   const deadline = options.deadline || 0;
 
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return 0;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -286,7 +296,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
 
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       log(`⚠️ migrateFormsToCurrentTemplate: could not open form ${formId} (${err}).`);
       noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);
@@ -346,7 +356,7 @@ function migrateFormsToCurrentTemplate(registrySheet, sessionRows, options) {
 }
 
 /**
- * Re-points Master_Program_Dashboard's "View Live Form" links at freshly
+ * Re-points All_Program_Sessions's "View Live Form" links at freshly
  * generated URLs, for the forms in urlByFormId. Needed after a rebuild: the
  * link we hand out is a PREFILLED url (buildRegistrationUrl()) whose
  * entry.N parameters name the form's item IDs, and a rebuilt form has new
@@ -376,7 +386,10 @@ function updateRegistryFormLinks(registrySheet, urlByFormId) {
       links[r] = [makeHyperlinkFormula(url, 'View Live Form')];
       touched = true;
     });
-    if (touched) linkRange.setValues(links);
+    if (touched) {
+      linkRange.setValues(links);
+      invalidateSectionedRowsCache(registrySheet);
+    }
   });
 }
 

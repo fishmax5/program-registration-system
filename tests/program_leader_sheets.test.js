@@ -32,10 +32,15 @@ this.pullProgramLeaderSheetEdits = pullProgramLeaderSheetEdits;
 this.leaderRowKey = leaderRowKey;
 this.encodeLeaderSnapshot = encodeLeaderSnapshot;
 this.getIndexMap = getIndexMap;
+this.isLeaderSheetWaitlistedRow = isLeaderSheetWaitlistedRow;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.LEADER_OWNED_COLUMNS = LEADER_OWNED_COLUMNS;
 this.HEADERS = HEADERS;
 this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
+this.ensureRegistrantSheetsForUpcomingPrograms = ensureRegistrantSheetsForUpcomingPrograms;
+this.REGISTRANT_SHEET_MAX_CREATES_PER_RUN = REGISTRANT_SHEET_MAX_CREATES_PER_RUN;
+this.__stubCreate = function (fn) { createProgramLeaderSheet = fn; };
+this.registrantSheetFileName = registrantSheetFileName;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -105,10 +110,10 @@ check('a session with no readable date still gets a band rather than throwing',
 // THE ONE THAT MATTERS: a banded sheet pulls back only the leader's edits.
 // ---------------------------------------------------------------------------
 
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 
 function registrantRow(values) {
-  const row = new Array(sandbox.HEADERS.Registrant_Dash.length).fill('');
+  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
   Object.keys(values).forEach(k => { row[regMap[k]] = values[k]; });
   return row;
 }
@@ -181,6 +186,103 @@ check("Bob's tick and note landed on his row",
 check("Ann's untouched cells left the workbook's own note alone",
   [registrantRows[0][regMap['Contacted']], registrantRows[0][regMap['Leader_Notes']]],
   [false, 'staff note']);
+
+// ---------------------------------------------------------------------------
+// WHO GETS A SHEET, now that it is every program rather than only the ones
+// with a notifying leader.
+//
+// THE FAILURES THIS PINS. (1) A calendar carrying next spring's dates must not
+// build a spreadsheet per program tonight — the horizon is what stops it, and
+// SpreadsheetApp.create() is the slowest call this project makes. (2) A weekly
+// class must get ONE sheet, not one per date: the registry entry is what makes
+// a link handed out in September still right in March. (3) A run that hits the
+// cap must build the SOONEST sessions' sheets, not whatever sorted first.
+// ---------------------------------------------------------------------------
+
+const pdHeaders = sandbox.HEADERS.All_Program_Sessions;
+const pdMap = sandbox.getIndexMap(pdHeaders);
+
+function dashRow(title, location, daysOut) {
+  const row = new Array(pdHeaders.length).fill('');
+  row[pdMap['Event_ID']] = `${title}-${daysOut}`;
+  row[pdMap['Clean_Title']] = title;
+  row[pdMap['Location']] = location;
+  row[pdMap['Event_Date']] = new Date(Date.now() + daysOut * 86400000);
+  return row;
+}
+
+let built = [];
+sandbox.__stubCreate(value => { built.push(value); });
+
+sandbox.__setRegistry({});
+built = [];
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+  dashRow('Chair Yoga', 'Narberth', 2),
+  dashRow('Chair Yoga', 'Narberth', 9),   // same program, later — still one sheet
+  dashRow('Bridge Club', 'Narberth', 40), // past the horizon
+  dashRow('Art', 'Ashbridge', -3)         // already happened
+]);
+check('one sheet per program inside the week, and none for the rest',
+  built, ['Chair Yoga|||Narberth']);
+
+check('the same program at another site is its own sheet — the privacy boundary',
+  (() => {
+    built = [];
+    sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+      dashRow('Chair Yoga', 'Narberth', 1), dashRow('Chair Yoga', 'Ashbridge', 1)]);
+    return built.slice().sort();
+  })(),
+  ['Chair Yoga|||Ashbridge', 'Chair Yoga|||Narberth']);
+
+check('a program already holding a sheet is left completely alone',
+  (() => {
+    sandbox.__setRegistry({ 'chair yoga|narberth': { fileId: 'F1' } });
+    built = [];
+    sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [dashRow('Chair Yoga', 'Narberth', 1)]);
+    sandbox.__setRegistry({});
+    return built;
+  })(), []);
+
+// The cap, and the order it spends itself in.
+built = [];
+const many = [];
+for (let i = 0; i < sandbox.REGISTRANT_SHEET_MAX_CREATES_PER_RUN + 3; i++) {
+  // Named so alphabetical order is the REVERSE of soonest-first: a pass that
+  // sorted by name would build the furthest-out sessions and leave tomorrow's.
+  many.push(dashRow(`Program ${String.fromCharCode(90 - i)}`, 'Narberth', i));
+}
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, many);
+check('one run builds no more than the cap',
+  built.length, sandbox.REGISTRANT_SHEET_MAX_CREATES_PER_RUN);
+check('...and spends it on the soonest sessions',
+  built[0], 'Program Z|||Narberth');
+
+check('the file is named for what is on it, not for who reads it',
+  sandbox.registrantSheetFileName('Chair Yoga', 'Narberth'),
+  'Registrant Sheet — Chair Yoga (Narberth)');
+
+// WHICH LINES GET THE WASH. A leader scans a roster for "how many chairs",
+// and the one line where the answer is no has to look different — from either
+// side: the status the workbook settled on, or the tick the leader made on
+// this sheet a minute ago and has not yet seen pushed back.
+{
+  const m = sandbox.getIndexMap(sandbox.LEADER_SHEET_HEADERS);
+  const line = over => {
+    const row = new Array(sandbox.LEADER_SHEET_HEADERS.length).fill('');
+    Object.keys(over).forEach(k => { row[m[k]] = over[k]; });
+    return row;
+  };
+  check('a waitlisted status is washed',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Waitlisted' }), m), true);
+  check("a leader's own tick is washed before the next push confirms it",
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active', Waitlisted: true }), m), true);
+  check('a pasted "TRUE" counts, the same as it does in the merge',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Waitlisted: 'TRUE' }), m), true);
+  check('an ordinary active line is not washed',
+    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active' }), m), false);
+  check('and neither is a band row, which carries neither',
+    sandbox.isLeaderSheetWaitlistedRow(line({}), m), false);
+}
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

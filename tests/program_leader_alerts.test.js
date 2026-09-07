@@ -174,8 +174,8 @@ check('a huge diff is truncated, and says that it was',
 // and never a superseded row.
 // ---------------------------------------------------------------------------
 
-const sessionMap = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.Registrant_Dash);
+const sessionMap = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
+const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
 
 function row(map, headers, values) {
   const r = new Array(headers.length).fill('');
@@ -189,21 +189,21 @@ const longAgo = new Date();
 longAgo.setDate(longAgo.getDate() - 400);
 
 const sessionRows = [
-  row(sessionMap, sandbox.HEADERS.Master_Program_Dashboard,
+  row(sessionMap, sandbox.HEADERS.All_Program_Sessions,
     { Event_ID: 'EV1', Event_Date: soon, Clean_Title: 'Chair Yoga', Location: 'Narberth' }),
   // Same program, but far outside the alert window.
-  row(sessionMap, sandbox.HEADERS.Master_Program_Dashboard,
+  row(sessionMap, sandbox.HEADERS.All_Program_Sessions,
     { Event_ID: 'EV2', Event_Date: longAgo, Clean_Title: 'Chair Yoga', Location: 'Narberth' }),
   // A program nobody asked to be told about.
-  row(sessionMap, sandbox.HEADERS.Master_Program_Dashboard,
+  row(sessionMap, sandbox.HEADERS.All_Program_Sessions,
     { Event_ID: 'EV3', Event_Date: soon, Clean_Title: 'Tai Chi', Location: 'Ashbridge' })
 ];
 
 const registrantRows = [
-  row(regMap, sandbox.HEADERS.Registrant_Dash, { Event_ID: 'EV1', Name: 'Ann', Program_Status: 'Active', Party_Size: 2 }),
-  row(regMap, sandbox.HEADERS.Registrant_Dash, { Event_ID: 'EV1', Name: 'Old Bob', Program_Status: 'Superseded' }),
-  row(regMap, sandbox.HEADERS.Registrant_Dash, { Event_ID: 'EV2', Name: 'Historic', Program_Status: 'Active' }),
-  row(regMap, sandbox.HEADERS.Registrant_Dash, { Event_ID: 'EV3', Name: 'Someone Else', Program_Status: 'Active' })
+  row(regMap, sandbox.HEADERS.All_Registrants, { Event_ID: 'EV1', Name: 'Ann', Program_Status: 'Active', Party_Size: 2 }),
+  row(regMap, sandbox.HEADERS.All_Registrants, { Event_ID: 'EV1', Name: 'Old Bob', Program_Status: 'Superseded' }),
+  row(regMap, sandbox.HEADERS.All_Registrants, { Event_ID: 'EV2', Name: 'Historic', Program_Status: 'Active' }),
+  row(regMap, sandbox.HEADERS.All_Registrants, { Event_ID: 'EV3', Name: 'Someone Else', Program_Status: 'Active' })
 ];
 
 const rosters = sandbox.buildLeaderAlertRosters(sessionRows, registrantRows, ['chair yoga|narberth']);

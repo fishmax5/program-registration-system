@@ -231,7 +231,17 @@ function buildEventGroups(parsedSessions) {
     if (parsed.isAssistance) groups[key].isAssistance = true;
     if (!groups[key].slotMinutes && parsed.slotMinutes) groups[key].slotMinutes = parsed.slotMinutes;
     if (!groups[key].maxPerMonth && parsed.maxPerMonth) groups[key].maxPerMonth = parsed.maxPerMonth;
-    groups[key].sessions.push({ event, calendarId, locationName });
+    // AND HERE IS THE ONE THAT IS NOT MERGED INTO THE GROUP AT ALL. Every
+    // setting above is a statement about a program (or, for [Cap: N], about a
+    // month of one) and is folded onto the group accordingly. [Waitlist Only]
+    // is a statement about THIS DATE — see WAITLIST_ONLY_TAG — so it rides on
+    // the session, where writeEventRegistryRows() reads it one row at a time.
+    // Folding it up the way the flags above are folded would take "the 14th is
+    // full" and quietly apply it to every other date of the program, which is
+    // the exact opposite of what somebody ticking it just said.
+    groups[key].sessions.push({
+      event, calendarId, locationName, waitlistOnly: !!parsed.waitlistOnly
+    });
   });
 
   return unifyProgramFlagsAcrossGroups(Object.values(groups)).map(g => {
@@ -439,8 +449,8 @@ function getExistingRegistryState(registrySheet) {
   // BUT still showing the marks of a [No Registration] tag that has since come
   // off — the second one has work to do even though it has no new dates.
   const state = { eventIds: new Set(), groupFormMap: {}, blockedPrograms: new Set() };
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
 
   rows.forEach(row => {

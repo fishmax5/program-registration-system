@@ -67,7 +67,7 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const map = sandbox.getIndexMap(sandbox.HEADERS.Master_Program_Dashboard);
+const map = sandbox.getIndexMap(sandbox.HEADERS.All_Program_Sessions);
 const CAL = 'narberth@group.calendar.google.com';
 
 // A sheet stub that captures the one setValues() the writer makes.

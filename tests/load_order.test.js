@@ -37,7 +37,9 @@ const DERIVED_GLOBALS = [
   'LUNCH_ONLY_TYPE_TAG', 'TAB_GROUPS', 'TYPO', 'RECOGNIZED_TAG_PATTERNS',
   'DESCRIPTION_TAG_READERS', 'REGISTRATION_NOT_OPEN_NOTICE_PATTERNS',
   'REGISTRANT_EDITABLE_COLUMNS', 'LEADER_SHEET_BAND_BG', 'LEADER_SHEET_BAND_INK',
-  'PROGRAM_FORM_TYPES', 'REGISTRATION_ANCHOR_REGEX_GLOBAL'
+  'LEADER_SHEET_WAITLIST_BG', 'LEADER_SHEET_WAITLIST_INK',
+  'PROGRAM_FORM_TYPES', 'REGISTRATION_ANCHOR_REGEX_GLOBAL', 'DOOR_ROUTES',
+  'STRAY_FILE_PATTERNS'
 ];
 
 /** Just enough Apps Script for the project to finish evaluating. */
@@ -63,6 +65,11 @@ function stubs() {
       getEffectiveUser: () => ({ getEmail: () => 'a@b.c' })
     },
     FormApp: { ItemType: {} },
+    MimeType: {
+      GOOGLE_FORMS: 'application/vnd.google-apps.form',
+      GOOGLE_SHEETS: 'application/vnd.google-apps.spreadsheet',
+      GOOGLE_DOCS: 'application/vnd.google-apps.document'
+    },
     CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},
     ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {},
     Calendar: {}, CacheService: {}

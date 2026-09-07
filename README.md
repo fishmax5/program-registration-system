@@ -130,7 +130,7 @@ It also:
   thirty identical rows reading "Lunch Only (no program)", and stays out of the
   participation numbers and the Today block — a meal is not a program, but it
   is worth reading;
-- lists **who is eating**, not just how many, on a `Lunch_Roster` tab: one row
+- lists **who is eating**, not just how many, on a `All_Lunch_Registrants` tab: one row
   per person per date and location, with their programs, phone, `Hot`/`Cold`
   and whether they've been handed their meal — built from the same pass as the
   order count, so the names and the number cannot disagree;

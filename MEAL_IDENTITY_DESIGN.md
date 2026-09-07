@@ -5,7 +5,7 @@ This is a design for how the workbook could answer *"which lunch did this
 person get?"* rather than only *"how many meals went out that day?"*
 
 What shipped: `Meal_ID` on `Lunch_Schedule` (derived, never typed),
-`Meal_Source` on `Registrant_Dash` (blank = today's meal), the
+`Meal_Source` on `All_Registrants` (blank = today's meal), the
 rollup attributing meals to the batch they name, and `Carried_Over` on
 `Master_Lunch_Dashboard`. The worked example in §10 is what it does. What did
 NOT ship from Phase 1: giving subs their own `Lunch_Schedule` rows — that one

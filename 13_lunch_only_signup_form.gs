@@ -155,7 +155,7 @@ function syncLunchOnlySessions(registrySheet) {
   const menuSheet = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
   if (!menuSheet) return {};
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
   // NOT the calendar's 60-day window — see LUNCH_SIGNUP_LOOKAHEAD_MONTHS.
@@ -257,7 +257,7 @@ function syncLunchOnlySessions(registrySheet) {
     return previousLinks;
   }
 
-  const existingRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const existingRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const rowByEventId = {};
   existingRows.forEach(row => {
     const id = String(row[map['Event_ID']] || '').trim();
@@ -543,6 +543,10 @@ function getLunchOnlyFormLinks() {
 defineLazyGlobal_('TAB_GROUPS', () => ([
   { color: PALETTE.TAB_TODAY, names: [
     SHEET_NAMES.PROGRAM_DASHBOARD,
+    // Immediately after the tab it is a view of, and after rather than before
+    // it: the session table is the one staff open every morning, and a derived
+    // summary does not get to be the first thing in the workbook.
+    SHEET_NAMES.PROGRAM_MONTH,
     SHEET_NAMES.LUNCH_DASHBOARD,
     SHEET_NAMES.LUNCH_ROSTER,
     SHEET_NAMES.REGISTRANT_DASH
@@ -556,14 +560,17 @@ defineLazyGlobal_('TAB_GROUPS', () => ([
     SHEET_NAMES.MEMBER_ROLL,
     SHEET_NAMES.CLUB_MEMBERS,
     SHEET_NAMES.REGULAR_NEEDS,
-    SHEET_NAMES.PROGRAM_OPTIONS,
-    // Beside Program_Options, which is the tab it was carved out of and the
+    SHEET_NAMES.PROGRAM_SETTINGS,
+    // Beside Program_Settings, which is the tab it was carved out of and the
     // one somebody is already on when they go looking for who leads a class.
     SHEET_NAMES.PROGRAM_LEADERS,
     SHEET_NAMES.ASSISTANCE_REQUESTS
   ] },
   { color: PALETTE.TAB_ARCHIVE, names: [
-    SHEET_NAMES.TRIAGE
+    SHEET_NAMES.TRIAGE,
+    // The record of months that are over, which is the archive shelf even
+    // though nothing was moved there — see 83_monthly_metrics.gs.
+    SHEET_NAMES.METRICS
   ] }
 ]));
 
@@ -712,6 +719,7 @@ function setHeadersIfNeeded(sheet, headers) {
   const needsWrite = headers.some((h, i) => String(existing[i] || '').trim() !== h);
   if (needsWrite) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    invalidateSectionedRowsCache(sheet);
     log(`Headers written on "${sheet.getName()}"`);
   }
 }
@@ -844,7 +852,7 @@ function writeSectionBanner(sheet, row, numCols, text, options) {
  * column names stay on screen however far down somebody scrolls.
  *
  * "The table that is the tab" is the rule, and it is not always the topmost
- * table: Master_Program_Dashboard opens with a Today block and a metrics
+ * table: All_Program_Sessions opens with a Today block and a metrics
  * block, and freezing at those left the session table's headers — the thing
  * five hundred rows are read against — scrolling away with everything else.
  * Whatever a tab puts above its main table comes along in the frozen band.
@@ -886,6 +894,10 @@ function freezeColumnsSafely(sheet, count) {
 
 /** Writes a bold, dark header row of the given headers at an arbitrary row. */
 function writeSectionHeader(sheet, row, numCols, headerValues) {
+  // The marker row every sectioned read finds its sub-tables by. Moving,
+  // adding or renaming one changes which rows come back and in what column
+  // order, so no cached read of this tab survives it.
+  invalidateSectionedRowsCache(sheet);
   sheet.getRange(row, 1, 1, numCols).setValues([headerValues])
     .setFontSize(TYPO.COLUMN_HEADER.size)
     .setFontWeight(TYPO.COLUMN_HEADER.weight)
@@ -923,6 +935,28 @@ function applyZebraStripingBanding(sheet, startRow) {
   // The same stripe the manual striper uses, so a flat tab and a sectioned one
   // band identically — they sit next to each other in the tab strip.
   banding.setSecondRowColor(PALETTE.STRIPE);
+}
+
+/**
+ * Widens the grid when a layout needs a column the sheet does not have.
+ *
+ * A tab's column count is not decorative: getRange(1, 27, 1, 5) on a sheet
+ * with 26 columns THROWS rather than growing it, and a default Google Sheet
+ * has exactly 26. So a layout that grows past whatever the tab was created
+ * with — Config's did, when the Admin Notification Emails table landed past
+ * the columns every earlier version ended at — has to ask for the room before
+ * it writes into it.
+ *
+ * Never narrows: a tab somebody has widened by hand keeps its columns, and
+ * this is a no-op on every tab that already has the room, which is all of them
+ * after the first run.
+ */
+function ensureSheetColumns(sheet, neededCols) {
+  const have = sheet.getMaxColumns();
+  if (!neededCols || neededCols <= have) return have;
+  sheet.insertColumnsAfter(have, neededCols - have);
+  log(`Widened "${sheet.getName()}" from ${have} to ${neededCols} columns to fit its layout.`);
+  return neededCols;
 }
 
 /**

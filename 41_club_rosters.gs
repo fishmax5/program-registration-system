@@ -340,9 +340,9 @@ function cancelUpcomingClubRegistrations(args) {
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return 0;
 
-  const headers = HEADERS.Registrant_Dash;
+  const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
-  const rows = readAllSectionedRows(sheet, headers, 'Event_ID');
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const todayKey = formatDateKey(new Date());
   const nameKey = normalizeNameKey(name);
   const isSharedClub = clubKey.indexOf(`${SHARED_LOCATION_SCOPE}::`) === 0;
@@ -424,10 +424,10 @@ function refreshClubMemberLabels(sessionRows) {
  */
 function collectKnownClubs(sessionRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  const rows = sessionRows || (sheet ? readAllSectionedRows(sheet, headers, 'Event_ID') : []);
+  const rows = sessionRows || (sheet ? getSectionedRows(sheet, headers, 'Event_ID') : []);
   const sharedFormIds = getSharedFormIdSet();
 
   const clubs = {};

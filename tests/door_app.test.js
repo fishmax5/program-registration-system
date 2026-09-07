@@ -65,9 +65,9 @@ function ok(name, cond) {
 // ---------------------------------------------------------------------------
 ok('a bare URL is not the staff roster', sandbox.checkInRosterModeRequested({}) === false);
 ok('?mode=session still is', sandbox.checkInRosterModeRequested({ mode: 'session' }) === true);
-// The old door page is kept for one release, by name, so an unchanged
-// bookmark opens something that works rather than nothing.
-ok('?mode=walkin is not claimed by the roster',
+// The old door page is retired and ?mode=walkin is no longer a route, so an
+// unchanged bookmark has to fall through to THIS app rather than to an error.
+ok('a stale ?mode=walkin bookmark is not claimed by the roster',
   sandbox.checkInRosterModeRequested({ mode: 'walkin' }) === false);
 
 // ---------------------------------------------------------------------------
@@ -190,6 +190,50 @@ marks.length = 0;
 ok('"just today" writes nothing at all',
   sandbox.applyDoorRecurring({ location: 'Narberth', name: 'Joan Alvarez', choice: 'none',
     programs: [{ value: 'x', title: 'x' }] }).length === 0 && marks.length === 0);
+
+// ---------------------------------------------------------------------------
+// 6. doorSignIn() — the app does not wait on it (see 73's send()), so this is
+//    the only place a failed sign-in is ever going to be seen. It has to
+//    catch everything walkInSignIn() can do and turn it into one admin email,
+//    to the same people notifyAdmin() already reaches everywhere else — the
+//    Sync_Digest ticks on Config's Admin Notification Emails table — except a
+//    wrong PIN, which the app still catches and re-prompts for itself.
+// ---------------------------------------------------------------------------
+sandbox.getAdminNotificationRows = () => [
+  { email: 'admin@example.org', syncDigest: true, leaderRosterAlerts: false,
+    registrantReminders: false, calendarInviteGuest: false }
+];
+const sentMail = [];
+sandbox.MailApp.sendEmail = (to, subject, body) => sentMail.push({ to, subject, body });
+
+sandbox.walkInSignIn = () => ({ ok: true, message: '✅ Signed in — Joan Alvarez.', lines: [], name: 'Joan Alvarez' });
+const okRes = sandbox.doorSignIn(JSON.stringify({ name: 'Joan Alvarez', location: 'Narberth' }));
+ok('a successful sign-in passes straight through', okRes.ok === true);
+ok('and sends no email', sentMail.length === 0);
+
+sandbox.walkInSignIn = () => ({ ok: false, message: '⚠️ Nothing was recorded for Joan Alvarez.', lines: [], name: 'Joan Alvarez' });
+const failRes = sandbox.doorSignIn(JSON.stringify({ name: 'Joan Alvarez', location: 'Narberth', dateKey: '2025-09-02' }));
+ok('a failed sign-in is still handed back', failRes.ok === false);
+ok('and staff is emailed about it', sentMail.length === 1);
+if (sentMail.length) {
+  ok('naming who it was', /Joan Alvarez/.test(sentMail[0].body));
+  ok('and where', /Narberth/.test(sentMail[0].body));
+  ok('and the reason walkInSignIn gave', /Nothing was recorded/.test(sentMail[0].body));
+  ok('to the Config admin-notifications address', sentMail[0].to === 'admin@example.org');
+}
+
+sentMail.length = 0;
+sandbox.walkInSignIn = () => ({ ok: false, needsPin: true, message: 'Wrong PIN.' });
+const pinRes = sandbox.doorSignIn(JSON.stringify({ name: 'Joan Alvarez', location: 'Narberth' }));
+ok('a wrong PIN is handed back too', pinRes.needsPin === true);
+ok('but is not emailed — the tablet catches that one itself', sentMail.length === 0);
+
+sentMail.length = 0;
+sandbox.walkInSignIn = () => { throw new Error('sheet is locked'); };
+const thrownRes = sandbox.doorSignIn(JSON.stringify({ name: 'Joan Alvarez', location: 'Narberth' }));
+ok('a thrown error never reaches the caller', thrownRes && thrownRes.ok === false);
+ok('and is emailed to staff too', sentMail.length === 1);
+if (sentMail.length) ok('with the error in it', /sheet is locked/.test(sentMail[0].body));
 
 console.log(fail ? `\n${fail} FAILURE(S)` : '\nall passed');
 process.exit(fail ? 1 : 0);

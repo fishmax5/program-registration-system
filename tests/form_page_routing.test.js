@@ -66,6 +66,14 @@ function fakeForm(id) {
       createChoice: (v, nav) => ({ getValue: () => v, nav: nav || null }),
       setRows: () => it, setColumns: () => it, setBounds: () => it, setLabels: () => it, setImage: () => it,
       asListItem: () => it, asMultipleChoiceItem: () => it, asCheckboxItem: () => it,
+      asGridItem: () => {
+        if (it.type !== 'GRID') throw new Error(`Invalid conversion for item type: ${it.type}`);
+        return it;
+      },
+      asCheckboxGridItem: () => {
+        if (it.type !== 'CHECKBOX_GRID') throw new Error(`Invalid conversion for item type: ${it.type}`);
+        return it;
+      },
       asPageBreakItem: () => {
         if (it.type !== PAGE_BREAK) throw new Error(`Invalid conversion for item type: ${it.type}`);
         return it;
@@ -96,7 +104,8 @@ function fakeForm(id) {
     addListItem: () => make('LIST'),
     addCheckboxItem: () => make('CHECKBOX'),
     addMultipleChoiceItem: () => make('MULTIPLE_CHOICE'),
-    addCheckboxGridItem: () => make('GRID'),
+    addCheckboxGridItem: () => make('CHECKBOX_GRID'),
+    addGridItem: () => make('GRID'),
     addPageBreakItem: () => make(PAGE_BREAK),
     addSectionHeaderItem: () => make('SECTION_HEADER'),
     addScaleItem: () => make('SCALE'),
@@ -124,7 +133,8 @@ const sandbox = {
   },
   SpreadsheetApp: { getActiveSpreadsheet: () => null, getActive: () => null },
   FormApp: {
-    ItemType: { PAGE_BREAK, PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST', MULTIPLE_CHOICE: 'MULTIPLE_CHOICE' },
+    ItemType: { PAGE_BREAK, PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST', MULTIPLE_CHOICE: 'MULTIPLE_CHOICE',
+        GRID: 'GRID', CHECKBOX_GRID: 'CHECKBOX_GRID' },
     PageNavigationType: { SUBMIT, CONTINUE, GO_TO_PAGE }
   },
   CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},
@@ -306,7 +316,7 @@ function everyRoute(form) {
     form.getItems().filter(it => it.getTitle() === Q.ATTENDANCE_MODE).length, 0);
   const seen = walk(form, { [Q.GUEST_COUNT]: sandbox.GUEST_COUNT_NONE_LABEL }).seen;
   check('so it flows into the every-date page instead of submitting',
-    seen.indexOf(Q.ALL_DATES_LUNCH_PEOPLE) !== -1, true);
+    seen.indexOf(Q.ALL_DATES_MEAL_COUNT) !== -1, true);
   check('and it does not also drag them through the roster grid',
     seen.indexOf(Q.ATTENDANCE_GRID), -1);
 }

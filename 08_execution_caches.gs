@@ -18,6 +18,12 @@
 //     per call, the former once per lunch-dashboard rollup row.
 //   - form.getItems() is a REMOTE call and getResponseValueByTitle() made
 //     one per lookup — roughly ten per response, times every response.
+//   - FormApp.openById() is a REMOTE call and had no memo at all, with 35 call
+//     sites across 17 files. reconcileNoRegistrationGroups() and its neighbours
+//     in 23_reconcile_sessions.gs open forms five separate times, and within
+//     ONE sync the same form is commonly opened again by 10_form_date_labels,
+//     26_event_descriptions, 31_form_shape_and_migration, 54_custom_questions,
+//     55_assistance_sync_and_images and 68_form_state_migrations.
 //   - CalendarApp.getEvents() ran once per calendar in syncCalendarsInternal()
 //     AND again in every triageDeletedSessions() pass; a full
 //     initializeAndSyncAll() hit the calendars four times over.
@@ -26,8 +32,17 @@
 let __mealInfoIndexCache = null;
 let __mealBufferIndexCache = null;
 let __orderAheadDaysCache = null;
-let __adminNotificationEmailCache = null;
-let __archiveCopyEmailCache = null;
+// Config's Admin Notification Emails table, read once per execution — see
+// getAdminNotificationRows(). An array, so an EMPTY table ([], meaning "copy
+// nobody") caches as the answer it is rather than being re-read from the sheet
+// by every category lookup in the run.
+let __adminNotificationRowsCache = null;
+let __membershipFormIdCache = null;
+// The door's membership application, read once per execution — see
+// membershipFormShape(). Wrapped ({ shape }) so a form that could NOT be
+// opened is cached as the refusal it is, rather than re-attempting a remote
+// call that has already failed once in this execution.
+let __membershipFormShapeCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
@@ -35,9 +50,11 @@ let __calendarInviteModeCache = null;
 // be cached, instead of being re-read from the sheet on every session.
 let __registrationHorizonCache = null;
 let __automationEnabledCache = null;
+let __outboundMailPausedCache = null;
 let __triggerOwnerCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
+let __formHandleCache = {};
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -206,18 +223,21 @@ function invalidateMealInfoIndex() {
 function invalidateConfigCaches() {
   __mealBufferIndexCache = null;
   __orderAheadDaysCache = null;
-  __adminNotificationEmailCache = null;
-  __archiveCopyEmailCache = null;
+  __adminNotificationRowsCache = null;
+  __membershipFormIdCache = null;
+  __membershipFormShapeCache = null;
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;
   __registrationHorizonCache = null;
   __automationEnabledCache = null;
+  __outboundMailPausedCache = null;
   __triggerOwnerCache = null;
-  // This one also lives in the CROSS-execution cache, which a plain
+  // These two also live in the CROSS-execution cache, which a plain
   // per-execution reset would leave serving the old value to the next
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.
   clearAutomationFlagCache();
+  clearOutboundMailPauseCache();
 }
 
 /**
@@ -252,6 +272,55 @@ function getFormItemIndex(form) {
 function invalidateFormItemIndex(formId) {
   if (formId) delete __formItemIndexCache[formId];
   else __formItemIndexCache = {};
+  // The HANDLE goes with the index. Every path that dirties a form's items has
+  // just written to that form, and the cheap thing to do about a handle whose
+  // freshness is now in question is to drop it and pay for one more open —
+  // rather than reason, at every one of these call sites, about what a Form
+  // object does and does not re-read after somebody else has edited the file.
+  // Nothing needs a separate invalidateFormHandle(): a path that wants the
+  // handle gone wants the index gone too, and there is no path that wants the
+  // reverse.
+  if (formId) delete __formHandleCache[formId];
+  else __formHandleCache = {};
+}
+
+/**
+ * ONE FormApp.openById() per form per execution.
+ *
+ * The handle itself, not its items — getFormItemIndex() above memoizes
+ * form.getItems() but was always handed a form somebody else had already paid
+ * to open. A single sync opens the same form from half a dozen files (the
+ * banner at the top of this file lists them), and each of those was a separate
+ * round trip to the Forms service for a document that had not changed hands.
+ *
+ * FAILURES ARE NOT CACHED, deliberately. A form id that will not open is
+ * re-tried on the next call, exactly as it was before this cache existed, for
+ * three reasons:
+ *   - The throw is the ANSWER at some call sites. findExistingFormIdFromEvents()
+ *     and the "existing form" branch of moveSessionsToForm() open a form purely
+ *     to find out whether it opens; a remembered "no" would still be correct,
+ *     but a remembered "no" is one bad minute away from being wrong for the
+ *     rest of a run.
+ *   - A failure here is routinely REPAIRED mid-execution. syncRegistrations()
+ *     answers a permission failure by opening the file's sharing up, and the
+ *     rebuild and recovery paths (49, 50) put a form back within the same run;
+ *     a cached refusal would outlive its own fix.
+ *   - The cost of getting it wrong is asymmetric. A repeated open of a broken
+ *     form is one wasted round trip on a path that is already logging a
+ *     warning; a wrongly remembered refusal silently skips a form's dates, its
+ *     questions or its registrations for the whole execution.
+ * Both mean a caller's own try/catch keeps working unchanged — this function
+ * throws whatever FormApp.openById() throws, at every call.
+ */
+function openFormCached(formId) {
+  const id = String(formId || '').trim();
+  // No id: hand it to Forms anyway, so the caller gets the same error it
+  // always got rather than a different one invented here.
+  if (!id) return FormApp.openById(formId);
+  if (__formHandleCache[id]) return __formHandleCache[id];
+  const form = FormApp.openById(id);
+  __formHandleCache[id] = form;
+  return form;
 }
 
 /**
@@ -293,3 +362,133 @@ function invalidateCalendarEventsCache() {
 }
 
 
+// ============================================================================
+// THE SECTIONED-TABLE READ, ONCE PER TAB PER EXECUTION
+// ============================================================================
+//
+// readAllSectionedRows() and readAllSectionedRowValues()
+// (34_sectioned_tables.gs) are how every date-bearing tab is read, from
+// roughly forty-six files. They are also the most expensive read in the
+// project: the formula-preserving one costs a whole-grid read to find the
+// header rows plus a getValues() AND a getFormulas() per sub-table — seven
+// round trips on the two-zone shape every tab has.
+//
+// WHAT THIS REPLACES. A single syncRegistrations() run re-read the same two
+// tabs over and over: All_Program_Sessions at 27_registration_import.gs:81,
+// 33_calendar_invitations.gs:110 and :319, 66_program_leader_notifications.gs
+// and 70_registrant_notifications.gs; All_Registrants at
+// 27_registration_import.gs:83 and :281, 30_registry_counts.gs:20,
+// 33_calendar_invitations.gs:342 and 70_registrant_notifications.gs:497 —
+// eight-plus full-grid reads of two tabs that changed at most once in
+// between, which is tens of round trips on a workbook with a year of history.
+//
+// The codebase already half-solved this by hand, threading a `sessionRows` /
+// `registrantRows` optional parameter down through call chains so a callee
+// could reuse what its caller had already read. That is a manual cache with
+// no invalidation story, and it only ever reached the callees somebody
+// remembered to thread it to. This is the same idea with the plumbing gone.
+//
+// THE KEY is sheet name + marker header + reader kind, plus the `headers`
+// array and `endRow` the call asked for — the last two because they change
+// the ANSWER, not just the cost: a different HEADERS list projects different
+// columns, and Lunch_Schedule's endRow deliberately stops short of the ADD
+// block below the tables. The reader kind is in the key because the two
+// readers genuinely return different things for the same cell: the
+// formula-preserving one hands back `=HYPERLINK(...)` where the values one
+// hands back the text it displays, and letting them share an entry would
+// hand a caller the wrong one of those.
+//
+// EVERY HIT IS A COPY. Callers mutate the rows they get back —
+// cancelRegistrantRows() stamps four cells on every matching row and hands
+// the same array to the render — so a cache that returned its own array
+// would be rewritten by its first reader. A slice per row costs nothing
+// against the round trips it saves.
+//
+// INVALIDATION is the whole risk here: a cached roster that survives a write
+// reads as data loss, not as a slow page. So it is dropped by every path
+// that writes to one of these tabs — writeUpcomingPastSections() and
+// renderFlatDateSheet() in 34, writeMemoryTab() in 40, and each of the
+// scattered single-cell and single-column writes elsewhere. Grep
+// invalidateSectionedRowsCache() for the list. When in doubt the call is
+// made with no sheet name, which drops everything: a redundant re-read is
+// one round trip, and a missed one is a wrong roster.
+// ============================================================================
+
+let __sectionedRowsCache = {};
+
+/**
+ * The cache key for one sectioned read. The header list goes in whole, not
+ * just its length: two same-length HEADERS arrays project different columns.
+ */
+function sectionedRowsCacheKey(sheet, headers, markerHeaderName, endRow, kind) {
+  return [
+    sheet.getName(), markerHeaderName, kind, endRow || '', (headers || []).join(',')
+  ].join('|');
+}
+
+/** A fresh copy of a cached row set, so a caller's edits never reach the cache. */
+function copySectionedRows(rows) {
+  return rows.map(row => row.slice());
+}
+
+/**
+ * readAllSectionedRows(), memoized for the rest of this execution. The
+ * formula-preserving read — use it when the rows are going back onto a sheet.
+ */
+function getSectionedRows(sheet, headers, markerHeaderName, endRow) {
+  if (!sheet) return [];
+  // A real Sheet always has getName(); a test double that skips it is opting
+  // itself out of caching, not asking for a crash — read straight through.
+  if (typeof sheet.getName !== 'function') {
+    return readAllSectionedRows(sheet, headers, markerHeaderName, endRow);
+  }
+  const key = sectionedRowsCacheKey(sheet, headers, markerHeaderName, endRow, 'formulas');
+  if (!__sectionedRowsCache[key]) {
+    __sectionedRowsCache[key] = readAllSectionedRows(sheet, headers, markerHeaderName, endRow);
+  }
+  return copySectionedRows(__sectionedRowsCache[key]);
+}
+
+/**
+ * readAllSectionedRowValues(), memoized for the rest of this execution. The
+ * one-round-trip values read — use it when nothing is going back onto a
+ * sheet, and when a formula cell (All_Registrants's Event_Time) has to come
+ * back as the time it displays rather than as its formula.
+ */
+function getSectionedRowValues(sheet, headers, markerHeaderName) {
+  if (!sheet) return [];
+  if (typeof sheet.getName !== 'function') {
+    return readAllSectionedRowValues(sheet, headers, markerHeaderName);
+  }
+  const key = sectionedRowsCacheKey(sheet, headers, markerHeaderName, null, 'values');
+  if (!__sectionedRowsCache[key]) {
+    __sectionedRowsCache[key] = readAllSectionedRowValues(sheet, headers, markerHeaderName);
+  }
+  return copySectionedRows(__sectionedRowsCache[key]);
+}
+
+/**
+ * Drops the cached reads of one tab — or, called with nothing, of every tab.
+ *
+ * Called by everything that writes to a sectioned tab. Err toward the
+ * no-argument form: dropping a tab that did not change costs one re-read,
+ * and keeping a tab that did costs a stale roster.
+ *
+ * Takes either a sheet or its name — every call site here writes through a
+ * sheet object it already has in hand, so it hands over the sheet itself
+ * rather than repeat-guarding a `.getName()` call at every site. A sheet-like
+ * object with no getName() (only ever a test double that opted out of this
+ * cache — see getSectionedRows()) cannot be identified, so this drops
+ * everything rather than silently leaving it cached.
+ */
+function invalidateSectionedRowsCache(sheetOrName) {
+  const sheetName = !sheetOrName ? null
+    : typeof sheetOrName === 'string' ? sheetOrName
+    : typeof sheetOrName.getName === 'function' ? sheetOrName.getName()
+    : null;
+  if (!sheetName) { __sectionedRowsCache = {}; return; }
+  const prefix = `${sheetName}|`;
+  Object.keys(__sectionedRowsCache).forEach(key => {
+    if (key.indexOf(prefix) === 0) delete __sectionedRowsCache[key];
+  });
+}

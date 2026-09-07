@@ -120,10 +120,10 @@ function listKnownProgramTitles() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!sheet) return [];
   try {
-    const headers = HEADERS.Master_Program_Dashboard;
+    const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
     const seen = {};
-    readAllSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
       const title = String(row[map['Clean_Title']] || '').trim();
       if (title) seen[title] = true;
     });

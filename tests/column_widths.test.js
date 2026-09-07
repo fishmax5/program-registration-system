@@ -82,7 +82,7 @@ function fakeSheet(name, grid, widths) {
   };
 }
 
-// Registrant_Dash's real shape: a banner, then the header row, then rows.
+// All_Registrants's real shape: a banner, then the header row, then rows.
 const grid = [
   ['⏳ Upcoming Registrants', '', '', ''],
   ['Event_Date', 'Location', 'Name', 'Admin_Notes'],
@@ -104,19 +104,19 @@ check('and a tab with no header row at all says so rather than guessing',
 // --- Capturing, saving, applying -------------------------------------------
 // Admin_Notes has been dragged out to 420; everything else is where the
 // autofit left it.
-const source = fakeSheet('Registrant_Dash', grid, [90, 110, 160, 420]);
+const source = fakeSheet('All_Registrants', grid, [90, 110, 160, 420]);
 const captured = sandbox.captureColumnWidths(source);
 check('every column is captured by number', captured.byIndex, { 1: 90, 2: 110, 3: 160, 4: 420 });
 check('and by header name, which is what survives a layout change',
   captured.byName, { Event_Date: 90, Location: 110, Name: 160, Admin_Notes: 420 });
 
 sandbox.saveColumnWidthsForSheet(source, captured);
-check('saved widths are readable back', !!sandbox.savedColumnWidthsFor('Registrant_Dash'), true);
-check('and a tab that never saved any has none', sandbox.savedColumnWidthsFor('Lunch_Roster'), null);
+check('saved widths are readable back', !!sandbox.savedColumnWidthsFor('All_Registrants'), true);
+check('and a tab that never saved any has none', sandbox.savedColumnWidthsFor('All_Lunch_Registrants'), null);
 
 // A later render has just autofitted everything narrow. The saved widths are
 // applied last and are the last word.
-const refitted = fakeSheet('Registrant_Dash', grid, [64, 64, 64, 64]);
+const refitted = fakeSheet('All_Registrants', grid, [64, 64, 64, 64]);
 const set = sandbox.applySavedColumnWidths(refitted, 4);
 check('the autofit is overruled', refitted.widths, [90, 110, 160, 420]);
 check('on every column that was saved', set, 4);
@@ -129,7 +129,7 @@ const movedGrid = [
   ['Event_Date', 'Admin_Notes', 'Name'],
   ['', 'called Tuesday', 'Jane Smith']
 ];
-const moved = fakeSheet('Registrant_Dash', movedGrid, [64, 64, 64]);
+const moved = fakeSheet('All_Registrants', movedGrid, [64, 64, 64]);
 sandbox.applySavedColumnWidths(moved, 3);
 check('a width follows its column when the layout moves', moved.widths, [90, 420, 160]);
 
@@ -149,10 +149,10 @@ sandbox.applySavedColumnWidths(silly, 2);
 check('an absurd width is clamped rather than honoured',
   silly.widths, [sandbox.MIN_COLUMN_WIDTH_PX, sandbox.MAX_SAVED_COLUMN_WIDTH_PX]);
 
-sandbox.clearSavedColumnWidthsForSheet('Registrant_Dash');
+sandbox.clearSavedColumnWidthsForSheet('All_Registrants');
 check('forgetting a tab hands it back to the autofit',
-  sandbox.savedColumnWidthsFor('Registrant_Dash'), null);
-const untouched = fakeSheet('Registrant_Dash', grid, [64, 64, 64, 64]);
+  sandbox.savedColumnWidthsFor('All_Registrants'), null);
+const untouched = fakeSheet('All_Registrants', grid, [64, 64, 64, 64]);
 check('which is to say nothing is applied at all',
   sandbox.applySavedColumnWidths(untouched, 4), 0);
 check('and no width write is made', untouched.calls.setColumnWidths, 0);

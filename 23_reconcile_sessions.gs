@@ -188,6 +188,7 @@ function applySessionTimesToRows(registrySheet, expected) {
     if (touched) {
       startRange.setValues(starts);
       endRange.setValues(ends);
+      invalidateSectionedRowsCache(registrySheet);
     }
   });
 
@@ -378,6 +379,7 @@ function applyAssistanceSettingsToRows(registrySheet, expected, options) {
       statusRange.setValues(statuses);
     }
     if (flagTouched && flagRange) flagRange.setValues(flags);
+    if (touched || flagTouched) invalidateSectionedRowsCache(registrySheet);
   });
 
   return changed;
@@ -466,7 +468,7 @@ function applyNoRegistrationEffects(registrySheet, groups) {
       // 2. The form stops taking responses, and we remember that we did it.
       if (formId && !closedIds[formId]) {
         try {
-          const form = FormApp.openById(formId);
+          const form = openFormCached(formId);
           if (form.isAcceptingResponses()) {
             form.setAcceptingResponses(false);
             closedNow++;
@@ -483,7 +485,7 @@ function applyNoRegistrationEffects(registrySheet, groups) {
     // we did not close ourselves is left exactly as it is.
     if (formId && closedIds[formId]) {
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         if (!form.isAcceptingResponses()) {
           form.setAcceptingResponses(true);
           reopenedNow++;
@@ -734,14 +736,14 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     noRegistrationClosed = {};
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const todayKey = formatDateKey(new Date());
 
   // Form_ID -> { open: does it still cover a session inside the horizon,
   //              upcoming: does it cover any future session at all, title }
   const byForm = {};
-  readAllSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
     const formId = String(row[map['Form_ID']] || '').trim();
     if (!formId) return;
     const date = coerceDate(row[map['Event_Date']]);
@@ -776,7 +778,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     if (shouldBeClosed) {
       if (weClosedIt) return; // already ours, already shut
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         if (form.isAcceptingResponses()) {
           form.setCustomClosedFormMessage(REGISTRATION_NOT_OPEN_FORM_MESSAGE);
           form.setAcceptingResponses(false);
@@ -796,7 +798,7 @@ function reconcileRegistrationHorizonForms(registrySheet) {
     // Either a session is now inside the horizon, or the form has no upcoming
     // session left to hold shut. Both mean this function is done with it.
     try {
-      const form = FormApp.openById(formId);
+      const form = openFormCached(formId);
       if (!form.isAcceptingResponses()) {
         form.setAcceptingResponses(true);
         reopened++;
@@ -859,7 +861,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
     if (!formId) return null;
     if (!Object.prototype.hasOwnProperty.call(linksByFormId, formId)) {
       try {
-        const form = FormApp.openById(formId);
+        const form = openFormCached(formId);
         linksByFormId[formId] = { publishedUrl: form.getPublishedUrl(), editUrl: form.getEditUrl() };
       } catch (err) {
         log(`ℹ️ Could not re-read form ${formId} to restore its links (${err}).`);
@@ -903,6 +905,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
       const setCell = (colName, value) => {
         if (!sheetMap[colName]) return;
         registrySheet.getRange(zone.start + r, sheetMap[colName], 1, 1).setValue(value);
+        invalidateSectionedRowsCache(registrySheet);
       };
 
       if (wantsNoRegistration[key]) {

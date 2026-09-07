@@ -17,7 +17,7 @@ function fakeForm(id) {
   let nextId = 1;
   const make = type => {
     const it = {
-      _id: nextId++, type, title: '', help: '', choices: [], goTo: null, navType: CONTINUE,
+      _id: nextId++, type, title: '', help: '', choices: [], rows: [], columns: [], goTo: null, navType: CONTINUE,
       getId: () => it._id, getType: () => it.type, getTitle: () => it.title,
       getHelpText: () => it.help, getIndex: () => items.indexOf(it),
       setTitle: t => { it.title = t; return it; },
@@ -27,8 +27,20 @@ function fakeForm(id) {
       getChoices: () => it.choices,
       setChoices: cs => { it.choices = cs; return it; },
       createChoice: (v, nav) => ({ getValue: () => v, nav: nav || null }),
-      setRows: () => it, setColumns: () => it, setBounds: () => it, setLabels: () => it, setImage: () => it,
+      setRows: r => { it.rows = r; return it; }, getRows: () => it.rows || [],
+      setColumns: c => { it.columns = c; return it; }, getColumns: () => it.columns || [], setBounds: () => it, setLabels: () => it, setImage: () => it,
       asListItem: () => it, asMultipleChoiceItem: () => it, asCheckboxItem: () => it,
+      // The two grid kinds are told apart the way Apps Script tells them
+      // apart: a CHECKBOX_GRID is not a GRID and asking for the wrong one
+      // throws. The meal-count grid is a GRID; the attendance grid is not.
+      asGridItem: () => {
+        if (it.type !== 'GRID') throw new Error(`Invalid conversion for item type: ${it.type}`);
+        return it;
+      },
+      asCheckboxGridItem: () => {
+        if (it.type !== 'CHECKBOX_GRID') throw new Error(`Invalid conversion for item type: ${it.type}`);
+        return it;
+      },
       asPageBreakItem: () => {
         if (it.type !== PAGE_BREAK) throw new Error(`Invalid conversion for item type: ${it.type}`);
         return it;
@@ -59,7 +71,8 @@ function fakeForm(id) {
     addListItem: () => make('LIST'),
     addCheckboxItem: () => make('CHECKBOX'),
     addMultipleChoiceItem: () => make('MULTIPLE_CHOICE'),
-    addCheckboxGridItem: () => make('GRID'),
+    addCheckboxGridItem: () => make('CHECKBOX_GRID'),
+    addGridItem: () => make('GRID'),
     addPageBreakItem: () => make(PAGE_BREAK),
     addSectionHeaderItem: () => make('SECTION_HEADER'),
     addScaleItem: () => make('SCALE'),
@@ -89,7 +102,8 @@ function baseSandbox() {
     },
     SpreadsheetApp: { getActiveSpreadsheet: () => null, getActive: () => null },
     FormApp: {
-      ItemType: { PAGE_BREAK, PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST', MULTIPLE_CHOICE: 'MULTIPLE_CHOICE' },
+      ItemType: { PAGE_BREAK, PARAGRAPH_TEXT: 'PARAGRAPH_TEXT', LIST: 'LIST', MULTIPLE_CHOICE: 'MULTIPLE_CHOICE',
+        GRID: 'GRID', CHECKBOX_GRID: 'CHECKBOX_GRID' },
       PageNavigationType: { SUBMIT, CONTINUE, GO_TO_PAGE }
     },
     CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},

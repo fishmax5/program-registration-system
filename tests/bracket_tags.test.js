@@ -59,7 +59,8 @@ function settingsOf(text) {
   const r = sandbox.parseSettingsBrackets(text);
   const out = {};
   ['capacity', 'slotMinutes', 'maxPerMonth'].forEach(k => { if (r[k]) out[k] = r[k]; });
-  ['isFixed', 'isShared', 'isClub', 'noRegistration', 'isAssistance'].forEach(k => { if (r[k]) out[k] = true; });
+  ['isFixed', 'isShared', 'isClub', 'noRegistration', 'waitlistOnly', 'isAssistance']
+    .forEach(k => { if (r[k]) out[k] = true; });
   if (r.explicitGrouping) out.explicitGrouping = r.explicitGrouping;
   return out;
 }
@@ -84,6 +85,9 @@ check('[All Sites]', settingsOf('[All Sites]'), { isShared: true });
 check('[No Registration]', settingsOf('[No Registration]'), { noRegistration: true });
 check('[Drop-In]', settingsOf('[Drop-In]'), { noRegistration: true });
 check('[No Sign-ups]', settingsOf('[No Sign-ups]'), { noRegistration: true });
+// The one tag on this list that describes a DATE rather than a program — see
+// WAITLIST_ONLY_TAG, and tests/waitlist_only.test.js for what it then does.
+check('[Waitlist Only]', settingsOf('[Waitlist Only]'), { waitlistOnly: true });
 check('[Personalized Assistance]', settingsOf('[Personalized Assistance]'), { isAssistance: true });
 check('[By Appointment]', settingsOf('[By Appointment]'), { isAssistance: true });
 check('[1-on-1]', settingsOf('[1-on-1]'), { isAssistance: true });

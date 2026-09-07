@@ -8,10 +8,10 @@
 // tab's (possibly several) header rows, reading all its rows regardless of
 // which zone they're currently in, splitting rows by date, and writing the
 // two zones back out with consistent banners/headers/zebra striping/month
-// tinting. Master_Program_Dashboard and Master_Lunch_Dashboard call the
+// tinting. All_Program_Sessions and Master_Lunch_Dashboard call the
 // lower-level writeUpcomingPastSections() directly (since they have their
 // own extra Today/Metrics sections above); the three flat, single-table
-// tabs (Registrant_Dash, Deleted_Event_Triage, Lunch_Schedule)
+// tabs (All_Registrants, Deleted_Event_Triage, Lunch_Schedule)
 // use the renderFlatDateSheet() wrapper instead.
 // ============================================================================
 
@@ -48,7 +48,7 @@ function getZoneDataRange(sheet, headerRow, nextHeaderRow, dateCol1Based) {
  * NOT part of the schedule yet — see getLunchScheduleEndRow().
  */
 function getSectionZones(sheet, markerHeaderName, endRow) {
-  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
+  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000, endRow);
   if (headerRows.length === 0) return [];
   const map = getHeaderMapAt(sheet, headerRows[0]);
   const dateCol = map['Event_Date'];
@@ -82,24 +82,12 @@ function findZoneForRow(zones, row) {
  * HEADERS entry be reordered (or gain/lose a column) without scrambling the
  * data already sitting on the tab: the next render reads by header NAME and
  * writes back out in the new order.
+ *
+ * TWO round trips for the whole tab, whatever the section count — see
+ * readSectionedGrid_().
  */
 function readAllSectionedRows(sheet, headers, markerHeaderName, endRow) {
-  const headerRows = findAllHeaderRows(sheet, markerHeaderName, 5000);
-  if (headerRows.length === 0) return [];
-  const lastRow = endRow ? Math.min(endRow, sheet.getLastRow()) : sheet.getLastRow();
-  const sheetLastCol = Math.max(sheet.getLastColumn(), headers.length);
-  const dateColIdx = headers.indexOf('Event_Date');
-  let combined = [];
-  headerRows.forEach((hRow, i) => {
-    const zoneEnd = (i + 1 < headerRows.length) ? headerRows[i + 1] - 1 : lastRow;
-    if (zoneEnd <= hRow) return;
-    const projection = buildHeaderProjection(sheet, hRow, headers, sheetLastCol);
-    const numCols = projection ? sheetLastCol : headers.length;
-    let rows = getRowsPreservingFormulas(sheet, hRow + 1, 1, zoneEnd - hRow, numCols);
-    if (projection) rows = rows.map(row => projection.map(src => (src === -1 ? '' : row[src])));
-    combined = combined.concat(dateColIdx >= 0 ? rows.filter(row => coerceDate(row[dateColIdx])) : rows);
-  });
-  return combined;
+  return readSectionedGrid_(sheet, headers, markerHeaderName, endRow, true);
 }
 
 /**
@@ -108,32 +96,75 @@ function readAllSectionedRows(sheet, headers, markerHeaderName, endRow) {
  *
  * WHY IT EXISTS. readAllSectionedRows() is built for a render: it is about to
  * copy rows back onto a sheet, so a HYPERLINK cell has to come back as its
- * formula rather than as dead text, and that costs a getValues() AND a
- * getFormulas() per sub-table — on top of the whole-grid read
- * findAllHeaderRows() already did to locate the header rows. On a workbook
- * with a year of history that is a full read of the tab three times over, and
- * the round trips (not the parsing) are what a person feels.
+ * formula rather than as dead text, and that costs a getFormulas() on top of
+ * the getValues(). Nothing here is going back onto a sheet, so the second
+ * fetch is dead weight — one getValues() of the whole grid answers all of it.
  *
- * Nothing here is going back onto a sheet, so one getValues() of the whole
- * grid answers all of it: the header rows are found in the grid already in
- * memory, and each sub-table's rows are sliced out of it. One call per tab
- * instead of 1 + 2N, which is what took Quick Mark's open from a twenty-second
- * wait to something the desk doesn't notice.
- *
- * It is also the MORE correct read for a consumer of values: Registrant_Dash's
+ * It is also the MORE correct read for a consumer of values: All_Registrants's
  * Event_Time is a formula, and the formula-preserving read hands back the
  * formula string, which is not a time anything can parse.
  */
 function readAllSectionedRowValues(sheet, headers, markerHeaderName) {
-  if (!sheet) return [];
-  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), 5000);
-  if (lastRow < 1) return [];
-  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
-  const grid = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  return readSectionedGrid_(sheet, headers, markerHeaderName, null, false);
+}
 
+/**
+ * How far down a tab a header row is looked for. Both readers stop here; the
+ * formula-preserving one still reads DATA past it (see below).
+ */
+const SECTIONED_HEADER_SCAN_ROWS = 5000;
+
+/**
+ * The one implementation behind both sectioned readers.
+ *
+ * WHAT IT COSTS, AND WHY THAT IS THE POINT. This used to be 1 + 2N round
+ * trips on the formula-preserving path: a whole-grid scan in
+ * findAllHeaderRows() to locate the header rows, then per sub-table a header
+ * read plus a getRowsPreservingFormulas() — itself a getValues() AND a
+ * getFormulas(). On a workbook with a year of history that is the tab read
+ * three times over, and the round trips, not the parsing, are what a person
+ * feels: it is what took Quick Mark's open to a twenty-second wait.
+ *
+ * So the grid is fetched ONCE (twice with `preserveFormulas`: getValues() +
+ * getFormulas(), merged here exactly as getRowsPreservingFormulas() does it),
+ * the header rows are found in the grid already in memory, and each
+ * sub-table's rows are sliced out of it. Two calls per tab — one without
+ * formulas — however many sections the tab has grown.
+ *
+ * `endRow` bounds the read, which is both halves of what Lunch_Schedule needs
+ * from it: the last zone stops there, and the ADD block below it — dated rows
+ * that are explicitly NOT part of the schedule yet — is never read at all.
+ * See getLunchScheduleEndRow().
+ */
+function readSectionedGrid_(sheet, headers, markerHeaderName, endRow, preserveFormulas) {
+  if (!sheet) return [];
+  let lastRow = Math.max(sheet.getLastRow(), 0);
+  if (endRow) lastRow = Math.min(endRow, lastRow);
+  // A values read is only a read, so the row bound that keeps a runaway tab
+  // from costing the door page a huge fetch is free to apply. The
+  // formula-preserving read is a RENDER's read — the rows it returns are the
+  // rows about to be written back — so truncating it would delete whatever
+  // sat past the bound. It reads to the bottom for that reason.
+  if (!preserveFormulas) lastRow = Math.min(lastRow, SECTIONED_HEADER_SCAN_ROWS);
+  if (lastRow < 1) return [];
+
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const range = sheet.getRange(1, 1, lastRow, lastCol);
+  const values = range.getValues();
+  // The formula string wherever a cell holds one, the value everywhere else —
+  // getRowsPreservingFormulas(), done once for the whole grid.
+  const formulas = preserveFormulas ? range.getFormulas() : null;
+  const grid = formulas
+    ? values.map((row, r) => row.map((val, c) => formulas[r][c] || val))
+    : values;
+
+  // Header rows are located in `values`, never in the merged grid: a marker
+  // cell is text, and a stray formula beside it must not change what the row
+  // is recognized as.
   const headerRows = [];
-  for (let r = 0; r < grid.length; r++) {
-    if (grid[r].some(v => normalizeHeaderText(v) === markerHeaderName)) headerRows.push(r + 1);
+  const scanEnd = Math.min(values.length, SECTIONED_HEADER_SCAN_ROWS);
+  for (let r = 0; r < scanEnd; r++) {
+    if (values[r].some(v => normalizeHeaderText(v) === markerHeaderName)) headerRows.push(r + 1);
   }
   if (headerRows.length === 0) return [];
 
@@ -142,7 +173,7 @@ function readAllSectionedRowValues(sheet, headers, markerHeaderName) {
   headerRows.forEach((hRow, i) => {
     const zoneEnd = (i + 1 < headerRows.length) ? headerRows[i + 1] - 1 : lastRow;
     if (zoneEnd <= hRow) return;
-    const projection = buildHeaderProjectionFromRow(grid[hRow - 1], headers,
+    const projection = buildHeaderProjectionFromRow(values[hRow - 1], headers,
       `"${sheet.getName()}" row ${hRow}`);
     let rows = grid.slice(hRow, zoneEnd); // hRow is 1-based, so this starts one past the header
     rows = projection
@@ -160,8 +191,8 @@ function readAllSectionedRowValues(sheet, headers, markerHeaderName) {
  * Returns null when they already line up column-for-column — the fast path,
  * and the only case that ever ran before this existed. Otherwise returns a
  * per-canonical-column array of 0-based SHEET column indexes (-1 for a
- * column the sheet doesn't have yet), so readAllSectionedRows() can project
- * each row into the expected order.
+ * column the sheet doesn't have yet), so a sectioned read can project each
+ * row into the expected order.
  *
  * This is what makes changing a HEADERS layout safe on a workbook that
  * already holds data. Reordering the array used to silently reinterpret
@@ -180,11 +211,11 @@ function buildHeaderProjection(sheet, headerRow, headers, lastCol) {
  * The half of buildHeaderProjection() that needs no sheet: the header row's
  * values are already in hand.
  *
- * Split out for readAllSectionedRowValues(), which reads a tab's whole grid in
- * ONE call and therefore already holds every header row it is about to
- * project — going back to the sheet for each of them would put back exactly
- * the round trips that read is there to remove. `where` is only used to say
- * which row was re-aligned in the log.
+ * Split out for readSectionedGrid_(), which fetches a tab's whole grid up
+ * front and therefore already holds every header row it is about to project —
+ * going back to the sheet for each of them would put back exactly the round
+ * trips that read is there to remove. `where` is only used to say which row
+ * was re-aligned in the log.
  */
 function buildHeaderProjectionFromRow(headerRowValues, headers, where) {
   const rowValues = headerRowValues.map(normalizeHeaderText);
@@ -235,7 +266,7 @@ function partitionByDate(rows, dateColIdx, todayKey) {
 // ============================================================================
 //
 // Every date-sorted tab in this workbook grows in one direction forever. A
-// year in, the Past section of Registrant_Dash is thousands of
+// year in, the Past section of All_Registrants is thousands of
 // rows that nobody scrolls through and every render rewrites.
 //
 // THE CHEAP HALF OF THE PROBLEM — that it is in the way — is solved here, by
@@ -405,8 +436,8 @@ function reportArchivableMonths() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cutoff = getVisibleMonthCutoffKey();
   const tabs = [
-    { name: SHEET_NAMES.REGISTRANT_DASH, headers: HEADERS.Registrant_Dash, marker: 'Event_ID' },
-    { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.Master_Program_Dashboard, marker: 'Event_ID' },
+    { name: SHEET_NAMES.REGISTRANT_DASH, headers: HEADERS.All_Registrants, marker: 'Event_ID' },
+    { name: SHEET_NAMES.PROGRAM_DASHBOARD, headers: HEADERS.All_Program_Sessions, marker: 'Event_ID' },
     { name: SHEET_NAMES.TRIAGE, headers: HEADERS.Deleted_Event_Triage, marker: 'Event_ID' },
     { name: SHEET_NAMES.LUNCH_SCHEDULE, headers: HEADERS.Lunch_Schedule, marker: 'Event_Date' }
   ];
@@ -477,6 +508,12 @@ const ARCHIVE_ADVISORY_CELLS = 150000;
  * can layer per-zone validation/conditional-formatting/formulas on top.
  */
 function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastRows, options) {
+  // THE tab-rewrite choke point: every sectioned tab in the workbook is
+  // written through here, renderFlatDateSheet() included. Anything this
+  // execution read off this tab describes the rows that are about to be
+  // replaced, so it goes now rather than after — an early return below would
+  // otherwise leave a cache describing a half-written tab.
+  invalidateSectionedRowsCache(sheet);
   options = options || {};
   const numCols = headers.length;
   const dateColIdx = headers.indexOf('Event_Date');
@@ -499,7 +536,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   if (upcomingRows.length > 0) sheet.getRange(upcomingDataStart, 1, upcomingRows.length, numCols).setValues(upcomingRows);
   setDataRowHeights(sheet, upcomingDataStart, upcomingRows.length);
   applyZebraStripingManualBounded(sheet, upcomingDataStart, upcomingRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length);
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length, options.dateNumberFormat);
   row += upcomingRows.length;
   row++; // spacer
 
@@ -514,7 +551,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   if (pastRows.length > 0) sheet.getRange(pastDataStart, 1, pastRows.length, numCols).setValues(pastRows);
   setDataRowHeights(sheet, pastDataStart, pastRows.length);
   applyZebraStripingManualBounded(sheet, pastDataStart, pastRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length);
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length, options.dateNumberFormat);
   row += pastRows.length;
 
   // Old months go away LAST, once the rows are written and formatted — hiding
@@ -571,10 +608,14 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
 /**
  * Fully rebuilds a "flat" (single logical table) sheet into Upcoming/Past
  * sub-tables, driven entirely by each row's Event_Date. Used for
- * Registrant_Dash, Deleted_Event_Triage, and Lunch_Schedule.
+ * All_Registrants, Deleted_Event_Triage, and Lunch_Schedule.
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
+  // Belt and braces: writeUpcomingPastSections() below drops this tab's cached
+  // reads too, but the clear() happens first and a throw in between would
+  // otherwise leave the old rows cached against an emptied tab.
+  invalidateSectionedRowsCache(sheet);
   sheet.clear();
   sheet.clearFormats();
   // Row visibility is a sheet-level property that survives clear(), exactly

@@ -115,8 +115,83 @@ const FORM_STATE_MIGRATIONS = [
     version: 8,
     targets: context => isRoutingAffectedFormContext(context),
     apply: (form, context) => repairFormPageRouting(form, context)
+  },
+  {
+    id: 'meal_totals_v9',
+    title: 'Lunch asked for as a total (v8 → v9)',
+    version: 9,
+    // EVERY FORM, with no targets predicate. The three questions this replaces
+    // are on every form that has ever offered lunch, and whether a given form
+    // still carries them cannot be judged from the dashboard rows — a form
+    // whose dates stopped serving lunch had them stripped, and a form built
+    // last week never had them. So the cheap check is the one inside apply(),
+    // which reads the titles off the form and returns 0 without a write when
+    // there is nothing of the old shape on it.
+    apply: (form, context) => convertFormToMealTotals(form, context)
   }
 ];
+
+/**
+ * v8 → v9: SWAPS THE THREE PERSON-SHAPED LUNCH QUESTIONS FOR THE TWO
+ * COUNT-SHAPED ONES, in place, on a live form.
+ *
+ * The change itself is described on TEMPLATE_VERSION. What this exists for is
+ * the alternative: without it every live form in the workbook is stale by
+ * isFormOnCurrentTemplate()'s reckoning and gets REBUILT — a few dozen Forms
+ * writes each, five per execution, and a new prefilled link for every session
+ * row because a rebuilt form has new item IDs. The questions are the only
+ * thing that actually changed, so this changes the questions.
+ *
+ * IT DOES NOT WRITE ITS OWN VERSION OF THE SHAPE. syncLunchQuestionsOnForm()
+ * is already the one place that decides which lunch questions a form should
+ * carry — the lunch-only form's single grid, the appointment form's none, the
+ * ordinary form's two — and it now removes the pre-v9 items wherever it looks.
+ * Calling it is what keeps this migration and the hourly sync from disagreeing
+ * about the same form.
+ *
+ * THE DATE ROWS HAVE TO FOLLOW IT. A freshly added grid holds the template's
+ * placeholder row, so a form left here without a forced label write is a form
+ * whose lunch question offers "(dates will be filled in automatically)" and
+ * nothing else — strictly worse than the old shape it replaced.
+ *
+ * Returns 0 and writes nothing on a form that has already been converted,
+ * which is most of them after the first sweep: the guard below is three title
+ * comparisons on items the sweep has already read.
+ */
+function convertFormToMealTotals(form, context) {
+  const titles = form.getItems().map(it => it.getTitle());
+  // A FORM THAT IS STALE FOR SOME OTHER REASON IS THE REBUILD PASS'S. This
+  // migration carries a `version`, so a form it lands on is STAMPED at
+  // TEMPLATE_VERSION and the rebuild pass then leaves it alone — which would
+  // be exactly wrong for a form still on the v1/v2 guest-count branch pages or
+  // still carrying the floating footer header. Those are the other two things
+  // isFormOnCurrentTemplate() judges a form stale by, and swapping their lunch
+  // questions does not make either of them any less true.
+  if (titles.indexOf(LEGACY_GUEST_COUNT_TITLE) !== -1 ||
+      titles.indexOf(LEGACY_FOOTER_ITEM_TITLE) !== -1) {
+    return { changed: 0, recognized: false };
+  }
+  const preV9 = [TEMPLATE_ITEM_TITLES.LUNCH_GRID, TEMPLATE_ITEM_TITLES.ALL_DATES_LUNCH_PEOPLE,
+    TEMPLATE_ITEM_TITLES.EXTRA_MEALS, LEGACY_LUNCH_ONLY_GRID_TITLE];
+  if (!preV9.some(title => titles.indexOf(title) !== -1)) return { changed: 0, recognized: true };
+
+  const { allDateLabels, lunchDateLabels } = buildDateLabelSets(context.sessions, context);
+  let changed = syncLunchQuestionsOnForm(form, context.locations, lunchDateLabels.length > 0, context);
+  // force: the rows this form's meal question is carrying are the template's
+  // placeholder, and the fingerprint on file still describes the labels the
+  // old grid had.
+  applyFormDateLabels(form.getId(), allDateLabels, lunchDateLabels, {
+    form, force: true, context: 'meal-total migration',
+    shape: formLunchShapeKey(context, lunchDateLabels.length > 0)
+  });
+
+  if (changed > 0) {
+    log(`Form ${form.getId()} ("${describeLocations(context.locations)}") now asks for meals as a ` +
+      `total per date rather than as a box per person.`);
+    invalidateFormItemIndex(form.getId());
+  }
+  return { changed: changed, recognized: true };
+}
 
 /**
  * WHICH FORMS THE v8 ROUTING REPAIR IS FOR: the single-session ones and the
@@ -289,8 +364,8 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
   // executions (repairFormRoutingNow()) takes the rest of its list from it, so
   // a form counted in `deferred` is the only kind that comes back next time.
   const result = { opened: 0, repaired: 0, skipped: 0, unrecognized: 0, deferred: 0, visited: [] };
-  const headers = HEADERS.Master_Program_Dashboard;
-  const rows = sessionRows || readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const headers = HEADERS.All_Program_Sessions;
+  const rows = sessionRows || getSectionedRows(registrySheet, headers, 'Event_ID');
   if (rows.length === 0) return result;
   const map = getIndexMap(headers);
   const byForm = groupRegistryRowsByForm(rows, map);
@@ -321,7 +396,7 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
 
     let form;
     try {
-      form = FormApp.openById(formId);
+      form = openFormCached(formId);
     } catch (err) {
       // NOT recorded as applied. A form that could not be opened has not been
       // migrated, and the next run must try it again — the rebuild pass logs
@@ -412,8 +487,12 @@ function runFormStateMigrations(registrySheet, sessionRows, options) {
 // where it stopped. The list of forms left is kept in Script Properties, so a
 // slice that dies outright — the ceiling, a thrown error — loses nothing but
 // its own progress, and the watchdog trigger armed at the top of every slice
-// restarts it. Mirrors the in-place rebuild sweep (32) deliberately: same
-// state-in-properties shape, same watchdog-then-hand-off ordering.
+// restarts it. The state machine behind that is runSlicedJob() in 74, shared
+// with the bootstrap import (25) and the two form sweeps (32, 49) — this is
+// the one caller with no lock and no automation pause, since nothing this
+// repair writes conflicts with a sync the way replacing a form would. The
+// stored state keeps its key and shape, so a repair already in flight resumes
+// untouched.
 // ---------------------------------------------------------------------------
 
 /** { startedAt, lastSliceAt, slices, remaining: [formId], opened, repaired, skipped, unrecognized } */
@@ -439,64 +518,62 @@ const FORM_ROUTING_REPAIR_WATCHDOG_DELAY_MS = FORM_ROUTING_REPAIR_SLICE_BUDGET_M
 /** A ceiling on slices, so a sweep that cannot advance ends rather than handing on forever. */
 const FORM_ROUTING_REPAIR_MAX_SLICES = 40;
 
+/**
+ * A single slice that repairs nothing ends the sweep — not two in a row, like
+ * the other sliced jobs. Handing this one on again would only ask the exact
+ * same `remaining` list the exact same question, since nothing here changes
+ * what runFormStateMigrations() would find; ending immediately and saying so
+ * beats a trigger that never stops.
+ */
+const FORM_ROUTING_REPAIR_MAX_STALLED_SLICES = 1;
+
 /** A sweep that has not advanced in this long is abandoned rather than blocking the next click. */
 const FORM_ROUTING_REPAIR_STALE_MS = 30 * 60 * 1000;
 
 function getFormRoutingRepairState() {
-  const raw = PropertiesService.getScriptProperties().getProperty(FORM_ROUTING_REPAIR_STATE_PROP_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    log(`⚠️ The routing-repair state was unreadable (${err}) — treating it as finished.`);
-    return null;
-  }
+  return getSlicedJobState(FORM_ROUTING_REPAIR_STATE_PROP_KEY, 'Routing repair');
 }
 
 function saveFormRoutingRepairState(state) {
-  PropertiesService.getScriptProperties().setProperty(FORM_ROUTING_REPAIR_STATE_PROP_KEY, JSON.stringify(state));
+  saveSlicedJobState(FORM_ROUTING_REPAIR_STATE_PROP_KEY, state);
 }
 
 /** Is a routing repair in flight? Stale state reads as "no". */
 function isFormRoutingRepairActive() {
-  const state = getFormRoutingRepairState();
-  if (!state) return false;
-  const age = Date.now() - (state.lastSliceAt || state.startedAt || 0);
-  if (age > FORM_ROUTING_REPAIR_STALE_MS) {
-    log(`⚠️ Ignoring a routing repair that has not advanced in ${Math.round(age / 60000)} minute(s).`);
-    return false;
-  }
-  return true;
+  return isSlicedJobActive(FORM_ROUTING_REPAIR_STATE_PROP_KEY, FORM_ROUTING_REPAIR_STALE_MS, minutes =>
+    `⚠️ Ignoring a routing repair that has not advanced in ${minutes} minute(s).`);
 }
 
 /** Replaces any pending hand-off with exactly one, `delayMs` out. */
 function armFormRoutingRepairResume(delayMs) {
-  deleteFormRoutingRepairResumeTriggers();
-  ScriptApp.newTrigger(FORM_ROUTING_REPAIR_RESUME_HANDLER).timeBased().after(delayMs).create();
+  armSlicedJobResume(FORM_ROUTING_REPAIR_RESUME_HANDLER, delayMs);
 }
 
 function deleteFormRoutingRepairResumeTriggers() {
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() !== FORM_ROUTING_REPAIR_RESUME_HANDLER) return;
-    ScriptApp.deleteTrigger(t); // one-off triggers linger after firing; clear them out
-  });
+  return deleteSlicedJobResumeTriggers(FORM_ROUTING_REPAIR_RESUME_HANDLER);
 }
 
 /**
- * ADMIN → "Fix Form Page Routing (no rebuild)". Runs every registered
- * migration over the forms it applies to, ledger ignored, and says what it did.
+ * ADMIN → "Fix Forms In Place (no rebuild)". Runs every registered migration
+ * over the forms it applies to, ledger ignored, and says what it did.
  *
- * The un-destructive sibling of "Rebuild Forms In Place": no question is
- * replaced, no pre-checked box is regenerated, no link moves — the only writes
- * are the navigation settings that are actually wrong. Someone who has just
+ * The un-destructive sibling of "Rebuild Forms In Place": no form is emptied
+ * and rebuilt, and no link moves — the only writes are the repairs a form
+ * actually needs, whether that is a misplaced navigation setting or the swap
+ * from the pre-v9 lunch questions to the meal totals. Someone who has just
  * pulled a fix and does not want to wait an hour for the sync runs this.
+ *
+ * STILL SPELLED "ROUTING" throughout its state and its handler names, because
+ * the first repair it carried was the page routing and its stored state and
+ * resume trigger are keyed by those names — see the Script Properties rule in
+ * CLAUDE.md. What it does is every migration, not only that one.
  *
  * ONE CLICK IS THE WHOLE JOB. What does not fit in this execution is carried on
  * by a hand-off trigger until every form has been looked at; the dialog says so
  * rather than asking for another click.
  */
 function repairFormRoutingNow() {
-  if (!requireAuthorizedAdmin('Fix Form Page Routing')) return;
+  if (!requireAuthorizedAdmin('Fix Forms In Place')) return;
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -505,14 +582,14 @@ function repairFormRoutingNow() {
     return;
   }
   if (isFormRoutingRepairActive()) {
-    ui.alert('A routing check is already running in the background and will finish on its own — ' +
+    ui.alert('A form check is already running in the background and will finish on its own — ' +
       'leaving it alone.');
     return;
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const formIds = Object.keys(groupRegistryRowsByForm(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map));
+  const formIds = Object.keys(groupRegistryRowsByForm(getSectionedRows(registrySheet, headers, 'Event_ID'), map));
   if (formIds.length === 0) {
     ui.alert('There is no form on this workbook to check yet.');
     return;
@@ -522,7 +599,7 @@ function repairFormRoutingNow() {
     startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0,
     remaining: formIds, opened: 0, repaired: 0, skipped: 0, unrecognized: 0
   });
-  toastIfPossible('Checking every form’s page routing…');
+  toastIfPossible('Checking every form for repairs it needs…');
 
   const state = runFormRoutingRepairSlice();
   const totals = state || getFormRoutingRepairState();
@@ -545,78 +622,73 @@ function resumeFormRoutingRepair() {
 /**
  * One execution's worth of repairing. Returns the state as it stands after
  * this slice — `remaining` empty means the sweep is finished.
+ *
+ * The state machine — watchdog, slice count, deadline, hand-off — is
+ * runSlicedJob() in 74. This job has no lock and no automation pause (nothing
+ * it writes conflicts with a sync the way a form REPLACEMENT would), so its
+ * `work` is the whole slice: one batched call into runFormStateMigrations()
+ * over whatever forms are still `remaining`.
  */
 function runFormRoutingRepairSlice() {
-  const state = getFormRoutingRepairState();
-  if (!state) {
-    deleteFormRoutingRepairResumeTriggers(); // a leftover trigger firing after the sweep finished
-    return null;
-  }
+  return runSlicedJob({
+    label: 'Routing repair',
+    propKey: FORM_ROUTING_REPAIR_STATE_PROP_KEY,
+    resumeHandler: FORM_ROUTING_REPAIR_RESUME_HANDLER,
+    budgetMs: FORM_ROUTING_REPAIR_SLICE_BUDGET_MS,
+    resumeDelayMs: FORM_ROUTING_REPAIR_RESUME_DELAY_MS,
+    watchdogDelayMs: FORM_ROUTING_REPAIR_WATCHDOG_DELAY_MS,
+    maxSlices: FORM_ROUTING_REPAIR_MAX_SLICES,
+    maxStalledSlices: FORM_ROUTING_REPAIR_MAX_STALLED_SLICES,
 
-  // Armed BEFORE anything else, so every exit path — including the six-minute
-  // ceiling, which returns from nowhere — leaves exactly one live successor.
-  // finishFormRoutingRepair() clears it.
-  armFormRoutingRepairResume(FORM_ROUTING_REPAIR_WATCHDOG_DELAY_MS);
+    work: ctx => {
+      const state = ctx.state;
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+      if (!registrySheet) return { stop: 'stopped — the program dashboard sheet is gone' };
+      if (!state.remaining || state.remaining.length === 0) return { finished: true };
 
-  try {
-    state.slices++;
-    state.lastSliceAt = Date.now();
-    saveFormRoutingRepairState(state);
+      // force: the ledger is what the hourly sync goes by, and a person clicking
+      // this is asking for the forms to be looked at again whatever it says.
+      // No limit: the deadline is the limit, and it is the honest one.
+      const result = runFormStateMigrations(registrySheet, null, {
+        force: true, limit: 100000, onlyFormIds: new Set(state.remaining),
+        deadline: ctx.deadline
+      });
 
-    if (state.slices > FORM_ROUTING_REPAIR_MAX_SLICES) {
-      return finishFormRoutingRepair(state, `stopped after ${FORM_ROUTING_REPAIR_MAX_SLICES} runs without finishing`);
-    }
+      state.opened += result.opened;
+      state.repaired += result.repaired;
+      state.skipped += result.skipped;
+      state.unrecognized += result.unrecognized;
+      const visited = new Set(result.visited);
+      const before = state.remaining.length;
+      state.remaining = state.remaining.filter(id => !visited.has(id));
+      if (state.remaining.length === 0) return { finished: true };
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (!registrySheet) {
-      return finishFormRoutingRepair(state, 'stopped — the program dashboard sheet is gone');
-    }
-    if (!state.remaining || state.remaining.length === 0) {
-      return finishFormRoutingRepair(state, null);
-    }
+      return { processed: before - state.remaining.length, remaining: state.remaining.length };
+    },
 
-    // force: the ledger is what the hourly sync goes by, and a person clicking
-    // this is asking for the forms to be looked at again whatever it says.
-    // No limit: the deadline is the limit, and it is the honest one.
-    const result = runFormStateMigrations(registrySheet, null, {
-      force: true, limit: 100000, onlyFormIds: new Set(state.remaining),
-      deadline: Date.now() + FORM_ROUTING_REPAIR_SLICE_BUDGET_MS
-    });
+    onHandOff: state => {
+      toastIfPossible(`Routing check: ${state.opened} form(s) done, ${state.remaining.length} to go. ` +
+        `This continues by itself — no need to run it again.`);
+    },
 
-    state.opened += result.opened;
-    state.repaired += result.repaired;
-    state.skipped += result.skipped;
-    state.unrecognized += result.unrecognized;
-    const visited = new Set(result.visited);
-    const before = state.remaining.length;
-    state.remaining = state.remaining.filter(id => !visited.has(id));
-    if (state.remaining.length === 0) {
-      return finishFormRoutingRepair(state, null);
-    }
+    overrunProblem: () => `stopped after ${FORM_ROUTING_REPAIR_MAX_SLICES} runs without finishing`,
     // Nothing moved and there is still a list: handing on again would only
     // repeat this. Ending and saying so beats a trigger that never stops.
-    if (state.remaining.length === before) {
-      return finishFormRoutingRepair(state,
-        `stopped — ${state.remaining.length} form(s) could not be checked`);
-    }
+    stalledProblem: result => `stopped — ${result.remaining} form(s) could not be checked`,
 
-    saveFormRoutingRepairState(state);
-    toastIfPossible(`Routing check: ${state.opened} form(s) done, ${state.remaining.length} to go. ` +
-      `This continues by itself — no need to run it again.`);
-    armFormRoutingRepairResume(FORM_ROUTING_REPAIR_RESUME_DELAY_MS); // replaces the watchdog with a prompt hand-off
-    return state;
-  } catch (err) {
     // An exception, unlike a timeout, is ours to handle: end the sweep tidily
     // rather than leaving its state to block the next click for half an hour.
-    log(`⚠️ The routing repair run failed (${err}).`);
-    return finishFormRoutingRepair(state, `stopped after an error: ${err}`);
-  }
+    onError: err => { log(`⚠️ The routing repair run failed (${err}).`); },
+    errorProblem: err => `stopped after an error: ${err}`,
+
+    onDone: (state, problem) => finishFormRoutingRepair(state, problem)
+  });
 }
 
 /** Ends the sweep: clear the state, drop the hand-off trigger, say what happened. */
 function finishFormRoutingRepair(state, problem) {
-  PropertiesService.getScriptProperties().deleteProperty(FORM_ROUTING_REPAIR_STATE_PROP_KEY);
+  clearSlicedJobState(FORM_ROUTING_REPAIR_STATE_PROP_KEY);
   deleteFormRoutingRepairResumeTriggers();
   const finished = Object.assign({}, state, { problem: problem || '' });
   const headline = describeFormRoutingRepair(finished).join(' · ');

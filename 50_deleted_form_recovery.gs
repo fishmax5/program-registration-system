@@ -182,6 +182,11 @@ function planFormRecovery(refs, probeFn) {
 function restoreOneFormFile(formId, folder) {
   const file = DriveApp.getFileById(formId);
   file.setTrashed(false);
+  // Anything cached about this form was cached while it was in the trash — and
+  // the sweep that runs after a rescue is the one that has to see the restored
+  // file, not a handle to the deleted one. (An open that FAILED was never
+  // cached in the first place; see openFormCached().)
+  invalidateFormItemIndex(formId);
   // ASKED AGAIN, AFTER THE RESTORE. Untrashing puts a file back where it came
   // from, which for a form this system built is the forms folder already — so
   // the ordinary case has nothing to move, and trying to move it anyway is
@@ -302,9 +307,9 @@ function recoverDeletedForms() {
     return null;
   }
 
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
-  const sessionRows = readAllSectionedRows(registrySheet, headers, 'Event_ID');
+  const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
     getLunchOnlyFormLinks());
   if (refs.length === 0) {
@@ -397,12 +402,12 @@ function recoverDeletedForms() {
  * run. A lost form with nothing upcoming is reported and left alone.
  */
 function offerToRebuildLostForms(registrySheet, goneRefs, result) {
-  const headers = HEADERS.Master_Program_Dashboard;
+  const headers = HEADERS.All_Program_Sessions;
   const map = getIndexMap(headers);
   const lost = {};
   goneRefs.forEach(ref => { lost[ref.formId] = ref; });
 
-  const plan = planFormRebuilds(readAllSectionedRows(registrySheet, headers, 'Event_ID'), map)
+  const plan = planFormRebuilds(getSectionedRows(registrySheet, headers, 'Event_ID'), map)
     .filter(item => Object.prototype.hasOwnProperty.call(lost, item.oldFormId));
   const pastOnly = goneRefs.length - plan.length;
 

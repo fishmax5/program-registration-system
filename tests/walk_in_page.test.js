@@ -1,9 +1,12 @@
-// THE WALK-IN SIGN-IN PAGE (section 16b) — the door page the location links
-// now open on, for the person who walked in without registering.
+// THE DOOR'S DAY AND ITS ONE WRITE (section 16h) — what the tablet at the
+// front door reads, and what it is allowed to write.
 //
-// What this file pins is the handful of things that break SILENTLY, which on a
-// page a member of the public taps unsupervised means either a sign-in that
-// records nothing or a promise of a meal that does not exist:
+// The page these functions were built for (section 16b) was retired; the door
+// app (sections 16f/16g) reads and writes through them now, so what is pinned
+// here is the server half and the routing that picks a page. These are the
+// things that break SILENTLY, which on a screen a member of the public taps
+// unsupervised means either a sign-in that records nothing or a promise of a
+// meal that does not exist:
 //
 //   1. THE SESSION VALUES ARE QUICK MARK CHOICES. Every write the page makes
 //      goes through applyQuickMarkFromDialog() against a "title · date" string
@@ -17,10 +20,7 @@
 //      hangs off it: a meal is ordered days ahead against a count, so an
 //      unregistered lunch is a request to be checked with staff and must never
 //      be presented as one that is waiting for them.
-//   4. THE OPTIONS ARE AN INLINE LITERAL. Same hazard as the check-in page's
-//      (check_in_page.test.js): a location name carrying the two characters
-//      that end a script tag would end the page mid-sentence.
-//   5. THE REFUSALS HOLD. A new member the office has no way to reach — no
+//   4. THE REFUSALS HOLD. A new member the office has no way to reach — no
 //      email AND no phone — is the one thing the page turns away, because
 //      being able to follow up is the entire reason it asks a stranger for
 //      anything. Either detail on its own is enough.
@@ -67,7 +67,7 @@ const sandbox = {
   ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
 };
 vm.createContext(sandbox);
-vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP;',
+vm.runInContext(src + ';this.HEADERS = HEADERS; this.CALENDAR_MAP = CALENDAR_MAP; this.SHEET_NAMES = SHEET_NAMES;',
   sandbox, { filename: 'program.gs' });
 
 let fail = 0;
@@ -82,7 +82,7 @@ function ok(name, cond) {
 // The door is the DEFAULT, because the link taped to the tablet by the
 // entrance is the one everybody has, and a volunteer should not have to
 // choose a page before they can use one.
-ok('a bare URL is the door', sandbox.checkInRosterModeRequested({}) === false);
+ok('a bare URL is the door app', sandbox.checkInRosterModeRequested({}) === false);
 ok('a location pin alone is still the door',
   sandbox.checkInRosterModeRequested({ location: 'Narberth' }) === false);
 ok('?mode=session is the staff roster', sandbox.checkInRosterModeRequested({ mode: 'session' }) === true);
@@ -90,7 +90,14 @@ ok('?mode=session is the staff roster', sandbox.checkInRosterModeRequested({ mod
 ok('so is ?mode=checkin', sandbox.checkInRosterModeRequested({ mode: 'checkin' }) === true);
 ok('so is ?mode=check-in', sandbox.checkInRosterModeRequested({ mode: 'check-in' }) === true);
 ok('and it is case-insensitive', sandbox.checkInRosterModeRequested({ mode: ' Roster ' }) === true);
-ok('nonsense is the door, not an error', sandbox.checkInRosterModeRequested({ mode: 'banana' }) === false);
+ok('nonsense is the door app, not an error',
+  sandbox.checkInRosterModeRequested({ mode: 'banana' }) === false);
+// THE RETIRED PAGE'S OWN MODE. ?mode=walkin was the previous door page and is
+// no longer a branch in doGet(); a bookmark still carrying it must land on the
+// door app rather than on an error, which is exactly what "not the roster"
+// buys — see the banner in 62_walk_in_page.gs.
+ok('a stale ?mode=walkin bookmark is the door app',
+  sandbox.checkInRosterModeRequested({ mode: 'walkin' }) === false);
 
 // ---------------------------------------------------------------------------
 // 2. The URLs the dialog hands out.
@@ -255,42 +262,6 @@ ok('and the script-reported address is warned about again',
   withUrl('https://script.google.com/macros/s/WRONG/dev', () => sandbox.readCheckInPageInfo()).isDev === true);
 
 // ---------------------------------------------------------------------------
-// 3. The page's inlined options.
-// ---------------------------------------------------------------------------
-const nastyLocation = 'St. Mary\'s </script><script>alert("x")</script>';
-const page = sandbox.buildWalkInHtml({
-  location: nastyLocation, pinRequired: true, locations: [nastyLocation, 'Narberth'],
-  rosterUrl: 'https://x/exec?location=Narberth&mode=session'
-});
-const body = page.substring(page.indexOf('<script>'));
-ok('the page has exactly one closing script tag', body.split('</script>').length - 1 === 1);
-const literal = /var OPTS = JSON\.parse\(("(?:[^"\\]|\\.)*")\);/.exec(page);
-ok('the options are inlined as a single string literal', !!literal);
-if (literal) {
-  const opts = JSON.parse(JSON.parse(literal[1]));
-  ok('the hostile location survives the round trip', opts.location === nastyLocation);
-  ok('the locations travel with the page', opts.locations.indexOf('Narberth') !== -1);
-  ok('the PIN requirement travels with it', opts.pinRequired === true);
-  ok('and so does the way back to the staff roster', /mode=session/.test(opts.rosterUrl));
-}
-// The page's own script has to be JavaScript — a template-literal escape that
-// went wrong is otherwise a blank tablet with nothing in the log.
-const inner = page.substring(page.indexOf('<script>') + '<script>'.length, page.lastIndexOf('</script>'));
-let parses = true;
-try { new vm.Script(inner); } catch (err) { parses = false; }
-ok('the page script parses as JavaScript', parses);
-// The sentence the whole lunch section exists for.
-ok('the page warns that an unregistered lunch is not a promised meal',
-  /check with a staff member that one is available/i.test(page));
-// The tick IS the handover now, on both sides of the registered/not line —
-// the door is where the food is collected, so a meal ticked here is marked
-// served (Lunch_Served), and the page has to say that before it is ticked.
-ok('and says a tick records the meal as taken',
-  /recorded as taking a meal/i.test(page) && /records it as handed to you/i.test(page));
-ok('and offers the way out of a mistaken tick',
-  /leave it unticked if you are not taking it today/i.test(page));
-
-// ---------------------------------------------------------------------------
 // 4. The day, read off stub tabs.
 // ---------------------------------------------------------------------------
 const DASH_HEADERS = ['Event_Date', 'Location', 'Clean_Title', 'Event_Time',
@@ -298,7 +269,7 @@ const DASH_HEADERS = ['Event_Date', 'Location', 'Clean_Title', 'Event_Time',
 const REG_HEADERS = ['Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended',
   'Lunch_Served', 'Lunch_Status', 'Phone', 'Event_ID'];
 const ROLL_HEADERS = ['Name', 'Phone', 'Email', 'Times_Seen', 'First_Seen', 'Last_Seen',
-  'Locations', 'Usual_Lunch', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
+  'Locations', 'Usual_Guests', 'Dietary_Notes', 'Contact', 'Staff_Notes'];
 
 // A sheet the way the readers expect one: a grid, read whole or in ranges.
 function gridSheet(name, values) {
@@ -318,24 +289,27 @@ function gridSheet(name, values) {
 }
 
 const realHeaders = {
-  dash: sandbox.HEADERS.Master_Program_Dashboard,
-  reg: sandbox.HEADERS.Registrant_Dash,
+  dash: sandbox.HEADERS.All_Program_Sessions,
+  reg: sandbox.HEADERS.All_Registrants,
   roll: sandbox.HEADERS.Member_Roll
 };
 const realMeal = sandbox.getMealInfoForDate;
 
 function withWorkbook(parts, fn) {
-  sandbox.HEADERS.Master_Program_Dashboard = DASH_HEADERS;
-  sandbox.HEADERS.Registrant_Dash = REG_HEADERS;
+  sandbox.HEADERS.All_Program_Sessions = DASH_HEADERS;
+  sandbox.HEADERS.All_Registrants = REG_HEADERS;
   sandbox.HEADERS.Member_Roll = ROLL_HEADERS;
   // The menu is stubbed rather than a fourth sheet: what readWalkInDay() does
   // with a meal is all this file is about, and Lunch_Schedule's own reader has
   // its tests elsewhere.
   sandbox.getMealInfoForDate = (date, loc) => (parts.meal === undefined ? null : parts.meal);
   const sheets = {
-    Master_Program_Dashboard: gridSheet('Master_Program_Dashboard',
+    // Keyed off the constant, not the literal: the session tab was renamed
+    // from All_Program_Sessions to All_Program_Sessions, and a fixture that
+    // spells the name out goes silently empty on the next such rename.
+    [sandbox.SHEET_NAMES.PROGRAM_DASHBOARD]: gridSheet(sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
       [DASH_HEADERS].concat(parts.dash || [])),
-    Registrant_Dash: gridSheet('Registrant_Dash', [REG_HEADERS].concat(parts.reg || [])),
+    All_Registrants: gridSheet('All_Registrants', [REG_HEADERS].concat(parts.reg || [])),
     Member_Roll: parts.roll
       ? gridSheet('Member_Roll', [['👤 Member Roll'], ROLL_HEADERS].concat(parts.roll))
       : null
@@ -343,9 +317,13 @@ function withWorkbook(parts, fn) {
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
     getSheetByName: n => sheets[n] || null
   });
+  // Each call stands in for a fresh execution against a fresh workbook — the
+  // per-execution sectioned-rows cache (08_execution_caches.gs) has to start
+  // empty too, or the next scenario's read comes back as this one's rows.
+  sandbox.invalidateSectionedRowsCache();
   try { return fn(); } finally {
-    sandbox.HEADERS.Master_Program_Dashboard = realHeaders.dash;
-    sandbox.HEADERS.Registrant_Dash = realHeaders.reg;
+    sandbox.HEADERS.All_Program_Sessions = realHeaders.dash;
+    sandbox.HEADERS.All_Registrants = realHeaders.reg;
     sandbox.HEADERS.Member_Roll = realHeaders.roll;
     sandbox.getMealInfoForDate = realMeal;
     sandbox.SpreadsheetApp.getActiveSpreadsheet = () => null;
