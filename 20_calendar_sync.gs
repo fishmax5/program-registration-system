@@ -8,7 +8,7 @@
  * `ordinaryEnd` is the horizon this sync has always had: SYNC_LOOKAHEAD_DAYS
  * out, rounded to the end of whatever month that lands in. `end` is the same
  * date OR the end of an appointment form's rolling window, whichever is later
- * — see assistanceFormWindow() (88). The two are not always the same: read on
+ * — see assistanceFormWindow() (94). The two are not always the same: read on
  * the 1st of a 31-day month, sixty days out stops at the end of NEXT month,
  * which is a month short of what an appointment form is meant to be offering.
  *
@@ -16,7 +16,7 @@
  * Whether an event is an appointment event cannot be known until it has been
  * read, so the read has to reach far enough for the ones that are — and every
  * ordinary program in that extra reach is then trimmed back to `ordinaryEnd`
- * by trimGroupsToFormWindows() (88). Without that trim, extending this window
+ * by trimGroupsToFormWindows() (94). Without that trim, extending this window
  * would quietly move the horizon for the whole workbook: a month of session
  * rows, and a month of forms, appearing earlier than they ever have.
  */

@@ -140,6 +140,12 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
  *
+ * THE PUBLIC PAGES ARE NOT IN THIS TABLE. They live in 91_public_embeds.gs,
+ * which doGet() asks before it walks this one: everything declared below
+ * WRITES to the workbook, and the one thing that separates the public pages
+ * from all of it — that another website may frame them — is a property of the
+ * response, not of the page.
+ *
  * BUILT LAZILY (see 01a_lazy_globals.gs). The entries name functions and
  * constants that live in sections 16b, 16f and 71 — other files, in a project
  * that is one shared global scope evaluated in whatever order it happens to be
@@ -169,25 +175,6 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
         programLabel: cancelPageProgramLabel(formId)
       });
     }
-  },
-  {
-    id: 'public',
-    mode: 'public',
-    title: 'Programs & Sign-Ups',
-    // THE PUBLIC CALENDAR, and the only page here nobody at this organization
-    // is expected to be holding. It is what goes on a flyer, in a newsletter
-    // and on the website: everything running between now and the end of next
-    // month, with the CURRENT sign-up form behind each session. Read-only,
-    // ungated for the same reason the cancel page is — a page that asks a
-    // stranger for a staff PIN is a page that becomes a phone call — and
-    // carrying no names at all, which is what makes that safe (see the banner
-    // in 86_public_program_calendar.gs).
-    //
-    // ABOVE THE STAFF ROSTER because both are staff-typed URLs and only one
-    // of them is ever printed: a spelling this route claims must never be
-    // answered by a page that asks for a PIN.
-    match: params => PUBLIC_CALENDAR_MODES.indexOf(doorRequestedMode_(params)) !== -1,
-    build: () => buildPublicCalendarHtml(publicProgramCalendar({}))
   },
   {
     id: 'session',
@@ -256,6 +243,14 @@ function doGet(e) {
     locations: checkInLocations()
   };
 
+  // THE PUBLIC PAGES ARE ASKED ABOUT FIRST, and they are declared and served
+  // by their own file (91_public_embeds.gs). Not tidying: they are the only
+  // pages here another website may FRAME, which is a property of the response
+  // rather than of the page, and asking first also means a spelling the public
+  // router claims can never be answered by a page that wants a staff PIN.
+  const publicRoute = publicEmbedRoute(params);
+  if (publicRoute) return servePublicEmbed(publicRoute, params);
+
   let route = null;
   for (let i = 0; i < DOOR_ROUTES.length && !route; i++) {
     if (DOOR_ROUTES[i].match(params)) route = DOOR_ROUTES[i];
@@ -264,28 +259,22 @@ function doGet(e) {
   // edited down to nothing still serves a page rather than a stack trace.
   if (!route) route = doorRouteById_('door');
 
-  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). This page writes to the
-  // workbook, and letting any site frame it is what turns a tap on somebody
-  // else's page into a check-in on this one. Nothing needs to embed it — it is
-  // opened on a tablet, not built into another site.
-  return HtmlService.createHtmlOutput(route.build(params, ctx))
+  const out = HtmlService.createHtmlOutput(route.build(params, ctx))
     .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
 
-/**
- * What ?mode= has to say to get the PUBLIC CALENDAR (section 17).
- *
- * Spelled several ways for the same reason the roster's list is: this one is
- * printed on paper and typed into a newsletter by somebody who is not looking
- * at this file, and 'calendar' and 'events' are what a person writing about it
- * reaches for. A spelling missing from here is not an error page — it falls
- * through to the door app, which is the wrong page in front of the wrong
- * audience.
- */
-const PUBLIC_CALENDAR_MODES = ['public', 'calendar', 'programs', 'events', 'signup', 'sign-up', 'signups'];
+  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). Apps Script refuses
+  // framing by default, and for every page below this line that default is
+  // the protection: they all write to the workbook, and letting any site
+  // frame the door app is what turns a tap on somebody else's page into a
+  // check-in on this one. The two pages that MAY be framed returned above,
+  // from servePublicEmbed() in 91 — which is the only place ALLOWALL is
+  // written, because it is the only place that serves a page that cannot
+  // write anything.
+  return out;
+}
 
 /** What ?mode= has to say to get the session roster instead of the door page. */
 const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];
@@ -326,6 +315,21 @@ function checkInPageUrl(options) {
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
   const mode = doorRouteUrlMode_(opts.mode);
   if (mode) parts.push(`mode=${encodeURIComponent(mode)}`);
+  // Only the public calendar reads a span, and only a spelling it recognizes
+  // is written — a link carrying a word the page would ignore is a link that
+  // says something untrue about what it opens.
+  const span = publicCalendarSpanRequested_({ span: opts.span });
+  if (span) parts.push(`span=${encodeURIComponent(span)}`);
+  // ANYTHING ELSE THE ROUTE UNDERSTANDS, still assembled here rather than by
+  // the caller: the embed URLs in section 17b carry ?embed=1 and a pinned
+  // building, and a caller that concatenated those itself is a caller that
+  // gets to forget the encodeURIComponent on a building called "St. John's".
+  const extra = opts.params || {};
+  Object.keys(extra).forEach(key => {
+    const value = String(extra[key] === undefined || extra[key] === null ? '' : extra[key]).trim();
+    if (!value) return;
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  });
   if (!parts.length) return base;
   return `${base}${base.indexOf('?') === -1 ? '?' : '&'}${parts.join('&')}`;
 }
@@ -343,6 +347,12 @@ function checkInPageUrl(options) {
 function doorRouteUrlMode_(requested) {
   const asked = String(requested || '').trim();
   if (!asked) return '';
+  // THE PUBLIC PAGES FIRST, because their table is the one that moved: a link
+  // built for 'public' or 'regular' has to carry the spelling 91 answers to,
+  // and asking DOOR_ROUTES for a page it no longer declares would hand the
+  // caller's own word back and print a URL that opens the door app.
+  const publicMode = publicEmbedUrlMode(asked);
+  if (publicMode) return publicMode;
   const wanted = asked.toLowerCase();
   for (let i = 0; i < DOOR_ROUTES.length; i++) {
     const route = DOOR_ROUTES[i];
@@ -494,19 +504,34 @@ function normalizeCheckInWebAppUrl(value) {
  */
 function setCheckInWebAppUrl(url) {
   const judged = normalizeCheckInWebAppUrl(url);
-  if (!judged.ok) return { ok: false, savedUrl: readSavedCheckInWebAppUrl(), message: `⚠️ ${judged.message}` };
+  if (!judged.ok) {
+    return {
+      ok: false, savedUrl: readSavedCheckInWebAppUrl(),
+      embedSnippet: publicCalendarEmbedSnippet({}),
+      message: `⚠️ ${judged.message}`
+    };
+  }
   const props = PropertiesService.getScriptProperties();
   if (!judged.url) {
     props.deleteProperty(CHECK_IN_WEB_APP_URL_PROP_KEY);
     return {
       ok: true,
       savedUrl: '',
+      // REBUILT AFTER THE WRITE, NEVER BEFORE IT. The website snippet carries
+      // the address inside it, so the one the dialog draws next has to be the
+      // one this call just settled on — a snippet built from the old address
+      // is a calendar pointing at a deployment nobody meant to publish.
+      embedSnippet: publicCalendarEmbedSnippet({}),
       message: 'Cleared. The links now use whatever address the script reports, which is not ' +
         'always the published one.'
     };
   }
   props.setProperty(CHECK_IN_WEB_APP_URL_PROP_KEY, judged.url);
-  return { ok: true, savedUrl: judged.url, message: `Saved. Every link below is now built from ${judged.url}` };
+  return {
+    ok: true, savedUrl: judged.url,
+    embedSnippet: publicCalendarEmbedSnippet({}),
+    message: `Saved. Every link below is now built from ${judged.url}`
+  };
 }
 
 /**

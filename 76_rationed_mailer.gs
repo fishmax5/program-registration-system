@@ -66,6 +66,11 @@
 //
 // ---------------------------------------------------------- THE OFFICE COPY
 //
+// HISTORY, AND STILL THE RULE. No caller copies the office on a member's
+// message any more — the office reads one line per send in its 10am digest
+// (88_office_daily_digest.gs) — but if one ever does again, this is how, and
+// the reason below is why it is not a BCC.
+//
 // A BCC gives the office the message but not a way to talk about it. Reply-all
 // on a BCC'd copy goes to the MEMBER — so the one thing the desk actually
 // wants to do with a reminder about somebody's appointment ("did anyone call
@@ -235,20 +240,23 @@ function normalizeBccList(bcc) {
  *   subject      }
  *   body         } plain text — see buildRegistrantReminderBody() for why.
  *   reserve      the floor this caller will not dig the day's quota below.
- *   bcc          who in the office is copied on this one: an array of
- *                addresses, a comma-separated string, or nothing at all for a
- *                message to `to` alone. The CALLER resolves it, because which
- *                addresses those are is a policy question its own category on
- *                Config answers — adminEmailsForCategory('leaderRosterAlerts')
- *                for section 9d, ('registrantReminders') for 9e — and an empty
- *                list means copy nobody, exactly as a blank cell used to.
- *                BCC and not CC, because these messages tell one person about
- *                their own registration and a visible office address on them
- *                invites a reply-all thread nobody at the desk wants.
- *   officeCopy   true to send the office its copy as a SEPARATE forwarded
- *                message rather than as a BCC line on this one. Same
- *                addresses, same cost, different envelope — see THE OFFICE
- *                COPY above for which passes want it and why.
+ *   bcc          who else is copied on this one: an array of addresses, a
+ *                comma-separated string, or nothing at all for a message to
+ *                `to` alone. The CALLER resolves it, and NO CALLER PASSES ONE
+ *                any more: the office is told about these sends in its daily
+ *                digest instead (88), which is why a reminder now costs one
+ *                message against the quota rather than one plus the size of
+ *                the office table. Kept because "copy somebody on this" is a
+ *                property of a message rather than of the passes that happen
+ *                to exist today. BCC and not CC, because these messages tell
+ *                one person about their own registration and a visible second
+ *                address invites a reply-all thread nobody wants.
+ *   officeCopy   true to send `bcc` its copy as a SEPARATE forwarded message
+ *                rather than as a BCC line on this one. Same addresses, same
+ *                cost, different envelope — see THE OFFICE COPY above. Unused
+ *                while nothing passes a `bcc`, and kept for the same reason:
+ *                it is the correct shape for a copy, and rediscovering it is
+ *                more expensive than keeping it.
  *   alreadySent  optional () => boolean: the caller's ledger, consulted before
  *                the send. A caller may well have checked it already; this is
  *                the check that is guaranteed to have run.

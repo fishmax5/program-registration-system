@@ -94,7 +94,7 @@ function fakeEvent(title, description, start, hours) {
  * A date in a month RELATIVE TO TODAY, which every fixture below is built from.
  *
  * They used to be hard-coded in September 2026, and an appointment program's
- * form now carries a ROLLING three-month window (see 88) — so a fixture pinned
+ * form now carries a ROLLING three-month window (see 94) — so a fixture pinned
  * to a month would fall out of that window the moment the month went past and
  * take its group with it. The same reason tests/appointment_review.test.js
  * builds its month this way.
@@ -175,7 +175,7 @@ function findGroup(groups, title) {
   // whole program.
   //
   // AN APPOINTMENT PROGRAM IS NOW THE ONE THING THAT IS NOT GROUPED PER MONTH
-  // (see 88): the flags are unified across its month groups exactly as below,
+  // (see 94): the flags are unified across its month groups exactly as below,
   // and then those groups are folded into ONE, because a member booking a chair
   // with Heather is not booking a month. The unification is still what makes
   // the fold possible — only the tagged month knows the tag — so the two facts
@@ -348,7 +348,7 @@ function findGroup(groups, title) {
   check('the log names the program, not the calendar ID', line.indexOf('@group.calendar') === -1, true);
   check('it names the program', line.indexOf('"Low-Cost Wills"') >= 0, true);
   // An appointment program has no month — it is one rolling form, three months
-  // wide (see 88) — so the span it names is that window, built from today the
+  // wide (see 94) — so the span it names is that window, built from today the
   // same way the code does rather than pinned to a month that will go past.
   check('it names the place and the span',
     line.indexOf(`Narberth · ${sandbox.describeAssistanceFormWindow()}`) >= 0, true);

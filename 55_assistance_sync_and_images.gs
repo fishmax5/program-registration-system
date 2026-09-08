@@ -767,13 +767,20 @@ function recordAssistanceRequests(requests) {
 }
 
 /**
- * The one email per sync about the requests just filed, to the addresses
- * ticked for 'appointmentRequests'.
+ * The requests just filed, written into the office's daily digest under a
+ * section of their own.
  *
- * Everything needed to make the call is in the body — name, number, email, the
+ * Everything needed to make the call goes in it — name, number, email, the
  * program and location they asked about, and what they typed — because the
  * alternative is opening the workbook to find out whether this is worth
- * opening the workbook for. Nobody ticked means nothing sent.
+ * opening the workbook for.
+ *
+ * It was its own email per sync, to whoever was ticked for
+ * 'appointmentRequests'. It is a section in the 10am digest now (see
+ * 88_office_daily_digest.gs), which keeps the one thing that tick was for —
+ * these are not fault reports, they are people waiting for a phone call — and
+ * drops the thing it cost, which was an email per sync on the morning three of
+ * them came in at once. Nothing filed still means nothing written.
  */
 function sendAssistanceRequestNotification(rows, map) {
   if (!rows || rows.length === 0) return false;

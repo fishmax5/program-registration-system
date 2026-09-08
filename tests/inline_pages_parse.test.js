@@ -99,7 +99,41 @@ const pages = [
   // The other page a stranger sees, and the one whose whole promise is that
   // it draws before anything is requested — a dead script block there is a
   // blank page on a printed link.
-  ['the public calendar page', () => sandbox.buildPublicCalendarHtml({
+  ['the public calendar page', () => sandbox.buildPublicCalendarHtml(publicSnapshot())],
+  // AND THE SAME PAGE EMBEDDED, which is a different string: the embed skin is
+  // written server-side (see the banner in 87) and so is a second style block
+  // and a second branch of markup. A page that only ever compiled unframed is
+  // a page that goes blank inside somebody's website and nowhere else.
+  ['the public calendar page, embedded', () => sandbox.buildPublicCalendarHtml(
+    publicSnapshot(),
+    sandbox.publicCalendarViewOptions({ embed: '1', building: 'Narberth', view: 'week' }))],
+  // The other public page, on the same terms: it is drawn from an inlined
+  // fold, and a dead script block in it is a blank block on the website.
+  ['the regular programs page', () => sandbox.buildPublicRegularHtml({
+    ok: true, generatedAt: 'Oct 1, 9:00 AM', todayKey: '2026-10-01',
+    horizonKey: '2026-11-30', locations: ['Narberth'],
+    programs: [{
+      key: "women's </script> group|narberth", title: "Women's </script> Group",
+      location: 'Narberth', weekday: 'Thursday', time: '9:30 AM', sortTime: '0930',
+      sessions: [{
+      id: '2026-10-01|EV1', dateKey: '2026-10-01', weekday: 'Thu',
+      dayLabel: 'Thursday, October 1', shortLabel: 'Thu Oct 1',
+      monthLabel: 'October 2026', title: "Women's </script> Group",
+      programKey: "women's </script> group|narberth", location: 'Narberth',
+      time: '9:30 AM', sortTime: '0930', lunch: false, club: false, appointment: false,
+      url: 'https://docs.google.com/forms/d/e/X/viewform', state: 'open',
+      seats: 'Seats available'
+    }]
+    }]
+  }, {})],
+  ['the cancel page', () => sandbox.buildCancelPageHtml({
+    formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
+  })]
+];
+
+/** One session, with every hazard this file exists for in its title. */
+function publicSnapshot() {
+  return {
     ok: true, generatedAt: 'Oct 1, 9:00 AM', todayKey: '2026-10-01',
     horizonKey: '2026-11-30', locations: ['Narberth'],
     sessions: [{
@@ -110,11 +144,8 @@ const pages = [
       url: 'https://docs.google.com/forms/d/e/X/viewform', state: 'open',
       seats: 'Seats available'
     }]
-  })],
-  ['the cancel page', () => sandbox.buildCancelPageHtml({
-    formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
-  })]
-];
+  };
+}
 
 pages.forEach(([name, build]) => {
   let html = '';

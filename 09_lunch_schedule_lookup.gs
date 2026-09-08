@@ -300,7 +300,7 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
     .map(row => String((map['Type_Tag'] === undefined ? '' : row[map['Type_Tag']]) || '').trim())
     .filter(Boolean));
   // WINDOWED ON THE WAY OUT for an appointment form, and nowhere else in here:
-  // windowAssistanceContextSessions() (88) trims `sessions` to the three months
+  // windowAssistanceContextSessions() (94) trims `sessions` to the three months
   // that form offers, leaving every label-shaping field above derived from the
   // whole row set. The reason it is the last thing that happens is spelled out
   // there.

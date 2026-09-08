@@ -728,7 +728,7 @@ function describeImportSummary(summary) {
  *
  * `options` is passed on to buildEventGroups() and says how far out the groups
  * it builds may reach. A caller reading a window somebody TYPED passes its own
- * end; omitted, it means the sync's horizon. See trimGroupsToFormWindows() (88).
+ * end; omitted, it means the sync's horizon. See trimGroupsToFormWindows() (94).
  */
 function buildGroupsForWindow(eventsByCalendar, options) {
   const parsedSessions = [];
@@ -828,7 +828,7 @@ function collectCalendarWork(groups, existingState, renamedGroupKeys) {
     // nothing NEW either — every one of its dates is already on the sheet — and
     // its upcoming rows are spread across the forms those months each had. It
     // is processed so processCalendarGroup() can bring them onto the one form
-    // this program now books through (see 88).
+    // this program now books through (see 94).
     const needsAssistanceAdoption = existingState.splitAssistancePrograms &&
       existingState.splitAssistancePrograms.has(group.groupKey);
 

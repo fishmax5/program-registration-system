@@ -339,24 +339,22 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
 
       // The quota, the send itself, the refused-address rule and "record it
       // only once it is away" are section 9f's. What is decided here is who is
-      // due a message, who in the office is copied (Config's
-      // Registrant_Reminders tick, and nobody by default), what it says, and
-      // how much of a scarce quota this pass may spend (`reserve`).
+      // due a message, what it says, and how much of a scarce quota this pass
+      // may spend (`reserve`).
       //
-      // officeCopy: the office gets its OWN message rather than a BCC line on
-      // the member's. Same addresses, same cost — but reply-all on it reaches
-      // the desk instead of the member, which is what makes the copy a thread
-      // the office can talk on. See THE OFFICE COPY in section 9f.
+      // THE OFFICE IS NO LONGER ON THE MESSAGE — neither BCC'd nor sent its
+      // own copy. A day of reminders was a day of office mail apiece; it is
+      // one line each in the 10am digest now (see 88_office_daily_digest.gs),
+      // spooled below once the member's copy is actually away. That also makes
+      // a send cost ONE message against the daily quota rather than one plus
+      // the size of the office table, which is why this pass now gets further
+      // through a backlog on the same hundred.
       const outcome = sendRationedEmail({
         to: email,
         subject: buildRegistrantReminderSubject(item.session, offset),
         body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
           item.daysAway),
         reserve: REMINDER_QUOTA_RESERVE,
-        bcc: adminEmailsForCategory('registrantReminders'),
-        officeCopy: true,
-        describeRecipient: `Reminder sent to ${name ? `${name} <${email}>` : email} about ` +
-          `"${item.session.title}" on ${formatDateLabel(item.session.date)}`,
         alreadySent,
         recordSent: () => {
           sentFor[stamp] = true;
@@ -366,7 +364,14 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
       });
 
       if (outcome.status === 'sent' || outcome.status === 'duplicate') {
-        if (outcome.status === 'sent') result.sent++;
+        if (outcome.status === 'sent') {
+          result.sent++;
+          // One line for tomorrow morning's digest, in place of the copy the
+          // office used to be sent of every one of these.
+          spoolOfficeNote('Reminders sent to registrants',
+            `${name ? `${name} <${email}>` : email} — "${item.session.title}" on ` +
+            `${formatDateLabel(item.session.date)}${describeReminderOffset(offset)}`);
+        }
         return;
       }
       if (outcome.status === 'held') {
@@ -430,6 +435,18 @@ function pruneRegistrantReminderLedger(liveEventIds, todayKey) {
     delete ledger[eventId];
     __reminderLedgerDirty = true;
   });
+}
+
+/**
+ * Which of a program's reminders this was, in the few words the office digest
+ * has room for: " (booking confirmation)", " (the day before)", " (7 days
+ * before)". Not the subject line — that is written to the member.
+ */
+function describeReminderOffset(offset) {
+  if (offset === REMINDER_CONFIRMATION_OFFSET) return ' (booking confirmation)';
+  if (offset === 0) return ' (the morning of)';
+  if (offset === 1) return ' (the day before)';
+  return ` (${offset} days before)`;
 }
 
 /** "Your appointment on Tue, Mar 3, 2026" / "Reminder: Chair Yoga tomorrow". */

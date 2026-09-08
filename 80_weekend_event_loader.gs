@@ -152,7 +152,7 @@ function loadWeekendEvents(eventIds, startKey, endKey) {
     const existingState = getExistingRegistryState(registrySheet);
     // THE WINDOW SOMEBODY TYPED IS THE WINDOW. The date boxes on this dialog
     // reach further than the sync's own horizon on purpose, and a group built
-    // here must not be trimmed back to it — see trimGroupsToFormWindows() (88).
+    // here must not be trimmed back to it — see trimGroupsToFormWindows() (94).
     const groups = buildGroupsForWindow(getCalendarEventsForWindow(start, end),
       { ordinaryEnd: end, assistanceEnd: end });
 

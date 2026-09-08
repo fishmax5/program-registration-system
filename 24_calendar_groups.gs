@@ -72,7 +72,7 @@ function processCalendarGroup(registrySheet, item, existingState) {
 
   // BEFORE the descriptions are rewritten, and only for an appointment
   // program: the months this program used to take a separate form for are
-  // brought onto this one (see 88). It has to happen first — the link this
+  // brought onto this one (see 94). It has to happen first — the link this
   // writes onto every one of the group's events is the adopted form's, and a
   // row still naming last month's form under it is exactly the drift
   // repairDashboardLinks() exists to find.
@@ -178,7 +178,7 @@ function handleUnreachableGroupForm(registrySheet, group, newSessions, existingS
  *          [All Locations] — the WHERE half of grouping.
  *   span   'FIXED' for a [Grouped] series, ASSISTANCE_FORM_SPAN for a
  *          [Personalized Assistance] program (every month of it on one rolling
- *          form — see 88), else the month label — the WHEN half. ('FIXED' is
+ *          form — see 94), else the month label — the WHEN half. ('FIXED' is
  *          deliberately not renamed alongside the Type_Tag vocabulary; it is a
  *          persisted internal key, see getExistingRegistryState().)
  *
@@ -190,7 +190,7 @@ function handleUnreachableGroupForm(registrySheet, group, newSessions, existingS
  * from, so nothing downstream has to assume a group is single-location) and
  * `events`, the same list flattened, for the calendar-facing helpers.
  *
- * `options` is handed straight to trimGroupsToFormWindows() (88) and says how
+ * `options` is handed straight to trimGroupsToFormWindows() (94) and says how
  * far out a group's form may reach. Omitted — which is every caller but the
  * weekend loader — it means the sync's own horizon.
  */
@@ -540,7 +540,7 @@ function getExistingRegistryState(registrySheet) {
  *
  * Every workbook that has been running appointment programs has exactly this:
  * one form per month, each named by that month's rows. One of them is about to
- * become the program's only form (see adoptAssistanceProgramSessions() in 88),
+ * become the program's only form (see adoptAssistanceProgramSessions() in 94),
  * and which one is not arbitrary — it is the form whose link is in circulation
  * right now, which is the one the program's NEXT session is on. Adopting that
  * one means the link most recently handed out, printed, and emailed goes on

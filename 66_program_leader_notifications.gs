@@ -506,23 +506,34 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     }
 
     // The quota, the send itself and the refused-address rule are section
-    // 9f's — this pass decides only WHO is written to, who in the office is
-    // copied (Config's Leader_Roster_Alerts tick, and nobody by default), what
-    // the message says, and how much of a scarce quota it may spend
-    // (`reserve`).
+    // 9f's — this pass decides only WHO is written to, what the message says,
+    // and how much of a scarce quota it may spend (`reserve`).
+    //
+    // NO OFFICE BCC any more: a busy afternoon put a copy of every leader's
+    // alert in the office inbox, and the office now reads one line per alert
+    // in the 10am digest instead (see 88_office_daily_digest.gs), spooled
+    // below once the leader's copy is away. A send costs one message rather
+    // than one plus the office table, which is the whole of why this pass's
+    // reserve buys more alerts than it used to.
     const outcome = sendRationedEmail({
       to: leader.email,
       subject: buildLeaderAlertSubject(programs),
       body: buildLeaderAlertBody(leader, programs),
-      reserve: LEADER_ALERT_QUOTA_RESERVE,
-      bcc: adminEmailsForCategory('leaderRosterAlerts')
+      reserve: LEADER_ALERT_QUOTA_RESERVE
     });
 
     if (outcome.status === 'sent') {
       sent++;
       programs.forEach(program => { told[program.key] = true; });
+      const changeCount = programs.reduce((sum, p) => sum + p.changes.length, 0);
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
-        `${programs.reduce((sum, p) => sum + p.changes.length, 0)} change(s).`);
+        `${changeCount} change(s).`);
+      // One line for tomorrow morning, in place of the copy the office used to
+      // be BCC'd on. The programs are named because "which class?" is the first
+      // thing anybody reading it asks.
+      spoolOfficeNote('Roster change alerts sent to leaders',
+        `${leader.email} — ${changeCount} change(s) across ` +
+        `${programs.map(p => p.title).join(', ')}`);
       return;
     }
 
@@ -913,6 +924,9 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
       sent++;
       recordDigest();
       log(`Roster digest sent to ${leader.email} — ${sessions.length} upcoming session(s).`);
+      spoolOfficeNote('Roster digests sent to leaders',
+        `${leader.email} — ${sessions.length} upcoming session(s): ` +
+        `${sessions.map(x => `${x.title} ${formatDateLabel(x.date)}`).join('; ')}`);
       return;
     }
 
