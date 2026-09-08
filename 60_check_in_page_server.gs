@@ -140,7 +140,7 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
  *
- * THE PUBLIC PAGES ARE NOT IN THIS TABLE. They live in 88_public_embeds.gs,
+ * THE PUBLIC PAGES ARE NOT IN THIS TABLE. They live in 91_public_embeds.gs,
  * which doGet() asks before it walks this one — they are the only pages here
  * that another website may frame, and that is a property of the response
  * rather than of the page. Everything declared below writes to the workbook.
@@ -243,7 +243,7 @@ function doGet(e) {
   };
 
   // THE PUBLIC EMBEDS ARE ASKED ABOUT FIRST, and they are served by their own
-  // file (88_public_embeds.gs) rather than by a row in DOOR_ROUTES. Not tidying:
+  // file (91_public_embeds.gs) rather than by a row in DOOR_ROUTES. Not tidying:
   // they are the only pages here that may be FRAMED by another website, which
   // is a property of the RESPONSE, and the table below can only describe a
   // page's body. Asking first also means a spelling the public router claims

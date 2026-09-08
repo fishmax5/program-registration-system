@@ -28,7 +28,7 @@
 // IT IS DRAWN TO SIT INSIDE SOMEBODY ELSE'S PAGE. This is embedded in a
 // colored block on the organization's website, so the page has no background
 // of its own and every surface that has to be readable paints itself — the
-// shared stylesheet is publicEmbedStyles() in 88_public_embeds.gs, which both
+// shared stylesheet is publicEmbedStyles() in 91_public_embeds.gs, which both
 // public pages use so the two cannot drift into nearly matching. The control
 // bar is a white card rather than a bare line for exactly that reason: on the
 // website's green block, transparent controls on a transparent page were a row
