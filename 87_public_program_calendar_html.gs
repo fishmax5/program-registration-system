@@ -1,5 +1,5 @@
 // ============================================================================
-// 17a. THE PUBLIC CALENDAR'S PAGE  (one card per program, and one tap to a form)
+// 17a. THE PUBLIC CALENDAR'S PAGE  (one tile per program, and one tap to a form)
 // ============================================================================
 //
 // One served page, no navigations, no spinners on the path a person actually
@@ -7,31 +7,49 @@
 // about what a stranger may see; what is here is the promise the page makes
 // about how it feels:
 //
-//   1. IT READS BY PROGRAM, NOT BY DATE. This page was a diary: one card per
-//      SESSION under a heading per day, which for a weekly class was the same
-//      four words repeated eight times down a phone screen, and for lunch was
-//      a card a day for two months. A person deciding whether to come to chair
-//      yoga is not asking what is on next Thursday, they are asking what chair
-//      yoga is and when it runs — so a program is ONE card carrying its dates,
-//      and the dates are what they tap. `programKey` on each session is what
-//      the grouping is done on; the server decides it (title + building), so
-//      a `[Shared]` program running in two buildings stays two cards.
-//   2. THE FIRST FRAME IS THE ANSWER. The whole window — today to the end of
+//   1. IT SAYS WHOSE CALENDAR THIS IS BEFORE IT SAYS WHAT IS ON. Every other
+//      page here opens straight onto a list, because everybody holding one
+//      already knows. This link is printed on a flyer and forwarded by a
+//      neighbour, so it opens with the centre's name, a sentence, the phone
+//      number and the two buildings with their addresses — all of it out of
+//      the snapshot (PUBLIC_CALENDAR_INTRO and the CENTER_* constants in
+//      `04`), never typed into this markup, so a changed phone number cannot
+//      be right on a form and wrong here.
+//   2. IT READS BY PROGRAM, NOT BY DATE, AS A GRID. This page was a diary:
+//      one card per SESSION under a heading per day, which for a weekly class
+//      was the same four words repeated eight times down a phone screen and
+//      for lunch was a card a day for two months. A program is now ONE TILE
+//      carrying its dates, two tiles to a row on anything wider than a phone,
+//      so what is on fits on a screen instead of a scroll. `programKey` on
+//      each session is what the grouping is done on; the server decides it
+//      (title + building), so a `[Shared]` program running in two buildings
+//      stays two tiles.
+//   3. LUNCH IS PINNED, AND FULL WIDTH. It runs nearly every weekday at both
+//      buildings, it is what the largest number of people are looking for,
+//      and in date order it would sit wherever tomorrow happens to fall.
+//   4. THE WHOLE TILE IS THE BUTTON. Not a link tucked in a corner: the
+//      rectangle opens the next date somebody can actually get into, and the
+//      date chips inside it are still their own links for the months the
+//      program's form changes over. That is why the tile is a role="button"
+//      div and not an <a> — an anchor inside an anchor is not a thing a
+//      browser will honour.
+//   5. "WAITING LIST" IS SAID ABOUT A PROGRAM ONLY WHEN EVERY DATE IN VIEW IS
+//      FULL. A class with four open weeks and one full one is a class you can
+//      come to; labelling the whole tile "waiting list" because its NEXT date
+//      is full sends that person away from something they could have had. The
+//      full dates are coloured instead, and the tile says which colour means
+//      what when it is carrying both.
+//   6. THE FIRST FRAME IS THE ANSWER. The whole window — today to the end of
 //      next month — is inlined into the page, so the calendar is drawn before
-//      the browser has made a single request of its own. There is no loading
-//      state on open because there is nothing to load.
-//   3. EVERY FILTER IS ARITHMETIC, NEVER A ROUND TRIP. Week, month, building,
+//      the browser has made a single request of its own.
+//   7. EVERY FILTER IS ARITHMETIC, NEVER A ROUND TRIP. Week, month, building,
 //      search: each one re-runs against the array already in memory and
 //      redraws in the same frame as the tap. This is the whole reason the
 //      window travels at once (see the banner in 86). `?span=week` and
 //      `?span=month` only decide which of those filters is already pressed
 //      when the page opens — which is what makes a weekly link and a monthly
 //      link two printable addresses rather than two pages to maintain.
-//   4. A TAP ON A DATE IS ANSWERED BEFORE THE FORM LOADS. The chip marks
-//      itself as opening immediately and the form opens in its own tab; the
-//      page a person came from is still behind it, still filtered the way
-//      they left it, because nothing about opening a form navigated away.
-//   5. THE REFRESH IS QUIET AND IT IS BEHIND THEM. A background read runs
+//   8. THE REFRESH IS QUIET AND IT IS BEHIND THEM. A background read runs
 //      once after the first paint and replaces the inlined snapshot if it has
 //      moved — but never while a filter is being tapped, and never as a
 //      flash of empty. A page that redraws under a thumb is how somebody taps
@@ -40,7 +58,7 @@
 // EVERYTHING FROM THE WORKBOOK IS WRITTEN WITH textContent. Program titles are
 // typed by staff into a calendar and they contain apostrophes, ampersands and
 // — this has happened — angle brackets. This page uses no innerHTML with data
-// in it at all: cards are built out of createElement, and the one place data
+// in it at all: tiles are built out of createElement, and the one place data
 // crosses into script is the double-JSON.stringify below. See
 // tests/public_calendar.test.js, which is what holds that line.
 // ============================================================================
@@ -85,13 +103,22 @@ function buildPublicCalendarHtml(snapshot, options) {
   body { margin: 0; background: var(--page); color: var(--ink);
          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
          font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 64px 16px; }
+  /* Wide enough for two tiles a row, and no wider: a third column would put
+     the far edge of the page outside a comfortable reading width. */
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 64px 16px; }
 
-  header { padding: 26px 0 14px 0; }
-  header h1 { margin: 0; font-size: 27px; letter-spacing: -.02em; font-weight: 700; }
-  header p { margin: 6px 0 0 0; color: var(--muted); font-size: 15px; }
+  /* WHO THIS IS. Sized like a masthead rather than a page title, because for
+     somebody who followed a forwarded link it is the first question. */
+  header { padding: 30px 0 16px 0; }
+  header .eyebrow { margin: 0 0 4px 0; color: var(--brand); font-size: 13px;
+                    font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  header h1 { margin: 0; font-size: 30px; letter-spacing: -.022em; font-weight: 700; }
+  header p.blurb { margin: 8px 0 0 0; color: var(--ink); font-size: 16px; max-width: 62ch; }
+  header p.lines { margin: 10px 0 0 0; color: var(--muted); font-size: 14px; }
+  header p.lines a { color: var(--brand); text-decoration: none; font-weight: 650; }
+  header p.places { margin: 4px 0 0 0; color: var(--muted); font-size: 13px; }
 
-  /* THE CONTROLS STICK. Somebody four programs down the page who wants "this
+  /* THE CONTROLS STICK. Somebody four rows down the page who wants "this
      week" instead should not have to scroll back up to say so. */
   .controls { position: sticky; top: 0; z-index: 4; background: var(--page);
               padding: 10px 0 12px 0; border-bottom: 1px solid var(--line); }
@@ -110,16 +137,32 @@ function buildPublicCalendarHtml(snapshot, options) {
   .count button { border: 0; background: transparent; color: var(--brand); font: inherit;
                   font-size: 13px; cursor: pointer; padding: 2px 0; }
 
-  /* ONE PROGRAM, ONE CARD. The title is the first thing on it and it is on a
-     line of its own — the old layout put a fixed-width time column beside it,
-     which on a phone squeezed every title into three or four words a line. */
+  /* TWO TILES A ROW, one on a phone — and anything that is not a tile (the
+     lunch pin, an empty state, a failed read) spans the whole width. */
+  /* Stretched, not top-aligned: two tiles side by side with different
+     numbers of dates on them read as a ragged edge otherwise. */
+  #list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px; margin-top: 16px; }
+  #list > .full { grid-column: 1 / -1; }
+  @media (max-width: 640px) { #list { grid-template-columns: 1fr; } }
+
+  /* ONE PROGRAM, ONE TILE, AND THE WHOLE TILE IS THE BUTTON. */
   .prog { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-          padding: 13px 15px 11px 15px; margin-bottom: 10px; box-shadow: var(--shadow); }
+          padding: 13px 15px 12px 15px; box-shadow: var(--shadow); cursor: pointer;
+          transition: transform .08s ease, border-color .12s ease, box-shadow .12s ease; }
+  .prog:hover { border-color: var(--brand); }
+  .prog:active { transform: scale(.992); }
+  .prog:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .prog.flat { cursor: default; }
+  .prog.flat:hover { border-color: var(--line); }
+  .prog.flat:active { transform: none; }
+  .prog.opening { opacity: .6; }
   .prog .head { display: flex; gap: 10px; align-items: baseline; }
   .prog .name { font-size: 17px; font-weight: 650; letter-spacing: -.01em; flex: 1; min-width: 0; }
   .prog .cta { flex: 0 0 auto; font-size: 14px; font-weight: 650; color: var(--brand);
-               text-decoration: none; white-space: nowrap; }
+               white-space: nowrap; }
   .prog .cta.quiet { color: var(--muted); font-weight: 600; }
+  .prog .cta.warn { color: var(--warn); }
   .prog .when { color: var(--muted); font-size: 14px; margin-top: 3px; }
   .prog .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
   .tag { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
@@ -128,21 +171,26 @@ function buildPublicCalendarHtml(snapshot, options) {
   .tag.open { background: var(--open-bg); color: var(--open); }
   .tag.warn { background: var(--warn-bg); color: var(--warn); }
 
-  /* THE DATES ARE THE TAP TARGETS. Each one carries its own session's form,
-     which for a Regular program is a different form each month — the whole
-     reason a printed link goes stale and this page does not. */
+  /* THE DATES ARE TAP TARGETS OF THEIR OWN. Each carries its own session's
+     form, which for a Regular program is a different form each month — the
+     whole reason a printed link goes stale and this page does not. */
   .dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .chip { font-size: 13px; font-weight: 600; padding: 7px 11px; border-radius: 10px;
           border: 1px solid var(--line); background: var(--page); color: var(--ink);
-          text-decoration: none; font-variant-numeric: tabular-nums;
+          text-decoration: none; font-variant-numeric: tabular-nums; display: inline-block;
           transition: transform .08s ease, border-color .12s ease; }
   a.chip:hover { border-color: var(--brand); }
   a.chip:active { transform: scale(.97); }
   .chip.today { border-color: var(--brand); color: var(--brand); }
-  .chip.warn { color: var(--warn); }
+  /* A FULL DATE IS AMBER, NOT ABSENT. It is still a date somebody may want —
+     the form behind it is the waiting list — so it is coloured rather than
+     hidden, and the tile says what the colour means when it has both. */
+  .chip.full { background: var(--warn-bg); border-color: var(--warn-bg); color: var(--warn); }
   .chip.quiet { color: var(--muted); }
   .chip.opening { opacity: .55; }
   .chip.more { border-style: dashed; color: var(--muted); cursor: pointer; font-family: inherit; }
+  .legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .legend b { color: var(--warn); font-weight: 700; }
 
   .empty { text-align: center; color: var(--muted); padding: 54px 20px; }
   .empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
@@ -154,8 +202,11 @@ function buildPublicCalendarHtml(snapshot, options) {
 
 <div class="wrap">
   <header>
-    <h1>Programs &amp; Sign-Ups</h1>
-    <p id="lede">Everything coming up. Tap a date to open that session's sign-up form.</p>
+    <p class="eyebrow">Programs &amp; sign-ups</p>
+    <h1 id="orgName">Programs &amp; Sign-Ups</h1>
+    <p class="blurb" id="blurb">Everything coming up. Tap a program to open its sign-up form.</p>
+    <p class="lines" id="contact"></p>
+    <p class="places" id="places"></p>
   </header>
 
   <div class="controls">
@@ -185,9 +236,9 @@ function buildPublicCalendarHtml(snapshot, options) {
   var SESSIONS = (DATA && DATA.sessions) || [];
   var SPAN = ${span};
   var STORE_KEY = 'publicCalendarPrefs.v1';
-  // How many dates a card shows before it offers the rest. Six is two rows on
-  // a phone: enough to see the rhythm of a weekly class, short of the wall of
-  // chips a daily one would otherwise be.
+  // How many dates a tile shows before it offers the rest. Six is two rows in
+  // a half-width tile: enough to see the rhythm of a weekly class, short of
+  // the wall of chips a daily one would otherwise be.
   var CHIP_LIMIT = 6;
 
   // The filter, and the whole of the page's state. Restored from this
@@ -263,8 +314,13 @@ function buildPublicCalendarHtml(snapshot, options) {
 
   /**
    * THE GROUPING — sessions in date order, folded into programs in the order
-   * their NEXT session falls. That ordering is free: the array is already
-   * sorted by date, so the first time a program is seen is its next date.
+   * their NEXT session falls, with LUNCH PINNED AHEAD OF ALL OF IT.
+   *
+   * The date ordering is free: the array is already sorted by date, so the
+   * first time a program is seen is its next date. The pin is not about
+   * dates at all — lunch runs nearly every weekday at both buildings and is
+   * what the largest number of people come to this page for, and in date
+   * order it lands wherever tomorrow happens to fall.
    */
   function programsFrom(rows) {
     var order = [], byKey = {};
@@ -284,7 +340,9 @@ function buildPublicCalendarHtml(snapshot, options) {
       group.club = group.club || !!s.club;
       group.appointment = group.appointment || !!s.appointment;
     }
-    return order;
+    var lunch = [], rest = [];
+    order.forEach(function (g) { (g.lunch ? lunch : rest).push(g); });
+    return lunch.concat(rest);
   }
 
   // --------------------------------------------------------------------
@@ -314,7 +372,7 @@ function buildPublicCalendarHtml(snapshot, options) {
   }
 
   /**
-   * WHEN A PROGRAM RUNS, in one line — the sentence a card is worth reading
+   * WHEN A PROGRAM RUNS, in one line — the sentence a tile is worth reading
    * for. A single date says the date; a rhythm says the rhythm ("Tuesdays &
    * Thursdays"); anything less regular than that says how many dates there
    * are, because naming five weekdays is not a rhythm, it is a list.
@@ -335,47 +393,63 @@ function buildPublicCalendarHtml(snapshot, options) {
     return when ? head + ' · ' + when : head;
   }
 
-  /** The next session somebody can actually do something with, else the next one. */
-  function leadSession(group) {
-    for (var i = 0; i < group.sessions.length; i++) {
-      if (group.sessions[i].url) return group.sessions[i];
+  /** A date somebody can still take a place on, as opposed to join a queue for. */
+  function isOpenSession(s) { return !!s.url && s.state !== 'waitlist'; }
+
+  /**
+   * WHAT THE TILE SAYS ABOUT SIGNING UP — decided across every date in view,
+   * not off the next one.
+   *
+   * "Waiting list" is the label that costs somebody an afternoon when it is
+   * wrong: a class with four open weeks and one full one is a class they can
+   * come to, and a tile that says otherwise because its NEXT date is full
+   * sends them away from something that was theirs. So the words follow the
+   * FIRST DATE THEY CAN ACTUALLY HAVE, and only a program with no such date
+   * left in view is called a waiting list.
+   */
+  function leadOf(group) {
+    var sessions = group.sessions;
+    for (var i = 0; i < sessions.length; i++) {
+      if (isOpenSession(sessions[i])) return sessions[i];
     }
-    return group.sessions[0];
+    for (var j = 0; j < sessions.length; j++) {
+      if (sessions[j].url) return sessions[j];
+    }
+    return sessions[0];
   }
 
-  function ctaFor(lead) {
-    if (!lead) return null;
-    var words = lead.state === 'none' ? 'No sign-up needed'
-      : lead.state === 'soon' ? 'Sign-up opens soon'
-      : lead.state === 'waitlist' ? 'Join the waiting list'
-      : 'Sign up';
-    if (!lead.url) return el('span', 'cta quiet', words);
-    var link = el('a', 'cta', words);
-    link.href = lead.url;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    return link;
+  function ctaWords(lead, everyDateFull) {
+    if (everyDateFull) return 'Join the waiting list';
+    if (!lead) return '';
+    if (lead.state === 'none') return 'No sign-up needed';
+    if (lead.state === 'soon') return 'Sign-up opens soon';
+    if (lead.state === 'waitlist') return 'Join the waiting list';
+    return 'Sign up';
   }
 
   /**
    * ONE DATE. A link when that session has a form behind it, and a plain chip
    * when it does not — so a date nothing can happen on never invites a tap.
+   * A chip's click never reaches the tile underneath it: the tile opens the
+   * next date somebody can have, and this one is a different answer.
    */
   function chipFor(s) {
     var label = relativeDay(s.dateKey) || s.shortLabel || s.dayLabel;
-    var kind = s.dateKey === todayKey() ? ' today'
-      : (s.state === 'waitlist' ? ' warn' : (s.url ? '' : ' quiet'));
+    var kind = s.state === 'waitlist' ? ' full'
+      : (s.dateKey === todayKey() ? ' today' : (s.url ? '' : ' quiet'));
     if (!s.url) return el('span', 'chip' + kind, label);
     var node = el('a', 'chip' + kind, label);
     node.href = s.url;
     node.target = '_blank';
     node.rel = 'noopener';
-    node.title = s.dayLabel + (s.time ? ', ' + s.time : '');
+    node.title = s.dayLabel + (s.time ? ', ' + s.time : '')
+      + (s.state === 'waitlist' ? ' — full, the form joins the waiting list' : '');
     // OPTIMISTIC, AND HONEST ABOUT IT. The form is somebody else's page on
     // somebody else's network; what this page can answer for is that the tap
     // registered, so it says so in the same frame and lets the new tab take
     // as long as it takes.
-    node.addEventListener('click', function () {
+    node.addEventListener('click', function (event) {
+      event.stopPropagation();
       node.classList.add('opening');
       window.setTimeout(function () { node.classList.remove('opening'); }, 2500);
     });
@@ -383,14 +457,50 @@ function buildPublicCalendarHtml(snapshot, options) {
   }
 
   function cardFor(group) {
-    var card = el('article', 'prog');
+    var sessions = group.sessions;
+    var lead = leadOf(group);
+    var withForm = sessions.filter(function (s) { return !!s.url; });
+    var fullDates = sessions.filter(function (s) { return s.state === 'waitlist'; });
+    // Only a program every one of whose dates is spoken for is a waiting
+    // list. A tile with nothing bookable on it at all (no forms yet, or no
+    // registration taken) is neither — it is answered by the state words.
+    var everyDateFull = withForm.length > 0 && fullDates.length === withForm.length;
+
+    var card = el('div', 'prog' + (group.lunch ? ' full' : ''));
+    var url = lead && lead.url ? lead.url : '';
+    if (url) {
+      // THE WHOLE RECTANGLE IS THE BUTTON — a div rather than an <a> because
+      // the date chips inside it are links of their own, and a browser will
+      // not honour an anchor nested in an anchor. Keyboard and screen readers
+      // are given the same thing the mouse gets, by hand.
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      var open = function () {
+        card.classList.add('opening');
+        window.setTimeout(function () { card.classList.remove('opening'); }, 2500);
+        window.open(url, '_blank', 'noopener');
+      };
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+          event.preventDefault();
+          open();
+        }
+      });
+    } else {
+      card.className += ' flat';
+    }
 
     var head = el('div', 'head');
     head.appendChild(el('div', 'name', group.title));
-    var lead = leadSession(group);
-    var cta = ctaFor(lead);
-    if (cta) head.appendChild(cta);
+    var words = ctaWords(lead, everyDateFull);
+    if (words) {
+      var kind = everyDateFull || (lead && lead.state === 'waitlist') ? 'warn'
+        : (url ? '' : 'quiet');
+      head.appendChild(el('span', 'cta' + (kind ? ' ' + kind : ''), words));
+    }
     card.appendChild(head);
+    card.setAttribute('aria-label', group.title + (words ? ' — ' + words : ''));
 
     card.appendChild(el('div', 'when', scheduleLine(group)));
 
@@ -399,33 +509,70 @@ function buildPublicCalendarHtml(snapshot, options) {
     if (group.club) meta.appendChild(tag('Club'));
     if (group.appointment) meta.appendChild(tag('By appointment'));
     if (group.lunch) meta.appendChild(tag('Lunch'));
-    if (lead && lead.seats) {
+    // The seat sentence belongs to the date the tile would open, not to the
+    // program — "3 seats left" about a date three weeks after the one being
+    // offered is a number about the wrong afternoon.
+    if (everyDateFull) meta.appendChild(tag('Every date full', 'warn'));
+    else if (lead && lead.seats) {
       meta.appendChild(tag(lead.seats, lead.state === 'open' ? 'open' : 'warn'));
     }
     if (meta.childNodes.length) card.appendChild(meta);
 
     // A single date is already the whole of the line above, so a chip
-    // repeating it would be the same fact twice — the CTA is the tap target
-    // there. Everything else gets its dates.
-    if (group.sessions.length > 1) {
+    // repeating it would be the same fact twice — the tile itself is the tap
+    // target there. Everything else gets its dates.
+    if (sessions.length > 1) {
       var dates = el('div', 'dates');
-      var shown = group.sessions.slice(0, CHIP_LIMIT);
+      var shown = sessions.slice(0, CHIP_LIMIT);
       shown.forEach(function (s) { dates.appendChild(chipFor(s)); });
-      var rest = group.sessions.length - shown.length;
+      var rest = sessions.length - shown.length;
       if (rest > 0) {
         var more = el('button', 'chip more', '+' + rest + ' more');
         more.type = 'button';
-        more.addEventListener('click', function () {
+        more.addEventListener('click', function (event) {
+          event.stopPropagation();
           dates.removeChild(more);
-          group.sessions.slice(CHIP_LIMIT).forEach(function (s) {
-            dates.appendChild(chipFor(s));
-          });
+          sessions.slice(CHIP_LIMIT).forEach(function (s) { dates.appendChild(chipFor(s)); });
         });
         dates.appendChild(more);
       }
       card.appendChild(dates);
+      // Said only where it is needed: a tile carrying both kinds of date is
+      // the only place the colour has a question to answer.
+      if (fullDates.length && !everyDateFull) {
+        var legend = el('div', 'legend');
+        legend.appendChild(el('b', '', 'Amber'));
+        legend.appendChild(document.createTextNode(
+          ' dates are full — that form joins the waiting list.'));
+        card.appendChild(legend);
+      }
     }
     return card;
+  }
+
+  function drawIntro() {
+    var intro = (DATA && DATA.intro) || {};
+    if (intro.name) document.getElementById('orgName').textContent = intro.name;
+    if (intro.blurb) document.getElementById('blurb').textContent = intro.blurb;
+
+    var contact = document.getElementById('contact');
+    contact.textContent = '';
+    if (intro.phone) {
+      contact.appendChild(document.createTextNode('Questions, or rather sign up by phone? '));
+      var tel = el('a', '', intro.phone);
+      // Dialled by a thumb on the phone the page is being read on — which is
+      // the whole point of the number being here rather than in a footer.
+      tel.href = 'tel:' + String(intro.phone).replace(/[^0-9+]/g, '');
+      contact.appendChild(tel);
+    }
+    if (intro.email) {
+      contact.appendChild(document.createTextNode(intro.phone ? '  ·  ' : ''));
+      var mail = el('a', '', intro.email);
+      mail.href = 'mailto:' + intro.email;
+      contact.appendChild(mail);
+    }
+    document.getElementById('places').textContent =
+      (intro.places && intro.places.length) ? intro.places.join('   ·   ') : '';
   }
 
   function draw() {
@@ -435,12 +582,12 @@ function buildPublicCalendarHtml(snapshot, options) {
 
     list.textContent = '';
     if (!DATA || DATA.ok === false) {
-      var warn = el('div', 'notice', DATA && DATA.message
+      var warn = el('div', 'notice full', DATA && DATA.message
         ? DATA.message
         : 'We could not read the program calendar just now. Please try again shortly.');
       list.appendChild(warn);
     } else if (!groups.length) {
-      var none = el('div', 'empty');
+      var none = el('div', 'empty full');
       none.appendChild(el('b', '', 'Nothing here yet'));
       none.appendChild(el('div', '', view.q
         ? 'No programs match that search in this date range.'
@@ -521,6 +668,7 @@ function buildPublicCalendarHtml(snapshot, options) {
         }
         DATA = res;
         SESSIONS = res.sessions || [];
+        drawIntro();
         drawLocations();
         draw();
       })
@@ -533,6 +681,7 @@ function buildPublicCalendarHtml(snapshot, options) {
       .publicProgramCalendar(JSON.stringify({ fresh: !!force }));
   }
 
+  drawIntro();
   drawLocations();
   draw();
   window.setTimeout(function () { refresh(false); }, 400);

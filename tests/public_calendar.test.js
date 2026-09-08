@@ -28,8 +28,12 @@
 //      page showing a spreadsheet formula where the time should be is what
 //      this pins against.
 //   8. THE PAGE READS BY PROGRAM. Every session carries the programKey the
-//      cards are grouped on, and a lunch-only row is called Lunch at its
+//      tiles are grouped on, and a lunch-only row is called Lunch at its
 //      building rather than "Lunch Only (no program)".
+//   9. THE PAGE SAYS WHOSE CALENDAR IT IS. The snapshot carries the centre's
+//      name, phone, email and the addresses of the buildings that have
+//      something on — out of the same constants the forms print, so a
+//      changed phone number cannot be right on a form and wrong here.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
@@ -90,7 +94,11 @@ const sandbox = {
   CacheService: { getScriptCache: () => { throw new Error('no cache here'); } }
 };
 vm.createContext(sandbox);
-vm.runInContext(src + ';this.HEADERS = HEADERS;', sandbox, { filename: 'program.gs' });
+// `const`s declared at the top of a vm script are not properties of its
+// global object, so the few this file asserts on are handed out by name.
+vm.runInContext(src + ';this.HEADERS = HEADERS;'
+  + 'this.CENTER_NAME = CENTER_NAME; this.CENTER_PHONE = CENTER_PHONE;'
+  + 'this.CENTER_EMAIL = CENTER_EMAIL;', sandbox, { filename: 'program.gs' });
 
 let fail = 0;
 function ok(name, cond) {
@@ -190,6 +198,16 @@ const byTitle = title => snap.sessions.filter(s => s.title === title)[0];
 // ---------------------------------------------------------------------------
 // 1. What may leave the workbook — the whole field list, pinned.
 // ---------------------------------------------------------------------------
+// The intro is snapshot-level, not session-level: it is the same four facts
+// for everybody and carries nothing about anybody.
+ok('the snapshot introduces the centre by the constants the forms print',
+  snap.intro.name === sandbox.CENTER_NAME && snap.intro.phone === sandbox.CENTER_PHONE
+  && snap.intro.email === sandbox.CENTER_EMAIL && !!snap.intro.blurb);
+ok('and names only the buildings that have something on, with their addresses',
+  snap.intro.places.length === 2
+  && snap.intro.places[0].indexOf('Ashbridge') === 0
+  && snap.intro.places[1].indexOf('100 Conway') !== -1);
+
 const ALLOWED = ['id', 'dateKey', 'weekday', 'dayLabel', 'shortLabel', 'monthLabel', 'title',
   'programKey', 'location', 'time', 'sortTime', 'lunch', 'club', 'appointment', 'url',
   'state', 'seats'];
@@ -287,8 +305,25 @@ ok('a title cannot close the page\'s script block',
   (html.match(/<\/script>/g) || []).length === 1);
 ok('no data is written into the page with innerHTML',
   html.indexOf('innerHTML') === -1);
-ok('the page draws one card per program rather than one per date',
+ok('the page draws one tile per program rather than one per date',
   html.indexOf('programsFrom') !== -1 && html.indexOf('programKey') !== -1);
+ok('the introduction is inlined with the first frame',
+  html.indexOf(sandbox.CENTER_NAME) !== -1 && html.indexOf(sandbox.CENTER_PHONE) !== -1
+  && html.indexOf('Ashbridge House') !== -1);
+ok('the tiles are laid out two to a row',
+  /#list \{[^}]*grid-template-columns: repeat\(2/.test(html));
+ok('lunch is pinned ahead of everything else',
+  html.indexOf('return lunch.concat(rest);') !== -1);
+ok('the whole tile is the button, and its dates are still their own links',
+  html.indexOf("card.setAttribute('role', 'button')") !== -1
+  && html.indexOf('event.stopPropagation();') !== -1);
+ok('a keyboard gets what the mouse gets',
+  html.indexOf('card.tabIndex = 0') !== -1 && html.indexOf("event.key === 'Enter'") !== -1);
+ok('"waiting list" is said about a program only when every date in view is full',
+  html.indexOf('var everyDateFull = withForm.length > 0 && fullDates.length === withForm.length;')
+    !== -1);
+ok('...and a full date is coloured rather than hidden',
+  html.indexOf(".chip.full {") !== -1 && html.indexOf("' full'") !== -1);
 ok('the page offers a week, a month and everything',
   html.indexOf('This week') !== -1 && html.indexOf('This month') !== -1
   && html.indexOf('Everything') !== -1);

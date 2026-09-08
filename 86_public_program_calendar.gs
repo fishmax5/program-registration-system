@@ -68,6 +68,27 @@
 /** What lunch is called on a page a stranger reads. See buildPublicSessionRow(). */
 const PUBLIC_LUNCH_PROGRAM_TITLE = 'Lunch';
 
+/**
+ * THE PARAGRAPH AT THE TOP OF THE PAGE — the only words here written for
+ * somebody who does not yet know what this place is.
+ *
+ * Every other page this deployment serves opens straight onto a list, because
+ * everybody holding one already knows whose list it is. This link is printed
+ * on a flyer and forwarded by a neighbour, so the page has to say what it is
+ * before it says what is on. Kept as one string here rather than typed into
+ * the page's markup so the office can change the sentence without touching
+ * HTML — and deliberately short: the calendar is what somebody came for.
+ *
+ * The NAME, PHONE and EMAIL beside it are not repeated here — they are
+ * CENTER_NAME / CENTER_PHONE / CENTER_EMAIL in `04`, the same three constants
+ * the forms and the sign-in sheet print, so a changed number cannot be right
+ * on a form and wrong on the calendar.
+ */
+const PUBLIC_CALENDAR_INTRO =
+  'Classes, clubs, trips, lunch and one-to-one help \u2014 most days, at both of our ' +
+  'buildings. Pick a program below and tap a date to open its sign-up form. Would you ' +
+  'rather sign up by phone, or have a question about a program? Please call us.';
+
 /** How long a built snapshot is served to everybody who asks. See the banner. */
 const PUBLIC_CALENDAR_CACHE_SECONDS = 300;
 
@@ -175,6 +196,18 @@ function buildPublicProgramCalendar() {
 
   return {
     ok: true,
+    // WHO THIS IS, for the one reader who does not already know. See
+    // PUBLIC_CALENDAR_INTRO — and note the addresses are only for buildings
+    // that actually have something on, for the same reason the location
+    // filter is: a page that names a building with nothing in it is a page
+    // somebody drives to.
+    intro: {
+      name: CENTER_NAME,
+      blurb: PUBLIC_CALENDAR_INTRO,
+      phone: CENTER_PHONE,
+      email: CENTER_EMAIL,
+      places: Object.keys(locations).sort().map(describeLocationWithAddress)
+    },
     // Stamped so the page can say how old what it is showing is, rather than
     // presenting a five-minute-old cache as this second's truth.
     generatedAt: Utilities.formatDate(new Date(), TIMEZONE, 'MMM d, h:mm a'),

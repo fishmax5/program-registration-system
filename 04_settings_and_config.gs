@@ -543,12 +543,15 @@ function describeLocationWithAddress(locationName) {
 /**
  * THE ONE PLACE THE CENTER'S CONTACT DETAILS LIVE.
  *
- * They appear in three registrant-facing places that must never disagree with
+ * They appear in four registrant-facing places that must never disagree with
  * each other: the sign-off at the bottom of every form description
  * (buildFormDescription()), the "more than three guests" note on the guest
- * count question (see getOrCreateTemplateForm()), and the printed sign-in
- * sheet's header. Change them here and all three follow.
+ * count question (see getOrCreateTemplateForm()), the printed sign-in sheet's
+ * header, and the introduction at the top of the public program calendar
+ * (`86`) — the one of the four a stranger reads first. Change them here and
+ * all four follow.
  */
+const CENTER_NAME = 'New Horizons Senior Center';
 const CENTER_PHONE = '(610) 664-2366';
 const CENTER_EMAIL = 'info@newhorizonsseniorcenter.org';
 
