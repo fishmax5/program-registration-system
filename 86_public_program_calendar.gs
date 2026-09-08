@@ -409,9 +409,10 @@ function publicSeatsPhrase_(row, map, noRegistration, waitlistOnly) {
 // WHAT IT DELIBERATELY DOES NOT DO IS RELAX ANYTHING. The embed reads the same
 // snapshot the public link reads, through the same function, with the same
 // fields in it — there is no second read here and nothing new leaves the
-// workbook. The one permission granted anywhere for this is the `frameable`
-// flag on the public route in DOOR_ROUTES, which is a per-route answer for the
-// reason its comment gives: this page cannot write.
+// workbook. The one permission granted anywhere for this is the ALLOWALL in
+// servePublicEmbed() (91), which serves the public pages and nothing else, for
+// the reason its banner gives: these are the only pages here that cannot
+// write.
 // ============================================================================
 
 /**
@@ -448,7 +449,7 @@ function publicCalendarViewOptions(params) {
     // ONE VOCABULARY FOR THE RANGE, and it is the printed link's. An embed
     // pinning a week and a newsletter link opening on one are the same thing
     // said by two different people, so they are read by one function
-    // (publicCalendarSpanRequested_, in 60) and a spelling that works in a
+    // (publicCalendarSpanRequested_, in 91) and a spelling that works in a
     // newsletter works in an iframe without anybody having to know it should.
     span: publicCalendarSpanRequested_(p)
   };

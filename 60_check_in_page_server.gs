@@ -136,8 +136,6 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  *          the first match wins, so an entry's position is part of its meaning
  *   build  the page itself, from the request and the shared context
  *   title  the browser tab
- *   frameable  may another site put this page in an <iframe>? Absent means no,
- *          which is the right answer for every page that writes — see doGet()
  *
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
