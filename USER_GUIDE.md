@@ -258,6 +258,32 @@ appointment-based.
 | Full when | every seat is taken | every **time** is taken — a couple at one appointment is one appointment, not two |
 | Roster grids / "every date" / club option | yes | no — they don't mean anything for an appointment |
 | Guest questions | yes | **yes** — "individual or couple" is a real answer for a will |
+| How many forms | one per **calendar month** | **one, for as long as the program runs** — see below |
+
+**One form, three months at a time.** Every other program takes a new form each
+calendar month. An appointment program does not: all of its dates share **one
+form and one link**, and that form carries a rolling window of **this month and
+the two after it**. As a month goes past, its dates come off the form on the
+next sync and a new third month appears — nobody presses anything, and the link
+never changes. So the link printed on a flyer in September still opens the right
+form in March, and a member looking for "the next free time with Heather" sees
+the next three months of them on one page instead of having to be handed a
+different form for each month.
+
+Three months is the ceiling, not a promise: dates further out are on the
+calendar and on the dashboard as usual, they are simply not bookable yet. A
+program tagged `[Grouped]` as well is left as a series — one form for its whole
+run, with no window — because a series has an end and this does not.
+
+**What happens to the month forms a program already has.** The first **Sync
+Cal** after this arrives moves the program's *upcoming* dates onto one of them:
+the form its **next session** is already on, so the link most recently handed
+out is the one that keeps working. The dashboard's links and the registration
+link in the calendar events are rewritten to match, and the office is told in
+the admin digest which forms were superseded. Nothing is deleted — the other
+months' forms still open and still hold every response already made on them —
+and *past* dates keep pointing at the form they were actually booked through,
+because that is a record of what happened.
 
 **Slots are back-to-back.** The event's start-to-end span is cut into
 appointments of `[Slots: N]` minutes (30 if you don't say), with no gaps. A time

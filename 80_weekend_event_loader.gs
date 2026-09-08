@@ -95,7 +95,9 @@ function scanNonWeekdayEvents(startKey, endKey) {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const existing = registrySheet ? getExistingRegistryState(registrySheet) : { eventIds: new Set() };
 
-  const groups = buildGroupsForWindow(getCalendarEventsForWindow(start, end));
+  // The window somebody typed, not the sync's — see loadWeekendEvents().
+  const groups = buildGroupsForWindow(getCalendarEventsForWindow(start, end),
+    { ordinaryEnd: end, assistanceEnd: end });
   const found = [];
 
   groups.forEach(group => {
@@ -148,7 +150,11 @@ function loadWeekendEvents(eventIds, startKey, endKey) {
 
     const { start, end } = resolveNonWeekdayWindow(startKey, endKey);
     const existingState = getExistingRegistryState(registrySheet);
-    const groups = buildGroupsForWindow(getCalendarEventsForWindow(start, end));
+    // THE WINDOW SOMEBODY TYPED IS THE WINDOW. The date boxes on this dialog
+    // reach further than the sync's own horizon on purpose, and a group built
+    // here must not be trimmed back to it — see trimGroupsToFormWindows() (88).
+    const groups = buildGroupsForWindow(getCalendarEventsForWindow(start, end),
+      { ordinaryEnd: end, assistanceEnd: end });
 
     // One unit of work per group, carrying ONLY the ticked sessions. That is
     // the whole difference between this and a sync: processCalendarGroup()

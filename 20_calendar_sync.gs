@@ -2,14 +2,34 @@
 // 4. CALENDAR SYNC & FORM GENERATION  (syncCalendars)
 // ============================================================================
 
+/**
+ * The window every calendar is read over.
+ *
+ * `ordinaryEnd` is the horizon this sync has always had: SYNC_LOOKAHEAD_DAYS
+ * out, rounded to the end of whatever month that lands in. `end` is the same
+ * date OR the end of an appointment form's rolling window, whichever is later
+ * — see assistanceFormWindow() (88). The two are not always the same: read on
+ * the 1st of a 31-day month, sixty days out stops at the end of NEXT month,
+ * which is a month short of what an appointment form is meant to be offering.
+ *
+ * WHY BOTH ARE RETURNED. Reading further is not the same as promising more.
+ * Whether an event is an appointment event cannot be known until it has been
+ * read, so the read has to reach far enough for the ones that are — and every
+ * ordinary program in that extra reach is then trimmed back to `ordinaryEnd`
+ * by trimGroupsToFormWindows() (88). Without that trim, extending this window
+ * would quietly move the horizon for the whole workbook: a month of session
+ * rows, and a month of forms, appearing earlier than they ever have.
+ */
 function computeSyncDateRange() {
   const today = new Date();
   const target = new Date(today);
   target.setDate(target.getDate() + SYNC_LOOKAHEAD_DAYS);
 
   const start = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0);
-  const end = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59);
-  return { start, end };
+  const ordinaryEnd = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59);
+  const assistanceEnd = assistanceFormWindow(today).end;
+  const end = assistanceEnd > ordinaryEnd ? assistanceEnd : ordinaryEnd;
+  return { start, end, ordinaryEnd };
 }
 
 /** A leading "*" on the title marks an event TENTATIVE — see parseEventTitle(). */

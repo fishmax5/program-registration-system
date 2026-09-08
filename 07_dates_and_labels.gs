@@ -482,12 +482,26 @@ function hyperlinkFormulaUrl(value) {
  */
 function formSpanForGroup(group) {
   if (!group) return '';
-  return group.isFixed ? 'FIXED' : String(group.monthLabel || '');
+  if (group.isFixed) return 'FIXED';
+  // An appointment program is one form for as long as it runs, whatever month
+  // a given date falls in — see 88. Read from the same predicate the fold uses,
+  // so a group and its rows cannot end up on two different answers.
+  if (isRollingAssistanceGroup(group)) return ASSISTANCE_FORM_SPAN;
+  return String(group.monthLabel || '');
 }
 
-/** The same span, read off a session ROW (its Type_Tag and its date) instead of a group. */
-function formSpanForRow(typeTag, date) {
+/**
+ * The same span, read off a session ROW (its Type_Tag and its date) instead of
+ * a group.
+ *
+ * `isAssistance` is the row's Personalized_Assistance tick. It is optional
+ * because two callers read rows from workbooks whose layout may predate that
+ * column; absent, it reads as false, which gives exactly the answer this
+ * function gave before appointment programs had a span of their own.
+ */
+function formSpanForRow(typeTag, date, isAssistance) {
   if (isGroupedTypeTag(typeTag)) return 'FIXED';
+  if (isAssistance) return ASSISTANCE_FORM_SPAN;
   const d = coerceDate(date);
   return d ? getMonthLabel(d) : '';
 }

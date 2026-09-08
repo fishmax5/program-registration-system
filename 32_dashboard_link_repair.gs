@@ -71,6 +71,11 @@ function readSessionRowIdentity(values, r) {
     title,
     location,
     typeTag: at('Type_Tag'),
+    // Optional, like the column itself: a workbook still on the old layout has
+    // no Personalized_Assistance, `at()` gives '' for a column that was never
+    // read, and false is the answer this function gave before appointment
+    // programs had a form span of their own.
+    isAssistance: isAssistanceColumnValue(at('Personalized_Assistance')),
     formId: String(at('Form_ID') || '').trim(),
     link: String(at('Form_Response_Link') || '').trim(),
     isLunchOnly: isLunchOnlyEventId(eventId),
@@ -96,7 +101,8 @@ function registryKeyForSessionRow(identity) {
     return lunchOnlyGroupKey(identity.location, getMonthLabel(identity.date));
   }
   if (!identity.source || !identity.title) return '';
-  return `${identity.source}::${identity.title}::${formSpanForRow(identity.typeTag, identity.date)}`;
+  return `${identity.source}::${identity.title}::` +
+    `${formSpanForRow(identity.typeTag, identity.date, identity.isAssistance)}`;
 }
 
 /**
@@ -155,6 +161,10 @@ function planDashboardLinkRepair(registrySheet) {
   const needed = ['Event_Date', 'Event_ID', 'Calendar_Source', 'Clean_Title', 'Location',
     'Type_Tag', 'Form_ID', 'Form_Response_Link', 'Edit_Form_Link'];
   if (needed.some(h => !sheetMap[h])) return { plan: [], stats };
+  // Read when it is there and simply absent when it is not — the repair has to
+  // go on working on a workbook whose layout predates appointment programs,
+  // and this column decides only which SPAN a row's key carries.
+  if (sheetMap['Personalized_Assistance']) needed.push('Personalized_Assistance');
 
   const registry = getPersistentFormRegistry();
   const shared = getSharedFormIdSet();

@@ -299,7 +299,12 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   const typeTags = dedupePreservingOrder(formRows
     .map(row => String((map['Type_Tag'] === undefined ? '' : row[map['Type_Tag']]) || '').trim())
     .filter(Boolean));
-  return {
+  // WINDOWED ON THE WAY OUT for an appointment form, and nowhere else in here:
+  // windowAssistanceContextSessions() (88) trims `sessions` to the three months
+  // that form offers, leaving every label-shaping field above derived from the
+  // whole row set. The reason it is the last thing that happens is spelled out
+  // there.
+  return windowAssistanceContextSessions({
     formId,
     sessions,
     locations,
@@ -342,7 +347,7 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
     isLunchOnly,
     programTitle: titles.length === 1 ? titles[0] : '',
     capacityHints: buildCapacityHintsFromRegistryRows(formRows, map)
-  };
+  });
 }
 
 /** { Form_ID: {showLocation, showTitle} } for a batch of session rows — how each form's date labels read. */

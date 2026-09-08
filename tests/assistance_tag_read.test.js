@@ -64,6 +64,7 @@ vm.runInContext(src + `
 this.ASSISTANCE_TAG = ASSISTANCE_TAG;
 this.ASSISTANCE_WORDS_REGEX = ASSISTANCE_WORDS_REGEX;
 this.APPOINTMENT_SLOT_MINUTES = APPOINTMENT_SLOT_MINUTES;
+this.ASSISTANCE_FORM_SPAN = ASSISTANCE_FORM_SPAN;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -89,6 +90,23 @@ function fakeEvent(title, description, start, hours) {
   };
 }
 
+/**
+ * A date in a month RELATIVE TO TODAY, which every fixture below is built from.
+ *
+ * They used to be hard-coded in September 2026, and an appointment program's
+ * form now carries a ROLLING three-month window (see 88) — so a fixture pinned
+ * to a month would fall out of that window the moment the month went past and
+ * take its group with it. The same reason tests/appointment_review.test.js
+ * builds its month this way.
+ */
+function monthsOut(offset, day, hour, minute) {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth() + offset, day, hour || 10, minute || 0);
+}
+function thisMonth(day, hour, minute) {
+  return monthsOut(0, day, hour, minute);
+}
+
 /** buildGroupsForWindow() takes the raw fetch, which is all this needs to stub. */
 function groupsFor(eventsByCalendar) {
   return sandbox.buildGroupsForWindow(eventsByCalendar);
@@ -102,7 +120,7 @@ function findGroup(groups, title) {
 // ---------------------------------------------------------------------------
 {
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Low-Cost Wills', '[Personalized Assistance]', new Date(2026, 8, 3, 12, 30))]
+    [NARBERTH]: [fakeEvent('Low-Cost Wills', '[Personalized Assistance]', thisMonth(3, 12, 30))]
   });
   check('description tag reaches the group', groups[0].isAssistance, true);
 }
@@ -111,7 +129,7 @@ function findGroup(groups, title) {
   // "[Slots: 20]" alone says appointments too — parseSettingsBrackets() has
   // always said so, and the dropped copy meant nothing downstream heard it.
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Computer Help', '[Slots: 20]', new Date(2026, 8, 4, 10, 0))]
+    [NARBERTH]: [fakeEvent('Computer Help', '[Slots: 20]', thisMonth(4, 10, 0))]
   });
   check('[Slots: N] alone marks appointments', groups[0].isAssistance, true);
   check('[Slots: N] carries the length', groups[0].slotMinutes, 20);
@@ -121,7 +139,7 @@ function findGroup(groups, title) {
   const groups = groupsFor({
     [NARBERTH]: [fakeEvent('Medicare Counseling',
       'Gerry is in room 4.\n[Personalized Assistance, Slots: 20, Max Per Month: 1]',
-      new Date(2026, 8, 5, 13, 0))]
+      thisMonth(5, 13, 0))]
   });
   check('a combined bracket carries all three', [
     groups[0].isAssistance, groups[0].slotMinutes, groups[0].maxPerMonth
@@ -132,7 +150,7 @@ function findGroup(groups, title) {
   // The neighbouring flags were never broken — they are here so a future
   // rewrite of the copy cannot drop one of them the way this one dropped three.
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Book Club', '[Club, Grouped, Cap: 12]', new Date(2026, 8, 6, 14, 0))]
+    [NARBERTH]: [fakeEvent('Book Club', '[Club, Grouped, Cap: 12]', thisMonth(6, 14, 0))]
   });
   check('the other settings still arrive', [
     groups[0].isClub, groups[0].isFixed, groups[0].capacity, groups[0].isAssistance
@@ -141,7 +159,7 @@ function findGroup(groups, title) {
 
 {
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Coffee Hour', 'Come as you are.', new Date(2026, 8, 7, 9, 0))]
+    [NARBERTH]: [fakeEvent('Coffee Hour', 'Come as you are.', thisMonth(7, 9, 0))]
   });
   check('an untagged program is not an appointment program', groups[0].isAssistance, false);
 }
@@ -155,25 +173,71 @@ function findGroup(groups, title) {
   // calendar + title with no month in it, so an untagged month's `false`
   // landed on the same key and, whenever it was written last, unticked the
   // whole program.
+  //
+  // AN APPOINTMENT PROGRAM IS NOW THE ONE THING THAT IS NOT GROUPED PER MONTH
+  // (see 88): the flags are unified across its month groups exactly as below,
+  // and then those groups are folded into ONE, because a member booking a chair
+  // with Heather is not booking a month. The unification is still what makes
+  // the fold possible — only the tagged month knows the tag — so the two facts
+  // are checked together here.
   const groups = groupsFor({
     [NARBERTH]: [
-      fakeEvent('Low-Cost Wills', '[Personalized Assistance, Slots: 20]', new Date(2026, 8, 3, 12, 30)),
-      fakeEvent('Low-Cost Wills', 'Heather is in the small room.', new Date(2026, 9, 1, 12, 30)),
-      fakeEvent('Low-Cost Wills', '', new Date(2026, 10, 5, 12, 30))
+      fakeEvent('Low-Cost Wills', '[Personalized Assistance, Slots: 20]', thisMonth(3, 12, 30)),
+      fakeEvent('Low-Cost Wills', 'Heather is in the small room.', monthsOut(1, 1, 12, 30)),
+      fakeEvent('Low-Cost Wills', '', monthsOut(2, 5, 12, 30))
     ]
   });
   const wills = findGroup(groups, 'Low-Cost Wills');
-  check('one program, three month groups', wills.length, 3);
-  check('every month group is an appointment program', wills.map(g => g.isAssistance), [true, true, true]);
-  check('every month group knows the slot length', wills.map(g => g.slotMinutes), [20, 20, 20]);
+  check('three months of an appointment program are ONE group', wills.length, 1);
+  check('and every one of its dates is on it', wills[0].sessions.length, 3);
+  check('the tag reached the months that never carried it', wills[0].isAssistance, true);
+  check('and so did the slot length', wills[0].slotMinutes, 20);
+  check('its group key names the program, not a month',
+    wills[0].groupKey.endsWith(`::${sandbox.ASSISTANCE_FORM_SPAN}`), true);
+  check('so it has no month to be named after', wills[0].monthLabel, null);
+}
+
+{
+  // THE ROLLING WINDOW, at both ends. A date last month is off the form — it
+  // is what "the old months drop off as they go" means — and a date four
+  // months out is not on it yet, whatever the calendar says.
+  const groups = groupsFor({
+    [NARBERTH]: [
+      fakeEvent('Low-Cost Wills', '[Personalized Assistance]', monthsOut(-1, 3, 12, 30)),
+      fakeEvent('Low-Cost Wills', '', thisMonth(3, 12, 30)),
+      fakeEvent('Low-Cost Wills', '', monthsOut(2, 3, 12, 30)),
+      fakeEvent('Low-Cost Wills', '', monthsOut(3, 3, 12, 30))
+    ]
+  });
+  const wills = findGroup(groups, 'Low-Cost Wills')[0];
+  check('the window is three months wide, however many dates there are',
+    wills.sessions.length, 2);
+  check('and it is THIS month through the third one',
+    wills.sessions.map(s => s.event.getStartTime().getMonth()),
+    [thisMonth(1).getMonth(), monthsOut(2, 1).getMonth()]);
+}
+
+{
+  // [Grouped] still wins: somebody who has said "this is a series with an end"
+  // has said something a rolling window would contradict, and a series carries
+  // its whole run on one form already.
+  const groups = groupsFor({
+    [NARBERTH]: [
+      fakeEvent('Tax Help', '[Personalized Assistance, Grouped]', thisMonth(3, 12, 30)),
+      fakeEvent('Tax Help', '', monthsOut(1, 3, 12, 30))
+    ]
+  });
+  const taxes = findGroup(groups, 'Tax Help')[0];
+  check('a grouped appointment series keeps the series span',
+    taxes.groupKey.endsWith('::FIXED'), true);
 }
 
 {
   // The same rule for the flags that already had it stated within a group.
   const groups = groupsFor({
     [NARBERTH]: [
-      fakeEvent('Knitting Circle', '[Club]', new Date(2026, 8, 3, 10, 0)),
-      fakeEvent('Knitting Circle', '', new Date(2026, 9, 3, 10, 0))
+      fakeEvent('Knitting Circle', '[Club]', thisMonth(3, 10, 0)),
+      fakeEvent('Knitting Circle', '', monthsOut(1, 3, 10, 0))
     ]
   });
   check('club spreads across months too',
@@ -185,8 +249,8 @@ function findGroup(groups, title) {
   // untagged "Chair Yoga" are two programs with two forms, and the tick is
   // spread by the same rule on the sheet (spreadFlagToSiblingRows()).
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Chair Yoga', '[Personalized Assistance]', new Date(2026, 8, 3, 10, 0))],
-    [ASHBRIDGE]: [fakeEvent('Chair Yoga', '', new Date(2026, 8, 4, 10, 0))]
+    [NARBERTH]: [fakeEvent('Chair Yoga', '[Personalized Assistance]', thisMonth(3, 10, 0))],
+    [ASHBRIDGE]: [fakeEvent('Chair Yoga', '', thisMonth(4, 10, 0))]
   });
   const yoga = groups.filter(g => g.cleanTitle === 'Chair Yoga')
     .sort((a, b) => String(a.calendarId).localeCompare(String(b.calendarId)));
@@ -199,8 +263,8 @@ function findGroup(groups, title) {
   // …but a [All Locations] program IS one program, and its groups share a
   // scope, so the tag reaches the other site.
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Tai Chi', '[All Locations, Personalized Assistance]', new Date(2026, 8, 3, 10, 0))],
-    [ASHBRIDGE]: [fakeEvent('Tai Chi', '[All Locations]', new Date(2026, 8, 4, 10, 0))]
+    [NARBERTH]: [fakeEvent('Tai Chi', '[All Locations, Personalized Assistance]', thisMonth(3, 10, 0))],
+    [ASHBRIDGE]: [fakeEvent('Tai Chi', '[All Locations]', thisMonth(4, 10, 0))]
   });
   const taiChi = findGroup(groups, 'Tai Chi');
   check('a linked program is one program', taiChi.length, 1);
@@ -217,7 +281,7 @@ function findGroup(groups, title) {
   const groups = groupsFor({
     [NARBERTH]: [fakeEvent('Low-Cost Wills',
       '<div>Heather Turner</div><div>[Personalized&nbsp;Assistance,&nbsp;Slots: 20]</div>',
-      new Date(2026, 8, 3, 12, 30))]
+      thisMonth(3, 12, 30))]
   });
   check('an &nbsp; inside the bracket still reads as the tag', groups[0].isAssistance, true);
   check('and the slot length with it', groups[0].slotMinutes, 20);
@@ -225,7 +289,7 @@ function findGroup(groups, title) {
 
 {
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Book Club', '[Club<br>]', new Date(2026, 8, 3, 10, 0))]
+    [NARBERTH]: [fakeEvent('Book Club', '[Club<br>]', thisMonth(3, 10, 0))]
   });
   check('a stray tag inside the bracket does not hide the word', groups[0].isClub, true);
 }
@@ -278,12 +342,16 @@ function findGroup(groups, title) {
   // nothing at all about the tags, which is the fact the log is opened for.
   const groups = groupsFor({
     [NARBERTH]: [fakeEvent('Low-Cost Wills', '[Personalized Assistance, Slots: 20, Cap: 5]',
-      new Date(2026, 8, 3, 12, 30))]
+      thisMonth(3, 12, 30))]
   });
   const line = sandbox.describeGroup(groups[0]);
   check('the log names the program, not the calendar ID', line.indexOf('@group.calendar') === -1, true);
   check('it names the program', line.indexOf('"Low-Cost Wills"') >= 0, true);
-  check('it names the place and the span', line.indexOf('Narberth · September 2026') >= 0, true);
+  // An appointment program has no month — it is one rolling form, three months
+  // wide (see 88) — so the span it names is that window, built from today the
+  // same way the code does rather than pinned to a month that will go past.
+  check('it names the place and the span',
+    line.indexOf(`Narberth · ${sandbox.describeAssistanceFormWindow()}`) >= 0, true);
   check('it names the tags it resolved',
     line.indexOf('[Personalized Assistance, Slots: 20, Regular, Cap: 5]') >= 0, true);
   check('it says how many dates', line.indexOf('1 date(s)') >= 0, true);
@@ -291,7 +359,7 @@ function findGroup(groups, title) {
 
 {
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Coffee Hour', '', new Date(2026, 8, 3, 9, 0))]
+    [NARBERTH]: [fakeEvent('Coffee Hour', '', thisMonth(3, 9, 0))]
   });
   check('an untagged program still reports its grouping',
     sandbox.describeGroupTags(groups[0]), '[Regular]');
@@ -302,7 +370,7 @@ function findGroup(groups, title) {
   // actually use — the default is a real answer, and a blank there reads as a
   // program that did not take.
   const groups = groupsFor({
-    [NARBERTH]: [fakeEvent('Medicare', '[By Appointment]', new Date(2026, 8, 3, 13, 0))]
+    [NARBERTH]: [fakeEvent('Medicare', '[By Appointment]', thisMonth(3, 13, 0))]
   });
   check('the default slot length is stated, not left blank',
     sandbox.describeGroupTags(groups[0]).indexOf(`Slots: ${sandbox.APPOINTMENT_SLOT_MINUTES}`) >= 0, true);

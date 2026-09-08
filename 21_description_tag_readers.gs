@@ -725,8 +725,12 @@ function describeImportSummary(summary) {
  * Parsing is per calendar (a calendar IS a location), but GROUPING is done
  * once across all of them — that is what lets a program tagged
  * [All Locations] pool its sessions onto one form instead of one per site.
+ *
+ * `options` is passed on to buildEventGroups() and says how far out the groups
+ * it builds may reach. A caller reading a window somebody TYPED passes its own
+ * end; omitted, it means the sync's horizon. See trimGroupsToFormWindows() (88).
  */
-function buildGroupsForWindow(eventsByCalendar) {
+function buildGroupsForWindow(eventsByCalendar, options) {
   const parsedSessions = [];
 
   Object.keys(CALENDAR_MAP).forEach(calendarId => {
@@ -782,7 +786,7 @@ function buildGroupsForWindow(eventsByCalendar) {
     }
   });
 
-  const groups = buildEventGroups(parsedSessions);
+  const groups = buildEventGroups(parsedSessions, options);
   warnAboutPartiallySharedPrograms(groups);
   return groups;
 }
@@ -820,14 +824,25 @@ function collectCalendarWork(groups, existingState, renamedGroupKeys) {
     // "Chair Yoga - September" to sign up for Gentle Yoga.
     const wasRenamed = renamed.has(group.groupKey);
 
-    if (newSessions.length === 0 && !needsUnblocking && !wasRenamed) {
+    // An appointment program upgraded from the month-per-form layout has
+    // nothing NEW either — every one of its dates is already on the sheet — and
+    // its upcoming rows are spread across the forms those months each had. It
+    // is processed so processCalendarGroup() can bring them onto the one form
+    // this program now books through (see 88).
+    const needsAssistanceAdoption = existingState.splitAssistancePrograms &&
+      existingState.splitAssistancePrograms.has(group.groupKey);
+
+    if (newSessions.length === 0 && !needsUnblocking && !wasRenamed && !needsAssistanceAdoption) {
       log(`Up to date: ${describeGroup(group)} — every date already on the session table, nothing to do.`);
       return;
     }
     if (newSessions.length === 0) {
       log(`No new dates for ${describeGroup(group)}, but processing it anyway: it ` +
         (wasRenamed ? 'was just renamed on the calendar — its form has to be renamed to match.'
-          : `is coming back off [${NO_REGISTRATION_TAG}] — its form and its calendar links have to be restored.`));
+          : (needsAssistanceAdoption
+            ? 'is an appointment program whose months are still on separate forms — they are being ' +
+              'brought onto the one form it books through.'
+            : `is coming back off [${NO_REGISTRATION_TAG}] — its form and its calendar links have to be restored.`)));
     }
     work.push({
       group,

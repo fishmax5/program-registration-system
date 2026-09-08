@@ -594,9 +594,16 @@ function buildFormTitleForGroup(group) {
   if (group.isLunchOnly) {
     return `Lunch Sign-Up — ${group.locations[0] || ''}, ${group.monthLabel}`;
   }
+  // AN APPOINTMENT PROGRAM'S FORM IS NOT NAMED FOR A MONTH, because it is not
+  // about one: it carries a rolling three months and keeps the same link for
+  // as long as the program runs (see 88). A form still called "Low-Cost Wills
+  // - September 2026" in November is the same lie the month-per-form grouping
+  // used to tell, left on the one line a respondent reads first.
   const baseTitle = group.isFixed
     ? `${group.cleanTitle} — Registration`
-    : `${group.cleanTitle} - ${group.monthLabel}`;
+    : (isRollingAssistanceGroup(group)
+      ? `${group.cleanTitle} — Appointments`
+      : `${group.cleanTitle} - ${group.monthLabel}`);
   // A cross-location form sits in the same Drive folder as the per-location
   // ones and would otherwise be indistinguishable from them by name.
   return group.isShared ? `${baseTitle} (${SHARED_LOCATION_TAG})` : baseTitle;

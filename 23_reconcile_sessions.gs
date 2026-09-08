@@ -892,6 +892,12 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
     const typeTags = sheetMap['Type_Tag']
       ? registrySheet.getRange(zone.start, sheetMap['Type_Tag'], zone.count, 1).getValues()
       : null;
+    // The other half of the span: an appointment program's rows all belong to
+    // ONE form whatever month they are in, so a month-keyed fallback would hand
+    // them the wrong one — or, more often, none at all. See formSpanForRow().
+    const assists = sheetMap['Personalized_Assistance']
+      ? registrySheet.getRange(zone.start, sheetMap['Personalized_Assistance'], zone.count, 1).getValues()
+      : null;
     // Read as VALUES but written CELL BY CELL. These columns hold =HYPERLINK()
     // formulas, which getValues() flattens to their display text — writing a
     // whole column back from that array would turn every link on it into the
@@ -924,7 +930,8 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
       // it is keyed by span so a row a month out gets its own month's form.
       const spanKey = programFormKey(String(sources[r][0] || '').trim(),
         String(titles[r][0] || '').trim(),
-        formSpanForRow(typeTags ? typeTags[r][0] : '', dates[r][0]));
+        formSpanForRow(typeTags ? typeTags[r][0] : '', dates[r][0],
+          assists ? isAssistanceColumnValue(assists[r][0]) : false));
       const formId = rowFormId || (formIdByProgram ? (formIdByProgram[spanKey] || '') : '');
       const links = linksFor(formId);
       if (!links) continue; // no form to point at yet — the next sync builds one

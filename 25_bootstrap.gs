@@ -480,9 +480,16 @@ function toastIfPossible(message) {
 const REGISTRATION_LINK_FRAGMENT_KEY = 'form';
 
 function buildRegistrationLinkLine(group, formInfo) {
+  // Three wordings, because the link means three slightly different things. A
+  // month's form is named for its month; a series and an appointment program
+  // are not (see buildFormTitleForGroup()) — and for an appointment program the
+  // verb is wrong as well as the month: what is on the other end of this link
+  // is a time to be booked, not a class to be registered for.
   const label = group.isFixed
     ? `📝 Register for ${group.cleanTitle}`
-    : `📝 Register for ${group.cleanTitle} — ${group.monthLabel}`;
+    : (isRollingAssistanceGroup(group)
+      ? `📝 Book an appointment — ${group.cleanTitle}`
+      : `📝 Register for ${group.cleanTitle} — ${group.monthLabel}`);
   const href = `${formInfo.publishedUrl}#${REGISTRATION_LINK_FRAGMENT_KEY}=${formInfo.formId}`;
   return `<a href="${href}">${label}</a>${buildCancelLinkLine(formInfo.formId)}`;
 }

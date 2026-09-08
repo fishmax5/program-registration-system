@@ -70,6 +70,14 @@ function processCalendarGroup(registrySheet, item, existingState) {
   });
   writeEventRegistryRows(registrySheet, newSessionsGroup, formInfo);
 
+  // BEFORE the descriptions are rewritten, and only for an appointment
+  // program: the months this program used to take a separate form for are
+  // brought onto this one (see 88). It has to happen first — the link this
+  // writes onto every one of the group's events is the adopted form's, and a
+  // row still naming last month's form under it is exactly the drift
+  // repairDashboardLinks() exists to find.
+  adoptAssistanceProgramSessions(registrySheet, group, formInfo);
+
   backInjectCalendarDescriptions(group, formInfo);
 
   // Keep the in-memory state honest for the rest of THIS run: these dates now
@@ -168,16 +176,25 @@ function handleUnreachableGroupForm(registrySheet, group, newSessions, existingS
  * A group key is `<scope>::<title>::<span>`:
  *   scope  the calendar ID, or SHARED_LOCATION_SCOPE when the event is tagged
  *          [All Locations] — the WHERE half of grouping.
- *   span   'FIXED' for a [Grouped] series, else the month label — the WHEN
- *          half. ('FIXED' is deliberately not renamed alongside the Type_Tag
- *          vocabulary; it is a persisted internal key, see
- *          getExistingRegistryState().)
+ *   span   'FIXED' for a [Grouped] series, ASSISTANCE_FORM_SPAN for a
+ *          [Personalized Assistance] program (every month of it on one rolling
+ *          form — see 88), else the month label — the WHEN half. ('FIXED' is
+ *          deliberately not renamed alongside the Type_Tag vocabulary; it is a
+ *          persisted internal key, see getExistingRegistryState().)
+ *
+ * The assistance span is NOT applied in the loop below, where the other two
+ * are: the flag it depends on is only true of every month of a program after
+ * unifyProgramFlagsAcrossGroups() has run. The fold happens after it.
  *
  * Every group carries `sessions` (each with the calendar and location it came
  * from, so nothing downstream has to assume a group is single-location) and
  * `events`, the same list flattened, for the calendar-facing helpers.
+ *
+ * `options` is handed straight to trimGroupsToFormWindows() (88) and says how
+ * far out a group's form may reach. Omitted — which is every caller but the
+ * weekend loader — it means the sync's own horizon.
  */
-function buildEventGroups(parsedSessions) {
+function buildEventGroups(parsedSessions, options) {
   const groups = {};
 
   parsedSessions.forEach(({ event, parsed, calendarId, locationName }) => {
@@ -244,7 +261,15 @@ function buildEventGroups(parsedSessions) {
     });
   });
 
-  return unifyProgramFlagsAcrossGroups(Object.values(groups)).map(g => {
+  // ORDER IS LOAD-BEARING HERE, all three steps of it. The flags are unified
+  // first because the appointment fold groups ON one of them (see
+  // mergeAssistanceProgramGroups()); the fold runs before the trim because a
+  // rolling appointment group answers to a different window from every other
+  // group and cannot be recognized until it exists; and both run before the
+  // per-group derivations below, which are computed from the final session list
+  // (locations, calendarIds, the series length).
+  const merged = mergeAssistanceProgramGroups(unifyProgramFlagsAcrossGroups(Object.values(groups)));
+  return trimGroupsToFormWindows(merged, options).map(g => {
     g.sessions.sort((a, b) => a.event.getStartTime() - b.event.getStartTime());
     g.events = g.sessions.map(s => s.event);
     g.locations = distinctLocations(g.sessions.map(s => s.locationName));
@@ -364,7 +389,9 @@ function describeGroup(group) {
     (group.calendarId ? CALENDAR_MAP[group.calendarId] || group.calendarId : '');
   const when = group.isFixed
     ? 'whole series' + (group.seriesWeeks ? `, ~${group.seriesWeeks} week(s)` : '')
-    : (group.monthLabel || '');
+    : (isRollingAssistanceGroup(group)
+      ? describeAssistanceFormWindow()
+      : (group.monthLabel || ''));
   const scope = [where, when].filter(Boolean).join(' · ');
   const tags = describeGroupTags(group);
   const dates = group.sessions ? `${group.sessions.length} date(s)` : '';
@@ -448,10 +475,22 @@ function getExistingRegistryState(registrySheet) {
   // difference between a program that is up to date and one that is up to date
   // BUT still showing the marks of a [No Registration] tag that has since come
   // off — the second one has work to do even though it has no new dates.
-  const state = { eventIds: new Set(), groupFormMap: {}, blockedPrograms: new Set() };
+  const state = { eventIds: new Set(), groupFormMap: {}, blockedPrograms: new Set(),
+    // `<scope>::<title>::ASSIST` for every appointment program whose UPCOMING
+    // rows do not all name one form — the workbook it is being upgraded from
+    // had one form per month, so on the first sync after this change that is
+    // all of them. It is what gives collectCalendarWork() a reason to process
+    // a program with no new dates: without it, adoption would wait for the
+    // next month to appear on the calendar. See adoptAssistanceProgramSessions().
+    splitAssistancePrograms: new Set() };
   const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
+  // `<scope>::<title>::ASSIST` -> every form its rows currently name, with the
+  // date of the row that names it. Resolved after the loop rather than in it,
+  // because for an appointment program "which form?" is a CHOICE — see
+  // chooseAdoptedAssistanceForms().
+  const assistanceCandidates = {};
 
   rows.forEach(row => {
     const eventId = row[map['Event_ID']];
@@ -474,10 +513,18 @@ function getExistingRegistryState(registrySheet) {
     // output. Renaming it would orphan every stored entry and duplicate every
     // grouped form. isGroupedTypeTag() reads both spellings of the VALUE,
     // which is the part users see — see formSpanForRow().
-    const key = `${source}::${title}::${formSpanForRow(typeTag, row[map['Event_Date']])}`;
+    const isAssistance = map['Personalized_Assistance'] !== undefined &&
+      isAssistanceColumnValue(row[map['Personalized_Assistance']]);
+    const key = `${source}::${title}::${formSpanForRow(typeTag, row[map['Event_Date']], isAssistance)}`;
+    if (isAssistance && !isGroupedTypeTag(typeTag)) {
+      if (!assistanceCandidates[key]) assistanceCandidates[key] = [];
+      assistanceCandidates[key].push({ formId, date: coerceDate(row[map['Event_Date']]) });
+      return;
+    }
     if (!state.groupFormMap[key]) state.groupFormMap[key] = formId;
   });
 
+  chooseAdoptedAssistanceForms(state, assistanceCandidates);
   addSharedGroupKeysFromRows(state, rows, map);
 
   const persistent = getPersistentFormRegistry();
@@ -486,6 +533,39 @@ function getExistingRegistryState(registrySheet) {
   });
 
   return state;
+}
+
+/**
+ * WHICH FORM AN APPOINTMENT PROGRAM KEEPS, when its rows name several.
+ *
+ * Every workbook that has been running appointment programs has exactly this:
+ * one form per month, each named by that month's rows. One of them is about to
+ * become the program's only form (see adoptAssistanceProgramSessions() in 88),
+ * and which one is not arbitrary — it is the form whose link is in circulation
+ * right now, which is the one the program's NEXT session is on. Adopting that
+ * one means the link most recently handed out, printed, and emailed goes on
+ * working, and the forms that stop being current are the ones nobody is about
+ * to click.
+ *
+ * The fallback, for a program with nothing upcoming at all, is its most recent
+ * PAST date's form — the last one anybody used — rather than whichever row the
+ * sectioned reader happened to hand over first.
+ */
+function chooseAdoptedAssistanceForms(state, candidatesByKey) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  Object.keys(candidatesByKey || {}).forEach(key => {
+    if (state.groupFormMap[key]) return;
+    const rows = candidatesByKey[key].filter(c => c.formId);
+    if (rows.length === 0) return;
+    const upcoming = rows.filter(c => c.date && c.date >= today).sort((a, b) => a.date - b.date);
+    const past = rows.filter(c => c.date && c.date < today).sort((a, b) => b.date - a.date);
+    const chosen = upcoming[0] || past[0] || rows[0];
+    state.groupFormMap[key] = chosen.formId;
+    // The upcoming rows are the ones adoption rewrites, so they are the ones
+    // that decide whether there is anything to do.
+    if (upcoming.some(c => c.formId !== chosen.formId)) state.splitAssistancePrograms.add(key);
+  });
 }
 
 /**
@@ -510,7 +590,9 @@ function addSharedGroupKeysFromRows(state, rows, map) {
     if (!byForm[formId]) byForm[formId] = { title, sources: new Set(), keys: new Set() };
     byForm[formId].sources.add(source);
 
-    const span = formSpanForRow(row[map['Type_Tag']], row[map['Event_Date']]);
+    const span = formSpanForRow(row[map['Type_Tag']], row[map['Event_Date']],
+      map['Personalized_Assistance'] !== undefined &&
+        isAssistanceColumnValue(row[map['Personalized_Assistance']]));
     byForm[formId].keys.add(`${SHARED_LOCATION_SCOPE}::${title}::${span}`);
   });
 
