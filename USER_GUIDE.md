@@ -2170,8 +2170,8 @@ Eight small settings blocks:
   to appear on dates with no registrations yet is gone with it.
 - **⏰ Order Ahead Time** — how many days' notice you need. Registrations
   inside that window get flagged.
-- **📧 Admin Notification Emails** — up to five people in the office, each
-  ticked for what they're copied on — see below
+- **📧 Admin Notification Emails** — up to five people in the office, who get
+  one digest a day at 10:00 covering everything the workbook did — see below
 - **🍽️ Lunch Service by Location** — see below
 - **🔗 Registration Link in Events** — see below
 - **⚙️ Automation & Trigger Ownership** — see below
@@ -2197,37 +2197,68 @@ them in Config any time; you don't need to touch the code.
 
 #### 📧 Admin Notification Emails
 
-One row per person, up to five, and a tick box for each thing they're copied
-on. Type the address, tick what they should get, and that's the whole setup —
-**an empty table means this system copies nobody**, and clearing a row is how
+One row per person, up to five. Type the address and that's the setup — **an
+empty table means this system copies nobody**, and clearing a row is how
 someone stops hearing from it.
 
-| Tick | What that person gets |
-|---|---|
-| **Sync_Digest** | **At most one message per sync**, and only when something needs a person: waitlisted registrants, forms that couldn't be opened, events sent to triage, a door sign-in that didn't complete. A quiet sync sends nothing. |
-| **Leader_Roster_Alerts** | A blind copy of every roster-change email a program leader gets |
-| **Registrant_Reminders** | A blind copy of the reminder emails registrants get before a session |
-| **Calendar_Invite_Guest** | Added as a **guest** on any calendar event registrants are invited to, so it lands in their own calendar. Google emails them the invitation itself. Only events with at least one registrant are ever touched, and once they're on an event they stay on it. |
+**Everyone in this table gets one email a day**, at **10:00**, covering
+everything the workbook did the day before: the sync digest's findings, every
+reminder sent to a registrant, every roster alert sent to a program leader,
+every calendar guest list that changed, and every appointment request filed.
+One message, grouped into sections, whether they're ticked for anything or not.
 
-The copies are **blind** (BCC) on the two email rows: the leader or the member
-sees only their own message, so nobody starts a reply-all thread with the
-office on it.
+> **Why it's a digest.** The office used to get all of that as it happened —
+> a message per sync, a copy of every reminder, a blind copy of every leader
+> alert. On a busy Tuesday that was forty emails, which is the same as none:
+> nobody reads the fortieth, so nobody reads the one that mattered.
+
+**The same thing reported twice is one line and a count.** An hourly sync that
+can't open the same form all day reads as one line saying it happened 24 times,
+between the first time and the last.
+
+**Two things still arrive the moment they happen**, because somebody at the
+desk may need to act within the hour:
+
+- a **Quick Mark that wouldn't save** — the mark was shown as done and then
+  refused, and whoever made it has already moved on to the next person
+- a **door sign-in that didn't complete** — the visitor is standing there, and
+  the visit may need entering by hand
+
+Those go to whoever is ticked for **Sync_Digest** — or to everyone in the table
+if nobody is ticked, because a fault report is the one message an unticked box
+shouldn't be able to silence.
+
+| Tick | What it does now |
+|---|---|
+| **Sync_Digest** | Who gets the two urgent faults above, as they happen. |
+| **Leader_Roster_Alerts** | Nothing on its own any more — leader alerts are a section of the daily digest. Kept as the record of who used to be copied. |
+| **Registrant_Reminders** | Nothing on its own any more — reminders sent are a section of the daily digest. |
+| **Calendar_Invite_Guest** | Nothing on its own any more — guest-list changes are a section of the daily digest. Nobody in the office is put on the events themselves. |
+| **Appointment_Requests** | Nothing on its own any more — requests needing a date are a section of the daily digest. |
+
+Each tick box's own cell note says the same thing, so nobody has to remember
+it. Hover one on the Config tab.
+
+**Can't wait until tomorrow morning?** *Admin ▸ Reports ▸ 📨 Send the Office
+Digest Now* sends everything that's waiting, including today so far, and
+doesn't disturb the 10:00 send.
+
+> **This is easier on the daily mail quota, too.** Google allows this account
+> 100 messages a day (1,500 on Workspace), and every office copy used to count
+> as its own message: three people ticked for registrant reminders made every
+> reminder cost four. A reminder now costs one, and the office costs one a day.
 
 > **Every address here also becomes an editor** of the program leader sheets
 > and forms this system shares out of the workbook — ticked or not. That's file
 > access, not mail, which is why it doesn't have a tick box of its own.
 
-> **Mind the daily mail quota.** Google allows this account 100 messages a day
-> (1,500 on Workspace), and *each* blind copy counts as its own message. Three
-> people ticked for registrant reminders makes every reminder cost four
-> messages instead of one. Tick the two BCC columns for the people who actually
-> need the paper trail.
-
 **This replaced the old single Admin Notification Email and Archive Copy
 Address cells, and your existing addresses are carried across automatically** —
 the admin address arrives ticked for the sync digest, the archive address for
-the other three, and the old cells are cleared. Nothing needs re-typing, and
-nothing that was going out stops going out.
+the other three, and the old cells are cleared. Nothing needs re-typing.
+
+> Elsewhere in this guide, *"it goes in the admin digest"* means exactly this:
+> it's a line in tomorrow morning's 10:00 email.
 
 #### 🔗 Registration Link in Events
 

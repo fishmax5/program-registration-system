@@ -18,12 +18,28 @@ const src = require('./helpers/source').readSource();
 
 const sentMail = [];
 let quota = 100;
+const props = {};
 const sandbox = {
   console: { log: () => {} },
-  Utilities: { formatDate: d => new Date(d).toISOString(), sleep: () => {} },
+  // Pattern-aware, because the office spool files a note under the DAY it was
+  // written and stamps it with the time (see 88_office_daily_digest.gs).
+  Utilities: {
+    formatDate: (d, tz, pattern) => {
+      if (pattern === 'yyyy-MM-dd') return '2026-09-08';
+      if (pattern === 'HH:mm') return '11:30';
+      return new Date(d).toISOString();
+    },
+    sleep: () => {}
+  },
+  // A REAL STORE, not a stub that forgets: the daily digest is a spool, so a
+  // property that never reads back would make every note look like the first.
   PropertiesService: {
     getScriptProperties: () => ({
-      getProperty: () => null, setProperty: () => {}, setProperties: () => {}, deleteProperty: () => {}
+      getProperty: key => (Object.prototype.hasOwnProperty.call(props, key) ? props[key] : null),
+      setProperty: (key, value) => { props[key] = value; },
+      setProperties: obj => { Object.keys(obj).forEach(k => { props[k] = obj[k]; }); },
+      deleteProperty: key => { delete props[key]; },
+      getKeys: () => Object.keys(props)
     })
   },
   SpreadsheetApp: {
@@ -38,7 +54,10 @@ const sandbox = {
   ScriptApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {},
   MailApp: {
     getRemainingDailyQuota: () => quota,
-    sendEmail: options => sentMail.push(options)
+    // Both shapes: the rationed mailer passes an options object, the office
+    // digest and the urgent fault reports pass (to, subject, body).
+    sendEmail: (a, subject, body) => sentMail.push(
+      a && typeof a === 'object' ? a : { to: a, subject, body })
   }
 };
 vm.createContext(sandbox);
@@ -56,6 +75,10 @@ this.legacyAdminNotificationRowValues = legacyAdminNotificationRowValues;
 this.sendRationedEmail = sendRationedEmail;
 this.normalizeBccList = normalizeBccList;
 this.notifyAdmin = notifyAdmin;
+this.notifyAdminUrgent = notifyAdminUrgent;
+this.readOfficeDigestDay = readOfficeDigestDay;
+this.sendOfficeDigestForDay = sendOfficeDigestForDay;
+this.officeDigestDateKey = officeDigestDateKey_;
 this.resetRationedMailState = resetRationedMailState;
 this.invalidateConfigCaches = invalidateConfigCaches;
 this.ensureSheetColumns = ensureSheetColumns;
@@ -339,22 +362,65 @@ check('while the same message with nobody copied still goes',
   'sent');
 
 // ---------------------------------------------------------------------------
-// 5. notifyAdmin(): one message, however many people are ticked for the digest.
+// 5. THE OFFICE HEARS ONCE A DAY.
+//
+// notifyAdmin() no longer sends anything: it files a line for the 10am digest,
+// which goes to EVERYONE on the table, ticked or not. What the ticks still
+// decide is who gets the handful of faults that cannot wait — notifyAdminUrgent().
 // ---------------------------------------------------------------------------
 sentMail.length = 0;
+Object.keys(props).forEach(k => delete props[k]);
 useSheet(fakeConfigSheet(tableCells([
   ['dana@example.org', true, false, false, false],
   ['lee@example.org', true, false, false, false],
   ['no-digest@example.org', false, true, true, true]
 ])));
-check('the digest is sent', sandbox.notifyAdmin('subject', 'body'), true);
-check('as ONE message to everyone ticked for it, and nobody else',
+
+check('the note is filed', sandbox.notifyAdmin('Forms that could not be opened', '1a2b3c'), true);
+check('and nothing at all is mailed when it is filed', sentMail.length, 0);
+
+// The same complaint every hour is one line with a count, not twenty-four
+// lines — the whole reason the office stopped reading these.
+sandbox.notifyAdmin('Forms that could not be opened', '1a2b3c');
+const today = sandbox.officeDigestDateKey(new Date());
+const spooled = sandbox.readOfficeDigestDay(today);
+check('one entry, however many times it happened', spooled.length, 1);
+check('...counted rather than repeated', spooled[0].n, 2);
+check('...filed under the subject it came in with', spooled[0].s, 'Forms that could not be opened');
+
+check('the digest goes out', sandbox.sendOfficeDigestForDay(today), true);
+check('as ONE message to everybody on the table, ticked or not',
+  sentMail.map(m => m.to || m), ['dana@example.org,lee@example.org,no-digest@example.org']);
+check('the day it covers is in the subject', sentMail[0].subject.indexOf(today) > 0, true);
+check('and the note is in the body', sentMail[0].body.indexOf('1a2b3c') !== -1, true);
+check('...with the count it was seen', sentMail[0].body.indexOf('2×') !== -1, true);
+check('the spool is cleared once the message is away',
+  sandbox.readOfficeDigestDay(today).length, 0);
+check('a day with nothing on it sends nothing', sandbox.sendOfficeDigestForDay(today), false);
+
+// The exception: a fault the desk may need within the hour.
+sentMail.length = 0;
+check('an urgent fault is sent at once',
+  sandbox.notifyAdminUrgent('Quick Mark did not save: Ada', 'body'), true);
+check('...to the people ticked for Sync_Digest, and nobody else',
   sentMail.map(m => m.to || m), ['dana@example.org,lee@example.org']);
 
+// Nobody ticked is not permission to stay silent about a fault.
 sentMail.length = 0;
+useSheet(fakeConfigSheet(tableCells([['dana@example.org', false, false, false, false]])));
+check('with nobody ticked, an urgent fault goes to the whole table instead',
+  [sandbox.notifyAdminUrgent('subject', 'body'), sentMail.map(m => m.to || m)],
+  [true, ['dana@example.org']]);
+
+sentMail.length = 0;
+Object.keys(props).forEach(k => delete props[k]);
 useSheet(fakeConfigSheet({}));
-check('and an empty table sends nothing at all', sandbox.notifyAdmin('subject', 'body'), false);
-check('with no message spent on it', sentMail.length, 0);
+check('an empty table still files the note', sandbox.notifyAdmin('subject', 'body'), true);
+check('...but has nobody to send the digest to',
+  sandbox.sendOfficeDigestForDay(sandbox.officeDigestDateKey(new Date())), false);
+check('and an urgent fault with no addresses at all sends nothing',
+  sandbox.notifyAdminUrgent('subject', 'body'), false);
+check('with no message spent on any of it', sentMail.length, 0);
 
 console.log(failures === 0 ? '\nAll admin notification checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

@@ -3,9 +3,14 @@
 // Staff addresses ticked for Calendar_Invite_Guest used to be added to every
 // event a registrant was invited to, which put the whole program calendar on
 // four or five people's own calendars, one Google invitation at a time. They
-// now get one plain-text digest per pass instead, and this pins the two things
-// that made the change worth making: the pass adds nobody but registrants, and
-// the digest says who was told and how.
+// are told in writing instead, and this pins the two things that made the
+// change worth making: the pass adds nobody but registrants, and what the
+// office reads says who was told and how.
+//
+// WHERE THAT WRITING GOES has changed once since: it was an email per sync to
+// everyone ticked for Calendar_Invite_Guest, and it is now one line per session
+// in the 10am office digest (88_office_daily_digest.gs), beside the reminders
+// and roster alerts that went out the same day.
 const fs = require('fs');
 const vm = require('vm');
 
@@ -31,11 +36,8 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.registrantNamesByEmail = registrantNamesByEmail;
 this.describeInvitee = describeInvitee;
-this.buildCalendarInviteDigestSubject = buildCalendarInviteDigestSubject;
-this.buildCalendarInviteDigestBody = buildCalendarInviteDigestBody;
 this.calendarInviteAdminCleanupTargets = calendarInviteAdminCleanupTargets;
 this.notifyOfficeOfCalendarInvites = notifyOfficeOfCalendarInvites;
-this.INVITE_DIGEST_QUOTA_RESERVE = INVITE_DIGEST_QUOTA_RESERVE;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 `, sandbox, { filename: 'program.gs' });
@@ -55,8 +57,10 @@ function checkTrue(name, actual) { check(name, !!actual, true); }
 const inviteSource = fs.readFileSync(`${__dirname}/../33_calendar_invitations.gs`, 'utf8');
 checkTrue('no office address is added to a guest list any more',
   inviteSource.indexOf('officeGuests') === -1);
-checkTrue('the ticked category is still read — for the digest',
-  inviteSource.indexOf("adminEmailsForCategory('calendarInviteGuest')") !== -1);
+checkTrue('and no office address is mailed by this pass at all any more',
+  inviteSource.indexOf('adminEmailsForCategory') === -1);
+checkTrue('what the office is told is written for the daily digest instead',
+  inviteSource.indexOf('spoolOfficeNote') !== -1);
 
 // ---------------------------------------------------------------------------
 // Who each address belongs to, for a digest a person can read.
@@ -91,22 +95,27 @@ const changes = [
     removed: ['pat@example.org']
   }
 ];
-check('the subject counts both directions and the sessions',
-  sandbox.buildCalendarInviteDigestSubject(changes),
-  'Calendar invitations: 1 invited, 1 removed across 2 session(s)');
+const spooled = [];
+vm.runInContext('spoolOfficeNote = function (section, message) { ' +
+  'this.__spooled.push({ section, message }); return true; };', sandbox);
+sandbox.__spooled = spooled;
 
-const body = sandbox.buildCalendarInviteDigestBody(changes);
-checkTrue('the body names the session', body.indexOf('Chair Yoga') !== -1);
-checkTrue('the body says who was invited', body.indexOf('Ada Lovelace <ada@example.org>') !== -1);
-checkTrue('the body says HOW they were told',
-  body.indexOf('Google calendar invitation') !== -1);
-checkTrue('the body says who came off', body.indexOf('pat@example.org') !== -1);
-checkTrue('the body says where the copy list comes from',
-  body.indexOf('Calendar_Invite_Guest') !== -1);
+check('one line per session whose guest list changed',
+  sandbox.notifyOfficeOfCalendarInvites(changes), 2);
+check('filed under one heading, so a busy morning reads as one block',
+  spooled.map(e => e.section), ['Calendar invitations', 'Calendar invitations']);
+checkTrue('the line names the session', spooled[0].message.indexOf('Chair Yoga') !== -1);
+checkTrue('and says who was invited',
+  spooled[0].message.indexOf('Ada Lovelace <ada@example.org>') !== -1);
+checkTrue('and who came off the other one', spooled[1].message.indexOf('pat@example.org') !== -1);
+checkTrue('...as a removal, not an invitation',
+  spooled[1].message.indexOf('removed') !== -1 && spooled[1].message.indexOf('invited') === -1);
 
-// Nothing changed, nothing sent — the hourly sync must not mail the office
-// every hour to say so.
-check('an empty pass sends nothing', sandbox.notifyOfficeOfCalendarInvites([]), 0);
+// Nothing changed, nothing written — the hourly sync must not put a line in
+// the digest every hour to say that nothing happened.
+spooled.length = 0;
+check('an empty pass writes nothing', sandbox.notifyOfficeOfCalendarInvites([]), 0);
+check('...and files nothing', spooled.length, 0);
 
 // ---------------------------------------------------------------------------
 // The one-time cleanup picks staff addresses out of a guest list.

@@ -1231,7 +1231,7 @@ function buildDoorAppHtml(options) {
    * If the write actually fails, the visitor has already moved on by the
    * time anyone could know — so this does not surface an error on the
    * tablet at all. doorSignIn() (section 16f) catches that server-side and
-   * emails staff through notifyAdmin() instead, which runs to completion
+   * emails staff through notifyAdminUrgent() instead, which runs to completion
    * whether or not the tablet is still listening. needsPin is the one
    * exception: a stale PIN fails every sign-in after this one, not just
    * this visitor's, so it still interrupts with the PIN screen.

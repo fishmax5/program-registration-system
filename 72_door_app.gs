@@ -113,10 +113,12 @@ function doorDay(payload) {
  * throw is caught rather than surfacing as a raw error the page never reads,
  * and anything that comes back other than success or a wrong PIN (the app's
  * own PIN screen still catches that, because a stale PIN fails every sign-in
- * after it, not just this one) is emailed to staff through notifyAdmin() —
- * to everyone ticked for the sync digest on Config's Admin Notification
- * Emails table, the same people every other admin notification in this
- * workbook already reaches — so the visit can be entered by hand.
+ * after it, not just this one) is emailed to staff through
+ * notifyAdminUrgent() — to everyone ticked for the sync digest on Config's
+ * Admin Notification Emails table — so the visit can be entered by hand.
+ * URGENT rather than the 10am office digest (88) precisely because somebody
+ * is standing at the door: this is one of the two things in the workbook
+ * that still mails the office the moment it happens.
  */
 function doorSignIn(payload) {
   const args = parseCheckInPayload(payload);
@@ -196,7 +198,9 @@ function reportDoorSignInFailure(payload, reason) {
     '',
     'Please check whether this visit needs to be entered by hand.'
   ];
-  notifyAdmin('[Door app] A sign-in did not complete', lines.join('\n'));
+  // URGENT, not the daily digest: somebody is standing at the door and the
+  // visit may need entering by hand today. See notifyAdminUrgent() (15).
+  notifyAdminUrgent('[Door app] A sign-in did not complete', lines.join('\n'));
 }
 
 /**

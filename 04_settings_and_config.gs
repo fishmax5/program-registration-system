@@ -109,31 +109,45 @@ const ADMIN_NOTIFICATION_MAX_ROWS = 5;
  * Email column is offset 0). `key` is what the row object reads back as —
  * see getAdminNotificationRows() and adminEmailsForCategory().
  *
- *   SYNC_DIGEST            The per-sync digest notifyAdmin() sends: waitlisted
- *                          registrants, forms that failed to open, triaged
- *                          events, a door sign-in that did not complete. Was
+ * ONE EMAIL A DAY, TO EVERYBODY HERE. Office mail is a spool and a single
+ * 10am send now (see 88_office_daily_digest.gs), and it goes to every address
+ * in this table whether it is ticked or not. So four of the five ticks below
+ * no longer route anything: they are kept as the record of who used to be
+ * copied on what, and their cell notes say exactly that rather than pretending
+ * otherwise. Deleting a column from a live Config tab loses that record for
+ * good, which is a worse trade than an honest checkbox nobody has to tick.
+ *
+ *   SYNC_DIGEST            THE ONE TICK THAT STILL DECIDES SOMETHING: who is
+ *                          mailed at once by notifyAdminUrgent() when a fault
+ *                          cannot wait until ten tomorrow — a Quick Mark that
+ *                          would not save, a door sign-in that did not
+ *                          complete. Nobody ticked means everyone in the
+ *                          table, because a fault report is the one message an
+ *                          unticked box must not silence. Was
  *                          Admin_Notification_Email.
- *   LEADER_ROSTER_ALERTS   BCC on the roster-change email a program leader
- *                          gets (section 9d). Was Archive_Copy_Email.
- *   REGISTRANT_REMINDERS   Copied on the reminder a registrant gets (section
- *                          9e) — as a SEPARATE forwarded message, not a BCC
- *                          line: the member's copy names the member alone, and
- *                          reply-all on the office's copy reaches the desk
- *                          rather than the member. See THE OFFICE COPY in
- *                          section 9f.
- *                          Was Archive_Copy_Email.
- *   CALENDAR_INVITE_GUEST  Added as a GUEST on any event a registrant is
- *                          invited to (section 5b). Was Archive_Copy_Email.
- *                          A guest, not a CC — Google mails them the invitation
- *                          itself — so it is a tick per person, not a BCC line.
- *   APPOINTMENT_REQUESTS   Emailed when a sync files somebody onto
- *                          Assistance_Requests: a person who wanted a
- *                          personalized-assistance appointment and could not
- *                          be offered a time (see ASSISTANCE_NO_TIME_CHOICE).
- *                          Its own tick rather than a line in the sync digest
- *                          because it is not a fault report — it is a person
- *                          waiting for a phone call, and whoever makes that
- *                          call is rarely whoever reads the digest.
+ *   LEADER_ROSTER_ALERTS   Was a BCC on the roster-change email a program
+ *                          leader gets (section 9d). Now a line in the daily
+ *                          digest naming the leader, the program and how many
+ *                          changes — and the leader's copy carries no office
+ *                          address at all.
+ *   REGISTRANT_REMINDERS   Was a forwarded "[Office copy]" of every reminder a
+ *                          registrant gets (section 9e). Now a line in the
+ *                          daily digest per reminder sent. A send costs one
+ *                          message against the day's hundred rather than one
+ *                          plus the size of this table.
+ *   CALENDAR_INVITE_GUEST  Was a per-sync digest of guest-list changes, and
+ *                          before that a guest on the events themselves
+ *                          (section 5b). Now a line per session in the daily
+ *                          digest. Still never a guest — Admin ▸ Repair ▸
+ *                          "Remove Office Guests from Calendar Events" takes
+ *                          anyone still on one back off.
+ *   APPOINTMENT_REQUESTS   Was its own email when a sync filed somebody onto
+ *                          Assistance_Requests (see ASSISTANCE_NO_TIME_CHOICE)
+ *                          — a person waiting for a phone call. Now its own
+ *                          SECTION in the daily digest, which is the same
+ *                          separation from the fault reports that earned it a
+ *                          tick of its own, at one message a day instead of
+ *                          one a sync.
  *
  * BEING AN EDITOR of the registrant sheets and forms this system shares is
  * deliberately NOT a category. It is not mail at all, it is standing access to
@@ -463,8 +477,8 @@ const AUTOMATION_FLAG_CACHE_KEY = 'AUTOMATION_ENABLED_FLAG';
 // event is written), so pausing mail cannot stop those; take Invite_Registrants
 // off for that.
 //
-// WHAT IT DOES NOT PAUSE: notifyAdmin(), which is office mail about the
-// workbook itself. Silencing the channel that would tell you the repair went
+// WHAT IT DOES NOT PAUSE: the office's own daily digest (88) or the urgent
+// fault reports beside it, which are office mail about the workbook itself. Silencing the channel that would tell you the repair went
 // wrong is exactly backwards, and it is not what anybody means by "don't email
 // the members".
 //
