@@ -14,9 +14,18 @@
 // So this is one public, read-only page: everything running between now and
 // the end of next month, filtered to a week or a month with one tap, and every
 // session carrying the CURRENT registration link for that session. Tapping a
-// session opens the Google Form this workbook already generates and maintains
-// for it. Nothing here registers anybody, and nothing here is a second place a
+// date opens the Google Form this workbook already generates and maintains for
+// it. Nothing here registers anybody, and nothing here is a second place a
 // registration can come from — the form is still the only door in.
+//
+// READ BY PROGRAM, NOT BY DATE. The page draws one card per PROGRAM carrying
+// its dates (see 87), so each session says which program it belongs to
+// (`programKey` — title + building) rather than being filed under a day of
+// its own. A weekly class was eight near-identical cards down a phone screen
+// and lunch was one a day for two months; both are one card now. Lunch is
+// also RENAMED here: the session tab calls those rows "🥡 Lunch Only (no
+// program)", which is machinery talking to itself, and on a flyer's calendar
+// it is Lunch, at a building the card already names.
 //
 // WHAT IT DELIBERATELY DOES NOT CARRY, and why the page can be public at all:
 //
@@ -55,6 +64,30 @@
 // never been the authority on whether there is a seat, and does not claim to
 // be.
 // ============================================================================
+
+/** What lunch is called on a page a stranger reads. See buildPublicSessionRow(). */
+const PUBLIC_LUNCH_PROGRAM_TITLE = 'Lunch';
+
+/**
+ * THE PARAGRAPH AT THE TOP OF THE PAGE — the only words here written for
+ * somebody who does not yet know what this place is.
+ *
+ * Every other page this deployment serves opens straight onto a list, because
+ * everybody holding one already knows whose list it is. This link is printed
+ * on a flyer and forwarded by a neighbour, so the page has to say what it is
+ * before it says what is on. Kept as one string here rather than typed into
+ * the page's markup so the office can change the sentence without touching
+ * HTML — and deliberately short: the calendar is what somebody came for.
+ *
+ * The NAME, PHONE and EMAIL beside it are not repeated here — they are
+ * CENTER_NAME / CENTER_PHONE / CENTER_EMAIL in `04`, the same three constants
+ * the forms and the sign-in sheet print, so a changed number cannot be right
+ * on a form and wrong on the calendar.
+ */
+const PUBLIC_CALENDAR_INTRO =
+  'Classes, clubs, trips, lunch and one-to-one help \u2014 most days, at both of our ' +
+  'buildings. Pick a program below and tap a date to open its sign-up form. Would you ' +
+  'rather sign up by phone, or have a question about a program? Please call us.';
 
 /** How long a built snapshot is served to everybody who asks. See the banner. */
 const PUBLIC_CALENDAR_CACHE_SECONDS = 300;
@@ -163,6 +196,18 @@ function buildPublicProgramCalendar() {
 
   return {
     ok: true,
+    // WHO THIS IS, for the one reader who does not already know. See
+    // PUBLIC_CALENDAR_INTRO — and note the addresses are only for buildings
+    // that actually have something on, for the same reason the location
+    // filter is: a page that names a building with nothing in it is a page
+    // somebody drives to.
+    intro: {
+      name: CENTER_NAME,
+      blurb: PUBLIC_CALENDAR_INTRO,
+      phone: CENTER_PHONE,
+      email: CENTER_EMAIL,
+      places: Object.keys(locations).sort().map(describeLocationWithAddress)
+    },
     // Stamped so the page can say how old what it is showing is, rather than
     // presenting a five-minute-old cache as this second's truth.
     generatedAt: Utilities.formatDate(new Date(), TIMEZONE, 'MMM d, h:mm a'),
@@ -209,12 +254,23 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
   if (/cancel/i.test(status)) return null;
 
   const eventId = String(row[map['Event_ID']] || '').trim();
+  const lunch = isLunchOnlyEventId(eventId);
   const linkCell = row[map['Form_Response_Link']];
   const url = hyperlinkFormulaUrl(linkCell);
   const noRegistration = isNoRegistrationColumnValue(row[map['No_Registration']])
     || String(linkCell || '').trim() === NO_REGISTRATION_LINK_LABEL;
   const waitlistOnly = isWaitlistOnlyColumnValue(row[map['Waitlist_Only']])
     || status === WAITLIST_ONLY_STATUS;
+
+  const location = String(row[map['Location']] || '').trim();
+  // WHAT THE LUNCH ROWS ARE CALLED HERE. On the session tab a lunch-only row
+  // is named for the machinery that made it — "🥡 Lunch Only (no program)",
+  // or "Lunch @ Narberth — Chx Parm" — and a stranger reading a flyer's
+  // calendar has no idea what "(no program)" is denying. It is lunch, at a
+  // building, and the building is already on the card: one program called
+  // Lunch per location, which is also what stops twenty dated lunch rows
+  // filling the page.
+  const publicTitle = lunch ? PUBLIC_LUNCH_PROGRAM_TITLE : title;
 
   return {
     // Nothing is keyed on this in the workbook — it is the browser's own list
@@ -223,14 +279,24 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
     dateKey,
     weekday: Utilities.formatDate(date, TIMEZONE, 'EEE'),
     dayLabel: Utilities.formatDate(date, TIMEZONE, 'EEEE, MMMM d'),
+    // The short form the date chips on a program card are drawn with — one
+    // per session, so the label a person taps is built once, here, rather
+    // than by parsing a date key in the browser.
+    shortLabel: Utilities.formatDate(date, TIMEZONE, 'EEE MMM d'),
     monthLabel: Utilities.formatDate(date, TIMEZONE, 'MMMM yyyy'),
-    title,
-    location: String(row[map['Location']] || '').trim(),
-    time: String(row[map['Event_Time']] || '').trim(),
+    title: publicTitle,
+    // WHAT THE PAGE GROUPS ON. The calendar reads by PROGRAM, not by date:
+    // a weekly class is one card carrying its dates, not six cards a page
+    // apart. Title + building, because that is the thing a person signs up
+    // for — a `[Shared]` program running in two buildings is two cards, and
+    // has to be: they are two different rooms to turn up at.
+    programKey: `${(publicTitle || '').toLowerCase()}|${location.toLowerCase()}`,
+    location,
+    time: publicSessionTimeLabel_(row, map, date),
     // Sorting on the CELL is what puts 9:30 AM above 1:00 PM; sorting on the
     // label would put "1:00 PM" first, every day, on every building.
     sortTime: publicSessionSortTime_(date),
-    lunch: isLunchOnlyEventId(eventId),
+    lunch,
     club: isClubColumnValue(row[map['Club']]),
     appointment: isAssistanceColumnValue(row[map['Personalized_Assistance']]),
     // The link is withheld from a session nobody may register for, so a card
@@ -239,6 +305,30 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
     state: publicSessionState_(noRegistration, waitlistOnly, url, status),
     seats: publicSeatsPhrase_(row, map, noRegistration, waitlistOnly)
   };
+}
+
+/**
+ * THE TIME, AS WORDS — BUILT, NEVER READ OFF THE CELL.
+ *
+ * Event_Time on the session tab is a FORMULA (see setEventTimeFormulas), and
+ * this file's read is deliberately formula-preserving because the sign-up
+ * link exists only inside a formula. So the Event_Time cell arrives here as
+ * `=IF(W9="",TEXT(A9,"h:mm AM/PM"),…)` — which is exactly what a page printed
+ * on the open internet put where the time should have been.
+ *
+ * Rebuilt from the row's own start and end instead, which is where that
+ * formula was reading it from anyway. The cell is still the fallback for a
+ * row that holds words rather than a formula (a hand-typed or legacy row);
+ * a value that starts with '=' is never one of those.
+ */
+function publicSessionTimeLabel_(row, map, date) {
+  const start = formatTimeLabel(date);
+  const endCell = map['Event_End'] === undefined ? '' : row[map['Event_End']];
+  const end = formatTimeLabel(coerceDate(endCell));
+  if (start && end && end !== start) return `${start} \u2013 ${end}`;
+  if (start) return start;
+  const raw = String(row[map['Event_Time']] || '').trim();
+  return raw.charAt(0) === '=' ? '' : raw;
 }
 
 /** 'HHmm' from the session's start, for sorting. */
@@ -311,9 +401,10 @@ function publicSeatsPhrase_(row, map, noRegistration, waitlistOnly) {
 //      The page measures itself and posts its height out (see the resizer in
 //      publicCalendarEmbedSnippet) — the host listens and grows the frame, so
 //      there is one scrollbar on the screen and it belongs to the website.
-//   3. LETS ONE PAGE BE ONE BUILDING. ?building= and ?view= pin the filters
-//      the page would otherwise open on, so the Narberth page embeds
-//      Narberth's week and the events page embeds everything.
+//   3. LETS ONE PAGE BE ONE BUILDING. ?building= pins the building and ?span=
+//      the range — the same ?span= the two printed links carry, read by the
+//      same function — so the Narberth page embeds Narberth's week and the
+//      events page embeds everything.
 //
 // WHAT IT DELIBERATELY DOES NOT DO IS RELAX ANYTHING. The embed reads the same
 // snapshot the public link reads, through the same function, with the same
@@ -332,13 +423,6 @@ function publicSeatsPhrase_(row, map, noRegistration, waitlistOnly) {
  */
 const PUBLIC_CALENDAR_EMBED_MESSAGE = 'programCalendarHeight.v1';
 
-/** The three ranges the page can open on, in the spellings an embed may use. */
-const PUBLIC_CALENDAR_EMBED_RANGES = {
-  week: 7, 'this-week': 7, '7': 7,
-  month: 31, 'this-month': 31, '31': 31,
-  all: 0, everything: 0, '0': 0
-};
-
 /**
  * THE PRESENTATION OPTIONS IN A REQUEST — and nothing else is read from one.
  *
@@ -355,17 +439,18 @@ const PUBLIC_CALENDAR_EMBED_RANGES = {
  */
 function publicCalendarViewOptions(params) {
   const p = params || {};
-  const asked = String(p.view || p.range || '').trim().toLowerCase();
-  const range = Object.prototype.hasOwnProperty.call(PUBLIC_CALENDAR_EMBED_RANGES, asked)
-    ? PUBLIC_CALENDAR_EMBED_RANGES[asked]
-    : null;
   return {
     embed: isPublicCalendarEmbedRequest_(p),
     // ?building= is the word a person writing the embed reaches for; ?location=
     // is what every other page on this deployment already calls it, and a URL
     // that carries both is answered by the one that is about this page.
     location: String(p.building || p.location || p.loc || '').trim(),
-    days: range
+    // ONE VOCABULARY FOR THE RANGE, and it is the printed link's. An embed
+    // pinning a week and a newsletter link opening on one are the same thing
+    // said by two different people, so they are read by one function
+    // (publicCalendarSpanRequested_, in 60) and a spelling that works in a
+    // newsletter works in an iframe without anybody having to know it should.
+    span: publicCalendarSpanRequested_(p)
   };
 }
 
@@ -385,19 +470,17 @@ function isPublicCalendarEmbedRequest_(params) {
 /**
  * THE URL A WEBSITE FRAMES. Same route, same page, ?embed=1 on it.
  *
- * options: { location, view } — both optional, both pins (see the banner).
- * Returns '' when the script has never been deployed, which the dialog draws
- * as "no link yet" rather than as a snippet nobody can use.
+ * options: { location, span } — both optional, both pins (see the banner), and
+ * the span is spelled the way the printed links spell it. Returns '' when the
+ * script has never been deployed, which the dialog draws as "no link yet"
+ * rather than as a snippet nobody can use.
  */
 function publicCalendarEmbedUrl(options) {
   const opts = options || {};
   return checkInPageUrl({
     mode: 'public',
-    params: {
-      embed: '1',
-      building: opts.location || '',
-      view: opts.view || ''
-    }
+    span: opts.span || '',
+    params: { embed: '1', building: opts.location || '' }
   });
 }
 

@@ -20,7 +20,20 @@
 //   5. THE PAGE SURVIVES AN APOSTROPHE AND A </script>. Titles are typed by
 //      staff into a calendar.
 //   6. ?mode=public REACHES IT, in every spelling, and is never answered by a
-//      page that asks for a staff PIN.
+//      page that asks for a staff PIN — and ?span=week / ?span=month are the
+//      two printable links, which only choose the filter the page opens on.
+//   7. THE TIME IS THE TIME, NOT THE FORMULA THAT MAKES IT. Event_Time holds
+//      an =IF(…TEXT(…)) formula and this read is formula-preserving (see 2),
+//      so the label is rebuilt from the row's own start and end. A public
+//      page showing a spreadsheet formula where the time should be is what
+//      this pins against.
+//   8. THE PAGE READS BY PROGRAM. Every session carries the programKey the
+//      tiles are grouped on, and a lunch-only row is called Lunch at its
+//      building rather than "Lunch Only (no program)".
+//   9. THE PAGE SAYS WHOSE CALENDAR IT IS. The snapshot carries the centre's
+//      name, phone, email and the addresses of the buildings that have
+//      something on — out of the same constants the forms print, so a
+//      changed phone number cannot be right on a form and wrong here.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
@@ -36,6 +49,11 @@ const sandbox = {
       switch (fmt) {
         case 'yyyy-MM-dd': return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         case 'EEE': return DAYS[d.getDay()].slice(0, 3);
+        case 'EEE MMM d': return `${DAYS[d.getDay()].slice(0, 3)} ${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+        case 'h:mm a': {
+          const h = d.getHours() % 12 || 12;
+          return `${h}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+        }
         case 'EEEE, MMMM d': return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
         case 'MMMM yyyy': return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
         case 'HHmm': return `${pad(d.getHours())}${pad(d.getMinutes())}`;
@@ -78,7 +96,11 @@ const sandbox = {
   CacheService: { getScriptCache: () => { throw new Error('no cache here'); } }
 };
 vm.createContext(sandbox);
-vm.runInContext(src + ';this.HEADERS = HEADERS;', sandbox, { filename: 'program.gs' });
+// `const`s declared at the top of a vm script are not properties of its
+// global object, so the few this file asserts on are handed out by name.
+vm.runInContext(src + ';this.HEADERS = HEADERS;'
+  + 'this.CENTER_NAME = CENTER_NAME; this.CENTER_PHONE = CENTER_PHONE;'
+  + 'this.CENTER_EMAIL = CENTER_EMAIL;', sandbox, { filename: 'program.gs' });
 
 let fail = 0;
 function ok(name, cond) {
@@ -105,12 +127,38 @@ function row(fields) {
 }
 
 const VIEW = 'https://docs.google.com/forms/d/e/PUB1/viewform';
+const endAt = (offset, hour) => new Date(today.getFullYear(), today.getMonth(),
+  today.getDate() + offset, hour, 30);
 const rows = [
   row({
+    // Event_Time as the FORMULA the session tab actually holds — this read is
+    // formula-preserving, so this is what a public page was handed.
     Event_Date: dayAt(2), Location: 'Narberth', Clean_Title: "Ruth's Chair Yoga",
-    Event_Time: '9:30 AM – 10:30 AM', Status: '🟢 Open', Event_ID: 'EV1',
+    Event_Time: '=IF(W9="",TEXT(A9,"h:mm AM/PM"),TEXT(A9,"h:mm AM/PM")&" – "&TEXT(W9,"h:mm AM/PM"))',
+    Event_End: endAt(2, 10),
+    Status: '🟢 Open', Event_ID: 'EV1',
     Form_Response_Link: `=HYPERLINK("${VIEW}","View Live Form")`,
     Max_Capacity: 20, Remaining_Seats: 12
+  }),
+  // The same program a week later — one card, two dates.
+  row({
+    Event_Date: dayAt(9), Location: 'Narberth', Clean_Title: "Ruth's Chair Yoga",
+    Event_Time: '=IF(W10="",TEXT(A10,"h:mm AM/PM"),"")', Event_End: endAt(9, 10),
+    Status: '🟢 Open', Event_ID: 'EV1B',
+    Form_Response_Link: `=HYPERLINK("${VIEW}","View Live Form")`,
+    Max_Capacity: 20, Remaining_Seats: 12
+  }),
+  // Two lunch-only rows at one building: one program called Lunch, not two
+  // cards called "Lunch Only (no program)".
+  row({
+    Event_Date: dayAt(1), Location: 'Narberth', Clean_Title: '🥡 Lunch Only (no program)',
+    Status: '🟢 Open', Event_ID: 'LUNCHONLY:2099-01-01|Narberth',
+    Form_Response_Link: `=HYPERLINK("${VIEW}","View Live Form")`
+  }),
+  row({
+    Event_Date: dayAt(2), Location: 'Narberth', Clean_Title: 'Lunch @ Narberth — Chx Parm',
+    Status: '🟢 Open', Event_ID: 'LUNCHONLY:2099-01-02|Narberth',
+    Form_Response_Link: `=HYPERLINK("${VIEW}","View Live Form")`
   }),
   // Almost full, and the seat count is the fact that changes an afternoon.
   row({
@@ -152,8 +200,19 @@ const byTitle = title => snap.sessions.filter(s => s.title === title)[0];
 // ---------------------------------------------------------------------------
 // 1. What may leave the workbook — the whole field list, pinned.
 // ---------------------------------------------------------------------------
-const ALLOWED = ['id', 'dateKey', 'weekday', 'dayLabel', 'monthLabel', 'title', 'location',
-  'time', 'sortTime', 'lunch', 'club', 'appointment', 'url', 'state', 'seats'];
+// The intro is snapshot-level, not session-level: it is the same four facts
+// for everybody and carries nothing about anybody.
+ok('the snapshot introduces the centre by the constants the forms print',
+  snap.intro.name === sandbox.CENTER_NAME && snap.intro.phone === sandbox.CENTER_PHONE
+  && snap.intro.email === sandbox.CENTER_EMAIL && !!snap.intro.blurb);
+ok('and names only the buildings that have something on, with their addresses',
+  snap.intro.places.length === 2
+  && snap.intro.places[0].indexOf('Ashbridge') === 0
+  && snap.intro.places[1].indexOf('100 Conway') !== -1);
+
+const ALLOWED = ['id', 'dateKey', 'weekday', 'dayLabel', 'shortLabel', 'monthLabel', 'title',
+  'programKey', 'location', 'time', 'sortTime', 'lunch', 'club', 'appointment', 'url',
+  'state', 'seats'];
 const extra = Object.keys(snap.sessions[0]).filter(k => ALLOWED.indexOf(k) === -1);
 ok('a public session carries only the agreed fields (found: ' + extra.join(', ') + ')',
   extra.length === 0);
@@ -190,6 +249,36 @@ ok('a session with room says so without publishing a headcount',
 ok('the club tag reaches the page', byTitle('Book Club').club === true);
 
 // ---------------------------------------------------------------------------
+// 3a. The time is the time, and lunch is called Lunch.
+// ---------------------------------------------------------------------------
+ok('no session carries a spreadsheet formula where its time should be',
+  snap.sessions.every(s => s.time.charAt(0) !== '='));
+ok('a session with an end time reads as a range',
+  byTitle("Ruth's Chair Yoga").time === '9:30 AM – 10:30 AM');
+ok('a lunch-only row is called Lunch and nothing else',
+  snap.sessions.filter(s => s.lunch).length === 2
+  && snap.sessions.filter(s => s.lunch).every(s => s.title === 'Lunch'));
+ok('lunch is contained by building, so both of its dates are one program',
+  new Set(snap.sessions.filter(s => s.lunch).map(s => s.programKey)).size === 1);
+ok('...and that building is on the row that says so',
+  snap.sessions.filter(s => s.lunch).every(s => s.location === 'Narberth'));
+ok('no session still carries the "no program" wording',
+  JSON.stringify(snap).indexOf('no program') === -1);
+
+// ---------------------------------------------------------------------------
+// 3b. The grouping the page reads by.
+// ---------------------------------------------------------------------------
+const yoga = snap.sessions.filter(s => s.title === "Ruth's Chair Yoga");
+ok('two dates of one program share one programKey',
+  yoga.length === 2 && yoga[0].programKey === yoga[1].programKey);
+ok('two different programs do not',
+  yoga[0].programKey !== byTitle('Book Club').programKey);
+ok('the same program at two buildings would be two cards',
+  yoga[0].programKey.indexOf('narberth') !== -1);
+ok('every session carries the short date label a chip is drawn with',
+  snap.sessions.every(s => !!s.shortLabel));
+
+// ---------------------------------------------------------------------------
 // 4. The window and the ordering.
 // ---------------------------------------------------------------------------
 ok('the window starts today', snap.todayKey === sandbox.formatDateKey(new Date()));
@@ -218,11 +307,36 @@ ok('a title cannot close the page\'s script block',
   (html.match(/<\/script>/g) || []).length === 1);
 ok('no data is written into the page with innerHTML',
   html.indexOf('innerHTML') === -1);
+ok('the page draws one tile per program rather than one per date',
+  html.indexOf('programsFrom') !== -1 && html.indexOf('programKey') !== -1);
+ok('the introduction is inlined with the first frame',
+  html.indexOf(sandbox.CENTER_NAME) !== -1 && html.indexOf(sandbox.CENTER_PHONE) !== -1
+  && html.indexOf('Ashbridge House') !== -1);
+ok('the tiles are laid out two to a row',
+  /#list \{[^}]*grid-template-columns: repeat\(2/.test(html));
+ok('lunch is pinned ahead of everything else',
+  html.indexOf('return lunch.concat(rest);') !== -1);
+ok('the whole tile is the button, and its dates are still their own links',
+  html.indexOf("card.setAttribute('role', 'button')") !== -1
+  && html.indexOf('event.stopPropagation();') !== -1);
+ok('a keyboard gets what the mouse gets',
+  html.indexOf('card.tabIndex = 0') !== -1 && html.indexOf("event.key === 'Enter'") !== -1);
+ok('"waiting list" is said about a program only when every date in view is full',
+  html.indexOf('var everyDateFull = withForm.length > 0 && fullDates.length === withForm.length;')
+    !== -1);
+ok('...and a full date is coloured rather than hidden',
+  html.indexOf(".chip.full {") !== -1 && html.indexOf("' full'") !== -1);
 ok('the page offers a week, a month and everything',
   html.indexOf('This week') !== -1 && html.indexOf('This month') !== -1
   && html.indexOf('Everything') !== -1);
 ok('the form opens in its own tab, so the calendar is still behind it',
   html.indexOf("node.target = '_blank'") !== -1);
+
+// The span the printed links carry reaches the page as its opening range.
+// Built NOW rather than lazily: section 6 below replaces the page builder
+// with a stub, and a lambda called after that would be testing the stub.
+const weekHtml = sandbox.buildPublicCalendarHtml(snap, { span: 'week' });
+const defaultSpanHtml = sandbox.buildPublicCalendarHtml(snap, {});
 
 // A read that failed is a sentence, not an empty calendar.
 const failedHtml = sandbox.buildPublicCalendarHtml({ ok: false, message: 'Could not look.' });
@@ -237,20 +351,21 @@ ok('a failed read is inlined as its own message',
 // and a building name off the query string cannot end the page mid-sentence.
 // ---------------------------------------------------------------------------
 const embedHtml = sandbox.buildPublicCalendarHtml(snap,
-  sandbox.publicCalendarViewOptions({ embed: '1', building: 'narberth', view: 'week' }));
+  sandbox.publicCalendarViewOptions({ embed: '1', building: 'narberth', span: 'week' }));
 
-ok('the embed drops the page heading, which is the host site\'s job',
-  embedHtml.indexOf('Programs &amp; Sign-Ups') === -1
-  && html.indexOf('Programs &amp; Sign-Ups') !== -1);
+ok('the embed drops the introduction, which is the host site\'s job',
+  embedHtml.indexOf('id="orgName"') === -1 && html.indexOf('id="orgName"') !== -1);
 ok('and takes its own background off, so it inherits the site around it',
   embedHtml.indexOf('background: transparent') !== -1);
 ok('the pinned building is resolved to the spelling the workbook uses',
   embedHtml.indexOf('\\"location\\":\\"Narberth\\"') !== -1);
-ok('the pinned range reaches the page as days', embedHtml.indexOf('\\"days\\":7') !== -1);
+// The range is the SAME mechanism the printed links use — one vocabulary, one
+// reader — so an embed pinning a week is a page that opens on SPAN 'week'.
+ok('the pinned range rides the printed links\' own span',
+  embedHtml.indexOf('var SPAN = "week"') !== -1);
 ok('the embed knows to report its height', embedHtml.indexOf('postMessage') !== -1);
-ok('...and the printed page never does',
-  html.indexOf('\\"embed\\":false') !== -1 && html.indexOf('postMessage') !== -1
-  && html.indexOf('\\"days\\":null') !== -1);
+ok('...and the printed page, which is nobody\'s frame, never does',
+  html.indexOf('\\"embed\\":false') !== -1 && html.indexOf('\\"location\\":\\"\\"') !== -1);
 
 // A pin nobody can satisfy is dropped, not applied: a website showing an
 // empty calendar because a building was renamed is the failure nobody
@@ -301,6 +416,29 @@ ok('the link the dialog prints carries the mode the router answers to',
   sandbox.checkInPageUrl({ mode: 'public' })
     === 'https://script.google.com/macros/s/ABC/exec?mode=public');
 
+// TWO PRINTABLE LINKS, one page. The span only decides which filter is
+// already pressed, and a spelling the page would ignore is never written.
+ok('there is a weekly link',
+  sandbox.checkInPageUrl({ mode: 'public', span: 'week' })
+    === 'https://script.google.com/macros/s/ABC/exec?mode=public&span=week');
+ok('and a monthly one',
+  sandbox.checkInPageUrl({ mode: 'public', span: 'monthly' })
+    === 'https://script.google.com/macros/s/ABC/exec?mode=public&span=month');
+ok('a span nobody recognizes is left off the link rather than printed',
+  sandbox.checkInPageUrl({ mode: 'public', span: 'fortnight' })
+    === 'https://script.google.com/macros/s/ABC/exec?mode=public');
+['week', 'weekly', '7'].forEach(span => {
+  ok(`?span=${span} is read as the week`,
+    sandbox.publicCalendarSpanRequested_({ span }) === 'week');
+});
+['month', 'monthly', '31'].forEach(span => {
+  ok(`?span=${span} is read as the month`,
+    sandbox.publicCalendarSpanRequested_({ span }) === 'month');
+});
+ok('and the page opens on the range the link asked for',
+  weekHtml.indexOf('var SPAN = "week"') !== -1
+  && defaultSpanHtml.indexOf('var SPAN = ""') !== -1);
+
 // ---------------------------------------------------------------------------
 // 7. FRAMING IS A PER-ROUTE PERMISSION. Exactly one page here may be put in
 // somebody else's <iframe>, and it is the one that cannot write anything: a
@@ -323,8 +461,11 @@ ok('the embed URL carries the mode the router answers to and asks for the skin',
   sandbox.publicCalendarEmbedUrl({})
     === 'https://script.google.com/macros/s/ABC/exec?mode=public&embed=1');
 ok('a pinned building is encoded rather than pasted raw',
-  sandbox.publicCalendarEmbedUrl({ location: "St. John's", view: 'week' })
+  sandbox.publicCalendarEmbedUrl({ location: "St. John's", span: 'week' })
     .indexOf('building=St.%20John\'s') !== -1);
+ok('...and the embed spells its range the way the printed links do',
+  sandbox.publicCalendarEmbedUrl({ span: 'weekly' })
+    === 'https://script.google.com/macros/s/ABC/exec?mode=public&span=week&embed=1');
 ok('the snippet is an iframe on that address',
   snippet.indexOf('<iframe') !== -1 && snippet.indexOf(sandbox.publicCalendarEmbedUrl({})) !== -1);
 ok('...with a fallback height, for a host that never hears the message',

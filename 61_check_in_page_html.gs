@@ -1195,13 +1195,20 @@ function readCheckInPageInfo() {
     // other address on this screen is: checkInPageUrl() reads the spelling out
     // of DOOR_ROUTES, so a link and the router cannot drift.
     publicUrl: checkInPageUrl({ mode: 'public' }),
-    // AND THE SAME PAGE AS SOMETHING TO PASTE. The link above is what goes on
-    // a flyer; this is what goes into the website, where the alternative is a
-    // Google Calendar embed that cannot show a seat count or open this
-    // month's sign-up form. Built here, whole, because a snippet a person
-    // assembles from a note about ?embed=1 is a snippet that gets pasted
-    // wrong — and because the resize listener in it is not something anybody
-    // should be asked to type.
+    // TWO SPELLINGS OF ONE PAGE, because they are pasted into two different
+    // things: a weekly link for the newsletter that goes out on Mondays, a
+    // monthly one for a flyer or the website. Same calendar, same forms —
+    // only which filter is already pressed when it opens differs, and either
+    // one is one tap from the other.
+    publicWeekUrl: checkInPageUrl({ mode: 'public', span: 'week' }),
+    publicMonthUrl: checkInPageUrl({ mode: 'public', span: 'month' }),
+    // AND THE SAME PAGE AS SOMETHING TO PASTE. The links above are what goes
+    // in a newsletter; this is what goes into the website itself, where the
+    // alternative is a Google Calendar embed that cannot show a seat count or
+    // open this month's sign-up form. Built here, whole, because a snippet a
+    // person assembles from a note about ?embed=1 is a snippet that gets
+    // pasted wrong — and because the resize listener in it is not something
+    // anybody should be asked to type.
     embedSnippet: publicCalendarEmbedSnippet({})
   };
 }
@@ -1285,9 +1292,10 @@ function buildCheckInPageHtml(info) {
   <button class="copy" onclick="copyEmbed(this)">Copy the code</button>
   <p class="hint">
     <b>One building, or one week.</b> Add <code>&amp;building=Narberth</code> to the address in
-    <code>src</code> to embed just that building, and <code>&amp;view=week</code> (or
-    <code>month</code>, or <code>all</code>) to choose what it opens on. A building name that
-    does not match is ignored rather than showing an empty calendar.
+    <code>src</code> to embed just that building, and <code>&amp;span=week</code> (or
+    <code>month</code>, or <code>all</code> &mdash; the same word the two links above carry) to
+    choose what it opens on. A building name that does not match one of yours is ignored rather
+    than showing an empty calendar.
   </p>
 </fieldset>
 
@@ -1382,9 +1390,19 @@ function buildCheckInPageHtml(info) {
     // it carries no names and writes nothing.
     if (INFO.publicUrl) {
       html += linkRow('The public program calendar', INFO.publicUrl,
-        'Safe to publish. Everything running between now and the end of next month, with ' +
-        'the current sign-up form behind each session. No names on it, and nobody can ' +
-        'change anything from it.');
+        'Safe to publish. Everything running between now and the end of next month, one card ' +
+        'per program, with the current sign-up form behind each date. No names on it, and ' +
+        'nobody can change anything from it.');
+      if (INFO.publicWeekUrl) {
+        html += linkRow('\u2026 opening on this week', INFO.publicWeekUrl,
+          'The same calendar, filtered to the next seven days when it opens. For a weekly ' +
+          'newsletter or email.');
+      }
+      if (INFO.publicMonthUrl) {
+        html += linkRow('\u2026 opening on this month', INFO.publicMonthUrl,
+          'The same calendar, filtered to the next month when it opens. For a flyer, a ' +
+          'printed QR code or the website.');
+      }
     }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +

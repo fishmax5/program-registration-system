@@ -906,7 +906,9 @@ function reportOptimisticQuickMarkFailure(args, result) {
     const where = [String(args.session || '').trim(), String(args.location || '').trim()]
       .filter(Boolean).join(' · ');
     log(`⚠️ Quick Mark did not save for "${name}"${where ? ` (${where})` : ''}: ${result.message}`);
-    notifyAdmin(`Quick Mark did not save: ${name}`,
+    // URGENT, not the daily digest: the desk has already moved on and the
+    // person in front of them is unmarked. See notifyAdminUrgent() (15).
+    notifyAdminUrgent(`Quick Mark did not save: ${name}`,
       'A mark made at the desk was shown as done and then refused, so whoever made it has ' +
       'probably moved on to the next person.\n\n' +
       `Name: ${name}\n` +

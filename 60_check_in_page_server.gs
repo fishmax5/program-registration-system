@@ -189,6 +189,14 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     // of them is ever printed: a spelling this route claims must never be
     // answered by a page that asks for a PIN.
     //
+    // ?span= AND ?building= ARE WHAT ITS URL CARRIES BESIDES THE MODE, and the
+    // span is why there can be two printed links: a weekly one for a
+    // newsletter that goes out on Mondays and a monthly one for a flyer,
+    // opening on the same page showing different amounts of it. Both only
+    // choose which filter is already pressed — every filter is still there and
+    // still one tap away, so neither link is a page that hides anything from
+    // whoever opens it.
+    //
     // THE ONE FRAMEABLE ROUTE. See the X-Frame note in doGet(): this page is
     // meant to sit inside the organization's own website, and it is the only
     // one here that can be framed without handing somebody else's page the
@@ -305,6 +313,26 @@ function doGet(e) {
  */
 const PUBLIC_CALENDAR_MODES = ['public', 'calendar', 'programs', 'events', 'signup', 'sign-up', 'signups'];
 
+/**
+ * WHICH RANGE A PUBLIC LINK OPENS ON: 'week', 'month', 'all', or '' for the
+ * page's own default.
+ *
+ * Spelled several ways for the same reason the modes are: these URLs are
+ * typed by hand, printed, and pasted into a newsletter, and "weekly" not
+ * working when "week" does is the sort of thing nobody ever reports — the
+ * link simply looks like it does not do what it was described as doing.
+ */
+const PUBLIC_CALENDAR_SPANS = {
+  week: 'week', weekly: 'week', 'this-week': 'week', '7': 'week',
+  month: 'month', monthly: 'month', 'this-month': 'month', '31': 'month',
+  all: 'all', everything: 'all', full: 'all', '0': 'all'
+};
+
+function publicCalendarSpanRequested_(params) {
+  const asked = String((params && (params.span || params.range)) || '').trim().toLowerCase();
+  return PUBLIC_CALENDAR_SPANS[asked] || '';
+}
+
 /** What ?mode= has to say to get the session roster instead of the door page. */
 const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];
 
@@ -344,8 +372,13 @@ function checkInPageUrl(options) {
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
   const mode = doorRouteUrlMode_(opts.mode);
   if (mode) parts.push(`mode=${encodeURIComponent(mode)}`);
+  // Only the public calendar reads a span, and only a spelling it recognizes
+  // is written — a link carrying a word the page would ignore is a link that
+  // says something untrue about what it opens.
+  const span = publicCalendarSpanRequested_({ span: opts.span });
+  if (span) parts.push(`span=${encodeURIComponent(span)}`);
   // ANYTHING ELSE THE ROUTE UNDERSTANDS, still assembled here rather than by
-  // the caller: the embed URLs in section 17 carry ?embed=1 and a pinned
+  // the caller: the embed URLs in section 17b carry ?embed=1 and a pinned
   // building, and a caller that concatenated those itself is a caller that
   // gets to forget the encodeURIComponent on a building called "St. John's".
   const extra = opts.params || {};
