@@ -1195,9 +1195,27 @@ function readCheckInPageInfo() {
     // other address on this screen is: checkInPageUrl() reads the spelling out
     // of DOOR_ROUTES, so a link and the router cannot drift.
     publicUrl: checkInPageUrl({ mode: 'public' }),
-    // The second embed, and the same reasoning: it is meant to be copied onto
-    // a website, so it is handed over rather than described.
-    weeklyUrl: checkInPageUrl({ mode: 'weekly' })
+    // TWO SPELLINGS OF ONE PAGE, because they are pasted into two different
+    // things: a weekly link for the newsletter that goes out on Mondays, a
+    // monthly one for a flyer or the website. Same calendar, same forms —
+    // only which filter is already pressed when it opens differs, and either
+    // one is one tap from the other.
+    publicWeekUrl: checkInPageUrl({ mode: 'public', span: 'week' }),
+    publicMonthUrl: checkInPageUrl({ mode: 'public', span: 'month' }),
+    // AND THE SAME PAGE AS SOMETHING TO PASTE. The links above are what goes
+    // in a newsletter; this is what goes into the website itself, where the
+    // alternative is a Google Calendar embed that cannot show a seat count or
+    // open this month's sign-up form. Built here, whole, because a snippet a
+    // person assembles from a note about ?embed=1 is a snippet that gets
+    // pasted wrong — and because the resize listener in it is not something
+    // anybody should be asked to type.
+    embedSnippet: publicCalendarEmbedSnippet({}),
+    // THE SECOND PUBLIC PAGE, on the same terms: the same programs asked
+    // about the other way round — what runs every Monday, every Tuesday —
+    // for the part of a website that is about joining a class rather than
+    // about what is on this week.
+    regularUrl: checkInPageUrl({ mode: 'regular' }),
+    regularEmbedSnippet: publicRegularEmbedSnippet({})
   };
 }
 
@@ -1246,6 +1264,9 @@ function buildCheckInPageHtml(info) {
   ol { padding-left: 20px; line-height: 1.6; }
   input[type=text] { width: 140px; padding: 6px; font-size: 13px; }
   input#weburl { width: 100%; margin-bottom: 6px; font-family: monospace; font-size: 12px; }
+  textarea#embed { width: 100%; font-family: monospace; font-size: 11px; line-height: 1.45;
+                   border: 1px solid #DADCE0; border-radius: 4px; padding: 6px; resize: vertical;
+                   background: #F8F9FA; color: #222; }
   code { background: #F1F3F4; border-radius: 3px; padding: 0 3px; }
   button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
            font-size: 13px; cursor: pointer; }
@@ -1264,6 +1285,32 @@ function buildCheckInPageHtml(info) {
   name to mark them present and tap Lunch as meals are handed over.
 </p>
 <div id="links"></div>
+
+<fieldset id="embedbox" style="display:none">
+  <legend>Put the calendar on your website</legend>
+  <p class="hint">
+    Paste this where a Google Calendar embed would go. It is the public calendar above, drawn
+    inside your own page with no heading and no background of its own, so it inherits the site
+    around it &mdash; and it grows to fit its contents, so there is no scrollbar inside the box.
+    Each program still opens its own sign-up form, in a new tab.
+  </p>
+  <textarea id="embed" readonly rows="7" onclick="this.select()"></textarea>
+  <button class="copy" onclick="copyEmbed(this)">Copy the code</button>
+  <p class="hint">
+    <b>And the weekly programs page.</b> The same thing for the other public page &mdash; paste
+    this where you want &ldquo;what runs every week&rdquo; instead of the diary. The two can sit
+    on one page; they resize independently.
+  </p>
+  <textarea id="regularEmbed" readonly rows="7" onclick="this.select()"></textarea>
+  <button class="copy" onclick="copyRegularEmbed(this)">Copy the code</button>
+  <p class="hint">
+    <b>One building, or one week.</b> Add <code>&amp;building=Narberth</code> to the address in
+    <code>src</code> to embed just that building, and <code>&amp;span=week</code> (or
+    <code>month</code>, or <code>all</code> &mdash; the same word the two links above carry) to
+    choose what it opens on. A building name that does not match one of yours is ignored rather
+    than showing an empty calendar.
+  </p>
+</fieldset>
 
 <fieldset>
   <legend>The deployment address</legend>
@@ -1356,15 +1403,25 @@ function buildCheckInPageHtml(info) {
     // it carries no names and writes nothing.
     if (INFO.publicUrl) {
       html += linkRow('The public program calendar', INFO.publicUrl,
-        'Safe to publish. Everything running between now and the end of next month, with ' +
-        'the current sign-up form behind each session. No names on it, and nobody can ' +
-        'change anything from it.');
+        'Safe to publish. Everything running between now and the end of next month, one card ' +
+        'per program, with the current sign-up form behind each date. No names on it, and ' +
+        'nobody can change anything from it.');
+      if (INFO.publicWeekUrl) {
+        html += linkRow('\u2026 opening on this week', INFO.publicWeekUrl,
+          'The same calendar, filtered to the next seven days when it opens. For a weekly ' +
+          'newsletter or email.');
+      }
+      if (INFO.publicMonthUrl) {
+        html += linkRow('\u2026 opening on this month', INFO.publicMonthUrl,
+          'The same calendar, filtered to the next month when it opens. For a flyer, a ' +
+          'printed QR code or the website.');
+      }
     }
-    if (INFO.weeklyUrl) {
-      html += linkRow('The weekly programs page', INFO.weeklyUrl,
-        'The same programs the other way round: what runs every Monday, every Tuesday and ' +
-        'so on, one line each. Also safe to publish, and both of these can be embedded in ' +
-        'a page on the website.');
+    if (INFO.regularUrl) {
+      html += linkRow('The weekly programs page', INFO.regularUrl,
+        'The other question: what runs every Monday, every Tuesday, and so on \u2014 one line ' +
+        'per program under each weekday, for somebody deciding whether to join something ' +
+        'rather than what to do on Thursday. Also safe to publish, and embeddable the same way.');
     }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +
@@ -1417,6 +1474,13 @@ function buildCheckInPageHtml(info) {
           deploymentId(res.savedUrl) !== deploymentId(INFO.scriptUrl));
         draw();
         drawUrl();
+        // THE SNIPPET IS BUILT FROM THE ADDRESS, so saving a new one changes
+        // it. Rebuilt on the server rather than patched here: the URL inside
+        // it is assembled by checkInPageUrl(), which is the whole reason a
+        // link and the router cannot drift.
+        INFO.embedSnippet = res.embedSnippet || INFO.embedSnippet;
+        INFO.regularEmbedSnippet = res.regularEmbedSnippet || INFO.regularEmbedSnippet;
+        drawEmbed();
         var s2 = document.getElementById('status');
         s2.textContent = res.message;
         s2.className = res.ok ? 'ok' : 'warn';
@@ -1461,6 +1525,37 @@ function buildCheckInPageHtml(info) {
     box.select();
     try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
     document.body.removeChild(box);
+  }
+
+  /**
+   * The embed code, and the box it lives in — which stays hidden entirely
+   * when there is nothing to paste. A snippet built on the /dev address, or
+   * on no address at all, is a snippet that renders an error inside somebody's
+   * website; a fieldset that is not there asks no questions.
+   */
+  function drawEmbed() {
+    var box = document.getElementById('embedbox');
+    if (!INFO.embedSnippet || INFO.isDev) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    document.getElementById('embed').value = INFO.embedSnippet;
+    document.getElementById('regularEmbed').value = INFO.regularEmbedSnippet || '';
+  }
+
+  function copyEmbed(button) { copyArea('embed', button); }
+  function copyRegularEmbed(button) { copyArea('regularEmbed', button); }
+
+  function copyArea(id, button) {
+    var area = document.getElementById(id);
+    area.select();
+    var done = function () { if (button) button.textContent = 'Copied'; };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(area.value).then(done, function () {
+          try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
+        });
+      }
+    } catch (err) { /* fall through */ }
+    try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
   }
 
   function drawPin() {
@@ -1510,6 +1605,7 @@ function buildCheckInPageHtml(info) {
 
   draw();
   drawUrl();
+  drawEmbed();
   drawPin();
 </script>`;
 }

@@ -209,30 +209,45 @@ function seedCateringPolicyRows(sheet) {
 function seedAdminNotificationEmailsTable(sheet) {
   const section = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;
   sheet.getRange(CONFIG_DATA_START_ROW, section.startCol, ADMIN_NOTIFICATION_MAX_ROWS, 1).setNote(
-    `Up to ${ADMIN_NOTIFICATION_MAX_ROWS} people in the office, one per row, each ticked for what they are `
-    + 'copied on. Leave a row blank to skip it; an empty table means this system copies nobody.\n\n'
+    `Up to ${ADMIN_NOTIFICATION_MAX_ROWS} people in the office, one per row. Leave a row blank to skip `
+    + 'it; an empty table means this system copies nobody.\n\n'
+    + `Everyone here gets one email a day, at ${OFFICE_DIGEST_HOUR}:00, covering everything the workbook `
+    + 'did the day before — ticked or not. The tick boxes beside each address are what STILL arrives as '
+    + 'it happens; read their notes.\n\n'
     + 'Every address here is also made an editor of the program registrant sheets and forms this system '
     + 'shares out of the workbook, ticked or not — that is file access, not mail.');
 
+  // WHAT THE TICKS MEAN SINCE THE DAILY DIGEST (see 88_office_daily_digest.gs).
+  // Office mail is one message a day to EVERY address in this table, ticked or
+  // not, so four of these five no longer route anything. They are kept rather
+  // than removed because they still record who used to be copied on what, and
+  // a column quietly deleted from a live Config tab is a question nobody can
+  // answer afterwards. The notes say so plainly — a checkbox that does nothing
+  // and does not admit it is worse than no checkbox at all.
+  const digestNote = 'This is now part of the one office digest sent at '
+    + OFFICE_DIGEST_HOUR + ':00 each morning, covering the previous day — and that goes to EVERY '
+    + 'address in this table, ticked or not. The tick no longer decides who is copied; it is kept so '
+    + 'the record of who used to be survives.\n\n';
   const noteByHeader = {
-    Sync_Digest: 'The per-sync digest of things needing attention: waitlisted registrants, forms that '
-      + 'failed to open, triaged deleted events, a door sign-in that did not complete. Internal — '
-      + 'nobody outside the office is on it.',
-    Leader_Roster_Alerts: 'BCC on the roster-change email a program leader gets when somebody joins, '
-      + 'drops or changes on their program.',
-    Registrant_Reminders: 'Copied on the reminder emails registrants get before a session they signed up '
-      + 'for — as a separate "[Office copy]" message, so the member never sees this address and a '
-      + 'reply-all on the copy stays in the office.',
-    Calendar_Invite_Guest: 'Emailed a digest after each sync that adds or removes calendar guests: '
-      + 'every session whose guest list changed, who was invited to it, who came off, and that Google '
-      + 'sent each of them the invitation. One message per sync, and nothing at all when a sync changes '
-      + 'nothing. This person is NOT put on the events themselves — that is what this used to do, and '
-      + 'Admin \u25b8 Repair \u25b8 "Remove Office Guests from Calendar Events" takes them back off the '
-      + 'ones they are still on.',
-    Appointment_Requests: 'Emailed when a sync files somebody onto the "'
-      + SHEET_NAMES.ASSISTANCE_REQUESTS + '" tab: they asked for a personalized-assistance appointment '
-      + 'and none of the times offered worked. One email per sync, listing only the new requests, with '
-      + 'their phone number and email on it. Nothing is sent when a sync files none.'
+    Sync_Digest: 'WHAT STILL ARRIVES IMMEDIATELY: a fault somebody at the desk may need to act on '
+      + 'within the hour — a Quick Mark that would not save, a door sign-in that did not complete. '
+      + 'Everything else the sync notices (waitlisted registrants, forms that failed to open, triaged '
+      + 'deleted events) waits for the ' + OFFICE_DIGEST_HOUR + ':00 digest.\n\n'
+      + 'If nobody here is ticked, those urgent faults go to everyone in the table instead: a fault '
+      + 'report is the one message an unticked box must not be able to silence.',
+    Leader_Roster_Alerts: digestNote
+      + 'One line per alert: which leader was written to, about which program, and how many changes.',
+    Registrant_Reminders: digestNote
+      + 'One line per reminder: who was reminded, about which session, and which reminder it was. The '
+      + 'member is written to alone — no office address is on their copy.',
+    Calendar_Invite_Guest: digestNote
+      + 'One line per session whose guest list changed: who was invited, who came off, and that Google '
+      + 'sent each of them the invitation itself. This person is NOT put on the events — that is what '
+      + 'this used to do, and Admin \u25b8 Repair \u25b8 "Remove Office Guests from Calendar Events" '
+      + 'takes them back off the ones they are still on.',
+    Appointment_Requests: digestNote
+      + 'One line per person filed onto the "' + SHEET_NAMES.ASSISTANCE_REQUESTS + '" tab: they asked '
+      + 'for a personalized-assistance appointment and none of the times offered worked.'
   };
   ADMIN_NOTIFICATION_CATEGORIES.forEach(category => {
     sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + category.offset, ADMIN_NOTIFICATION_MAX_ROWS, 1)
@@ -1217,30 +1232,61 @@ function claimTriggerOwnership(email) {
 }
 
 /**
- * Sends one admin email to everyone ticked for Sync_Digest on Config's Admin
- * Notification Emails table, if anybody is. Never throws — a failed
- * notification must not take down the sync that triggered it.
+ * ONE OFFICE NOTE, HELD FOR THE MORNING DIGEST.
+ *
+ * This used to send a message there and then, to everyone ticked for
+ * Sync_Digest, once per sync. Twenty-four syncs a day, each with its own
+ * subject line, is how the office stopped reading any of them — so what it
+ * says is now SPOOLED (see 88_office_daily_digest.gs) and goes out at 10am
+ * with everything else the workbook did, to everyone on the table.
+ *
+ * The signature is unchanged, and so is the promise: it never throws — a
+ * failed notification must not take down the sync that triggered it — and it
+ * returns whether the office will hear about this.
+ *
+ * WHAT STILL GOES AT ONCE is notifyAdminUrgent() below, and only its two
+ * callers. Everything reaching this one is something the office READS.
+ */
+function notifyAdmin(subject, body) {
+  const heading = String(subject === null || subject === undefined ? '' : subject).trim();
+  const line = String(body === null || body === undefined ? '' : body).trim();
+  return spoolOfficeNote(heading || 'Notes', line || heading);
+}
+
+/**
+ * THE MESSAGE THAT CANNOT WAIT UNTIL TEN TOMORROW.
+ *
+ * The behavior notifyAdmin() used to have, kept for the handful of faults a
+ * desk may need to act on within the hour: a Quick Mark that would not save
+ * (38) and a door sign-in that did not complete (72). Two callers, and a
+ * third is a decision — anything the office merely needs to KNOW belongs in
+ * the daily digest, which is the whole reason it exists.
  *
  * ONE MESSAGE, however many people are on it: the recipients go out as a
  * single comma-separated list, so a table with four names spends one message
  * rather than four. They see each other, which is right for an internal
- * digest — this is office mail about the workbook, not a member's own
- * registration (contrast the BCC in sendRationedEmail()).
+ * report about the workbook.
  *
- * DELIBERATELY NOT RATIONED. Every other send in this workbook goes through
- * sendRationedEmail() (section 9f) and stops short of a floor; this one is the
- * floor's reason for existing. It is one message saying something went wrong —
- * quite possibly that mail is over quota — and holding back the message that
- * reports the shortage is exactly backwards. It is small and it is rare; the
- * rationed callers leave room for it.
+ * Sent to everyone ticked for Sync_Digest, FALLING BACK to every address on
+ * the table when nobody is ticked. A fault report is the one message that must
+ * not be silenced by an unticked box: the ticks say who wants the routine
+ * traffic, and after the digest there is no routine traffic left for them to
+ * say anything about.
+ *
+ * DELIBERATELY NOT RATIONED. Every send to somebody outside the office goes
+ * through sendRationedEmail() (section 9f) and stops short of a floor; this
+ * one is the floor's reason for existing. It is one message saying something
+ * went wrong — quite possibly that mail is over quota — and holding back the
+ * message that reports the shortage is exactly backwards.
  */
-function notifyAdmin(subject, body) {
-  const emails = adminEmailsForCategory('syncDigest');
+function notifyAdminUrgent(subject, body) {
+  const ticked = adminEmailsForCategory('syncDigest');
+  const emails = ticked.length > 0 ? ticked : getAllAdminNotificationEmails();
   if (emails.length === 0) return false;
   const to = emails.join(',');
   try {
     MailApp.sendEmail(to, subject, body);
-    log(`Sent admin notification to ${emails.join(', ')}: ${subject}`);
+    log(`Sent urgent admin notification to ${emails.join(', ')}: ${subject}`);
     return true;
   } catch (err) {
     log(`⚠️ Could not send admin notification to "${emails.join(', ')}" (${err}).`);
@@ -1249,31 +1295,17 @@ function notifyAdmin(subject, body) {
 }
 
 /**
- * An email to the addresses ticked for ONE category, rather than to the sync
- * digest's readers.
+ * A note filed under ONE category's name rather than the sync digest's.
  *
- * notifyAdmin() above is 'syncDigest' and always will be — it is the digest's
- * own sender. This is the same plumbing for a category that is not a fault
- * report and should not wait for one: a category nobody has ticked sends
- * nothing at all, which is what an empty table has always meant here.
- *
- * Deliberately NOT through sendRationedEmail() (76), for the reason its banner
- * gives about notifyAdmin(): these are a handful of internal addresses, and a
- * quota floor that silently drops one of them is worse than the send failing
- * loudly.
+ * Spooled for the daily digest like everything else, and — since the digest
+ * goes to the whole table — the category is now a HEADING rather than an
+ * address list: `categoryKey` names the section the office reads it under.
+ * A category nobody ticked no longer means "send nothing", because there is
+ * no separate send for a tick to govern; the digest is one message and this
+ * is a paragraph in it.
  */
 function notifyAdminCategory(categoryKey, subject, body) {
-  const emails = adminEmailsForCategory(categoryKey);
-  if (emails.length === 0) return false;
-  const to = emails.join(',');
-  try {
-    MailApp.sendEmail(to, subject, body);
-    log(`Sent ${categoryKey} notification to ${emails.join(', ')}: ${subject}`);
-    return true;
-  } catch (err) {
-    log(`⚠️ Could not send ${categoryKey} notification to "${emails.join(', ')}" (${err}).`);
-    return false;
-  }
+  return spoolOfficeNote(subject || categoryKey, body);
 }
 
 /**
@@ -1291,7 +1323,16 @@ function noteForAdmin(category, message) {
   __adminDigest[category].push(message);
 }
 
-/** Sends the accumulated digest (if any) and resets the collector. */
+/**
+ * Files the accumulated notes for the office and resets the collector.
+ *
+ * ONE SPOOL ENTRY PER NOTE, not one per run. The daily digest coalesces
+ * identical notes into a line with a count (see 88_office_daily_digest.gs), so
+ * an hourly sync that cannot open the same form all day reads as one line
+ * saying it happened twenty-four times — which it could not do if this handed
+ * it one pre-formatted blob per run. `context` is carried on the heading, so
+ * "Calendar sync" and "Form re-check" failing the same way stay two lines.
+ */
 function flushAdminDigest(context) {
   const digest = __adminDigest;
   __adminDigest = null;
@@ -1300,17 +1341,13 @@ function flushAdminDigest(context) {
   const categories = Object.keys(digest).filter(c => digest[c].length > 0);
   if (categories.length === 0) return false;
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const lines = [];
+  let spooled = 0;
   categories.forEach(category => {
-    lines.push(`${category} (${digest[category].length}):`);
-    digest[category].forEach(m => lines.push(`  • ${m}`));
-    lines.push('');
+    digest[category].forEach(message => {
+      if (spoolOfficeNote(`${category} (${context})`, message)) spooled++;
+    });
   });
-  if (ss) lines.push(`Workbook: ${ss.getUrl()}`);
-
-  const total = categories.reduce((sum, c) => sum + digest[c].length, 0);
-  return notifyAdmin(`[Calendar & Form Manager] ${context}: ${total} item(s) need attention`, lines.join('\n'));
+  return spooled > 0;
 }
 
 function computeOrderAheadFlag(eventDate, submittedAt, orderAheadDays) {

@@ -39,13 +39,16 @@ const sandbox = {
   SpreadsheetApp: { getActiveSpreadsheet: () => null },
   FormApp: { ItemType: {} }, CalendarApp: {}, DriveApp: {}, LockService: {},
   HtmlService: {
+    XFrameOptionsMode: { ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' },
     // Enough of an HtmlOutput to record what doGet() decided.
     createHtmlOutput: html => ({
       html,
       title: '',
       metaTags: [],
+      xFrame: '',
       setTitle(t) { this.title = t; return this; },
-      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; }
+      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; },
+      setXFrameOptionsMode(mode) { this.xFrame = mode; return this; }
     })
   },
   Session: {

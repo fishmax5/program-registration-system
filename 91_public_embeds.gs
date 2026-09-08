@@ -3,36 +3,35 @@
 // ============================================================================
 //
 // Two of the pages this deployment serves are not opened by staff, not opened
-// at the door, and not opened from a calendar invitation. They are opened by
-// a stranger, on a phone, usually INSIDE AN IFRAME on the organization's own
-// website — the block on the "Register for Programs" page. That audience is a
-// different thing from the door, and this file is where the difference is
-// declared once instead of being remembered in four places:
+// at the door, and not opened from a calendar invitation. They are opened by a
+// stranger, on a phone, and increasingly INSIDE AN IFRAME on the
+// organization's own website. That audience is a different thing from the
+// door, and this file is where the difference is declared once:
 //
-//   1. THEY MAY BE FRAMED, AND NOTHING ELSE HERE MAY BE. doGet() deliberately
-//      does not allow framing (see its comment): every other page in this
-//      deployment WRITES to the workbook, and letting any site frame one of
-//      those is how a tap on somebody else's page becomes a check-in on this
-//      one. The public pages write nothing at all, so they — and only they —
-//      are served with XFrameOptionsMode.ALLOWALL. Serving them the ordinary
-//      way is why the embed on the website was a blank block: the browser
-//      refused the frame and there was nothing to see.
-//   2. THEY ARE UNGATED. No PIN, no location pin, no identity. A page that
+//   1. THEY MAY BE FRAMED, AND NOTHING ELSE HERE MAY BE. Every page in
+//      DOOR_ROUTES (60) WRITES to the workbook, and letting any site frame one
+//      of those is how a tap on somebody else's page becomes a check-in on
+//      this one. The public pages write nothing at all, so servePublicEmbed()
+//      is the ONE place XFrameOptionsMode.ALLOWALL is written, and it serves
+//      only the pages declared here. A page that one day grows a write leaves
+//      this table in the same edit.
+//   2. THEY ARE UNGATED. No PIN, no location pin, no identity — a page that
 //      asks a stranger for a staff code is a page that becomes a phone call.
-//   3. THEY ARE READ-ONLY. Every endpoint they call takes no arguments that
-//      change anything, so there is nothing in them to get wrong.
+//   3. THEY SHARE ONE LOOK. Both sit in the same colored block on the same
+//      website, and two pages that NEARLY match is worse than either, so the
+//      stylesheet is publicEmbedStyles() below rather than a copy apiece.
 //
-// WHY THEY LEFT 60_check_in_page_server.gs. That file is the DOOR's router,
-// and the public pages were two rows in the middle of it that had to be read
-// past by anybody working on the tablet. Worse, the one property they need —
-// being frameable — is a property of the RESPONSE, which DOOR_ROUTES has no
-// way to say. So the public pages have their own table here, doGet() asks
-// this table first, and 60 keeps one delegating entry (see doorRouteUrlMode_)
-// so a printed ?mode= and this router still cannot drift apart.
+// WHY THEY LEFT 60. That file is the DOOR's router; the public pages were rows
+// in the middle of it that anybody working on the tablet had to read past, and
+// their one distinguishing property — being frameable — was a flag on a row
+// describing a property of the RESPONSE. doGet() now asks this table first and
+// doorRouteUrlMode_() asks publicEmbedUrlMode() first, so a printed ?mode= and
+// this router still cannot drift apart.
 //
 // Behavior and vocabulary only. Numbered last for the usual reason — never
-// renumber — and safely: PUBLIC_EMBED_ROUTES is lazy (01a), the two mode lists
-// are self-contained consts, and every page it names is a hoisted function.
+// renumber — and safely: PUBLIC_EMBED_ROUTES is lazy (01a), the mode and span
+// lists are self-contained consts, and every page it names is a hoisted
+// function.
 // ============================================================================
 
 /**
@@ -48,17 +47,44 @@
 const PUBLIC_CALENDAR_MODES = ['public', 'calendar', 'programs', 'events', 'signup', 'sign-up', 'signups'];
 
 /**
- * And what gets the WEEKLY page — the same programs, asked about the other
- * way round. 'What is on this Thursday' is the calendar; 'what runs every
- * Thursday' is this, and a person planning a term wants the second one.
+ * And what gets the REGULAR PROGRAMS page (section 18a) — the same programs
+ * asked about the other way round: not "what is on this Thursday" but "what
+ * runs every Thursday".
+ *
+ * DELIBERATELY NOT 'weekly'. `?span=weekly` already means something else on
+ * the calendar page — the next seven days — and one word meaning two things
+ * across two links that are printed side by side is how somebody puts the
+ * wrong address in a newsletter. This page is the one about programs that
+ * RECUR; the span is about how much of the diary you are shown.
  */
-const PUBLIC_WEEKLY_MODES = ['weekly', 'regular', 'ongoing', 'recurring', 'classes', 'weekly-programs'];
+const PUBLIC_REGULAR_MODES = ['regular', 'recurring', 'ongoing', 'classes',
+  'every-week', 'regular-programs', 'weekly-programs'];
 
 /**
- * EVERY PUBLIC PAGE, IN THE ORDER THEY ARE TRIED — same shape as DOOR_ROUTES
- * and read by both the router and the link builder:
+ * WHICH RANGE A PUBLIC LINK OPENS ON: 'week', 'month', 'all', or '' for the
+ * page's own default.
  *
- *   id     what the page is called; checkInPageUrl({ mode: 'weekly' }) etc.
+ * Spelled several ways for the same reason the modes are: these URLs are
+ * typed by hand, printed, and pasted into a newsletter, and "weekly" not
+ * working when "week" does is the sort of thing nobody ever reports — the
+ * link simply looks like it does not do what it was described as doing.
+ */
+const PUBLIC_CALENDAR_SPANS = {
+  week: 'week', weekly: 'week', 'this-week': 'week', '7': 'week',
+  month: 'month', monthly: 'month', 'this-month': 'month', '31': 'month',
+  all: 'all', everything: 'all', full: 'all', '0': 'all'
+};
+
+function publicCalendarSpanRequested_(params) {
+  const asked = String((params && (params.span || params.range)) || '').trim().toLowerCase();
+  return PUBLIC_CALENDAR_SPANS[asked] || '';
+}
+
+/**
+ * EVERY PUBLIC PAGE, IN THE ORDER THEY ARE TRIED — the same shape DOOR_ROUTES
+ * uses, and read by both the router and the link builder:
+ *
+ *   id     what the page is called; checkInPageUrl({ mode: 'regular' }) etc.
  *   mode   the ?mode= this page's own URLs carry
  *   modes  every spelling that reaches it (see the two lists above)
  *   title  the browser tab
@@ -74,20 +100,25 @@ defineLazyGlobal_('PUBLIC_EMBED_ROUTES', () => [
     mode: 'public',
     modes: PUBLIC_CALENDAR_MODES,
     title: 'Programs & Sign-Ups',
-    // WHAT IS ON, DAY BY DAY. Everything between now and the end of next
-    // month, with the CURRENT sign-up form behind each session — which for a
-    // Regular program is the thing an emailed link is always wrong about a
-    // month later.
-    build: () => buildPublicCalendarHtml(publicProgramCalendar({}))
+    // WHAT IS ON. Everything between now and the end of next month, one tile
+    // per program, with the CURRENT sign-up form behind each date — which for
+    // a Regular program is the thing an emailed link is always wrong about a
+    // month later. ?span= and ?building= only decide how it OPENS; every
+    // filter is still one tap away (see publicCalendarViewOptions in 86).
+    build: params => buildPublicCalendarHtml(
+      publicProgramCalendar({}), publicCalendarViewOptions(params))
   },
   {
-    id: 'weekly',
-    mode: 'weekly',
-    modes: PUBLIC_WEEKLY_MODES,
-    title: 'Weekly Programs',
-    // WHAT RUNS EVERY WEEK, weekday by weekday. Built from the same snapshot
-    // the calendar page is built from — one read, one cache, two pages.
-    build: () => buildPublicWeeklyHtml(publicWeeklyPrograms({}))
+    id: 'regular',
+    mode: 'regular',
+    modes: PUBLIC_REGULAR_MODES,
+    title: 'Regular Programs',
+    // WHAT RUNS EVERY WEEK, weekday by weekday — the standing invitations,
+    // for somebody deciding whether to JOIN something rather than whether to
+    // come on Thursday. Built by folding the same snapshot the calendar page
+    // is built from: one tab read, one cache, two pages.
+    build: params => buildPublicRegularHtml(
+      publicRegularPrograms({}), publicCalendarViewOptions(params))
   }
 ]);
 
@@ -103,8 +134,9 @@ function publicEmbedRoute(params) {
 
 /**
  * The ?mode= a caller's name for a public page is spelled as in a URL, or ''
- * when no public page answers to that name. The link builder in 60 asks this
- * first — which is what keeps a printed link and this table together.
+ * when no public page answers to that name. checkInPageUrl() asks this before
+ * it asks DOOR_ROUTES — which is what keeps a printed link and this table
+ * together now that the pages are declared here.
  */
 function publicEmbedUrlMode(requested) {
   const asked = String(requested || '').trim().toLowerCase();
@@ -119,78 +151,83 @@ function publicEmbedUrlMode(requested) {
 /**
  * THE ONE PLACE A FRAMEABLE PAGE IS SERVED FROM. See point 1 in the banner:
  * ALLOWALL belongs to these pages and to nothing else in this deployment, so
- * it is written once, here, rather than being an option a future route could
+ * it is written once, here, rather than being a flag a future route could
  * pick up by copying its neighbour.
  */
 function servePublicEmbed(route, params) {
   const out = HtmlService.createHtmlOutput(route.build(params || {}))
     .setTitle(route.title)
+    // These are read on a phone as often as on a desk, and inside a frame
+    // whose width is somebody else's column.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-  // Older Apps Script stubs (and the tests') do not carry this method; a page
-  // that cannot say ALLOWALL is still a correct page, just not an embeddable
-  // one, and that is not worth a stack trace in front of a stranger.
-  if (typeof out.setXFrameOptionsMode === 'function' && typeof HtmlService.XFrameOptionsMode !== 'undefined') {
-    out.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
+  out.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   return out;
 }
 
 /**
- * THE SHARED LOOK OF BOTH EMBEDS — one stylesheet, because they sit in the
- * same colored block on the same website and two pages that nearly match is
- * worse than either.
+ * THE LOOK BOTH PUBLIC PAGES ARE DRAWN IN — one stylesheet, shared.
  *
- * THE PAGE HAS NO BACKGROUND OF ITS OWN. It is drawn on whatever color the
- * website's section is (a soft green on the sign-up page, a yellow further
- * down), so `body` is transparent and every surface that has to be readable
- * — the sticky control bar, a card — paints itself white and says so. A page
- * that painted its own gray ground would be a gray rectangle pasted onto a
- * green section, which is exactly what an embed must not look like.
+ * IT HAS NO BACKGROUND OF ITS OWN, AND NO DARK MODE. This is pasted into a
+ * block on the organization's website whose color the website chooses — a
+ * soft green on the sign-up page, a yellow further down — so `body` is
+ * transparent and every surface that has to be readable paints itself white
+ * and says so. The dark-mode block this stylesheet used to carry was worse
+ * than useless in that setting: it turned the text pale on a phone set to
+ * dark while the block behind it stayed green, which is the whole of why the
+ * "3 programs · 12 dates · Refresh" line could not be seen.
  *
- * AND IT DOES NOT FOLLOW THE VIEWER'S DARK MODE. The section behind it is one
- * fixed color on the website whatever the phone is set to; light text on it
- * would be text on green, unreadable, and unfixable from here.
+ * The vocabulary is the website's own: black pill buttons, generous rounding,
+ * a single geometric typeface, green for "there is room" and amber for "this
+ * one is full".
  */
 function publicEmbedStyles() {
   return `
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* A stranger on a phone, in a hurry, possibly at arm's length: everything
+     here is sized for reading standing up, and every tap target is a thumb. */
   :root {
-    --ink: #16181A; --muted: #5A6360; --line: #D7DED6;
-    --card: #FFFFFF; --surface: rgba(255,255,255,.92);
-    --pill: #101010; --pill-ink: #FFFFFF;
-    --green: #2F7A46; --green-bg: #E4F1E1;
-    --amber: #7A5300; --amber-bg: #FBEBC6;
+    --ink: #16181A; --muted: #56605C; --line: #D5DDD3; --card: #FFFFFF;
+    --page: #F4F7F2; --brand: #101010; --brand-ink: #FFFFFF;
+    --open: #2F7A46; --open-bg: #E4F1E1; --warn: #7A5300; --warn-bg: #FBEBC6;
     --quiet: #4A5250; --quiet-bg: #EFF2ED;
-    --shadow: 0 1px 2px rgba(20,30,20,.06), 0 2px 8px rgba(20,30,20,.06);
+    --shadow: 0 1px 2px rgba(20,30,20,.05), 0 2px 8px rgba(20,30,20,.06);
     --radius: 18px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  /* TRANSPARENT ON PURPOSE — see the banner above. */
+  /* TRANSPARENT ON PURPOSE — the website's own section color is the page. */
   body { margin: 0; background: transparent; color: var(--ink);
          font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
          font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
-  .wrap { max-width: 820px; margin: 0 auto; padding: 0 14px 56px 14px; }
+  /* Wide enough for two tiles a row, and no wider: a third column would put
+     the far edge of the page outside a comfortable reading width. */
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 64px 16px; }
 
-  header { padding: 18px 2px 10px 2px; }
-  header h1 { margin: 0; font-size: 30px; line-height: 1.12; letter-spacing: -.02em; font-weight: 700; }
-  header p { margin: 8px 0 0 0; color: var(--muted); font-size: 15px; max-width: 46em; }
+  /* WHO THIS IS. Sized like a masthead rather than a page title, because for
+     somebody who followed a forwarded link it is the first question. */
+  header { padding: 26px 0 14px 0; }
+  header .eyebrow { margin: 0 0 4px 0; color: var(--muted); font-size: 13px;
+                    font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  header h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: -.022em; font-weight: 700; }
+  header p.blurb { margin: 8px 0 0 0; color: var(--ink); font-size: 16px; max-width: 62ch; }
+  header p.lines { margin: 10px 0 0 0; color: var(--ink); font-size: 14px; }
+  header p.lines a { color: var(--ink); text-decoration: underline; font-weight: 600; }
+  header p.places { margin: 4px 0 0 0; color: var(--muted); font-size: 13px; }
 
-  /* THE CONTROL BAR IS A CARD, NOT A LINE. It was transparent text on a
-     transparent page, which on the website's green block came out as a row
-     nobody could see — the reason this redesign exists. It paints itself
-     white, keeps a border, and stays put while the list scrolls under it. */
-  .controls { position: sticky; top: 0; z-index: 4; background: var(--surface);
-              -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  /* THE CONTROL BAR IS A CARD, NOT A LINE. It was transparent controls on a
+     transparent page, which on a colored website block came out as a row
+     nobody could see. It paints itself, keeps a border, and stays put while
+     the list scrolls under it. */
+  .controls { position: sticky; top: 0; z-index: 4; background: var(--card);
               border: 1px solid var(--line); border-radius: var(--radius);
-              padding: 10px; margin: 4px 0 6px 0; box-shadow: var(--shadow); }
+              padding: 10px; margin: 4px 0 2px 0; box-shadow: var(--shadow); }
   .seg { display: flex; gap: 6px; background: var(--quiet-bg); border-radius: 999px; padding: 4px; }
   .seg button { flex: 1; border: 0; background: transparent; color: var(--quiet); font-size: 14px;
                 font-weight: 600; padding: 10px 8px; border-radius: 999px; cursor: pointer;
                 font-family: inherit; transition: background .12s ease, color .12s ease; }
-  .seg button[aria-pressed="true"] { background: var(--pill); color: var(--pill-ink); }
+  .seg button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); }
 
   /* THE BUILDING IS A ROW OF PILLS, NOT A DROPDOWN. Which building a program
      is in is the second question every caller asks, and a <select> hides the
@@ -199,65 +236,146 @@ function publicEmbedStyles() {
   .locbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .locbar button { border: 1px solid var(--line); background: var(--card); color: var(--ink);
                    font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px;
-                   border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-  .locbar button[aria-pressed="true"] { background: var(--pill); color: var(--pill-ink); border-color: var(--pill); }
-  .locbar button .pin { font-size: 12px; opacity: .8; }
+                   border-radius: 999px; cursor: pointer; display: inline-flex;
+                   align-items: center; gap: 6px; }
+  .locbar button[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink);
+                                        border-color: var(--brand); }
+  .locbar button .pin { font-size: 10px; opacity: .75; }
 
-  .searchrow { display: flex; gap: 8px; margin-top: 8px; }
-  .searchrow input { flex: 1; min-width: 0; font-family: inherit; font-size: 15px;
+  .row2 { display: flex; gap: 8px; margin-top: 8px; }
+  .row2 input { flex: 1; min-width: 0; font-family: inherit; font-size: 15px;
         padding: 11px 14px; border: 1px solid var(--line); border-radius: 999px;
         background: var(--card); color: var(--ink); }
-  .count { color: var(--muted); font-size: 13px; margin-top: 9px; display: flex; gap: 8px;
-           align-items: center; justify-content: space-between; }
+  /* THE LINE THAT SAYS HOW MUCH YOU ARE LOOKING AT, and it is readable now:
+     the count is ink rather than a grey that only worked on a white page, and
+     Refresh is an outlined pill rather than blue text on nothing. */
+  .count { color: var(--ink); font-size: 13px; font-weight: 500; margin-top: 10px;
+           display: flex; gap: 8px; align-items: center; justify-content: space-between; }
   .count button { border: 1px solid var(--line); background: var(--card); color: var(--ink);
                   font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-                  padding: 6px 13px; border-radius: 999px; }
+                  padding: 6px 14px; border-radius: 999px; }
 
-  h2.day { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-           color: var(--ink); margin: 22px 0 8px 2px; }
-  h2.day span.rel { background: var(--pill); color: var(--pill-ink); border-radius: 999px;
-                    padding: 3px 10px; margin-right: 8px; letter-spacing: .06em; }
+  /* TWO TILES A ROW, one on a phone — and anything that is not a tile (the
+     lunch pin, an empty state, a failed read) spans the whole width.
+     Stretched, not top-aligned: two tiles side by side with different
+     numbers of dates on them read as a ragged edge otherwise. */
+  #list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px; margin-top: 16px; }
+  #list > .full { grid-column: 1 / -1; }
+  @media (max-width: 640px) { #list { grid-template-columns: 1fr; } }
 
-  .card { display: block; width: 100%; text-align: left; font: inherit; color: inherit;
-          background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-          padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow);
-          text-decoration: none; transition: transform .08s ease, border-color .12s ease; }
-  a.card { cursor: pointer; }
-  a.card:hover { border-color: var(--pill); }
-  a.card:active { transform: scale(.988); }
-  .card .top { display: flex; gap: 12px; align-items: baseline; }
-  .card .time { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px;
-                color: var(--muted); flex: 0 0 auto; min-width: 86px; }
-  .card .title { font-size: 18px; font-weight: 600; letter-spacing: -.01em; flex: 1; min-width: 0; }
-  .card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 9px 0 0 98px; }
-  /* The dates line on a weekly card: a fact, quietly, under the row of
-     chips — never competing with the title or the button. */
-  .card .when { margin: 8px 0 0 98px; color: var(--muted); font-size: 13px; }
-  @media (max-width: 520px) {
-    header h1 { font-size: 25px; }
-    .card .top { display: block; }
-    .card .time { min-width: 0; margin-bottom: 2px; }
-    .card .meta, .card .when { margin-left: 0; }
-  }
+  /* THE WEEKDAY HEADINGS on the regular-programs page: a black pill, so the
+     week reads as a week rather than as grey type on a colored block. */
+  h2.day { grid-column: 1 / -1; margin: 14px 0 0 0; font-size: 13px; font-weight: 700;
+           letter-spacing: .08em; text-transform: uppercase; }
+  h2.day span { background: var(--brand); color: var(--brand-ink); border-radius: 999px;
+                padding: 6px 14px; display: inline-block; }
+
+  /* ONE PROGRAM, ONE TILE, AND THE WHOLE TILE IS THE BUTTON. */
+  .prog { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 14px 16px 13px 16px; box-shadow: var(--shadow); cursor: pointer;
+          transition: transform .08s ease, border-color .12s ease, box-shadow .12s ease; }
+  .prog:hover { border-color: var(--brand); }
+  .prog:active { transform: scale(.992); }
+  .prog:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .prog.flat { cursor: default; }
+  .prog.flat:hover { border-color: var(--line); }
+  .prog.flat:active { transform: none; }
+  .prog.opening { opacity: .6; }
+  .prog .head { display: flex; gap: 10px; align-items: center; }
+  .prog .name { font-size: 18px; font-weight: 600; letter-spacing: -.01em; flex: 1; min-width: 0; }
+  /* The site's own button shape, on the tile that opens something. A tile
+     that opens nothing gets a sentence instead — the two must not look
+     alike, or somebody taps four times and then phones the office. */
+  .prog .cta { flex: 0 0 auto; font-size: 13px; font-weight: 600; white-space: nowrap;
+               background: var(--brand); color: var(--brand-ink);
+               border-radius: 999px; padding: 8px 16px; }
+  .prog .cta.quiet { background: transparent; color: var(--muted); padding: 0; font-weight: 500; }
+  .prog .cta.warn { background: var(--warn-bg); color: var(--warn); }
+  .prog .when { color: var(--muted); font-size: 14px; margin-top: 5px; }
+  .prog .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 9px; }
   .tag { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
          background: var(--quiet-bg); color: var(--quiet); }
-  /* THE BUILDING, ON EVERY CARD, AS THE ONE OUTLINED CHIP. It used to be gray
-     text with no box, indistinguishable from the tags beside it; a person
+  /* THE BUILDING, ON EVERY TILE, AS THE ONE OUTLINED CHIP. It was flat grey
+     text with no box, indistinguishable from the tags beside it: a person
      scanning for "which one is at Narberth" was reading, not scanning. */
-  .tag.where { background: var(--card); color: var(--ink); border: 1px solid var(--pill);
+  .tag.where { background: var(--card); color: var(--ink); border: 1px solid var(--brand);
                font-weight: 600; }
-  .tag.open { background: var(--green-bg); color: var(--green); }
-  .tag.warn { background: var(--amber-bg); color: var(--amber); }
-  .cta { margin-left: auto; font-size: 14px; font-weight: 600; color: var(--ink);
-         background: var(--pill); color: var(--pill-ink); border-radius: 999px; padding: 7px 16px; }
-  .cta.quiet { background: transparent; color: var(--muted); padding-left: 0; padding-right: 0; }
-  .card.opening { opacity: .6; }
+  .tag.open { background: var(--open-bg); color: var(--open); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn); }
+
+  /* THE DATES ARE TAP TARGETS OF THEIR OWN. Each carries its own session's
+     form, which for a Regular program is a different form each month — the
+     whole reason a printed link goes stale and this page does not. */
+  .dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+  .chip { font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 999px;
+          border: 1px solid var(--line); background: var(--page); color: var(--ink);
+          text-decoration: none; font-variant-numeric: tabular-nums; display: inline-block;
+          transition: transform .08s ease, border-color .12s ease; }
+  a.chip:hover { border-color: var(--brand); }
+  a.chip:active { transform: scale(.97); }
+  .chip.today { border-color: var(--brand); color: var(--brand); font-weight: 700; }
+  /* A FULL DATE IS AMBER, NOT ABSENT. It is still a date somebody may want —
+     the form behind it is the waiting list — so it is coloured rather than
+     hidden, and the tile says what the colour means when it has both. */
+  .chip.full { background: var(--warn-bg); border-color: var(--warn-bg); color: var(--warn); }
+  .chip.quiet { color: var(--muted); }
+  .chip.opening { opacity: .55; }
+  .chip.more { border-style: dashed; color: var(--muted); cursor: pointer; font-family: inherit; }
+  .legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .legend b { color: var(--warn); font-weight: 700; }
 
   .empty { text-align: center; color: var(--muted); padding: 44px 20px; background: var(--card);
            border: 1px solid var(--line); border-radius: var(--radius); }
   .empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
-  .notice { background: var(--amber-bg); color: var(--amber); border-radius: var(--radius);
+  .notice { background: var(--warn-bg); color: var(--warn); border-radius: var(--radius);
             padding: 14px 16px; margin: 18px 0; font-size: 15px; }
-  footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 26px; line-height: 1.6; }
-  </style>`;
+  footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 30px;
+           line-height: 1.6; }
+</style>`;
+}
+
+/**
+ * THE EMBED SKIN, or '' — what changes when the page is inside a frame.
+ *
+ * Written SERVER-side rather than switched on by a class the page's own
+ * script adds, because a class added by script is a class added after the
+ * first paint: the heading would be drawn, seen, and then removed, inside
+ * somebody else's website. There is no frame in which this page looks like a
+ * page that got dressed.
+ *
+ * What it does is take things AWAY. The introduction is the host site's job —
+ * it has already said whose calendar this is, and said it in its own typeface
+ * — the sticky bar unsticks (the frame is resized to the content, so there is
+ * nothing here to scroll past), and the bottom padding goes, because in a
+ * frame it is empty space nobody can explain rather than room for a thumb.
+ */
+function publicEmbedSkinStyles(embed) {
+  if (!embed) return '';
+  return `
+<style>
+  .wrap { padding: 0 2px 2px 2px; max-width: none; }
+  .controls { position: static; margin-top: 0; }
+  footer { margin-top: 18px; font-size: 12px; }
+</style>`;
+}
+
+/**
+ * THE REGULAR-PROGRAMS PAGE'S OWN EMBED ADDRESS AND SNIPPET — the calendar's,
+ * with this page's mode on it and its own frame id, so a website that embeds
+ * both grows two frames rather than one.
+ */
+function publicRegularEmbedUrl(options) {
+  const opts = options || {};
+  return checkInPageUrl({
+    mode: 'regular',
+    params: { embed: '1', building: opts.location || '' }
+  });
+}
+
+function publicRegularEmbedSnippet(options) {
+  return publicEmbedSnippetFor_(publicRegularEmbedUrl(options), {
+    id: 'regular-programs',
+    title: 'Weekly programs'
+  });
 }

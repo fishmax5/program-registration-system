@@ -136,14 +136,17 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  *          the first match wins, so an entry's position is part of its meaning
  *   build  the page itself, from the request and the shared context
  *   title  the browser tab
+ *   frameable  may another site put this page in an <iframe>? Absent means no,
+ *          which is the right answer for every page that writes — see doGet()
  *
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
  *
  * THE PUBLIC PAGES ARE NOT IN THIS TABLE. They live in 91_public_embeds.gs,
- * which doGet() asks before it walks this one — they are the only pages here
- * that another website may frame, and that is a property of the response
- * rather than of the page. Everything declared below writes to the workbook.
+ * which doGet() asks before it walks this one: everything declared below
+ * WRITES to the workbook, and the one thing that separates the public pages
+ * from all of it — that another website may frame them — is a property of the
+ * response, not of the page.
  *
  * BUILT LAZILY (see 01a_lazy_globals.gs). The entries name functions and
  * constants that live in sections 16b, 16f and 71 — other files, in a project
@@ -242,12 +245,11 @@ function doGet(e) {
     locations: checkInLocations()
   };
 
-  // THE PUBLIC EMBEDS ARE ASKED ABOUT FIRST, and they are served by their own
-  // file (91_public_embeds.gs) rather than by a row in DOOR_ROUTES. Not tidying:
-  // they are the only pages here that may be FRAMED by another website, which
-  // is a property of the RESPONSE, and the table below can only describe a
-  // page's body. Asking first also means a spelling the public router claims
-  // can never be answered by a page that asks a stranger for a staff PIN.
+  // THE PUBLIC PAGES ARE ASKED ABOUT FIRST, and they are declared and served
+  // by their own file (91_public_embeds.gs). Not tidying: they are the only
+  // pages here another website may FRAME, which is a property of the response
+  // rather than of the page, and asking first also means a spelling the public
+  // router claims can never be answered by a page that wants a staff PIN.
   const publicRoute = publicEmbedRoute(params);
   if (publicRoute) return servePublicEmbed(publicRoute, params);
 
@@ -259,17 +261,21 @@ function doGet(e) {
   // edited down to nothing still serves a page rather than a stack trace.
   if (!route) route = doorRouteById_('door');
 
-  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). Every page below this
-  // line writes to the workbook, and letting any site frame one of them is
-  // what turns a tap on somebody else's page into a check-in on this one.
-  // Nothing here needs to embed — these are opened on a tablet, not built
-  // into another site. The two pages that ARE embedded returned above, from
-  // servePublicEmbed() in 88, which is the only place ALLOWALL is written.
-  return HtmlService.createHtmlOutput(route.build(params, ctx))
+  const out = HtmlService.createHtmlOutput(route.build(params, ctx))
     .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+
+  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). Apps Script refuses
+  // framing by default, and for every page below this line that default is
+  // the protection: they all write to the workbook, and letting any site
+  // frame the door app is what turns a tap on somebody else's page into a
+  // check-in on this one. The two pages that MAY be framed returned above,
+  // from servePublicEmbed() in 91 — which is the only place ALLOWALL is
+  // written, because it is the only place that serves a page that cannot
+  // write anything.
+  return out;
 }
 
 /** What ?mode= has to say to get the session roster instead of the door page. */
@@ -311,6 +317,21 @@ function checkInPageUrl(options) {
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
   const mode = doorRouteUrlMode_(opts.mode);
   if (mode) parts.push(`mode=${encodeURIComponent(mode)}`);
+  // Only the public calendar reads a span, and only a spelling it recognizes
+  // is written — a link carrying a word the page would ignore is a link that
+  // says something untrue about what it opens.
+  const span = publicCalendarSpanRequested_({ span: opts.span });
+  if (span) parts.push(`span=${encodeURIComponent(span)}`);
+  // ANYTHING ELSE THE ROUTE UNDERSTANDS, still assembled here rather than by
+  // the caller: the embed URLs in section 17b carry ?embed=1 and a pinned
+  // building, and a caller that concatenated those itself is a caller that
+  // gets to forget the encodeURIComponent on a building called "St. John's".
+  const extra = opts.params || {};
+  Object.keys(extra).forEach(key => {
+    const value = String(extra[key] === undefined || extra[key] === null ? '' : extra[key]).trim();
+    if (!value) return;
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  });
   if (!parts.length) return base;
   return `${base}${base.indexOf('?') === -1 ? '?' : '&'}${parts.join('&')}`;
 }
@@ -329,7 +350,7 @@ function doorRouteUrlMode_(requested) {
   const asked = String(requested || '').trim();
   if (!asked) return '';
   // THE PUBLIC PAGES FIRST, because their table is the one that moved: a link
-  // built for 'public' or 'weekly' has to carry the spelling 88 answers to,
+  // built for 'public' or 'regular' has to carry the spelling 91 answers to,
   // and asking DOOR_ROUTES for a page it no longer declares would hand the
   // caller's own word back and print a URL that opens the door app.
   const publicMode = publicEmbedUrlMode(asked);
@@ -485,19 +506,34 @@ function normalizeCheckInWebAppUrl(value) {
  */
 function setCheckInWebAppUrl(url) {
   const judged = normalizeCheckInWebAppUrl(url);
-  if (!judged.ok) return { ok: false, savedUrl: readSavedCheckInWebAppUrl(), message: `⚠️ ${judged.message}` };
+  if (!judged.ok) {
+    return {
+      ok: false, savedUrl: readSavedCheckInWebAppUrl(),
+      embedSnippet: publicCalendarEmbedSnippet({}),
+      message: `⚠️ ${judged.message}`
+    };
+  }
   const props = PropertiesService.getScriptProperties();
   if (!judged.url) {
     props.deleteProperty(CHECK_IN_WEB_APP_URL_PROP_KEY);
     return {
       ok: true,
       savedUrl: '',
+      // REBUILT AFTER THE WRITE, NEVER BEFORE IT. The website snippet carries
+      // the address inside it, so the one the dialog draws next has to be the
+      // one this call just settled on — a snippet built from the old address
+      // is a calendar pointing at a deployment nobody meant to publish.
+      embedSnippet: publicCalendarEmbedSnippet({}),
       message: 'Cleared. The links now use whatever address the script reports, which is not ' +
         'always the published one.'
     };
   }
   props.setProperty(CHECK_IN_WEB_APP_URL_PROP_KEY, judged.url);
-  return { ok: true, savedUrl: judged.url, message: `Saved. Every link below is now built from ${judged.url}` };
+  return {
+    ok: true, savedUrl: judged.url,
+    embedSnippet: publicCalendarEmbedSnippet({}),
+    message: `Saved. Every link below is now built from ${judged.url}`
+  };
 }
 
 /**

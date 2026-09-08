@@ -472,27 +472,19 @@ function inviteRegistrantsForSessions(eventIds) {
 //
 // The office used to find out who had been invited to what by being invited
 // to it themselves. That is the one thing this file will not do any more (see
-// the banner at the top), so the same information is written out instead:
-// after each pass, one plain-text message per address ticked for
-// Calendar_Invite_Guest, naming every session whose guest list changed, who
-// was added, who was taken off, and — the part a guest list never said — HOW
-// each of them was told, which is Google's own calendar invitation.
+// the banner at the top), so the same information is written out instead: one
+// line per session whose guest list changed, naming who was added, who was
+// taken off, and — the part a guest list never said — that Google's own
+// calendar invitation is how each of them was told.
 //
-// One message per run, not per session: a sync that catches up on thirty
-// sessions is one thing that happened, and thirty separate emails about it is
-// the same burial by volume the guest list caused.
+// IT IS NOT A MESSAGE OF ITS OWN any more. It was, briefly: one email per
+// pass to everybody ticked for Calendar_Invite_Guest, which on a morning that
+// caught up on three forms was three emails before the office had read
+// anything else. The lines are spooled for the 10am digest instead (see
+// 88_office_daily_digest.gs), where they sit beside the reminders and roster
+// alerts that went out alongside them — and the pass spends no mail quota on
+// the office at all.
 // ============================================================================
-
-/**
- * The floor this pass will not dig the day's hundred messages below.
- *
- * Lower than the registrant reminders' reserve (REMINDER_QUOTA_RESERVE, ten):
- * a digest is the office learning something slightly sooner than the workbook
- * would have told them anyway, and a member being told about their own
- * appointment is not. When the quota is that close to gone, the member's
- * message is the one that should still be affordable.
- */
-const INVITE_DIGEST_QUOTA_RESERVE = 4;
 
 /** Registrant rows as { email: name }, first name seen per address. */
 function registrantNamesByEmail(rows, lrMap) {
@@ -512,57 +504,17 @@ function describeInvitee(email, nameByEmail) {
   return name ? `${name} <${email}>` : String(email || '');
 }
 
-/** The digest's subject line. */
-function buildCalendarInviteDigestSubject(changes) {
-  const invited = (changes || []).reduce((n, c) => n + c.added.length, 0);
-  const removed = (changes || []).reduce((n, c) => n + c.removed.length, 0);
-  const parts = [];
-  if (invited > 0) parts.push(`${invited} invited`);
-  if (removed > 0) parts.push(`${removed} removed`);
-  return `Calendar invitations: ${parts.join(', ') || 'no changes'} ` +
-    `across ${(changes || []).length} session(s)`;
-}
-
 /**
- * The digest's body. Plain text for the same reason every other message this
- * project sends is (see buildRegistrantReminderBody): it is read on a phone at
- * a desk, and an HTML mail that renders as markup is worse than no mail.
- */
-function buildCalendarInviteDigestBody(changes) {
-  const lines = [
-    'Registrations were added to (or taken off) these Google Calendar events.',
-    'Everyone listed under "invited" was added as a guest on the event, and',
-    'Google emailed them its own calendar invitation. Everyone under "removed"',
-    'was taken off it, which Google also emailed them about.',
-    '',
-    'Nobody in the office is on these guest lists any more — this message is',
-    'the copy. Who receives it is the Calendar_Invite_Guest column on the',
-    'Config tab.',
-    ''
-  ];
-  (changes || []).forEach(change => {
-    const session = change.session || {};
-    lines.push(`${formatDateLabel(session.date)} — ${session.title || '(untitled)'}` +
-      (session.location ? ` (${session.location})` : ''));
-    if (change.added.length > 0) {
-      lines.push(`  invited (Google calendar invitation): ${change.added.join(', ')}`);
-    }
-    if (change.removed.length > 0) {
-      lines.push(`  removed (Google cancellation): ${change.removed.join(', ')}`);
-    }
-    lines.push('');
-  });
-  return lines.join('\n');
-}
-
-/**
- * Mails the digest to every address ticked for Calendar_Invite_Guest. Returns
- * how many messages actually went.
+ * Files the invitation changes for the office's 10am digest. Returns how many
+ * SESSIONS were written down.
  *
- * Sent to each address in its own message rather than one message BCC'd to
- * all of them, because sendRationedEmail() counts a BCC as its own message
- * anyway (it is one) and a direct message is the one a member of staff can
- * reply to and forward without wondering who else has it.
+ * This used to be its own email to each address ticked for
+ * Calendar_Invite_Guest, once per sync pass — which on a morning when three
+ * forms filled up was three separate messages saying much the same thing,
+ * before anything else the workbook had to report. It is now one line per
+ * session in the daily digest (88_office_daily_digest.gs), where it sits next
+ * to the reminders and the roster alerts it happened alongside. Nobody is
+ * mailed here at all, so the pass spends no quota on the office.
  *
  * Never throws, and never blocks the pass: an office that was not told about
  * a set of invitations is a smaller problem than a sync that failed after
@@ -570,30 +522,27 @@ function buildCalendarInviteDigestBody(changes) {
  */
 function notifyOfficeOfCalendarInvites(changes) {
   if (!changes || changes.length === 0) return 0;
-  let sent = 0;
+  let noted = 0;
   try {
-    const office = adminEmailsForCategory('calendarInviteGuest');
-    if (office.length === 0) return 0;
-    const subject = buildCalendarInviteDigestSubject(changes);
-    const body = buildCalendarInviteDigestBody(changes);
-    office.forEach(address => {
-      const outcome = sendRationedEmail({
-        to: address,
-        subject,
-        body,
-        reserve: INVITE_DIGEST_QUOTA_RESERVE
-      });
-      if (outcome.status === 'sent') sent++;
-      else if (outcome.status === 'failed') {
-        log(`⚠️ Could not send the calendar-invitation digest to ${address} (${outcome.error}).`);
-      }
+    changes.forEach(change => {
+      const session = change.session || {};
+      const where = `${formatDateLabel(session.date)} — ${session.title || '(untitled)'}` +
+        (session.location ? ` (${session.location})` : '');
+      const parts = [];
+      // "invited" and "removed" are Google's own words for what it emailed
+      // these people: the guest list is the message, and the office is being
+      // told what the member already received.
+      if (change.added && change.added.length > 0) parts.push(`invited ${change.added.join(', ')}`);
+      if (change.removed && change.removed.length > 0) parts.push(`removed ${change.removed.join(', ')}`);
+      if (parts.length === 0) return;
+      if (spoolOfficeNote('Calendar invitations', `${where} — ${parts.join('; ')}`)) noted++;
     });
   } catch (err) {
-    log(`⚠️ Calendar-invitation digest could not be sent (${err}).`);
-    return sent;
+    log(`⚠️ Calendar-invitation changes could not be noted for the office digest (${err}).`);
+    return noted;
   }
-  if (sent > 0) log(`Calendar invitations: digest sent to ${sent} office address(es).`);
-  return sent;
+  if (noted > 0) log(`Calendar invitations: ${noted} session(s) noted for the office digest.`);
+  return noted;
 }
 
 // ============================================================================

@@ -359,7 +359,11 @@ function buildAppMenu(ui, includeAdmin) {
         // thing that names WHICH calendar the leftover rows are from, and the
         // calendar ID is the whole question, so it is read first. See 84.
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
-        .addItem('Archive Old Months (report)', 'reportArchivableMonths'))
+        .addItem('Archive Old Months (report)', 'reportArchivableMonths')
+        // Sends, so not read-only — but it is the digest's own item and this
+        // is where somebody looks for it. It sends what is waiting NOW,
+        // including today so far, and does not disturb tomorrow's 10am send.
+        .addItem('\ud83d\udce8 Send the Office Digest Now', 'sendOfficeDigestNow'))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
       // sit interleaved with the repairs above \u2014 "Delete Registrations" was
@@ -532,6 +536,15 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('captureMonthlyMetricsTrigger', () =>
     ScriptApp.newTrigger('captureMonthlyMetricsTrigger')
       .timeBased().onMonthDay(2).atHour(4).create());
+  // ONE EMAIL A DAY FOR THE OFFICE, at OFFICE_DIGEST_HOUR. Everything the
+  // workbook would have mailed the office is spooled as it happens and sent
+  // here in one message covering YESTERDAY — a closed day, so an entry written
+  // at 09:59 is never split across two digests (see 88_office_daily_digest.gs).
+  // Ten rather than the small hours because it is read at a desk, in the
+  // morning, by somebody who is about to act on it.
+  removed += resetTriggersForHandler('sendOfficeDailyDigest', () =>
+    ScriptApp.newTrigger('sendOfficeDailyDigest')
+      .timeBased().everyDays(1).atHour(OFFICE_DIGEST_HOUR).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a

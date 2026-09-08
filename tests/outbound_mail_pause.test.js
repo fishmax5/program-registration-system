@@ -215,26 +215,30 @@ check('an already-sent message still reads as a duplicate', attempt.outcome.stat
 check('and is not counted against the pause', sandbox.rationedMailPausedCount(), 0);
 
 // ---------------------------------------------------------------------------
-// 3. THE OFFICE STILL HEARS. notifyAdmin() does not come through the rationed
-//    mailer, and pausing member mail must not silence the workbook's own
-//    report of what it just did.
+// 3. THE OFFICE STILL HEARS. The pause holds mail to MEMBERS AND LEADERS;
+//    the workbook's own report of what it just did is not on that wire at all.
+//    It is spooled for the 10am digest (88_office_daily_digest.gs) rather than
+//    sent from here, which is what the pause must not be able to swallow.
 // ---------------------------------------------------------------------------
 useSheet(configSheet('Yes', { digestTo: 'office@example.org' }));
+const spooled = [];
+vm.runInContext('spoolOfficeNote = function (section, message) { ' +
+  'this.__spooled.push({ section, message }); return true; };', sandbox);
+sandbox.__spooled = spooled;
+
 const paused = sandbox.sendRationedEmail({
   to: 'member@example.org', subject: 'Reminder', body: 'tomorrow', reserve: 0
 });
 check('the member is not written to', paused.status, 'paused');
-// The pause writes one line into the admin digest the first time it holds a
-// message, which is how "why did nobody hear from us?" stays answerable.
-// notifyAdmin() reads the ticked office addresses off Config, and does not go
-// through the rationed mailer at all — which is the point.
+// The pause writes one line for the office the first time it holds a message,
+// which is how "why did nobody hear from us?" stays answerable.
 sentMail.length = 0;
-check('...and the digest still goes to the office',
-  sandbox.flushAdminDigest('Registration sync'), true);
-check('as a real message, to the person ticked for it',
-  sentMail.map(m => m.to), ['office@example.org']);
-check('and it names the pause',
-  sentMail[0].body.indexOf('paused') !== -1, true);
+check('...and the office is still told', sandbox.flushAdminDigest('Registration sync'), true);
+check('nothing was mailed to say so — it waits for the daily digest', sentMail.length, 0);
+check('and the line names the pause',
+  spooled.some(e => `${e.section} ${e.message}`.indexOf('paused') !== -1), true);
+check('...under a heading that says which pass it came from',
+  spooled.some(e => e.section.indexOf('Registration sync') !== -1), true);
 
 console.log(failures === 0 ? '\nAll outbound mail pause tests passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

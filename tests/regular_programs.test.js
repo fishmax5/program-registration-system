@@ -1,4 +1,4 @@
-// THE WEEKLY PROGRAMS PAGE (sections 18, 18a and 18b) — the second embed, and
+// THE REGULAR PROGRAMS PAGE (sections 18, 18a and 18b) — the second embed, and
 // the one that answers "what runs every Thursday" instead of "what is on".
 //
 // What has to hold:
@@ -11,7 +11,7 @@
 //      two buildings is two things a person can go to, at two addresses.
 //   3. IT PUBLISHES NOTHING THE CALENDAR PAGE DOES NOT. It is a fold of the
 //      same snapshot, so the privacy line in 86 holds by construction.
-//   4. ?mode=weekly REACHES IT, in every spelling, and never a page that asks
+//   4. ?mode=regular REACHES IT, in every spelling, and never a page that asks
 //      a stranger for a staff PIN.
 //   5. THE PUBLIC PAGES — AND ONLY THEY — ARE FRAMEABLE. The embed on the
 //      website is an iframe; every other page here writes to the workbook.
@@ -54,10 +54,12 @@ const sandbox = {
   },
   FormApp: { ItemType: {} }, CalendarApp: {}, DriveApp: {}, LockService: {},
   HtmlService: {
+    XFrameOptionsMode: { ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' },
     createHtmlOutput: html => ({
-      html, title: '', metaTags: [],
+      html, title: '', metaTags: [], xFrame: '',
       setTitle(t) { this.title = t; return this; },
-      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; }
+      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; },
+      setXFrameOptionsMode(mode) { this.xFrame = mode; return this; }
     })
   },
   Session: {
@@ -98,7 +100,7 @@ const VIEW = 'https://docs.google.com/forms/d/e/PUB1/viewform';
 const link = `=HYPERLINK("${VIEW}","View Live Form")`;
 const rows = [];
 const add = (offset, fields) => rows.push(row(Object.assign({
-  Event_Date: dayAt(offset), Status: '\u{1F7E2} Open', Event_Time: '9:30 AM \u2013 10:30 AM',
+  Event_Date: dayAt(offset), Status: 'Open', Event_Time: '9:30 AM',
   Form_Response_Link: link, Max_Capacity: 20, Remaining_Seats: 12
 }, fields)));
 
@@ -110,7 +112,7 @@ const add = (offset, fields) => rows.push(row(Object.assign({
 [1, 8, 22].forEach((d, i) => add(d, {
   Location: 'Narberth', Clean_Title: 'Watercolor', Event_ID: 'WC' + i
 }));
-// The same weekly program in a second building: two entries, two addresses.
+// The same weekly program in two buildings: two programs, two addresses.
 [2, 9, 16].forEach((d, i) => add(d, {
   Location: 'Ashbridge', Clean_Title: 'Shared Bingo', Event_ID: 'SBA' + i
 }));
@@ -118,9 +120,6 @@ const add = (offset, fields) => rows.push(row(Object.assign({
   Location: 'Narberth', Clean_Title: 'Shared Bingo', Event_ID: 'SBN' + i
 }));
 // Every other week — deliberately NOT on this page.
-[3, 17].forEach((d, i) => add(d, {
-  Location: 'Narberth', Clean_Title: 'Fortnightly Film', Event_ID: 'FF' + i
-}));
 [0, 14, 28].forEach((d, i) => add(d, {
   Location: 'Ashbridge', Clean_Title: 'Every Other Week Walk', Event_ID: 'EOW' + i
 }));
@@ -131,76 +130,87 @@ const add = (offset, fields) => rows.push(row(Object.assign({
 // Weekly, but no form generated yet — on the page, saying so.
 [5, 12, 19].forEach((d, i) => rows.push(row({
   Event_Date: dayAt(d), Location: 'Ashbridge', Clean_Title: 'Tai Chi',
-  Event_Time: '10:00 AM', Status: '\u{1F7E2} Open', Event_ID: 'TC' + i
+  Event_Time: '10:00 AM', Status: 'Open', Event_ID: 'TC' + i
 })));
 // Weekly, and full: the form is still the way in, as a waiting list.
 [6, 13, 20].forEach((d, i) => add(d, {
   Location: 'Narberth', Clean_Title: 'Book Club', Event_ID: 'BC' + i,
-  Status: '\u{1F534} Waitlist Only', Club: true, Max_Capacity: 8, Remaining_Seats: 0
+  Waitlist_Only: true, Club: true, Max_Capacity: 8, Remaining_Seats: 0
+}));
+// Lunch runs nearly every weekday at both buildings and is pinned on the
+// calendar page; it is not a thing somebody joins on Tuesdays.
+[0, 7, 14].forEach((d, i) => add(d, {
+  Location: 'Narberth', Clean_Title: 'Lunch @ Narberth', Event_ID: 'LUNCHONLY:N' + i
 }));
 
 sandbox.getSectionedRows = () => rows.map(r => r.slice());
 
-const snap = sandbox.publicWeeklyPrograms({});
+const snap = sandbox.publicRegularPrograms({});
 const named = title => snap.programs.filter(p => p.title === title);
 
 // ---------------------------------------------------------------------------
-// 1. What counts as weekly.
+// 1. What counts as regular.
 // ---------------------------------------------------------------------------
 ok('a weekly program is one entry, not one per date', named("Ruth's Chair Yoga").length === 1);
-ok('...carrying every date in the window', named("Ruth's Chair Yoga")[0].count === 4);
+ok('...carrying every date in the window', named("Ruth's Chair Yoga")[0].sessions.length === 4);
 ok('a weekly program that misses a week is still weekly', named('Watercolor').length === 1);
-ok('every other week is not weekly', named('Fortnightly Film').length === 0
-  && named('Every Other Week Walk').length === 0);
+ok('every other week is not weekly', named('Every Other Week Walk').length === 0);
 ok('two dates are a coincidence, not a pattern', named('Twice Only').length === 0);
 ok('the same program in two buildings is two entries', named('Shared Bingo').length === 2);
 ok('...at their own addresses',
   named('Shared Bingo').map(p => p.location).sort().join('|') === 'Ashbridge|Narberth');
+ok('lunch is not a weekly program somebody joins',
+  snap.programs.every(p => p.title.toLowerCase().indexOf('lunch') === -1));
 
 // ---------------------------------------------------------------------------
-// 2. What an entry says.
+// 2. What a program says.
 // ---------------------------------------------------------------------------
+const WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const yoga = named("Ruth's Chair Yoga")[0];
-ok('an entry names the weekday it runs on',
-  ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    .indexOf(yoga.weekday) !== -1);
-ok('and every date is on that weekday',
-  yoga.dates.length === 4 && yoga.nextDateKey === yoga.dates[0]);
-ok('the link is the next session\'s live form', yoga.url === VIEW);
-ok('a weekly program with no form yet says so rather than nothing',
-  named('Tai Chi')[0].state === 'soon' && named('Tai Chi')[0].url === '');
-ok('a full weekly program is a waiting list', named('Book Club')[0].state === 'waitlist'
-  && named('Book Club')[0].seats === 'Waiting list');
-ok('entries come back Monday-first, then by start time', (() => {
-  const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  return snap.programs.every((p, i) => i === 0
-    || order.indexOf(snap.programs[i - 1].weekday) <= order.indexOf(p.weekday));
-})());
+ok('a program names the weekday it runs on', WEEK.indexOf(yoga.weekday) !== -1);
+ok('and every one of its dates is on that weekday',
+  yoga.sessions.every(s => s.dayLabel.split(',')[0] === yoga.weekday));
+ok('its dates carry the live form', yoga.sessions[0].url === VIEW);
+ok('a weekly program with no form yet is still listed',
+  named('Tai Chi').length === 1 && named('Tai Chi')[0].sessions[0].url === '');
+ok('a full weekly program keeps its form, as a waiting list',
+  named('Book Club')[0].sessions[0].state === 'waitlist');
+ok('programs come back Monday-first',
+  snap.programs.every((p, i) => i === 0
+    || WEEK.indexOf(snap.programs[i - 1].weekday) <= WEEK.indexOf(p.weekday)));
 ok('only the buildings with a weekly program are offered as filters',
   JSON.stringify(snap.locations) === JSON.stringify(['Ashbridge', 'Narberth']));
 ok('nothing in the fold mentions a registrant',
   JSON.stringify(snap).toLowerCase().indexOf('registrant') === -1);
 
-// The fold may not widen what the calendar page was allowed to publish.
-const ALLOWED = ['id', 'title', 'location', 'weekday', 'time', 'sortTime', 'dates', 'count',
-  'nextDateKey', 'nextDayLabel', 'lastDayLabel', 'lunch', 'club', 'appointment',
-  'url', 'state', 'seats'];
-const extra = Object.keys(yoga).filter(k => ALLOWED.indexOf(k) === -1);
-ok('a weekly entry carries only the agreed fields (found: ' + extra.join(', ') + ')',
+// The fold may not widen what the calendar page was allowed to publish: the
+// sessions on a program are the calendar's own rows, untouched.
+const ALLOWED = ['id', 'dateKey', 'weekday', 'dayLabel', 'shortLabel', 'monthLabel', 'title',
+  'programKey', 'location', 'time', 'sortTime', 'lunch', 'club', 'appointment', 'url',
+  'state', 'seats'];
+const extra = Object.keys(yoga.sessions[0]).filter(k => ALLOWED.indexOf(k) === -1);
+ok('a published session carries only the agreed fields (found: ' + extra.join(', ') + ')',
   extra.length === 0);
 
 // ---------------------------------------------------------------------------
 // 3. The page.
 // ---------------------------------------------------------------------------
-const html = sandbox.buildPublicWeeklyHtml(snap);
+const html = sandbox.buildPublicRegularHtml(snap, {});
 ok('the whole fold is inlined, so the first frame needs no request',
   html.indexOf(VIEW) !== -1 && html.indexOf('Chair Yoga') !== -1);
 ok('the page is drawn on the shared embed stylesheet',
-  html.indexOf('--pill-ink') !== -1 && html.indexOf('background: transparent') !== -1);
+  html.indexOf('background: transparent') !== -1 && html.indexOf('--brand-ink') !== -1);
 ok('no data is written into the page with innerHTML', html.indexOf('innerHTML') === -1);
 ok('a title cannot close the page\'s script block',
   (html.match(/<\/script>/g) || []).length === 1);
-const failedHtml = sandbox.buildPublicWeeklyHtml({ ok: false, message: 'Could not look.' });
+const embedHtml = sandbox.buildPublicRegularHtml(snap,
+  sandbox.publicCalendarViewOptions({ embed: '1', building: 'narberth' }));
+ok('the embed drops the introduction, which is the host site\'s job',
+  embedHtml.indexOf('id="orgName"') === -1 && html.indexOf('id="orgName"') !== -1);
+ok('...and pins the building it was given, resolved to the real spelling',
+  embedHtml.indexOf('\\"location\\":\\"Narberth\\"') !== -1);
+ok('the embed knows to report its height', embedHtml.indexOf('postMessage') !== -1);
+const failedHtml = sandbox.buildPublicRegularHtml({ ok: false, message: 'Could not look.' }, {});
 ok('a failed read is inlined as its own message',
   failedHtml.indexOf('Could not look.') !== -1);
 
@@ -212,45 +222,41 @@ sandbox.readyCheckInSessionIndex = () => ({ sessions: [] });
 sandbox.buildCheckInHtml = () => 'PAGE:roster';
 sandbox.buildDoorAppHtml = () => 'PAGE:door';
 sandbox.buildPublicCalendarHtml = () => 'PAGE:public';
-sandbox.buildPublicWeeklyHtml = () => 'PAGE:weekly';
+sandbox.buildPublicRegularHtml = () => 'PAGE:regular';
 
-['weekly', 'regular', 'ongoing', 'recurring', 'classes', 'weekly-programs', 'WEEKLY']
-  .forEach(mode => {
-    ok(`?mode=${mode} opens the weekly page`,
-      sandbox.doGet({ parameter: { mode } }).html === 'PAGE:weekly');
+['regular', 'recurring', 'ongoing', 'classes', 'every-week', 'regular-programs',
+  'weekly-programs', 'REGULAR'].forEach(mode => {
+    ok(`?mode=${mode} opens the regular programs page`,
+      sandbox.doGet({ parameter: { mode } }).html === 'PAGE:regular');
   });
-ok('?view=weekly opens it too',
-  sandbox.doGet({ parameter: { view: 'weekly' } }).html === 'PAGE:weekly');
+ok('?view=recurring opens it too',
+  sandbox.doGet({ parameter: { view: 'recurring' } }).html === 'PAGE:regular');
 ok('the calendar page is still its own mode',
   sandbox.doGet({ parameter: { mode: 'public' } }).html === 'PAGE:public');
+// ?span=weekly is the CALENDAR's next seven days and must stay that: one word
+// meaning two things across two printed links is a link pasted wrong.
+ok('?span=weekly still means the calendar\'s week, not this page',
+  sandbox.doGet({ parameter: { mode: 'public', span: 'weekly' } }).html === 'PAGE:public');
 ok('the door app is still what an unrecognized mode gets',
   sandbox.doGet({ parameter: { mode: 'zzz' } }).html === 'PAGE:door');
 ok('the link a staff member prints carries the mode the router answers to',
-  sandbox.checkInPageUrl({ mode: 'weekly' })
-    === 'https://script.google.com/macros/s/ABC/exec?mode=weekly');
+  sandbox.checkInPageUrl({ mode: 'regular' })
+    === 'https://script.google.com/macros/s/ABC/exec?mode=regular');
 ok('...and so does a link asked for by one of the other spellings',
   sandbox.checkInPageUrl({ mode: 'recurring' })
-    === 'https://script.google.com/macros/s/ABC/exec?mode=weekly');
+    === 'https://script.google.com/macros/s/ABC/exec?mode=regular');
+ok('the embed snippet can be written for it',
+  sandbox.publicRegularEmbedSnippet({}).indexOf('mode=regular&embed=1') !== -1);
 
 // THE EMBEDS MAY BE FRAMED; NOTHING ELSE HERE MAY BE. Both halves matter: the
 // website's block is an iframe, and every other page here writes to the
 // workbook.
-const framed = [];
-sandbox.HtmlService.XFrameOptionsMode = { ALLOWALL: 'ALLOWALL' };
-const originalCreate = sandbox.HtmlService.createHtmlOutput;
-sandbox.HtmlService.createHtmlOutput = html => {
-  const out = originalCreate(html);
-  out.setXFrameOptionsMode = mode => { framed.push(mode); return out; };
-  return out;
-};
-sandbox.doGet({ parameter: { mode: 'weekly' } });
-ok('the weekly embed is served frameable', framed.join('') === 'ALLOWALL');
-framed.length = 0;
-sandbox.doGet({ parameter: { mode: 'public' } });
-ok('so is the calendar embed', framed.join('') === 'ALLOWALL');
-framed.length = 0;
-sandbox.doGet({ parameter: { mode: 'session' } });
-sandbox.doGet({ parameter: {} });
-ok('the staff roster and the door app are not', framed.length === 0);
+ok('the regular programs page may be framed',
+  sandbox.doGet({ parameter: { mode: 'regular' } }).xFrame === 'ALLOWALL');
+ok('so may the calendar', sandbox.doGet({ parameter: { mode: 'public' } }).xFrame === 'ALLOWALL');
+ok('the door app may not', !sandbox.doGet({ parameter: {} }).xFrame);
+ok('the staff roster may not',
+  !sandbox.doGet({ parameter: { mode: 'session' } }).xFrame);
 
-console.log(fail ? `\n${fail} failed` : '\nAll weekly program checks passed');
+console.log(fail ? `\n${fail} failed` : '\nAll regular program checks passed');
+process.exit(fail ? 1 : 0);

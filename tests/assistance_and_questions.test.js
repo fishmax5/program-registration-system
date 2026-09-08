@@ -207,11 +207,14 @@ const reserved = sandbox.reservedQuestionTitles();
   .forEach(t => check(`"${t}" is reserved`, reserved.has(t.toLowerCase()), true));
 check('"Zip Code" is not reserved', reserved.has('zip code'), false);
 
-// --- the email about the requests just filed --------------------------------
-// One email per sync, to whoever is ticked for it on Config, with everything
-// needed to make the call in the body. Nobody ticked means nothing sent.
-const sent = [];
-sandbox.MailApp.sendEmail = (to, subject, body) => sent.push({ to, subject, body });
+// --- the office's line about the requests just filed ------------------------
+// It used to be its own email per sync, to whoever was ticked for it. It is a
+// section in the 10am office digest now (88_office_daily_digest.gs), with
+// everything needed to make the call in it. Nothing filed still writes nothing.
+const spooled = [];
+vm.runInContext('spoolOfficeNote = function (section, message) { ' +
+  'this.__spooled.push({ section, message }); return true; };', sandbox);
+sandbox.__spooled = spooled;
 const reqMap = sandbox.getIndexMap(sandbox.HEADERS.Assistance_Requests);
 const reqRow = (values) => {
   const row = new Array(sandbox.HEADERS.Assistance_Requests.length).fill('');
@@ -224,21 +227,15 @@ const filedRows = [reqRow({
   Answers: 'Needs an evening'
 })];
 
-vm.runInContext("adminEmailsForCategory = function (key) { " +
-  "return key === 'appointmentRequests' ? ['heather@example.org'] : []; };", sandbox);
-check('nothing filed sends nothing', sandbox.sendAssistanceRequestNotification([], reqMap), false);
-check('the filed requests are emailed to whoever is ticked for them',
+check('nothing filed writes nothing', sandbox.sendAssistanceRequestNotification([], reqMap), false);
+check('the filed requests go into the digest',
   sandbox.sendAssistanceRequestNotification(filedRows, reqMap), true);
-check('as one message', sent.length, 1);
-check('to that address', sent[0].to, 'heather@example.org');
-check('the name is in it', sent[0].body.indexOf("Pat O'Brien") !== -1, true);
+check('as one entry', spooled.length, 1);
+check('under a section of their own, not among the fault reports',
+  spooled[0].section.indexOf('appointment request') !== -1, true);
+check('the name is in it', spooled[0].message.indexOf("Pat O'Brien") !== -1, true);
 check('and so is the phone number, so nobody has to open the workbook to ring',
-  sent[0].body.indexOf('610-555-0101') !== -1, true);
-
-vm.runInContext('adminEmailsForCategory = function () { return []; };', sandbox);
-check('and nobody ticked sends nothing at all',
-  sandbox.sendAssistanceRequestNotification(filedRows, reqMap), false);
-check('off nobody\'s quota', sent.length, 1);
+  spooled[0].message.indexOf('610-555-0101') !== -1, true);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
