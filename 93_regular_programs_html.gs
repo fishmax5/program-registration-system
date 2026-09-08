@@ -72,7 +72,7 @@ ${embed ? '' : `  <header>
     </div>
   </div>
 
-  <div id="list"></div>
+  <div id="list" class="week"></div>
 
   <footer id="foot"></footer>
 </div>
@@ -82,10 +82,17 @@ ${embed ? '' : `  <header>
   var PROGRAMS = (DATA && DATA.programs) || [];
   var EMBED = JSON.parse(${embedding});
   var STORE_KEY = 'publicCalendarPrefs.v1';
-  // The same limit the calendar page uses: six dates is two rows in a
-  // half-width tile — enough to see the rhythm, short of a wall of chips.
-  var CHIP_LIMIT = 6;
+  // FOUR, not the calendar page's six: a tile here stands in a weekday
+  // column a fifth of the screen wide, and six chips in it is four rows of
+  // dates under a two-word title. The rest are one tap away.
+  var CHIP_LIMIT = 4;
   var DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  ${publicLocationColorScript()}
+
+  /** The class carrying this building's colour, or the neutral outline. */
+  function locClass(name) {
+    return LOC_COLORS[String(name || '').trim().toLowerCase()] || '';
+  }
 
   // The building is shared with the calendar page's own storage on purpose:
   // somebody who only ever comes to Narberth said so once, and both public
@@ -167,13 +174,19 @@ ${embed ? '' : `  <header>
     return sessions[0];
   }
 
+  /**
+   * WHAT THE TILE SAYS IN PLACE OF A BUTTON — nothing, for an ordinary open
+   * program: the whole tile is the button, and a pill inside it was a second
+   * target doing the same job, and the widest thing on a tile in a narrow
+   * weekday column. Only the states a tap cannot answer are left.
+   */
   function ctaWords(lead, everyDateFull) {
     if (everyDateFull) return 'Join the waiting list';
     if (!lead) return '';
     if (lead.state === 'none') return 'No sign-up needed';
     if (lead.state === 'soon') return 'Sign-up opens soon';
     if (lead.state === 'waitlist') return 'Join the waiting list';
-    return 'Sign up';
+    return '';
   }
 
   /** One date: a link when it has a form behind it, a plain chip when not. */
@@ -196,17 +209,20 @@ ${embed ? '' : `  <header>
     return node;
   }
 
-  /** "Every Tuesday · 9:30 AM – 10:30 AM, from Sep 9". */
+  /**
+   * "9:30 AM – 10:30 AM · 8 dates through Nov 27" — and NOT the weekday,
+   * which is the column this tile is standing in. Repeating it on every tile
+   * would be the heading said again, once per program, down the page.
+   */
   function scheduleLine(program) {
     var sessions = program.sessions || [];
-    var line = 'Every ' + program.weekday;
-    if (program.time) line += ' \\u00b7 ' + program.time;
+    var parts = [];
+    if (program.time) parts.push(program.time);
     if (sessions.length) {
       var last = sessions[sessions.length - 1];
-      line += ' \\u00b7 ' + sessions.length + ' dates through '
-        + (last.shortLabel || last.dayLabel);
+      parts.push(sessions.length + ' dates through ' + (last.shortLabel || last.dayLabel));
     }
-    return line;
+    return parts.join(' \\u00b7 ');
   }
 
   function cardFor(program) {
@@ -216,7 +232,8 @@ ${embed ? '' : `  <header>
     var fullDates = sessions.filter(function (s) { return s.state === 'waitlist'; });
     var everyDateFull = withForm.length > 0 && fullDates.length === withForm.length;
 
-    var card = el('div', 'prog');
+    var colour = locClass(program.location);
+    var card = el('div', 'prog' + (colour ? ' ' + colour : ''));
     var url = lead && lead.url ? lead.url : '';
     if (url) {
       // THE WHOLE RECTANGLE IS THE BUTTON — a div rather than an <a>, because
@@ -245,8 +262,7 @@ ${embed ? '' : `  <header>
     head.appendChild(el('div', 'name', program.title));
     var words = ctaWords(lead, everyDateFull);
     if (words) {
-      var kind = everyDateFull || (lead && lead.state === 'waitlist') ? 'warn'
-        : (url ? '' : 'quiet');
+      var kind = everyDateFull || (lead && lead.state === 'waitlist') ? 'warn' : '';
       head.appendChild(el('span', 'cta' + (kind ? ' ' + kind : ''), words));
     }
     card.appendChild(head);
@@ -255,7 +271,9 @@ ${embed ? '' : `  <header>
     card.appendChild(el('div', 'when', scheduleLine(program)));
 
     var meta = el('div', 'meta');
-    if (program.location) meta.appendChild(tag('\\u25CF ' + program.location, 'where'));
+    if (program.location) {
+      meta.appendChild(tag(program.location, 'where' + (colour ? ' ' + colour : '')));
+    }
     if (lead && lead.club) meta.appendChild(tag('Club'));
     if (lead && lead.appointment) meta.appendChild(tag('By appointment'));
     if (everyDateFull) meta.appendChild(tag('Every date full', 'warn'));
@@ -329,17 +347,20 @@ ${embed ? '' : `  <header>
         : 'Nothing in the next two months runs every week. Everything else is on the full calendar.'));
       list.appendChild(none);
     } else {
-      // Grouped by weekday in the order the server sorted them — Monday
-      // first, because that is how a person planning a week reads one.
-      var day = '';
+      // ONE COLUMN PER WEEKDAY, in the order the server sorted them — Monday
+      // first, because that is how a person planning a week reads one, and a
+      // weekday with nothing on gets no column rather than an empty one.
+      var column = null, day = '';
       rows.forEach(function (p) {
         if (p.weekday !== day) {
           day = p.weekday;
+          column = el('div', 'daycol');
           var h = el('h2', 'day');
           h.appendChild(el('span', '', 'Every ' + p.weekday));
-          list.appendChild(h);
+          column.appendChild(h);
+          list.appendChild(column);
         }
-        list.appendChild(cardFor(p));
+        column.appendChild(cardFor(p));
       });
     }
 

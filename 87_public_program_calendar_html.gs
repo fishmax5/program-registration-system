@@ -155,6 +155,12 @@ ${embed ? '' : `  <header>
   // a half-width tile: enough to see the rhythm of a weekly class, short of
   // the wall of chips a daily one would otherwise be.
   var CHIP_LIMIT = 6;
+  ${publicLocationColorScript()}
+
+  /** The class carrying this building's colour, or the neutral outline. */
+  function locClass(name) {
+    return LOC_COLORS[String(name || '').trim().toLowerCase()] || '';
+  }
 
   // The filter, and the whole of the page's state. Restored from this
   // browser's own storage so somebody who only ever wants Narberth is not
@@ -344,13 +350,20 @@ ${embed ? '' : `  <header>
     return sessions[0];
   }
 
+  /**
+   * WHAT THE TILE SAYS IN PLACE OF A BUTTON — and for an ordinary open
+   * program that is NOTHING. The whole tile is the button already, so a "Sign
+   * up" pill inside it was a second target doing the same job. What is left
+   * here is only the states a tap cannot answer: no sign-up taken, no form
+   * yet, or a waiting list.
+   */
   function ctaWords(lead, everyDateFull) {
     if (everyDateFull) return 'Join the waiting list';
     if (!lead) return '';
     if (lead.state === 'none') return 'No sign-up needed';
     if (lead.state === 'soon') return 'Sign-up opens soon';
     if (lead.state === 'waitlist') return 'Join the waiting list';
-    return 'Sign up';
+    return '';
   }
 
   /**
@@ -392,7 +405,8 @@ ${embed ? '' : `  <header>
     // registration taken) is neither — it is answered by the state words.
     var everyDateFull = withForm.length > 0 && fullDates.length === withForm.length;
 
-    var card = el('div', 'prog' + (group.lunch ? ' full' : ''));
+    var colour = locClass(group.location);
+    var card = el('div', 'prog' + (group.lunch ? ' full' : '') + (colour ? ' ' + colour : ''));
     var url = lead && lead.url ? lead.url : '';
     if (url) {
       // THE WHOLE RECTANGLE IS THE BUTTON — a div rather than an <a> because
@@ -421,8 +435,7 @@ ${embed ? '' : `  <header>
     head.appendChild(el('div', 'name', group.title));
     var words = ctaWords(lead, everyDateFull);
     if (words) {
-      var kind = everyDateFull || (lead && lead.state === 'waitlist') ? 'warn'
-        : (url ? '' : 'quiet');
+      var kind = everyDateFull || (lead && lead.state === 'waitlist') ? 'warn' : '';
       head.appendChild(el('span', 'cta' + (kind ? ' ' + kind : ''), words));
     }
     card.appendChild(head);
@@ -431,7 +444,9 @@ ${embed ? '' : `  <header>
     card.appendChild(el('div', 'when', scheduleLine(group)));
 
     var meta = el('div', 'meta');
-    if (group.location) meta.appendChild(tag(group.location, 'where'));
+    if (group.location) {
+      meta.appendChild(tag(group.location, 'where' + (colour ? ' ' + colour : '')));
+    }
     if (group.club) meta.appendChild(tag('Club'));
     if (group.appointment) meta.appendChild(tag('By appointment'));
     if (group.lunch) meta.appendChild(tag('Lunch'));

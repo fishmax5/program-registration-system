@@ -210,6 +210,36 @@ ok('the embed drops the introduction, which is the host site\'s job',
 ok('...and pins the building it was given, resolved to the real spelling',
   embedHtml.indexOf('\\"location\\":\\"Narberth\\"') !== -1);
 ok('the embed knows to report its height', embedHtml.indexOf('postMessage') !== -1);
+// THE WEEK IS COLUMNS. One per weekday that has anything on — which is what
+// makes the page read landscape, and what lets the tile drop the weekday from
+// its own line.
+ok('the weekday is a column, not a band across the page',
+  html.indexOf("el('div', 'daycol')") !== -1
+  && /#list\.week \{[^}]*grid-template-columns: repeat\(auto-fit/.test(html));
+ok('a weekday with nothing on gets no column',
+  html.indexOf("if (p.weekday !== day)") !== -1);
+
+// THE WHOLE TILE IS THE BUTTON, so there is no button drawn inside it. Only
+// the states a tap cannot answer are still written in that slot.
+ok('there is no "Sign up" pill on a tile', html.indexOf("'Sign up'") === -1);
+ok('...but a program nobody can book yet still says so',
+  html.indexOf("'Sign-up opens soon'") !== -1
+  && html.indexOf("'No sign-up needed'") !== -1
+  && html.indexOf("'Join the waiting list'") !== -1);
+
+// THE BUILDING IS A COLOUR BEFORE IT IS A WORD.
+ok('each building carries the website\'s own colour',
+  sandbox.publicLocationColorMap().ashbridge === 'loc-green'
+  && sandbox.publicLocationColorMap().narberth === 'loc-yellow');
+ok('...inlined for the page to colour its tiles with',
+  html.indexOf('var LOC_COLORS = JSON.parse(') !== -1
+  && html.indexOf('loc-yellow') !== -1);
+ok('...and drawn as a filled chip and a stripe down the tile',
+  html.indexOf('.tag.where.loc-green') !== -1
+  && html.indexOf('.prog.loc-yellow { border-left') !== -1);
+ok('a building with no colour of its own is not given one',
+  html.indexOf("LOC_COLORS[String(name || '').trim().toLowerCase()] || ''") !== -1);
+
 const failedHtml = sandbox.buildPublicRegularHtml({ ok: false, message: 'Could not look.' }, {});
 ok('a failed read is inlined as its own message',
   failedHtml.indexOf('Could not look.') !== -1);

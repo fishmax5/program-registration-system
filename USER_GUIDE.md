@@ -1482,9 +1482,19 @@ a week is still on it; something that runs every *other* week is not, because
 not on it either — it runs nearly every weekday, and it is already pinned at
 the top of the calendar page.
 
+It is laid out as **columns, one per weekday**, so a laptop or a sideways phone
+shows the whole week at once; on an upright phone the columns stack.
+
 Each tile is the same tile the calendar draws: the program, when it runs, the
 building, whether there is room, and its dates as chips that each open **that
-date's own form**.
+date's own form**. Tapping anywhere on a tile opens the next date somebody can
+still get into — there is no separate "Sign up" button on either page, because
+the tile itself is the button.
+
+**The building is a colour.** Ashbridge is green and Narberth is yellow, filled
+into the building's label and striped down the edge of the tile, so which
+building something is at can be seen rather than read. A building without a
+colour of its own keeps a plain outline.
 
 ##### Putting either of them *on* the website, instead of linking to it
 

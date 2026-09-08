@@ -61,6 +61,37 @@ const PUBLIC_REGULAR_MODES = ['regular', 'recurring', 'ongoing', 'classes',
   'every-week', 'regular-programs', 'weekly-programs'];
 
 /**
+ * A COLOUR PER BUILDING, from the website's own two.
+ *
+ * Which building a session is at is the second question every caller asks,
+ * and on a page of tiles it is the one a person is SCANNING for rather than
+ * reading. A colour answers it before the words do — so the building's chip
+ * is filled and the tile carries a stripe of the same colour down its edge.
+ *
+ * Keyed on the building's name in lower case, because the name is typed by
+ * staff into Config and read back with whatever capitals it was given that
+ * day. A building not named here is drawn in the neutral outline rather than
+ * being given a colour nobody chose: a third building appearing in a colour
+ * that means something else on the website is worse than one in grey.
+ */
+const PUBLIC_LOCATION_COLORS = {
+  ashbridge: 'loc-green',
+  narberth: 'loc-yellow'
+};
+
+/** The map as the pages read it — one place, so both pages colour alike. */
+function publicLocationColorMap() {
+  return PUBLIC_LOCATION_COLORS;
+}
+
+/** `var LOC_COLORS = …;` for a page's inline script. */
+function publicLocationColorScript() {
+  const data = JSON.stringify(JSON.stringify(publicLocationColorMap()))
+    .replace(/<\//g, '<\\/');
+  return `var LOC_COLORS = JSON.parse(${data});`;
+}
+
+/**
  * WHICH RANGE A PUBLIC LINK OPENS ON: 'week', 'month', 'all', or '' for the
  * page's own default.
  *
@@ -193,6 +224,9 @@ function publicEmbedStyles() {
     --page: #F4F7F2; --brand: #101010; --brand-ink: #FFFFFF;
     --open: #2F7A46; --open-bg: #E4F1E1; --warn: #7A5300; --warn-bg: #FBEBC6;
     --quiet: #4A5250; --quiet-bg: #EFF2ED;
+    /* The website's own two colours, doing a job: which building this is. */
+    --loc-green: #C9E1B5; --loc-green-ink: #22521C;
+    --loc-yellow: #F5CE63; --loc-yellow-ink: #5C4200;
     --shadow: 0 1px 2px rgba(20,30,20,.05), 0 2px 8px rgba(20,30,20,.06);
     --radius: 18px;
   }
@@ -201,9 +235,12 @@ function publicEmbedStyles() {
   body { margin: 0; background: transparent; color: var(--ink);
          font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
          font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
-  /* Wide enough for two tiles a row, and no wider: a third column would put
-     the far edge of the page outside a comfortable reading width. */
-  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 64px 16px; }
+  /* THIS IS READ LANDSCAPE AS OFTEN AS PORTRAIT — it is a block on a website
+     opened on a laptop, and a phone turned sideways at the door. So the page
+     takes the width it is given rather than a column down the middle of it:
+     three tiles a row on a wide screen, seven weekday columns on the regular
+     programs page, and the same page folded to one column on a phone. */
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 16px 64px 16px; }
 
   /* WHO THIS IS. Sized like a masthead rather than a page title, because for
      somebody who followed a forwarded link it is the first question. */
@@ -262,14 +299,27 @@ function publicEmbedStyles() {
   #list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 12px; margin-top: 16px; }
   #list > .full { grid-column: 1 / -1; }
+  @media (min-width: 1100px) { #list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 640px) { #list { grid-template-columns: 1fr; } }
+
+  /* THE WEEK, AS COLUMNS. One column per weekday that has anything on, each
+     one a stack of tiles under its own heading — which is how a week is read
+     when the question is "what is on Tuesdays", and what makes the page work
+     landscape: seven narrow columns across a laptop, folding to two on a
+     tablet and one on a phone. auto-fit rather than repeat(7) so a centre
+     that runs nothing on Sundays does not print an empty column. */
+  #list.week { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+               align-items: start; gap: 14px; }
+  @media (min-width: 1100px) { #list.week { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); } }
+  @media (max-width: 640px) { #list.week { grid-template-columns: 1fr; } }
+  .daycol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
   /* THE WEEKDAY HEADINGS on the regular-programs page: a black pill, so the
      week reads as a week rather than as grey type on a colored block. */
-  h2.day { grid-column: 1 / -1; margin: 14px 0 0 0; font-size: 13px; font-weight: 700;
-           letter-spacing: .08em; text-transform: uppercase; }
+  h2.day { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .08em;
+           text-transform: uppercase; }
   h2.day span { background: var(--brand); color: var(--brand-ink); border-radius: 999px;
-                padding: 6px 14px; display: inline-block; }
+                padding: 7px 14px; display: block; text-align: center; }
 
   /* ONE PROGRAM, ONE TILE, AND THE WHOLE TILE IS THE BUTTON. */
   .prog { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
@@ -282,25 +332,36 @@ function publicEmbedStyles() {
   .prog.flat:hover { border-color: var(--line); }
   .prog.flat:active { transform: none; }
   .prog.opening { opacity: .6; }
+  /* THE BUILDING'S COLOUR, DOWN THE EDGE OF THE TILE. The chip says it in
+     words; the stripe is what a person scanning a screen of tiles actually
+     sees, before they have read anything. */
+  .prog.loc-green { border-left: 7px solid var(--loc-green); }
+  .prog.loc-yellow { border-left: 7px solid var(--loc-yellow); }
   .prog .head { display: flex; gap: 10px; align-items: center; }
   .prog .name { font-size: 18px; font-weight: 600; letter-spacing: -.01em; flex: 1; min-width: 0; }
-  /* The site's own button shape, on the tile that opens something. A tile
-     that opens nothing gets a sentence instead — the two must not look
-     alike, or somebody taps four times and then phones the office. */
-  .prog .cta { flex: 0 0 auto; font-size: 13px; font-weight: 600; white-space: nowrap;
-               background: var(--brand); color: var(--brand-ink);
-               border-radius: 999px; padding: 8px 16px; }
-  .prog .cta.quiet { background: transparent; color: var(--muted); padding: 0; font-weight: 500; }
-  .prog .cta.warn { background: var(--warn-bg); color: var(--warn); }
+  /* NO "SIGN UP" BUTTON. The whole tile is already the button, and a pill
+     inside a button is a second thing to aim at that does the same thing —
+     on a tile in a narrow weekday column it was also the widest thing on it.
+     What is left in this slot is the states that are NOT an invitation: a
+     sentence, quietly, because they are the answers a tap cannot give. */
+  .prog .cta { flex: 0 0 auto; font-size: 13px; font-weight: 500; white-space: nowrap;
+               color: var(--muted); }
+  .prog .cta.warn { background: var(--warn-bg); color: var(--warn); font-weight: 600;
+                    border-radius: 999px; padding: 5px 12px; }
   .prog .when { color: var(--muted); font-size: 14px; margin-top: 5px; }
   .prog .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 9px; }
   .tag { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
          background: var(--quiet-bg); color: var(--quiet); }
-  /* THE BUILDING, ON EVERY TILE, AS THE ONE OUTLINED CHIP. It was flat grey
-     text with no box, indistinguishable from the tags beside it: a person
-     scanning for "which one is at Narberth" was reading, not scanning. */
+  /* THE BUILDING, ON EVERY TILE, AND IT IS THE LOUDEST CHIP ON IT — filled
+     in that building's own colour (see PUBLIC_LOCATION_COLORS), a size up
+     from the tags beside it, and never grey unless the building is one this
+     file has no colour for. */
   .tag.where { background: var(--card); color: var(--ink); border: 1px solid var(--brand);
-               font-weight: 600; }
+               font-weight: 700; font-size: 13px; padding: 5px 12px; letter-spacing: .01em; }
+  .tag.where.loc-green { background: var(--loc-green); color: var(--loc-green-ink);
+                         border-color: var(--loc-green); }
+  .tag.where.loc-yellow { background: var(--loc-yellow); color: var(--loc-yellow-ink);
+                          border-color: var(--loc-yellow); }
   .tag.open { background: var(--open-bg); color: var(--open); }
   .tag.warn { background: var(--warn-bg); color: var(--warn); }
 
