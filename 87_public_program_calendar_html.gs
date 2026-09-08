@@ -1,5 +1,5 @@
 // ============================================================================
-// 17a. THE PUBLIC CALENDAR'S PAGE  (a week, a month, and one tap to the form)
+// 17a. THE PUBLIC CALENDAR'S PAGE  (one card per program, and one tap to a form)
 // ============================================================================
 //
 // One served page, no navigations, no spinners on the path a person actually
@@ -7,19 +7,31 @@
 // about what a stranger may see; what is here is the promise the page makes
 // about how it feels:
 //
-//   1. THE FIRST FRAME IS THE ANSWER. The whole window — today to the end of
+//   1. IT READS BY PROGRAM, NOT BY DATE. This page was a diary: one card per
+//      SESSION under a heading per day, which for a weekly class was the same
+//      four words repeated eight times down a phone screen, and for lunch was
+//      a card a day for two months. A person deciding whether to come to chair
+//      yoga is not asking what is on next Thursday, they are asking what chair
+//      yoga is and when it runs — so a program is ONE card carrying its dates,
+//      and the dates are what they tap. `programKey` on each session is what
+//      the grouping is done on; the server decides it (title + building), so
+//      a `[Shared]` program running in two buildings stays two cards.
+//   2. THE FIRST FRAME IS THE ANSWER. The whole window — today to the end of
 //      next month — is inlined into the page, so the calendar is drawn before
 //      the browser has made a single request of its own. There is no loading
 //      state on open because there is nothing to load.
-//   2. EVERY FILTER IS ARITHMETIC, NEVER A ROUND TRIP. Week, month, building,
+//   3. EVERY FILTER IS ARITHMETIC, NEVER A ROUND TRIP. Week, month, building,
 //      search: each one re-runs against the array already in memory and
 //      redraws in the same frame as the tap. This is the whole reason the
-//      window travels at once (see the banner in 86).
-//   3. A TAP ON A SESSION IS ANSWERED BEFORE THE FORM LOADS. The card marks
+//      window travels at once (see the banner in 86). `?span=week` and
+//      `?span=month` only decide which of those filters is already pressed
+//      when the page opens — which is what makes a weekly link and a monthly
+//      link two printable addresses rather than two pages to maintain.
+//   4. A TAP ON A DATE IS ANSWERED BEFORE THE FORM LOADS. The chip marks
 //      itself as opening immediately and the form opens in its own tab; the
 //      page a person came from is still behind it, still filtered the way
 //      they left it, because nothing about opening a form navigated away.
-//   4. THE REFRESH IS QUIET AND IT IS BEHIND THEM. A background read runs
+//   5. THE REFRESH IS QUIET AND IT IS BEHIND THEM. A background read runs
 //      once after the first paint and replaces the inlined snapshot if it has
 //      moved — but never while a filter is being tapped, and never as a
 //      flash of empty. A page that redraws under a thumb is how somebody taps
@@ -30,7 +42,7 @@
 // — this has happened — angle brackets. This page uses no innerHTML with data
 // in it at all: cards are built out of createElement, and the one place data
 // crosses into script is the double-JSON.stringify below. See
-// tests/public_calendar_page.test.js, which is what holds that line.
+// tests/public_calendar.test.js, which is what holds that line.
 // ============================================================================
 
 /**
@@ -40,10 +52,16 @@
  * frame is complete. A FAILED read is inlined just as faithfully: the page
  * says it could not look, which is a different sentence from "nothing is on"
  * and the only one of the two that should send somebody to the phone.
+ *
+ * `options.span` is the range the page opens on — 'week', 'month', 'all' or
+ * '' for whatever this browser last chose. It is resolved from the URL by
+ * publicCalendarSpanRequested_() in 60, so the two printed links and the page
+ * cannot disagree about what "weekly" means.
  */
-function buildPublicCalendarHtml(snapshot) {
+function buildPublicCalendarHtml(snapshot, options) {
   const data = JSON.stringify(JSON.stringify(snapshot || { ok: false, sessions: [] }))
     .replace(/<\//g, '<\\/');
+  const span = JSON.stringify(String((options && options.span) || ''));
 
   return `
 <style>
@@ -73,7 +91,7 @@ function buildPublicCalendarHtml(snapshot) {
   header h1 { margin: 0; font-size: 27px; letter-spacing: -.02em; font-weight: 700; }
   header p { margin: 6px 0 0 0; color: var(--muted); font-size: 15px; }
 
-  /* THE CONTROLS STICK. Somebody four weeks down the page who wants "this
+  /* THE CONTROLS STICK. Somebody four programs down the page who wants "this
      week" instead should not have to scroll back up to say so. */
   .controls { position: sticky; top: 0; z-index: 4; background: var(--page);
               padding: 10px 0 12px 0; border-bottom: 1px solid var(--line); }
@@ -92,37 +110,39 @@ function buildPublicCalendarHtml(snapshot) {
   .count button { border: 0; background: transparent; color: var(--brand); font: inherit;
                   font-size: 13px; cursor: pointer; padding: 2px 0; }
 
-  h2.day { font-size: 13px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-           color: var(--muted); margin: 26px 0 8px 0; }
-  h2.day span.rel { color: var(--brand); }
-
-  /* A CARD IS A LINK when there is a form behind it, and a plain block when
-     there is not — so a card nothing happens on never invites a tap. */
-  .card { display: block; width: 100%; text-align: left; font: inherit; color: inherit;
-          background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-          padding: 13px 15px; margin-bottom: 9px; box-shadow: var(--shadow);
-          text-decoration: none; transition: transform .08s ease, border-color .12s ease; }
-  a.card { cursor: pointer; }
-  a.card:hover { border-color: var(--brand); }
-  a.card:active { transform: scale(.988); }
-  .card .top { display: flex; gap: 12px; align-items: baseline; }
-  .card .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px;
-                color: var(--muted); flex: 0 0 auto; min-width: 78px; }
-  .card .title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; flex: 1; min-width: 0; }
-  .card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-                margin: 8px 0 0 90px; }
-  @media (max-width: 480px) {
-    .card .top { display: block; }
-    .card .time { min-width: 0; margin-bottom: 2px; }
-    .card .meta { margin-left: 0; }
-  }
+  /* ONE PROGRAM, ONE CARD. The title is the first thing on it and it is on a
+     line of its own — the old layout put a fixed-width time column beside it,
+     which on a phone squeezed every title into three or four words a line. */
+  .prog { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+          padding: 13px 15px 11px 15px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .prog .head { display: flex; gap: 10px; align-items: baseline; }
+  .prog .name { font-size: 17px; font-weight: 650; letter-spacing: -.01em; flex: 1; min-width: 0; }
+  .prog .cta { flex: 0 0 auto; font-size: 14px; font-weight: 650; color: var(--brand);
+               text-decoration: none; white-space: nowrap; }
+  .prog .cta.quiet { color: var(--muted); font-weight: 600; }
+  .prog .when { color: var(--muted); font-size: 14px; margin-top: 3px; }
+  .prog .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
   .tag { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
          background: var(--quiet-bg); color: var(--quiet); }
   .tag.where { background: transparent; color: var(--muted); padding-left: 0; }
   .tag.open { background: var(--open-bg); color: var(--open); }
   .tag.warn { background: var(--warn-bg); color: var(--warn); }
-  .cta { margin-left: auto; font-size: 14px; font-weight: 650; color: var(--brand); }
-  .card.opening { opacity: .6; }
+
+  /* THE DATES ARE THE TAP TARGETS. Each one carries its own session's form,
+     which for a Regular program is a different form each month — the whole
+     reason a printed link goes stale and this page does not. */
+  .dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { font-size: 13px; font-weight: 600; padding: 7px 11px; border-radius: 10px;
+          border: 1px solid var(--line); background: var(--page); color: var(--ink);
+          text-decoration: none; font-variant-numeric: tabular-nums;
+          transition: transform .08s ease, border-color .12s ease; }
+  a.chip:hover { border-color: var(--brand); }
+  a.chip:active { transform: scale(.97); }
+  .chip.today { border-color: var(--brand); color: var(--brand); }
+  .chip.warn { color: var(--warn); }
+  .chip.quiet { color: var(--muted); }
+  .chip.opening { opacity: .55; }
+  .chip.more { border-style: dashed; color: var(--muted); cursor: pointer; font-family: inherit; }
 
   .empty { text-align: center; color: var(--muted); padding: 54px 20px; }
   .empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
@@ -135,7 +155,7 @@ function buildPublicCalendarHtml(snapshot) {
 <div class="wrap">
   <header>
     <h1>Programs &amp; Sign-Ups</h1>
-    <p id="lede">Everything coming up. Tap a program to open its sign-up form.</p>
+    <p id="lede">Everything coming up. Tap a date to open that session's sign-up form.</p>
   </header>
 
   <div class="controls">
@@ -163,7 +183,12 @@ function buildPublicCalendarHtml(snapshot) {
 <script>
   var DATA = JSON.parse(${data});
   var SESSIONS = (DATA && DATA.sessions) || [];
+  var SPAN = ${span};
   var STORE_KEY = 'publicCalendarPrefs.v1';
+  // How many dates a card shows before it offers the rest. Six is two rows on
+  // a phone: enough to see the rhythm of a weekly class, short of the wall of
+  // chips a daily one would otherwise be.
+  var CHIP_LIMIT = 6;
 
   // The filter, and the whole of the page's state. Restored from this
   // browser's own storage so somebody who only ever wants Narberth is not
@@ -176,6 +201,14 @@ function buildPublicCalendarHtml(snapshot) {
       if (typeof saved.location === 'string') view.location = saved.location;
     }
   } catch (err) { /* private browsing, or nothing stored yet */ }
+
+  // THE LINK WINS OVER THE MEMORY, and only over the range. Somebody who
+  // opened the weekly link asked for this week just now; what they chose on
+  // some previous visit is the older answer of the two. Their BUILDING is
+  // left alone — no printed link claims to know which one they want.
+  if (SPAN === 'week') view.days = 7;
+  else if (SPAN === 'month') view.days = 31;
+  else if (SPAN === 'all') view.days = 0;
 
   function save() {
     try {
@@ -199,7 +232,7 @@ function buildPublicCalendarHtml(snapshot) {
     return d.getFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (day.length < 2 ? '0' + day : day);
   }
 
-  /** "Today" / "Tomorrow" for the two headings that earn a word. */
+  /** "Today" / "Tomorrow" for the two dates that earn a word instead of a date. */
   function relativeDay(key) {
     var t = todayKey();
     if (!t) return '';
@@ -207,6 +240,9 @@ function buildPublicCalendarHtml(snapshot) {
     if (key === keyPlusDays(t, 1)) return 'Tomorrow';
     return '';
   }
+
+  var PLURAL_DAYS = { Sun: 'Sundays', Mon: 'Mondays', Tue: 'Tuesdays', Wed: 'Wednesdays',
+                      Thu: 'Thursdays', Fri: 'Fridays', Sat: 'Saturdays' };
 
   // --------------------------------------------------------------------
   // The filter — one pass, no allocation per keystroke beyond the result.
@@ -225,6 +261,32 @@ function buildPublicCalendarHtml(snapshot) {
     return out;
   }
 
+  /**
+   * THE GROUPING — sessions in date order, folded into programs in the order
+   * their NEXT session falls. That ordering is free: the array is already
+   * sorted by date, so the first time a program is seen is its next date.
+   */
+  function programsFrom(rows) {
+    var order = [], byKey = {};
+    for (var i = 0; i < rows.length; i++) {
+      var s = rows[i];
+      var key = s.programKey || (s.title + '|' + s.location);
+      var group = byKey[key];
+      if (!group) {
+        group = byKey[key] = {
+          key: key, title: s.title, location: s.location,
+          lunch: false, club: false, appointment: false, sessions: []
+        };
+        order.push(group);
+      }
+      group.sessions.push(s);
+      group.lunch = group.lunch || !!s.lunch;
+      group.club = group.club || !!s.club;
+      group.appointment = group.appointment || !!s.appointment;
+    }
+    return order;
+  }
+
   // --------------------------------------------------------------------
   // Drawing. createElement and textContent throughout — see the banner.
   // --------------------------------------------------------------------
@@ -239,50 +301,137 @@ function buildPublicCalendarHtml(snapshot) {
     return el('span', 'tag' + (kind ? ' ' + kind : ''), text);
   }
 
-  function cardFor(s) {
-    var node;
-    if (s.url) {
-      node = el('a', 'card');
-      node.href = s.url;
-      node.target = '_blank';
-      node.rel = 'noopener';
-      // OPTIMISTIC, AND HONEST ABOUT IT. The form is somebody else's page on
-      // somebody else's network; what this page can answer for is that the
-      // tap registered, so it says so in the same frame and lets the new tab
-      // take as long as it takes.
-      node.addEventListener('click', function () {
-        node.classList.add('opening');
-        window.setTimeout(function () { node.classList.remove('opening'); }, 2500);
-      });
-    } else {
-      node = el('div', 'card');
-    }
+  /** The distinct values of one field, in the order they first appear. */
+  function distinct(list, field) {
+    var seen = {}, out = [];
+    list.forEach(function (s) {
+      var value = s[field] || '';
+      if (!value || seen[value]) return;
+      seen[value] = true;
+      out.push(value);
+    });
+    return out;
+  }
 
-    var top = el('div', 'top');
-    top.appendChild(el('span', 'time', s.time || 'All day'));
-    top.appendChild(el('span', 'title', s.title));
-    node.appendChild(top);
+  /**
+   * WHEN A PROGRAM RUNS, in one line — the sentence a card is worth reading
+   * for. A single date says the date; a rhythm says the rhythm ("Tuesdays &
+   * Thursdays"); anything less regular than that says how many dates there
+   * are, because naming five weekdays is not a rhythm, it is a list.
+   */
+  function scheduleLine(group) {
+    var sessions = group.sessions;
+    var times = distinct(sessions, 'time');
+    var when = times.length === 1 ? times[0] : (times.length ? 'times vary' : '');
+    var head;
+    if (sessions.length === 1) {
+      head = relativeDay(sessions[0].dateKey) || sessions[0].shortLabel || sessions[0].dayLabel;
+    } else {
+      var days = distinct(sessions, 'weekday').map(function (d) { return PLURAL_DAYS[d] || d; });
+      head = (days.length && days.length <= 2)
+        ? days.join(' & ')
+        : sessions.length + ' dates';
+    }
+    return when ? head + ' · ' + when : head;
+  }
+
+  /** The next session somebody can actually do something with, else the next one. */
+  function leadSession(group) {
+    for (var i = 0; i < group.sessions.length; i++) {
+      if (group.sessions[i].url) return group.sessions[i];
+    }
+    return group.sessions[0];
+  }
+
+  function ctaFor(lead) {
+    if (!lead) return null;
+    var words = lead.state === 'none' ? 'No sign-up needed'
+      : lead.state === 'soon' ? 'Sign-up opens soon'
+      : lead.state === 'waitlist' ? 'Join the waiting list'
+      : 'Sign up';
+    if (!lead.url) return el('span', 'cta quiet', words);
+    var link = el('a', 'cta', words);
+    link.href = lead.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    return link;
+  }
+
+  /**
+   * ONE DATE. A link when that session has a form behind it, and a plain chip
+   * when it does not — so a date nothing can happen on never invites a tap.
+   */
+  function chipFor(s) {
+    var label = relativeDay(s.dateKey) || s.shortLabel || s.dayLabel;
+    var kind = s.dateKey === todayKey() ? ' today'
+      : (s.state === 'waitlist' ? ' warn' : (s.url ? '' : ' quiet'));
+    if (!s.url) return el('span', 'chip' + kind, label);
+    var node = el('a', 'chip' + kind, label);
+    node.href = s.url;
+    node.target = '_blank';
+    node.rel = 'noopener';
+    node.title = s.dayLabel + (s.time ? ', ' + s.time : '');
+    // OPTIMISTIC, AND HONEST ABOUT IT. The form is somebody else's page on
+    // somebody else's network; what this page can answer for is that the tap
+    // registered, so it says so in the same frame and lets the new tab take
+    // as long as it takes.
+    node.addEventListener('click', function () {
+      node.classList.add('opening');
+      window.setTimeout(function () { node.classList.remove('opening'); }, 2500);
+    });
+    return node;
+  }
+
+  function cardFor(group) {
+    var card = el('article', 'prog');
+
+    var head = el('div', 'head');
+    head.appendChild(el('div', 'name', group.title));
+    var lead = leadSession(group);
+    var cta = ctaFor(lead);
+    if (cta) head.appendChild(cta);
+    card.appendChild(head);
+
+    card.appendChild(el('div', 'when', scheduleLine(group)));
 
     var meta = el('div', 'meta');
-    if (s.location) meta.appendChild(tag(s.location, 'where'));
-    if (s.lunch) meta.appendChild(tag('Lunch'));
-    if (s.club) meta.appendChild(tag('Club'));
-    if (s.appointment) meta.appendChild(tag('By appointment'));
-    if (s.seats) meta.appendChild(tag(s.seats, s.state === 'open' ? 'open' : 'warn'));
+    if (group.location) meta.appendChild(tag(group.location, 'where'));
+    if (group.club) meta.appendChild(tag('Club'));
+    if (group.appointment) meta.appendChild(tag('By appointment'));
+    if (group.lunch) meta.appendChild(tag('Lunch'));
+    if (lead && lead.seats) {
+      meta.appendChild(tag(lead.seats, lead.state === 'open' ? 'open' : 'warn'));
+    }
+    if (meta.childNodes.length) card.appendChild(meta);
 
-    var cta = el('span', 'cta');
-    if (s.state === 'none') { cta.textContent = 'No sign-up needed'; cta.style.color = 'var(--muted)'; }
-    else if (s.state === 'soon') { cta.textContent = 'Sign-up opens soon'; cta.style.color = 'var(--muted)'; }
-    else if (s.state === 'waitlist') { cta.textContent = 'Join the waiting list'; }
-    else { cta.textContent = 'Sign up'; }
-    meta.appendChild(cta);
-    node.appendChild(meta);
-    return node;
+    // A single date is already the whole of the line above, so a chip
+    // repeating it would be the same fact twice — the CTA is the tap target
+    // there. Everything else gets its dates.
+    if (group.sessions.length > 1) {
+      var dates = el('div', 'dates');
+      var shown = group.sessions.slice(0, CHIP_LIMIT);
+      shown.forEach(function (s) { dates.appendChild(chipFor(s)); });
+      var rest = group.sessions.length - shown.length;
+      if (rest > 0) {
+        var more = el('button', 'chip more', '+' + rest + ' more');
+        more.type = 'button';
+        more.addEventListener('click', function () {
+          dates.removeChild(more);
+          group.sessions.slice(CHIP_LIMIT).forEach(function (s) {
+            dates.appendChild(chipFor(s));
+          });
+        });
+        dates.appendChild(more);
+      }
+      card.appendChild(dates);
+    }
+    return card;
   }
 
   function draw() {
     var list = document.getElementById('list');
     var rows = visible();
+    var groups = programsFrom(rows);
 
     list.textContent = '';
     if (!DATA || DATA.ok === false) {
@@ -290,7 +439,7 @@ function buildPublicCalendarHtml(snapshot) {
         ? DATA.message
         : 'We could not read the program calendar just now. Please try again shortly.');
       list.appendChild(warn);
-    } else if (!rows.length) {
+    } else if (!groups.length) {
       var none = el('div', 'empty');
       none.appendChild(el('b', '', 'Nothing here yet'));
       none.appendChild(el('div', '', view.q
@@ -298,26 +447,12 @@ function buildPublicCalendarHtml(snapshot) {
         : 'Nothing is scheduled in this date range. Try a longer one.'));
       list.appendChild(none);
     } else {
-      var day = '';
-      rows.forEach(function (s) {
-        if (s.dateKey !== day) {
-          day = s.dateKey;
-          var h = el('h2', 'day');
-          var rel = relativeDay(s.dateKey);
-          if (rel) {
-            h.appendChild(el('span', 'rel', rel));
-            h.appendChild(document.createTextNode(' \\u00b7 ' + s.dayLabel));
-          } else {
-            h.appendChild(document.createTextNode(s.dayLabel));
-          }
-          list.appendChild(h);
-        }
-        list.appendChild(cardFor(s));
-      });
+      groups.forEach(function (group) { list.appendChild(cardFor(group)); });
     }
 
-    document.getElementById('count').textContent = rows.length
-      ? (rows.length === 1 ? '1 program' : rows.length + ' programs')
+    document.getElementById('count').textContent = groups.length
+      ? (groups.length === 1 ? '1 program' : groups.length + ' programs')
+        + ' · ' + (rows.length === 1 ? '1 date' : rows.length + ' dates')
       : '';
     document.getElementById('foot').textContent = DATA && DATA.generatedAt
       ? 'Updated ' + DATA.generatedAt + '. Seats are checked again when you open a form.'
@@ -376,7 +511,7 @@ function buildPublicCalendarHtml(snapshot) {
    */
   function refresh(force) {
     var button = document.getElementById('refresh');
-    if (force) button.textContent = 'Refreshing\\u2026';
+    if (force) button.textContent = 'Refreshing…';
     google.script.run
       .withSuccessHandler(function (res) {
         button.textContent = 'Refresh';

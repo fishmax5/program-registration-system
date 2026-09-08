@@ -14,9 +14,18 @@
 // So this is one public, read-only page: everything running between now and
 // the end of next month, filtered to a week or a month with one tap, and every
 // session carrying the CURRENT registration link for that session. Tapping a
-// session opens the Google Form this workbook already generates and maintains
-// for it. Nothing here registers anybody, and nothing here is a second place a
+// date opens the Google Form this workbook already generates and maintains for
+// it. Nothing here registers anybody, and nothing here is a second place a
 // registration can come from — the form is still the only door in.
+//
+// READ BY PROGRAM, NOT BY DATE. The page draws one card per PROGRAM carrying
+// its dates (see 87), so each session says which program it belongs to
+// (`programKey` — title + building) rather than being filed under a day of
+// its own. A weekly class was eight near-identical cards down a phone screen
+// and lunch was one a day for two months; both are one card now. Lunch is
+// also RENAMED here: the session tab calls those rows "🥡 Lunch Only (no
+// program)", which is machinery talking to itself, and on a flyer's calendar
+// it is Lunch, at a building the card already names.
 //
 // WHAT IT DELIBERATELY DOES NOT CARRY, and why the page can be public at all:
 //
@@ -55,6 +64,9 @@
 // never been the authority on whether there is a seat, and does not claim to
 // be.
 // ============================================================================
+
+/** What lunch is called on a page a stranger reads. See buildPublicSessionRow(). */
+const PUBLIC_LUNCH_PROGRAM_TITLE = 'Lunch';
 
 /** How long a built snapshot is served to everybody who asks. See the banner. */
 const PUBLIC_CALENDAR_CACHE_SECONDS = 300;
@@ -209,12 +221,23 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
   if (/cancel/i.test(status)) return null;
 
   const eventId = String(row[map['Event_ID']] || '').trim();
+  const lunch = isLunchOnlyEventId(eventId);
   const linkCell = row[map['Form_Response_Link']];
   const url = hyperlinkFormulaUrl(linkCell);
   const noRegistration = isNoRegistrationColumnValue(row[map['No_Registration']])
     || String(linkCell || '').trim() === NO_REGISTRATION_LINK_LABEL;
   const waitlistOnly = isWaitlistOnlyColumnValue(row[map['Waitlist_Only']])
     || status === WAITLIST_ONLY_STATUS;
+
+  const location = String(row[map['Location']] || '').trim();
+  // WHAT THE LUNCH ROWS ARE CALLED HERE. On the session tab a lunch-only row
+  // is named for the machinery that made it — "🥡 Lunch Only (no program)",
+  // or "Lunch @ Narberth — Chx Parm" — and a stranger reading a flyer's
+  // calendar has no idea what "(no program)" is denying. It is lunch, at a
+  // building, and the building is already on the card: one program called
+  // Lunch per location, which is also what stops twenty dated lunch rows
+  // filling the page.
+  const publicTitle = lunch ? PUBLIC_LUNCH_PROGRAM_TITLE : title;
 
   return {
     // Nothing is keyed on this in the workbook — it is the browser's own list
@@ -223,14 +246,24 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
     dateKey,
     weekday: Utilities.formatDate(date, TIMEZONE, 'EEE'),
     dayLabel: Utilities.formatDate(date, TIMEZONE, 'EEEE, MMMM d'),
+    // The short form the date chips on a program card are drawn with — one
+    // per session, so the label a person taps is built once, here, rather
+    // than by parsing a date key in the browser.
+    shortLabel: Utilities.formatDate(date, TIMEZONE, 'EEE MMM d'),
     monthLabel: Utilities.formatDate(date, TIMEZONE, 'MMMM yyyy'),
-    title,
-    location: String(row[map['Location']] || '').trim(),
-    time: String(row[map['Event_Time']] || '').trim(),
+    title: publicTitle,
+    // WHAT THE PAGE GROUPS ON. The calendar reads by PROGRAM, not by date:
+    // a weekly class is one card carrying its dates, not six cards a page
+    // apart. Title + building, because that is the thing a person signs up
+    // for — a `[Shared]` program running in two buildings is two cards, and
+    // has to be: they are two different rooms to turn up at.
+    programKey: `${(publicTitle || '').toLowerCase()}|${location.toLowerCase()}`,
+    location,
+    time: publicSessionTimeLabel_(row, map, date),
     // Sorting on the CELL is what puts 9:30 AM above 1:00 PM; sorting on the
     // label would put "1:00 PM" first, every day, on every building.
     sortTime: publicSessionSortTime_(date),
-    lunch: isLunchOnlyEventId(eventId),
+    lunch,
     club: isClubColumnValue(row[map['Club']]),
     appointment: isAssistanceColumnValue(row[map['Personalized_Assistance']]),
     // The link is withheld from a session nobody may register for, so a card
@@ -239,6 +272,30 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
     state: publicSessionState_(noRegistration, waitlistOnly, url, status),
     seats: publicSeatsPhrase_(row, map, noRegistration, waitlistOnly)
   };
+}
+
+/**
+ * THE TIME, AS WORDS — BUILT, NEVER READ OFF THE CELL.
+ *
+ * Event_Time on the session tab is a FORMULA (see setEventTimeFormulas), and
+ * this file's read is deliberately formula-preserving because the sign-up
+ * link exists only inside a formula. So the Event_Time cell arrives here as
+ * `=IF(W9="",TEXT(A9,"h:mm AM/PM"),…)` — which is exactly what a page printed
+ * on the open internet put where the time should have been.
+ *
+ * Rebuilt from the row's own start and end instead, which is where that
+ * formula was reading it from anyway. The cell is still the fallback for a
+ * row that holds words rather than a formula (a hand-typed or legacy row);
+ * a value that starts with '=' is never one of those.
+ */
+function publicSessionTimeLabel_(row, map, date) {
+  const start = formatTimeLabel(date);
+  const endCell = map['Event_End'] === undefined ? '' : row[map['Event_End']];
+  const end = formatTimeLabel(coerceDate(endCell));
+  if (start && end && end !== start) return `${start} \u2013 ${end}`;
+  if (start) return start;
+  const raw = String(row[map['Event_Time']] || '').trim();
+  return raw.charAt(0) === '=' ? '' : raw;
 }
 
 /** 'HHmm' from the session's start, for sorting. */

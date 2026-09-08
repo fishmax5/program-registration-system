@@ -1194,7 +1194,14 @@ function readCheckInPageInfo() {
     // Built here rather than in the dialog's script for the reason every
     // other address on this screen is: checkInPageUrl() reads the spelling out
     // of DOOR_ROUTES, so a link and the router cannot drift.
-    publicUrl: checkInPageUrl({ mode: 'public' })
+    publicUrl: checkInPageUrl({ mode: 'public' }),
+    // TWO SPELLINGS OF ONE PAGE, because they are pasted into two different
+    // things: a weekly link for the newsletter that goes out on Mondays, a
+    // monthly one for a flyer or the website. Same calendar, same forms —
+    // only which filter is already pressed when it opens differs, and either
+    // one is one tap from the other.
+    publicWeekUrl: checkInPageUrl({ mode: 'public', span: 'week' }),
+    publicMonthUrl: checkInPageUrl({ mode: 'public', span: 'month' })
   };
 }
 
@@ -1353,9 +1360,19 @@ function buildCheckInPageHtml(info) {
     // it carries no names and writes nothing.
     if (INFO.publicUrl) {
       html += linkRow('The public program calendar', INFO.publicUrl,
-        'Safe to publish. Everything running between now and the end of next month, with ' +
-        'the current sign-up form behind each session. No names on it, and nobody can ' +
-        'change anything from it.');
+        'Safe to publish. Everything running between now and the end of next month, one card ' +
+        'per program, with the current sign-up form behind each date. No names on it, and ' +
+        'nobody can change anything from it.');
+      if (INFO.publicWeekUrl) {
+        html += linkRow('\u2026 opening on this week', INFO.publicWeekUrl,
+          'The same calendar, filtered to the next seven days when it opens. For a weekly ' +
+          'newsletter or email.');
+      }
+      if (INFO.publicMonthUrl) {
+        html += linkRow('\u2026 opening on this month', INFO.publicMonthUrl,
+          'The same calendar, filtered to the next month when it opens. For a flyer, a ' +
+          'printed QR code or the website.');
+      }
     }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +
