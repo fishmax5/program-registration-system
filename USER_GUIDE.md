@@ -1437,6 +1437,36 @@ It writes into exactly the same cells Quick Mark writes into, at the same
 moment — there is no separate list to reconcile afterwards, and two people can
 work the door and the desk at once.
 
+##### The public program calendar — the link you can print
+
+The same window lists one more address, and it is the only one here that is
+meant to leave the building: **the public program calendar**, the same
+deployment with `?mode=public` on the end.
+
+Open it and you get everything running from today to the end of next month —
+one card per session, grouped by day:
+
+- **This week / This month / Everything** across the top. These are instant:
+  the whole window is already in the page, so nothing is fetched when you tap
+  between them.
+- A **building** filter (only when you have more than one) and a **search
+  box**, both just as instant.
+- **Tapping a session opens that session's own sign-up form** in a new tab —
+  the current one. This is the thing an emailed link cannot do: a Regular
+  program gets a new form every month, so the link somebody pasted into a
+  newsletter in September is September's form in October. This page is always
+  pointing at the right one.
+- A session that takes no sign-ups says **"No sign-up needed"** and does not
+  open anything. A full one says **"Join the waiting list"**. One whose form
+  has not been generated yet says **"Sign-up opens soon"** rather than
+  pretending it is missing.
+- Sessions with a capacity show **"3 seats left"** as they fill.
+
+**It is safe to publish.** There are no names on it, no registration counts,
+and nothing on it can change anything: it reads the session tab and hands out
+form links, and that is the whole of it. Put it on the website, in the
+newsletter, or behind a QR code on a flyer.
+
 **Setting it up** (once):
 
 1. **Extensions ▸ Apps Script**

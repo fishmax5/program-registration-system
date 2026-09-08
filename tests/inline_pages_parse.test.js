@@ -96,6 +96,21 @@ const pages = [
   // The one page in this project a MEMBER sees, and the one nobody on staff
   // would notice was blank. A program title is interpolated straight into its
   // heading, so it is exactly the shape this file exists to catch.
+  // The other page a stranger sees, and the one whose whole promise is that
+  // it draws before anything is requested — a dead script block there is a
+  // blank page on a printed link.
+  ['the public calendar page', () => sandbox.buildPublicCalendarHtml({
+    ok: true, generatedAt: 'Oct 1, 9:00 AM', todayKey: '2026-10-01',
+    horizonKey: '2026-11-30', locations: ['Narberth'],
+    sessions: [{
+      id: '2026-10-01|EV1', dateKey: '2026-10-01', weekday: 'Thu',
+      dayLabel: 'Thursday, October 1', monthLabel: 'October 2026',
+      title: "Women's </script> Group", location: 'Narberth', time: '9:30 AM',
+      sortTime: '0930', lunch: false, club: false, appointment: false,
+      url: 'https://docs.google.com/forms/d/e/X/viewform', state: 'open',
+      seats: 'Seats available'
+    }]
+  })],
   ['the cancel page', () => sandbox.buildCancelPageHtml({
     formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
   })]

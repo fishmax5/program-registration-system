@@ -171,6 +171,25 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     }
   },
   {
+    id: 'public',
+    mode: 'public',
+    title: 'Programs & Sign-Ups',
+    // THE PUBLIC CALENDAR, and the only page here nobody at this organization
+    // is expected to be holding. It is what goes on a flyer, in a newsletter
+    // and on the website: everything running between now and the end of next
+    // month, with the CURRENT sign-up form behind each session. Read-only,
+    // ungated for the same reason the cancel page is — a page that asks a
+    // stranger for a staff PIN is a page that becomes a phone call — and
+    // carrying no names at all, which is what makes that safe (see the banner
+    // in 86_public_program_calendar.gs).
+    //
+    // ABOVE THE STAFF ROSTER because both are staff-typed URLs and only one
+    // of them is ever printed: a spelling this route claims must never be
+    // answered by a page that asks for a PIN.
+    match: params => PUBLIC_CALENDAR_MODES.indexOf(doorRequestedMode_(params)) !== -1,
+    build: () => buildPublicCalendarHtml(publicProgramCalendar({}))
+  },
+  {
     id: 'session',
     mode: 'session',
     title: 'Check In',
@@ -255,6 +274,18 @@ function doGet(e) {
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
+
+/**
+ * What ?mode= has to say to get the PUBLIC CALENDAR (section 17).
+ *
+ * Spelled several ways for the same reason the roster's list is: this one is
+ * printed on paper and typed into a newsletter by somebody who is not looking
+ * at this file, and 'calendar' and 'events' are what a person writing about it
+ * reaches for. A spelling missing from here is not an error page — it falls
+ * through to the door app, which is the wrong page in front of the wrong
+ * audience.
+ */
+const PUBLIC_CALENDAR_MODES = ['public', 'calendar', 'programs', 'events', 'signup', 'sign-up', 'signups'];
 
 /** What ?mode= has to say to get the session roster instead of the door page. */
 const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];

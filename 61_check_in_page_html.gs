@@ -1190,7 +1190,11 @@ function readCheckInPageInfo() {
       webAppDeploymentId(savedUrl) && webAppDeploymentId(scriptUrl) &&
       webAppDeploymentId(savedUrl) !== webAppDeploymentId(scriptUrl)),
     locations: checkInLocations(),
-    pinSet: isCheckInPinSet()
+    pinSet: isCheckInPinSet(),
+    // Built here rather than in the dialog's script for the reason every
+    // other address on this screen is: checkInPageUrl() reads the spelling out
+    // of DOOR_ROUTES, so a link and the router cannot drift.
+    publicUrl: checkInPageUrl({ mode: 'public' })
   };
 }
 
@@ -1249,7 +1253,8 @@ function buildCheckInPageHtml(info) {
 </style>
 <h3>Door Pages</h3>
 <p class="hint">
-  Two pages on one deployment, both writing to the same rows Quick Mark writes to.
+  Three pages on one deployment. The two staff ones write to the same rows Quick Mark writes to;
+  the third writes nothing and is the one you can publish.
   The <b>sign-in page</b> is for the tablet by the entrance: it shows everybody signed up here
   today, then today's programs and lunch, and it can register a walk-in — or a brand-new
   member — on the spot. The <b>check-in list</b> is the staff one: one session at a time, tap a
@@ -1339,6 +1344,19 @@ function buildCheckInPageHtml(info) {
       'Put this on every tablet and every desk. The first time it opens it asks which ' +
       'building and which day; after that it goes straight to the name list. "Change setup" ' +
       'at the top changes the answer.');
+    // THE ONE LINK ON THIS SCREEN THAT LEAVES THE BUILDING. It is listed
+    // beside the tablet link rather than hidden in the sentence below,
+    // because unlike the staff pages it is meant to be COPIED — onto a flyer,
+    // into a newsletter, onto the website — and a link somebody has to
+    // assemble by hand from a note about ?mode= is a link that gets pasted
+    // wrong. It shows what is on and opens each program's own sign-up form;
+    // it carries no names and writes nothing.
+    if (INFO.publicUrl) {
+      html += linkRow('The public program calendar', INFO.publicUrl,
+        'Safe to publish. Everything running between now and the end of next month, with ' +
+        'the current sign-up form behind each session. No names on it, and nobody can ' +
+        'change anything from it.');
+    }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +
       (INFO.fromSaved
