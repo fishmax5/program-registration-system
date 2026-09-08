@@ -140,6 +140,11 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
  *
+ * THE PUBLIC PAGES ARE NOT IN THIS TABLE. They live in 88_public_embeds.gs,
+ * which doGet() asks before it walks this one — they are the only pages here
+ * that another website may frame, and that is a property of the response
+ * rather than of the page. Everything declared below writes to the workbook.
+ *
  * BUILT LAZILY (see 01a_lazy_globals.gs). The entries name functions and
  * constants that live in sections 16b, 16f and 71 — other files, in a project
  * that is one shared global scope evaluated in whatever order it happens to be
@@ -169,25 +174,6 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
         programLabel: cancelPageProgramLabel(formId)
       });
     }
-  },
-  {
-    id: 'public',
-    mode: 'public',
-    title: 'Programs & Sign-Ups',
-    // THE PUBLIC CALENDAR, and the only page here nobody at this organization
-    // is expected to be holding. It is what goes on a flyer, in a newsletter
-    // and on the website: everything running between now and the end of next
-    // month, with the CURRENT sign-up form behind each session. Read-only,
-    // ungated for the same reason the cancel page is — a page that asks a
-    // stranger for a staff PIN is a page that becomes a phone call — and
-    // carrying no names at all, which is what makes that safe (see the banner
-    // in 86_public_program_calendar.gs).
-    //
-    // ABOVE THE STAFF ROSTER because both are staff-typed URLs and only one
-    // of them is ever printed: a spelling this route claims must never be
-    // answered by a page that asks for a PIN.
-    match: params => PUBLIC_CALENDAR_MODES.indexOf(doorRequestedMode_(params)) !== -1,
-    build: () => buildPublicCalendarHtml(publicProgramCalendar({}))
   },
   {
     id: 'session',
@@ -256,6 +242,15 @@ function doGet(e) {
     locations: checkInLocations()
   };
 
+  // THE PUBLIC EMBEDS ARE ASKED ABOUT FIRST, and they are served by their own
+  // file (88_public_embeds.gs) rather than by a row in DOOR_ROUTES. Not tidying:
+  // they are the only pages here that may be FRAMED by another website, which
+  // is a property of the RESPONSE, and the table below can only describe a
+  // page's body. Asking first also means a spelling the public router claims
+  // can never be answered by a page that asks a stranger for a staff PIN.
+  const publicRoute = publicEmbedRoute(params);
+  if (publicRoute) return servePublicEmbed(publicRoute, params);
+
   let route = null;
   for (let i = 0; i < DOOR_ROUTES.length && !route; i++) {
     if (DOOR_ROUTES[i].match(params)) route = DOOR_ROUTES[i];
@@ -264,28 +259,18 @@ function doGet(e) {
   // edited down to nothing still serves a page rather than a stack trace.
   if (!route) route = doorRouteById_('door');
 
-  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). This page writes to the
-  // workbook, and letting any site frame it is what turns a tap on somebody
-  // else's page into a check-in on this one. Nothing needs to embed it — it is
-  // opened on a tablet, not built into another site.
+  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). Every page below this
+  // line writes to the workbook, and letting any site frame one of them is
+  // what turns a tap on somebody else's page into a check-in on this one.
+  // Nothing here needs to embed — these are opened on a tablet, not built
+  // into another site. The two pages that ARE embedded returned above, from
+  // servePublicEmbed() in 88, which is the only place ALLOWALL is written.
   return HtmlService.createHtmlOutput(route.build(params, ctx))
     .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
-
-/**
- * What ?mode= has to say to get the PUBLIC CALENDAR (section 17).
- *
- * Spelled several ways for the same reason the roster's list is: this one is
- * printed on paper and typed into a newsletter by somebody who is not looking
- * at this file, and 'calendar' and 'events' are what a person writing about it
- * reaches for. A spelling missing from here is not an error page — it falls
- * through to the door app, which is the wrong page in front of the wrong
- * audience.
- */
-const PUBLIC_CALENDAR_MODES = ['public', 'calendar', 'programs', 'events', 'signup', 'sign-up', 'signups'];
 
 /** What ?mode= has to say to get the session roster instead of the door page. */
 const CHECK_IN_ROSTER_MODES = ['session', 'sessions', 'checkin', 'check-in', 'roster'];
@@ -343,6 +328,12 @@ function checkInPageUrl(options) {
 function doorRouteUrlMode_(requested) {
   const asked = String(requested || '').trim();
   if (!asked) return '';
+  // THE PUBLIC PAGES FIRST, because their table is the one that moved: a link
+  // built for 'public' or 'weekly' has to carry the spelling 88 answers to,
+  // and asking DOOR_ROUTES for a page it no longer declares would hand the
+  // caller's own word back and print a URL that opens the door app.
+  const publicMode = publicEmbedUrlMode(asked);
+  if (publicMode) return publicMode;
   const wanted = asked.toLowerCase();
   for (let i = 0; i < DOOR_ROUTES.length; i++) {
     const route = DOOR_ROUTES[i];

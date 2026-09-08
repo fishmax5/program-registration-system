@@ -25,6 +25,15 @@
 //      flash of empty. A page that redraws under a thumb is how somebody taps
 //      the wrong Thursday.
 //
+// IT IS DRAWN TO SIT INSIDE SOMEBODY ELSE'S PAGE. This is embedded in a
+// colored block on the organization's website, so the page has no background
+// of its own and every surface that has to be readable paints itself — the
+// shared stylesheet is publicEmbedStyles() in 88_public_embeds.gs, which both
+// public pages use so the two cannot drift into nearly matching. The control
+// bar is a white card rather than a bare line for exactly that reason: on the
+// website's green block, transparent controls on a transparent page were a row
+// nobody could see.
+//
 // EVERYTHING FROM THE WORKBOOK IS WRITTEN WITH textContent. Program titles are
 // typed by staff into a calendar and they contain apostrophes, ampersands and
 // — this has happened — angle brackets. This page uses no innerHTML with data
@@ -46,91 +55,7 @@ function buildPublicCalendarHtml(snapshot) {
     .replace(/<\//g, '<\\/');
 
   return `
-<style>
-  /* A stranger on a phone, in a hurry, possibly at arm's length: everything
-     here is sized for reading standing up, and every tap target is a thumb. */
-  :root {
-    --ink: #1B1C1E; --muted: #5F6368; --line: #E3E5E8; --card: #FFFFFF;
-    --page: #F6F7F9; --brand: #1A56C4; --brand-ink: #FFFFFF;
-    --open: #0F7B3E; --open-bg: #E7F5EC; --warn: #9A5B00; --warn-bg: #FDF1DE;
-    --quiet: #4B5563; --quiet-bg: #EEF0F3; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ink: #E8EAED; --muted: #9AA0A6; --line: #2E3033; --card: #1E2023;
-      --page: #141517; --brand: #8AB4F8; --brand-ink: #10131A;
-      --open: #7EE2A8; --open-bg: #16301F; --warn: #F3C078; --warn-bg: #33260F;
-      --quiet: #C4C7CB; --quiet-bg: #26282C; --shadow: none;
-    }
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; background: var(--page); color: var(--ink);
-         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-         font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 64px 16px; }
-
-  header { padding: 26px 0 14px 0; }
-  header h1 { margin: 0; font-size: 27px; letter-spacing: -.02em; font-weight: 700; }
-  header p { margin: 6px 0 0 0; color: var(--muted); font-size: 15px; }
-
-  /* THE CONTROLS STICK. Somebody four weeks down the page who wants "this
-     week" instead should not have to scroll back up to say so. */
-  .controls { position: sticky; top: 0; z-index: 4; background: var(--page);
-              padding: 10px 0 12px 0; border-bottom: 1px solid var(--line); }
-  .seg { display: flex; gap: 6px; background: var(--quiet-bg); border-radius: 12px; padding: 4px; }
-  .seg button { flex: 1; border: 0; background: transparent; color: var(--quiet); font-size: 14px;
-                font-weight: 600; padding: 10px 8px; border-radius: 9px; cursor: pointer;
-                font-family: inherit; transition: background .12s ease, color .12s ease; }
-  .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
-  .row2 { display: flex; gap: 8px; margin-top: 8px; }
-  .row2 input, .row2 select { flex: 1; min-width: 0; font-family: inherit; font-size: 15px;
-        padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
-        background: var(--card); color: var(--ink); }
-  .row2 select { flex: 0 0 auto; max-width: 46%; }
-  .count { color: var(--muted); font-size: 13px; margin-top: 9px; display: flex; gap: 8px;
-           align-items: center; justify-content: space-between; }
-  .count button { border: 0; background: transparent; color: var(--brand); font: inherit;
-                  font-size: 13px; cursor: pointer; padding: 2px 0; }
-
-  h2.day { font-size: 13px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-           color: var(--muted); margin: 26px 0 8px 0; }
-  h2.day span.rel { color: var(--brand); }
-
-  /* A CARD IS A LINK when there is a form behind it, and a plain block when
-     there is not — so a card nothing happens on never invites a tap. */
-  .card { display: block; width: 100%; text-align: left; font: inherit; color: inherit;
-          background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-          padding: 13px 15px; margin-bottom: 9px; box-shadow: var(--shadow);
-          text-decoration: none; transition: transform .08s ease, border-color .12s ease; }
-  a.card { cursor: pointer; }
-  a.card:hover { border-color: var(--brand); }
-  a.card:active { transform: scale(.988); }
-  .card .top { display: flex; gap: 12px; align-items: baseline; }
-  .card .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px;
-                color: var(--muted); flex: 0 0 auto; min-width: 78px; }
-  .card .title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; flex: 1; min-width: 0; }
-  .card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-                margin: 8px 0 0 90px; }
-  @media (max-width: 480px) {
-    .card .top { display: block; }
-    .card .time { min-width: 0; margin-bottom: 2px; }
-    .card .meta { margin-left: 0; }
-  }
-  .tag { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
-         background: var(--quiet-bg); color: var(--quiet); }
-  .tag.where { background: transparent; color: var(--muted); padding-left: 0; }
-  .tag.open { background: var(--open-bg); color: var(--open); }
-  .tag.warn { background: var(--warn-bg); color: var(--warn); }
-  .cta { margin-left: auto; font-size: 14px; font-weight: 650; color: var(--brand); }
-  .card.opening { opacity: .6; }
-
-  .empty { text-align: center; color: var(--muted); padding: 54px 20px; }
-  .empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
-  .notice { background: var(--warn-bg); color: var(--warn); border-radius: 12px;
-            padding: 14px 16px; margin: 18px 0; font-size: 15px; }
-  footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 34px;
-           line-height: 1.6; }
-</style>
+${publicEmbedStyles()}
 
 <div class="wrap">
   <header>
@@ -144,10 +69,10 @@ function buildPublicCalendarHtml(snapshot) {
       <button type="button" id="r31" onclick="setRange(31)">This month</button>
       <button type="button" id="r0" onclick="setRange(0)">Everything</button>
     </div>
-    <div class="row2">
+    <div class="locbar" id="locbar" role="group" aria-label="Location"></div>
+    <div class="searchrow">
       <input type="search" id="q" placeholder="Search programs" autocomplete="off"
              oninput="onSearch()" aria-label="Search programs">
-      <select id="loc" onchange="onLocation()" aria-label="Location"></select>
     </div>
     <div class="count">
       <span id="count"></span>
@@ -264,15 +189,21 @@ function buildPublicCalendarHtml(snapshot) {
     node.appendChild(top);
 
     var meta = el('div', 'meta');
-    if (s.location) meta.appendChild(tag(s.location, 'where'));
+    // THE BUILDING FIRST, AND IN A BOX. Which building is the second thing a
+    // person needs and it used to be flat gray text among flat gray tags.
+    if (s.location) meta.appendChild(tag('\u25CF ' + s.location, 'where'));
     if (s.lunch) meta.appendChild(tag('Lunch'));
     if (s.club) meta.appendChild(tag('Club'));
     if (s.appointment) meta.appendChild(tag('By appointment'));
     if (s.seats) meta.appendChild(tag(s.seats, s.state === 'open' ? 'open' : 'warn'));
 
+    // A CARD THAT DOES SOMETHING GETS THE BLACK PILL; a card that does not
+    // gets a sentence. The two must not look alike — the pill is the site's
+    // own button shape, and printing it on a session nobody can sign up for
+    // is how somebody taps four times and phones the office.
     var cta = el('span', 'cta');
-    if (s.state === 'none') { cta.textContent = 'No sign-up needed'; cta.style.color = 'var(--muted)'; }
-    else if (s.state === 'soon') { cta.textContent = 'Sign-up opens soon'; cta.style.color = 'var(--muted)'; }
+    if (s.state === 'none') { cta.className = 'cta quiet'; cta.textContent = 'No sign-up needed'; }
+    else if (s.state === 'soon') { cta.className = 'cta quiet'; cta.textContent = 'Sign-up opens soon'; }
     else if (s.state === 'waitlist') { cta.textContent = 'Join the waiting list'; }
     else { cta.textContent = 'Sign up'; }
     meta.appendChild(cta);
@@ -327,26 +258,39 @@ function buildPublicCalendarHtml(snapshot) {
     });
   }
 
+  /**
+   * THE BUILDING FILTER, AS PILLS. It was a <select>, which on the website's
+   * green block was a gray box that read as decoration and hid the answer to
+   * the second question every caller asks. Pills say both things at once:
+   * which buildings have anything on, and which one is being shown.
+   */
   function drawLocations() {
-    var select = document.getElementById('loc');
+    var bar = document.getElementById('locbar');
     var locations = (DATA && DATA.locations) || [];
-    // ONE BUILDING IS NOT A CHOICE. A dropdown with a single option in it is
-    // a control that asks a question nobody has.
-    if (locations.length < 2) { select.style.display = 'none'; return; }
-    select.style.display = '';
-    select.textContent = '';
-    var all = el('option', '', 'All locations');
-    all.value = '';
-    select.appendChild(all);
-    locations.forEach(function (name) {
-      var option = el('option', '', name);
-      option.value = name;
-      select.appendChild(option);
-    });
     // A remembered building that has nothing on any more is dropped rather
     // than left selected, which would be an empty page nobody could explain.
     if (view.location && locations.indexOf(view.location) === -1) view.location = '';
-    select.value = view.location;
+    bar.textContent = '';
+    // ONE BUILDING IS NOT A CHOICE. A control with a single option in it is a
+    // control that asks a question nobody has — but the building is still a
+    // fact, so it stays on every card either way.
+    if (locations.length < 2) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    bar.appendChild(locationPill('', 'All locations'));
+    locations.forEach(function (name) { bar.appendChild(locationPill(name, name)); });
+  }
+
+  function locationPill(value, label) {
+    var button = el('button', '', '');
+    button.type = 'button';
+    if (value) {
+      var pin = el('span', 'pin', '\u25CF');
+      button.appendChild(pin);
+    }
+    button.appendChild(document.createTextNode(label));
+    button.setAttribute('aria-pressed', view.location === value ? 'true' : 'false');
+    button.addEventListener('click', function () { setLocation(value); });
+    return button;
   }
 
   // --------------------------------------------------------------------
@@ -354,7 +298,7 @@ function buildPublicCalendarHtml(snapshot) {
   // asks the server anything.
   // --------------------------------------------------------------------
   function setRange(days) { view.days = days; save(); draw(); }
-  function onLocation() { view.location = document.getElementById('loc').value; save(); draw(); }
+  function setLocation(name) { view.location = name; save(); drawLocations(); draw(); }
 
   var searchTimer = null;
   function onSearch() {

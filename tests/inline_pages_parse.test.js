@@ -111,6 +111,21 @@ const pages = [
       seats: 'Seats available'
     }]
   })],
+  // The weekly embed, on the same terms: it is drawn from an inlined fold and
+  // a dead script block there is a blank block on the website.
+  ['the weekly programs page', () => sandbox.buildPublicWeeklyHtml({
+    ok: true, generatedAt: 'Oct 1, 9:00 AM', todayKey: '2026-10-01',
+    horizonKey: '2026-11-30', locations: ['Narberth'],
+    programs: [{
+      id: 'Thursday|2026-10-01|EV1', title: "Women's </script> Group",
+      location: 'Narberth', weekday: 'Thursday', time: '9:30 AM', sortTime: '0930',
+      dates: ['2026-10-01', '2026-10-08'], count: 2, nextDateKey: '2026-10-01',
+      nextDayLabel: 'Thursday, October 1', lastDayLabel: 'Thursday, October 8',
+      lunch: false, club: false, appointment: false,
+      url: 'https://docs.google.com/forms/d/e/X/viewform', state: 'open',
+      seats: 'Seats available'
+    }]
+  })],
   ['the cancel page', () => sandbox.buildCancelPageHtml({
     formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
   })]

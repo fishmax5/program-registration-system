@@ -1194,7 +1194,10 @@ function readCheckInPageInfo() {
     // Built here rather than in the dialog's script for the reason every
     // other address on this screen is: checkInPageUrl() reads the spelling out
     // of DOOR_ROUTES, so a link and the router cannot drift.
-    publicUrl: checkInPageUrl({ mode: 'public' })
+    publicUrl: checkInPageUrl({ mode: 'public' }),
+    // The second embed, and the same reasoning: it is meant to be copied onto
+    // a website, so it is handed over rather than described.
+    weeklyUrl: checkInPageUrl({ mode: 'weekly' })
   };
 }
 
@@ -1356,6 +1359,12 @@ function buildCheckInPageHtml(info) {
         'Safe to publish. Everything running between now and the end of next month, with ' +
         'the current sign-up form behind each session. No names on it, and nobody can ' +
         'change anything from it.');
+    }
+    if (INFO.weeklyUrl) {
+      html += linkRow('The weekly programs page', INFO.weeklyUrl,
+        'The same programs the other way round: what runs every Monday, every Tuesday and ' +
+        'so on, one line each. Also safe to publish, and both of these can be embedded in ' +
+        'a page on the website.');
     }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +

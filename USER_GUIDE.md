@@ -1467,14 +1467,51 @@ and nothing on it can change anything: it reads the session tab and hands out
 form links, and that is the whole of it. Put it on the website, in the
 newsletter, or behind a QR code on a flyer.
 
+##### The weekly programs page — the other way to ask
+
+The same window lists a second public address: **the weekly programs page**,
+`?mode=weekly` on the same deployment. It answers the question the calendar
+cannot — *what runs every Thursday* — with seven headings, **Every Monday**
+through **Every Sunday**, and one line per program under each rather than one
+per date.
+
+A program is on it when the calendar shows it running on the **same weekday,
+a week apart, at least three times** in the next two months. A class that
+misses a week is still on it; something that runs every *other* week is not,
+because "Every Tuesday" is a promise this page should not make on its behalf.
+Each line carries the time, the building, whether there is room, and the
+**current** sign-up form — the same live link the calendar page hands out —
+plus a quiet note saying when the next one is and how many are left in the
+window.
+
+##### Putting either of them on the website
+
+Both public pages — and **only** those two — may be embedded in a page on your
+website. Paste the address into a Squarespace/Wix/WordPress **embed** or
+**iframe** block:
+
+```html
+<iframe src="PASTE-THE-LINK-HERE" style="width:100%;height:900px;border:0"
+        title="Programs and sign-ups"></iframe>
+```
+
+They are drawn to sit inside whatever colored block you put them in: the page
+has **no background of its own**, so your section's color shows through, and
+the controls and cards paint themselves white so they stay readable on it.
+Give the frame plenty of height — it scrolls inside the block otherwise.
+
+The staff pages are deliberately **not** embeddable. Everything else in that
+deployment writes to the workbook, and a page that any site could frame is a
+page where a tap somewhere else becomes a check-in here.
+
 **Setting it up** (once):
 
 1. **Extensions ▸ Apps Script**
 2. **Deploy ▸ New deployment ▸ Web app**
 3. **Execute as: Me.** **Who has access:** *Anyone within your organization* if
    the tablets are signed into your Google accounts; *Anyone* if they are not.
-4. **Deploy**, then reopen **📱 Door Pages** — **the one link** is listed
-   there. Open it on each tablet, add it to the home screen, and answer its
+4. **Deploy**, then reopen **📱 Door Pages** — **the tablet link** is listed
+   there, with the two public links under it. Open it on each tablet, add it to the home screen, and answer its
    setup screen once; that tablet never asks again. The staff pages are the
    same address with `?mode=session` on the end.
 
