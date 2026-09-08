@@ -136,6 +136,8 @@ const CHECK_IN_WEB_APP_URL_PROP_KEY = 'CHECK_IN_WEB_APP_URL';
  *          the first match wins, so an entry's position is part of its meaning
  *   build  the page itself, from the request and the shared context
  *   title  the browser tab
+ *   frameable  may another site put this page in an <iframe>? Absent means no,
+ *          which is the right answer for every page that writes — see doGet()
  *
  * `ctx` is what every route would otherwise have to resolve for itself: the
  * ?location= pin, whether a PIN is set, and the list of buildings.
@@ -186,8 +188,15 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     // ABOVE THE STAFF ROSTER because both are staff-typed URLs and only one
     // of them is ever printed: a spelling this route claims must never be
     // answered by a page that asks for a PIN.
+    //
+    // THE ONE FRAMEABLE ROUTE. See the X-Frame note in doGet(): this page is
+    // meant to sit inside the organization's own website, and it is the only
+    // one here that can be framed without handing somebody else's page the
+    // ability to write into this workbook, because it cannot write anything.
+    frameable: true,
     match: params => PUBLIC_CALENDAR_MODES.indexOf(doorRequestedMode_(params)) !== -1,
-    build: () => buildPublicCalendarHtml(publicProgramCalendar({}))
+    build: params => buildPublicCalendarHtml(
+      publicProgramCalendar({}), publicCalendarViewOptions(params))
   },
   {
     id: 'session',
@@ -264,15 +273,24 @@ function doGet(e) {
   // edited down to nothing still serves a page rather than a stack trace.
   if (!route) route = doorRouteById_('door');
 
-  // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). This page writes to the
-  // workbook, and letting any site frame it is what turns a tap on somebody
-  // else's page into a check-in on this one. Nothing needs to embed it — it is
-  // opened on a tablet, not built into another site.
-  return HtmlService.createHtmlOutput(route.build(params, ctx))
+  const out = HtmlService.createHtmlOutput(route.build(params, ctx))
     .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+
+  // WHO MAY PUT THIS PAGE IN A FRAME, AND WHY IT IS A PER-ROUTE ANSWER.
+  //
+  // Apps Script refuses framing by default, and for every page here that
+  // writes to the workbook that default is the protection: letting any site
+  // frame the door app is what turns a tap on somebody else's page into a
+  // check-in on this one. So the permission is not granted to the deployment,
+  // it is granted to a ROUTE — `frameable: true` in DOOR_ROUTES — and exactly
+  // one route has it: the public calendar, which reads a snapshot with no
+  // names in it and has no endpoint that writes anything. A route that one day
+  // grows a write must lose that flag in the same edit.
+  if (route.frameable) out.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return out;
 }
 
 /**
@@ -326,6 +344,16 @@ function checkInPageUrl(options) {
   if (opts.location) parts.push(`location=${encodeURIComponent(opts.location)}`);
   const mode = doorRouteUrlMode_(opts.mode);
   if (mode) parts.push(`mode=${encodeURIComponent(mode)}`);
+  // ANYTHING ELSE THE ROUTE UNDERSTANDS, still assembled here rather than by
+  // the caller: the embed URLs in section 17 carry ?embed=1 and a pinned
+  // building, and a caller that concatenated those itself is a caller that
+  // gets to forget the encodeURIComponent on a building called "St. John's".
+  const extra = opts.params || {};
+  Object.keys(extra).forEach(key => {
+    const value = String(extra[key] === undefined || extra[key] === null ? '' : extra[key]).trim();
+    if (!value) return;
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  });
   if (!parts.length) return base;
   return `${base}${base.indexOf('?') === -1 ? '?' : '&'}${parts.join('&')}`;
 }
@@ -494,19 +522,34 @@ function normalizeCheckInWebAppUrl(value) {
  */
 function setCheckInWebAppUrl(url) {
   const judged = normalizeCheckInWebAppUrl(url);
-  if (!judged.ok) return { ok: false, savedUrl: readSavedCheckInWebAppUrl(), message: `⚠️ ${judged.message}` };
+  if (!judged.ok) {
+    return {
+      ok: false, savedUrl: readSavedCheckInWebAppUrl(),
+      embedSnippet: publicCalendarEmbedSnippet({}),
+      message: `⚠️ ${judged.message}`
+    };
+  }
   const props = PropertiesService.getScriptProperties();
   if (!judged.url) {
     props.deleteProperty(CHECK_IN_WEB_APP_URL_PROP_KEY);
     return {
       ok: true,
       savedUrl: '',
+      // REBUILT AFTER THE WRITE, NEVER BEFORE IT. The website snippet carries
+      // the address inside it, so the one the dialog draws next has to be the
+      // one this call just settled on — a snippet built from the old address
+      // is a calendar pointing at a deployment nobody meant to publish.
+      embedSnippet: publicCalendarEmbedSnippet({}),
       message: 'Cleared. The links now use whatever address the script reports, which is not ' +
         'always the published one.'
     };
   }
   props.setProperty(CHECK_IN_WEB_APP_URL_PROP_KEY, judged.url);
-  return { ok: true, savedUrl: judged.url, message: `Saved. Every link below is now built from ${judged.url}` };
+  return {
+    ok: true, savedUrl: judged.url,
+    embedSnippet: publicCalendarEmbedSnippet({}),
+    message: `Saved. Every link below is now built from ${judged.url}`
+  };
 }
 
 /**

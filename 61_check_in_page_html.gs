@@ -1194,7 +1194,15 @@ function readCheckInPageInfo() {
     // Built here rather than in the dialog's script for the reason every
     // other address on this screen is: checkInPageUrl() reads the spelling out
     // of DOOR_ROUTES, so a link and the router cannot drift.
-    publicUrl: checkInPageUrl({ mode: 'public' })
+    publicUrl: checkInPageUrl({ mode: 'public' }),
+    // AND THE SAME PAGE AS SOMETHING TO PASTE. The link above is what goes on
+    // a flyer; this is what goes into the website, where the alternative is a
+    // Google Calendar embed that cannot show a seat count or open this
+    // month's sign-up form. Built here, whole, because a snippet a person
+    // assembles from a note about ?embed=1 is a snippet that gets pasted
+    // wrong — and because the resize listener in it is not something anybody
+    // should be asked to type.
+    embedSnippet: publicCalendarEmbedSnippet({})
   };
 }
 
@@ -1243,6 +1251,9 @@ function buildCheckInPageHtml(info) {
   ol { padding-left: 20px; line-height: 1.6; }
   input[type=text] { width: 140px; padding: 6px; font-size: 13px; }
   input#weburl { width: 100%; margin-bottom: 6px; font-family: monospace; font-size: 12px; }
+  textarea#embed { width: 100%; font-family: monospace; font-size: 11px; line-height: 1.45;
+                   border: 1px solid #DADCE0; border-radius: 4px; padding: 6px; resize: vertical;
+                   background: #F8F9FA; color: #222; }
   code { background: #F1F3F4; border-radius: 3px; padding: 0 3px; }
   button { background: #1A73E8; color: #fff; border: 0; border-radius: 4px; padding: 8px 16px;
            font-size: 13px; cursor: pointer; }
@@ -1261,6 +1272,24 @@ function buildCheckInPageHtml(info) {
   name to mark them present and tap Lunch as meals are handed over.
 </p>
 <div id="links"></div>
+
+<fieldset id="embedbox" style="display:none">
+  <legend>Put the calendar on your website</legend>
+  <p class="hint">
+    Paste this where a Google Calendar embed would go. It is the public calendar above, drawn
+    inside your own page with no heading and no background of its own, so it inherits the site
+    around it &mdash; and it grows to fit its contents, so there is no scrollbar inside the box.
+    Each program still opens its own sign-up form, in a new tab.
+  </p>
+  <textarea id="embed" readonly rows="7" onclick="this.select()"></textarea>
+  <button class="copy" onclick="copyEmbed(this)">Copy the code</button>
+  <p class="hint">
+    <b>One building, or one week.</b> Add <code>&amp;building=Narberth</code> to the address in
+    <code>src</code> to embed just that building, and <code>&amp;view=week</code> (or
+    <code>month</code>, or <code>all</code>) to choose what it opens on. A building name that
+    does not match is ignored rather than showing an empty calendar.
+  </p>
+</fieldset>
 
 <fieldset>
   <legend>The deployment address</legend>
@@ -1408,6 +1437,12 @@ function buildCheckInPageHtml(info) {
           deploymentId(res.savedUrl) !== deploymentId(INFO.scriptUrl));
         draw();
         drawUrl();
+        // THE SNIPPET IS BUILT FROM THE ADDRESS, so saving a new one changes
+        // it. Rebuilt on the server rather than patched here: the URL inside
+        // it is assembled by checkInPageUrl(), which is the whole reason a
+        // link and the router cannot drift.
+        INFO.embedSnippet = res.embedSnippet || INFO.embedSnippet;
+        drawEmbed();
         var s2 = document.getElementById('status');
         s2.textContent = res.message;
         s2.className = res.ok ? 'ok' : 'warn';
@@ -1452,6 +1487,33 @@ function buildCheckInPageHtml(info) {
     box.select();
     try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
     document.body.removeChild(box);
+  }
+
+  /**
+   * The embed code, and the box it lives in — which stays hidden entirely
+   * when there is nothing to paste. A snippet built on the /dev address, or
+   * on no address at all, is a snippet that renders an error inside somebody's
+   * website; a fieldset that is not there asks no questions.
+   */
+  function drawEmbed() {
+    var box = document.getElementById('embedbox');
+    if (!INFO.embedSnippet || INFO.isDev) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    document.getElementById('embed').value = INFO.embedSnippet;
+  }
+
+  function copyEmbed(button) {
+    var area = document.getElementById('embed');
+    area.select();
+    var done = function () { if (button) button.textContent = 'Copied'; };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(area.value).then(done, function () {
+          try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
+        });
+      }
+    } catch (err) { /* fall through */ }
+    try { document.execCommand('copy'); done(); } catch (err) { /* leave it selected */ }
   }
 
   function drawPin() {
@@ -1501,6 +1563,7 @@ function buildCheckInPageHtml(info) {
 
   draw();
   drawUrl();
+  drawEmbed();
   drawPin();
 </script>`;
 }

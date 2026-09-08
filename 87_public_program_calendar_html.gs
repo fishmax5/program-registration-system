@@ -40,10 +40,39 @@
  * frame is complete. A FAILED read is inlined just as faithfully: the page
  * says it could not look, which is a different sentence from "nothing is on"
  * and the only one of the two that should send somebody to the phone.
+ *
+ * `options` is what publicCalendarViewOptions() read off the query string —
+ * { embed, location, days } — and it changes how this page is DRAWN and
+ * nothing about what it contains. See the banner in 17b.
+ *
+ * THE PINNED BUILDING IS RESOLVED HERE, against the buildings the snapshot
+ * actually has, and case-insensitively: an embed is typed by hand into a
+ * website's HTML months before anybody notices it says "narberth". A pin that
+ * matches nothing is DROPPED rather than applied — a website showing an empty
+ * calendar because a building was renamed is worse than one showing every
+ * building, and it is the failure nobody reports because it looks deliberate.
  */
-function buildPublicCalendarHtml(snapshot) {
-  const data = JSON.stringify(JSON.stringify(snapshot || { ok: false, sessions: [] }))
-    .replace(/<\//g, '<\\/');
+function buildPublicCalendarHtml(snapshot, options) {
+  const snap = snapshot || { ok: false, sessions: [] };
+  const opts = options || {};
+  const embed = !!opts.embed;
+  const data = JSON.stringify(JSON.stringify(snap)).replace(/<\//g, '<\\/');
+
+  const wanted = String(opts.location || '').trim().toLowerCase();
+  const known = (snap && snap.locations) || [];
+  let pinned = '';
+  for (let i = 0; i < known.length && !pinned; i++) {
+    if (String(known[i]).trim().toLowerCase() === wanted) pinned = known[i];
+  }
+  // THE SAME DOUBLE ESCAPE THE SNAPSHOT GETS, and for a sharper reason: this
+  // one came off the URL. ?building=</script> is a page ended mid-sentence by
+  // anybody who can type an address, so nothing here is ever interpolated raw.
+  const view = JSON.stringify(JSON.stringify({
+    embed,
+    location: pinned,
+    days: (opts.days === 0 || opts.days === 7 || opts.days === 31) ? opts.days : null,
+    message: PUBLIC_CALENDAR_EMBED_MESSAGE
+  })).replace(/<\//g, '<\\/');
 
   return `
 <style>
@@ -131,13 +160,38 @@ function buildPublicCalendarHtml(snapshot) {
   footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 34px;
            line-height: 1.6; }
 </style>
+${embed ? `
+<style>
+  /* ------------------------------------------------------------------
+     THE EMBED SKIN. Written SERVER-side rather than switched on by a class
+     the page's own script adds, because a class added by script is a class
+     added after the first paint: the grey page and the big heading would be
+     drawn, seen, and then removed, in somebody else's website. There is no
+     frame in which this page looks like a page that got dressed.
+
+     What it does is take things AWAY. The heading and the footer are the host
+     site's job — it has already said whose calendar this is — the page
+     background becomes the host's own, the sticky bar unsticks (the frame is
+     resized to the content, so there is nothing here to scroll past), and the
+     bottom padding goes, because in a frame it is empty space nobody can
+     explain rather than room for a thumb.
+     ------------------------------------------------------------------ */
+  body { background: transparent; font-size: 15px; }
+  .wrap { padding: 0 2px 2px 2px; max-width: none; }
+  .controls { position: static; background: transparent; padding: 0 0 10px 0; }
+  .card { border-radius: 12px; padding: 11px 13px; margin-bottom: 7px; }
+  .card .title { font-size: 16px; }
+  h2.day { margin: 18px 0 7px 0; }
+  .empty { padding: 34px 16px; }
+  footer { margin-top: 18px; font-size: 12px; }
+</style>` : ''}
 
 <div class="wrap">
-  <header>
+${embed ? '' : `  <header>
     <h1>Programs &amp; Sign-Ups</h1>
     <p id="lede">Everything coming up. Tap a program to open its sign-up form.</p>
   </header>
-
+`}
   <div class="controls">
     <div class="seg" role="group" aria-label="How far ahead">
       <button type="button" id="r7" onclick="setRange(7)">This week</button>
@@ -163,7 +217,15 @@ function buildPublicCalendarHtml(snapshot) {
 <script>
   var DATA = JSON.parse(${data});
   var SESSIONS = (DATA && DATA.sessions) || [];
+  var OPTS = JSON.parse(${view});
   var STORE_KEY = 'publicCalendarPrefs.v1';
+
+  // WHAT THE HOST PAGE PINNED. A pin is the embed's author speaking, and it
+  // beats both the default and whatever this browser remembers: the Narberth
+  // page on the website shows Narberth to a visitor whose last visit was to
+  // the flyer link and left Ashbridge in storage.
+  var pinnedLocation = !!OPTS.location;
+  var pinnedDays = OPTS.days === 0 || OPTS.days === 7 || OPTS.days === 31;
 
   // The filter, and the whole of the page's state. Restored from this
   // browser's own storage so somebody who only ever wants Narberth is not
@@ -172,12 +234,21 @@ function buildPublicCalendarHtml(snapshot) {
   try {
     var saved = JSON.parse(window.localStorage.getItem(STORE_KEY) || '{}');
     if (saved && typeof saved === 'object') {
-      if (saved.days === 0 || saved.days === 7 || saved.days === 31) view.days = saved.days;
-      if (typeof saved.location === 'string') view.location = saved.location;
+      if (!pinnedDays && (saved.days === 0 || saved.days === 7 || saved.days === 31)) {
+        view.days = saved.days;
+      }
+      if (!pinnedLocation && typeof saved.location === 'string') view.location = saved.location;
     }
   } catch (err) { /* private browsing, or nothing stored yet */ }
+  if (pinnedDays) view.days = OPTS.days;
+  if (pinnedLocation) view.location = OPTS.location;
 
   function save() {
+    // A PINNED PAGE REMEMBERS NOTHING. The embed and the printed link are the
+    // same origin and share this key, so an embed that stored its own pin
+    // would quietly re-open the flyer link on one building — a setting the
+    // person who typed the URL made, applied to somebody who never saw it.
+    if (pinnedLocation || pinnedDays) return;
     try {
       window.localStorage.setItem(STORE_KEY,
         JSON.stringify({ days: view.days, location: view.location }));
@@ -325,14 +396,16 @@ function buildPublicCalendarHtml(snapshot) {
     [7, 31, 0].forEach(function (d) {
       document.getElementById('r' + d).setAttribute('aria-pressed', view.days === d ? 'true' : 'false');
     });
+    postHeight();
   }
 
   function drawLocations() {
     var select = document.getElementById('loc');
     var locations = (DATA && DATA.locations) || [];
-    // ONE BUILDING IS NOT A CHOICE. A dropdown with a single option in it is
-    // a control that asks a question nobody has.
-    if (locations.length < 2) { select.style.display = 'none'; return; }
+    // ONE BUILDING IS NOT A CHOICE, and neither is a pinned one: an embed that
+    // says Narberth is a page about Narberth, and a dropdown on it is an
+    // invitation to make the host site's own page say something else.
+    if (pinnedLocation || locations.length < 2) { select.style.display = 'none'; return; }
     select.style.display = '';
     select.textContent = '';
     var all = el('option', '', 'All locations');
@@ -398,8 +471,51 @@ function buildPublicCalendarHtml(snapshot) {
       .publicProgramCalendar(JSON.stringify({ fresh: !!force }));
   }
 
+  // --------------------------------------------------------------------
+  // THE FRAME'S HEIGHT, WHICH IS THE WHOLE OF WHAT AN EMBED SAYS TO ITS HOST.
+  //
+  // An iframe's height is fixed and this page's is not, and the two disagree
+  // as a scrollbar INSIDE the frame — which on a phone is the gesture where
+  // somebody scrolls the calendar when they meant to scroll the website and
+  // decides the site is broken. So the page measures itself after every draw
+  // and posts the number out; the eleven-line listener in the snippet (see
+  // publicCalendarEmbedSnippet) grows the frame to match.
+  //
+  // The target origin is '*' on purpose: the host is somebody else's website
+  // and this page is not told its address. What is being published to it is a
+  // number of pixels — there is nothing in this message anybody may not see,
+  // and the listener's own check is that the message came from ITS frame.
+  //
+  // Only ever GROWS-and-shrinks to the content, never on a timer: a frame that
+  // resizes while a finger is on it is how somebody taps the wrong Thursday.
+  // --------------------------------------------------------------------
+  var lastHeight = 0;
+  function postHeight() {
+    if (!OPTS.embed || window.parent === window) return;
+    var height = Math.max(
+      document.documentElement.scrollHeight,
+      document.body ? document.body.scrollHeight : 0);
+    if (!height || Math.abs(height - lastHeight) < 2) return;
+    lastHeight = height;
+    try {
+      window.parent.postMessage({ type: OPTS.message, height: height }, '*');
+    } catch (err) { /* a host that will not be spoken to keeps its 900px */ }
+  }
+
   drawLocations();
   draw();
+  postHeight();
+  if (OPTS.embed) {
+    // Fonts land after the first paint and change every card's height by a
+    // pixel or two; a card opened or a filter tapped changes it by hundreds.
+    window.addEventListener('load', postHeight);
+    window.addEventListener('resize', postHeight);
+    if (window.ResizeObserver && document.body) {
+      new window.ResizeObserver(postHeight).observe(document.body);
+    } else {
+      window.setInterval(postHeight, 1000);
+    }
+  }
   window.setTimeout(function () { refresh(false); }, 400);
 </script>
 `;

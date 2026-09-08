@@ -60,10 +60,12 @@ const sandbox = {
   },
   FormApp: { ItemType: {} }, CalendarApp: {}, DriveApp: {}, LockService: {},
   HtmlService: {
+    XFrameOptionsMode: { ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' },
     createHtmlOutput: html => ({
-      html, title: '', metaTags: [],
+      html, title: '', metaTags: [], xFrame: '',
       setTitle(t) { this.title = t; return this; },
-      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; }
+      addMetaTag(name, content) { this.metaTags.push(`${name}=${content}`); return this; },
+      setXFrameOptionsMode(mode) { this.xFrame = mode; return this; }
     })
   },
   Session: {
@@ -228,6 +230,49 @@ ok('a failed read is inlined as its own message',
   failedHtml.indexOf('Could not look.') !== -1);
 
 // ---------------------------------------------------------------------------
+// 5b. THE EMBED (section 17b) — the same page inside somebody else's website.
+//
+// What has to hold: the chrome comes off, the pins are applied and are
+// RESOLVED against real buildings, the page can tell its host how tall it is,
+// and a building name off the query string cannot end the page mid-sentence.
+// ---------------------------------------------------------------------------
+const embedHtml = sandbox.buildPublicCalendarHtml(snap,
+  sandbox.publicCalendarViewOptions({ embed: '1', building: 'narberth', view: 'week' }));
+
+ok('the embed drops the page heading, which is the host site\'s job',
+  embedHtml.indexOf('Programs &amp; Sign-Ups') === -1
+  && html.indexOf('Programs &amp; Sign-Ups') !== -1);
+ok('and takes its own background off, so it inherits the site around it',
+  embedHtml.indexOf('background: transparent') !== -1);
+ok('the pinned building is resolved to the spelling the workbook uses',
+  embedHtml.indexOf('\\"location\\":\\"Narberth\\"') !== -1);
+ok('the pinned range reaches the page as days', embedHtml.indexOf('\\"days\\":7') !== -1);
+ok('the embed knows to report its height', embedHtml.indexOf('postMessage') !== -1);
+ok('...and the printed page never does',
+  html.indexOf('\\"embed\\":false') !== -1 && html.indexOf('postMessage') !== -1
+  && html.indexOf('\\"days\\":null') !== -1);
+
+// A pin nobody can satisfy is dropped, not applied: a website showing an
+// empty calendar because a building was renamed is the failure nobody
+// reports, because it looks deliberate.
+const staleHtml = sandbox.buildPublicCalendarHtml(snap,
+  sandbox.publicCalendarViewOptions({ embed: '1', building: 'Bala Cynwyd' }));
+ok('a building the workbook has never heard of is ignored rather than obeyed',
+  staleHtml.indexOf('\\"location\\":\\"\\"') !== -1);
+
+// The query string is typed by whoever holds the link.
+const hostileHtml = sandbox.buildPublicCalendarHtml(snap,
+  sandbox.publicCalendarViewOptions({ embed: '1', building: '</script><script>alert(1)' }));
+ok('a building name cannot close the page\'s script block',
+  (hostileHtml.match(/<\/script>/g) || []).length === 1);
+
+ok('?embed=no is not an embed',
+  sandbox.publicCalendarViewOptions({ embed: 'no' }).embed === false);
+ok('a bare ?embed is', sandbox.publicCalendarViewOptions({ embed: '' }).embed === true);
+ok('and a URL that never mentions it is not',
+  sandbox.publicCalendarViewOptions({}).embed === false);
+
+// ---------------------------------------------------------------------------
 // 6. Routing, and the gate that is deliberately absent.
 // ---------------------------------------------------------------------------
 sandbox.buildCancelPageHtml = () => 'PAGE:cancel';
@@ -255,6 +300,44 @@ ok('the public read answers without a PIN',
 ok('the link the dialog prints carries the mode the router answers to',
   sandbox.checkInPageUrl({ mode: 'public' })
     === 'https://script.google.com/macros/s/ABC/exec?mode=public');
+
+// ---------------------------------------------------------------------------
+// 7. FRAMING IS A PER-ROUTE PERMISSION. Exactly one page here may be put in
+// somebody else's <iframe>, and it is the one that cannot write anything: a
+// door page that could be framed is a tap on another site turned into a
+// check-in on this workbook.
+// ---------------------------------------------------------------------------
+ok('the public calendar may be framed',
+  sandbox.doGet({ parameter: { mode: 'public' } }).xFrame === 'ALLOWALL');
+ok('the door app may not', !sandbox.doGet({ parameter: {} }).xFrame);
+ok('the staff roster may not',
+  !sandbox.doGet({ parameter: { mode: 'session' } }).xFrame);
+ok('the cancel page may not',
+  !sandbox.doGet({ parameter: { mode: 'cancel', form: 'F1' } }).xFrame);
+
+// ---------------------------------------------------------------------------
+// 8. The snippet somebody pastes into their website.
+// ---------------------------------------------------------------------------
+const snippet = sandbox.publicCalendarEmbedSnippet({});
+ok('the embed URL carries the mode the router answers to and asks for the skin',
+  sandbox.publicCalendarEmbedUrl({})
+    === 'https://script.google.com/macros/s/ABC/exec?mode=public&embed=1');
+ok('a pinned building is encoded rather than pasted raw',
+  sandbox.publicCalendarEmbedUrl({ location: "St. John's", view: 'week' })
+    .indexOf('building=St.%20John\'s') !== -1);
+ok('the snippet is an iframe on that address',
+  snippet.indexOf('<iframe') !== -1 && snippet.indexOf(sandbox.publicCalendarEmbedUrl({})) !== -1);
+ok('...with a fallback height, for a host that never hears the message',
+  snippet.indexOf('height:900px') !== -1);
+ok('...and a listener that answers only its own frame',
+  snippet.indexOf('event.source !== frame.contentWindow') !== -1);
+// Named as a literal rather than read off the constant, because the whole
+// point of it is that the listener is pasted into somebody else's website and
+// goes on running there: changing the string is changing a contract with pages
+// this repo cannot see, and that should have to be done here too.
+ok('the listener and the page agree on the message type',
+  snippet.indexOf('programCalendarHeight.v1') !== -1
+  && embedHtml.indexOf('programCalendarHeight.v1') !== -1);
 
 console.log(fail ? `\n${fail} failed` : '\nAll public calendar checks passed');
 process.exit(fail ? 1 : 0);

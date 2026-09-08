@@ -284,3 +284,156 @@ function publicSeatsPhrase_(row, map, noRegistration, waitlistOnly) {
   }
   return 'Seats available';
 }
+
+// ============================================================================
+// 17b. THE EMBED  (the same page, inside somebody else's website)
+// ============================================================================
+//
+// The link above is the thing you print. This is the thing you PASTE — into
+// the organization's own site, where a Google Calendar embed would otherwise
+// be: a grid in Google's typeface with Google's chrome around it, which shows
+// a title and a time and cannot say whether there is a seat, cannot carry the
+// sign-up form for THIS month's session, and cannot be made to look like the
+// page it sits on. This page can do all three, and it is already built.
+//
+// So an embed is not a second page. It is the SAME route with ?embed=1 on it,
+// which does three things and no more:
+//
+//   1. TAKES THE CHROME OFF. No heading, no page background of its own, no
+//      footer paragraph — the host page has already said who this
+//      organization is, and a card with its own grey backdrop inside a white
+//      website reads as a screenshot of another site rather than as part of
+//      this one.
+//   2. LETS THE FRAME BE THE RIGHT HEIGHT. An iframe has a fixed height and
+//      the page inside it does not; the two disagree as an inner scrollbar,
+//      which on a phone is the interaction where a person scrolls the frame
+//      when they meant to scroll the page and concludes the site is broken.
+//      The page measures itself and posts its height out (see the resizer in
+//      publicCalendarEmbedSnippet) — the host listens and grows the frame, so
+//      there is one scrollbar on the screen and it belongs to the website.
+//   3. LETS ONE PAGE BE ONE BUILDING. ?building= and ?view= pin the filters
+//      the page would otherwise open on, so the Narberth page embeds
+//      Narberth's week and the events page embeds everything.
+//
+// WHAT IT DELIBERATELY DOES NOT DO IS RELAX ANYTHING. The embed reads the same
+// snapshot the public link reads, through the same function, with the same
+// fields in it — there is no second read here and nothing new leaves the
+// workbook. The one permission granted anywhere for this is the `frameable`
+// flag on the public route in DOOR_ROUTES, which is a per-route answer for the
+// reason its comment gives: this page cannot write.
+// ============================================================================
+
+/**
+ * What the parent page listens for. Versioned in the STRING rather than in a
+ * key, because the listener is pasted into somebody else's website and will
+ * still be running there long after this file has moved on: a message shape
+ * that changes gets a new type, and the old snippet goes on being ignored
+ * politely rather than resizing a frame to the wrong number.
+ */
+const PUBLIC_CALENDAR_EMBED_MESSAGE = 'programCalendarHeight.v1';
+
+/** The three ranges the page can open on, in the spellings an embed may use. */
+const PUBLIC_CALENDAR_EMBED_RANGES = {
+  week: 7, 'this-week': 7, '7': 7,
+  month: 31, 'this-month': 31, '31': 31,
+  all: 0, everything: 0, '0': 0
+};
+
+/**
+ * THE PRESENTATION OPTIONS IN A REQUEST — and nothing else is read from one.
+ *
+ * Deliberately separate from publicProgramCalendar(): what the snapshot
+ * CONTAINS must not depend on the query string, because the snapshot is cached
+ * and served to everybody, and because a page whose payload varies with its URL
+ * is a page somebody will one day widen with a parameter. These are how the
+ * already-public payload is DRAWN, so they are read here and applied in the
+ * browser.
+ *
+ * { embed, location, days } — location is what the visitor typed and is
+ * resolved against the real buildings in buildPublicCalendarHtml(), days is
+ * null when the URL did not ask, meaning "whatever this browser last chose".
+ */
+function publicCalendarViewOptions(params) {
+  const p = params || {};
+  const asked = String(p.view || p.range || '').trim().toLowerCase();
+  const range = Object.prototype.hasOwnProperty.call(PUBLIC_CALENDAR_EMBED_RANGES, asked)
+    ? PUBLIC_CALENDAR_EMBED_RANGES[asked]
+    : null;
+  return {
+    embed: isPublicCalendarEmbedRequest_(p),
+    // ?building= is the word a person writing the embed reaches for; ?location=
+    // is what every other page on this deployment already calls it, and a URL
+    // that carries both is answered by the one that is about this page.
+    location: String(p.building || p.location || p.loc || '').trim(),
+    days: range
+  };
+}
+
+/**
+ * Is this request asking for the embed skin? Any of the usual ways somebody
+ * writes "yes" — and the bare `?embed` a hand-typed URL ends up with, which
+ * arrives as an empty string and would otherwise read as "no".
+ */
+function isPublicCalendarEmbedRequest_(params) {
+  const p = params || {};
+  if (!Object.prototype.hasOwnProperty.call(p, 'embed')) return false;
+  const value = String(p.embed === undefined || p.embed === null ? '' : p.embed)
+    .trim().toLowerCase();
+  return value !== 'no' && value !== 'false' && value !== '0';
+}
+
+/**
+ * THE URL A WEBSITE FRAMES. Same route, same page, ?embed=1 on it.
+ *
+ * options: { location, view } — both optional, both pins (see the banner).
+ * Returns '' when the script has never been deployed, which the dialog draws
+ * as "no link yet" rather than as a snippet nobody can use.
+ */
+function publicCalendarEmbedUrl(options) {
+  const opts = options || {};
+  return checkInPageUrl({
+    mode: 'public',
+    params: {
+      embed: '1',
+      building: opts.location || '',
+      view: opts.view || ''
+    }
+  });
+}
+
+/**
+ * THE WHOLE THING SOMEBODY PASTES INTO THEIR WEBSITE, as one string.
+ *
+ * An <iframe> and eleven lines of listener. The listener is what stops the
+ * inner scrollbar, and it is written to be safe in a page it knows nothing
+ * about: it answers only messages from THIS frame's own window (`event.source
+ * !== frame.contentWindow` is the check that matters — an origin string is not
+ * available to compare against reliably across Google's two web-app hostnames),
+ * only messages carrying this file's own type, and it only ever sets a height.
+ *
+ * The `height` on the iframe itself is the FALLBACK, not the plan: a visitor
+ * whose browser drops the message, or a site whose CSP blocks the inline
+ * script, gets a 900px calendar that scrolls inside itself — which is what a
+ * Google Calendar embed does on its best day.
+ */
+function publicCalendarEmbedSnippet(options) {
+  const url = publicCalendarEmbedUrl(options);
+  if (!url) return '';
+  return [
+    `<iframe id="program-calendar" src="${url}"`,
+    '        title="Programs and sign-ups" loading="lazy"',
+    '        style="width:100%;height:900px;border:0;display:block"></iframe>',
+    '<script>',
+    '(function () {',
+    '  var frame = document.getElementById("program-calendar");',
+    '  window.addEventListener("message", function (event) {',
+    '    if (!frame || event.source !== frame.contentWindow) return;',
+    '    var data = event.data;',
+    `    if (!data || data.type !== ${JSON.stringify(PUBLIC_CALENDAR_EMBED_MESSAGE)}) return;`,
+    '    var height = Number(data.height);',
+    '    if (height > 0) frame.style.height = Math.ceil(height) + "px";',
+    '  });',
+    '}());',
+    '</script>'
+  ].join('\n');
+}
