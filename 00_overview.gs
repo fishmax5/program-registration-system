@@ -158,6 +158,13 @@
  *          form in a single step.
  *      [Fixed] and [Monthly] are still read as [Grouped] / [Regular], so no
  *      existing calendar description needs editing — see EVENT_TYPES.
+ *      AND [Grouped] IS THE ONE TAG THAT DOES NOT HAVE TO BE TYPED: an event
+ *      that repeats and ENDS — "after 8 occurrences", or on a date — is read
+ *      as a series and put on one form, up to the length set on Config
+ *      (twelve by default, 0 to turn it off). The tag is then written into the
+ *      event's description so the decision is visible and can be changed like
+ *      any other; a [Grouped] or [Regular] already typed there always wins.
+ *      See 95_recurring_series_detection.gs.
  *      A title is what attendees read on a shared calendar, so scheduling
  *      jargon does not belong there. Brackets left in a TITLE are still
  *      honored as a legacy fallback (and logged) so existing calendars keep

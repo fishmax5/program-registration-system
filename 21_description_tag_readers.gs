@@ -546,6 +546,13 @@ function importCalendarGroups(registrySheet, options) {
   const eventsByCalendar = getCalendarEventsForWindow(start, end);
   const groups = buildGroupsForWindow(eventsByCalendar);
 
+  // A program grouped because its recurrence ENDS is grouped for a reason
+  // nothing on the calendar says out loud. This writes it there, once, so the
+  // decision is visible, arguable and durable — see stampDetectedSeriesGrouping()
+  // (95). It changes nothing about this run: the groups above were already
+  // built from the same reading.
+  stampDetectedSeriesGrouping(groups);
+
   // BEFORE anything decides what is "new": a program renamed on the calendar
   // presents as a brand-new group whose old sessions have vanished, and the
   // vanishing half is what triage acts on. Moving the existing rows onto the
@@ -832,7 +839,15 @@ function collectCalendarWork(groups, existingState, renamedGroupKeys) {
     const needsAssistanceAdoption = existingState.splitAssistancePrograms &&
       existingState.splitAssistancePrograms.has(group.groupKey);
 
-    if (newSessions.length === 0 && !needsUnblocking && !wasRenamed && !needsAssistanceAdoption) {
+    // And the same for a program the calendar has just been read as a SERIES
+    // (95). A course recognized in its fourth week has every one of its dates
+    // on the sheet already and nothing new is ever coming — a series being a
+    // series — so without this, the months it is spread across would never be
+    // brought onto the one form it now books through.
+    const needsSeriesAdoption = groupedProgramNeedsAdoption(existingState, group);
+
+    if (newSessions.length === 0 && !needsUnblocking && !wasRenamed && !needsAssistanceAdoption &&
+      !needsSeriesAdoption) {
       log(`Up to date: ${describeGroup(group)} — every date already on the session table, nothing to do.`);
       return;
     }
@@ -842,7 +857,11 @@ function collectCalendarWork(groups, existingState, renamedGroupKeys) {
           : (needsAssistanceAdoption
             ? 'is an appointment program whose months are still on separate forms — they are being ' +
               'brought onto the one form it books through.'
-            : `is coming back off [${NO_REGISTRATION_TAG}] — its form and its calendar links have to be restored.`)));
+            : (needsSeriesAdoption
+              ? 'runs as a series whose months are still on separate forms — they are being brought onto ' +
+                'the one form it books through.'
+              : `is coming back off [${NO_REGISTRATION_TAG}] — its form and its calendar links have to be ` +
+                `restored.`))));
     }
     work.push({
       group,

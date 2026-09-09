@@ -52,6 +52,11 @@ let __registrationHorizonCache = null;
 let __automationEnabledCache = null;
 let __outboundMailPausedCache = null;
 let __triggerOwnerCache = null;
+// How long a bounded recurrence may be and still be read as a series — see
+// getGroupSeriesUpTo(). Read once per execution because resolveEventSettings()
+// asks it of every event on every calendar, and a Config round trip per event
+// is a sync's worth of them.
+let __groupSeriesUpToCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 let __formHandleCache = {};
@@ -233,6 +238,7 @@ function invalidateConfigCaches() {
   __automationEnabledCache = null;
   __outboundMailPausedCache = null;
   __triggerOwnerCache = null;
+  __groupSeriesUpToCache = null;
   // These two also live in the CROSS-execution cache, which a plain
   // per-execution reset would leave serving the old value to the next
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.

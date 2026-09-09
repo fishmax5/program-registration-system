@@ -26,6 +26,20 @@ function processCalendarGroup(registrySheet, item, existingState) {
   }
 
   let existingFormId = existingState.groupFormMap[group.groupKey];
+  if (!existingFormId && group.isFixed) {
+    // A PROGRAM THAT HAS JUST BECOME A SERIES has no ::FIXED entry anywhere —
+    // it has been running on monthly forms, one per month, each keyed by its
+    // month. Building a new form here would be a new link on a course already
+    // three weeks in, with every sign-up so far on a form the dashboard no
+    // longer names. So the form its NEXT date is already on is adopted
+    // instead. See chooseFormForGroupedProgram() (95).
+    existingFormId = chooseFormForGroupedProgram(existingState, group);
+    if (existingFormId) {
+      log(`${describeGroup(group)} is now one form for its whole run. Keeping ` +
+        `${describeFormLink(existingFormId)} — the form its next date is already on, so the link in ` +
+        `circulation goes on working.`);
+    }
+  }
   if (!existingFormId) {
     // Memoized: detectRenamedPrograms() asked this same question about this
     // same group earlier in the run — see recoverFormIdFromGroupEvents().
@@ -77,6 +91,10 @@ function processCalendarGroup(registrySheet, item, existingState) {
   // row still naming last month's form under it is exactly the drift
   // repairDashboardLinks() exists to find.
   adoptAssistanceProgramSessions(registrySheet, group, formInfo);
+  // And the same move, for the same reason, for a program the calendar has
+  // just been read as a SERIES: the months it used to take a form apiece for
+  // are brought onto this one before the link is written onto its events (95).
+  adoptGroupedProgramSessions(registrySheet, group, formInfo, existingState);
 
   backInjectCalendarDescriptions(group, formInfo);
 
@@ -482,7 +500,14 @@ function getExistingRegistryState(registrySheet) {
     // all of them. It is what gives collectCalendarWork() a reason to process
     // a program with no new dates: without it, adoption would wait for the
     // next month to appear on the calendar. See adoptAssistanceProgramSessions().
-    splitAssistancePrograms: new Set() };
+    splitAssistancePrograms: new Set(),
+    // `calendarId|title` -> [{ formId, date }] for every row that names a
+    // form, whatever span it belongs to. The one thing the span-keyed map
+    // above cannot answer: "which forms is this PROGRAM on right now?" — which
+    // is what a program that has just been recognized as a series has to ask,
+    // because its months are each keyed by their own month and its new key is
+    // keyed ::FIXED. See chooseFormForGroupedProgram() (95).
+    programFormCandidates: {} };
   const headers = HEADERS.All_Program_Sessions;
   const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
   const map = getIndexMap(headers);
@@ -506,6 +531,19 @@ function getExistingRegistryState(registrySheet) {
     const typeTag = row[map['Type_Tag']];
     const formId = row[map['Form_ID']];
     if (!source || !title || !formId) return;
+
+    const programKey = `${source}|${title}`;
+    if (!state.programFormCandidates[programKey]) state.programFormCandidates[programKey] = [];
+    state.programFormCandidates[programKey].push({
+      formId,
+      date: coerceDate(row[map['Event_Date']]),
+      // Whether the ROW already knows this program is one form. A row written
+      // while it was Regular is what tells groupedProgramNeedsAdoption() the
+      // grouping is NEW — as opposed to a long-standing series whose staff
+      // deliberately moved one date onto another form (47), which is not
+      // something to undo.
+      grouped: isGroupedTypeTag(typeTag)
+    });
 
     // The ::FIXED group-key suffix is deliberately NOT renamed alongside the
     // Type_Tag vocabulary: it's an internal key already persisted in the

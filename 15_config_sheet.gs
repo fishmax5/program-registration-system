@@ -115,6 +115,7 @@ function styleConfigSheet(sheet) {
   seedRegistrationHorizonRow(sheet);
   seedMembershipFormRow(sheet);
   seedOutboundMailRow(sheet);
+  seedSeriesDetectionRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -152,6 +153,31 @@ function seedMealBufferRows(sheet) {
   const startRow = CONFIG_DATA_START_ROW + existingCombos.size;
   sheet.getRange(startRow, section.startCol, rowsToAdd.length, section.headers.length).setValues(rowsToAdd);
   log(`Seeded ${rowsToAdd.length} Meal Buffer Amounts row(s) on "${SHEET_NAMES.CONFIG}".`);
+}
+
+/**
+ * How long a bounded recurrence may be and still be read as a series.
+ *
+ * A NUMBER RATHER THAN A TICK BOX, because the two answers this setting has to
+ * give are "twelve" and "none". Nought turns the recognition off altogether —
+ * which is the honest way to say "we would rather type the tag ourselves" —
+ * and any other number is where a centre draws the line between a course and a
+ * standing class entered with an end date on it. See
+ * 95_recurring_series_detection.gs for what the number is compared against.
+ */
+function seedSeriesDetectionRow(sheet) {
+  const section = CONFIG_LAYOUT.SERIES_DETECTION;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (cell.getValue() !== '') return;
+  cell.setValue(DEFAULT_GROUP_SERIES_UP_TO);
+  cell.setNote(
+    'A calendar event that repeats and ENDS \u2014 "ends after N times", or an end date \u2014 is read as a '
+    + 'series and put on ONE registration form, instead of a fresh form each month.\n\n'
+    + 'This is the longest run that counts. A recurrence longer than this is a standing program and keeps '
+    + 'its monthly forms.\n\n'
+    + 'Set it to 0 to turn the recognition off and tag series by hand.\n\n'
+    + 'A [Grouped] or [Regular] typed into an event description always wins over this.');
+  log(`Seeded ${CONFIG_LAYOUT.SERIES_DETECTION.title} (${DEFAULT_GROUP_SERIES_UP_TO}) on "${SHEET_NAMES.CONFIG}".`);
 }
 
 function seedOrderAheadRow(sheet) {
@@ -897,6 +923,32 @@ function getOrderAheadDays() {
   }
   __orderAheadDaysCache = days;
   return days;
+}
+
+/**
+ * The longest bounded recurrence that is still read as a series, from Config.
+ *
+ * Falls back to DEFAULT_GROUP_SERIES_UP_TO whenever the cell is blank or is
+ * not a number — a typo must not silently turn the recognition off, because
+ * "off" here is a decision somebody makes by typing 0. Nought IS honoured.
+ */
+function getGroupSeriesUpTo() {
+  if (__groupSeriesUpToCache !== null) return __groupSeriesUpToCache;
+  let max = DEFAULT_GROUP_SERIES_UP_TO;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      const val = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.SERIES_DETECTION.startCol).getValue();
+      const num = Number(val);
+      if (val !== '' && val !== null && !isNaN(num) && num >= 0) max = Math.floor(num);
+    }
+  } catch (err) {
+    // No spreadsheet, or no authorization to read one — the same state a
+    // simple onEdit trigger runs in. The default is the answer.
+  }
+  __groupSeriesUpToCache = max;
+  return max;
 }
 
 /**

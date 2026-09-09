@@ -317,6 +317,13 @@ function parseEventTitle(title) {
  * DESCRIPTION's brackets win, and anything the description doesn't specify
  * falls back to legacy brackets left in the title (with a one-time nudge in
  * the log).
+ *
+ * Grouping has one more fallback under both of those, and only grouping does:
+ * a recurrence that ends after a handful of occurrences is read as a series
+ * (isDetectedGroupedSeries(), 95). Nothing else here can be inferred from what
+ * a calendar event IS — a capacity, a club, an assistance program are all
+ * things somebody has to say — which is why this is the one setting with a
+ * layer nobody typed.
  */
 function resolveEventSettings(event, parsedTitle) {
   const description = (event && typeof event.getDescription === 'function')
@@ -331,9 +338,15 @@ function resolveEventSettings(event, parsedTitle) {
   // Without this, moving a program to Regular in the description does nothing
   // at all until someone also finds and deletes the legacy title bracket —
   // the "I changed it and it changed itself back" failure, one layer down.
+  // THE THIRD LAYER, and the only one nobody typed: an event that repeats and
+  // ENDS is a series, and a series takes one form (see 95). It is read LAST,
+  // under both of the above, because it is a reading of what somebody did on
+  // the calendar rather than a statement they made about this program — so a
+  // [Grouped] or [Regular] in the description, and a legacy bracket left in the
+  // title, both settle the question before it is asked.
   const isFixed = fromDescription.explicitGrouping
     ? fromDescription.explicitGrouping === EVENT_TYPES.GROUPED
-    : (parsedTitle.legacyIsFixed || false);
+    : (parsedTitle.legacyIsFixed || isDetectedGroupedSeries(event));
   const isShared = fromDescription.isShared || parsedTitle.legacyIsShared || false;
   const isClub = fromDescription.isClub || parsedTitle.legacyIsClub || false;
   const noRegistration = fromDescription.noRegistration || parsedTitle.legacyNoRegistration || false;
