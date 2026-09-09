@@ -37,12 +37,12 @@ let __orderAheadDaysCache = null;
 // nobody") caches as the answer it is rather than being re-read from the sheet
 // by every category lookup in the run.
 let __adminNotificationRowsCache = null;
+// The membership application's form id. Nothing opens that form any more —
+// the door files a note for the office instead of showing the application (see
+// recordMembershipHandoff(), 72_door_app.gs) — so the id is read only to put
+// the form's link in that note, and the shape cache that sat beside this one
+// went with the screen it was for.
 let __membershipFormIdCache = null;
-// The door's membership application, read once per execution — see
-// membershipFormShape(). Wrapped ({ shape }) so a form that could NOT be
-// opened is cached as the refusal it is, rather than re-attempting a remote
-// call that has already failed once in this execution.
-let __membershipFormShapeCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
@@ -230,7 +230,6 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationRowsCache = null;
   __membershipFormIdCache = null;
-  __membershipFormShapeCache = null;
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;
