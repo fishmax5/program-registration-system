@@ -45,7 +45,9 @@ function makeCountingSheet(grid, name) {
   const stats = {
     getValues: 0, getFormulas: 0, setValues: 0, setValue: 0,
     cellsRead: 0, cellsWritten: 0,
-    getLastRow: 0, getLastColumn: 0, getRange: 0
+    getLastRow: 0, getLastColumn: 0, getRange: 0,
+    // Calls that move no data but still cross the wire — see the Proxy below.
+    formatting: 0
   };
 
   const width = () => grid.reduce((w, row) => Math.max(w, row.length), 0);
@@ -65,7 +67,7 @@ function makeCountingSheet(grid, name) {
       stats.getRange++;
       const rows = numRows === undefined ? 1 : numRows;
       const cols = numCols === undefined ? 1 : numCols;
-      return {
+      const range = {
         getValues() {
           stats.getValues++;
           stats.cellsRead += rows * cols;
@@ -109,32 +111,61 @@ function makeCountingSheet(grid, name) {
               grid[row - 1 + r][col - 1 + c] = values[r][c];
             }
           }
-          return this;
+          return proxy;
         },
         setValue(value) {
           stats.setValue++;
           stats.cellsWritten += 1;
           if (!grid[row - 1]) grid[row - 1] = [];
           grid[row - 1][col - 1] = value;
-          return this;
+          return proxy;
         },
-        // Formatting calls are counted as round trips but change no data.
-        setBackground() { return this; },
-        setFontWeight() { return this; },
-        setNote() { return this; },
-        setNumberFormat() { return this; },
-        clearDataValidations() { return this; },
-        setDataValidation() { return this; }
+        getRow: () => row,
+        getColumn: () => col,
+        getNumRows: () => rows,
+        getNumColumns: () => cols,
+        getA1Notation: () => `R${row}C${col}`
       };
+      // FORMATTING IS COUNTED, NOT MODELLED. A render makes dozens of calls
+      // that move no data — setBackground, clearNote, setFontWeight, the
+      // borders, the number formats — and stubbing each one by name is how a
+      // harness like this rots: the next call the code learns to make throws,
+      // in a file nobody thinks of as part of the feature. So anything not
+      // implemented above is answered generically, chained like the real
+      // Range, and tallied under `formatting` — which is the honest place for
+      // it, since a round trip that changes no cell still costs a round trip.
+      const proxy = new Proxy(range, {
+        get(target, prop) {
+          if (prop in target) return target[prop];
+          if (typeof prop !== 'string') return undefined;
+          return () => {
+            stats.formatting++;
+            // A getter is asked for a value, not for chaining. Only the
+            // setters and the clears hand the range back, and they hand back
+            // the PROXY — a real Range chains indefinitely, and returning the
+            // bare object would break on the second call in a chain.
+            if (/^(get|is)[A-Z]/.test(prop)) return prop.startsWith('is') ? false : null;
+            return proxy;
+          };
+        }
+      });
+      return proxy;
     }
   };
   return sheet;
 }
 
-/** Total service round trips — the number the benchmark is actually about. */
+/**
+ * Total service round trips — the number the benchmark is actually about.
+ *
+ * FORMATTING COUNTS. A setBackground() that changes no cell still stops the
+ * script and waits for Sheets, so leaving it out would flatter a render (which
+ * is mostly formatting) and say nothing useful about it. The data-only tally
+ * is still there under the individual counters for anything that wants it.
+ */
 function roundTrips(stats) {
   return stats.getValues + stats.getFormulas + stats.setValues + stats.setValue +
-    stats.getLastRow + stats.getLastColumn;
+    stats.getLastRow + stats.getLastColumn + stats.formatting;
 }
 
 module.exports = { makeCountingSheet, roundTrips, displayTextOf };

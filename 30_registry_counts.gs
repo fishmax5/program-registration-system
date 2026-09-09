@@ -1,17 +1,15 @@
 /** Recomputes Active_Count / Waitlist_Count / Remaining_Seats / Status on the session table (both Upcoming and Past zones). */
 function recomputeEventRegistryCounts(registrySheet, registrantsSheet, registrantRows) {
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return;
+  // ONE READ OF THE TAB, like the reconcile passes it sits beside — see
+  // loadSessionGrid() (96). This ran every registration sync and read four
+  // columns per zone to write four more, none of which anything else in the
+  // run had to fetch again.
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return;
 
-  const regMap = getHeaderMapAt(registrySheet, headerRows[0]); // identical column layout at every header row
   const counts = buildEventCountsFromRegistrants(registrantsSheet, registrantRows);
-
-  headerRows.forEach((hRow, i) => {
-    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, regMap['Event_Date']);
-    if (!zone) return;
-    recomputeCountsForZone(registrySheet, zone.start, zone.count, regMap, counts);
-  });
+  model.zones.forEach(zone => recomputeCountsForZone(model, zone, counts));
+  flushSessionGrid(model);
 }
 
 function buildEventCountsFromRegistrants(registrantsSheet, registrantRows) {
@@ -92,59 +90,63 @@ function occupancyForSession(counts, isAppointmentSession) {
   };
 }
 
-function recomputeCountsForZone(registrySheet, dataStart, numRows, regMap, counts) {
-  const eventIds = registrySheet.getRange(dataStart, regMap['Event_ID'], numRows, 1).getValues();
-  const maxCaps = registrySheet.getRange(dataStart, regMap['Max_Capacity'], numRows, 1).getValues();
+function recomputeCountsForZone(model, zone, counts) {
+  const eventIds = sessionGridColumn(model, zone, 'Event_ID');
+  const maxCaps = sessionGridColumn(model, zone, 'Max_Capacity');
+  if (!eventIds || !maxCaps) return;
   // WHICH SESSIONS COUNT IN SLOTS RATHER THAN IN PEOPLE — see
   // occupancyForSession(). Read here rather than inferred from the count,
   // because "three registered against a capacity of three" looks identical
   // either way and only the session knows which it is.
-  const isAppointment = regMap['Personalized_Assistance'] === undefined
-    ? null
-    : registrySheet.getRange(dataStart, regMap['Personalized_Assistance'], numRows, 1).getValues();
+  const isAppointment = sessionGridColumn(model, zone, 'Personalized_Assistance');
   // WHICH SESSIONS ARE TAKING NOBODY NEW REGARDLESS OF THEIR CAPACITY — see
   // WAITLIST_ONLY_TAG. Read here because an UNCAPPED session forced to the
   // waitlist is otherwise reported as "🟢 Unlimited" with a blank
   // Waitlist_Count, which is the sheet hiding the very thing somebody ticked
   // the box to make happen: the registrants ARE being waitlisted, and the tab
   // said the session had unlimited room.
-  const forcedWaitlist = regMap['Waitlist_Only'] === undefined
-    ? null
-    : registrySheet.getRange(dataStart, regMap['Waitlist_Only'], numRows, 1).getValues();
+  const forcedWaitlist = sessionGridColumn(model, zone, 'Waitlist_Only');
 
-  const activeOut = [], waitlistOut = [], remainingOut = [], statusOut = [];
-  for (let i = 0; i < numRows; i++) {
-    const eventId = eventIds[i][0];
-    const rawCap = maxCaps[i][0];
+  const activeOut = sessionGridColumn(model, zone, 'Active_Count');
+  const waitlistOut = sessionGridColumn(model, zone, 'Waitlist_Count');
+  const remainingOut = sessionGridColumn(model, zone, 'Remaining_Seats');
+  const statusOut = sessionGridColumn(model, zone, 'Status');
+  if (!activeOut || !waitlistOut || !remainingOut || !statusOut) return;
+
+  for (let i = 0; i < zone.count; i++) {
+    const eventId = eventIds[i];
+    const rawCap = maxCaps[i];
     const isUncapped = rawCap === '--' || rawCap === '' || Number(rawCap) <= 0;
     const maxCap = isUncapped ? 0 : Number(rawCap);
-    const isForced = !!forcedWaitlist && isWaitlistOnlyColumnValue(forcedWaitlist[i][0]);
+    const isForced = !!forcedWaitlist && isWaitlistOnlyColumnValue(forcedWaitlist[i]);
     const c = occupancyForSession(counts[eventId],
-      !!isAppointment && isAssistanceColumnValue(isAppointment[i][0]));
+      !!isAppointment && isAssistanceColumnValue(isAppointment[i]));
 
-    activeOut.push([c.active]);
+    activeOut[i] = c.active;
     if (isForced) {
       // The counts are real either way; only the two DERIVED cells are decided
       // by the tick. Seats remaining is 0 because nobody can take one, and the
       // status says so in the same words a full session uses.
-      waitlistOut.push([c.waitlist]);
-      remainingOut.push([0]);
-      statusOut.push([WAITLIST_ONLY_STATUS]);
+      waitlistOut[i] = c.waitlist;
+      remainingOut[i] = 0;
+      statusOut[i] = WAITLIST_ONLY_STATUS;
     } else if (isUncapped) {
-      waitlistOut.push(['']);
-      remainingOut.push(['']);
-      statusOut.push(['🟢 Unlimited']);
+      waitlistOut[i] = '';
+      remainingOut[i] = '';
+      statusOut[i] = '🟢 Unlimited';
     } else {
-      waitlistOut.push([c.waitlist]);
-      remainingOut.push([Math.max(maxCap - c.active, 0)]);
-      statusOut.push([computeStatus(c.active, maxCap)]);
+      waitlistOut[i] = c.waitlist;
+      remainingOut[i] = Math.max(maxCap - c.active, 0);
+      statusOut[i] = computeStatus(c.active, maxCap);
     }
   }
-  registrySheet.getRange(dataStart, regMap['Active_Count'], numRows, 1).setValues(activeOut);
-  registrySheet.getRange(dataStart, regMap['Waitlist_Count'], numRows, 1).setValues(waitlistOut);
-  registrySheet.getRange(dataStart, regMap['Remaining_Seats'], numRows, 1).setValues(remainingOut);
-  registrySheet.getRange(dataStart, regMap['Status'], numRows, 1).setValues(statusOut);
-  invalidateSectionedRowsCache(registrySheet);
+  // Four columns, but two writes: Active_Count sits beside Status and
+  // Waitlist_Count beside Remaining_Seats, and flushSessionGrid() merges a run
+  // of neighbours into one call.
+  markSessionGridColumn(model, zone, 'Active_Count');
+  markSessionGridColumn(model, zone, 'Waitlist_Count');
+  markSessionGridColumn(model, zone, 'Remaining_Seats');
+  markSessionGridColumn(model, zone, 'Status');
 }
 
 /**

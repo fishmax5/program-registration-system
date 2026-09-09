@@ -87,6 +87,10 @@ this.updateRegistrationLinkCells = updateRegistrationLinkCells;
 this.buildFormIdByProgram = buildFormIdByProgram;
 this.invalidateSectionedRowsCache = invalidateSectionedRowsCache;
 this.withSessionGrid = (typeof withSessionGrid === 'function') ? withSessionGrid : null;
+this.getSectionedRows = getSectionedRows;
+this.findProgramSessionHeaderRows = findProgramSessionHeaderRows;
+this.getHeaderMapAt = getHeaderMapAt;
+this.recomputeEventRegistryCounts = recomputeEventRegistryCounts;
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -241,3 +245,58 @@ function run(label) {
 run(sandbox.withSessionGrid
   ? 'RECONCILE PHASE — one shared read, one write-back'
   : 'RECONCILE PHASE — per-pass column reads');
+
+// ============================================================================
+// THE SECOND HALF OF THE SAME PROBLEM: the readers that come AFTER the
+// reconcile phase.
+//
+// A sync does not stop at the passes above. The dashboard render reads the
+// session rows, the triage pass reads them, the registration import reads them
+// again at the top of its own half, the counts pass reads four columns of them
+// and the leader sheets read them once more — all in ONE execution, and until
+// the grid cache existed every one of those was its own fetch of the same
+// unchanged tab.
+// ============================================================================
+function runReaders(label) {
+  const { grid, groups, rows } = buildWorkbook();
+  const sheet = makeCountingSheet(grid, 'All_Program_Sessions');
+  const registrants = makeCountingSheet([['Event_ID']], 'All_Registrants');
+  sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
+    getSheetByName: name => (name === 'All_Program_Sessions' ? sheet
+      : name === 'All_Registrants' ? registrants : null),
+    toast: () => {}, getSheets: () => [sheet, registrants]
+  });
+  sandbox.SpreadsheetApp.getActive = sandbox.SpreadsheetApp.getActiveSpreadsheet;
+
+  console.log(`\n${label}`);
+  console.log(`${rows} session rows, one execution\n`);
+  console.log('  reader                                 reads  cells read');
+  console.log('  ' + '-'.repeat(66));
+
+  let prev = Object.assign({}, sheet.stats);
+  const time = (name, fn) => {
+    try { fn(); } catch (err) { console.log(`  ${name}: threw ${err}`); }
+    const s = sheet.stats;
+    const reads = (s.getValues - prev.getValues) + (s.getFormulas - prev.getFormulas) +
+      (s.getLastRow - prev.getLastRow) + (s.getLastColumn - prev.getLastColumn);
+    console.log(`  ${name.padEnd(38)}${String(reads).padStart(5)}  ${s.cellsRead - prev.cellsRead}`);
+    prev = Object.assign({}, s);
+  };
+
+  const H = sandbox.HEADERS.All_Program_Sessions;
+  time('the render reads the session rows', () => sandbox.getSectionedRows(sheet, H, 'Event_ID'));
+  time('the triage pass reads them', () => sandbox.getSectionedRows(sheet, H, 'Event_ID'));
+  time('the import reads them at its top', () => sandbox.getSectionedRows(sheet, H, 'Event_ID'));
+  time('a link-repair scan finds the headers', () => sandbox.findProgramSessionHeaderRows(sheet));
+  time('and reads the header row', () => sandbox.getHeaderMapAt(sheet, 3));
+  time('the leader sheets read them again', () => sandbox.getSectionedRows(sheet, H, 'Event_ID'));
+
+  const s = sheet.stats;
+  console.log('  ' + '-'.repeat(66));
+  console.log(`  TOTAL reads: ${s.getValues + s.getFormulas + s.getLastRow + s.getLastColumn}` +
+    `, cells read ${s.cellsRead}`);
+}
+
+runReaders(sandbox.withSessionGrid
+  ? 'DOWNSTREAM READERS — one shared grid'
+  : 'DOWNSTREAM READERS — a fetch apiece');
