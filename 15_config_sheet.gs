@@ -389,7 +389,14 @@ function migrateLegacyAdminNotificationColumns(sheet) {
  * Seeds the membership application's form id, and says in the cell note what
  * the cell is for and what an empty one means. Only ever written into an EMPTY
  * cell — a workbook pointed at a different application, or deliberately
- * cleared so the door stops offering one, is left as staff left it.
+ * cleared, is left as staff left it.
+ *
+ * WHAT THIS CELL IS FOR NOW. The door app used to draw the application's own
+ * questions on the tablet and submit them back through the Forms API; it does
+ * not any more (see recordMembershipHandoff(), 72_door_app.gs, for why). The
+ * id is read for ONE thing: putting the form's link into the office note a
+ * walk-in's "not a member yet" files, so whoever follows up has the thing to
+ * send. Nothing opens the form, so no access to it is needed by anybody.
  */
 function seedMembershipFormRow(sheet) {
   const section = CONFIG_LAYOUT.MEMBERSHIP_FORM;
@@ -398,13 +405,13 @@ function seedMembershipFormRow(sheet) {
     cell.setValue(DEFAULT_MEMBERSHIP_FORM_ID);
     log(`Seeded the default Membership Application form id on "${SHEET_NAMES.CONFIG}".`);
   }
-  cell.setNote('The Google Form the door app shows to somebody who says they are not a member yet.\n\n'
-    + 'Paste either the form id or its whole edit URL. The door reads the form\'s questions LIVE, '
-    + 'so editing the form is how the door\'s membership screen changes — no code change is needed.\n\n'
-    + 'Leave blank to stop offering the application at the door; a walk-in who is not a member is then '
-    + 'recorded for the office to follow up, and nothing else happens.\n\n'
-    + 'The account this script runs as must have EDIT access to the form, which is what the Forms API '
-    + 'requires to open it. Without that the door shows a plain message and a link to the form itself.');
+  cell.setNote('The membership application to send somebody who signs in at the door and says they '
+    + 'are not a member yet.\n\n'
+    + 'Paste either the form id or its whole edit URL. The door does NOT show this form to anybody: '
+    + 'it files a note for the office naming the person, how to reach them, and this link.\n\n'
+    + 'Leave blank and the note is filed without a link — the person is still recorded for the office '
+    + 'to follow up.\n\n'
+    + 'Nothing opens the form, so the account this script runs as needs no access to it.');
 }
 
 /**
@@ -1190,10 +1197,10 @@ function getAllAdminNotificationEmails() {
  * The membership application's form id, or '' when the cell is blank, holds
  * something that is not an id, or cannot be read at all.
  *
- * '' is a complete answer everywhere it is used: the door simply does not
- * offer the application. Reading fails the same way for the same reason
- * getAdminNotificationRows() does — a Config tab mid-rebuild must not be able
- * to point the door at a form nobody chose.
+ * '' is a complete answer everywhere it is used: the office's note is filed
+ * without a link to the application. Reading fails the same way for the same
+ * reason getAdminNotificationRows() does — a Config tab mid-rebuild must not
+ * be able to point the office at a form nobody chose.
  */
 function getMembershipFormId() {
   if (__membershipFormIdCache !== null) return __membershipFormIdCache;
@@ -1207,7 +1214,7 @@ function getMembershipFormId() {
         sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue());
     }
   } catch (err) {
-    log(`\u26a0\ufe0f Could not read the Membership Application form id from Config (${err}) — the door will not offer it.`);
+    log(`\u26a0\ufe0f Could not read the Membership Application form id from Config (${err}) — the office's note will carry no link.`);
     id = '';
   }
   __membershipFormIdCache = id;

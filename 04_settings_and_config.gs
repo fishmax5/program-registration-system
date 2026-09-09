@@ -207,10 +207,11 @@ const RETIRED_ARCHIVE_COPY_COL = { title: '🗄️ Archive Copy Address', col: 2
  * new file with a new id. Pasting an id (or the form's whole edit URL, which
  * is what a browser hands you) into one cell must be the whole operation.
  *
- * BLANK MEANS NO APPLICATION AT THE DOOR. The membership screen is not
- * offered, and a walk-in who says they are not a member yet is recorded for
- * the office exactly as they were before this existed — which is the behavior
- * every workbook had, and therefore the only safe reading of an empty cell.
+ * BLANK MEANS NO LINK IN THE OFFICE'S NOTE. A walk-in who says they are not a
+ * member yet is recorded for the office exactly as they were before this
+ * existed — which is the behavior every workbook had, and therefore the only
+ * safe reading of an empty cell. Nothing at the door opens this form; see
+ * recordMembershipHandoff() (72_door_app.gs).
  *
  * The default below is seeded onto a fresh Config tab only; a workbook whose
  * cell has been cleared or repointed by hand stays as staff left it.
