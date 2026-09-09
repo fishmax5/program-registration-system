@@ -39,9 +39,13 @@ function getHeaderMap(sheet) {
 function getHeaderMapAt(sheet, headerRow) {
   const map = {};
   if (!headerRow || headerRow < 1) return map;
-  const lastCol = sheet.getLastColumn();
-  if (lastCol < 1) return map;
-  const headerRowValues = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  // Out of the tab's one cached grid (96) rather than a read of its own: this
+  // is called at the top of every reconcile pass, and a header row is one row
+  // of a grid the run has almost always already fetched.
+  const entry = readSheetGrid(sheet, false);
+  if (!entry) return map;
+  const headerRowValues = entry.values[headerRow - 1];
+  if (!headerRowValues) return map;
   headerRowValues.forEach((h, i) => {
     const name = normalizeHeaderText(h);
     if (name && map[name] === undefined) map[name] = i + 1;
@@ -66,13 +70,19 @@ function getHeaderMapAt(sheet, headerRow) {
 function findAllHeaderRows(sheet, uniqueHeaderText, maxRowsToScan, endRow) {
   const ceiling = maxRowsToScan || 3000;
   const bound = endRow ? Math.min(endRow, ceiling) : ceiling;
-  const lastRow = Math.min(Math.max(sheet.getLastRow(), 0), bound);
-  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  // THE GRID IS READ ONCE PER TAB PER EXECUTION — see readSheetGrid() (96).
+  // This scan is what made the reconcile phase expensive: it is the first
+  // thing six separate passes do, it reads the WHOLE tab to find two rows,
+  // and none of those passes had changed the tab in a way the next one's scan
+  // needed to see. The bound still applies; it is applied to the grid.
+  const entry = readSheetGrid(sheet, false);
+  if (!entry) return [];
+  const lastRow = Math.min(entry.lastRow, bound);
   if (lastRow < 1) return [];
-  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const values = entry.values;
   const rows = [];
-  for (let r = 0; r < values.length; r++) {
-    if (values[r].some(v => normalizeHeaderText(v) === uniqueHeaderText)) rows.push(r + 1);
+  for (let r = 0; r < lastRow; r++) {
+    if (values[r] && values[r].some(v => normalizeHeaderText(v) === uniqueHeaderText)) rows.push(r + 1);
   }
   return rows;
 }

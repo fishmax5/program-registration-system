@@ -24,16 +24,21 @@
  */
 function getZoneDataRange(sheet, headerRow, nextHeaderRow, dateCol1Based) {
   if (!dateCol1Based) return null;
-  const scanEnd = nextHeaderRow ? nextHeaderRow - 1 : sheet.getLastRow();
+  // One column of the tab's cached grid (96), not a read of its own. Called
+  // once per zone per pass, which on the reconcile phase alone was a dozen
+  // round trips asking the same question of the same unchanged column.
+  const entry = readSheetGrid(sheet, false);
+  if (!entry) return null;
+  const scanEnd = nextHeaderRow ? nextHeaderRow - 1 : entry.lastRow;
   if (scanEnd < headerRow + 1) return null;
-  const values = sheet.getRange(headerRow + 1, dateCol1Based, scanEnd - headerRow, 1).getValues();
   let firstRow = -1, lastRow = -1;
-  values.forEach((v, i) => {
-    if (coerceDate(v[0])) {
-      if (firstRow === -1) firstRow = headerRow + 1 + i;
-      lastRow = headerRow + 1 + i;
+  for (let row = headerRow + 1; row <= scanEnd; row++) {
+    const line = entry.values[row - 1];
+    if (line && coerceDate(line[dateCol1Based - 1])) {
+      if (firstRow === -1) firstRow = row;
+      lastRow = row;
     }
-  });
+  }
   if (firstRow === -1) return null;
   return { start: firstRow, count: lastRow - firstRow + 1 };
 }
@@ -138,7 +143,13 @@ const SECTIONED_HEADER_SCAN_ROWS = 5000;
  */
 function readSectionedGrid_(sheet, headers, markerHeaderName, endRow, preserveFormulas) {
   if (!sheet) return [];
-  let lastRow = Math.max(sheet.getLastRow(), 0);
+  // Through the per-execution grid cache (96), so a tab read by a reconcile
+  // pass and then by the render that follows it costs one fetch between them
+  // rather than one each. The cache is dropped by every writer — see
+  // invalidateSectionedRowsCache().
+  const entry = readSheetGrid(sheet, !!preserveFormulas);
+  if (!entry) return [];
+  let lastRow = entry.lastRow;
   if (endRow) lastRow = Math.min(endRow, lastRow);
   // A values read is only a read, so the row bound that keeps a runaway tab
   // from costing the door page a huge fetch is free to apply. The
@@ -148,15 +159,10 @@ function readSectionedGrid_(sheet, headers, markerHeaderName, endRow, preserveFo
   if (!preserveFormulas) lastRow = Math.min(lastRow, SECTIONED_HEADER_SCAN_ROWS);
   if (lastRow < 1) return [];
 
-  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
-  const range = sheet.getRange(1, 1, lastRow, lastCol);
-  const values = range.getValues();
+  const values = entry.values;
   // The formula string wherever a cell holds one, the value everywhere else —
   // getRowsPreservingFormulas(), done once for the whole grid.
-  const formulas = preserveFormulas ? range.getFormulas() : null;
-  const grid = formulas
-    ? values.map((row, r) => row.map((val, c) => formulas[r][c] || val))
-    : values;
+  const grid = sheetGridCells(entry, !!preserveFormulas);
 
   // Header rows are located in `values`, never in the merged grid: a marker
   // cell is text, and a stray formula beside it must not change what the row

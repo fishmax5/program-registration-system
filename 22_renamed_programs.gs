@@ -612,9 +612,14 @@ function renameProgramSettingRows(ss, renames) {
 function reconcileProgramFlagColumns(registrySheet, groups) {
   if (!groups || groups.length === 0) return 0;
 
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  // ONE READ OF THE TAB FOR THE WHOLE PASS — see loadSessionGrid() (96). This
+  // used to locate the header rows (a read of the whole grid) and then read
+  // three columns per zone PER FLAG, which on three flags and two zones is
+  // eighteen round trips to answer one question. The columns come out of the
+  // shared grid now, and the ticks go back in one write per zone below.
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return 0;
+  const sheetMap = model.map; // 1-based
   if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
 
   let changed = 0;
@@ -648,19 +653,15 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
       });
     });
 
-    headerRows.forEach((hRow, i) => {
-      const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-      const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
-      if (!zone) return;
-
-      const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
-      const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
-      const flagRange = registrySheet.getRange(zone.start, sheetMap[flag.column], zone.count, 1);
-      const current = flagRange.getValues();
+    model.zones.forEach(zone => {
+      const sources = sessionGridColumn(model, zone, 'Calendar_Source');
+      const titles = sessionGridColumn(model, zone, 'Clean_Title');
+      const current = sessionGridColumn(model, zone, flag.column);
+      if (!sources || !titles || !current) return;
 
       let touched = false;
       for (let r = 0; r < zone.count; r++) {
-        const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
+        const key = `${String(sources[r] || '').trim()}|${String(titles[r] || '').trim()}`;
         if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
         if (pendingKeys.has(key)) continue; // waiting to be written TO the calendar
         const want = expected[key];
@@ -668,24 +669,24 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
         // word "Club" from an older version counts as already ticked in
         // MEANING — but not in TYPE, hence the second test: it is rewritten as
         // a real boolean so the checkbox renders, once, and never again.
-        if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
+        if (isFlagColumnValue(current[r], flag.regex) === want && typeof current[r] === 'boolean') continue;
         // Only a real change of ANSWER is worth reporting; rewriting the word
         // "Club" as a boolean is the same answer in a different type, and
         // saying so once per program per sync would drown the lines that
         // matter.
-        if (isFlagColumnValue(current[r][0], flag.regex) !== want) {
-          note(want ? ticked : unticked, flag.column, String(titles[r][0] || '').trim());
+        if (isFlagColumnValue(current[r], flag.regex) !== want) {
+          note(want ? ticked : unticked, flag.column, String(titles[r] || '').trim());
         }
-        current[r] = [want];
+        current[r] = want;
         touched = true;
         changed++;
       }
-      if (touched) {
-        flagRange.setValues(current);
-        invalidateSectionedRowsCache(registrySheet);
-      }
+      if (touched) markSessionGridColumn(model, zone, flag.column);
     });
   });
+  // Outside a withSessionGrid() scope this is the write; inside one the sync
+  // owns it and this is a no-op. Either way the pass has said what it changed.
+  flushSessionGrid(model);
 
   Object.keys(ticked).forEach(column => log(
     `Ticked ${column} on the session table for: ${ticked[column].join(', ')} — the calendar says so.`));
@@ -735,9 +736,12 @@ function reconcileProgramFlagColumns(registrySheet, groups) {
 function reconcileSessionFlagColumns(registrySheet, groups) {
   if (!groups || groups.length === 0) return 0;
 
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  // The same one read the program reconcile above works from — inside the
+  // sync's withSessionGrid() scope this is literally the same model, so the
+  // two passes share a fetch as well as a tab.
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return 0;
+  const sheetMap = model.map; // 1-based
   if (!sheetMap['Calendar_Source'] || !sheetMap['Clean_Title'] || !sheetMap['Event_Date']) return 0;
 
   let changed = 0;
@@ -764,38 +768,31 @@ function reconcileSessionFlagColumns(registrySheet, groups) {
 
     const closed = [];
     const opened = [];
-    headerRows.forEach((hRow, i) => {
-      const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-      const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
-      if (!zone) return;
-
-      const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
-      const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
-      const dates = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1).getValues();
-      const flagRange = registrySheet.getRange(zone.start, sheetMap[flag.column], zone.count, 1);
-      const current = flagRange.getValues();
+    model.zones.forEach(zone => {
+      const sources = sessionGridColumn(model, zone, 'Calendar_Source');
+      const titles = sessionGridColumn(model, zone, 'Clean_Title');
+      const dates = sessionGridColumn(model, zone, 'Event_Date');
+      const current = sessionGridColumn(model, zone, flag.column);
+      if (!sources || !titles || !dates || !current) return;
 
       let touched = false;
       for (let r = 0; r < zone.count; r++) {
-        const date = coerceDate(dates[r][0]);
+        const date = coerceDate(dates[r]);
         if (!date) continue;
-        const title = String(titles[r][0] || '').trim();
-        const key = `${String(sources[r][0] || '').trim()}|${title}|${formatDateKey(date)}`;
+        const title = String(titles[r] || '').trim();
+        const key = `${String(sources[r] || '').trim()}|${title}|${formatDateKey(date)}`;
         if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
         if (pendingKeys.has(key)) continue; // waiting to be written TO the calendar
         const want = expected[key];
-        if (isFlagColumnValue(current[r][0], flag.regex) === want && typeof current[r][0] === 'boolean') continue;
-        if (isFlagColumnValue(current[r][0], flag.regex) !== want) {
+        if (isFlagColumnValue(current[r], flag.regex) === want && typeof current[r] === 'boolean') continue;
+        if (isFlagColumnValue(current[r], flag.regex) !== want) {
           (want ? closed : opened).push(`${title} ${formatDateLabel(date)}`);
         }
-        current[r] = [want];
+        current[r] = want;
         touched = true;
         changed++;
       }
-      if (touched) {
-        flagRange.setValues(current);
-        invalidateSectionedRowsCache(registrySheet);
-      }
+      if (touched) markSessionGridColumn(model, zone, flag.column);
     });
 
     if (closed.length > 0) {
@@ -808,6 +805,8 @@ function reconcileSessionFlagColumns(registrySheet, groups) {
         `To put it back, tick the box and let it reach the calendar.`);
     }
   });
+  // A no-op inside the sync's scope, which owns the write — see (96).
+  flushSessionGrid(model);
   return changed;
 }
 

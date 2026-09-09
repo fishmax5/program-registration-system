@@ -488,6 +488,12 @@ function getSectionedRowValues(sheet, headers, markerHeaderName) {
  * everything rather than silently leaving it cached.
  */
 function invalidateSectionedRowsCache(sheetOrName) {
+  // THE RAW GRID GOES WITH IT. readSheetGrid() (96) caches the one whole-tab
+  // read every reader here is projected from, so a stale grid is a stale
+  // roster by another route. Dropping both from the one function is what
+  // keeps the twenty-six call sites below from needing to know there are two
+  // caches — there is one list of writers, and it is already correct.
+  invalidateSheetGridCache(sheetOrName);
   const sheetName = !sheetOrName ? null
     : typeof sheetOrName === 'string' ? sheetOrName
     : typeof sheetOrName.getName === 'function' ? sheetOrName.getName()
