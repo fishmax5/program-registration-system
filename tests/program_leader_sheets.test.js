@@ -17,7 +17,18 @@ const src = require('./helpers/source').readSource();
 
 const sandbox = {
   console: { log: () => {} },
-  Utilities: { formatDate: d => d.toISOString(), sleep: () => {} },
+  // formatDateKey() builds a 'yyyy-MM-dd' KEY and compares keys with < and >.
+  // A stub that ignored the pattern and answered every call with a full ISO
+  // timestamp turned those comparisons into comparisons of the MILLISECOND the
+  // value was made in: a fixture row dated Date.now() sorts before the
+  // new Date() the code under test reads a moment later, so today's session
+  // read as already past and dropped out. Honour the one pattern that is a key;
+  // everything else here is read with indexOf, and the full stamp still suits it.
+  Utilities: {
+    formatDate: (d, tz, pattern) =>
+      (pattern === 'yyyy-MM-dd' ? d.toISOString().slice(0, 10) : d.toISOString()),
+    sleep: () => {}
+  },
   PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty: () => {}, setProperties: () => {}, deleteProperty: () => {} }) },
   SpreadsheetApp: { getActiveSpreadsheet: () => null, getActive: () => null },
   FormApp: { ItemType: {} }, CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},
