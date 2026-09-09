@@ -1957,10 +1957,77 @@ function handleConfigEdit(e, sheet) {
       invalidateConfigCaches(); // reverted — the cache must match the sheet
       return;
     }
+    // A TYPED DATE TURNS THE ROLLING HORIZON OFF, in both directions: while
+    // Months_Ahead is set this cell is only a display of it, so a date left
+    // here beside a live month count would be overwritten by the next sync and
+    // the person who typed it would watch their answer disappear. "I mean this
+    // date" is the one thing somebody typing a date can be sure of, so it wins
+    // — and clearing the display means the same thing about no horizon at all.
+    const monthsCell = e.range.getSheet().getRange(CONFIG_DATA_START_ROW,
+      CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1);
+    const rollingWas = parseRegistrationHorizonMonths(monthsCell.getValue());
+    if (rollingWas) monthsCell.clearContent();
+
     invalidateConfigCaches(); // the horizon just moved; anything read after this must see the new one
-    toastIfPossible(parsed
+    const rollingOffNote = rollingWas
+      ? ` The rolling ${describeRegistrationHorizonMonths(rollingWas)} setting was turned off.`
+      : '';
+    toastIfPossible((parsed
       ? `Registration open through ${formatDateLabel(parsed)}. Run Sync Cal, or "🔗 Rewrite Event Links", to apply it now.`
-      : 'Registration horizon cleared — every session is open again from the next sync.');
+      : 'Registration horizon cleared — every session is open again from the next sync.') + rollingOffNote);
+  }
+
+  // THE ROLLING HALF, and the ordinary way this setting is changed: picking
+  // the next number up the list is "open one more month". It says what date
+  // that works out to before it is believed, because the number is one step
+  // removed from the thing it decides — and the date it names is the whole
+  // public's view of the programme.
+  const isHorizonMonthsEdit = editedCol === CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1 &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isHorizonMonthsEdit) {
+    const rawMonths = String(e.value || '').trim();
+    const months = rawMonths ? parseRegistrationHorizonMonths(e.range.getValue()) : null;
+
+    if (rawMonths && !months) {
+      // Refused rather than confirmed, for the same reason a bad date is: left
+      // in place it reads as no rolling horizon at all (see
+      // readRegistrationHorizonMonths()), and the date cell beside it is a
+      // display nobody has been updating.
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      invalidateConfigCaches();
+      toastIfPossible(`"${rawMonths}" isn't a number of months — Months_Ahead was left as it was. ` +
+        `Pick one of ${REGISTRATION_HORIZON_MONTH_OPTIONS.join(' / ')}, or clear it to use the date instead.`);
+      return;
+    }
+
+    const resolved = months ? rollingRegistrationHorizonDate(months) : null;
+    const detail = resolved
+      ? `Registration will be open through ${formatDateLabel(resolved)} — the end of the month ` +
+        `${describeRegistrationHorizonMonths(months)} from today — and that date moves forward on its own ` +
+        'as the months pass, so it never goes stale.\n\n' +
+        'Sessions after it are not open yet: their calendar events say ' +
+        `"${REGISTRATION_NOT_OPEN_LINE}" instead of showing a register link, and any form whose remaining ` +
+        'sessions are all past that date stops accepting responses.\n\n' +
+        'Nothing is deleted. Existing events are updated on the next sync, or straight away with ' +
+        '"🔗 Rewrite Event Links" from the Admin menu.'
+      : 'Clearing this stops the horizon rolling. The date in Registration_Open_Through is used ' +
+        'instead — and if that is blank too, every session is open again.';
+    if (!confirmCellEditOrRevert(e, resolved
+      ? `Open registration through ${formatDateLabel(resolved)}?`
+      : 'Stop the horizon rolling?', detail)) {
+      invalidateConfigCaches(); // reverted — the cache must match the sheet
+      return;
+    }
+    invalidateConfigCaches(); // read the new setting, then write the display from it
+    try {
+      refreshRegistrationHorizonDisplay();
+    } catch (err) {
+      log(`⚠️ Could not update the Registration_Open_Through display (${err}) — the horizon itself is set.`);
+    }
+    toastIfPossible(resolved
+      ? `Registration open through ${formatDateLabel(resolved)} (${describeRegistrationHorizonMonths(months)} ahead). ` +
+        'Run Sync Cal, or "🔗 Rewrite Event Links", to apply it now.'
+      : 'The horizon no longer rolls — the typed date is used instead.');
   }
 
   // Pausing is always safe and is the whole point of the switch, so it does
