@@ -19,26 +19,29 @@
 //              "Change setup" button in the header re-opens it, and the day
 //              defaults to today on every boot — a tablet left on Tuesday's
 //              date must not still be on it on Wednesday.
-//   EVENTS     EVERYTHING on at that building that day, whether or not anybody
-//              has registered for it, ticked by the desk. This is the first
-//              screen after setup because it is the question the door actually
-//              asks: a tablet at the door of the exercise room is not about
-//              the concert in the hall, and a name list holding both is a name
-//              list nobody can scan. Everything on it is ticked to begin with,
-//              so a desk that wants the whole building simply carries on.
-//   NAMES      Two sections and a search box. First, everybody REGISTERED for
-//              the ticked events — deduped per person, A–Z under letter
-//              headings, because somebody in three programs and a lunch is one
-//              person at the door. Under them, HERE RECENTLY: the regulars of
-//              those same programs from the last two months who are not down
-//              for today (see foldPastRegistrants(), section 16h) — the
-//              Tuesday class has the same eight people in it every week and
-//              half of them have never filled in a form.
+//   EVENTS     "What are you here for today?" — EVERYTHING on at that building
+//              that day, whether or not anybody has registered for it, tapped
+//              by THE PERSON STANDING THERE. This is the first screen of every
+//              visit and nothing on it is pre-ticked: it is a question, not a
+//              filter a volunteer sets in the morning, and it is emptied again
+//              the moment a sign-in is away. Asking it first is what makes the
+//              rest short — the name list after it holds one class instead of
+//              the whole building, and the answer is already ticked on the
+//              confirm screen. A quiet "Show everyone here today" is the way
+//              past it for somebody who cannot work out which class is theirs.
+//   NAMES      Two sections and a search box, all about what they just tapped.
+//              First, everybody REGISTERED for it — deduped per person, A–Z
+//              under letter headings, because somebody in three programs and a
+//              lunch is one person at the door. Under them, HERE RECENTLY: the
+//              regulars of those same programs from the last two months who
+//              are not down for today (see foldPastRegistrants(), section 16h)
+//              — the Tuesday class has the same eight people in it every week
+//              and half of them have never filled in a form.
 //   PERSON     Tapping a name opens the confirm screen — every event they are
-//              down for today, lunch included, with the ticked events
-//              pre-selected, and the same wiring the walk-in page already had
-//              (walkInSignIn()). They confirm, or they change what is ticked
-//              and then confirm.
+//              down for today, lunch included, with what they said at the door
+//              already ticked, and the same wiring the walk-in page already
+//              had (walkInSignIn()). They confirm, or they change what is
+//              ticked and then confirm.
 //   WALK-IN    Under the search box, always on screen and never a second page:
 //              "New here, or not registered?". It opens the day's programs as
 //              cards, takes a name and a way to reach them, asks about a
