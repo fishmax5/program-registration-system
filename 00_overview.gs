@@ -414,6 +414,20 @@
  *      puts rows back if a sweep did fire wrongly — necessary because the
  *      import only reads responses newer than the last sync, so a triaged
  *      registrant exists nowhere else.
+ *    - AND SO IS THE HOURLY REGISTRATION SYNC, for the same reason.
+ *      syncRegistrations() opens every form, repairs the ones whose shape has
+ *      drifted, writes the Registrants tab, rebuilds four dashboards and the
+ *      memory tabs, pushes a shared roster per program and then emails the
+ *      leaders, invites the registrants and sends the reminders. On a centre
+ *      with a hundred forms that is more than Apps Script allows one
+ *      execution, and the kill is silent: everything downstream of it simply
+ *      did not happen, hourly, for ever. So it works to a budget (Config ->
+ *      "How Long a Sync May Run", a few minutes short of whatever ceiling the
+ *      account has) and hands the rest to a follow-up trigger a minute later.
+ *      The sync clock moves to the moment the WINDOW opened and only once
+ *      every form in it has been read, so a slice that stopped part-way
+ *      leaves those responses readable by the next one. See
+ *      98_registration_sync_slices.gs.
  *    - THE FIRST IMPORT IS A SLICED JOB, NOT A SYNC. syncCalendars() is cheap
  *      only because it normally has nothing to do. Importing a real calendar
  *      from scratch — a form per program, a description write per event —
@@ -588,6 +602,30 @@
  *        dashboard render, and the lunch rollup. renderProgramDashboard()
  *        reports registrantsMoved back so a caller knows when its copy went
  *        stale under a triage sweep.
+ *      - A TAB IS WRITTEN IN PLANES, not a column at a time. A render's cost
+ *        was never its rows — on the Registrants tab at a year of
+ *        registrations it was four round trips of rows against nearly five
+ *        hundred of formatting, applied per column per zone. withRenderBatch()
+ *        (97_render_batching.gs) stages a band's backgrounds, validations,
+ *        number formats and alignments and writes one call per plane, and the
+ *        warning protections are skipped when the geometry has not moved.
+ *        tools/render_bench.js is the measurement.
+ *      - A LOOP OVER ROWS THAT SETS THE SAME THING IS A RangeList. The program
+ *        registrant sheets (46) are banded per SESSION, so a weekly class
+ *        running a year was fifty-two bands and fifty-two runs of rows between
+ *        them, each costing a handful of per-column calls against somebody
+ *        else's spreadsheet. getRangeList() applies one setter to many ranges
+ *        in one call, which is the shape of every one of those loops.
+ *      - AND THE WHOLE WRITE IS SKIPPED WHEN NOTHING MOVED. The fingerprint
+ *        pattern the form date labels started (10) is now on the appointment
+ *        times (55) and on the leader sheets (46): hash what would be written,
+ *        compare, and do not open the file. Each tracks only what this script
+ *        writes, so a hand-edited one is not noticed until its content
+ *        legitimately changes — every one of them has a forced path on the
+ *        menu that says so.
+ *      - A FILL-DOWN IS ONE EDIT, NOT THREE HUNDRED READS. onEdit fires once
+ *        for the range somebody dragged; readEditedBlock() (18) reads that
+ *        block once instead of a getValue() per cell per handler.
  *    Bulk sheet WRITES were already batched (one setValues/setBackgrounds/
  *    setFormulas per block, never a per-cell loop) — keep it that way.
  *

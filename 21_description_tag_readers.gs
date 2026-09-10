@@ -600,24 +600,39 @@ function importCalendarGroups(registrySheet, options) {
   // existing program. [Club] and [No Registration] have to take effect the
   // sync after they are ticked, not the sync after the program's next new
   // date.
-  reconcileProgramFlagColumns(registrySheet, work.allGroups || []);
-  // The same gap, one date at a time, for the tick that belongs to a session
-  // rather than to a program — see reconcileSessionFlagColumns() and
-  // WAITLIST_ONLY_TAG. Kept as its own pass, and NOT folded into the call
-  // above, because the two are keyed differently on purpose: one answer per
-  // program there, one answer per date here.
-  reconcileSessionFlagColumns(registrySheet, work.allGroups || []);
-  // The same gap again, for the two columns nothing has ever rewritten: a
-  // session's START and END. An event lengthened on the calendar after its
-  // date was first written left the row saying what it used to say, and an
-  // appointment program's slots are cut out of exactly those two columns —
-  // so the form went on offering one appointment per date. BEFORE the pass
-  // below, which does the slot arithmetic from them.
-  reconcileSessionTimesFromCalendar(registrySheet, work.allGroups || []);
-  // The same gap, for the columns a tick of Personalized_Assistance implies
-  // rather than sets — see reconcileAssistanceSessionSettings().
-  reconcileAssistanceSessionSettings(registrySheet, work.allGroups || []);
-  applyNoRegistrationEffects(registrySheet, work.allGroups || []);
+  //
+  // ALL FIVE READ THE SAME TAB, so they read it ONCE — see withSessionGrid()
+  // (96). Each of these used to begin by scanning the whole session table for
+  // its header rows and then read three to nine single columns per section
+  // zone, which is five full reads and some sixty round trips to answer five
+  // questions about a tab that none of them had changed in a way the next one
+  // needed to see. They now share one grid and stage their answers into it,
+  // and the scope writes back once at the end.
+  //
+  // THE ORDER IS UNCHANGED, and so is what each pass sees: a pass reading a
+  // column an earlier one has just written finds the new value, because they
+  // hold the same arrays. Only the moment the SHEET is told has moved, to the
+  // close of the scope — which is before anything below reads the tab again.
+  withSessionGrid(registrySheet, () => {
+    reconcileProgramFlagColumns(registrySheet, work.allGroups || []);
+    // The same gap, one date at a time, for the tick that belongs to a session
+    // rather than to a program — see reconcileSessionFlagColumns() and
+    // WAITLIST_ONLY_TAG. Kept as its own pass, and NOT folded into the call
+    // above, because the two are keyed differently on purpose: one answer per
+    // program there, one answer per date here.
+    reconcileSessionFlagColumns(registrySheet, work.allGroups || []);
+    // The same gap again, for the two columns nothing has ever rewritten: a
+    // session's START and END. An event lengthened on the calendar after its
+    // date was first written left the row saying what it used to say, and an
+    // appointment program's slots are cut out of exactly those two columns —
+    // so the form went on offering one appointment per date. BEFORE the pass
+    // below, which does the slot arithmetic from them.
+    reconcileSessionTimesFromCalendar(registrySheet, work.allGroups || []);
+    // The same gap, for the columns a tick of Personalized_Assistance implies
+    // rather than sets — see reconcileAssistanceSessionSettings().
+    reconcileAssistanceSessionSettings(registrySheet, work.allGroups || []);
+    applyNoRegistrationEffects(registrySheet, work.allGroups || []);
+  });
 
   const summary = {
     groupsTotal: work.length, groupsProcessed: 0, groupsFailed: 0,

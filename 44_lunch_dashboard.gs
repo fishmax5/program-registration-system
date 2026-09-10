@@ -1040,89 +1040,100 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   applyZebraStripingManualBounded(sheet, plan.todayDataStart, todayRows.length, TODAY_LUNCH_HEADERS.length);
   sheet.getRange(plan.spacerRow, 1, 1, numCols).clearContent().setBackground(PALETTE.PAPER);
 
-  const result = writeUpcomingPastSections(sheet, plan.scheduleStartRow, headers, upcoming, past, {
-    upcomingLabel: '📊 Upcoming Lunch Schedule', pastLabel: '📊 Past Lunch Schedule'
+  // ONE SCOPE OVER THE SCHEDULE TABLE — the write, the fourteen number
+  // formats, the hand-entry wash on six columns and the three dropdowns, all
+  // of which were a call per column per zone. They stage into the two zones'
+  // shared planes and go out once each. See 97_render_batching.gs.
+  //
+  // The Today block above is deliberately OUTSIDE it: it is four columns wide
+  // where the scope is the table's full width, so nothing it writes is inside
+  // a declared band and every one of its calls goes straight through.
+  const result = withRenderBatch(sheet, numCols, () => {
+    const result = writeUpcomingPastSections(sheet, plan.scheduleStartRow, headers, upcoming, past, {
+      upcomingLabel: '📊 Upcoming Lunch Schedule', pastLabel: '📊 Past Lunch Schedule'
+    });
+    if (result.upcomingDataStart !== upcomingDataStart || result.pastDataStart !== pastDataStart) {
+      log(`⚠️ Master_Lunch_Dashboard row math mismatch — Total_to_Order cross-references may be off. ` +
+        `Expected upcoming@${upcomingDataStart}/past@${pastDataStart}, got upcoming@${result.upcomingDataStart}/past@${result.pastDataStart}.`);
+    }
+
+    labelManualEntryColumns(sheet, result.upcomingHeaderRow, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
+    labelManualEntryColumns(sheet, result.pastHeaderRow, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
+
+    const zones = [
+      { start: result.upcomingDataStart, count: result.upcomingCount },
+      { start: result.pastDataStart, count: result.pastCount }
+    ];
+    const numericCols = ['Registered_Count', 'Served_Confirmed', 'Actual_Ordered', 'Standard_Buffer',
+      'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
+      'Carried_Over', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
+
+    zones.forEach(z => {
+      if (z.count < 1) return;
+      sheet.getRange(z.start, map['Event_Date'] + 1, z.count, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
+      numericCols.forEach(h => sheet.getRange(z.start, map[h] + 1, z.count, 1).setNumberFormat('0'));
+      tintManualEntryColumns(sheet, z.start, z.count, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
+    });
+
+    freezeRowsSafely(sheet, result.upcomingHeaderRow);
+    const locationCol = map['Location'] + 1;
+
+    zones.forEach(z => {
+      if (z.count < 1) return;
+      applyManualOverrideValidationBounded(sheet, map['Manual_Override'] + 1, z.start, z.count);
+      applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, LUNCH_TYPE_OPTIONS, z.start, z.count);
+      applyLocationValidationBounded(sheet, locationCol, z.start, z.count);
+    });
+
+    const todayLocationCol = todayMap['Location'] + 1;
+    applyLocationValidationBounded(sheet, todayLocationCol, plan.todayDataStart, plan.numLocations);
+
+    const rules = [];
+    const manualEntryColIndexes = LUNCH_DASHBOARD_MANUAL_COLUMNS.map(h => map[h] + 1);
+    zones.forEach(z => {
+      if (z.count < 1) return;
+      rules.push(...buildManualOverrideRowTintRules(sheet, z.start, z.count, numCols, map['Manual_Override'] + 1,
+        [locationCol, map['Event_Date'] + 1, ...manualEntryColIndexes]));
+    });
+
+    const activeZones = zones.filter(z => z.count > 0);
+    const typeRanges = activeZones.map(z => sheet.getRange(z.start, map['Lunch_Type'] + 1, z.count, 1));
+    const notServingRule = buildTextEqualsRuleForRanges(typeRanges, 'Not Serving', NOT_SERVING_COLOR);
+    if (notServingRule) rules.push(notServingRule);
+
+    // Location color-coding on the LOCATION CELL ONLY, the same as every other
+    // tab. It used to wash the whole row, on the theory that a block of color
+    // makes "everything for Ashbridge that week" scannable — but this tab
+    // already carries the month tint on Event_Date, the grey "Not Serving"
+    // type, the purple manual-override tint and a yellow band of hand-entry
+    // columns, and a full-row wash underneath all of that turned the numbers
+    // people read into figures on a colored background rather than making
+    // anything easier to find. One cell says the same thing and gets out of
+    // the way.
+    const locationRanges = activeZones.map(z => sheet.getRange(z.start, locationCol, z.count, 1));
+    locationRanges.push(sheet.getRange(plan.todayDataStart, todayLocationCol, plan.numLocations, 1));
+    rules.push(...buildLocationColorRules(locationRanges));
+
+    sheet.setConditionalFormatRules(rules);
+
+    // Everything to the left of the hand-entry columns is derived from the forms
+    // and the menu — warn if someone types over it. Manual_Override is left
+    // editable on purpose: switching a row to "Manually Added" is precisely how
+    // staff tell the sync to stop managing it.
+    protectDerivedColumns(sheet, headers,
+      ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed',
+        'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge', 'Carried_Over',
+        // Config owns these now — typing over one is overwritten on the next
+        // render, and the warning says where to change it instead.
+        'Standard_Buffer', 'Tester_Buffer',
+        'Sign_In_Sheet_Link'],
+      zones);
+
+    // Nothing on this tab is an internal key, so nothing is hidden — but the
+    // call still runs, so a column taken OFF a future hidden list reappears.
+    applyColumnVisibility(sheet, headers, LUNCH_DASHBOARD_HIDDEN_COLUMNS);
+    return result;
   });
-  if (result.upcomingDataStart !== upcomingDataStart || result.pastDataStart !== pastDataStart) {
-    log(`⚠️ Master_Lunch_Dashboard row math mismatch — Total_to_Order cross-references may be off. ` +
-      `Expected upcoming@${upcomingDataStart}/past@${pastDataStart}, got upcoming@${result.upcomingDataStart}/past@${result.pastDataStart}.`);
-  }
-
-  labelManualEntryColumns(sheet, result.upcomingHeaderRow, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
-  labelManualEntryColumns(sheet, result.pastHeaderRow, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
-
-  const zones = [
-    { start: result.upcomingDataStart, count: result.upcomingCount },
-    { start: result.pastDataStart, count: result.pastCount }
-  ];
-  const numericCols = ['Registered_Count', 'Served_Confirmed', 'Actual_Ordered', 'Standard_Buffer',
-    'Tester_Buffer', 'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
-    'Carried_Over', 'Total_Consumed', 'Thrown_Away', 'Discrepancy'];
-
-  zones.forEach(z => {
-    if (z.count < 1) return;
-    sheet.getRange(z.start, map['Event_Date'] + 1, z.count, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
-    numericCols.forEach(h => sheet.getRange(z.start, map[h] + 1, z.count, 1).setNumberFormat('0'));
-    tintManualEntryColumns(sheet, z.start, z.count, headers, LUNCH_DASHBOARD_MANUAL_COLUMNS);
-  });
-
-  freezeRowsSafely(sheet, result.upcomingHeaderRow);
-  const locationCol = map['Location'] + 1;
-
-  zones.forEach(z => {
-    if (z.count < 1) return;
-    applyManualOverrideValidationBounded(sheet, map['Manual_Override'] + 1, z.start, z.count);
-    applyValueListValidationBounded(sheet, map['Lunch_Type'] + 1, LUNCH_TYPE_OPTIONS, z.start, z.count);
-    applyLocationValidationBounded(sheet, locationCol, z.start, z.count);
-  });
-
-  const todayLocationCol = todayMap['Location'] + 1;
-  applyLocationValidationBounded(sheet, todayLocationCol, plan.todayDataStart, plan.numLocations);
-
-  const rules = [];
-  const manualEntryColIndexes = LUNCH_DASHBOARD_MANUAL_COLUMNS.map(h => map[h] + 1);
-  zones.forEach(z => {
-    if (z.count < 1) return;
-    rules.push(...buildManualOverrideRowTintRules(sheet, z.start, z.count, numCols, map['Manual_Override'] + 1,
-      [locationCol, map['Event_Date'] + 1, ...manualEntryColIndexes]));
-  });
-
-  const activeZones = zones.filter(z => z.count > 0);
-  const typeRanges = activeZones.map(z => sheet.getRange(z.start, map['Lunch_Type'] + 1, z.count, 1));
-  const notServingRule = buildTextEqualsRuleForRanges(typeRanges, 'Not Serving', NOT_SERVING_COLOR);
-  if (notServingRule) rules.push(notServingRule);
-
-  // Location color-coding on the LOCATION CELL ONLY, the same as every other
-  // tab. It used to wash the whole row, on the theory that a block of color
-  // makes "everything for Ashbridge that week" scannable — but this tab
-  // already carries the month tint on Event_Date, the grey "Not Serving"
-  // type, the purple manual-override tint and a yellow band of hand-entry
-  // columns, and a full-row wash underneath all of that turned the numbers
-  // people read into figures on a colored background rather than making
-  // anything easier to find. One cell says the same thing and gets out of
-  // the way.
-  const locationRanges = activeZones.map(z => sheet.getRange(z.start, locationCol, z.count, 1));
-  locationRanges.push(sheet.getRange(plan.todayDataStart, todayLocationCol, plan.numLocations, 1));
-  rules.push(...buildLocationColorRules(locationRanges));
-
-  sheet.setConditionalFormatRules(rules);
-
-  // Everything to the left of the hand-entry columns is derived from the forms
-  // and the menu — warn if someone types over it. Manual_Override is left
-  // editable on purpose: switching a row to "Manually Added" is precisely how
-  // staff tell the sync to stop managing it.
-  protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand', 'Registered_Count', 'Served_Confirmed',
-      'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge', 'Carried_Over',
-      // Config owns these now — typing over one is overwritten on the next
-      // render, and the warning says where to change it instead.
-      'Standard_Buffer', 'Tester_Buffer',
-      'Sign_In_Sheet_Link'],
-    zones);
-
-  // Nothing on this tab is an internal key, so nothing is hidden — but the
-  // call still runs, so a column taken OFF a future hidden list reappears.
-  applyColumnVisibility(sheet, headers, LUNCH_DASHBOARD_HIDDEN_COLUMNS);
   freezeColumnsSafely(sheet, 2); // date + location stay visible across the wide reconciliation columns
 
   autosizeColumns(sheet, { minCols: numCols });

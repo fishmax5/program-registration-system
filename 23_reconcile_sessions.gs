@@ -132,9 +132,11 @@ function reconcileSessionTimesFromCalendar(registrySheet, groups) {
 function applySessionTimesToRows(registrySheet, expected) {
   if (!expected || Object.keys(expected).length === 0) return 0;
 
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  // One read of the tab for the pass, shared with every other pass in the same
+  // withSessionGrid() scope — see (96).
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return 0;
+  const sheetMap = model.map; // 1-based
   const needed = ['Calendar_Source', 'Clean_Title', 'Event_Date', 'Event_End'];
   if (needed.some(header => !sheetMap[header])) return 0; // a workbook still on the old layout
 
@@ -142,24 +144,19 @@ function applySessionTimesToRows(registrySheet, expected) {
   const retimed = {};
   let changed = 0;
 
-  headerRows.forEach((hRow, i) => {
-    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
-    if (!zone) return;
-
-    const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
-    const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
-    const startRange = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1);
-    const endRange = registrySheet.getRange(zone.start, sheetMap['Event_End'], zone.count, 1);
-    const starts = startRange.getValues();
-    const ends = endRange.getValues();
+  model.zones.forEach(zone => {
+    const sources = sessionGridColumn(model, zone, 'Calendar_Source');
+    const titles = sessionGridColumn(model, zone, 'Clean_Title');
+    const starts = sessionGridColumn(model, zone, 'Event_Date');
+    const ends = sessionGridColumn(model, zone, 'Event_End');
+    if (!sources || !titles || !starts || !ends) return;
 
     let touched = false;
     for (let r = 0; r < zone.count; r++) {
-      const have = coerceDate(starts[r][0]);
+      const have = coerceDate(starts[r]);
       if (!have) continue;
-      const title = String(titles[r][0] || '').trim();
-      const key = sessionTimeKey(sources[r][0], title, formatDateKey(have));
+      const title = String(titles[r] || '').trim();
+      const key = sessionTimeKey(sources[r], title, formatDateKey(have));
       const want = expected[key];
       if (!want) continue;
       if (written[key]) continue; // a duplicate row of the same session — see above
@@ -168,15 +165,15 @@ function applySessionTimesToRows(registrySheet, expected) {
       // clockTimeOnDayOf(): an end retyped by hand reads back dated to 1899,
       // and comparing that against a real moment would report a difference on
       // every single sync forever.
-      const haveEnd = clockTimeOnDayOf(coerceDate(ends[r][0]), have);
+      const haveEnd = clockTimeOnDayOf(coerceDate(ends[r]), have);
       const sameStart = have.getTime() === want.start.getTime();
       const sameEnd = want.end
         ? !!(haveEnd && haveEnd.getTime() === want.end.getTime())
         : !haveEnd;
       if (sameStart && sameEnd) continue;
 
-      starts[r] = [want.start];
-      ends[r] = [want.end || ''];
+      starts[r] = want.start;
+      ends[r] = want.end || '';
       touched = true;
       changed++;
       if (title) {
@@ -186,11 +183,11 @@ function applySessionTimesToRows(registrySheet, expected) {
     }
 
     if (touched) {
-      startRange.setValues(starts);
-      endRange.setValues(ends);
-      invalidateSectionedRowsCache(registrySheet);
+      markSessionGridColumn(model, zone, 'Event_Date');
+      markSessionGridColumn(model, zone, 'Event_End');
     }
   });
+  flushSessionGrid(model); // a no-op inside the sync's scope, which owns the write
 
   if (changed > 0) {
     // The Event_Time formulas read these two columns, and Quick Mark reads the
@@ -302,51 +299,49 @@ function applyAssistanceSettingsToRows(registrySheet, expected, options) {
   options = options || {};
   if (!expected || Object.keys(expected).length === 0) return 0;
 
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  // The heaviest of the reconcile passes to read: nine columns, per zone. All
+  // nine come out of the shared grid (96) now, and the four it writes go back
+  // as one block per zone — Slot_Minutes, Max_Capacity, Remaining_Seats and
+  // Status are not neighbours by accident, and flushSessionGrid() merges a run
+  // of adjacent columns into one call.
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return 0;
+  const sheetMap = model.map; // 1-based
   const needed = ['Calendar_Source', 'Clean_Title', 'Event_Date', 'Event_End', 'Slot_Minutes',
     'Max_Capacity', 'Active_Count', 'Remaining_Seats', 'Status'];
   if (needed.some(header => !sheetMap[header])) return 0; // a workbook still on the old layout
-  const flagCol = options.writeFlagColumn ? sheetMap['Personalized_Assistance'] : null;
+  const flagColumn = options.writeFlagColumn ? 'Personalized_Assistance' : null;
 
   let changed = 0;
-  headerRows.forEach((hRow, i) => {
-    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
-    if (!zone) return;
-
-    const read = header => registrySheet.getRange(zone.start, sheetMap[header], zone.count, 1).getValues();
+  model.zones.forEach(zone => {
+    const read = header => sessionGridColumn(model, zone, header);
     const sources = read('Calendar_Source');
     const titles = read('Clean_Title');
     const starts = read('Event_Date');
     const ends = read('Event_End');
     const actives = read('Active_Count');
-    const slotRange = registrySheet.getRange(zone.start, sheetMap['Slot_Minutes'], zone.count, 1);
-    const capRange = registrySheet.getRange(zone.start, sheetMap['Max_Capacity'], zone.count, 1);
-    const remainingRange = registrySheet.getRange(zone.start, sheetMap['Remaining_Seats'], zone.count, 1);
-    const statusRange = registrySheet.getRange(zone.start, sheetMap['Status'], zone.count, 1);
-    const flagRange = flagCol ? registrySheet.getRange(zone.start, flagCol, zone.count, 1) : null;
-    const slots = slotRange.getValues();
-    const caps = capRange.getValues();
-    const remaining = remainingRange.getValues();
-    const statuses = statusRange.getValues();
-    const flags = flagRange ? flagRange.getValues() : null;
+    const slots = read('Slot_Minutes');
+    const caps = read('Max_Capacity');
+    const remaining = read('Remaining_Seats');
+    const statuses = read('Status');
+    const flags = flagColumn ? read(flagColumn) : null;
+    if (!sources || !titles || !starts || !ends || !actives || !slots || !caps ||
+      !remaining || !statuses) return;
 
     let touched = false;
     let flagTouched = false;
     for (let r = 0; r < zone.count; r++) {
-      const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
+      const key = `${String(sources[r] || '').trim()}|${String(titles[r] || '').trim()}`;
       if (!Object.prototype.hasOwnProperty.call(expected, key)) continue;
       const spec = expected[key];
       if (spec.dateKeys) {
-        const rowDate = coerceDate(starts[r][0]);
+        const rowDate = coerceDate(starts[r]);
         if (!rowDate || !spec.dateKeys[formatDateKey(rowDate)]) continue;
       }
 
-      if (flags && !(isFlagColumnValue(flags[r][0], ASSISTANCE_WORDS_REGEX) === spec.isAssistance &&
-        typeof flags[r][0] === 'boolean')) {
-        flags[r] = [spec.isAssistance];
+      if (flags && !(isFlagColumnValue(flags[r], ASSISTANCE_WORDS_REGEX) === spec.isAssistance &&
+        typeof flags[r] === 'boolean')) {
+        flags[r] = spec.isAssistance;
         flagTouched = true;
       }
 
@@ -354,34 +349,34 @@ function applyAssistanceSettingsToRows(registrySheet, expected, options) {
       let wantCap = spec.statedCapacity > 0 ? spec.statedCapacity : '';
       if (spec.isAssistance) {
         wantSlots = spec.slotMinutes;
-        const slotCount = buildAppointmentSlots(starts[r][0], ends[r][0], spec.slotMinutes).length;
-        const capacity = resolveAppointmentCapacity(spec.statedCapacity, slotCount, titles[r][0]);
+        const slotCount = buildAppointmentSlots(starts[r], ends[r], spec.slotMinutes).length;
+        const capacity = resolveAppointmentCapacity(spec.statedCapacity, slotCount, titles[r]);
         wantCap = capacity > 0 ? capacity : '';
       }
       // Number(), not ===: a blank cell reads as '' and a written number as a
       // number, and neither is worth a write when it already says the same.
-      if (Number(slots[r][0] || 0) === Number(wantSlots || 0) &&
-        Number(caps[r][0] || 0) === Number(wantCap || 0)) continue;
+      if (Number(slots[r] || 0) === Number(wantSlots || 0) &&
+        Number(caps[r] || 0) === Number(wantCap || 0)) continue;
 
-      slots[r] = [wantSlots];
-      caps[r] = [wantCap];
-      const active = Number(actives[r][0]) || 0;
+      slots[r] = wantSlots;
+      caps[r] = wantCap;
+      const active = Number(actives[r]) || 0;
       const cap = Number(wantCap) || 0;
-      remaining[r] = [cap > 0 ? Math.max(cap - active, 0) : ''];
-      statuses[r] = [cap > 0 ? computeStatus(active, cap) : '🟢 Unlimited'];
+      remaining[r] = cap > 0 ? Math.max(cap - active, 0) : '';
+      statuses[r] = cap > 0 ? computeStatus(active, cap) : '🟢 Unlimited';
       touched = true;
       changed++;
     }
     if (touched) {
-      slotRange.setValues(slots);
-      capRange.setValues(caps);
-      remainingRange.setValues(remaining);
-      statusRange.setValues(statuses);
+      markSessionGridColumn(model, zone, 'Slot_Minutes');
+      markSessionGridColumn(model, zone, 'Max_Capacity');
+      markSessionGridColumn(model, zone, 'Remaining_Seats');
+      markSessionGridColumn(model, zone, 'Status');
     }
-    if (flagTouched && flagRange) flagRange.setValues(flags);
-    if (touched || flagTouched) invalidateSectionedRowsCache(registrySheet);
+    if (flagTouched && flagColumn) markSessionGridColumn(model, zone, flagColumn);
   });
 
+  flushSessionGrid(model); // a no-op inside the sync's scope, which owns the write
   return changed;
 }
 
@@ -837,9 +832,9 @@ function reconcileRegistrationHorizonForms(registrySheet) {
  * fallback, and it is written into the row on the way past.
  */
 function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
-  const headerRows = findProgramSessionHeaderRows(registrySheet);
-  if (headerRows.length === 0) return 0;
-  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
+  const model = loadSessionGrid(registrySheet);
+  if (!model) return 0;
+  const sheetMap = model.map; // 1-based
   if (!sheetMap['Form_Response_Link'] || !sheetMap['Calendar_Source'] || !sheetMap['Clean_Title']) return 0;
 
   // Same rule as reconcileProgramFlagColumns(): a program whose No_Registration
@@ -872,75 +867,77 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
   };
 
   let changed = 0;
-  headerRows.forEach((hRow, i) => {
-    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
-    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
-    if (!zone) return;
-
-    const sources = registrySheet.getRange(zone.start, sheetMap['Calendar_Source'], zone.count, 1).getValues();
-    const titles = registrySheet.getRange(zone.start, sheetMap['Clean_Title'], zone.count, 1).getValues();
-    const formIds = sheetMap['Form_ID']
-      ? registrySheet.getRange(zone.start, sheetMap['Form_ID'], zone.count, 1).getValues()
-      : null;
+  model.zones.forEach(zone => {
+    const sources = sessionGridColumn(model, zone, 'Calendar_Source');
+    const titles = sessionGridColumn(model, zone, 'Clean_Title');
+    const formIds = sessionGridColumn(model, zone, 'Form_ID');
     // THE ROW'S OWN SPAN, for the form fallback below. A form belongs to one
     // month of a Regular program, so restoring a link from a program-level
     // lookup would hand every month of it whichever month's form was written
     // last — see buildFormIdByProgram(). Read here rather than derived from
     // the group, because the row is the only thing that knows which month it
     // is in.
-    const dates = registrySheet.getRange(zone.start, sheetMap['Event_Date'], zone.count, 1).getValues();
-    const typeTags = sheetMap['Type_Tag']
-      ? registrySheet.getRange(zone.start, sheetMap['Type_Tag'], zone.count, 1).getValues()
-      : null;
+    const dates = sessionGridColumn(model, zone, 'Event_Date');
+    const typeTags = sessionGridColumn(model, zone, 'Type_Tag');
     // The other half of the span: an appointment program's rows all belong to
     // ONE form whatever month they are in, so a month-keyed fallback would hand
     // them the wrong one — or, more often, none at all. See formSpanForRow().
-    const assists = sheetMap['Personalized_Assistance']
-      ? registrySheet.getRange(zone.start, sheetMap['Personalized_Assistance'], zone.count, 1).getValues()
-      : null;
-    // Read as VALUES but written CELL BY CELL. These columns hold =HYPERLINK()
-    // formulas, which getValues() flattens to their display text — writing a
-    // whole column back from that array would turn every link on it into the
-    // words "View Live Form".
-    const view = registrySheet.getRange(zone.start, sheetMap['Form_Response_Link'], zone.count, 1).getValues();
+    const assists = sessionGridColumn(model, zone, 'Personalized_Assistance');
+    // THE FORMULAS, NOT THE DISPLAY TEXT — and that is what lets these columns
+    // be written a column at a time now rather than a cell at a time. They
+    // hold =HYPERLINK(), which getValues() flattens to the words "View Live
+    // Form"; writing a whole column back from THAT array turned every live
+    // link on it into dead text, so every cell went back on its own. The
+    // shared grid (96) reads values and formulas together, so an untouched row
+    // goes back as the formula it already was and the column is one write.
+    const view = sessionGridColumn(model, zone, 'Form_Response_Link');
+    const edit = sessionGridColumn(model, zone, 'Edit_Form_Link');
+    if (!sources || !titles || !dates || !view) return;
+
+    let touchedView = false;
+    let touchedEdit = false;
+    let touchedFormId = false;
 
     for (let r = 0; r < zone.count; r++) {
-      const key = `${String(sources[r][0] || '').trim()}|${String(titles[r][0] || '').trim()}`;
+      const key = `${String(sources[r] || '').trim()}|${String(titles[r] || '').trim()}`;
       if (!Object.prototype.hasOwnProperty.call(wantsNoRegistration, key)) continue;
-      const isBlocked = String(view[r][0] || '').trim() === NO_REGISTRATION_LINK_LABEL;
-      const setCell = (colName, value) => {
-        if (!sheetMap[colName]) return;
-        registrySheet.getRange(zone.start + r, sheetMap[colName], 1, 1).setValue(value);
-        invalidateSectionedRowsCache(registrySheet);
-      };
+      const isBlocked = String(view[r] || '').trim() === NO_REGISTRATION_LINK_LABEL;
 
       if (wantsNoRegistration[key]) {
         if (isBlocked) continue;
-        setCell('Form_Response_Link', NO_REGISTRATION_LINK_LABEL);
-        setCell('Edit_Form_Link', '');
+        view[r] = NO_REGISTRATION_LINK_LABEL;
+        touchedView = true;
+        if (edit) { edit[r] = ''; touchedEdit = true; }
         changed++;
         continue;
       }
 
       if (!isBlocked) continue; // already showing its own links
-      const rowFormId = formIds ? String(formIds[r][0] || '').trim() : '';
+      const rowFormId = formIds ? String(formIds[r] || '').trim() : '';
       // The row's own form first — it is the only per-ROW fact here, so a row
       // that kept its Form_ID through the tag needs no lookup at all. The
       // fallback is for rows WRITTEN while the tag was on, which carry none;
       // it is keyed by span so a row a month out gets its own month's form.
-      const spanKey = programFormKey(String(sources[r][0] || '').trim(),
-        String(titles[r][0] || '').trim(),
-        formSpanForRow(typeTags ? typeTags[r][0] : '', dates[r][0],
-          assists ? isAssistanceColumnValue(assists[r][0]) : false));
+      const spanKey = programFormKey(String(sources[r] || '').trim(),
+        String(titles[r] || '').trim(),
+        formSpanForRow(typeTags ? typeTags[r] : '', dates[r],
+          assists ? isAssistanceColumnValue(assists[r]) : false));
       const formId = rowFormId || (formIdByProgram ? (formIdByProgram[spanKey] || '') : '');
       const links = linksFor(formId);
       if (!links) continue; // no form to point at yet — the next sync builds one
-      setCell('Form_Response_Link', makeHyperlinkFormula(links.publishedUrl, 'View Live Form'));
-      setCell('Edit_Form_Link', makeHyperlinkFormula(links.editUrl, 'Edit Form Settings'));
-      if (!rowFormId) setCell('Form_ID', formId);
+      view[r] = makeHyperlinkFormula(links.publishedUrl, 'View Live Form');
+      touchedView = true;
+      if (edit) { edit[r] = makeHyperlinkFormula(links.editUrl, 'Edit Form Settings'); touchedEdit = true; }
+      if (!rowFormId && formIds) { formIds[r] = formId; touchedFormId = true; }
       changed++;
     }
+
+    if (touchedView) markSessionGridColumn(model, zone, 'Form_Response_Link');
+    if (touchedEdit) markSessionGridColumn(model, zone, 'Edit_Form_Link');
+    if (touchedFormId) markSessionGridColumn(model, zone, 'Form_ID');
   });
+
+  flushSessionGrid(model); // a no-op inside the sync's scope, which owns the write
 
   if (changed > 0) log(`updateRegistrationLinkCells: rewrote the link columns on ${changed} session row(s).`);
   return changed;

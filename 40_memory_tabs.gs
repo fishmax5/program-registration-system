@@ -789,9 +789,15 @@ function memoryTabDividerRow(headers, label) {
  * `offsets` are 0-based positions within the data block.
  */
 function styleMemoryTabDividers(sheet, headers, offsets) {
-  (offsets || []).forEach(offset => {
+  if (!offsets || offsets.length === 0) return;
+  // ONCE, not once per divider. Program_Settings is grouped by kind now, so
+  // this list is seven headings rather than Member_Roll's one, and asking the
+  // sheet how tall it is seven times to answer the same question is seven
+  // round trips for one fact that cannot change while this loop runs.
+  const maxRows = sheet.getMaxRows();
+  offsets.forEach(offset => {
     const row = MEMORY_TAB_DATA_ROW + offset;
-    if (row > sheet.getMaxRows()) return;
+    if (row > maxRows) return;
     try {
       const range = sheet.getRange(row, 1, 1, headers.length);
       range.clearDataValidations();

@@ -180,8 +180,12 @@ const narrowHeaders = ['Event_ID', 'Event_Date'];
 sheet = fakeSheet('Tab_I', grid);
 const wide = sandbox.getSectionedRowValues(sheet, HEADERS, 'Event_ID');
 const narrow = sandbox.getSectionedRowValues(sheet, narrowHeaders, 'Event_ID');
-check('a different headers array reads again rather than reusing the other shape',
-  sheet.calls.getValues, 2);
+// ...and the two projections now come out of ONE fetch of the tab. The
+// projection is done in memory from the raw grid (96), so a second header
+// shape costs the slicing and nothing on the wire; what must never be shared
+// is the ANSWER, which the two checks below are the real test of.
+check('a second headers array is projected from the same one read',
+  sheet.calls.getValues, 1);
 check('and projects the narrower column list', narrow[0], ['e1', D1]);
 check('while the wider one still has all three columns', wide[0], ['e1', D1, 'Jane Smith']);
 
