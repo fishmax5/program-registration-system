@@ -470,6 +470,19 @@ function syncCalendarsInternal() {
         renderProgramDashboard();
       }
 
+      // BEFORE the import, which is what stamps "not yet open" onto events and
+      // closes forms past the horizon: while Months_Ahead is set the date on
+      // Config is a display of it, and a display a month out of date is the
+      // one thing somebody would check before believing this run. Guarded —
+      // nothing reads that cell while the rolling half is set, so a Config
+      // write this account is not allowed to make must not fail a sync.
+      try {
+        refreshRegistrationHorizonDisplay();
+      } catch (err) {
+        log(`⚠️ Could not refresh the Registration Open Through display on Config (${err}) — ` +
+          'the rolling horizon itself is unaffected.');
+      }
+
       const summary = importCalendarGroups(registrySheet);
       renderProgramDashboard();
 

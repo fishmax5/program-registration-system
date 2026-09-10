@@ -166,6 +166,36 @@ check('an event that does not repeat is not asked about',
   check('which is the only time that call is made', seriesLookups, 1);
 }
 
+{
+  // AN IMPORTED SERIES. An .ics import keeps the originating system's UID, so
+  // Events.get() on it is a 404 where the whole of the rest of this file
+  // assumes the UID and the API's event id are the same string. The 404 is
+  // answered by listing the calendar by iCalUID, which hands back the master.
+  sandbox.setStubs(12);
+  let listed = null;
+  sandbox.Calendar.Events.get = () => { const e = new Error('Not Found'); throw e; };
+  sandbox.Calendar.Events.list = (calId, opts) => {
+    listed = opts;
+    return { items: [{ start: { dateTime: '2026-09-01T10:00:00-04:00' },
+      recurrence: ['RRULE:FREQ=WEEKLY;COUNT=8'] }] };
+  };
+  const uid = 'Icalb3401b2a7dca972b08ee5bc0ada56c3b';
+  const ev = {
+    getTitle: () => 'Memoir Writing',
+    isAllDayEvent: () => false,
+    isRecurringEvent: () => true,
+    getId: () => uid,
+    getEventSeries: () => ({ getId: () => uid }),
+    getOriginalCalendarId: () => 'cal-a',
+    getDescription: () => '',
+    setDescription: () => {}
+  };
+  check('an imported series is read by its iCalUID rather than given up on',
+    sandbox.isDetectedGroupedSeries(ev), true);
+  check('and it is asked for the master, not the occurrences',
+    listed && listed.iCalUID === uid && listed.singleEvents === false, true);
+}
+
 // --- precedence: a typed tag always wins ------------------------------------
 function resolved(description, recurrence) {
   sandbox.setStubs(12);
