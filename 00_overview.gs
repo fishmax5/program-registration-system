@@ -610,6 +610,22 @@
  *        number formats and alignments and writes one call per plane, and the
  *        warning protections are skipped when the geometry has not moved.
  *        tools/render_bench.js is the measurement.
+ *      - A LOOP OVER ROWS THAT SETS THE SAME THING IS A RangeList. The program
+ *        registrant sheets (46) are banded per SESSION, so a weekly class
+ *        running a year was fifty-two bands and fifty-two runs of rows between
+ *        them, each costing a handful of per-column calls against somebody
+ *        else's spreadsheet. getRangeList() applies one setter to many ranges
+ *        in one call, which is the shape of every one of those loops.
+ *      - AND THE WHOLE WRITE IS SKIPPED WHEN NOTHING MOVED. The fingerprint
+ *        pattern the form date labels started (10) is now on the appointment
+ *        times (55) and on the leader sheets (46): hash what would be written,
+ *        compare, and do not open the file. Each tracks only what this script
+ *        writes, so a hand-edited one is not noticed until its content
+ *        legitimately changes — every one of them has a forced path on the
+ *        menu that says so.
+ *      - A FILL-DOWN IS ONE EDIT, NOT THREE HUNDRED READS. onEdit fires once
+ *        for the range somebody dragged; readEditedBlock() (18) reads that
+ *        block once instead of a getValue() per cell per handler.
  *    Bulk sheet WRITES were already batched (one setValues/setBackgrounds/
  *    setFormulas per block, never a per-cell loop) — keep it that way.
  *
