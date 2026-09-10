@@ -898,7 +898,25 @@ function writeSectionHeader(sheet, row, numCols, headerValues) {
   // adding or renaming one changes which rows come back and in what column
   // order, so no cached read of this tab survives it.
   invalidateSectionedRowsCache(sheet);
-  sheet.getRange(row, 1, 1, numCols).setValues([headerValues])
+  // THE THREE ATTRIBUTES A LATER PASS RELABELS — the text, the fill and the
+  // font — are staged rather than written when a render scope is open, so the
+  // manual-entry labels that follow patch one array instead of making four
+  // calls per column. The three that are uniform across the whole row and
+  // never patched are written here as they always were. See 97.
+  const staged = declareRenderHeaderRow(sheet, row, headerValues, {
+    background: TYPO.COLUMN_HEADER.background,
+    fontColor: TYPO.COLUMN_HEADER.color,
+    fontWeight: TYPO.COLUMN_HEADER.weight
+  });
+  const range = sheet.getRange(row, 1, 1, numCols);
+  if (staged) {
+    range
+      .setFontSize(TYPO.COLUMN_HEADER.size)
+      .setVerticalAlignment('middle')
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    return;
+  }
+  range.setValues([headerValues])
     .setFontSize(TYPO.COLUMN_HEADER.size)
     .setFontWeight(TYPO.COLUMN_HEADER.weight)
     .setBackground(TYPO.COLUMN_HEADER.background)
@@ -920,6 +938,10 @@ function applyZebraStripingManualBounded(sheet, startRow, numRows, numCols) {
   for (let r = 0; r < numRows; r++) {
     backgrounds.push(new Array(numCols).fill(r % 2 === 0 ? PALETTE.PAPER : PALETTE.STRIPE));
   }
+  // THE FIRST PLANE OF THE BAND, and the one every later tint patches rather
+  // than overwrites — see 97_render_batching.gs. Outside a render scope this
+  // is the write it has always been.
+  if (stageRenderBackgrounds(sheet, startRow, numRows, numCols, backgrounds)) return;
   sheet.getRange(startRow, 1, numRows, numCols).setBackgrounds(backgrounds);
 }
 
@@ -971,6 +993,9 @@ function autosizeColumns(sheet, options) {
   const force = !!options.force;
   const lastCol = Math.max(sheet.getLastColumn(), options.minCols || 0);
   if (lastCol < 1) return;
+  // ONE FIT PER TAB PER EXECUTION unless the table's shape changed — see
+  // shouldAutosizeColumns_() in 97_render_batching.gs for the trade.
+  if (!shouldAutosizeColumns_(sheet, lastCol, force)) return;
 
   try {
     if (force) {

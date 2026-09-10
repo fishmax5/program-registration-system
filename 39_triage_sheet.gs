@@ -75,22 +75,24 @@ function applyRegistrantsFormatting(sheet, headers, result) {
     // boolean, which is what Served_Confirmed counts.
     REGISTRANT_DAYOF_COLUMNS.concat(LEADER_FLAG_COLUMNS).forEach(h => {
       if (map[h] === undefined) return;
-      sheet.getRange(z.start, map[h] + 1, z.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
+      applyBoundedColumnFormat(sheet, map[h] + 1, z.start, z.count, {
+        validation: SpreadsheetApp.newDataValidation().requireCheckbox().build(),
+        alignment: 'center'
+      });
     });
     // Whole meal counts, not free text — this is what buildDashboardRollup()
     // sums into Master_Lunch_Dashboard's Day_1_*/Subs_* columns, plus
     // Meals_Ordered, which is the same kind of number on the ordering side.
     REGISTRANT_MEAL_QUANTITY_COLUMNS.forEach(h => {
       if (map[h] === undefined) return;
-      sheet.getRange(z.start, map[h] + 1, z.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation()
+      applyBoundedColumnFormat(sheet, map[h] + 1, z.start, z.count, {
+        validation: SpreadsheetApp.newDataValidation()
           .requireNumberGreaterThanOrEqualTo(0)
           .setAllowInvalid(false)
-          .build())
-        .setNumberFormat('0')
-        .setHorizontalAlignment('center');
+          .build(),
+        numberFormat: '0',
+        alignment: 'center'
+      });
     });
     // Meal_Source offers the batches anyone could plausibly still be handing
     // out, newest first, and accepts anything — allowInvalid, like every other
@@ -206,8 +208,70 @@ function applyRegistrantsFormatting(sheet, headers, result) {
  */
 const PROTECTION_TAG = 'Auto-managed by Calendar & Form Manager';
 
+/**
+ * What the last rebuild left on each tab: `{ "<tab>": "<fingerprint>|<count>" }`.
+ *
+ * THE MOST EXPENSIVE THING A RENDER DOES was rebuilding these. Thirteen derived
+ * columns across two zones is twenty-six protections, each of them three calls
+ * to create (protect / setDescription / setWarningOnly) and one to remove
+ * first — around ninety round trips, on a tab whose entire row content goes out
+ * in four. And a protection is among the slowest calls Apps Script makes.
+ *
+ * The rebuild is also, almost always, a rebuild of the identical thing: the
+ * protected ranges are a pure function of where the two zones start, how many
+ * rows they hold and which columns are derived. So that is what is remembered
+ * here, alongside the number of protections the tab was left holding — and a
+ * render that finds both unchanged does nothing at all.
+ *
+ * The count is the honesty check, and it is one call: anybody removing a
+ * protection by hand (or adding one) changes it, and the next render rebuilds
+ * from scratch. Reading the DESCRIPTIONS instead would be a call per
+ * protection, which is the cost this exists to avoid.
+ */
+const DERIVED_PROTECTION_STATE_PROP_KEY = 'DERIVED_COLUMN_PROTECTIONS_V1';
+
+function readDerivedProtectionState_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(DERIVED_PROTECTION_STATE_PROP_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function writeDerivedProtectionState_(state) {
+  try {
+    PropertiesService.getScriptProperties()
+      .setProperty(DERIVED_PROTECTION_STATE_PROP_KEY, JSON.stringify(state));
+  } catch (err) {
+    log(`ℹ️ Could not remember this tab's protection layout (${err}) — it will be rebuilt next render.`);
+  }
+}
+
+/** The geometry a set of warning protections is a pure function of. */
+function derivedProtectionFingerprint_(cols, zones) {
+  const bands = (zones || []).filter(z => z && z.count > 0).map(z => `${z.start}+${z.count}`).join(',');
+  return `${bands}|${cols.join(',')}`;
+}
+
 function protectDerivedColumns(sheet, headers, protectedNames, zones) {
   const map = getIndexMap(headers);
+
+  // NOTHING MOVED, NOTHING TO DO — see DERIVED_PROTECTION_STATE_PROP_KEY.
+  const cols = (protectedNames || []).filter(name => map[name] !== undefined).map(name => map[name] + 1);
+  const fingerprint = derivedProtectionFingerprint_(cols, zones);
+  const state = readDerivedProtectionState_();
+  const remembered = state[sheet.getName()];
+  let existing;
+  try {
+    existing = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
+  } catch (err) {
+    log(`ℹ️ Could not read protections on "${sheet.getName()}" (${err}) — leaving them as they are.`);
+    return;
+  }
+  if (remembered && remembered === `${fingerprint}|${existing.length}`) return;
 
   // Cleared ONCE, for the whole sheet, before anything is re-created —
   // clearing per zone would have each zone wipe the previous one's work.
@@ -218,17 +282,18 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
   // simple onEdit trigger, and a render IS reachable from there (a Quick Mark
   // walk-in rebuilds this tab). Warning labels are a nicety; aborting a
   // render that has already cleared the sheet is not survivable.
+  let kept = 0;
   try {
-    sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
-      .filter(p => String(p.getDescription() || '').indexOf(PROTECTION_TAG) === 0)
-      .forEach(p => {
-        try { p.remove(); } catch (err) { /* someone else's, or already gone */ }
-      });
+    existing.forEach(p => {
+      if (String(p.getDescription() || '').indexOf(PROTECTION_TAG) !== 0) { kept++; return; }
+      try { p.remove(); } catch (err) { kept++; /* someone else's, or already gone */ }
+    });
   } catch (err) {
-    log(`ℹ️ Could not read protections on "${sheet.getName()}" (${err}) — leaving them as they are.`);
+    log(`ℹ️ Could not clear this script's protections on "${sheet.getName()}" (${err}) — leaving them as they are.`);
     return;
   }
 
+  let made = 0;
   (zones || []).forEach(z => {
     if (z.count < 1) return;
     protectedNames.forEach(name => {
@@ -239,11 +304,18 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
           .protect()
           .setDescription(`${PROTECTION_TAG} — "${name}" is filled in automatically and will be overwritten.`)
           .setWarningOnly(true);
+        made++;
       } catch (err) {
         log(`ℹ️ Could not set a protection warning on "${name}" of ${sheet.getName()} (${err}).`);
       }
     });
   });
+
+  // Remembered only once the tab actually holds what the fingerprint claims —
+  // a protection that could not be created must not be recorded as present, or
+  // the next render would skip the rebuild that would have made it.
+  state[sheet.getName()] = `${fingerprint}|${kept + made}`;
+  writeDerivedProtectionState_(state);
 }
 
 /**
@@ -253,10 +325,19 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
 function applyColumnVisibility(sheet, headers, hiddenNames) {
   const map = getIndexMap(headers);
   const hide = new Set((hiddenNames || []).filter(h => map[h] !== undefined).map(h => map[h] + 1));
-  for (let c = 1; c <= headers.length; c++) {
+  // IN RUNS, not one column at a time. hideColumns()/showColumns() both take a
+  // span, and a tab of thirty-seven columns with three hidden ones is four
+  // calls that way and thirty-seven the other — on every render of every tab.
+  let runStart = 1;
+  for (let c = 2; c <= headers.length + 1; c++) {
+    const same = c <= headers.length && hide.has(c) === hide.has(runStart);
+    if (same) continue;
     try {
-      if (hide.has(c)) sheet.hideColumns(c); else sheet.showColumns(c);
+      const count = c - runStart;
+      if (hide.has(runStart)) sheet.hideColumns(runStart, count);
+      else sheet.showColumns(runStart, count);
     } catch (err) { /* a column beyond the sheet's width — nothing to hide */ }
+    runStart = c;
   }
 }
 
