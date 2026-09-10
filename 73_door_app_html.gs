@@ -19,21 +19,32 @@
 //     called "Movie Night </script>" are both real and both end the page
 //     mid-sentence otherwise. See tests/check_in_page.test.js.
 //
-// THE EVENTS SCREEN COMES FIRST, AND IT IS WHY THE NAME LIST IS READABLE.
-// Before it, the tablet showed everybody expected anywhere in the building
-// that day — which at a centre running four things at once is two hundred
-// names to scroll past to find one. So the desk ticks what THIS tablet is for
-// (SELECTED, below) and every screen after it is about those events: which
-// names are listed, which of them are pre-ticked on the confirm screen, and
-// which regulars are offered underneath. Everything is ticked to begin with,
-// so a door that really is about the whole building is one tap of Continue.
+// THE FIRST QUESTION IS ASKED OF THE MEMBER, NOT OF THE TABLET. "What are you
+// here for today?" — every event on at this building today, nothing ticked,
+// tapped by the person standing in front of it. It is not a setup step and it
+// is not a filter a volunteer sets in the morning: it is the first thing each
+// person does, and it resets for the next one the moment a sign-in is away.
 //
-// AND THE NAME LIST HAS TWO SECTIONS. Registered first; under them the people
-// who came to these same programs in the last two months and have not
-// registered for today (DAY.past, built by foldPastRegistrants() in section
-// 16h). A weekly class has the same eight people in it every week and half of
-// them have never filled in a form — before this they had to be typed into the
-// walk-in box by name, every week, by a volunteer who knew them.
+// WHY THAT ORDER. Asking it first is what makes the rest of the visit short.
+// The name list that follows holds only the people expected at what they just
+// tapped — one class instead of two hundred names — and what they tapped is
+// already ticked on the confirm screen, so the whole visit is: what I am here
+// for, my name, Confirm. Asking it the other way round (find your name, then
+// correct a screen of everything the building is doing) is the same three taps
+// spent on a longer list.
+//
+// HERE_FOR is that answer and PICKED is what the confirm screen holds; they
+// start the same and part company the moment somebody changes a tick, which is
+// why going back to the list does not lose what they said at the door.
+//
+// AND THE NAME LIST HAS THREE SECTIONS. Registered for what they tapped;
+// under them the people who came to those same programs in the last two months
+// and have not registered for today (DAY.past, built by foldPastRegistrants()
+// in section 16h) — a weekly class has the same eight people in it every week
+// and half of them have never filled in a form; then the search box, with the
+// walk-in sign-up inside it. Staff can get past the question entirely with
+// "Show everyone here today", for the person who cannot work out which class
+// is theirs.
 //
 // WHAT IS NO LONGER HERE: the membership application. It was a fifth screen
 // drawn from the office's own Google Form and submitted back through the Forms
@@ -176,14 +187,17 @@ function buildDoorAppHtml(options) {
   var PENDING = null;      // a background day held back until the screen is idle
   var STEP = 'setup';      // setup -> events -> names -> person | walkin
   var PERSON = null;       // { name, key, isNew, phone, email, registered[], ... }
-  var PICKED = {};         // session value -> true
+  var PICKED = {};         // session value -> true — the CONFIRM screen's ticks
   var LUNCH = false;
-  // WHAT THIS TABLET IS FOR: session value -> true, ticked on the events
-  // screen and read by every screen after it. A null SELECTED means the day
-  // has not been seen yet — the difference between "nothing is ticked" and
-  // "nothing has been asked", which is what stops a quiet background re-read
-  // (syncDay) wiping a desk's choices back to everything.
-  var SELECTED = null;
+  // WHAT THE PERSON AT THE DOOR SAID THEY ARE HERE FOR: session value -> true.
+  // Answered on the first screen, read by the name list (which sections it
+  // filters) and by the confirm screen (which ticks it starts with), and
+  // emptied after every sign-in — it is one person's answer about one visit,
+  // never a setting.
+  var HERE_FOR = {};
+  // The staff way past that question: the whole day's names, unfiltered. Also
+  // cleared per visit, because it is an answer about one person too.
+  var SHOW_ALL = false;
   // WHICH OF THIS PERSON'S HOUSEHOLD IS BEING SIGNED IN WITH THEM: member key
   // -> true. Ticked by default for anyone the workbook expects today and has
   // not already marked present — the couple who always arrive together are the
@@ -261,14 +275,23 @@ function buildDoorAppHtml(options) {
 
   function openSetup() {
     STEP = 'setup';
-    PERSON = null; PICKED = {}; LUNCH = false;
-    // A DIFFERENT BUILDING OR A DIFFERENT DAY IS A DIFFERENT SET OF EVENTS.
-    // Carrying yesterday's ticks into it would silently filter the new day by
-    // sessions that are not on it, and an empty name list is the one failure
-    // nobody at a door reports — it just looks like nobody came.
-    SELECTED = null;
+    startNextPerson();
     hideStatus();
     draw();
+  }
+
+  /**
+   * BACK TO AN EMPTY SCREEN FOR WHOEVER IS NEXT. Everything on this page is
+   * about ONE person's visit — what they are here for, who is with them,
+   * whether they are a member — so every one of those is cleared between
+   * people. A tick left behind is the next person signed in for somebody
+   * else's class, and nobody at a door would ever spot it.
+   */
+  function startNextPerson() {
+    PERSON = null; PICKED = {}; LUNCH = false; PARTY = {};
+    HERE_FOR = {}; SHOW_ALL = false;
+    RECURRING = 'none'; MEMBER = '';
+    WALKIN = { name: '', email: '', phone: '' };
   }
 
   // ---------------------------------------------------------------- the day
@@ -280,7 +303,6 @@ function buildDoorAppHtml(options) {
       setBusy(false);
       if (!res || !res.ok) { DAY = null; draw(); return handle(res); }
       DAY = res.day;
-      if (!SELECTED) { SELECTED = allEventsSelected(); STEP = 'events'; }
       hideStatus();
       draw();
       if (then) then();
@@ -299,16 +321,28 @@ function buildDoorAppHtml(options) {
     if (!SETUP) return;
     call('doorDay', { location: SETUP.location, dateKey: SETUP.dateKey }, function (res) {
       if (!res || !res.ok || !res.day) return;
-      if (STEP !== 'names' || PERSON) { PENDING = res.day; return; }
+      if (!screenIsIdle()) { PENDING = res.day; return; }
       DAY = res.day;
-      if (!SELECTED) SELECTED = allEventsSelected();
       draw();
     });
   }
 
+  /**
+   * IS IT SAFE TO PUT A NEW DAY ON THE SCREEN? Only where nothing is half
+   * answered: the name list with nobody chosen, or the "what are you here
+   * for" screen before the first tick. A list that reflows under a thumb on
+   * its way to a name is how the wrong person gets signed in, and a tick that
+   * vanishes mid-answer is worse.
+   */
+  function screenIsIdle() {
+    if (PERSON) return false;
+    if (STEP === 'names') return true;
+    return STEP === 'events' && !Object.keys(HERE_FOR).length;
+  }
+
   // --------------------------------------------------------------------- draw
   function draw() {
-    if (PENDING && STEP === 'names' && !PERSON) { DAY = PENDING; PENDING = null; }
+    if (PENDING && screenIsIdle()) { DAY = PENDING; PENDING = null; }
     var main = document.getElementById('app');
     var setupBtn = document.getElementById('setupbtn');
     main.innerHTML = '';
@@ -387,20 +421,21 @@ function buildDoorAppHtml(options) {
     return (box && box.value) || fallback || OPTS.todayKey;
   }
 
-  // SCREEN 2 — what is on at this building today, ticked by the desk.
+  // SCREEN 2 — THE FIRST QUESTION, AND IT IS ASKED OF THE PERSON.
   //
   // EVERY EVENT, WHETHER OR NOT ANYBODY IS REGISTERED FOR IT. A drop-in with
   // no form has no registrations by definition, and a class whose form went
-  // out yesterday may have none yet — leaving either off this screen would
-  // hide from the desk the one thing it is being asked about. The count is
-  // shown instead, which is the honest version of the same fact.
+  // out yesterday may have none yet — an event missing from this screen is a
+  // person who cannot say why they came.
+  //
+  // NOTHING IS TICKED TO BEGIN WITH. This is a question, not a filter with a
+  // default: a screen that arrives with four things already ticked is a screen
+  // somebody taps Continue on, and then everybody is signed in for everything.
   function drawEvents(main) {
     if (DAY.dateKey !== OPTS.todayKey) main.appendChild(offDayBanner());
-    main.appendChild(el('h2', '', 'What is this tablet for?'));
+    main.appendChild(el('h2', '', 'What are you here for today?'));
     main.appendChild(el('p', 'hint',
-      'Everything on at ' + DAY.location + ' on ' + DAY.dateLabel + '. Untick anything ' +
-      'this door is not for — the names you see next are the people signed up for what ' +
-      'is left ticked.'));
+      'Tap everything you are here for, then find your name on the next screen.'));
 
     var choices = eventChoices();
     var list = el('ul', 'list', '');
@@ -408,39 +443,43 @@ function buildDoorAppHtml(options) {
     if (!choices.length) {
       list.appendChild(el('p', 'hint',
         'Nothing is on at ' + DAY.location + ' on ' + DAY.dateLabel + '. ' +
-        'Anybody who turns up can still be signed in as a walk-in.'));
+        'You can still sign in — tap the button below.'));
     }
     main.appendChild(list);
 
-    if (choices.length) {
-      main.appendChild(button('plain',
-        selectedCount() === choices.length ? 'Untick everything' : 'Tick everything',
-        function () {
-          var all = selectedCount() !== choices.length;
-          SELECTED = {};
-          if (all) choices.forEach(function (choice) { SELECTED[choice.value] = true; });
-          draw();
-        }));
-    }
-    var go = button('big', 'Continue', function () {
-      if (choices.length && !selectedCount()) {
-        return say('Tick at least one thing — or ask a staff member to change the setup.', 'err');
+    var go = button('big', choices.length ? 'Continue' : 'Find my name', function () {
+      if (choices.length && !hereForCount()) {
+        return say('Tap what you are here for first.', 'err');
       }
       hideStatus();
+      SHOW_ALL = !choices.length;
       STEP = 'names';
       draw();
       window.scrollTo(0, 0);
     });
     go.id = 'go';
     main.appendChild(go);
+
+    // THE WAY PAST THE QUESTION, and it is deliberately the quiet button. It
+    // is for the person who cannot work out which of two classes is theirs and
+    // for the volunteer helping them — not the path a queue takes, because the
+    // whole point of the question above is the short list it produces.
+    main.appendChild(button('plain', 'Not sure? Show everyone here today', function () {
+      HERE_FOR = {};
+      SHOW_ALL = true;
+      hideStatus();
+      STEP = 'names';
+      draw();
+      window.scrollTo(0, 0);
+    }));
     main.appendChild(footer());
   }
 
   /**
-   * The day as a list of things that can be ticked — every program, and the
-   * meal if there is one to have. Lunch is on this screen for the same reason
-   * it is on the person screen: at this centre it is one of the things people
-   * come for, and a door that is only about the meal is a real door.
+   * The day as a list of things that can be tapped — every program, and the
+   * meal if there is one to have. Lunch is on this screen because at this
+   * centre it is one of the things people come for, and somebody here only for
+   * the meal is somebody with an honest answer to give.
    */
   function eventChoices() {
     var out = [];
@@ -453,7 +492,7 @@ function buildDoorAppHtml(options) {
       });
     });
     var lunch = DAY.lunch || {};
-    if (lunch.value && (lunch.offered || countRegisteredFor(lunch.value, true))) {
+    if (lunch.value && lunch.offered) {
       out.push({
         value: lunch.value,
         title: 'Lunch' + (lunch.dish ? ' — ' + lunch.dish : ''),
@@ -464,8 +503,13 @@ function buildDoorAppHtml(options) {
     return out;
   }
 
+  /**
+   * One event as a tick. NO COUNT OF WHO IS SIGNED UP: this screen is read by
+   * members now, and how many people are registered for a class is an internal
+   * number that answers no question the person tapping it has.
+   */
   function eventChoiceItem(choice) {
-    var on = isSelected(choice.value);
+    var on = isHereFor(choice.value);
     var li = el('li', 'item' + (on ? ' on' : ''), '');
     var label = document.createElement('label');
     var box = document.createElement('input');
@@ -473,49 +517,32 @@ function buildDoorAppHtml(options) {
     box.checked = on;
     box.disabled = busy;
     box.onchange = function () {
-      if (box.checked) SELECTED[choice.value] = true; else delete SELECTED[choice.value];
+      if (box.checked) HERE_FOR[choice.value] = true; else delete HERE_FOR[choice.value];
       li.className = 'item' + (box.checked ? ' on' : '');
     };
     var what = el('div', 'what', '');
-    var count = countRegisteredFor(choice.value, !!choice.isLunch);
     var meta = [];
     if (choice.time) meta.push(choice.time);
-    meta.push(count === 0 ? 'Nobody signed up yet'
-      : (count === 1 ? '1 person signed up' : count + ' people signed up'));
-    if (choice.byAppointment) meta.push('by appointment');
+    // Said here as well as on the confirm screen, because somebody who taps an
+    // appointment program and then finds they cannot be booked into it has
+    // been sent round a loop the door could have opened flat.
+    if (choice.byAppointment) meta.push('Booked by appointment — see a staff member');
     what.innerHTML = '<span class="title">' + esc(choice.title) + '</span>' +
-      '<span class="meta">' + esc(meta.join(' · ')) + '</span>';
+      (meta.length ? '<span class="meta' + (choice.byAppointment ? ' warn' : '') + '">' +
+        esc(meta.join(' · ')) + '</span>' : '');
     label.appendChild(box);
     label.appendChild(what);
     li.appendChild(label);
     return li;
   }
 
-  /** How many of today's people hold this session — the lunch line counts meals. */
-  function countRegisteredFor(value, isLunch) {
-    var n = 0;
-    (DAY.people || []).forEach(function (p) {
-      if (isLunch ? p.lunchRegistered : (p.registered || []).indexOf(value) !== -1) n++;
-      (p.guests || []).forEach(function (g) {
-        if (isLunch ? g.lunchRegistered : (g.registered || []).indexOf(value) !== -1) n++;
-      });
-    });
-    return n;
-  }
+  function isHereFor(value) { return !!HERE_FOR[value]; }
+  function hereForCount() { return Object.keys(HERE_FOR).length; }
 
-  function allEventsSelected() {
-    var picked = {};
-    (DAY ? eventChoices() : []).forEach(function (choice) { picked[choice.value] = true; });
-    return picked;
-  }
-
-  function isSelected(value) { return !!(SELECTED && SELECTED[value]); }
-  function selectedCount() { return SELECTED ? Object.keys(SELECTED).length : 0; }
-
-  /** Whether the day's meal is one of the things this tablet is for. */
-  function lunchSelected() {
+  /** Whether the day's meal is one of the things they said they are here for. */
+  function lunchHereFor() {
     var lunch = DAY.lunch || {};
-    return !!(lunch.value && isSelected(lunch.value));
+    return !!(lunch.value && isHereFor(lunch.value));
   }
 
   /** The one banner both the events screen and the name list need. */
@@ -532,15 +559,12 @@ function buildDoorAppHtml(options) {
     // WHAT THIS LIST IS OF, AND ONE TAP BACK TO CHANGING IT. Said in words
     // rather than left to be inferred from who is missing: a filtered list
     // and an empty one look identical to somebody who does not know a filter
-    // is on.
-    var choices = eventChoices();
-    if (choices.length) {
-      main.appendChild(button('plain',
-        selectedCount() === choices.length
-          ? 'Showing everything on today · Change'
-          : 'Showing ' + selectedCount() + ' of ' + choices.length + ' events · Change',
-        function () { STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0); }));
-    }
+    // is on — and the person reading it answered the question a moment ago,
+    // so it is also how they check the tablet heard them.
+    main.appendChild(button('plain', SHOW_ALL
+      ? 'Everybody here today · Choose what you are here for'
+      : 'Here for ' + whatIsShowing() + ' · Change',
+      function () { STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0); }));
 
     main.appendChild(el('h2', '', 'Tap your name'));
     var people = (DAY.people || []).filter(personIsSelected).sort(function (a, b) {
@@ -626,16 +650,14 @@ function buildDoorAppHtml(options) {
     });
   }
 
-  /** What the two sections are about, in the words the desk ticked. */
+  /** What the sections are about, in the words the person tapped. */
   function whatIsShowing() {
-    var choices = eventChoices();
-    if (!choices.length || selectedCount() === choices.length) {
-      return 'anything at ' + DAY.location + ' on ' + DAY.dateLabel;
-    }
-    var names = choices.filter(function (choice) { return isSelected(choice.value); })
+    if (SHOW_ALL) return 'anything at ' + DAY.location + ' on ' + DAY.dateLabel;
+    var names = eventChoices()
+      .filter(function (choice) { return isHereFor(choice.value); })
       .map(function (choice) { return choice.title; });
-    if (!names.length) return 'nothing — no events are ticked';
-    if (names.length > 3) return names.length + ' of the events on today';
+    if (!names.length) return 'nothing yet';
+    if (names.length > 3) return names.length + ' things';
     return names.join(', ');
   }
 
@@ -646,19 +668,18 @@ function buildDoorAppHtml(options) {
    * the host would hide the guest with them.
    */
   function personIsSelected(p) {
-    if (!SELECTED) return true;
-    if (lunchSelected() && p.lunchRegistered) return true;
-    var mine = (p.registered || []).some(isSelected);
-    if (mine) return true;
+    if (SHOW_ALL) return true;
+    if (lunchHereFor() && p.lunchRegistered) return true;
+    if ((p.registered || []).some(isHereFor)) return true;
     return (p.guests || []).some(function (g) {
-      return (lunchSelected() && g.lunchRegistered) || (g.registered || []).some(isSelected);
+      return (lunchHereFor() && g.lunchRegistered) || (g.registered || []).some(isHereFor);
     });
   }
 
   /** The same question of a regular, asked of the programs they used to come to. */
   function pastIsSelected(entry) {
-    if (!SELECTED) return true;
-    return (entry.values || []).some(isSelected);
+    if (SHOW_ALL) return true;
+    return (entry.values || []).some(isHereFor);
   }
 
   /**
@@ -764,30 +785,40 @@ function buildDoorAppHtml(options) {
 
   function choose(p) {
     PERSON = p;
-    // WHAT THEY ARE ALREADY DOWN FOR COMES PRE-TICKED, NARROWED TO WHAT THIS
-    // TABLET IS FOR. Somebody registered for Chair Yoga is here for Chair
-    // Yoga; making them tick it again is asking a question the workbook
-    // already knows the answer to. But a person registered for four things
-    // today, standing at the door of one of them, is here for that one — so
-    // the ticks are their sessions crossed with the desk's, and the screen is
-    // a CONFIRMATION with every tick live, so changing one is the same tap.
+    // WHAT THEY SAID AT THE DOOR, CROSSED WITH WHAT THE WORKBOOK EXPECTS OF
+    // THEM. Somebody registered for Chair Yoga who tapped Chair Yoga two
+    // screens ago has answered this question twice already; the screen is a
+    // CONFIRMATION of that, with every tick live so changing one is the same
+    // tap. A person registered for four things today is not asked which — they
+    // told the door on the way in.
     //
-    // THREE FALLBACKS, IN ORDER, AND NONE OF THEM LEAVES THE SCREEN EMPTY:
-    // their registered sessions that are ticked; the sessions a regular used
-    // to come to that are ticked (they hold no rows today — this is what the
-    // "Here recently" section signs somebody in for); and, for anybody found
-    // through the search box whose sessions the desk did not tick, everything
-    // they are registered for. A confirm screen with nothing on it is a person
-    // told to see a staff member for no reason.
+    // FOUR FALLBACKS, IN ORDER, AND NONE OF THEM LEAVES THE SCREEN EMPTY: what
+    // they are registered for out of what they tapped; what a regular usually
+    // comes to out of what they tapped (they hold no rows today — this is what
+    // the "Here recently" section signs somebody in for); what they tapped,
+    // for somebody found through the search box who is registered for none of
+    // it; and then their own registrations. A confirm screen with nothing on
+    // it is a person told to see a staff member for no reason.
     PICKED = {};
-    (p.registered || []).forEach(function (v) { if (isSelected(v)) PICKED[v] = true; });
+    (p.registered || []).forEach(function (v) { if (isHereFor(v)) PICKED[v] = true; });
     if (!Object.keys(PICKED).length) {
-      (p.was || []).forEach(function (v) { if (isSelected(v)) PICKED[v] = true; });
+      (p.was || []).forEach(function (v) { if (isHereFor(v)) PICKED[v] = true; });
+    }
+    if (!Object.keys(PICKED).length) {
+      Object.keys(HERE_FOR).forEach(function (v) { PICKED[v] = true; });
     }
     if (!Object.keys(PICKED).length) {
       (p.registered || []).forEach(function (v) { PICKED[v] = true; });
     }
-    LUNCH = !!p.lunchRegistered;
+    // LAST OF ALL, WHAT THEY USUALLY COME TO. Only reachable through "Show
+    // everyone here today", where nothing was tapped at the door and a regular
+    // holds no rows for today — without this that person's confirm screen is
+    // blank and Confirm refuses, which is the one path this screen must not
+    // have.
+    if (!Object.keys(PICKED).length) {
+      (p.was || []).forEach(function (v) { PICKED[v] = true; });
+    }
+    LUNCH = !!p.lunchRegistered || lunchHereFor();
     PARTY = {};
     (p.household || []).forEach(function (m) {
       if (m.expected && !m.here) PARTY[m.key] = true;
@@ -852,23 +883,24 @@ function buildDoorAppHtml(options) {
   /**
    * INTO THE WALK-IN SCREEN, WITH WHAT THIS TABLET IS FOR ALREADY TICKED.
    *
-   * Somebody at the door of the Tuesday class who is not on any list is there
-   * for the Tuesday class; asking them to find it in a list of everything on
-   * in the building is the question the events screen was put in front of the
-   * desk to stop asking. The lunch tick is deliberately NOT carried over: a
-   * meal is ordered days ahead against a count (see lunchItem()), and ticking
-   * one on somebody's behalf is a plate that may not exist.
+   * They answered it two screens ago: a walk-in has already said what they are
+   * here for, and asking again — on a list of everything the building is doing
+   * — is the door making somebody who is not on any list work hardest. The
+   * lunch tick comes across too, because tapping "Lunch" on the first screen IS
+   * asking for one; the meal line still says plainly that meals are ordered
+   * days ahead and a late one has to be checked with staff (lunchItem()).
    *
    * The name argument is whatever was typed into the search box before it came
    * up empty, so nobody types their own name twice.
    */
   function startWalkIn(name) {
-    PERSON = null; PARTY = {}; LUNCH = false; RECURRING = 'none'; MEMBER = '';
+    PERSON = null; PARTY = {}; RECURRING = 'none'; MEMBER = '';
     PICKED = {};
     var lunchValue = (DAY && DAY.lunch) ? DAY.lunch.value : '';
-    Object.keys(SELECTED || {}).forEach(function (value) {
+    Object.keys(HERE_FOR).forEach(function (value) {
       if (value !== lunchValue) PICKED[value] = true;
     });
+    LUNCH = lunchHereFor();
     WALKIN = { name: name || '', email: '', phone: '' };
     STEP = 'walkin';
     hideStatus();
@@ -930,7 +962,9 @@ function buildDoorAppHtml(options) {
     go.disabled = busy;
     main.appendChild(go);
     main.appendChild(button('plain', 'Back to the name list', function () {
-      STEP = 'names'; PICKED = {}; LUNCH = false; draw();
+      stashWalkIn();
+      STEP = 'names';
+      draw();
     }));
   }
 
@@ -1180,10 +1214,11 @@ function buildDoorAppHtml(options) {
     var notAMember = payload.member === 'no';
 
     var partyNames = (payload.party || []).map(function (p) { return p.name; });
-    PERSON = null; PICKED = {}; LUNCH = false; PARTY = {};
-    RECURRING = 'none'; MEMBER = '';
-    WALKIN = { name: '', email: '', phone: '' };
-    STEP = 'names';
+    // BACK TO THE FIRST QUESTION, EMPTY. The next person in the queue is a
+    // different visit — and a tablet left on the last person's ticks is the
+    // one way this page could sign somebody in for a class they never named.
+    startNextPerson();
+    STEP = 'events';
     draw();
     window.scrollTo(0, 0);
     // THE ONE THING A NON-MEMBER IS TOLD, and it is a promise about somebody
@@ -1198,7 +1233,7 @@ function buildDoorAppHtml(options) {
         if (res && res.needsPin) {
           try { window.localStorage.removeItem('checkInPin'); } catch (err) { /* ignore */ }
           pin = '';
-          STEP = 'names';
+          STEP = 'events';
           draw();
           say(res.message || 'Wrong PIN — ask a staff member to sign back in.', 'err');
           return showPin();

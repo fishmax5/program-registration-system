@@ -16,9 +16,11 @@
 //      includes the day it was said on — that one is already being signed in.
 //   5. A STANDING PLACE IS REFUSED ON AN APPOINTMENT PROGRAM, in words. One
 //      person holding every slot a program will ever run is the failure.
-//   6. THE EVENTS SCREEN LISTS EVERY EVENT, and the name list says which of
-//      them it is showing. A filtered list and an empty one look identical to
-//      somebody who does not know a filter is on.
+//   6. THE FIRST SCREEN ASKS THE PERSON WHAT THEY ARE HERE FOR — not the
+//      tablet, and not once in the morning. Nothing pre-ticked, cleared
+//      between people, and the name list says which answer it is showing:
+//      a filtered list and an empty one look identical to somebody who does
+//      not know a filter is on.
 //   7. A REGULAR IS OFFERED FOR TODAY'S SESSION, never for the one they came
 //      to in August — and somebody who cancelled is not a regular.
 const vm = require('vm');
@@ -120,19 +122,29 @@ ok('an unregistered lunch is still never promised',
   /meals are ordered in advance/i.test(page));
 
 // ---------------------------------------------------------------------------
-// 2b. THE EVENTS SCREEN, which is now what a tablet opens on.
+// 2b. THE FIRST SCREEN IS A QUESTION ASKED OF THE PERSON, not a desk filter.
 //
-// The name list is FILTERED by what is ticked here, so the two failures worth
-// pinning are the ones nobody at a door reports: an event missing from this
-// screen (its people are then unreachable except by search), and a filter
-// applied without saying so (an empty list looks exactly like nobody came).
+// The failures worth pinning are the ones nobody at a door reports: the
+// question worded as setup (a member reads it as staff's and taps past it), a
+// tablet that carries one person's answer into the next person's visit, a
+// filtered list that does not say it is filtered (an empty one looks exactly
+// like nobody came), and no way past the question for somebody who cannot
+// work out which class is theirs.
 // ---------------------------------------------------------------------------
-ok('the tablet is asked what it is for before it lists anybody',
-  /What is this tablet for\?/.test(page));
-ok('an event with nobody signed up for it is still on the screen',
-  /Nobody signed up yet/.test(page));
-ok('and the name list says what it is showing, with a way back',
-  /Showing \d+|Showing everything on today/.test(page) && /· Change/.test(page));
+ok('the person is asked what THEY are here for',
+  /What are you here for today\?/.test(page));
+ok('and told what the answer is for',
+  /then find your name on the next screen/.test(page));
+ok('the events are not pre-ticked — HERE_FOR starts empty',
+  /var HERE_FOR = \{\};/.test(page));
+ok('and every visit starts from an empty one',
+  /function startNextPerson\(\)[\s\S]{0,200}HERE_FOR = \{\}; SHOW_ALL = false;/.test(page));
+ok('a completed sign-in goes back to that question, not to the name list',
+  /startNextPerson\(\);\s*\n\s*STEP = 'events';/.test(page));
+ok('the name list says what it is showing, with a way back',
+  /Here for ' \+ whatIsShowing\(\) \+ ' · Change/.test(page));
+ok('and staff can get past the question entirely',
+  /Not sure\? Show everyone here today/.test(page));
 ok('the regulars have a section of their own', /Here recently/.test(page));
 
 // ---------------------------------------------------------------------------
