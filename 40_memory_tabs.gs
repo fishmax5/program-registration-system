@@ -178,7 +178,7 @@ function refreshMemberRoll(ss, registrantRows) {
 
   // Anyone already on the roll but absent from the current history stays,
   // with their computed columns left as they were.
-  const entries = [];
+  const outRows = [];
   const seen = {};
   Object.keys(people).sort((a, b) => people[a].name.localeCompare(people[b].name)).forEach(key => {
     const p = people[key];

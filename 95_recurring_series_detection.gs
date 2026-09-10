@@ -185,7 +185,7 @@ function readSeriesRecurrence(event, calendarId) {
   const id = calendarIdOfEvent(event, calendarId);
   if (id) {
     try {
-      const master = Calendar.Events.get(id, seriesId);
+      const master = readSeriesMaster(id, seriesId, event);
       answer = {
         seriesId,
         occurrences: countRecurrenceOccurrences(
@@ -214,6 +214,71 @@ function seriesIdFromInstanceId(eventId) {
   const raw = String(eventId || '').split('@')[0].trim();
   const stripped = raw.replace(/_\d{8}(T\d{6}Z)?$/, '');
   return stripped && stripped !== raw ? stripped : '';
+}
+
+/**
+ * THE SERIES MASTER, BY EVENT ID FIRST AND BY iCalUID SECOND.
+ *
+ * CalendarEvent.getId() returns the event's iCalUID, and for an event Google
+ * Calendar created itself that is the API's event id with "@google.com" on the
+ * end — which is why stripping the domain (seriesIdFromInstanceId) is the
+ * cheap path and is right nearly always.
+ *
+ * It is NOT right for an event that arrived from somewhere else: an .ics
+ * import, or a calendar subscribed from another system. Those keep the
+ * ORIGINATING system's UID ("Icalb3401b2a7dca972b08ee5bc0ada56c3b") while the
+ * API files them under an id of its own, so Events.get() on the UID is a 404 —
+ * which this file then read as "a rule I cannot understand" and logged, once
+ * per series, on every sync, about a program that may well be a bounded run
+ * worth grouping.
+ *
+ * So the 404 is answered the documented way: list the calendar by iCalUID with
+ * singleEvents off, which hands back the MASTER — recurrence and all — in one
+ * call, so nothing further is needed. Only the fallback costs a second round
+ * trip, and only for the imported events that need it; readSeriesRecurrence()
+ * memoizes the answer per series per execution either way.
+ *
+ * Throws when neither lookup finds a master, so the caller's log still fires
+ * for a series that genuinely cannot be read.
+ */
+function readSeriesMaster(calendarId, seriesId, event) {
+  try {
+    return Calendar.Events.get(calendarId, seriesId);
+  } catch (err) {
+    const uid = seriesUidOfEvent(event, seriesId);
+    if (!uid) throw err;
+    const found = Calendar.Events.list(calendarId, {
+      iCalUID: uid,
+      singleEvents: false,
+      showDeleted: false,
+      maxResults: 2
+    });
+    const items = (found && found.items) || [];
+    // The master is the item carrying the rule; an instance carries
+    // recurringEventId instead, and is the shape to ask about again by id.
+    const master = items.filter(it => it && it.recurrence)[0];
+    if (master) return master;
+    const instance = items.filter(it => it && it.recurringEventId)[0];
+    if (instance) return Calendar.Events.get(calendarId, instance.recurringEventId);
+    throw err;
+  }
+}
+
+/**
+ * The iCalUID to look an imported series up by: what the event itself reports,
+ * with the series id as the fallback for a stub with no getId().
+ */
+function seriesUidOfEvent(event, seriesId) {
+  try {
+    if (event && typeof event.getId === 'function') {
+      const raw = String(event.getId() || '').trim();
+      // An instance's UID carries the occurrence stamp; the series' does not.
+      if (raw) return raw.replace(/_\d{8}(T\d{6}Z)?(?=@|$)/, '');
+    }
+  } catch (err) {
+    // Nothing to add: the seriesId below is the only other thing to try.
+  }
+  return seriesId ? String(seriesId) : '';
 }
 
 /** DTSTART of a series master, from the advanced service's event resource. */
