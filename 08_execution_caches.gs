@@ -57,6 +57,10 @@ let __triggerOwnerCache = null;
 // asks it of every event on every calendar, and a Config round trip per event
 // is a sync's worth of them.
 let __groupSeriesUpToCache = null;
+// How many minutes one slice of a sync may work for — see
+// getSyncSliceBudgetMs(). Read once per execution because the tail of a
+// registration sync asks it between every step.
+let __syncBudgetMinutesCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 let __formHandleCache = {};
@@ -239,6 +243,7 @@ function invalidateConfigCaches() {
   __outboundMailPausedCache = null;
   __triggerOwnerCache = null;
   __groupSeriesUpToCache = null;
+  __syncBudgetMinutesCache = null;
   // These two also live in the CROSS-execution cache, which a plain
   // per-execution reset would leave serving the old value to the next
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.

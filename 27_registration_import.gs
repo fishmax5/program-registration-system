@@ -20,16 +20,6 @@ function syncRegistrations() {
     return;
   }
 
-  // THE SAME LOCK syncCalendars() takes, and for a sharper reason. This
-  // function reads every registrant row, adds to them in memory, and writes
-  // the whole tab back. Two overlapping runs — the hourly trigger and someone
-  // pressing the menu item, which is exactly what people do when they are
-  // waiting for a registration to appear — both read the same "before"
-  // picture, and whichever finishes last overwrites the other's new rows with
-  // its own. The registrations are not re-read afterwards either: getResponses()
-  // is bounded by LAST_FORM_SYNC_TIME, which the losing run has already
-  // advanced. So the rows are simply gone until someone notices a name is
-  // missing.
   // THE DOOR'S QUEUE GOES IN FIRST, before this run takes the lock and starts
   // rewriting the rows those marks land on. Queued marks are applied by row
   // match, not row number, so ordering is not a correctness question — but a
@@ -38,47 +28,41 @@ function syncRegistrations() {
   // flushCheckInQueue().
   flushCheckInQueue({ waitMs: SYNC_LOCK_WAIT_MS });
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
-    log('syncRegistrations: another sync is already running — skipping this run.');
-    toastIfPossible('Another sync is already running — try again in a moment.');
-    return;
-  }
-  try {
-    syncRegistrationsInternal();
-  } finally {
-    lock.releaseLock();
-  }
+  // ONE SLICE OF THE SYNC. The lock, the budget, the hand-off when the budget
+  // is spent and the words at the end of it all live in
+  // 98_registration_sync_slices.gs; what is left in this file is the IMPORT
+  // itself, below. `openWindow` is what makes this the run that decides the
+  // sync clock's next value — a hand-off carries the window this opened.
+  const outcome = runRegistrationSyncSlice({ openWindow: true });
 
-  // THE LISTS ARE REBUILT HERE, not the next time somebody opens Quick Mark.
-  // A sync is precisely the moment the registrant rows have changed, and it
-  // already runs hourly on a trigger with nobody waiting on it — so the read
-  // that used to be a wait at the sign-in desk is paid for in the background
-  // instead. Outside the lock: this reads tabs, and holding the sync lock
-  // while it does would block the next sync for no reason. Guarded like every
-  // step inside the sync: the registrations are already imported and written
-  // by the time this runs, and a cache that could not be warmed is only a
-  // slower first Quick Mark.
-  try {
-    warmQuickMarkIndexCache();
-  } catch (err) {
-    log(`⚠️ Could not rebuild the Quick Mark lists after the sync (${err}) — they will be built on demand.`);
-  }
+  // THE LISTS ARE REBUILT ONCE THE WINDOW IS DONE, not once per slice, and
+  // outside the lock — see warmQuickMarkAfterSync_().
+  if (outcome && outcome.finished) warmQuickMarkAfterSync_();
 }
 
-function syncRegistrationsInternal() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+/**
+ * THE HALF THAT CANNOT LOSE ANYTHING: every form's new responses, into rows,
+ * onto the Registrants tab.
+ *
+ * Returns how many units of work this slice got through, which is what tells
+ * the sliced-job runner whether the run stalled. Sets `plan.importDone` when
+ * every form in the window has been read — and only then is the sync clock
+ * advanced, because a window with unread forms in it is a window that has to
+ * be read again. See the banner in 98_registration_sync_slices.gs.
+ */
+function runRegistrationImportPhase(sync) {
+  const plan = sync.plan;
+  const ss = sync.ss;
   migrateLegacySheetNames(ss);
-  const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
-  const registrantsSheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
+  const registrySheet = sync.registrySheet;
+  const registrantsSheet = sync.registrantsSheet;
 
-  const lastSync = getLastSyncTime();
-  const syncStartedAt = new Date();
+  const lastSync = new Date(plan.lastSync);
   const orderAheadDays = getOrderAheadDays();
 
   // One read of each tab up front; both registry-derived structures below
   // are built from the same rows rather than scanning the sheet twice.
-  const sessionRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
+  const sessionRows = sync.sessionRows();
   const registryIndex = buildRegistryIndex(registrySheet);
   const existingRows = getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
   const protectedKeys = getProtectedRegistrantKeys(existingRows);
@@ -87,51 +71,30 @@ function syncRegistrationsInternal() {
   // start from the truth rather than from zero — see seedRegistryOccupancy().
   seedRegistryOccupancy(registryIndex, existingRows);
 
-  const formIds = getDistinctFormIds(registrySheet);
+  // THE WORK LIST IS THE PLAN'S, not this execution's. A first slice writes it
+  // down; a resume slice reads what is left of it. Recomputing it here would
+  // be reading a session table that the previous slice's own writes have
+  // already changed, which is how a form gets read twice and another not at
+  // all.
+  if (!plan.pendingFormIds) {
+    plan.pendingFormIds = getDistinctFormIds(registrySheet);
+    plan.formsRead = 0;
+  }
+
   const newRows = [];
-  // Club joins are gathered across every response and written to the roster
-  // ONCE, below — a tab rewrite per submission would be both slow and, on a
-  // busy sync, a lot of re-reads of a tab we are in the middle of changing.
   // Two things gathered across every response and written ONCE, below: club
   // joins, and the appointment requests nobody could book a time for (see
   // ASSISTANCE_NO_TIME_CHOICE). A tab rewrite per submission would be both
   // slow and, on a busy sync, a lot of re-reads of a tab being changed.
   const collectors = { clubJoins: [], assistanceRequests: [] };
 
-  // ONE STEP FAILING IS NOT THE RUN FAILING.
-  //
-  // Everything below this line is a step that can be skipped without making
-  // the others wrong: a dashboard render, a memory-tab refresh, a form's
-  // labels. They were unguarded, so a single throw — and the throw this was
-  // written for is a PERMISSION error, from a second account meeting a
-  // protected range or a file it does not own — ended the whole sync: every
-  // tab downstream of the failure was left as it was, the admin digest never
-  // went out, and the log said one line about one call.
-  //
-  // The one step that is NOT in this category is the write of the Registrants
-  // tab. It is still guarded, but its failure stops the sync clock — see
-  // `registrantsWritten` below.
-  //
-  // Each step now says what it could not do, in words that name the fix when
-  // the answer is "this account cannot touch that", and the run carries on.
-  const stepProblems = [];
-  const step = (label, fn) => {
-    try {
-      return fn();
-    } catch (err) {
-      stepProblems.push(label);
-      log(`⚠️ Registration sync: ${label} failed (${err}) — carrying on with the rest of the run.`);
-      noteForAdmin('Parts of the sync that could not run',
-        `${label} — ${err}.` + (isPermissionError(err)
-          ? ` That is a permissions failure, not a fault in the data: this account is not allowed to ` +
-            `change what it just tried to. Run the sync as the account that owns the workbook, or use ` +
-            `🔧 Admin ▸ 🔓 Open Up Form Sharing for a form it cannot reach.`
-          : ''));
-      return undefined;
-    }
-  };
-
-  formIds.forEach(formId => {
+  let formsThisSlice = 0;
+  while (plan.pendingFormIds.length > 0) {
+    // CHECKED BETWEEN FORMS, never inside one: a response half-imported is a
+    // registrant row half-built, and there is no state that could resume from
+    // the middle of one. A form is the smallest unit this can stop on.
+    if (sync.outOfTime() && formsThisSlice > 0) break;
+    const formId = plan.pendingFormIds[0];
     // THE WHOLE FORM IS INSIDE THE GUARD, not just the open.
     //
     // It used to be only FormApp.openById(), on the reasoning that opening is
@@ -146,13 +109,14 @@ function syncRegistrationsInternal() {
     try {
       const form = openFormCached(formId);
       const responses = form.getResponses(lastSync);
-      if (responses.length === 0) return; // don't pay for an item index on a form with nothing new
-      const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
-      responses.forEach(response => {
-        const rowsForResponse = processFormResponse(formIndex, response, registryIndex, protectedKeys,
-          existingRowIndex, orderAheadDays, collectors);
-        newRows.push(...rowsForResponse.filter(Boolean));
-      });
+      if (responses.length > 0) {
+        const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
+        responses.forEach(response => {
+          const rowsForResponse = processFormResponse(formIndex, response, registryIndex, protectedKeys,
+            existingRowIndex, orderAheadDays, collectors);
+          newRows.push(...rowsForResponse.filter(Boolean));
+        });
+      }
     } catch (err) {
       log(`⚠️ Could not read form ${formId}: ${err}`);
       // A PERMISSION FAILURE IS REPAIRABLE, and the repair is worth trying
@@ -174,14 +138,22 @@ function syncRegistrationsInternal() {
         noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);
       }
     }
-  });
+    // OFF THE LIST WHETHER IT WAS READ OR REFUSED. A form this account cannot
+    // open will refuse the next slice too, and leaving it at the head of the
+    // list would be a window that can never close.
+    plan.pendingFormIds.shift();
+    plan.formsRead = (plan.formsRead || 0) + 1;
+    formsThisSlice++;
+  }
+
+  const allFormsRead = plan.pendingFormIds.length === 0;
 
   flushPersistentRegistries(); // one write for every all-dates entry recorded above
 
   // The roster is updated BEFORE the catch-up below reads it, so somebody who
   // joined a club in this very sync is booked into its sessions on the same
   // run rather than waiting an hour for the next one.
-  step('updating the club roster', () => upsertClubMembers(collectors.clubJoins));
+  sync.step('updating the club roster', () => upsertClubMembers(collectors.clubJoins));
 
   // Guarded on its own: somebody asking for an appointment we cannot offer is
   // worth recording, and is never worth failing an import over.
@@ -196,28 +168,37 @@ function syncRegistrationsInternal() {
 
   // Deliberately AFTER the import loop above: bringing a form built on an
   // older template up to date replaces its questions, and a response that
-  // hadn't been imported yet would lose its answers with them.
+  // hadn't been imported yet would lose its answers with them. WHICH IS ALSO
+  // WHY THIS WAITS FOR EVERY FORM TO HAVE BEEN READ: a slice that ran out of
+  // budget with forms still pending is holding un-imported responses on those
+  // very forms, and rewriting one now is the way to lose them for good.
+  //
   // FIRST THE REPAIRS, THEN THE REBUILDS. A form whose only problem is one a
   // migration can write in place is fixed here and stamped current, so the
   // rebuild pass below skips it entirely — and the five rebuilds an execution
   // can afford are left for the forms that genuinely need one. Ordering it the
   // other way round would rebuild a form this could have fixed with four
   // writes. See 68_form_state_migrations.gs for the standing rule.
-  step('repairing forms in place', () =>
-    runFormStateMigrations(registrySheet, sessionRows));
+  //
+  // Both take this slice's deadline: they open forms one at a time and defer
+  // the rest, which is exactly what a budget is for.
+  if (allFormsRead) {
+    sync.step('repairing forms in place', () =>
+      runFormStateMigrations(registrySheet, sessionRows, { deadline: sync.deadline }));
 
-  step('bringing forms onto the current template', () =>
-    migrateFormsToCurrentTemplate(registrySheet, sessionRows));
+    sync.step('bringing forms onto the current template', () =>
+      migrateFormsToCurrentTemplate(registrySheet, sessionRows, { deadline: sync.deadline }));
+  }
 
   // Catch up "sign up for all dates" registrants on Grouped-series forms
   // whose date list has grown since they originally registered.
-  step('catching up "every date" registrants', () =>
+  sync.step('catching up "every date" registrants', () =>
     applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
   // ...and club members onto every upcoming session of their club, whichever
   // form now covers it. This is the step that makes a membership outlive the
   // form it was created on — see applyClubRosterCatchup().
-  step('catching up club members', () =>
+  sync.step('catching up club members', () =>
     applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
   // BEFORE the tab is rewritten, not after: the leaders' shared sheets hold
@@ -249,129 +230,36 @@ function syncRegistrationsInternal() {
   // the phone number and email the workbook already knows, not the blanks a
   // club catch-up or a door sign-in left. Fills blanks only; see
   // applyMemberRollContacts().
-  step('filling in known contact details', () => applyMemberRollContacts(combinedRegistrantRows));
+  sync.step('filling in known contact details', () => applyMemberRollContacts(combinedRegistrantRows));
   // THE ONE STEP WHOSE FAILURE STOPS THE CLOCK. Everything else here can be
   // skipped and picked up next hour; this is the write that puts the imported
   // registrations on the sheet, and if it does not land, advancing
   // LAST_FORM_SYNC_TIME would mean those responses are never read again.
-  const registrantsWritten = step('writing the Registrants tab',
+  const registrantsWritten = sync.step('writing the Registrants tab',
     () => { renderRegistrantsSheet(false, combinedRegistrantRows); return true; }) === true;
+  if (registrantsWritten) sync.setRegistrantRows(combinedRegistrantRows);
 
-  // combinedRegistrantRows IS what was just written to the Registrants tab,
-  // so every consumer below can work from it instead of re-reading — except
-  // where renderProgramDashboard()'s triage pass rewrites the tab, which it
-  // reports back via registrantsMoved.
-  step('recounting registrations against capacity', () =>
-    recomputeEventRegistryCounts(registrySheet, registrantsSheet, combinedRegistrantRows));
-  step("refreshing the forms' dates and lunch questions", () =>
-    refreshFormShapeForAllForms(registrySheet));
-  // The appointment half of the same idea: capacity labels tell a date-based
-  // form which dates are full, and this tells an appointment form which TIMES
-  // are gone. Both run here, on fresh counts, for the same reason — a form
-  // still offering a slot somebody took an hour ago is how two people end up
-  // in one chair.
-  step('refreshing the appointment times on forms', () =>
-    refreshAppointmentSlotsForAllForms(registrySheet, sessionRows, combinedRegistrantRows));
+  plan.importedRows = (plan.importedRows || 0) + newRows.length;
+  plan.problems = (plan.problems || []).concat(sync.problems.splice(0));
 
-  // A dashboard render that did not happen has moved nothing, so the rows read
-  // at the top are still the rows on the tab — which is exactly what
-  // `registrantsMoved: false` means to everything below.
-  const dashboardResult = step('rebuilding the program dashboard', () =>
-    renderProgramDashboard(false, { registrantRows: combinedRegistrantRows })) || { registrantsMoved: false };
-  const reusableRows = dashboardResult.registrantsMoved ? null : combinedRegistrantRows;
-  step('rebuilding the lunch dashboard', () => updateMasterLunchDashboard(reusableRows));
-  step('refreshing the memory tabs', () => refreshMemoryTabs(reusableRows, null));
-  step('rebuilding the club roster tab', () =>
-    renderClubMembersSheet(refreshClubMemberLabels(sessionRows)));
-
-  // The other half of the registrant sheet round trip, and the reason this
-  // feature needs NO TRIGGER OF ITS OWN: the rosters go back out on the same
-  // hourly pass that just imported into them. Reaches outside the workbook, so
-  // it sits down here with the invitations and carries its own guard.
-  const settledRegistrantRows = reusableRows ||
-    getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID');
-  // BEFORE THE PUSH, both of them, so a sheet born on this run is filled from
-  // the settled picture the same run rather than sitting empty for an hour.
-  //
-  // Two reasons a program gets a sheet, and they are deliberately separate.
-  // The horizon pass builds one for EVERY program a week before its next
-  // session (ensureRegistrantSheetsForUpcomingPrograms), which is the ordinary
-  // case. The leader pass builds one for a program whose leader has just
-  // ticked Notify_Roster_Changes whether or not it is running this week —
-  // somebody who asked to hear about a roster should have somewhere to look at
-  // it now, not in five weeks. Either may find the other already did it: both
-  // skip a program already in the registry.
-  try {
-    ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows);
-  } catch (err) {
-    log(`⚠️ Could not auto-create the upcoming programs' registrant sheets this run (${err}).`);
-  }
-  try {
-    ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows);
-  } catch (err) {
-    log(`⚠️ Could not auto-create registrant sheets for the notifying leaders this run (${err}).`);
-  }
-  try {
-    pushProgramLeaderSheets(sessionRows, settledRegistrantRows);
-  } catch (err) {
-    log(`⚠️ Could not refresh the program registrant sheets this run (${err}).`);
-  }
-
-  // AFTER the push, deliberately. The alert email links to the shared sheet
-  // and tells a leader what moved on it, and a leader who follows that link
-  // within the minute should find the sheet already saying the same thing.
-  // Sending first would put "Mary Ray is no longer on the roster" in an inbox
-  // beside a sheet that still lists her.
-  //
-  // Sends nothing at all when nothing changed — see section 9d.
-  try {
-    notifyProgramLeadersOfRosterChanges(sessionRows, settledRegistrantRows);
-  } catch (err) {
-    log(`⚠️ Could not send the roster-change alerts this run (${err}) — the registrations themselves are fine.`);
-  }
-
-  // THE OTHER Notify_Timing CHANNEL, right after the diff pass and for the
-  // same reason it sits after the push above — see LEADER_DIGEST_QUOTA_RESERVE
-  // for why the order of these three mail passes (alerts, digests, reminders)
-  // is load-bearing against the shared daily quota.
-  try {
-    sendProgramLeaderDaySnapshotDigests(sessionRows, settledRegistrantRows);
-  } catch (err) {
-    log(`⚠️ Could not send the roster digests this run (${err}) — the registrations themselves are fine.`);
-  }
-
-  // LAST, on purpose: this is the only step that reaches outside the workbook
-  // to other people, and it should act on the settled picture rather than on
-  // rows a later step might still cancel or supersede. Guarded by its own
-  // Config switch and a no-op when nothing changed — see section 5b.
-  try {
-    inviteRegistrantsToCalendarEvents(sessionRows, reusableRows);
-  } catch (err) {
-    log(`⚠️ Could not send calendar invitations this run (${err}) — the registrations themselves are fine.`);
-  }
-
-  // The other half of the same question, and after the invitations because an
-  // appointment's confirmation should not reach somebody before the calendar
-  // entry it is about. Per-program, ledgered, and a no-op for every program
-  // still on the default — see section 9e.
-  try {
-    sendRegistrantReminders(sessionRows, reusableRows);
-  } catch (err) {
-    log(`⚠️ Could not send registrant reminders this run (${err}) — the registrations themselves are fine.`);
-  }
-
-  flushPersistentRegistries();
-  // NOT ADVANCED WHEN THE ROWS DID NOT LAND: the next run re-reads the same
-  // responses and writes them again, which is the whole point of a sync clock.
-  if (registrantsWritten) setLastSyncTime(syncStartedAt);
-  flushAdminDigest('Registration sync'); // no-op unless something above actually needed attention
-  if (stepProblems.length === 0) {
-    toastIfPossible(`Registration sync complete ✅ — ${newRows.length} new row(s), ` +
-      `${combinedRegistrantRows.length} registrant row(s) total.`);
+  // THE CLOCK MOVES ONLY WHEN THE WHOLE WINDOW IS IN. Not when some of the
+  // forms were read, and not when the write did not land: either way the next
+  // run has to read the same responses again, which is the whole point of a
+  // sync clock.
+  if (allFormsRead && registrantsWritten) {
+    setLastSyncTime(new Date(plan.windowOpenedAt));
+    plan.importDone = true;
+  } else if (!allFormsRead) {
+    log(`Registration sync: ${plan.formsRead} form(s) read, ${plan.pendingFormIds.length} to go — ` +
+      `handing the rest to a follow-up run. The sync clock stays where it was.`);
   } else {
-    toastIfPossible(`Registration sync finished with problems ⚠️ — ${newRows.length} new row(s) imported, ` +
-      `but ${stepProblems.length} step(s) could not run: ${stepProblems.join('; ')}. See the log.`);
+    // The rows did not land. There is nothing a follow-up run can do about
+    // that which the next hourly one will not, so the window closes here and
+    // the clock stays put.
+    plan.importDone = true;
   }
+
+  return formsThisSlice + 1;
 }
 
 // sessionRows dropped: getSectionedRows() below is now the per-execution cache

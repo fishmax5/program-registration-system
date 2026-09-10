@@ -116,6 +116,7 @@ function styleConfigSheet(sheet) {
   seedMembershipFormRow(sheet);
   seedOutboundMailRow(sheet);
   seedSeriesDetectionRow(sheet);
+  seedSyncBudgetRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -178,6 +179,64 @@ function seedSeriesDetectionRow(sheet) {
     + 'Set it to 0 to turn the recognition off and tag series by hand.\n\n'
     + 'A [Grouped] or [Regular] typed into an event description always wins over this.');
   log(`Seeded ${CONFIG_LAYOUT.SERIES_DETECTION.title} (${DEFAULT_GROUP_SERIES_UP_TO}) on "${SHEET_NAMES.CONFIG}".`);
+}
+
+/**
+ * HOW LONG ONE SLICE OF A SYNC MAY WORK FOR, in minutes.
+ *
+ * Apps Script kills an execution at a fixed ceiling with no warning, no
+ * exception and no `finally` — six minutes on a consumer account, thirty on
+ * Google Workspace — and this workbook cannot ask which one it is running
+ * under. So it is stated here, and the registration sync stops a few minutes
+ * short of it and hands the rest to a follow-up trigger
+ * (98_registration_sync_slices.gs) instead of being cut off mid-write.
+ *
+ * The default leaves five minutes of headroom under the thirty-minute ceiling.
+ * A workbook on a consumer account should say 4.
+ */
+function seedSyncBudgetRow(sheet) {
+  const section = CONFIG_LAYOUT.SYNC_BUDGET;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (cell.getValue() !== '') return;
+  cell.setValue(DEFAULT_SYNC_BUDGET_MINUTES);
+  cell.setNote(
+    'How long one run of the registration sync may work before it stops cleanly and hands the rest to a '
+    + 'follow-up run a minute later. Nothing is skipped — the follow-up picks up exactly where this one '
+    + 'stopped, and keeps going until the whole sync is done.\n\n'
+    + 'Set it a few minutes BELOW whatever Google allows this account per run: 30 minutes on a Google '
+    + 'Workspace account (so 25 here, the default), 6 minutes on an ordinary gmail.com one (so 4).\n\n'
+    + 'Too high and a run is killed part-way instead of stopping tidily. Too low and an ordinary sync is '
+    + 'split across more runs than it needs.');
+  log(`Seeded ${CONFIG_LAYOUT.SYNC_BUDGET.title} (${DEFAULT_SYNC_BUDGET_MINUTES} minutes) on "${SHEET_NAMES.CONFIG}".`);
+}
+
+/**
+ * The Config cell above as milliseconds, memoized for the execution.
+ *
+ * Falls back to DEFAULT_SYNC_BUDGET_MINUTES whenever the cell is blank, is not
+ * a number, or is outside the range a budget can sensibly take — a zero or a
+ * negative would mean "stop before starting", and an hour is past every
+ * ceiling Apps Script has.
+ */
+function getSyncSliceBudgetMs() {
+  if (__syncBudgetMinutesCache !== null) return __syncBudgetMinutesCache * 60 * 1000;
+  let minutes = DEFAULT_SYNC_BUDGET_MINUTES;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      const val = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.SYNC_BUDGET.startCol).getValue();
+      const num = Number(val);
+      if (val !== '' && val !== null && !isNaN(num) &&
+          num >= MIN_SYNC_BUDGET_MINUTES && num <= MAX_SYNC_BUDGET_MINUTES) {
+        minutes = num;
+      }
+    }
+  } catch (err) {
+    // No spreadsheet, or no authorization to read one. The default is the answer.
+  }
+  __syncBudgetMinutesCache = minutes;
+  return minutes * 60 * 1000;
 }
 
 function seedOrderAheadRow(sheet) {

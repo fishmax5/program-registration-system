@@ -77,6 +77,12 @@ const CONFIG_LAYOUT = {
     title: '🔁 Recognize Short Series',
     startCol: 36,
     headers: ['Group_Series_Up_To']
+  },
+  // Fresh columns once more, same rule as the three blocks above.
+  SYNC_BUDGET: {
+    title: '⏱️ How Long a Sync May Run',
+    startCol: 38,
+    headers: ['Sync_Minutes_Per_Run']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -84,7 +90,7 @@ const CONFIG_LAYOUT = {
 // until the migration cleared them (RETIRED_ADMIN_NOTIFICATION_COL /
 // RETIRED_ARCHIVE_COPY_COL), and naming them here would invite somebody to
 // close the gap by moving a live section into one.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26, 33, 35];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26, 33, 35, 37];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the

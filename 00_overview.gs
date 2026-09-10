@@ -414,6 +414,20 @@
  *      puts rows back if a sweep did fire wrongly — necessary because the
  *      import only reads responses newer than the last sync, so a triaged
  *      registrant exists nowhere else.
+ *    - AND SO IS THE HOURLY REGISTRATION SYNC, for the same reason.
+ *      syncRegistrations() opens every form, repairs the ones whose shape has
+ *      drifted, writes the Registrants tab, rebuilds four dashboards and the
+ *      memory tabs, pushes a shared roster per program and then emails the
+ *      leaders, invites the registrants and sends the reminders. On a centre
+ *      with a hundred forms that is more than Apps Script allows one
+ *      execution, and the kill is silent: everything downstream of it simply
+ *      did not happen, hourly, for ever. So it works to a budget (Config ->
+ *      "How Long a Sync May Run", a few minutes short of whatever ceiling the
+ *      account has) and hands the rest to a follow-up trigger a minute later.
+ *      The sync clock moves to the moment the WINDOW opened and only once
+ *      every form in it has been read, so a slice that stopped part-way
+ *      leaves those responses readable by the next one. See
+ *      98_registration_sync_slices.gs.
  *    - THE FIRST IMPORT IS A SLICED JOB, NOT A SYNC. syncCalendars() is cheap
  *      only because it normally has nothing to do. Importing a real calendar
  *      from scratch — a form per program, a description write per event —
@@ -588,6 +602,14 @@
  *        dashboard render, and the lunch rollup. renderProgramDashboard()
  *        reports registrantsMoved back so a caller knows when its copy went
  *        stale under a triage sweep.
+ *      - A TAB IS WRITTEN IN PLANES, not a column at a time. A render's cost
+ *        was never its rows — on the Registrants tab at a year of
+ *        registrations it was four round trips of rows against nearly five
+ *        hundred of formatting, applied per column per zone. withRenderBatch()
+ *        (97_render_batching.gs) stages a band's backgrounds, validations,
+ *        number formats and alignments and writes one call per plane, and the
+ *        warning protections are skipped when the geometry has not moved.
+ *        tools/render_bench.js is the measurement.
  *    Bulk sheet WRITES were already batched (one setValues/setBackgrounds/
  *    setFormulas per block, never a per-cell loop) — keep it that way.
  *
