@@ -341,17 +341,17 @@ function applyBoundedColumnFormat(sheet, colIndex, startRow, numRows, spec) {
   if (!colIndex || colIndex < 1 || numRows < 1) return;
   spec = spec || {};
   const has = key => Object.prototype.hasOwnProperty.call(spec, key);
-  // ALL OR NOTHING, for the same reason applyMonthColorTint() asks the
-  // stricter plane first: a column half-staged and half-written is a column
-  // written twice.
-  const stageable = (!has('validation') || renderBandFor_(sheet, startRow, numRows)) &&
-    (!has('numberFormat') || renderBandFor_(sheet, startRow, numRows));
-  if (stageable && renderBandFor_(sheet, startRow, numRows)) {
-    let ok = true;
-    if (has('validation')) ok = stageRenderValidation(sheet, startRow, colIndex, numRows, spec.validation) && ok;
-    if (has('alignment')) ok = stageRenderAlignment(sheet, startRow, colIndex, numRows, spec.alignment) && ok;
-    if (has('numberFormat')) ok = stageRenderNumberFormat(sheet, startRow, colIndex, numRows, spec.numberFormat) && ok;
-    if (ok) return;
+  // ALL OR NOTHING. All three planes want the WHOLE band — a column staged for
+  // part of one would be overwritten when the plane is written whole — so the
+  // decision is made once, up front, rather than per attribute: a column half
+  // staged and half written directly is a column written twice.
+  const band = renderBandFor_(sheet, startRow, numRows);
+  if (band && startRow === band.start && numRows === band.count &&
+      colIndex >= 1 && colIndex <= band.numCols) {
+    if (has('validation')) stageRenderValidation(sheet, startRow, colIndex, numRows, spec.validation);
+    if (has('alignment')) stageRenderAlignment(sheet, startRow, colIndex, numRows, spec.alignment);
+    if (has('numberFormat')) stageRenderNumberFormat(sheet, startRow, colIndex, numRows, spec.numberFormat);
+    return;
   }
   const range = sheet.getRange(startRow, colIndex, numRows, 1);
   if (has('validation')) range.setDataValidation(spec.validation);
@@ -402,4 +402,13 @@ function flushRenderBatch_(scope) {
         `of "${sheet.getName()}" in one pass (${err}).`);
     }
   });
+
+  // THE HEADER ROWS ONLY REACHED THE TAB JUST NOW, and every sectioned read
+  // finds its sub-tables by them. writeSectionHeader() drops this tab's cached
+  // grid when it STAGES, which is the right moment for everything it was
+  // guarding against — except a read that happens between the staging and this
+  // flush, which would cache a picture of the tab with no header rows in it
+  // and go on serving it afterwards. So it is dropped again here, where the
+  // words are actually on the sheet.
+  invalidateSectionedRowsCache(sheet);
 }

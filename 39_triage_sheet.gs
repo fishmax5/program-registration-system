@@ -311,9 +311,19 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
     });
   });
 
-  // Remembered only once the tab actually holds what the fingerprint claims —
-  // a protection that could not be created must not be recorded as present, or
-  // the next render would skip the rebuild that would have made it.
+  // REMEMBERED ONLY IF THE TAB ACTUALLY HOLDS THE WHOLE SET. A protection this
+  // account was not allowed to create is one the next render has to try again
+  // — and recording the count it DID manage would make that render skip, since
+  // the count it read back would match. So a partial build is not written
+  // down at all, and the tab is rebuilt from scratch next time.
+  const wanted = cols.length * (zones || []).filter(z => z && z.count > 0).length;
+  if (made < wanted) {
+    log(`ℹ️ Only ${made} of ${wanted} warning protection(s) could be set on "${sheet.getName()}" — ` +
+      `the next render will try the rest again.`);
+    delete state[sheet.getName()];
+    writeDerivedProtectionState_(state);
+    return;
+  }
   state[sheet.getName()] = `${fingerprint}|${kept + made}`;
   writeDerivedProtectionState_(state);
 }
