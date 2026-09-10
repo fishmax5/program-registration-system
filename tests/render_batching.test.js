@@ -116,6 +116,7 @@ this.declareRenderBand = declareRenderBand;
 this.stageRenderValidation = stageRenderValidation;
 this.stageRenderColumnBackground = stageRenderColumnBackground;
 this.applyValueListValidationBounded = applyValueListValidationBounded;
+this.applyZebraStripingManualBounded = applyZebraStripingManualBounded;
 this.applyBoundedColumnFormat = applyBoundedColumnFormat;
 this.protectDerivedColumns = protectDerivedColumns;
 `, sandbox, { filename: 'program.gs' });
@@ -317,6 +318,18 @@ const callsNamed = (sheet, name) => sheet.calls.filter(c => c.name === name);
   });
   assert.strictEqual(callsNamed(sheet, 'setDataValidation').length, 1,
     'a range outside every declared band is written directly');
+
+  // ...and a NARROWER block inside one, which is what the hero "Today" strip on
+  // the two dashboards is: four columns wide where the scope is the table's
+  // twenty. Staging it would stripe four columns and leave sixteen unwritten.
+  sheet.calls.length = 0;
+  sandbox.withRenderBatch(sheet, 10, () => {
+    sandbox.declareRenderBand(sheet, 5, 4);
+    sandbox.applyZebraStripingManualBounded(sheet, 5, 4, 3);   // narrower than the scope
+  });
+  const narrow = callsNamed(sheet, 'setBackgrounds').filter(c => c.cols === 3);
+  assert.strictEqual(narrow.length, 1,
+    'a block narrower than the scope is striped directly, not staged into the band');
 }
 
 // ---------------------------------------------------------------------------
