@@ -209,7 +209,7 @@ function applyRegistrantsFormatting(sheet, headers, result) {
 const PROTECTION_TAG = 'Auto-managed by Calendar & Form Manager';
 
 /**
- * What the last rebuild left on each tab: `{ "<tab>": "<fingerprint>|<count>" }`.
+ * What the last rebuild left on each tab: `{ "<tab key>": "<fingerprint>|<count>" }`.
  *
  * THE MOST EXPENSIVE THING A RENDER DOES was rebuilding these. Thirteen derived
  * columns across two zones is twenty-six protections, each of them three calls
@@ -227,7 +227,27 @@ const PROTECTION_TAG = 'Auto-managed by Calendar & Form Manager';
  * protection by hand (or adding one) changes it, and the next render rebuilds
  * from scratch. Reading the DESCRIPTIONS instead would be a call per
  * protection, which is the cost this exists to avoid.
+ *
+ * THE KEY IS THE FILE AND THE TAB, NOT THE TAB'S NAME. protectDerivedColumns()
+ * is called on the program registrant sheets too (46), and every one of those
+ * is a tab called "Sign_Up_Sheet" in a DIFFERENT spreadsheet — forty files
+ * whose tabs all answer getName() identically. One shared entry between them
+ * cannot make a render skip work it needed (the count is read back off the
+ * sheet in front of it, so a tab that is not protected is never mistaken for
+ * one that is) — but each push would overwrite the last one's line, every
+ * sheet would mismatch, and the skip this exists for would never once fire on
+ * the forty sheets it matters most for. So the key is something two tabs
+ * cannot share.
  */
+function derivedProtectionKeyFor_(sheet) {
+  try {
+    return `${sheet.getParent().getId()}::${sheet.getSheetId()}`;
+  } catch (err) {
+    // A stub, or a sheet whose parent cannot be reached. The name is a worse
+    // key, but a worse key here only costs a rebuild that was not needed.
+    return `name::${sheet.getName()}`;
+  }
+}
 const DERIVED_PROTECTION_STATE_PROP_KEY = 'DERIVED_COLUMN_PROTECTIONS_V1';
 
 function readDerivedProtectionState_() {
@@ -241,10 +261,27 @@ function readDerivedProtectionState_() {
   }
 }
 
-function writeDerivedProtectionState_(state) {
+/**
+ * A Script Property value is capped at 9KB, and this one grows by a line per
+ * tab this workbook protects — its own dozen, plus one per program registrant
+ * sheet, of which there is one per program. Rather than let a write fail (and
+ * with it every later skip), a map that has grown past the cap is thrown away
+ * and started again from what is being written now. The cost of that is a few
+ * renders rebuilding protections they need not have; the cost of the write
+ * failing silently is every render doing so, for ever.
+ */
+const DERIVED_PROTECTION_STATE_MAX_CHARS = 8000;
+
+function writeDerivedProtectionState_(state, currentKey) {
   try {
-    PropertiesService.getScriptProperties()
-      .setProperty(DERIVED_PROTECTION_STATE_PROP_KEY, JSON.stringify(state));
+    let json = JSON.stringify(state);
+    if (json.length > DERIVED_PROTECTION_STATE_MAX_CHARS) {
+      const trimmed = {};
+      if (currentKey && state[currentKey] !== undefined) trimmed[currentKey] = state[currentKey];
+      json = JSON.stringify(trimmed);
+      log(`ℹ️ The remembered protection layouts outgrew what a Script Property holds — starting the list again.`);
+    }
+    PropertiesService.getScriptProperties().setProperty(DERIVED_PROTECTION_STATE_PROP_KEY, json);
   } catch (err) {
     log(`ℹ️ Could not remember this tab's protection layout (${err}) — it will be rebuilt next render.`);
   }
@@ -262,8 +299,9 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
   // NOTHING MOVED, NOTHING TO DO — see DERIVED_PROTECTION_STATE_PROP_KEY.
   const cols = (protectedNames || []).filter(name => map[name] !== undefined).map(name => map[name] + 1);
   const fingerprint = derivedProtectionFingerprint_(cols, zones);
+  const stateKey = derivedProtectionKeyFor_(sheet);
   const state = readDerivedProtectionState_();
-  const remembered = state[sheet.getName()];
+  const remembered = state[stateKey];
   let existing;
   try {
     existing = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
@@ -320,12 +358,12 @@ function protectDerivedColumns(sheet, headers, protectedNames, zones) {
   if (made < wanted) {
     log(`ℹ️ Only ${made} of ${wanted} warning protection(s) could be set on "${sheet.getName()}" — ` +
       `the next render will try the rest again.`);
-    delete state[sheet.getName()];
-    writeDerivedProtectionState_(state);
+    delete state[stateKey];
+    writeDerivedProtectionState_(state, stateKey);
     return;
   }
-  state[sheet.getName()] = `${fingerprint}|${kept + made}`;
-  writeDerivedProtectionState_(state);
+  state[stateKey] = `${fingerprint}|${kept + made}`;
+  writeDerivedProtectionState_(state, stateKey);
 }
 
 /**

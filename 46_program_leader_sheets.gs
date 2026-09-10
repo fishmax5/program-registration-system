@@ -338,7 +338,9 @@ function pullProgramLeaderSheetEdits(registrantRows) {
     if (!entry.fileId) return;
     let rows;
     try {
-      const file = SpreadsheetApp.openById(entry.fileId);
+      // The push at the end of the same sync opens this file too — see
+      // openSpreadsheetCached() for why that was two loads of one document.
+      const file = openSpreadsheetCached(entry.fileId);
       const tab = file.getSheetByName(LEADER_SHEET_TAB_NAME);
       if (!tab) {
         log(`ℹ️ Program registrant sheet for "${entry.title}" has no "${LEADER_SHEET_TAB_NAME}" tab — nothing to read back.`);
@@ -429,20 +431,67 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
  * conjured a spreadsheet per program would produce sixty files nobody asked
  * for and share none of them.
  */
-function pushProgramLeaderSheets(sessionRows, registrantRows) {
+/**
+ * Bumped when the SHAPE this file draws changes — a new column, a different
+ * band, a reworded banner note. Without it, a change to the drawing would
+ * reach only the sheets whose rosters happened to move afterwards.
+ */
+const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v1';
+
+/**
+ * WHAT THIS SHEET WOULD BE WRITTEN WITH, as one short string.
+ *
+ * Fingerprinted like the form date labels (10) and the appointment times (55),
+ * and for the same reason: this pass runs hourly on every registered sheet
+ * whether or not anything on it has moved, and rewriting one is the better part
+ * of two hundred round trips against somebody else's spreadsheet. The rows ARE
+ * the answer, so hashing them decides the question without writing anything.
+ *
+ * The heading is in it because the banner is drawn from the entry, so a program
+ * renamed or moved is a sheet that has to be redrawn. The refresh STAMP is not:
+ * it changes every hour by definition, and a fingerprint that never matches is
+ * not a fingerprint.
+ *
+ * LIKE EVERY FINGERPRINT HERE, it tracks what this script WRITES. A sheet a
+ * leader has mangled is not noticed until its rows legitimately change — the
+ * escape hatch is the menu item, which passes { force: true }.
+ */
+function computeLeaderSheetFingerprint(entry, rows) {
+  return computeFormLabelFingerprint(rows || [],
+    [String((entry && entry.title) || ''), String((entry && entry.location) || '')],
+    LEADER_SHEET_TEMPLATE_KEY);
+}
+
+function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
+  const force = !!(options && options.force);
   const registry = getProgramLeaderSheetRegistry();
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0) return 0;
 
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
   let pushed = 0;
+  let unchanged = 0;
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
     try {
-      const file = SpreadsheetApp.openById(entry.fileId);
+      const rows = byProgram[programKey] || [];
+      const fingerprint = computeLeaderSheetFingerprint(entry, rows);
+      // The file is opened either way: the pull at the head of this sync
+      // already paid for it (openSpreadsheetCached), and the banner's "Refreshed
+      // …" line has to stay true even on an hour when nothing moved.
+      const file = openSpreadsheetCached(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-      writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
+      if (!force && entry.pushedFingerprint === fingerprint && entry.accessOpened) {
+        stampLeaderSheetRefreshed(tab);
+        unchanged++;
+        return;
+      }
+      writeProgramLeaderSheetTab(tab, entry, rows);
+      if (entry.pushedFingerprint !== fingerprint) {
+        saveProgramLeaderSheetRegistryEntry(programKey,
+          Object.assign({}, entry, { pushedFingerprint: fingerprint }));
+      }
       pushed++;
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
       // ensureProgramLeaderSheetAccess() existed was shared with its creator and
@@ -453,7 +502,11 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
       if (!entry.accessOpened) {
         const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${entry.title}"`);
         if (access.openedUp || access.editors.length > 0) {
-          saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, { accessOpened: true }));
+          // Merged onto whatever the fingerprint write above left, not onto the
+          // copy this loop started with — two Object.assign()s from the same
+          // stale `entry` would each drop the other's field.
+          saveProgramLeaderSheetRegistryEntry(programKey,
+            Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
         }
       }
     } catch (err) {
@@ -466,8 +519,28 @@ function pushProgramLeaderSheets(sessionRows, registrantRows) {
         describeLeaderSheetAccessFailure(entry, programKey, err));
     }
   });
-  if (pushed > 0) log(`Program registrant sheets: refreshed ${pushed} shared sheet(s).`);
+  if (pushed > 0 || unchanged > 0) {
+    log(`Program registrant sheets: rewrote ${pushed} shared sheet(s)` +
+      (unchanged > 0 ? `, left ${unchanged} unchanged.` : '.'));
+  }
   return pushed;
+}
+
+/**
+ * The one cell a sheet nobody's roster moved still gets: the banner's note,
+ * which says when this was last looked at.
+ *
+ * A leader opens the sheet to find out whether the list in front of them is
+ * current, and "Refreshed three days ago" on a list that is right today is the
+ * wrong answer to the only question they asked. One call, against the two
+ * hundred a full redraw costs.
+ */
+function stampLeaderSheetRefreshed(sheet) {
+  try {
+    sheet.getRange(MEMORY_TAB_BANNER_ROW, 1).setNote(leaderSheetBannerNote());
+  } catch (err) {
+    log(`ℹ️ Could not restamp the refresh time on a program registrant sheet (${err}).`);
+  }
 }
 
 /**
@@ -640,6 +713,37 @@ function leaderSheetSessionBandLabel(group) {
  * them. That was slow enough on a real roster to push the hourly sync toward
  * its execution limit, which is a strange way to lose a registration import.
  */
+/**
+ * The banner note, and everything a program leader is told by it.
+ *
+ * ITS OWN FUNCTION because it is now written from two places: the full redraw
+ * below, and stampLeaderSheetRefreshed(), which is all a sheet gets on an hour
+ * when nobody's roster moved. Both have to say the same thing, and the one
+ * thing that differs between one hour and the next is the time at the top of
+ * it — which is exactly why the stamp is not in the fingerprint.
+ */
+function leaderSheetBannerNote() {
+  const stamp = Utilities.formatDate(new Date(),
+    Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
+  return `Refreshed ${stamp}.\n\nEach class has its own blue band. Tick the yellow columns; ` +
+    `everything else fills in by itself.\n\n` +
+    // SAID OUT LOUD, because it is the one tick with a consequence outside
+    // this sheet. A leader who thinks Dropped is a private note will use it
+    // to mean "chase this person"; a leader who is told what it does will
+    // use it to free a seat, which is what it now actually does. See
+    // applyLeaderDropsAsCancellations().
+    `Ticking Dropped CANCELS that person's place — their seat and their lunch go back, ` +
+    `and anything you type in Leader_Notes goes with it as the reason. Untick it before the ` +
+    `next hour is up if you did not mean to; after that, ring the office.\n\n` +
+    // THE SECOND TICK WITH A CONSEQUENCE, and the only one that can be
+    // taken back — which is exactly why it has to be said in the same
+    // breath as Dropped, or a leader will use the permanent one to mean
+    // the reversible one. See applyLeaderWaitlistTicks().
+    `Ticking Waitlisted moves that person off the class list and onto the waitlist — their seat ` +
+    `and their lunch go back too, and the row turns peach so you can see at a glance who is ` +
+    `waiting. Untick it to put them back on, which works whenever the class has room for them.`;
+}
+
 function writeProgramLeaderSheetTab(sheet, entry, rows) {
   const headers = LEADER_SHEET_HEADERS;
   const numCols = headers.length;
@@ -650,31 +754,13 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
   sheet.getBandings().forEach(b => b.remove());
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
-  const stamp = Utilities.formatDate(new Date(),
-    Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
   // The program and where it runs. The refresh stamp and the "tick the
   // yellow columns" instruction are a note: this sheet goes to a program leader
   // who reads the top line to check they have opened the right one, and a
   // heading that is three facts joined by bullets is not a top line.
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols,
     `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`,
-    { note: `Refreshed ${stamp}.\n\nEach class has its own blue band. Tick the yellow columns; ` +
-        `everything else fills in by itself.\n\n` +
-        // SAID OUT LOUD, because it is the one tick with a consequence outside
-        // this sheet. A leader who thinks Dropped is a private note will use it
-        // to mean "chase this person"; a leader who is told what it does will
-        // use it to free a seat, which is what it now actually does. See
-        // applyLeaderDropsAsCancellations().
-        `Ticking Dropped CANCELS that person's place — their seat and their lunch go back, ` +
-        `and anything you type in Leader_Notes goes with it as the reason. Untick it before the ` +
-        `next hour is up if you did not mean to; after that, ring the office.\n\n` +
-        // THE SECOND TICK WITH A CONSEQUENCE, and the only one that can be
-        // taken back — which is exactly why it has to be said in the same
-        // breath as Dropped, or a leader will use the permanent one to mean
-        // the reversible one. See applyLeaderWaitlistTicks().
-        `Ticking Waitlisted moves that person off the class list and onto the waitlist — their seat ` +
-        `and their lunch go back too, and the row turns peach so you can see at a glance who is ` +
-        `waiting. Untick it to put them back on, which works whenever the class has room for them.` });
+    { note: leaderSheetBannerNote() });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
 
@@ -739,43 +825,78 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
   }
   sheet.getRange(MEMORY_TAB_DATA_ROW, 1, grid.length, numCols).setBackgrounds(backgrounds);
 
-  // The one loud cell on the row, written after the wash it sits on. One call
-  // per waitlisted line rather than one per sheet, which is the one place this
-  // function spends an API call per row — a waitlist is a handful of people,
-  // and a roster where it is not has a bigger problem than a slow refresh.
+  // ============================================================================
+  // EVERYTHING BELOW IS A RangeList, NOT A LOOP.
+  //
+  // This sheet is banded per SESSION, so a weekly class running a year is fifty
+  // bands and fifty runs between them — and each of those used to cost four
+  // calls for the band row and, per run, two number formats, a wash per
+  // leader-owned column and two calls per tick box. Two hundred round trips
+  // against SOMEBODY ELSE'S spreadsheet, hourly, per program.
+  //
+  // getRangeList() applies one setter to many ranges in a single call, which is
+  // exactly the shape of every one of those loops: the same format, the same
+  // rule, the same colour, on one column of every run. So the per-run loop is
+  // gone and what is left is one call per ATTRIBUTE — a number that does not
+  // grow with the number of sessions on the sheet.
+  // ============================================================================
+  const columnA1 = (column, list) => (list || runs)
+    .map(run => sheet.getRange(run.start, column, run.count, 1).getA1Notation());
+  const rangeListFor = (column, list) => {
+    const a1 = columnA1(column, list);
+    return a1.length > 0 ? sheet.getRangeList(a1) : null;
+  };
+
+  // The one loud cell on the row, written after the wash it sits on.
+  const waitlistRows = [];
   for (let i = 0; i < grid.length; i++) {
     if (bandRowSet[MEMORY_TAB_DATA_ROW + i] || !isLeaderSheetWaitlistedRow(grid[i], map)) continue;
-    sheet.getRange(MEMORY_TAB_DATA_ROW + i, map['Program_Status'] + 1)
-      .setBackground(LEADER_SHEET_WAITLIST_INK)
-      .setFontWeight('bold');
+    waitlistRows.push({ start: MEMORY_TAB_DATA_ROW + i, count: 1 });
   }
+  const waitlistInk = rangeListFor(map['Program_Status'] + 1, waitlistRows);
+  if (waitlistInk) waitlistInk.setBackground(LEADER_SHEET_WAITLIST_INK).setFontWeight('bold');
 
-  bandRowNumbers.forEach(rowNumber => {
-    sheet.getRange(rowNumber, 1, 1, numCols)
-      .setFontWeight('bold')
+  if (bandRowNumbers.length > 0) {
+    const bandRows = bandRowNumbers.map(r => ({ start: r, count: 1 }));
+    const wholeBand = sheet.getRangeList(bandRows.map(b =>
+      sheet.getRange(b.start, 1, 1, numCols).getA1Notation()));
+    wholeBand.setFontWeight('bold')
       .setFontColor(LEADER_SHEET_BAND_INK)
       .setVerticalAlignment('middle');
     // OVERFLOW, not wrap: the label is longer than the Event_Date column and
     // is meant to run across the blank cells beside it. Wrapping would fold it
     // into a three-line cell and push the band to triple height.
-    sheet.getRange(rowNumber, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
-    try { sheet.setRowHeight(rowNumber, ROW_HEIGHTS.BANNER); } catch (err) { /* row may not exist yet */ }
-  });
+    const bandLabels = rangeListFor(1, bandRows);
+    if (bandLabels) bandLabels.setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
+    // Row heights are the one thing with no range-list form — a height belongs
+    // to a row, not to a range — so the bands keep a call apiece.
+    bandRowNumbers.forEach(rowNumber => {
+      try { sheet.setRowHeight(rowNumber, ROW_HEIGHTS.BANNER); } catch (err) { /* row may not exist yet */ }
+    });
+  }
 
-  runs.forEach(run => {
-    sheet.getRange(run.start, map['Event_Date'] + 1, run.count, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
-    sheet.getRange(run.start, map['Party_Size'] + 1, run.count, 1).setNumberFormat('0');
-    tintManualEntryColumns(sheet, run.start, run.count, headers, LEADER_OWNED_COLUMNS);
+  if (runs.length > 0) {
+    const dates = rangeListFor(map['Event_Date'] + 1);
+    if (dates) dates.setNumberFormat(DATE_DISPLAY_FORMAT);
+    const sizes = rangeListFor(map['Party_Size'] + 1);
+    if (sizes) sizes.setNumberFormat('0');
+    LEADER_OWNED_COLUMNS.forEach(name => {
+      if (map[name] === undefined) return;
+      const wash = rangeListFor(map[name] + 1);
+      if (wash) wash.setBackground(MANUAL_ENTRY_CELL_TINT);
+    });
     // Real checkboxes, so a mark is one click and reads back as a boolean —
     // which is what the snapshot comparison in pullProgramLeaderSheetEdits()
     // expects to be comparing. Never on a band row: a checkbox there is an
     // invitation to tick something that goes nowhere.
     LEADER_FLAG_COLUMNS.forEach(name => {
-      sheet.getRange(run.start, map[name] + 1, run.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
+      if (map[name] === undefined) return;
+      const ticks = rangeListFor(map[name] + 1);
+      if (!ticks) return;
+      ticks.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
         .setHorizontalAlignment('center');
     });
-  });
+  }
 
   // Warning-only, like everywhere else in this project: a program leader who
   // really must correct a misspelled name should be told it will be
@@ -1490,7 +1611,12 @@ function refreshProgramLeaderSheetsNow() {
       failures.push(`the program leaders' own edits could not be read back in (${err})`);
     }
     try {
-      pushed = pushProgramLeaderSheets(sessionRows, registrantRows);
+      // FORCED, because this is the escape hatch. The hourly pass skips a sheet
+      // whose rows have not moved (see computeLeaderSheetFingerprint), and the
+      // reason somebody presses a menu item called "refresh the rosters" is
+      // usually that one of them looks wrong — which is the one case a
+      // fingerprint cannot see.
+      pushed = pushProgramLeaderSheets(sessionRows, registrantRows, { force: true });
     } catch (err) {
       log(`⚠️ Could not push the program registrant sheets out (${err}).`);
       failures.push(`the rosters could not be sent out (${err})`);

@@ -64,6 +64,9 @@ let __syncBudgetMinutesCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 let __formHandleCache = {};
+// The same idea for the spreadsheets this workbook does not live in — see
+// openSpreadsheetCached().
+let __spreadsheetHandleCache = {};
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -332,6 +335,34 @@ function openFormCached(formId) {
   const form = FormApp.openById(id);
   __formHandleCache[id] = form;
   return form;
+}
+
+/**
+ * The same bargain as openFormCached(), for the spreadsheets this workbook does
+ * NOT live in — the program registrant sheets (46), one per program.
+ *
+ * A sync opens every one of them TWICE: pullProgramLeaderSheetEdits() reads the
+ * leaders' ticks back in before the Registrants tab is rewritten, and
+ * pushProgramLeaderSheets() writes the settled roster back out at the end.
+ * SpreadsheetApp.openById() loads a whole spreadsheet, which is the most
+ * expensive call either of those makes, and on a centre with forty programs it
+ * was eighty of them an hour for forty documents that had not changed hands in
+ * between.
+ *
+ * FAILURES ARE NOT CACHED, for the same three reasons openFormCached() gives:
+ * a refusal is routinely repaired mid-execution (ensureProgramLeaderSheetAccess
+ * runs in the push, on a file the pull may have been refused), the throw is the
+ * answer at some call sites, and a wrongly remembered "no" silently drops a
+ * leader's edits for a whole run. This throws whatever SpreadsheetApp throws,
+ * at every call, so every caller's own try/catch is unchanged.
+ */
+function openSpreadsheetCached(fileId) {
+  const id = String(fileId || '').trim();
+  if (!id) return SpreadsheetApp.openById(fileId);
+  if (__spreadsheetHandleCache[id]) return __spreadsheetHandleCache[id];
+  const file = SpreadsheetApp.openById(id);
+  __spreadsheetHandleCache[id] = file;
+  return file;
 }
 
 /**

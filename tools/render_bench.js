@@ -99,6 +99,9 @@ this.HEADERS = HEADERS;
 this.renderFlatDateSheet = renderFlatDateSheet;
 this.applyRegistrantsFormatting = applyRegistrantsFormatting;
 this.invalidateSectionedRowsCache = invalidateSectionedRowsCache;
+this.writeProgramLeaderSheetTab = writeProgramLeaderSheetTab;
+this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
+this.getIndexMap = getIndexMap;
 this.writeUpcomingPastSections = writeUpcomingPastSections;
 this.autosizeColumns = autosizeColumns;
 this.protectDerivedColumns = protectDerivedColumns;
@@ -234,4 +237,42 @@ function describe(d) {
     `range formatting ${d.formatting}, sheet-level ${d.sheetOps}`;
 }
 
+// ============================================================================
+// THE OTHER TAB THIS SYNC REWRITES, AND THE EXPENSIVE ONE: a program
+// registrant sheet. It lives in SOMEBODY ELSE'S spreadsheet, it is banded per
+// SESSION — so a weekly class running a year is fifty bands — and there is one
+// per program.
+// ============================================================================
+function runLeaderSheet() {
+  const headers = sandbox.LEADER_SHEET_HEADERS;
+  const map = sandbox.getIndexMap(headers);
+  const rows = [];
+  // A year of a weekly class, four people on each session.
+  for (let w = 0; w < 52; w++) {
+    for (let n = 0; n < 4; n++) {
+      const row = new Array(headers.length).fill('');
+      row[map['Event_Date']] = new RealDate(2026, 0, 6 + w * 7, 10, 0);
+      row[map['Event_Time']] = '10:00 AM – 11:30 AM';
+      row[map['Name']] = `Person ${w}-${n}`;
+      row[map['Party_Size']] = 1;
+      row[map['Program_Status']] = 'Active';
+      row[map['Event_ID']] = `evt|Chair Yoga|${w}`;
+      rows.push(row);
+    }
+  }
+  const sheet = freshSheet('Sign_Up_Sheet');
+  const entry = { title: 'Chair Yoga', location: 'Ashbridge', fileId: 'leader-1' };
+
+  console.log('\nONE PROGRAM REGISTRANT SHEET — a year of a weekly class');
+  console.log(`${rows.length} roster rows in 52 session bands, ${headers.length} columns\n`);
+  const d = measure(() => sandbox.writeProgramLeaderSheetTab(sheet, entry, rows), sheet);
+  console.log('  ' + '-'.repeat(66));
+  line('writeProgramLeaderSheetTab', d);
+  console.log('  ' + '-'.repeat(66));
+  console.log(`  breakdown: ${describe(d)}`);
+  console.log('  (the hourly sync skips this entirely when the roster has not moved —');
+  console.log('   see computeLeaderSheetFingerprint in 46_program_leader_sheets.gs)');
+}
+
 run();
+runLeaderSheet();

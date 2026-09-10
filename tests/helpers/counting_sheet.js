@@ -41,7 +41,13 @@ function isFormula(value) {
  * back afterwards to check that a faster path wrote the same cells as a slower
  * one — which is the other half of what a benchmark has to prove.
  */
-function makeCountingSheet(grid, name) {
+let __countingSheetSerial = 0;
+
+function makeCountingSheet(grid, name, options) {
+  options = options || {};
+  __countingSheetSerial++;
+  const fileId = options.fileId || `file-${__countingSheetSerial}`;
+  const sheetId = options.sheetId === undefined ? __countingSheetSerial : options.sheetId;
   const stats = {
     getValues: 0, getFormulas: 0, setValues: 0, setValue: 0,
     cellsRead: 0, cellsWritten: 0,
@@ -219,7 +225,32 @@ function makeCountingSheet(grid, name) {
       return sheetProxy;
     },
     clear: () => { stats.sheetOps++; grid.length = 0; return sheetProxy; },
-    getParent: () => ({ getSheetByName: () => sheetProxy, toast: () => {} })
+    // A file id and a sheet id, because code under measurement legitimately
+    // keys on them — the same tab NAME lives in forty different spreadsheets
+    // (every program registrant sheet is a "Sign_Up_Sheet"), so a harness that
+    // could not tell two of them apart would hide exactly that bug.
+    getSheetId: () => sheetId,
+    // MODELLED, because it is the whole point of some of the code measured
+    // here: getRangeList() applies one setter to many ranges in ONE call, so a
+    // harness that counted it per range would report the batched version as no
+    // better than the loop it replaced.
+    getRangeList: a1List => {
+      stats.sheetOps++;
+      const list = new Proxy({ __a1: a1List.slice() }, {
+        get(target, prop) {
+          if (prop in target) return target[prop];
+          if (typeof prop !== 'string') return undefined;
+          return (...args) => {
+            stats.sheetOps++;
+            calls.push({ name: `rangeList.${prop}`, ranges: a1List.slice(), args });
+            if (/^(get|is)[A-Z]/.test(prop)) return null;
+            return list;
+          };
+        }
+      });
+      return list;
+    },
+    getParent: () => ({ getId: () => fileId, getSheetByName: () => sheetProxy, toast: () => {} })
   });
 
   const sheetProxy = new Proxy(sheetImpl, {

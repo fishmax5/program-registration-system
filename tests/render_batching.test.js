@@ -371,6 +371,37 @@ const callsNamed = (sheet, name) => sheet.calls.filter(c => c.name === name);
 }
 
 // ---------------------------------------------------------------------------
+// 7b. TWO TABS OF THE SAME NAME IN DIFFERENT FILES ARE REMEMBERED APART
+//
+// Every program registrant sheet (46) is a tab called "Sign_Up_Sheet" in its
+// own spreadsheet, and protectDerivedColumns() is called on all of them. One
+// entry shared between forty of them cannot make a render skip work it needed
+// — the count is read back off the sheet in front of it — but each push would
+// overwrite the last one's line and the skip would never fire at all.
+// ---------------------------------------------------------------------------
+{
+  const zones = [{ start: 4, count: 10 }];
+  const names = ['Event_Date', 'Name'];
+  const a = freshSheet('Sign_Up_Sheet');
+  const b = makeCountingSheet([], 'Sign_Up_Sheet');
+
+  sandbox.protectDerivedColumns(a, HEADERS, names, zones);
+  sandbox.protectDerivedColumns(b, HEADERS, names, zones);
+  assert.strictEqual(a.__protections.length, names.length);
+  assert.strictEqual(b.__protections.length, names.length);
+
+  // Now the second render of each, with the OTHER file rendered in between —
+  // which is exactly what a sync does across forty of these.
+  const beforeA = roundTrips(a.stats);
+  sandbox.protectDerivedColumns(a, HEADERS, names, zones);
+  sandbox.protectDerivedColumns(b, HEADERS, names, zones);
+  const costA = roundTrips(a.stats) - beforeA;
+  assert.ok(costA <= 2,
+    `a tab whose own layout has not moved costs one read even when forty like it rendered ` +
+    `in between, was ${costA}`);
+}
+
+// ---------------------------------------------------------------------------
 // 8. THE COST — the reason all of the above exists
 // ---------------------------------------------------------------------------
 {
