@@ -155,7 +155,13 @@ function planDashboardLinkRepair(registrySheet) {
   // Doctor reports them as such (see buildDoctorFindings()).
   const stats = { scanned: 0, misaligned: 0, noKey: 0, noForm: 0, alreadyRight: 0,
     blocked: 0, formsOpened: 0, willFix: 0,
-    wrongForm: 0, staleLiveLink: 0, staleEditLink: 0, missingLink: 0 };
+    wrongForm: 0, staleLiveLink: 0, staleEditLink: 0, missingLink: 0,
+    // WHY A ROW RESOLVED THE WAY IT DID, so a run that fixes nothing can say
+    // what it looked at instead of reporting success. `noRegistryEntry` is the
+    // rows whose key the form registry has never heard of — they fall through
+    // to the vote, which can only ever confirm what the tab already says.
+    // `deadForm` is the rows whose registry (or voted) form would not open.
+    noRegistryEntry: 0, deadForm: 0 };
   if (headerRows.length === 0) return { plan: [], stats };
   const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]); // 1-based
   const needed = ['Event_Date', 'Event_ID', 'Calendar_Source', 'Clean_Title', 'Location',
@@ -234,20 +240,73 @@ function planDashboardLinkRepair(registrySheet) {
     return Object.keys(v).sort((a, b) => v[b] - v[a])[0] || '';
   };
 
+  // EVERY FORM THIS ROW COULD BELONG ON, in order of authority — and the first
+  // one that actually OPENS is the answer.
+  //
+  // THE BUG THIS FIXES. The resolution used to be one line, `registry[key] ||
+  // majority(key)`, and one attempt: open it, and give up on the row if it
+  // would not open. That is precisely backwards for the commonest way a
+  // dashboard goes wrong. A Form_ID naming a form that cannot be opened is not
+  // a reason to stop — it is the STRONGEST EVIDENCE AVAILABLE that the pointer
+  // is wrong, because a form this workbook manages and has not deleted opens
+  // fine. Worse, the two steps compounded: a workbook whose registry has no
+  // entry for a key falls through to the vote, the vote is the rows saying what
+  // they already say, and so a whole program pointing at one deleted form
+  // resolved to that same deleted form, failed to open, and was skipped. The
+  // repair then reported that every link already matched. It had not looked.
+  //
+  // THE EDIT LINK IS EVIDENCE AND THE VIEW LINK IS NOT, which is the one
+  // subtlety here and is not the mistake the banner at the top of this file
+  // describes. An edit URL is built FROM the file id (`/d/<id>/edit`), so it
+  // names a form; a published URL carries a separate identifier that no file id
+  // can be recovered from, which is why harvesting one to write onto other rows
+  // was wrong and stays banned. Nothing is harvested here: a candidate is a
+  // NAME, and the URLs written always come from opening that form and asking
+  // it. The row's own edit link is therefore only ever a suggestion, checked
+  // against the form itself before a single cell is written.
+  //
+  // ON A HEALTHY WORKBOOK NOTHING CHANGES: the first candidate opens, and the
+  // rest of this function behaves exactly as it did.
+  const candidatesFor = id => {
+    const out = [];
+    const push = value => {
+      const trimmed = String(value || '').trim();
+      if (trimmed && out.indexOf(trimmed) === -1) out.push(trimmed);
+    };
+    push(registry[id.key]);   // the authority
+    push(majority(id.key));   // the same-group vote, for a lost Script Properties
+    push(extractFormId(id.editHref)); // what the row's own edit link names
+    push(id.formId);          // and, last, what the row already says
+    return out;
+  };
+
   rowsToResolve.forEach(id => {
-    const wantedFormId = registry[id.key] || majority(id.key);
-    if (!wantedFormId) { stats.noForm++; return; }
-    let urls = urlByFormId[wantedFormId];
-    if (!urls) {
-      try {
-        const form = openFormCached(wantedFormId);
-        urls = { publishedUrl: buildRegistrationUrl(form), editUrl: form.getEditUrl() };
-        stats.formsOpened++;
-      } catch (err) {
-        log(`Repair links: could not open form ${wantedFormId} for "${id.title}" (${err}).`);
-        urls = null;
+    if (!registry[id.key]) stats.noRegistryEntry++;
+    const candidates = candidatesFor(id);
+    if (candidates.length === 0) { stats.noForm++; return; }
+
+    let wantedFormId = '';
+    let urls = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      if (!Object.prototype.hasOwnProperty.call(urlByFormId, candidate)) {
+        try {
+          const form = openFormCached(candidate);
+          urlByFormId[candidate] = { publishedUrl: buildRegistrationUrl(form), editUrl: form.getEditUrl() };
+          stats.formsOpened++;
+        } catch (err) {
+          log(`Repair links: could not open form ${candidate} for "${id.title}" (${err}).`);
+          urlByFormId[candidate] = null;
+        }
       }
-      urlByFormId[wantedFormId] = urls;
+      if (!urlByFormId[candidate]) continue;
+      wantedFormId = candidate;
+      urls = urlByFormId[candidate];
+      // Past the first candidate means the form the registry (or the vote)
+      // named could not be opened at all. Counted, because it is the finding
+      // somebody needs to be told about rather than a detail of the search.
+      if (i > 0) stats.deadForm++;
+      break;
     }
     if (!urls) { stats.noForm++; return; }
 
@@ -296,6 +355,49 @@ function applyDashboardLinkPlan(registrySheet, plan) {
 }
 
 /**
+ * WHY A REPAIR WROTE NOTHING, in the words that name the next thing to try.
+ *
+ * There are four different reasons and they need four different answers, so
+ * they are reported apart rather than collapsed into one cheerful sentence:
+ *
+ *   every row fine          the only one that is actually good news.
+ *   no form could be opened every candidate for those rows is gone from Drive
+ *                           or out of this account's reach. Nothing on a
+ *                           spreadsheet can invent a form's address.
+ *   no registry entry       the form registry has never heard of those rows'
+ *                           keys, so the only fallback is the rows voting for
+ *                           what they already say — which can confirm the tab
+ *                           but never correct it. A calendar sync reseeds it.
+ *   identity columns shifted the rows cannot name their own form safely; only
+ *                           the calendar can rebuild them.
+ */
+function describeEmptyLinkRepair(stats) {
+  const parts = [];
+  if (stats.noForm > 0) {
+    parts.push(`${stats.noForm} row(s) name a form that could NOT be opened — deleted from Drive, or ` +
+      `owned by an account this one cannot reach. Their links were left exactly as they are, because ` +
+      `nothing here can work out a missing form's address. If you know which form those sessions should ` +
+      `be on, use "Move Sessions to Another Form…" and paste its /d/<id>/edit link.`);
+  }
+  if (stats.noRegistryEntry > 0) {
+    parts.push(`${stats.noRegistryEntry} row(s) have no entry in the form registry, so the only thing ` +
+      `available to compare them against was each other — which can confirm what the tab says but can ` +
+      `never correct it. Run "Sync Cal only" to rebuild the registry from the calendar, then try this again.`);
+  }
+  if (stats.misaligned > 0) {
+    parts.push(`${stats.misaligned} row(s) have an Event_ID that does not match their own ` +
+      `date/title/calendar. Those rows are shifted in their IDENTITY columns, which this repair will not ` +
+      `guess at — they need "Sync Cal only" to rebuild them from the calendar.`);
+  }
+  if (parts.length === 0) {
+    return `Every one of the ${stats.scanned} row(s) checked already names a form that opens, and both of ` +
+      `its links open that same form ✅ — nothing to repair.`;
+  }
+  return `Nothing was written. Of ${stats.scanned} row(s) checked, ${stats.alreadyRight} were already ` +
+    `right.\n\n• ${parts.join('\n\n• ')}`;
+}
+
+/**
  * ADMIN ACTION — "Repair Dashboard Links (no calendar read)".
  *
  * Rewrites Form_ID and both link columns on All_Program_Sessions from the
@@ -323,12 +425,20 @@ function repairDashboardLinks() {
     `(${stats.formsOpened} form(s) opened).`);
 
   if (stats.willFix === 0) {
-    const message = stats.misaligned > 0
-      ? `No link needed fixing, but ${stats.misaligned} row(s) have an Event_ID that does not match their ` +
-        `own date/title/calendar. Those rows are shifted in their IDENTITY columns, which this repair will ` +
-        `not guess at — they need "Sync Cal only" to rebuild them from the calendar.`
-      : 'Every link on the dashboard already matches the form registry ✅ — nothing to repair.';
+    // NOTHING TO FIX AND NOTHING LOOKED AT ARE DIFFERENT ANSWERS, and this used
+    // to give the first one for both. A run that skipped every row — because
+    // the form each one named could not be opened, or because the registry has
+    // no entry for them and the rows could only vote for what they already say
+    // — reported that every link already matched the registry. Somebody acting
+    // on that goes away believing the dashboard is correct.
+    const message = describeEmptyLinkRepair(stats);
+    log(`Repair Dashboard Links: nothing written. ${message}`);
     toastIfPossible(message);
+    try {
+      SpreadsheetApp.getUi().alert('Repair Dashboard Links', message, SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (err) {
+      // No UI (editor or trigger run) — the toast and the log are the output.
+    }
     return { fixed: 0, stats };
   }
 
@@ -343,6 +453,12 @@ function repairDashboardLinks() {
     `response already collected is untouched. ${stats.formsOpened} form(s) were opened just to read their ` +
     `address.\n\n` +
     `First ${Math.min(5, plan.length)} of ${plan.length}:\n${sample}\n\n` +
+    (stats.deadForm > 0
+      ? `${stats.deadForm} of these point at a form that no longer opens at all. For those the form is ` +
+        `taken from the row's own "Edit Form Settings" link instead — an edit link names a form, unlike a ` +
+        `"View Live Form" one — and that form was opened and asked for its real address before anything ` +
+        `was planned.\n\n`
+      : '') +
     (stats.misaligned > 0
       ? `SKIPPED: ${stats.misaligned} row(s) whose Event_ID disagrees with their own date/title/calendar. ` +
         `Their identity columns are shifted too, so nothing here can name their form safely — run ` +
