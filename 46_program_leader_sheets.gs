@@ -422,6 +422,42 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
 // --- writing the sheets back out --------------------------------------------
 
 /**
+ * ONE tick column of ONE band of rows, drawn as real checkboxes.
+ *
+ * THE FAILURE IT PREVENTS, twice over. The refresh used to set the validation
+ * inline in writeProgramLeaderSheetTab()'s run loop, so a single refusal from
+ * Sheets on that one call threw out of the whole write — and
+ * pushProgramLeaderSheets() catches per SHEET, which means the roster was
+ * abandoned half-written and the next hour tried the same thing again. The
+ * symptom a leader actually reports is worth naming: the four tick columns
+ * come back as the words TRUE and FALSE, because the values were written and
+ * the validation that draws them as boxes was not.
+ *
+ * So it is guarded per column and never throws, and it prefers
+ * insertCheckboxes() — which sets the validation AND normalizes cells already
+ * holding TRUE/FALSE, i.e. repairs a sheet that has already been through the
+ * failure — falling back to the validation alone where that call is missing.
+ *
+ * A column the sheet's headers do not name is skipped rather than turned into
+ * a NaN column index, which is its own unhelpful throw.
+ */
+function applyLeaderFlagCheckbox_(sheet, map, name, startRow, numRows) {
+  if (map[name] === undefined || numRows < 1) return;
+  const range = sheet.getRange(startRow, map[name] + 1, numRows, 1);
+  try {
+    if (typeof range.insertCheckboxes === 'function') range.insertCheckboxes();
+    else range.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+    range.setHorizontalAlignment('center');
+  } catch (err) {
+    // Cosmetic: a column that reads back as TRUE/FALSE still round-trips,
+    // because normalizeLeaderFlag() accepts both. Losing the roster refresh
+    // over how a cell is DRAWN is not.
+    log(`ℹ️ Could not draw the "${name}" column as checkboxes (${err}) — the ticks still work.`);
+  }
+}
+
+
+/**
  * Refreshes every registered program registrant sheet from the settled picture.
  *
  * Only sheets ALREADY in the registry are touched. Creating one is a
@@ -771,9 +807,7 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     // expects to be comparing. Never on a band row: a checkbox there is an
     // invitation to tick something that goes nowhere.
     LEADER_FLAG_COLUMNS.forEach(name => {
-      sheet.getRange(run.start, map[name] + 1, run.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
+      applyLeaderFlagCheckbox_(sheet, map, name, run.start, run.count);
     });
   });
 
@@ -921,14 +955,24 @@ function addEditorWithoutNotifying_(driveFile, email) {
  * one. Returns { openedUp, editors, problems } for a caller that wants to say
  * what happened.
  */
-function openUpFileToAnyoneWithLink(fileId, describe) {
+function openUpFileToAnyoneWithLink(fileId, describe, opts) {
   const outcome = { openedUp: false, editors: [], problems: [] };
   if (!fileId) return outcome;
   const label = describe || `file ${fileId}`;
+  // `folder: true` is the FOLDER case (`97`). Two things follow from it, and
+  // both are load-bearing: a folder id has to be fetched with getFolderById()
+  // — getFileById() throws outright on one, which would report every folder as
+  // unreachable — and a folder gets the named editors and NO link sharing,
+  // because a link-editable folder hands over everything inside it, now and in
+  // future, which is a larger promise than any single file here makes.
+  const isFolder = !!(opts && opts.folder);
+  const wantsLinkSharing = isFolder
+    ? !!(opts && opts.linkSharing === true)
+    : (!opts || opts.linkSharing !== false);
 
   let driveFile = null;
   try {
-    driveFile = DriveApp.getFileById(fileId);
+    driveFile = isFolder ? DriveApp.getFolderById(fileId) : DriveApp.getFileById(fileId);
   } catch (err) {
     // Almost always "you do not have permission" — i.e. we are already the
     // account that cannot reach it, and there is nothing to do from here. The
@@ -964,6 +1008,8 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
       log(`ℹ️ Could not add ${email} as an editor of the ${label}.`);
     }
   });
+
+  if (!wantsLinkSharing) return outcome;
 
   try {
     driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
