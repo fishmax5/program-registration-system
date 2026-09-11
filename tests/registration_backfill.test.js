@@ -60,6 +60,8 @@ this.clearBackfillMarks = clearBackfillMarks;
 this.describeUnimportedFormPointer = describeUnimportedFormPointer;
 this.findUnimportedForms = findUnimportedForms;
 this.listFormsForReimport = listFormsForReimport;
+this.classifyReimportRegistryEntry_ = classifyReimportRegistryEntry_;
+this.registryKeySpanMonthKey_ = registryKeySpanMonthKey_;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -222,6 +224,66 @@ const sessionRow = fields => {
     offered[0].label.indexOf('NO SESSION ROW POINTS AT THIS FORM') !== -1, true);
   check('a form the session table does name is still offered, below it',
     offered.map(f => f.value), ['rollingForm', 'liveYoga']);
+}
+
+// --- the months that have simply aged off the table --------------------------
+//
+// THE BUG THIS PINS: the session table holds a bounded window of dates, so
+// every month that rolls off the back of it leaves its form in the registry
+// forever. Calling all of those "NO SESSION ROW POINTS AT THIS FORM" — and
+// sorting them above the healthy ones — made a picker in which every single
+// line carried a warning, which is the same as no warning at all.
+{
+  check('a month label is read out of the span half of a key',
+    sandbox.registryKeySpanMonthKey_('cal1::Chair Yoga::October 2026'), '2026-10');
+  check('a lunch-only key is read the same way',
+    sandbox.registryKeySpanMonthKey_('LUNCHONLY::Narberth::March 2025'), '2025-03');
+  check('a [Grouped] series names no month, so it can never be excused as an old one',
+    sandbox.registryKeySpanMonthKey_('cal1::Eight Week Course::FIXED'), '');
+  check('and neither can an appointment program',
+    sandbox.registryKeySpanMonthKey_('cal1::Computer Tech Support::ASSIST'), '');
+
+  check('a form filed only under months gone by is ordinary housekeeping',
+    sandbox.classifyReimportRegistryEntry_(['cal1::Chair Yoga::October 2025'], '2026-09'), 'past');
+  check('THIS month is not gone by — a live form nothing points at is the fault',
+    sandbox.classifyReimportRegistryEntry_(['cal1::Chair Yoga::September 2026'], '2026-09'), 'orphaned');
+  check('one current key among old ones is enough to keep the warning',
+    sandbox.classifyReimportRegistryEntry_(
+      ['cal1::Chair Yoga::May 2026', 'cal1::Chair Yoga::December 2026'], '2026-09'), 'orphaned');
+  check('a spanless key is never excused',
+    sandbox.classifyReimportRegistryEntry_(['cal1::Computer Tech Support::ASSIST'], '2026-09'), 'orphaned');
+
+  sandbox.setRows([
+    sessionRow({ Event_ID: 'e1', Event_Date: new Date(2026, 9, 13, 10, 0), Calendar_Source: 'cal1',
+      Clean_Title: 'Chair Yoga', Location: 'Narberth', Form_ID: 'liveYoga' })
+  ]);
+  sandbox.setRegistry({
+    'cal1::Computer Tech Support::ASSIST': 'rollingForm',
+    'cal1::Chair Yoga::January 2020': 'ancientForm'
+  });
+  const offered = sandbox.listFormsForReimport();
+  check('the three kinds come in the order they deserve',
+    offered.map(f => f.value), ['rollingForm', 'liveYoga', 'ancientForm']);
+  check('an aged-off month is offered without a warning on it',
+    offered[2].label.indexOf('NO SESSION ROW') === -1 &&
+      offered[2].label.indexOf('past month') !== -1, true);
+  check('...and the real fault still has one',
+    offered[0].label.indexOf('NO SESSION ROW POINTS AT THIS FORM') !== -1, true);
+}
+
+// --- a session table that could not be read ----------------------------------
+//
+// Nothing to judge against is not evidence of a fault: accusing every form in
+// the registry is the loudest possible way to report that the question was
+// never asked.
+{
+  sandbox.setRows([]);
+  sandbox.setRegistry({ 'cal1::Computer Tech Support::ASSIST': 'rollingForm' });
+  const offered = sandbox.listFormsForReimport();
+  check('no rows at all accuses nobody',
+    offered[0].label.indexOf('NO SESSION ROW') === -1, true);
+  check('...and says why instead',
+    offered[0].label.indexOf('could not be read') !== -1, true);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

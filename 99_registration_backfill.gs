@@ -403,6 +403,61 @@ function reportUnimportedForms() {
 // THE DIALOG
 // ---------------------------------------------------------------------------
 
+/** The month names getMonthLabel() writes into a registry key ("October 2026"). */
+const REGISTRY_KEY_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * The 'yyyy-MM' month a registry key's SPAN names, or '' when it names no
+ * month at all.
+ *
+ * A group key is `<calendar>::<title>::<span>` (registryKeyForSessionRow, 32)
+ * and a lunch-only one `LUNCHONLY::<location>::<span>` (13), so the span is
+ * always the last segment. It is a month label for an ordinary program and the
+ * two spanless words otherwise — 'FIXED' for a [Grouped] series, ASSIST for an
+ * appointment program (94) — both of which return '' here, because neither can
+ * be dated and neither should be excused as "last year's form".
+ */
+function registryKeySpanMonthKey_(key) {
+  const parts = String(key || '').split('::');
+  const span = String(parts[parts.length - 1] || '').trim();
+  const match = /^([A-Za-z]+)\s+(\d{4})$/.exec(span);
+  if (!match) return '';
+  const monthIndex = REGISTRY_KEY_MONTH_NAMES.indexOf(match[1]);
+  if (monthIndex === -1) return '';
+  return `${match[2]}-${String(monthIndex + 1).padStart(2, '0')}`;
+}
+
+/**
+ * WHAT A REGISTRY-ONLY FORM ACTUALLY IS — the distinction the picker was
+ * missing, and the reason every entry in it read as a fault.
+ *
+ * A form the registry knows and no session row names is NOT by itself wrong.
+ * The session table holds a bounded window of dates; every month that has
+ * rolled off the back of it leaves its form in the registry forever, so a
+ * workbook a year old has dozens of them. Labelling all of those "NO SESSION
+ * ROW POINTS AT THIS FORM" — and sorting them above the healthy months —
+ * turned the one line that means something into the whole list.
+ *
+ * So the span decides it, and the span is already in the key:
+ *
+ *   'past'      every key filing this form names a month now gone by. Ordinary
+ *               housekeeping: the rows aged off the table, the form stayed in
+ *               the registry. Offered, because a re-import of an old month is
+ *               exactly what somebody opens this for — just not shouted about.
+ *   'orphaned'  a key naming THIS month or a later one, or a spanless key
+ *               (FIXED / ASSIST), and still no row points at it. That is the
+ *               appointment-form fault this file exists for: a live form
+ *               collecting registrations nothing walks.
+ *
+ * Pure, so the decision can be tested without a spreadsheet or a clock.
+ */
+function classifyReimportRegistryEntry_(keys, nowMonthKey) {
+  const spans = (keys || []).map(registryKeySpanMonthKey_);
+  if (spans.length === 0) return 'orphaned';
+  return spans.every(span => span && span < nowMonthKey) ? 'past' : 'orphaned';
+}
+
 /**
  * Every form worth offering for a re-import — which is deliberately a WIDER
  * list than listExistingForms() (47) gives.
@@ -412,21 +467,31 @@ function reportUnimportedForms() {
  * premise is a form the session table has lost track of — so the registry's
  * forms are in the list too, marked as such, and a form whose dates are all
  * past is still offered because that is precisely when somebody notices.
+ *
+ * THREE KINDS, in the order they are offered: the forms nothing points at
+ * (classifyReimportRegistryEntry_ above), then the forms the session table
+ * names, then the months that have simply aged off it. A picker where every
+ * line carries a warning is a picker with no warning in it.
  */
 function listFormsForReimport() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const byForm = {};
+  let sessionRowsRead = 0;
 
   if (sheet) {
     const headers = HEADERS.All_Program_Sessions;
     const map = getIndexMap(headers);
-    getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+    const rows = getSectionedRows(sheet, headers, 'Event_ID');
+    sessionRowsRead = rows.length;
+    rows.forEach(row => {
       const formId = String(row[map['Form_ID']] || '').trim();
       const date = coerceDate(row[map['Event_Date']]);
       if (!formId || !date) return;
       const title = String(row[map['Clean_Title']] || '').trim();
-      if (!byForm[formId]) byForm[formId] = { formId, titles: [], latest: date, rows: 0, fromRows: true };
+      if (!byForm[formId]) {
+        byForm[formId] = { formId, titles: [], latest: date, rows: 0, kind: 'rows', keys: [] };
+      }
       const entry = byForm[formId];
       entry.rows++;
       if (title && entry.titles.indexOf(title) === -1) entry.titles.push(title);
@@ -434,30 +499,49 @@ function listFormsForReimport() {
     });
   }
 
+  // NOTHING TO JUDGE AGAINST IS NOT EVIDENCE OF A FAULT. A missing tab, or one
+  // this execution could not read, would otherwise accuse every form in the
+  // registry of being orphaned — the loudest possible way to report that the
+  // question was never asked.
+  const tableRead = sessionRowsRead > 0;
+  const nowMonthKey = formatMonthKey(new Date());
   const registry = getPersistentFormRegistry();
   Object.keys(registry).forEach(key => {
     const formId = String(registry[key] || '').trim();
-    if (!formId || byForm[formId]) return;
-    byForm[formId] = { formId, titles: [key], latest: null, rows: 0, fromRows: false };
+    if (!formId) return;
+    if (byForm[formId]) {
+      if (byForm[formId].keys.indexOf(key) === -1) byForm[formId].keys.push(key);
+      return;
+    }
+    byForm[formId] = { formId, titles: [], latest: null, rows: 0, kind: 'registry', keys: [key] };
   });
 
+  const rank = { orphaned: 0, rows: 1, past: 2, unknown: 2 };
   return Object.keys(byForm)
     .map(k => byForm[k])
+    .map(f => {
+      if (f.kind !== 'registry') return f;
+      f.kind = tableRead ? classifyReimportRegistryEntry_(f.keys, nowMonthKey) : 'unknown';
+      return f;
+    })
     .sort((a, b) => {
-      // The forms nothing points at go FIRST. They are the reason this dialog
-      // exists, and burying them under fifty healthy months would be the same
-      // silence in a different shape.
-      if (a.fromRows !== b.fromRows) return a.fromRows ? 1 : -1;
+      if (rank[a.kind] !== rank[b.kind]) return rank[a.kind] - rank[b.kind];
       return (b.latest || 0) - (a.latest || 0);
     })
     .slice(0, 120)
-    .map(f => ({
-      value: f.formId,
-      label: f.fromRows
-        ? `${f.titles.slice(0, 3).join(', ')}${f.titles.length > 3 ? '…' : ''} — ` +
-          `${f.rows} session row(s), through ${formatDateLabel(f.latest)}`
-        : `⚠️ NO SESSION ROW POINTS AT THIS FORM — registered as ${f.titles[0]}`
-    }));
+    .map(f => ({ value: f.formId, label: reimportFormLabel_(f) }));
+}
+
+/** One line in the picker, in the words its kind has earned. */
+function reimportFormLabel_(entry) {
+  const key = entry.keys && entry.keys.length > 0 ? entry.keys[0] : entry.formId;
+  if (entry.kind === 'rows') {
+    return `${entry.titles.slice(0, 3).join(', ')}${entry.titles.length > 3 ? '…' : ''} — ` +
+      `${entry.rows} session row(s), through ${formatDateLabel(entry.latest)}`;
+  }
+  if (entry.kind === 'past') return `${key} — a past month, no longer on the session table`;
+  if (entry.kind === 'unknown') return `${key} — the session table could not be read this run`;
+  return `⚠️ NO SESSION ROW POINTS AT THIS FORM — registered as ${key}`;
 }
 
 /** ADMIN ACTION — "Re-import a Form's Responses…". */
