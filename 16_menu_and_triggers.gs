@@ -305,6 +305,12 @@ function buildAppMenu(ui, includeAdmin) {
       // called repairFormRoutingNow() because the first such repair was the
       // page routing; renaming it would strand the trigger that resumes it.
       .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', 'repairFormRoutingNow')
+      // BESIDE THE DOCTOR, because it is the other half of the same repair.
+      // The Doctor puts a session row's Form_ID back on the form its link
+      // opens; this reads what that form collected while the two disagreed,
+      // which the ordinary sync never will — it reads from the sync clock, and
+      // those responses are behind it. Adds only what is missing; see 99.
+      .addItem('\u267b\ufe0f Re-import a Form\'s Responses\u2026', 'showReimportFormDialog')
       .addSeparator()
       // THE ONE-TIME JOBS, BEHIND ONE DOOR. Each of these is pressed once on a
       // workbook upgraded from an older version and never again — they catch
@@ -360,6 +366,12 @@ function buildAppMenu(ui, includeAdmin) {
         // calendar ID is the whole question, so it is read first. See 84.
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
+        // The check nothing else in the project makes: a form holding
+        // responses that NO session row names, which is to say a form nobody
+        // is importing. It is silent by construction — the import walks the
+        // Form_ID column, so a form missing from it is not read and not
+        // missed. See 99.
+        .addItem('Find Forms Nothing Is Importing (read-only report)', 'reportUnimportedForms')
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.
