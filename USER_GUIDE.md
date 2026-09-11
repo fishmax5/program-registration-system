@@ -1278,9 +1278,10 @@ item on the menu, because on a serving day it's the only one you need.
    of every mark beside it, so ticking it clears them. Use it when the session
    is full — on somebody who isn't on the list yet (it adds a waitlisted row)
    or on somebody who is (their seat and their lunch go straight back, and the
-   session's count drops by one there and then). Taking them back off the
-   waitlist is a `Program_Status` change on the Registrants tab, or an untick
-   on the program leader's own sheet.
+   session's count drops by one there and then). Taking them back off is
+   **Change this registration ▸ ↩️ Put them back on**, below — or a
+   `Program_Status` change on the Registrants tab, or an untick on the program
+   leader's own sheet.
 
    On a `[Personalized Assistance]` session a fourth box appears between the
    name and the ticks — **Appointment time** — listing the chairs that are
@@ -1338,6 +1339,62 @@ it** is ticked, and it arrives already ticked if you ticked **Sign up for
 lunch** — because somebody signing a person up for lunch today *and* putting
 them on every future session has usually described the whole arrangement, not
 half of it. Untick it if you meant only today's meal.
+
+##### ✏️ Change this registration — when something on the list is wrong
+
+The ticks above **add** things: they record that somebody was here, was fed, or
+should be on a list. The panel underneath the **Mark** button is for the other
+half of the day — something on a row is wrong and the person is standing there
+(or on the phone) waiting for it to be right.
+
+It appears as soon as you pick somebody **who is already registered for that
+session**. Pick them, choose what needs changing, fill in the one or two boxes
+it opens, and press the button. Only the changes that make sense for that
+person are offered: you can't cancel a booking that's already cancelled, and
+you can't undo an attendance mark on a row that hasn't got one.
+
+| Change | What it does |
+|---|---|
+| **📅 Move them — another day, time, or program** | Moves the whole booking to any other session at any location: another date of the same class, a different class, a different building. Their guests go with them. |
+| **🚫 Cancel this registration** | The same cancellation the door page and a leader's **Dropped** tick make: the seat and the meal go back immediately, and a dated line goes in `Admin_Notes` saying who did it and why. |
+| **↩️ Put them back on** | Undoes a cancellation, or gives a waiting-list place its seat. The meal comes back as whatever `Lunch_Type` says they asked for. |
+| **⏳ Move them to the waiting list** | The same as the **Add to waitlist** tick, for somebody already on the list: no seat, no meal. |
+| **↺ Undo a mark** | Takes the **Attended** tick off, or the **Lunch** tick and the meal counts with it, or both. This is the "I marked the wrong Mary" button. |
+| **🍽️ Change their meal** | Hot, Cold, or **No Lunch**, and how many. This **replaces** what the row says — unlike the Lunch tick above, which adds to it, because that one records a second handover and this one is a correction. |
+| **☎️ Correct their phone or email** | Goes onto **every upcoming row** that person has, not just this one — a phone number is a fact about them, not about one booking. Past rows keep how we reached them at the time, and Member_Roll picks the new details up on the next sync. |
+| **📝 Add a note to their row** | One sentence into `Admin_Notes`, dated and initialled. Something true *every* week belongs in a **regular need** instead (the box higher up the dialog). |
+| **🗑️ Remove this row entirely** | Deletes the row — and any guest rows with it — after naming who is about to go. The form response behind it is left alone, and the next sync will not put the row back. |
+
+**A few things it will refuse, and why:**
+
+- **Moving somebody onto a session they're already on.** That's two seats and
+  two meals for one person, not a move. Cancel or remove one of the rows.
+- **Moving somebody onto a full session**, or one marked `[Waitlist Only]`.
+  Raise `Max_Capacity`, cancel somebody, or leave them on the waiting list.
+- **Moving somebody into an appointment chair that's gone** since the lists
+  were read. Press **↻ reload** and pick another time.
+- **Putting somebody back on when the session filled up behind them**, or when
+  the waiting-list place was made by the *system* rather than by a person — if
+  they're number thirteen because the class holds twelve, promoting them would
+  jump the queue. Raise `Max_Capacity` or cancel somebody and the next sync
+  gives them the seat.
+- **Ordering a meal on a date with no lunch on it.** Add a Hot or Cold row to
+  `Lunch_Schedule` for that date first.
+
+> **This button waits, and the Mark button doesn't.** Marking hands back
+> instantly and writes underneath, because you've got thirty people to get
+> through. A change is rare, and it can be refused for reasons only the sheet
+> knows — so you get a moment of *"Working…"* and then the real answer. A
+> cancellation that says it worked and didn't is a seat given away twice.
+
+> **Moving somebody to another day clears their marks.** "Attended" and "lunch
+> served" are facts about the day they were recorded on; carried to a different
+> date they'd claim somebody collected a meal at a service that hasn't happened
+> yet. The dialog says so when it does it.
+
+> **A cancelled or waiting name stays in the Name dropdown**, marked
+> *(cancelled)* or *(waiting list)*. It has to — those are exactly the rows you
+> open this dialog to change.
 
 #### 📱 The door pages — the same thing on a tablet at the entrance
 
@@ -2868,7 +2925,7 @@ The **🔧 Admin** submenu only appears for the accounts listed in
 
 | Item | What it does |
 |---|---|
-| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, register them for a program (an appointment time included) with no form, or put them on the waitlist for a full one — location, session, name, then Attended / Lunch / Sign up for lunch / Register them / Add to waitlist. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
+| **⚡ Quick Mark Attendance / Lunch…** | Mark people in on the day, sign somebody up for a future lunch, register them for a program (an appointment time included) with no form, or put them on the waitlist for a full one — location, session, name, then Attended / Lunch / Sign up for lunch / Register them / Add to waitlist. And, on somebody already registered, **Change this registration**: move them to another day or program, cancel them, put them back on, undo a mark, correct their meal or their contact details, add a note, or remove the row. See [Quick Mark](#-quick-mark--the-fast-way-to-mark-people-off) |
 | **🖨️ Print Sign-In Sheet (PDF)…** | Pick a location and a date; get a landscape PDF of everyone expected there that day across every program, with empty boxes to tick and write meal counts into — see [Printed sign-in sheets](#printed-sign-in-sheets) |
 | **🔄 Update Everything Now** | Catches the workbook up with the calendars *and* the forms, in that order. This is the one to press when you have just changed something and want to see it. It is the same pair of passes the system runs on its own every hour |
 

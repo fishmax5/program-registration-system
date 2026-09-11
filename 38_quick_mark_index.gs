@@ -353,7 +353,7 @@ function buildQuickMarkIndex() {
   /** "location \0 title \0 dateKey" -> the bucket of names for that session. */
   const byLookup = {};
   /**
-   * sessionKey -> { names, keys, times }, three parallel arrays.
+   * sessionKey -> { names, keys, times, statuses }, four parallel arrays.
    *
    * `keys` are normalized, so the browser can subtract this session's people
    * from the roll. `times` is each person's BOOKED SLOT on an appointment
@@ -361,6 +361,13 @@ function buildQuickMarkIndex() {
    * a list of bare names is unusable at a Personalized Assistance desk, where
    * the whole shape of the morning is who is at 10:30 and who is at 11:00,
    * and where the same person can legitimately hold two slots.
+   *
+   * `statuses` is that row's Program_Status, and it is what makes the change
+   * panel honest: "put them back on" is offered to a cancelled row and to
+   * nobody else, "cancel" is not offered to a row that is already cancelled,
+   * and the name list can say "(waiting list)" beside a name rather than
+   * leaving a desk to find out by pressing a button. Read from the same rows
+   * the names come off, so there is no second pass and nothing to keep in step.
    */
   const namesBySession = {};
 
@@ -372,7 +379,7 @@ function buildQuickMarkIndex() {
   orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
     const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
     if (namesBySession[sessionKey]) return;
-    const bucket = { names: [], keys: [], times: [] };
+    const bucket = { names: [], keys: [], times: [], statuses: [] };
     namesBySession[sessionKey] = bucket;
     byLookup[`${choice.location}\u0000${quickMarkTitleKey(choice.title)}\u0000${choice.dateKey}`] = bucket;
     sessions.push({
@@ -409,6 +416,10 @@ function buildQuickMarkIndex() {
     // (appointmentStartLabelOf()). Blank on every ordinary session, which is
     // what the dialog keys "does this list show times?" off.
     const slot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
+    // A blank Program_Status is read as Active, the same way every other reader
+    // in this project reads it — a row written before the column existed holds
+    // a place, it does not hold nothing.
+    const status = String(row[map['Program_Status']] || '').trim() || 'Active';
 
     // This row belongs to its own session, and also to the dateless "program
     // only" entry for the same program — the fallback choice a desk picks
@@ -432,6 +443,7 @@ function buildQuickMarkIndex() {
       bucket.names.push(rowName);
       bucket.keys.push(nameKey);
       bucket.times.push(slot);
+      bucket.statuses.push(status);
     });
   });
 

@@ -580,7 +580,13 @@ const QUICK_MARK_CACHE_KEY = 'QUICK_MARK_INDEX_V2';
 // rest of their household (77_households_and_names.gs). A stored copy from
 // before that has neither, and a dialog reading it would silently offer no
 // household anywhere — the same shape of bug as the one above.
-const QUICK_MARK_INDEX_SCHEMA = 4;
+// 5: each registered person now carries their Program_Status, which is what
+// the change panel reads to decide what may be done to their row
+// (99_registrant_changes.gs) — and what the name list reads to say "(waiting
+// list)" beside a name. A stored copy from before that has every status
+// blank, and the panel would offer "put them back on" to somebody who was
+// never off it.
+const QUICK_MARK_INDEX_SCHEMA = 5;
 /**
  * CacheService caps one value at 100KB. The index for a workbook with a year
  * of history is bigger than that even gzipped, so it is stored as a manifest

@@ -100,7 +100,11 @@ function showQuickMarkDialog() {
   // stored index yet gets null here and the dialog fetches as it always did.
   const html = HtmlService.createHtmlOutput(buildQuickMarkHtml(readyQuickMarkIndex()))
     .setWidth(560)
-    .setHeight(620);
+    // Taller than it was, because the change panel (99_registrant_changes.gs)
+    // opens below the Mark button: at 620 the one control that says what is
+    // about to happen — "Apply change", and the answer under it — was the part
+    // that fell off the bottom.
+    .setHeight(700);
   SpreadsheetApp.getUi().showModalDialog(html, 'Quick Mark');
 }
 
@@ -196,7 +200,10 @@ function buildQuickMarkHtml(preloadedIndex) {
   on the list as well — that gives their seat and their lunch back — and staff take them off the
   waitlist on the Registrants tab when a place comes free.<br>
   <b>More than one meal?</b> Ticking <b>Lunch</b> opens boxes for how many they ate here and how many
-  they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.
+  they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.<br>
+  <b>Something already on the list is wrong?</b> Pick the person and use <b>Change this
+  registration</b> underneath — move them to another day, cancel them, put them back on, undo a
+  mark, correct their meal or their phone number, or take the row off altogether.
 </p>
 
 <label class="field" for="location">1. Location</label>
@@ -300,6 +307,95 @@ function buildQuickMarkHtml(preloadedIndex) {
 </fieldset>
 
 <button id="go" onclick="submit()" disabled>Mark</button>
+
+<!-- EVERYTHING THAT IS NOT A MARK. Shown only once a person who is actually on
+     this session's list has been picked, because every action in it changes a
+     row that already exists — there is nothing here to do to a walk-in who has
+     no row yet, and a panel that is always open is a panel that is always in
+     the way of the thirty people this dialog is really for. -->
+<fieldset id="changeBox" style="display:none">
+  <legend>Change this registration</legend>
+  <p class="hint" id="changeWho" style="margin:0 0 6px 0"></p>
+  <label class="field" for="changeWhat">What needs changing?</label>
+  <select id="changeWhat" onchange="changeWhatChanged()">
+    <option value="">— nothing, just marking —</option>
+    <option value="move">📅 Move them — another day, time, or program</option>
+    <option value="cancel">🚫 Cancel this registration</option>
+    <option value="restore">↩️ Put them back on</option>
+    <option value="waitlist">⏳ Move them to the waiting list</option>
+    <option value="undo">↺ Undo a mark — attended / lunch</option>
+    <option value="lunch">🍽️ Change their meal</option>
+    <option value="contact">☎️ Correct their phone or email</option>
+    <option value="note">📝 Add a note to their row</option>
+    <option value="remove">🗑️ Remove this row entirely</option>
+  </select>
+
+  <div id="moveFields" style="display:none">
+    <label class="field" for="toLocation">Move them to — location</label>
+    <select id="toLocation" onchange="toLocationChanged()">
+      <option value="">— choose a location —</option>
+    </select>
+    <label class="field" for="toSession">Move them to — session</label>
+    <select id="toSession" onchange="toSessionChanged()" disabled>
+      <option value="">— choose a location first —</option>
+    </select>
+    <label class="field" for="toApptTime" id="toApptLabel" style="display:none">Appointment time</label>
+    <select id="toApptTime" onchange="refreshChangeButton()" style="display:none">
+      <option value="">— choose a time —</option>
+    </select>
+    <p class="hint" id="toApptNote" style="display:none"></p>
+  </div>
+
+  <div id="undoFields" style="display:none">
+    <label class="tick"><input type="checkbox" id="clearAttended" onchange="refreshChangeButton()">
+      Take the <b>Attended</b> tick off</label>
+    <label class="tick"><input type="checkbox" id="clearLunch" onchange="refreshChangeButton()">
+      Take the <b>Lunch</b> tick off <span class="note">— and the meal counts with it</span></label>
+  </div>
+
+  <div id="lunchFields" style="display:none">
+    <label class="field" for="newLunchType">Their meal</label>
+    <select id="newLunchType" onchange="refreshChangeButton()">
+      <option value="Hot">Hot</option>
+      <option value="Cold">Cold</option>
+      <option value="No Lunch">No Lunch — take it off the order</option>
+    </select>
+    <div class="meals">
+      <label class="num">How many meals <input type="number" id="newMealsOrdered" min="1" max="20"
+        step="1" value="1"></label>
+      <span class="note">— this REPLACES what the row says, it does not add to it</span>
+    </div>
+  </div>
+
+  <div id="contactFields" style="display:none">
+    <label class="field" for="newPhone">Phone</label>
+    <input type="text" id="newPhone" placeholder="Leave blank to keep what is there"
+           autocomplete="off" oninput="refreshChangeButton()">
+    <label class="field" for="newEmail">Email</label>
+    <input type="text" id="newEmail" placeholder="Leave blank to keep what is there"
+           autocomplete="off" oninput="refreshChangeButton()">
+    <p class="hint" style="margin:6px 0 0 0">Goes onto every upcoming row this person has, not just
+      this one — a phone number is a fact about them, not about one booking.</p>
+  </div>
+
+  <div id="noteFields" style="display:none">
+    <label class="field" for="changeNote">The note</label>
+    <input type="text" id="changeNote" placeholder="&quot;Daughter collects her&quot;"
+           autocomplete="off" oninput="refreshChangeButton()">
+    <p class="hint" style="margin:6px 0 0 0">One sentence, on this row only. Something true every
+      week belongs in <b>a regular need</b> above instead.</p>
+  </div>
+
+  <div id="reasonFields" style="display:none">
+    <label class="field" for="changeReason">Reason (optional)</label>
+    <input type="text" id="changeReason" placeholder="Goes in the row's notes, for whoever asks later"
+           autocomplete="off">
+  </div>
+
+  <button id="changeGo" onclick="applyChange()" disabled>Apply change</button>
+  <div id="changeStatus" style="min-height:16px;margin-top:8px;font-weight:bold"></div>
+</fieldset>
+
 <div id="status"></div>
 <div id="log"></div>
 
@@ -425,6 +521,10 @@ function buildQuickMarkHtml(preloadedIndex) {
     // which means no appointment times and no standing tick until one is.
     showAppointmentTimes();
     registerChanged();
+    // The name went with the session list, so there is nothing to change —
+    // and a half-filled "move them to Thursday" left standing over whoever is
+    // picked next is exactly the mistake this dialog must not make.
+    refreshChangePanel();
     // A location picked before the sessions have landed is not an error and
     // not a wasted click: loadIndex() calls back through here the moment they
     // arrive, and the choice is still sitting in the dropdown.
@@ -439,8 +539,19 @@ function buildQuickMarkHtml(preloadedIndex) {
       el('session').disabled = true;
       return;
     }
+    // THE CHOSEN SESSION SURVIVES A RELOAD, the same way the location does.
+    // This runs again every time the lists are re-fetched — the ↻ link, and
+    // now every change the panel makes — and a desk that has just moved one
+    // person out of a queue of thirty should not have to find their session
+    // again to mark the next one.
+    var keep = el('session').value;
     var sessions = INDEX.sessions.filter(function (s) { return s.location === loc; });
     fill(el('session'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
+    if (keep && sessions.some(function (s) { return s.value === keep; })) {
+      el('session').value = keep;
+      sessionChanged();
+      return;
+    }
     say(sessions.length + ' session(s) at ' + loc + '.', '');
   }
 
@@ -448,8 +559,10 @@ function buildQuickMarkHtml(preloadedIndex) {
   // the roll. The roll arrives once for the whole dialog, so subtracting this
   // session's people from it is done here rather than sent per session.
   function namesFor(loc, session) {
-    var bucket = (INDEX && INDEX.namesBySession[loc + SEP + session]) || { names: [], keys: [], times: [] };
+    var bucket = (INDEX && INDEX.namesBySession[loc + SEP + session]) ||
+      { names: [], keys: [], times: [], statuses: [] };
     var times = bucket.times || [];
+    var statuses = bucket.statuses || [];
     var taken = {};
     bucket.keys.forEach(function (k) { taken[k] = true; });
 
@@ -469,12 +582,20 @@ function buildQuickMarkHtml(preloadedIndex) {
         return bucket.names[a].localeCompare(bucket.names[b]);
       });
     }
+    // A CANCELLED OR WAITING NAME IS STILL IN THE LIST, and has to say so. It
+    // is in the list because those are exactly the rows somebody opens this
+    // dialog to change — "she cancelled and now she can come" reaches nothing
+    // if the name has vanished — and it says so because the alternative is a
+    // desk ticking Attended against a row that holds no seat and finding out
+    // from a refusal.
     var out = order.map(function (i) {
       var name = bucket.names[i];
       var time = times[i] || '';
+      var label = (showTimes && time) ? time + '  —  ' + name : name;
+      var note = statusNoteFor(statuses[i]);
       return {
         value: packNamePick(name, time),
-        label: (showTimes && time) ? time + '  —  ' + name : name,
+        label: note ? label + '  ' + note : label,
         group: 'Registered for this session'
       };
     });
@@ -483,6 +604,34 @@ function buildQuickMarkHtml(preloadedIndex) {
       out.push({ value: packNamePick(m.name, ''), label: m.name, group: 'Other known members' });
     });
     return { options: out, registeredCount: bucket.names.length, otherCount: out.length - bucket.names.length };
+  }
+
+  // What a status is called in a dropdown, and '' for the one that needs no
+  // saying. 'Superseded' never reaches here (the index leaves those rows out),
+  // and a blank is Active — the same reading every server-side reader takes.
+  function statusNoteFor(status) {
+    var s = String(status || '').trim();
+    if (s === 'Cancelled') return '(cancelled)';
+    if (s === 'Waitlisted') return '(waiting list)';
+    return '';
+  }
+
+  // The chosen person's Program_Status, out of the same three parallel arrays
+  // their name came from. 'Active' when the lists predate the status (an index
+  // built by an older script), which is what the tab itself would say.
+  function chosenStatus() {
+    var bucket = INDEX && INDEX.namesBySession[el('location').value + SEP + el('session').value];
+    if (!bucket || !bucket.keys) return '';
+    var key = nameKeyOf(chosenName());
+    var time = chosenBookedTime();
+    var times = bucket.times || [];
+    var statuses = bucket.statuses || [];
+    for (var i = 0; i < bucket.keys.length; i++) {
+      if (bucket.keys[i] === key && (times[i] || '') === (time || '')) {
+        return String(statuses[i] || 'Active').trim() || 'Active';
+      }
+    }
+    return '';
   }
 
   // "10:30 AM" -> 630, for sorting a session's people into the order they are
@@ -593,6 +742,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     el('name').appendChild(walkIn);
     say(res.registeredCount + ' registered' +
       (res.otherCount ? ', plus ' + res.otherCount + ' other known member(s)' : '') + '.', '');
+    refreshChangePanel();
   }
 
   // A walk-in that was just written is on that session from now on, without
@@ -601,12 +751,20 @@ function buildQuickMarkHtml(preloadedIndex) {
     if (!INDEX || !name || !nameKey) return;
     var key = loc + SEP + session;
     var bucket = INDEX.namesBySession[key];
-    if (!bucket) { bucket = { names: [], keys: [], times: [] }; INDEX.namesBySession[key] = bucket; }
+    if (!bucket) {
+      bucket = { names: [], keys: [], times: [], statuses: [] };
+      INDEX.namesBySession[key] = bucket;
+    }
     if (!bucket.times) bucket.times = bucket.names.map(function () { return ''; });
+    if (!bucket.statuses) bucket.statuses = bucket.names.map(function () { return 'Active'; });
     if (bucket.keys.some(function (k, i) { return k === nameKey && bucket.times[i] === (time || ''); })) return;
     bucket.names.push(name);
     bucket.keys.push(nameKey);
     bucket.times.push(time || '');
+    // A row written by the button that is being pressed right now. The one
+    // exception is the waitlist tick, which is the whole of what that press
+    // means — see applyQuickMarkLocked().
+    bucket.statuses.push(el('waitlist').checked ? 'Waitlisted' : 'Active');
   }
 
   // The same correction rememberWalkIn() makes, for a slot that MOVED rather
@@ -632,6 +790,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     showAppointmentTimes();
     showNeeds();
     toggleNeedBox(false);
+    refreshChangePanel();
     refreshButton();
   }
 
@@ -1153,6 +1312,278 @@ function buildQuickMarkHtml(preloadedIndex) {
     showAppointmentTimes();
   }
 
+  // ------------------------------------------------------------------
+  // Change this registration
+  // ------------------------------------------------------------------
+  //
+  // EVERY ONE OF THESE CHANGES A ROW THAT ALREADY EXISTS, which is why the
+  // whole panel is hidden until somebody who is genuinely on this session's
+  // list has been picked (isRegisteredPick()). A walk-in has nothing to move,
+  // cancel or undo — the Mark ticks above are what write their row in the
+  // first place.
+  //
+  // AND UNLIKE EVERY OTHER BUTTON IN THIS DIALOG, THIS ONE WAITS. The marking
+  // path hands back optimistically because a desk has thirty of them to make
+  // and a refusal is survivable (see submit()). A change is rare and can be
+  // refused for reasons only the sheet knows — the slot went in between, the
+  // session is full, they are on it already — so the person pressing it reads
+  // the answer before they move on. A cancellation shown as done and then
+  // refused is a seat given away twice.
+
+  /** Which changes make sense for the status this person's row is in. */
+  function changesForStatus(status) {
+    if (status === 'Cancelled') return ['restore', 'move', 'contact', 'note', 'remove'];
+    if (status === 'Waitlisted') return ['restore', 'move', 'cancel', 'contact', 'note', 'remove'];
+    return ['move', 'cancel', 'waitlist', 'undo', 'lunch', 'contact', 'note', 'remove'];
+  }
+
+  function refreshChangePanel() {
+    var name = chosenName();
+    var registered = !!name && el('name').value !== WALK_IN &&
+      isRegisteredPick(name, chosenBookedTime());
+    el('changeBox').style.display = registered ? 'block' : 'none';
+    if (!registered) { resetChangePanel(); return; }
+
+    var status = chosenStatus() || 'Active';
+    var allowed = changesForStatus(status);
+    var options = el('changeWhat').getElementsByTagName('option');
+    for (var i = 0; i < options.length; i++) {
+      var value = options[i].value;
+      // The blank first entry is always there; everything else appears only
+      // where it means something. A cancelled row cannot be cancelled again,
+      // and undoing an attendance mark on one is a mark it does not have.
+      options[i].style.display = (!value || allowed.indexOf(value) !== -1) ? '' : 'none';
+      options[i].disabled = !(!value || allowed.indexOf(value) !== -1);
+    }
+    if (el('changeWhat').value && allowed.indexOf(el('changeWhat').value) === -1) {
+      el('changeWhat').value = '';
+    }
+    var session = chosenSession();
+    el('changeWho').textContent = name + ' — ' + (session ? session.label : 'this session') +
+      (status === 'Active' ? '' : ' · ' + status.toLowerCase());
+    changeWhatChanged();
+  }
+
+  /** The panel back to its opening state, without touching the marking ticks. */
+  function resetChangePanel() {
+    el('changeWhat').value = '';
+    el('toLocation').value = '';
+    el('toSession').innerHTML = '<option value="">— choose a location first —</option>';
+    el('toSession').disabled = true;
+    el('toApptTime').innerHTML = '';
+    el('clearAttended').checked = false;
+    el('clearLunch').checked = false;
+    el('newLunchType').value = 'Hot';
+    el('newMealsOrdered').value = '1';
+    el('newPhone').value = '';
+    el('newEmail').value = '';
+    el('changeNote').value = '';
+    el('changeReason').value = '';
+    sayChange('', '');
+    changeWhatChanged();
+  }
+
+  function changeWhatChanged() {
+    var what = el('changeWhat').value;
+    el('moveFields').style.display = what === 'move' ? 'block' : 'none';
+    el('undoFields').style.display = what === 'undo' ? 'block' : 'none';
+    el('lunchFields').style.display = what === 'lunch' ? 'block' : 'none';
+    el('contactFields').style.display = what === 'contact' ? 'block' : 'none';
+    el('noteFields').style.display = what === 'note' ? 'block' : 'none';
+    // The reason box rides with the three changes somebody asks about six
+    // weeks later — "why is this seat empty?" is the question the stamp exists
+    // to answer (see cancellationStamp()).
+    el('reasonFields').style.display =
+      (what === 'cancel' || what === 'waitlist' || what === 'restore') ? 'block' : 'none';
+    // The placeholder option is always there, so "never drawn" is one option,
+    // not none.
+    if (what === 'move' && el('toLocation').options.length < 2) drawMoveLocations();
+    if (what === 'move' && !el('toLocation').value) {
+      // Most moves stay at the same building, so start there rather than on a
+      // blank — a desk that wants the other one is one pick away.
+      el('toLocation').value = el('location').value;
+      toLocationChanged();
+    }
+    refreshChangeButton();
+  }
+
+  function drawMoveLocations() {
+    fill(el('toLocation'), LOCATIONS.map(function (loc) { return { value: loc, label: loc }; }),
+      '— choose a location —');
+  }
+
+  // The destination list is the SAME session list the top of the dialog is
+  // built from, filtered the same way: one index, two dropdowns, and no way
+  // for "the sessions at Narberth" to mean two different things on one screen.
+  function toLocationChanged() {
+    var loc = el('toLocation').value;
+    el('toApptTime').style.display = 'none';
+    el('toApptLabel').style.display = 'none';
+    el('toApptNote').style.display = 'none';
+    if (!INDEX || !loc) {
+      el('toSession').innerHTML = '<option value="">— choose a location first —</option>';
+      el('toSession').disabled = true;
+      refreshChangeButton();
+      return;
+    }
+    var sessions = INDEX.sessions.filter(function (s) { return s.location === loc; });
+    fill(el('toSession'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
+    toSessionChanged();
+  }
+
+  function toSessionChanged() {
+    var loc = el('toLocation').value;
+    var label = el('toSession').value;
+    var session = (INDEX && label) ? INDEX.sessions.filter(function (s) {
+      return s.location === loc && s.value === label;
+    })[0] : null;
+    var on = !!(session && session.byAppointment);
+    var free = (session && session.times) || [];
+
+    el('toApptLabel').style.display = on ? 'block' : 'none';
+    el('toApptTime').style.display = on ? 'block' : 'none';
+    el('toApptNote').style.display = on ? 'block' : 'none';
+    el('toApptNote').textContent = free.length
+      ? 'Booked by appointment — times already taken are not listed.'
+      : 'Every appointment on that date is taken, so nobody can be moved onto it.';
+
+    el('toApptTime').innerHTML = '';
+    if (on && free.length) {
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '— choose a time —';
+      el('toApptTime').appendChild(blank);
+      free.forEach(function (t) {
+        var o = document.createElement('option');
+        o.value = t.value;
+        o.textContent = t.label;
+        el('toApptTime').appendChild(o);
+      });
+    }
+    refreshChangeButton();
+  }
+
+  /** True when the destination the move panel is holding needs a time and has none. */
+  function moveNeedsTime() {
+    var loc = el('toLocation').value;
+    var label = el('toSession').value;
+    var session = (INDEX && label) ? INDEX.sessions.filter(function (s) {
+      return s.location === loc && s.value === label;
+    })[0] : null;
+    return !!(session && session.byAppointment) && !el('toApptTime').value;
+  }
+
+  function refreshChangeButton() {
+    var what = el('changeWhat').value;
+    var ready = !!what;
+    if (what === 'move') ready = !!el('toSession').value && !moveNeedsTime();
+    if (what === 'undo') ready = el('clearAttended').checked || el('clearLunch').checked;
+    if (what === 'contact') ready = !!el('newPhone').value.trim() || !!el('newEmail').value.trim();
+    if (what === 'note') ready = !!el('changeNote').value.trim();
+    el('changeGo').disabled = !ready;
+    el('changeGo').textContent = what === 'remove' ? 'Remove this row'
+      : (what === 'cancel' ? 'Cancel this registration'
+        : (what === 'move' ? 'Move them' : 'Apply change'));
+  }
+
+  function sayChange(msg, cls) {
+    var box = el('changeStatus');
+    box.textContent = msg;
+    box.className = cls || '';
+  }
+
+  /** Everything the server needs to find the row, whichever change it is. */
+  function changePayload(what) {
+    return {
+      change: what,
+      location: el('location').value,
+      session: el('session').value,
+      name: chosenName(),
+      bookedTime: chosenBookedTime(),
+      reason: el('changeReason').value,
+      toLocation: el('toLocation').value,
+      toSession: el('toSession').value,
+      toAppointmentTime: el('toApptTime').value,
+      clearAttended: el('clearAttended').checked,
+      clearLunch: el('clearLunch').checked,
+      lunchType: el('newLunchType').value,
+      mealsOrdered: countIn('newMealsOrdered', 1),
+      phone: el('newPhone').value,
+      email: el('newEmail').value,
+      note: el('changeNote').value
+    };
+  }
+
+  function applyChange() {
+    var what = el('changeWhat').value;
+    if (!what) return;
+    var name = chosenName();
+    var session = chosenSession();
+    var where = session ? session.label : 'this session';
+
+    // THE TWO THAT ARE ASKED ABOUT HERE rather than from a needsConfirm round
+    // trip, for the same reason the walk-in question is (see submit()): Apps
+    // Script will not put an alert up while a modal is open, so the question
+    // has to be the browser's. Removing a row asks again from the server as
+    // well, because that answer decides a deletion and the dialog's copy of
+    // who is on what can be minutes old.
+    if (what === 'cancel' &&
+      !window.confirm('Cancel ' + name + '\\'s place on ' + where + '?\\n\\n' +
+        'Their seat and their lunch go back straight away. "Put them back on" is how it is undone.')) {
+      return;
+    }
+    if (what === 'waitlist' &&
+      !window.confirm('Move ' + name + ' to the waiting list for ' + where + '?\\n\\n' +
+        'They will hold no seat and no meal will be ordered for them.')) {
+      return;
+    }
+
+    var payload = changePayload(what);
+    sendChange(payload, function (res) {
+      // The row is being deleted, so the server asks once more with the words
+      // it actually knows — who, on what date, and how many guest rows go too.
+      if (res && res.needsConfirm) {
+        if (!window.confirm(res.question)) { sayChange('Nothing was changed.', ''); return; }
+        payload.confirmRemove = true;
+        sendChange(payload, null);
+        return;
+      }
+    });
+  }
+
+  function sendChange(payload, onAnswer) {
+    el('changeGo').disabled = true;
+    sayChange('Working…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        refreshChangeButton();
+        if (res && res.needsConfirm && onAnswer) { onAnswer(res); return; }
+        if (!res || !res.ok) {
+          sayChange((res && res.message) || '⚠️ Nothing was changed.', 'err');
+          return;
+        }
+        var line = document.createElement('div');
+        line.textContent = '• ' + res.message;
+        el('log').insertBefore(line, el('log').firstChild);
+        // THE LISTS ARE NOW WRONG, and not in a way the dialog can patch: a
+        // move rewrites which session a name is on, a removal takes one off
+        // entirely, and a status change decides what the panel offers next.
+        // One rebuild on a rare action is a better bargain than five local
+        // corrections that can each be subtly wrong.
+        if (res.listsChanged) loadIndex(true);
+        // CLEARED FIRST, SAID SECOND. resetChangePanel() wipes this box on its
+        // way past, so saying it before the reset is saying it to nobody.
+        resetChangePanel();
+        sayChange(res.message, 'ok');
+      })
+      .withFailureHandler(function (err) {
+        refreshChangeButton();
+        sayChange('The workbook did not answer: ' + err.message +
+          ' — check the row before trying again.', 'err');
+      })
+      .applyRegistrantChangeFromDialog(payload);
+  }
+
   /** Same session, next person: the name and the ticks cleared, nothing else. */
   function readyForNextPerson() {
     el('name').value = '';
@@ -1176,6 +1607,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     registerChanged();
     showNeeds();
     toggleNeedBox(false);
+    refreshChangePanel();
     refreshButton();
   }
 
