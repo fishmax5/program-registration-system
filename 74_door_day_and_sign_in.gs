@@ -41,6 +41,24 @@
 const WALK_IN_MAX_MEMBERS = 4000;
 
 /**
+ * HOW FAR BACK "here recently" REACHES, and how many people it may name.
+ *
+ * The door app's name list is now filtered to the sessions the desk actually
+ * picked (see buildDoorAppHtml()'s events screen), which is right for the
+ * person who registered and wrong for the regular who never does: a Tuesday
+ * class has the same eight people in it every week and four of them have
+ * never filled a form in their lives. So under the registered names there is
+ * a second section — everybody who registered for one of THESE programs, at
+ * THIS building, in the last two months, and is not already on today's list.
+ *
+ * Two months rather than a year because the list is read standing up: a name
+ * on it should be somebody the volunteer might plausibly see today, and a
+ * roster of everybody who ever came is what the search box is for.
+ */
+const DOOR_PAST_REGISTRANT_MONTHS = 2;
+const DOOR_MAX_PAST_REGISTRANTS = 400;
+
+/**
  * TODAY AT ONE BUILDING — who is expected, what is on, and what is for lunch.
  *
  * One call rather than three, because the page cannot draw anything useful
@@ -103,6 +121,12 @@ function walkInDay(payload) {
  *               same shape, nested under whoever brought them; `guestOf` only
  *               ever appears on a guest whose own host is not expected today
  *               (see the guest-folding pass below),
+ *     past:     [{ name, key, phone, titles[], values[], lastDateKey,
+ *                  lastLabel }] — the regulars of TODAY'S programs who are not
+ *               on today's list, from the last DOOR_PAST_REGISTRANT_MONTHS
+ *               months at this building. `values` are today's session choices
+ *               for the programs they came to, so the page can filter this
+ *               section by the same tick the registered section is filtered by,
  *     members:  [{ name, key }]
  *   }
  *
@@ -180,6 +204,14 @@ function readWalkInDay(location, dateKeyOverride) {
 
   const people = [];
   const peopleByKey = {};
+  // EVERY ROW OF THE LAST TWO MONTHS AT THIS BUILDING, held raw and filtered
+  // once the day's programs are known — a row read here is a row the sheet
+  // scan below is walking past anyway, so the regulars section costs the read
+  // it is already paying for rather than a second one.
+  const pastRows = [];
+  const pastFrom = parseDateKey(dateKey);
+  pastFrom.setMonth(pastFrom.getMonth() - DOOR_PAST_REGISTRANT_MONTHS);
+  const pastFromKey = formatDateKey(pastFrom);
   const reg = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
   if (reg) {
     const headers = HEADERS.All_Registrants;
@@ -187,7 +219,12 @@ function readWalkInDay(location, dateKeyOverride) {
     getSectionedRowValues(reg, headers, 'Event_ID').forEach(row => {
       if (String(row[map['Location']] || '').trim() !== loc) return;
       const d = coerceDate(row[map['Event_Date']]);
-      if (!d || formatDateKey(d) !== dateKey) return;
+      if (!d) return;
+      const rowKey = formatDateKey(d);
+      if (rowKey !== dateKey) {
+        collectPastRegistrantRow(pastRows, row, map, rowKey, pastFromKey, dateKey);
+        return;
+      }
       const name = String(row[map['Name']] || '').trim();
       if (!name) return;
       // Their earlier submission, not a second person at the door.
@@ -341,9 +378,102 @@ function readWalkInDay(location, dateKeyOverride) {
       value: sessionValue(lunchTitle)
     },
     people: hosted,
+    past: foldPastRegistrants(pastRows, programs, peopleByKey),
     members: readWalkInMembers(),
     readAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
   };
+}
+
+/**
+ * ONE ROW OF THE RECENT PAST, kept if it could possibly matter.
+ *
+ * Deliberately cheap and deliberately generous: this runs on every registrant
+ * row the day scan walks past, so it does no title matching and no name
+ * folding — that is foldPastRegistrants()'s job, once the day's programs are
+ * known. All it decides is whether the row is INSIDE the window and whether it
+ * is a row about somebody actually coming.
+ *
+ * A CANCELLED OR SUPERSEDED ROW IS NOT AN ATTENDANCE. "They signed up and then
+ * cancelled" is exactly the person who should not be offered as a regular at
+ * the door — the whole point of 71_cancellation.gs is that the difference is
+ * kept, so it is read here rather than flattened.
+ */
+function collectPastRegistrantRow(out, row, map, rowKey, fromKey, dateKey) {
+  if (rowKey >= dateKey || rowKey < fromKey) return;
+  if (out.length >= DOOR_MAX_PAST_REGISTRANTS * 8) return;
+  const name = String(row[map['Name']] || '').trim();
+  if (!name) return;
+  const status = map['Program_Status'] === undefined
+    ? '' : String(row[map['Program_Status']] || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'superseded') return;
+  const title = String(row[map['Event']] || '').trim();
+  if (!title || isLunchOnlyProgramTitle(title)) return;
+  out.push({
+    name,
+    title,
+    dateKey: rowKey,
+    phone: map['Phone'] === undefined ? '' : String(row[map['Phone']] || '').trim()
+  });
+}
+
+/**
+ * THE REGULARS OF TODAY'S PROGRAMS — the second section of the name list.
+ *
+ * Matched on the PROGRAM, not on the building alone: somebody who came to a
+ * concert in July is not who the volunteer standing in front of the Tuesday
+ * exercise class is looking for. The match is normalizeNameKey()'d, the same
+ * comparison doorRemainingMonthSessions() makes, so a retyped space or a
+ * changed capital does not lose a regular.
+ *
+ * WHAT COMES BACK IS TODAY'S SESSION VALUE, never the past row's own — the
+ * page ticks these people into TODAY, and a value carrying August's date is a
+ * mark that lands on the wrong session or on none. `values` is what lets the
+ * page filter this section by the same tick that filters the registered one.
+ *
+ * Anybody already expected today is dropped: they are a card in the section
+ * above, and the same person twice on one screen is a volunteer wondering
+ * which one is the real one.
+ */
+function foldPastRegistrants(pastRows, programs, peopleByKey) {
+  if (!pastRows.length || !programs.length) return [];
+  const byTitleKey = {};
+  programs.forEach(program => {
+    const key = normalizeNameKey(program.title);
+    if (key && !byTitleKey[key]) byTitleKey[key] = program;
+  });
+
+  const byKey = {};
+  const out = [];
+  pastRows.forEach(entry => {
+    const program = byTitleKey[normalizeNameKey(entry.title)];
+    if (!program) return;
+    const key = normalizeNameKey(entry.name);
+    if (!key || peopleByKey[key]) return;
+    let person = byKey[key];
+    if (!person) {
+      if (out.length >= DOOR_MAX_PAST_REGISTRANTS) return;
+      person = {
+        name: entry.name, key, phone: entry.phone,
+        titles: [], values: [], lastDateKey: '', lastLabel: ''
+      };
+      byKey[key] = person;
+      out.push(person);
+    }
+    if (!person.phone && entry.phone) person.phone = entry.phone;
+    if (person.values.indexOf(program.value) === -1) {
+      person.values.push(program.value);
+      person.titles.push(program.title);
+    }
+    if (entry.dateKey > person.lastDateKey) person.lastDateKey = entry.dateKey;
+  });
+
+  out.forEach(person => {
+    const when = parseDateKey(person.lastDateKey);
+    person.lastLabel = when && !isNaN(when.getTime())
+      ? Utilities.formatDate(when, TIMEZONE, 'EEE, MMM d') : '';
+  });
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
 }
 
 /**
@@ -651,9 +781,10 @@ function walkInSignIn(payload) {
 
   // THE MEMBERSHIP HAND-OFF, last and never fatal. Somebody who has just told
   // the door they are not a member yet is already inside and signed in; what
-  // is left is the office's to do. The door app hands them the application
-  // itself on the next screen (see doorMembershipForm); this is the record
-  // that survives them not filling it in — see recordMembershipHandoff().
+  // is left is the office's to do, and this is the whole of it — a note naming
+  // them, how to reach them, and the application to send. The door does not
+  // ask them to fill one in on the tablet; see recordMembershipHandoff()
+  // (72_door_app.gs) for what was there before and why it went.
   if (memberStatus === 'no') {
     const note = recordMembershipHandoff({ name, email, phone, location });
     if (note) lines.push(note);

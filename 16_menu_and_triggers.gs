@@ -279,7 +279,7 @@ function buildAppMenu(ui, includeAdmin) {
       // THE SAME REPAIR, OVER EVERY FILE THIS SYSTEM MAKES \u2014 registrant sheets,
       // sign-in documents, form images and the folders they sit in, not just
       // the forms. Resumes where it stopped if it runs out of time; see
-      // openUpAllGeneratedFileSharing() (`97`).
+      // openUpAllGeneratedFileSharing() (`89`).
       .addItem('\ud83d\udd13 Open Up ALL File Sharing', 'openUpAllGeneratedFileSharing')
       // THE ONE THAT ANSWERS "WHY ISN'T THIS TAG WORKING". Every other item
       // here does something; this one only looks \u2014 at a calendar event, with
@@ -303,6 +303,20 @@ function buildAppMenu(ui, includeAdmin) {
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
       .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
+      // THE DOCTOR'S FIRST FINDING, AS ITS OWN ITEM. The Doctor is a dialog
+      // with several checks in it; this is the one repair people are sent to by
+      // name — by the appointment-form notes (99), by the report beside it, and
+      // by anybody whose Form_ID column has come apart from its link. It has
+      // always existed and was reachable only from inside the dialog or the
+      // Apps Script editor, which is no use to somebody being told to press it.
+      // Reads no calendar, rebuilds no form, and says what it will do first.
+      .addItem('\ud83d\udd17 Repair Dashboard Links (no calendar read)', 'repairDashboardLinks')
+      // THE CASE THE REPAIR ABOVE MUST NOT DECIDE. It assumes Form_ID is the
+      // truth and the links drifted — right when a column slid, and exactly
+      // wrong when a program is holding two near-identical forms and the
+      // registrations are on the one the links open. Which is which is a fact
+      // about response counts, not about the spreadsheet, so this one asks.
+      .addItem('\ud83d\udd00 Sessions Split Across Two Forms\u2026', 'showForkedFormsDialog')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
@@ -310,6 +324,12 @@ function buildAppMenu(ui, includeAdmin) {
       // called repairFormRoutingNow() because the first such repair was the
       // page routing; renaming it would strand the trigger that resumes it.
       .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', 'repairFormRoutingNow')
+      // BESIDE THE DOCTOR, because it is the other half of the same repair.
+      // The Doctor puts a session row's Form_ID back on the form its link
+      // opens; this reads what that form collected while the two disagreed,
+      // which the ordinary sync never will — it reads from the sync clock, and
+      // those responses are behind it. Adds only what is missing; see 99.
+      .addItem('\u267b\ufe0f Re-import a Form\'s Responses\u2026', 'showReimportFormDialog')
       .addSeparator()
       // THE ONE-TIME JOBS, BEHIND ONE DOOR. Each of these is pressed once on a
       // workbook upgraded from an older version and never again — they catch
@@ -365,6 +385,12 @@ function buildAppMenu(ui, includeAdmin) {
         // calendar ID is the whole question, so it is read first. See 84.
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
+        // The check nothing else in the project makes: a form holding
+        // responses that NO session row names, which is to say a form nobody
+        // is importing. It is silent by construction — the import walks the
+        // Form_ID column, so a form missing from it is not read and not
+        // missed. See 99.
+        .addItem('Find Forms Nothing Is Importing (read-only report)', 'reportUnimportedForms')
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.

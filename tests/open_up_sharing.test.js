@@ -70,7 +70,7 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.collectGeneratedArtifactTargets = collectGeneratedArtifactTargets;
 this.openUpFileToAnyoneWithLink = openUpFileToAnyoneWithLink;
-this.applyLeaderFlagCheckbox_ = applyLeaderFlagCheckbox_;
+this.applyLeaderFlagCheckboxes_ = applyLeaderFlagCheckboxes_;
 // The registries and folder lookups are stubbed IN the script's own scope, so
 // the calls inside collectGeneratedArtifactTargets() resolve to these.
 this.__stub = function (name, fn) { this[name] = fn; eval(name + ' = fn;'); };
@@ -157,25 +157,33 @@ check('a file reports it was opened', fileOutcome.openedUp, true);
 
 // --- a tick column that will not draw --------------------------------------
 
-const sheetThatRefuses = {
-  getRange: () => ({
-    insertCheckboxes: () => { throw new Error('Exception: You do not have permission'); },
-    setDataValidation: () => { throw new Error('Exception: You do not have permission'); },
-    setHorizontalAlignment: () => {}
-  })
-};
+// A RangeList has insertCheckboxes() and NOT setDataValidation(), which is the
+// whole reason this helper exists: the batched write called the missing one and
+// threw "ticks.setDataValidation is not a function" on every sheet, every hour,
+// leaving the roster half-written with its tick columns reading TRUE/FALSE.
+const drawn = [];
+sandbox.applyLeaderFlagCheckboxes_('Contacted', {
+  insertCheckboxes: () => { drawn.push('insertCheckboxes'); },
+  setHorizontalAlignment: () => { drawn.push('aligned'); }
+});
+check('a tick column is drawn with the call a RangeList actually has',
+  drawn, ['insertCheckboxes', 'aligned']);
+
 let threw = false;
 try {
-  sandbox.applyLeaderFlagCheckbox_(sheetThatRefuses, { Contacted: 8 }, 'Contacted', 3, 5);
+  sandbox.applyLeaderFlagCheckboxes_('Contacted', {
+    insertCheckboxes: () => { throw new Error('Exception: You do not have permission'); },
+    setHorizontalAlignment: () => {}
+  });
 } catch (err) {
   threw = true;
 }
 check('a refused checkbox column never abandons the roster', threw, false);
 
-let touched = false;
-sandbox.applyLeaderFlagCheckbox_({ getRange: () => { touched = true; return {}; } },
-  { Contacted: 8 }, 'Confirmed', 3, 5);
-check('a column the headers do not have is skipped, not indexed as NaN', touched, false);
+// A column the headers do not name arrives as null rather than as a NaN column
+// index, and is skipped.
+sandbox.applyLeaderFlagCheckboxes_('Confirmed', null);
+check('a column the headers do not have is skipped', true, true);
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

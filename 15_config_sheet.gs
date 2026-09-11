@@ -90,6 +90,13 @@ function styleConfigSheet(sheet) {
   const automationSection = CONFIG_LAYOUT.AUTOMATION;
   applyValueListValidationBounded(sheet, automationSection.startCol, AUTOMATION_ENABLED_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
+  // The rolling horizon is a closed list for the same reason the two switches
+  // around it are: this one cell decides what the whole public may sign up
+  // for, and "3 mo" typed into it reads as no rolling horizon at all. Blank is
+  // still allowed and still means "use the date beside me".
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1,
+    REGISTRATION_HORIZON_MONTH_OPTIONS, CONFIG_DATA_START_ROW, 1);
+
   // Same two-value dropdown, same reason: "paused", "off" and "hold" are not
   // the same thing to isOutboundMailPaused(), and none of them stops anything.
   applyValueListValidationBounded(sheet, CONFIG_LAYOUT.OUTBOUND_MAIL.startCol,
@@ -116,6 +123,7 @@ function styleConfigSheet(sheet) {
   seedMembershipFormRow(sheet);
   seedOutboundMailRow(sheet);
   seedSeriesDetectionRow(sheet);
+  seedSyncBudgetRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -178,6 +186,64 @@ function seedSeriesDetectionRow(sheet) {
     + 'Set it to 0 to turn the recognition off and tag series by hand.\n\n'
     + 'A [Grouped] or [Regular] typed into an event description always wins over this.');
   log(`Seeded ${CONFIG_LAYOUT.SERIES_DETECTION.title} (${DEFAULT_GROUP_SERIES_UP_TO}) on "${SHEET_NAMES.CONFIG}".`);
+}
+
+/**
+ * HOW LONG ONE SLICE OF A SYNC MAY WORK FOR, in minutes.
+ *
+ * Apps Script kills an execution at a fixed ceiling with no warning, no
+ * exception and no `finally` — six minutes on a consumer account, thirty on
+ * Google Workspace — and this workbook cannot ask which one it is running
+ * under. So it is stated here, and the registration sync stops a few minutes
+ * short of it and hands the rest to a follow-up trigger
+ * (98_registration_sync_slices.gs) instead of being cut off mid-write.
+ *
+ * The default leaves five minutes of headroom under the thirty-minute ceiling.
+ * A workbook on a consumer account should say 4.
+ */
+function seedSyncBudgetRow(sheet) {
+  const section = CONFIG_LAYOUT.SYNC_BUDGET;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (cell.getValue() !== '') return;
+  cell.setValue(DEFAULT_SYNC_BUDGET_MINUTES);
+  cell.setNote(
+    'How long one run of the registration sync may work before it stops cleanly and hands the rest to a '
+    + 'follow-up run a minute later. Nothing is skipped — the follow-up picks up exactly where this one '
+    + 'stopped, and keeps going until the whole sync is done.\n\n'
+    + 'Set it a few minutes BELOW whatever Google allows this account per run: 30 minutes on a Google '
+    + 'Workspace account (so 25 here, the default), 6 minutes on an ordinary gmail.com one (so 4).\n\n'
+    + 'Too high and a run is killed part-way instead of stopping tidily. Too low and an ordinary sync is '
+    + 'split across more runs than it needs.');
+  log(`Seeded ${CONFIG_LAYOUT.SYNC_BUDGET.title} (${DEFAULT_SYNC_BUDGET_MINUTES} minutes) on "${SHEET_NAMES.CONFIG}".`);
+}
+
+/**
+ * The Config cell above as milliseconds, memoized for the execution.
+ *
+ * Falls back to DEFAULT_SYNC_BUDGET_MINUTES whenever the cell is blank, is not
+ * a number, or is outside the range a budget can sensibly take — a zero or a
+ * negative would mean "stop before starting", and an hour is past every
+ * ceiling Apps Script has.
+ */
+function getSyncSliceBudgetMs() {
+  if (__syncBudgetMinutesCache !== null) return __syncBudgetMinutesCache * 60 * 1000;
+  let minutes = DEFAULT_SYNC_BUDGET_MINUTES;
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      const val = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.SYNC_BUDGET.startCol).getValue();
+      const num = Number(val);
+      if (val !== '' && val !== null && !isNaN(num) &&
+          num >= MIN_SYNC_BUDGET_MINUTES && num <= MAX_SYNC_BUDGET_MINUTES) {
+        minutes = num;
+      }
+    }
+  } catch (err) {
+    // No spreadsheet, or no authorization to read one. The default is the answer.
+  }
+  __syncBudgetMinutesCache = minutes;
+  return minutes * 60 * 1000;
 }
 
 function seedOrderAheadRow(sheet) {
@@ -382,7 +448,14 @@ function migrateLegacyAdminNotificationColumns(sheet) {
  * Seeds the membership application's form id, and says in the cell note what
  * the cell is for and what an empty one means. Only ever written into an EMPTY
  * cell — a workbook pointed at a different application, or deliberately
- * cleared so the door stops offering one, is left as staff left it.
+ * cleared, is left as staff left it.
+ *
+ * WHAT THIS CELL IS FOR NOW. The door app used to draw the application's own
+ * questions on the tablet and submit them back through the Forms API; it does
+ * not any more (see recordMembershipHandoff(), 72_door_app.gs, for why). The
+ * id is read for ONE thing: putting the form's link into the office note a
+ * walk-in's "not a member yet" files, so whoever follows up has the thing to
+ * send. Nothing opens the form, so no access to it is needed by anybody.
  */
 function seedMembershipFormRow(sheet) {
   const section = CONFIG_LAYOUT.MEMBERSHIP_FORM;
@@ -391,13 +464,13 @@ function seedMembershipFormRow(sheet) {
     cell.setValue(DEFAULT_MEMBERSHIP_FORM_ID);
     log(`Seeded the default Membership Application form id on "${SHEET_NAMES.CONFIG}".`);
   }
-  cell.setNote('The Google Form the door app shows to somebody who says they are not a member yet.\n\n'
-    + 'Paste either the form id or its whole edit URL. The door reads the form\'s questions LIVE, '
-    + 'so editing the form is how the door\'s membership screen changes — no code change is needed.\n\n'
-    + 'Leave blank to stop offering the application at the door; a walk-in who is not a member is then '
-    + 'recorded for the office to follow up, and nothing else happens.\n\n'
-    + 'The account this script runs as must have EDIT access to the form, which is what the Forms API '
-    + 'requires to open it. Without that the door shows a plain message and a link to the form itself.');
+  cell.setNote('The membership application to send somebody who signs in at the door and says they '
+    + 'are not a member yet.\n\n'
+    + 'Paste either the form id or its whole edit URL. The door does NOT show this form to anybody: '
+    + 'it files a note for the office naming the person, how to reach them, and this link.\n\n'
+    + 'Leave blank and the note is filed without a link — the person is still recorded for the office '
+    + 'to follow up.\n\n'
+    + 'Nothing opens the form, so the account this script runs as needs no access to it.');
 }
 
 /**
@@ -459,29 +532,61 @@ function seedCalendarInviteRow(sheet) {
 }
 
 /**
- * Leaves the horizon BLANK on purpose — blank means "no horizon", which is
- * how every workbook behaved before this setting existed. Seeding a date here
- * would silently take sessions out of registration on a workbook whose owner
- * never asked for a horizon at all.
+ * Seeds the ROLLING half, and never the date.
  *
- * Only the number format and the note are written, and both every time: the
- * note is the whole explanation of what the cell does, and a Config rebuild
- * is exactly when somebody is most likely to be reading it.
+ * A workbook that has typed a date, or deliberately cleared one, is left
+ * exactly as it is: Months_Ahead is seeded only when BOTH cells are empty,
+ * which is a Config tab nobody has ever answered this question on. Seeding a
+ * DATE here would silently take sessions out of registration on a workbook
+ * whose owner never asked for a horizon at all — which is why this function
+ * seeded nothing before — and seeding the rolling cell over a typed date
+ * would quietly overrule an answer somebody gave on purpose.
+ *
+ * Both notes are written every time. They are the whole explanation of what
+ * the pair does, and a Config rebuild is exactly when somebody is reading it.
  */
 function seedRegistrationHorizonRow(sheet) {
   const section = CONFIG_LAYOUT.REGISTRATION_HORIZON;
   const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  const monthsCell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol + 1);
   cell.setNumberFormat(DATE_DISPLAY_FORMAT);
+
+  const dateBlank = String(cell.getValue() || '').trim() === '';
+  const monthsBlank = String(monthsCell.getValue() || '').trim() === '';
+  if (dateBlank && monthsBlank) {
+    monthsCell.setValue(describeRegistrationHorizonMonths(DEFAULT_REGISTRATION_HORIZON_MONTHS));
+    log(`Seeded ${section.title} to ${DEFAULT_REGISTRATION_HORIZON_MONTHS} months ahead on "${SHEET_NAMES.CONFIG}".`);
+  }
+
   cell.setNote(
-    'Registration is open through this date. Leave BLANK to open everything (the default).\n\n'
+    'Registration is open through this date.\n\n'
+    + 'While Months_Ahead (the cell to the right) is set, this one is a DISPLAY of what that currently '
+    + 'works out to, rewritten on every calendar sync. Typing a date here turns the rolling horizon off '
+    + 'and pins the horizon to what you typed. Clearing BOTH cells opens every session.\n\n'
     + 'Sessions on or before this date behave normally. Sessions AFTER it are not open yet:\n'
-    + '  \u2022 their calendar events say "' + REGISTRATION_NOT_OPEN_LINE + '" instead of carrying a register link;\n'
-    + '  \u2022 a form whose remaining sessions are all past this date stops accepting responses, and '
+    + '  • their calendar events say "' + REGISTRATION_NOT_OPEN_LINE + '" instead of carrying a register link;\n'
+    + '  • a form whose remaining sessions are all past this date stops accepting responses, and '
     + 'anyone opening its link is told registration is not yet open.\n\n'
     + 'Nothing is deleted and nothing is permanent — the rows, forms and events are all still built ahead '
     + 'of time. Move this date forward (or clear it) and the next sync puts the links back and re-opens '
-    + 'the forms. Use "\ud83d\udd17 Rewrite Event Links" from the Admin menu to apply a change to existing '
+    + 'the forms. Use "🔗 Rewrite Event Links" from the Admin menu to apply a change to existing '
     + 'events straight away.');
+
+  monthsCell.setNote(
+    'How far ahead registration is open, counted from TODAY and worked out again on every read — so the '
+    + 'horizon never goes stale. The default is ' + DEFAULT_REGISTRATION_HORIZON_MONTHS + ' months.\n\n'
+    + 'TO OPEN ONE MORE MONTH: pick the next number up this list. The date to the left moves to the end '
+    + 'of that month on the next sync, and every form and calendar event follows it.\n\n'
+    + 'It always means the END of the month it lands on, not today plus that many months — so it moves '
+    + 'once a month rather than every morning.\n\n'
+    + 'Leave BLANK to stop rolling and use whatever date is typed to the left instead (blank there too '
+    + 'means every session is open).');
+}
+
+/** How a month count reads in the dropdown, a note or a toast. */
+function describeRegistrationHorizonMonths(months) {
+  const n = Math.max(1, Math.floor(Number(months) || 0));
+  return `${n} ${n === 1 ? 'month' : 'months'}`;
 }
 
 /**
@@ -544,27 +649,123 @@ function shouldShowLinkInDescription() {
  * The Registration Open Through date as a 'yyyy-MM-dd' key, or '' when there
  * is no horizon at all. See REGISTRATION_NOT_OPEN_TEXT for what it means.
  *
- * FAILS OPEN, loudly: a cell that isn't a date reads as "no horizon" and logs
- * why. One typo must never be able to close every form in the workbook.
+ * TWO CELLS, ONE ANSWER, and the rolling one is asked first: Months_Ahead set
+ * means the horizon is the end of the month that many months from today, and
+ * the date cell beside it is only a display of that (see
+ * refreshRegistrationHorizonDisplay()). Months_Ahead blank falls back to the
+ * typed date, which is how this setting worked before the rolling half
+ * existed and is what a workbook holding a date somebody meant keeps doing.
+ *
+ * FAILS OPEN, loudly, on both halves: a cell that isn't a date — or a
+ * Months_Ahead that isn't a month count — reads as "no horizon" and logs why.
+ * One typo must never be able to close every form in the workbook.
  */
 function getRegistrationHorizonKey() {
   if (__registrationHorizonCache !== null) return __registrationHorizonCache.key;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
   let key = '';
+  let months = null;
   if (sheet) {
-    const raw = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol).getValue();
-    if (raw !== '' && raw !== null && raw !== undefined) {
-      const parsed = coerceRegistrationHorizonDate(raw);
-      if (parsed) key = formatDateKey(parsed);
-      else {
-        log(`⚠️ Config's Registration_Open_Through reads "${raw}", which isn't a usable date — ` +
-          'treating it as no horizon, so every session stays open for registration.');
+    months = readRegistrationHorizonMonths(sheet);
+    if (months) {
+      key = formatDateKey(rollingRegistrationHorizonDate(months));
+    } else {
+      const raw = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol).getValue();
+      if (raw !== '' && raw !== null && raw !== undefined) {
+        const parsed = coerceRegistrationHorizonDate(raw);
+        if (parsed) key = formatDateKey(parsed);
+        else {
+          log(`⚠️ Config's Registration_Open_Through reads "${raw}", which isn't a usable date — ` +
+            'treating it as no horizon, so every session stays open for registration.');
+        }
       }
     }
   }
-  __registrationHorizonCache = { key };
+  __registrationHorizonCache = { key, months };
   return key;
+}
+
+/**
+ * The Months_Ahead cell read off an open Config sheet, or null when it is
+ * blank (or unusable, which is logged and treated as blank — see the banner
+ * over getRegistrationHorizonKey() for why that is the safe direction).
+ */
+function readRegistrationHorizonMonths(sheet) {
+  const raw = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1).getValue();
+  if (raw === '' || raw === null || raw === undefined) return null;
+  const months = parseRegistrationHorizonMonths(raw);
+  if (!months) {
+    log(`⚠️ Config's Months_Ahead reads "${raw}", which isn't a number of months — ` +
+      `using the Registration_Open_Through date instead. Pick one of ${REGISTRATION_HORIZON_MONTH_OPTIONS.join(' / ')}.`);
+  }
+  return months;
+}
+
+/**
+ * "3 months", "3", 3 -> 3. Anything else -> null.
+ *
+ * A LEADING number and nothing clever: the dropdown writes "3 months", a
+ * workbook upgraded from a hand-typed cell may hold the bare number 3, and
+ * both mean the same thing. A date object stringifies without a leading digit
+ * and so reads as null, which is what stops a date pasted into the wrong cell
+ * being read as sixty months of open registration.
+ */
+function parseRegistrationHorizonMonths(raw) {
+  if (raw === '' || raw === null || raw === undefined) return null;
+  const match = String(raw).trim().match(/^(\d{1,3})\b/);
+  if (!match) return null;
+  const months = Number(match[1]);
+  if (!(months >= 1) || months > REGISTRATION_HORIZON_MAX_MONTHS) return null;
+  return months;
+}
+
+/** The current Months_Ahead setting, or null when the horizon is a typed date. */
+function getRegistrationHorizonMonths() {
+  getRegistrationHorizonKey(); // fills the cache, which is where both halves live
+  return __registrationHorizonCache ? __registrationHorizonCache.months : null;
+}
+
+/**
+ * The END of the month `months` months from `today` — the whole of the
+ * rolling rule. See DEFAULT_REGISTRATION_HORIZON_MONTHS for why it rounds
+ * rather than counting days.
+ */
+function rollingRegistrationHorizonDate(months, today) {
+  const base = coerceDate(today) || new Date();
+  const n = Math.max(1, Math.floor(Number(months) || 0));
+  return new Date(base.getFullYear(), base.getMonth() + n + 1, 0, 0, 0, 0);
+}
+
+/**
+ * Writes the rolling horizon's resolved date into the date cell beside it, so
+ * a person reading Config sees a date rather than having to do the arithmetic
+ * — and so every dialog, note and log that already prints that cell keeps
+ * working.
+ *
+ * ONLY WHEN IT MOVED, and only while Months_Ahead is set: the value changes
+ * once a month, and a write on every sync is a revision on the tab and a
+ * cache to invalidate for nothing. Nothing downstream reads the cell while
+ * the rolling half is set — getRegistrationHorizonKey() computes it — so a
+ * failure here costs a stale display and not a wrong horizon, which is why
+ * the caller can safely swallow it.
+ */
+function refreshRegistrationHorizonDisplay() {
+  const months = getRegistrationHorizonMonths();
+  if (!months) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+  if (!sheet) return null;
+
+  const resolved = rollingRegistrationHorizonDate(months);
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol);
+  const shown = coerceRegistrationHorizonDate(cell.getValue());
+  if (shown && formatDateKey(shown) === formatDateKey(resolved)) return resolved;
+
+  cell.setValue(resolved).setNumberFormat(DATE_DISPLAY_FORMAT);
+  log(`Registration horizon is ${describeRegistrationHorizonMonths(months)} ahead — ` +
+    `Config now shows ${formatDateLabel(resolved)}.`);
+  return resolved;
 }
 
 /**
@@ -1055,10 +1256,10 @@ function getAllAdminNotificationEmails() {
  * The membership application's form id, or '' when the cell is blank, holds
  * something that is not an id, or cannot be read at all.
  *
- * '' is a complete answer everywhere it is used: the door simply does not
- * offer the application. Reading fails the same way for the same reason
- * getAdminNotificationRows() does — a Config tab mid-rebuild must not be able
- * to point the door at a form nobody chose.
+ * '' is a complete answer everywhere it is used: the office's note is filed
+ * without a link to the application. Reading fails the same way for the same
+ * reason getAdminNotificationRows() does — a Config tab mid-rebuild must not
+ * be able to point the office at a form nobody chose.
  */
 function getMembershipFormId() {
   if (__membershipFormIdCache !== null) return __membershipFormIdCache;
@@ -1072,7 +1273,7 @@ function getMembershipFormId() {
         sheet.getRange(CONFIG_DATA_START_ROW, section.startCol).getValue());
     }
   } catch (err) {
-    log(`\u26a0\ufe0f Could not read the Membership Application form id from Config (${err}) — the door will not offer it.`);
+    log(`\u26a0\ufe0f Could not read the Membership Application form id from Config (${err}) — the office's note will carry no link.`);
     id = '';
   }
   __membershipFormIdCache = id;

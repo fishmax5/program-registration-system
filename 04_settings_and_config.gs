@@ -34,10 +34,18 @@ const CONFIG_LAYOUT = {
     startCol: 19,
     headers: ['Invite_Registrants']
   },
+  // Two columns since September 2026, and widened IN PLACE rather than given
+  // fresh ones like the three blocks at the end of this table: the gap to
+  // MEMBERSHIP_FORM (column 25) has always been four columns wide and nothing
+  // has ever written into 22-24, so taking one of them moves no live setting.
+  // Months_Ahead is the horizon staff actually keep — see
+  // getRegistrationHorizonKey() — and it has to sit BESIDE the date it
+  // resolves to, because the whole point of the pair is that you can read one
+  // off the other.
   REGISTRATION_HORIZON: {
     title: '🚧 Registration Open Through',
     startCol: 21,
-    headers: ['Registration_Open_Through']
+    headers: ['Registration_Open_Through', 'Months_Ahead']
   },
   MEMBERSHIP_FORM: {
     title: '🪪 Membership Application Form',
@@ -77,6 +85,12 @@ const CONFIG_LAYOUT = {
     title: '🔁 Recognize Short Series',
     startCol: 36,
     headers: ['Group_Series_Up_To']
+  },
+  // Fresh columns once more, same rule as the three blocks above.
+  SYNC_BUDGET: {
+    title: '⏱️ How Long a Sync May Run',
+    startCol: 38,
+    headers: ['Sync_Minutes_Per_Run']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -84,7 +98,12 @@ const CONFIG_LAYOUT = {
 // until the migration cleared them (RETIRED_ADMIN_NOTIFICATION_COL /
 // RETIRED_ARCHIVE_COPY_COL), and naming them here would invite somebody to
 // close the gap by moving a live section into one.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 22, 24, 26, 33, 35];
+//
+// 22 came off the list when Registration Open Through gained its second cell
+// (Months_Ahead) and grew into it. Nothing reads this — it is the record of
+// which columns are blank, and a record that says a live cell is blank is
+// worse than no record.
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the
@@ -199,10 +218,11 @@ const RETIRED_ARCHIVE_COPY_COL = { title: '🗄️ Archive Copy Address', col: 2
  * new file with a new id. Pasting an id (or the form's whole edit URL, which
  * is what a browser hands you) into one cell must be the whole operation.
  *
- * BLANK MEANS NO APPLICATION AT THE DOOR. The membership screen is not
- * offered, and a walk-in who says they are not a member yet is recorded for
- * the office exactly as they were before this existed — which is the behavior
- * every workbook had, and therefore the only safe reading of an empty cell.
+ * BLANK MEANS NO LINK IN THE OFFICE'S NOTE. A walk-in who says they are not a
+ * member yet is recorded for the office exactly as they were before this
+ * existed — which is the behavior every workbook had, and therefore the only
+ * safe reading of an empty cell. Nothing at the door opens this form; see
+ * recordMembershipHandoff() (72_door_app.gs).
  *
  * The default below is seeded onto a fresh Config tab only; a workbook whose
  * cell has been cleared or repointed by hand stays as staff left it.
@@ -316,6 +336,52 @@ const REGISTRATION_NOT_OPEN_LINE = `🚧 ${REGISTRATION_NOT_OPEN_TEXT}`;
 const REGISTRATION_NOT_OPEN_FORM_MESSAGE =
   `${REGISTRATION_NOT_OPEN_TEXT} — this program is not taking sign-ups yet. ` +
   'Please check back closer to the session date.';
+/**
+ * A HORIZON THAT MOVES ON ITS OWN.
+ *
+ * The date cell above answers "open through when?" exactly once. A typed date
+ * is a promise about a month, and a promise about a month goes stale in a
+ * month: the horizon everybody agreed on in September silently closes every
+ * form in the workbook the morning after it passes, and nothing says so until
+ * a member rings the office about a link that says registration is not yet
+ * open.
+ *
+ * So the setting staff actually keep is Months_Ahead — how far out
+ * registration should be open, counted from TODAY and resolved afresh on
+ * every read. Three months by default.
+ *
+ * ROUNDED TO THE END OF A MONTH, not to today's date plus ninety days, for two
+ * reasons. It is how people say it ("we are open through December"), and it is
+ * what stops the horizon moving every single day: a horizon that shifts each
+ * morning is a horizon that rewrites the description of every event sitting on
+ * its boundary, every day, forever. Rounded, it moves once a month.
+ *
+ * THE DATE CELL IS STILL THE DATE CELL. Months_Ahead blank means the typed
+ * date is the horizon, exactly as it was before this existed — which is what
+ * keeps a workbook that has one working through this change untouched. When
+ * Months_Ahead IS set, the date cell becomes a display of what it currently
+ * resolves to, rewritten by the sync, and typing a date into it turns the
+ * rolling horizon off (see the Config edit handler): "I mean this date" is the
+ * one thing a person typing a date can be sure of.
+ */
+const DEFAULT_REGISTRATION_HORIZON_MONTHS = 3;
+
+/**
+ * The dropdown. A closed list rather than a free number because this cell is
+ * the whole public's view of the programme: "3", "3 mo", "three" and a stray
+ * space are not the same thing to a parser, and only one of them holds the
+ * horizon where somebody meant to put it.
+ *
+ * The gaps are deliberate — 7, 8, 10 and 11 months are not answers anybody
+ * gives — and adding a month at a time is the ordinary use: pick the next
+ * number down the list and registration opens one month further out.
+ */
+const REGISTRATION_HORIZON_MONTH_OPTIONS =
+  ['1 month', '2 months', '3 months', '4 months', '5 months', '6 months', '9 months', '12 months'];
+
+/** Past this, a Months_Ahead cell is read as a typo rather than a horizon. */
+const REGISTRATION_HORIZON_MAX_MONTHS = 60;
+
 const CONFIG_HEADER_ROW = 2;
 const CONFIG_DATA_START_ROW = 3;
 /** Types that actually need a Meal Buffer Amounts row in Config (a "Not Serving" day never does). */

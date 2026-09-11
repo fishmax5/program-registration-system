@@ -106,6 +106,8 @@ function handleProgramDashboardEdit(e, sheet) {
 
   // The flag checkboxes first: an edit lands in exactly one column, and
   // handleProgramFlagEdit() reports whether that column was one of theirs.
+  // (readEditedBlock() below is what keeps a fill-down over three hundred rows
+  // from costing three hundred single-cell reads while somebody watches.)
   for (let i = 0; i < PROGRAM_FLAG_COLUMNS.length; i++) {
     if (handleProgramFlagEdit(e, sheet, zones, headerMap, PROGRAM_FLAG_COLUMNS[i])) return;
   }
@@ -140,13 +142,15 @@ function handleProgramDashboardEdit(e, sheet) {
 
   // Multi-row edit. Collect the distinct (row, tag) pairs that actually landed
   // inside a data zone, ask ONCE, and stamp each affected program.
+  const titleCol = (headerMap['Clean_Title'] || 0) + 1;
+  const at = readEditedBlock(sheet, editedRow, numRows, [typeCol + 1, titleCol]);
   const targets = [];
   for (let r = 0; r < numRows; r++) {
     const row = editedRow + r;
     if (!isRowInAnyDataZone(zones, row)) continue;
-    const tag = normalizeTypeTag(sheet.getRange(row, typeCol + 1).getValue());
+    const tag = normalizeTypeTag(at(row, typeCol + 1));
     if (tag !== EVENT_TYPES.GROUPED && tag !== EVENT_TYPES.REGULAR) continue;
-    const title = String(sheet.getRange(row, (headerMap['Clean_Title'] || 0) + 1).getValue() || '').trim();
+    const title = String(at(row, titleCol) || '').trim();
     if (!title) continue;
     if (targets.some(t => t.title === title && t.tag === tag)) continue; // one stamp per program
     targets.push({ row, title, tag });
@@ -184,6 +188,50 @@ function describeTypeTagChange(title, newTag) {
     : `"${title}" will switch to a SEPARATE registration form per calendar month, ` +
       `instead of one form for the whole series.\n\nThe next sync will build those forms and update the ` +
       `registration link on every one of its calendar events.`;
+}
+
+/**
+ * ONE READ OF THE ROWS AN EDIT TOUCHED.
+ *
+ * A fill-down is one onEdit with a range hundreds of rows tall, and every
+ * handler below has to know two or three things about each of those rows
+ * before it can decide whether the row is a target: its program's title, its
+ * calendar, its date, the state the box now shows. Each of those was a
+ * getRange().getValue() — one round trip per cell, so a fill-down over three
+ * hundred sessions was the better part of a thousand of them, with somebody
+ * sitting in front of the sheet waiting for a confirmation dialog.
+ *
+ * The edited block is contiguous by definition, so it is ONE getValues(). This
+ * returns the reader over it: `at(row, col)` with a 1-BASED column, answering
+ * '' for anything outside the block — which is what the per-cell reads
+ * answered for a missing column too.
+ *
+ * `columns` is the 1-based columns the caller means to ask for; the block is
+ * read exactly that wide, so a tab of forty columns is not fetched to answer
+ * questions about three of them.
+ *
+ * A read that will not go through falls back to the per-cell reads this
+ * replaced. They are slower and they always worked.
+ */
+function readEditedBlock(sheet, editedRow, numRows, columns) {
+  const width = Math.max.apply(null, [1].concat((columns || []).filter(c => c > 0)));
+  let values = null;
+  try {
+    values = sheet.getRange(editedRow, 1, numRows, width).getValues();
+  } catch (err) {
+    log(`\u2139\ufe0f Could not read the edited block on "${sheet.getName()}" in one pass (${err}).`);
+  }
+  return (row, col) => {
+    if (!col || col < 1 || col > width) return '';
+    if (!values) {
+      const v = sheet.getRange(row, col).getValue();
+      return v === undefined || v === null ? '' : v;
+    }
+    const line = values[row - editedRow];
+    if (!line) return '';
+    const v = line[col - 1];
+    return v === undefined || v === null ? '' : v;
+  };
 }
 
 /**
@@ -231,8 +279,11 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
 
   const editedRow = e.range.getRow();
   const numRows = e.range.getNumRows();
+  const colOf = name => (headerMap[name] === undefined ? 0 : headerMap[name] + 1);
+  const at = readEditedBlock(sheet, editedRow, numRows,
+    [colOf('Clean_Title'), colOf('Calendar_Source'), flagCol + 1]);
   const readCell = (row, name) =>
-    (headerMap[name] === undefined ? '' : String(sheet.getRange(row, headerMap[name] + 1).getValue() || '').trim());
+    (headerMap[name] === undefined ? '' : String(at(row, headerMap[name] + 1) || '').trim());
 
   // Every distinct program touched by this edit — one cell or a fill-down over
   // a hundred — with the state its box now shows.
@@ -243,7 +294,7 @@ function handleProgramFlagEdit(e, sheet, zones, headerMap, flag) {
     const title = readCell(row, 'Clean_Title');
     const calendarId = readCell(row, 'Calendar_Source');
     if (!title || !calendarId) continue;
-    const on = isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue());
+    const on = isTruthyCheckbox(at(row, flagCol + 1));
     if (targets.some(t => t.title === title && t.calendarId === calendarId)) continue;
     targets.push({ row, title, calendarId, on });
   }
@@ -448,8 +499,10 @@ function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
   const editedRow = e.range.getRow();
   const numRows = e.range.getNumRows();
   const flagCol = sheetMap[flag.column];
+  const at = readEditedBlock(sheet, editedRow, numRows,
+    [sheetMap['Group_Key'] || 0, sheetMap['Program'] || 0, flagCol]);
   const readCell = (row, name) => (sheetMap[name]
-    ? String(sheet.getRange(row, sheetMap[name]).getValue() || '').trim() : '');
+    ? String(at(row, sheetMap[name]) || '').trim() : '');
 
   const targets = [];
   let lunchRows = 0;
@@ -463,7 +516,7 @@ function handleProgramMonthFlagEdit(e, sheet, sheetMap, headerRow) {
     if (groupKey.indexOf('lunch::') === 0) { lunchRows++; continue; }
     const title = readCell(row, 'Program');
     if (!title) continue;
-    targets.push({ row, title, on: isTruthyCheckbox(sheet.getRange(row, flagCol).getValue()) });
+    targets.push({ row, title, on: isTruthyCheckbox(at(row, flagCol)) });
   }
   if (targets.length === 0) {
     if (lunchRows > 0) toastIfPossible('⚠️ Lunch is not a program — there is nothing to tag.');
@@ -606,8 +659,11 @@ function handleWaitlistOnlyEdit(e, sheet, zones, headerMap) {
 
   const editedRow = e.range.getRow();
   const numRows = e.range.getNumRows();
+  const colOf = name => (headerMap[name] === undefined ? 0 : headerMap[name] + 1);
+  const at = readEditedBlock(sheet, editedRow, numRows,
+    [colOf('Clean_Title'), colOf('Calendar_Source'), colOf('Event_Date'), flagCol + 1]);
   const readCell = (row, name) =>
-    (headerMap[name] === undefined ? '' : sheet.getRange(row, headerMap[name] + 1).getValue());
+    (headerMap[name] === undefined ? '' : at(row, headerMap[name] + 1));
 
   const targets = [];
   for (let r = 0; r < numRows; r++) {
@@ -623,7 +679,7 @@ function handleWaitlistOnlyEdit(e, sheet, zones, headerMap) {
       row, title, calendarId,
       dateKey: formatDateKey(date),
       when: formatDateLabel(date),
-      on: isTruthyCheckbox(sheet.getRange(row, flagCol + 1).getValue())
+      on: isTruthyCheckbox(at(row, flagCol + 1))
     });
   }
   if (targets.length === 0) return true;
@@ -1957,10 +2013,77 @@ function handleConfigEdit(e, sheet) {
       invalidateConfigCaches(); // reverted — the cache must match the sheet
       return;
     }
+    // A TYPED DATE TURNS THE ROLLING HORIZON OFF, in both directions: while
+    // Months_Ahead is set this cell is only a display of it, so a date left
+    // here beside a live month count would be overwritten by the next sync and
+    // the person who typed it would watch their answer disappear. "I mean this
+    // date" is the one thing somebody typing a date can be sure of, so it wins
+    // — and clearing the display means the same thing about no horizon at all.
+    const monthsCell = e.range.getSheet().getRange(CONFIG_DATA_START_ROW,
+      CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1);
+    const rollingWas = parseRegistrationHorizonMonths(monthsCell.getValue());
+    if (rollingWas) monthsCell.clearContent();
+
     invalidateConfigCaches(); // the horizon just moved; anything read after this must see the new one
-    toastIfPossible(parsed
+    const rollingOffNote = rollingWas
+      ? ` The rolling ${describeRegistrationHorizonMonths(rollingWas)} setting was turned off.`
+      : '';
+    toastIfPossible((parsed
       ? `Registration open through ${formatDateLabel(parsed)}. Run Sync Cal, or "🔗 Rewrite Event Links", to apply it now.`
-      : 'Registration horizon cleared — every session is open again from the next sync.');
+      : 'Registration horizon cleared — every session is open again from the next sync.') + rollingOffNote);
+  }
+
+  // THE ROLLING HALF, and the ordinary way this setting is changed: picking
+  // the next number up the list is "open one more month". It says what date
+  // that works out to before it is believed, because the number is one step
+  // removed from the thing it decides — and the date it names is the whole
+  // public's view of the programme.
+  const isHorizonMonthsEdit = editedCol === CONFIG_LAYOUT.REGISTRATION_HORIZON.startCol + 1 &&
+    e.range.getRow() === CONFIG_DATA_START_ROW;
+  if (isHorizonMonthsEdit) {
+    const rawMonths = String(e.value || '').trim();
+    const months = rawMonths ? parseRegistrationHorizonMonths(e.range.getValue()) : null;
+
+    if (rawMonths && !months) {
+      // Refused rather than confirmed, for the same reason a bad date is: left
+      // in place it reads as no rolling horizon at all (see
+      // readRegistrationHorizonMonths()), and the date cell beside it is a
+      // display nobody has been updating.
+      e.range.setValue(e.oldValue === undefined ? '' : e.oldValue);
+      invalidateConfigCaches();
+      toastIfPossible(`"${rawMonths}" isn't a number of months — Months_Ahead was left as it was. ` +
+        `Pick one of ${REGISTRATION_HORIZON_MONTH_OPTIONS.join(' / ')}, or clear it to use the date instead.`);
+      return;
+    }
+
+    const resolved = months ? rollingRegistrationHorizonDate(months) : null;
+    const detail = resolved
+      ? `Registration will be open through ${formatDateLabel(resolved)} — the end of the month ` +
+        `${describeRegistrationHorizonMonths(months)} from today — and that date moves forward on its own ` +
+        'as the months pass, so it never goes stale.\n\n' +
+        'Sessions after it are not open yet: their calendar events say ' +
+        `"${REGISTRATION_NOT_OPEN_LINE}" instead of showing a register link, and any form whose remaining ` +
+        'sessions are all past that date stops accepting responses.\n\n' +
+        'Nothing is deleted. Existing events are updated on the next sync, or straight away with ' +
+        '"🔗 Rewrite Event Links" from the Admin menu.'
+      : 'Clearing this stops the horizon rolling. The date in Registration_Open_Through is used ' +
+        'instead — and if that is blank too, every session is open again.';
+    if (!confirmCellEditOrRevert(e, resolved
+      ? `Open registration through ${formatDateLabel(resolved)}?`
+      : 'Stop the horizon rolling?', detail)) {
+      invalidateConfigCaches(); // reverted — the cache must match the sheet
+      return;
+    }
+    invalidateConfigCaches(); // read the new setting, then write the display from it
+    try {
+      refreshRegistrationHorizonDisplay();
+    } catch (err) {
+      log(`⚠️ Could not update the Registration_Open_Through display (${err}) — the horizon itself is set.`);
+    }
+    toastIfPossible(resolved
+      ? `Registration open through ${formatDateLabel(resolved)} (${describeRegistrationHorizonMonths(months)} ahead). ` +
+        'Run Sync Cal, or "🔗 Rewrite Event Links", to apply it now.'
+      : 'The horizon no longer rolls — the typed date is used instead.');
   }
 
   // Pausing is always safe and is the whole point of the switch, so it does
