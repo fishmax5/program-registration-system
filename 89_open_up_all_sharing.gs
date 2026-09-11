@@ -37,35 +37,66 @@
 // being refused REPORTS the problem rather than fixing it — per file, by name,
 // so the next run can be made from the right account.
 //
-// IT RESUMES RATHER THAN RESTARTS. A workbook with three hundred artifacts is
-// more Drive calls than one execution has time for, so each pass works to a
-// deadline and writes down the ids it finished. Pressing the item again picks
-// up where it stopped; a pass that reaches the end clears the note, and the
-// one after that starts from the top. Every step is idempotent, so a file done
-// twice costs a round trip and nothing else.
+// IT CARRIES ITSELF ON, and that is the whole reason it is a sliced job. A
+// workbook with three hundred artifacts is more Drive calls than one execution
+// has, and the first version of this stopped at its deadline and asked the
+// person to press the item again — which is a repair that only finishes if
+// somebody sits there pressing it, on the workbook where it matters most. It
+// runs on `runSlicedJob` (`75`) now, like the four other long jobs here: the
+// plan is fixed at the press, each slice works to a budget, records every file
+// as it finishes, and arms the next slice thirty seconds out. Nothing to press
+// again, and a slice killed outright still leaves exactly one successor.
 //
-// LOAD ORDER: numbered last, and it may stay there. Behavior only, its own
-// three constants stand alone, and everything it reaches for — the registries
-// (`06`, `46`, `69`), the folders (`82`), the Config reads (`15`) and
-// openUpFileToAnyoneWithLink() (`46`) — it reads at CALL time or through a
+// Every step is idempotent, so a file done twice costs a round trip and
+// nothing else — which is what makes the resume safe rather than delicate.
+//
+// LOAD ORDER: it may sit anywhere. Behavior only, its nine constants stand
+// alone, and everything it reaches for — the registries (`06`, `46`, `69`),
+// the folders (`82`), the Config reads (`15`), openUpFileToAnyoneWithLink()
+// (`46`) and the sliced-job runner (`75`) — it reads at CALL time or through a
 // hoisted function declaration.
 // ============================================================================
 
-/** Ids already done in the pass that is in flight. See the banner. */
-const SHARING_SWEEP_STATE_PROP_KEY = 'OPEN_UP_SHARING_SWEEP_V1';
+/**
+ * This job's state: the plan fixed at the press, the ids finished, the count
+ * opened and the refusals. `_V2` because the shape changed when the sweep
+ * became a sliced job — it held `{ startedAt, done: {} }` before, which the
+ * runner cannot resume from.
+ */
+const SHARING_SWEEP_STATE_PROP_KEY = 'OPEN_UP_SHARING_SWEEP_V2';
+
+/** The trigger handler one slice arms for the next. A NAME, so it must match. */
+const SHARING_SWEEP_RESUME_HANDLER = 'resumeOpenUpAllFileSharing';
 
 /**
- * How long one pass works before it stops and says so. Short of the six-minute
- * kill by enough to write its progress down and draw a dialog — the two things
- * that make the next press cost nothing.
+ * How long one slice works before it stops tidily and hands on. Short of the
+ * six-minute kill by enough to record the last file and arm the successor.
  */
 const SHARING_SWEEP_BUDGET_MS = 4 * 60 * 1000;
 
+/** The gap before the next slice after a clean hand-off. */
+const SHARING_SWEEP_RESUME_DELAY_MS = 30 * 1000;
+
 /**
- * A pass older than this is not "in flight" any more, it is abandoned — the
- * execution died, or somebody walked away. Starting fresh is the right answer:
- * the list of artifacts has moved on since, and re-doing a file is a round
- * trip rather than a risk.
+ * The watchdog armed BEFORE any work — longer than the execution ceiling, so a
+ * slice killed outright is followed by exactly one successor rather than
+ * racing the hand-off this same slice is about to arm.
+ */
+const SHARING_SWEEP_WATCHDOG_DELAY_MS = 8 * 60 * 1000;
+
+/** Ceiling, so a sweep that cannot finish ends and says so. */
+const SHARING_SWEEP_MAX_SLICES = 40;
+
+/** Slices in a row reaching no file at all before it gives up. */
+const SHARING_SWEEP_MAX_STALLED_SLICES = 2;
+
+/** Slices in a row ending in an exception before it gives up. See the runner call. */
+const SHARING_SWEEP_MAX_ERROR_SLICES = 3;
+
+/**
+ * State older than this is not "in flight", it is abandoned — the execution
+ * died in a way that took its watchdog with it. Reading it as finished is what
+ * stops one dead sweep blocking every later press forever.
  */
 const SHARING_SWEEP_STALE_MS = 60 * 60 * 1000;
 
@@ -189,118 +220,186 @@ function collectGeneratedArtifactTargets() {
   return targets;
 }
 
-/** The ids finished by the pass in flight, or {} when there is no live pass. */
-function getSharingSweepDone_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(SHARING_SWEEP_STATE_PROP_KEY);
-  if (!raw) return {};
-  let state = null;
-  try {
-    state = JSON.parse(raw);
-  } catch (err) {
-    // Unreadable progress is no progress. Starting over costs round trips, not
-    // correctness — every step here is idempotent.
-    log(`ℹ️ The sharing sweep's progress could not be read (${err}) — starting a fresh pass.`);
-    return {};
-  }
-  const startedAt = (state && state.startedAt) || 0;
-  if (!startedAt || Date.now() - startedAt > SHARING_SWEEP_STALE_MS) return {};
-  return (state && state.done) || {};
-}
-
-function saveSharingSweepDone_(done, startedAt) {
-  PropertiesService.getScriptProperties().setProperty(SHARING_SWEEP_STATE_PROP_KEY,
-    JSON.stringify({ startedAt: startedAt, done: done }));
-}
-
-function clearSharingSweepState_() {
-  PropertiesService.getScriptProperties().deleteProperty(SHARING_SWEEP_STATE_PROP_KEY);
-}
-
 /**
  * MENU ACTION: open up every file this system has made — forms, registrant
  * sheets, sign-in documents, form images — and add the accounts that run it as
  * editors of those and of the folders they sit in.
  *
- * Reports per file rather than summarizing, because "eleven refused this
- * account" and "eleven were already fine" are the two answers somebody is
- * actually asking about, and the refusals name the fix (sign in as the account
- * that made them).
+ * Starts the job; `runOpenUpSharingSlice()` is what does the work, here and on
+ * every slice after it.
  */
 function openUpAllGeneratedFileSharing() {
   if (!requireAuthorizedAdmin('Open Up All File Sharing')) return 0;
+  if (isOpenUpSharingSweepActive()) {
+    const message = 'A sharing sweep is already running — it carries itself on every ' +
+      `${Math.round(SHARING_SWEEP_RESUME_DELAY_MS / 1000)}s until every file has been looked at. ` +
+      'You will be told when it finishes.';
+    toastIfPossible(message);
+    return 0;
+  }
   if (!confirmConsequentialAction('Open up every file this system made?',
     'Registration forms, program registrant sheets, sign-in documents and form images are all set to ' +
     '"anyone with the link can edit", and the accounts that run this system are added as editors of ' +
     'them and of the folders they live in.\n\nThis is what lets an hourly sync run by one account read ' +
     'files created by another — which is what most "it stopped updating" faults turn out to be. ' +
-    'Nothing is moved, renamed or deleted, and no link changes.', true)) {
+    'Nothing is moved, renamed or deleted, and no link changes.\n\nIt carries itself on across as many ' +
+    'runs as it needs, so there is nothing to press again.', true)) {
     return 0;
   }
 
-  const previouslyDone = getSharingSweepDone_();
-  const resuming = Object.keys(previouslyDone).length > 0;
-  const startedAt = resuming ? Date.now() - 1 : Date.now(); // a resumed pass keeps its own clock honest
-  const done = previouslyDone;
-
   const targets = collectGeneratedArtifactTargets();
-  const deadline = Date.now() + SHARING_SWEEP_BUDGET_MS;
-
-  let opened = 0;
-  let skipped = 0;
-  let remaining = 0;
-  const refused = [];
-
-  targets.forEach(target => {
-    if (done[target.id]) { skipped++; return; }
-    if (Date.now() >= deadline) { remaining++; return; }
-
-    const outcome = openUpFileToAnyoneWithLink(target.id, target.what,
-      { folder: target.folder });
-    done[target.id] = true;
-
-    // A folder never asks for link sharing, so "did anything happen" is the
-    // editors for those and the link for everything else.
-    const worked = target.folder ? outcome.problems.length === 0 : outcome.openedUp;
-    if (worked) opened++;
-    else refused.push(`${target.what} (${target.id}) — ${outcome.problems.join('; ') || 'Drive refused'}`);
-  });
-
-  if (remaining > 0) {
-    saveSharingSweepDone_(done, startedAt);
-  } else {
-    clearSharingSweepState_();
+  if (targets.length === 0) {
+    toastIfPossible('Nothing to open up — this workbook has no generated files recorded yet.');
+    return 0;
   }
+
+  // The plan is fixed HERE, at the press, rather than rebuilt per slice: a file
+  // made by the hourly sync while this is running would otherwise extend a
+  // sweep that is trying to end, and it is already opened up by the run that
+  // made it.
+  saveSlicedJobState(SHARING_SWEEP_STATE_PROP_KEY, {
+    startedAt: Date.now(),
+    lastSliceAt: Date.now(),
+    slices: 0,
+    stalledSlices: 0,
+    errorSlices: 0,
+    targets: targets,
+    done: [],
+    opened: 0,
+    refused: []
+  });
+  log(`openUpAllGeneratedFileSharing: starting on ${targets.length} file(s) and folder(s).`);
+  toastIfPossible(`Opening up ${targets.length} file(s) — this carries itself on until it is done.`);
+  return runOpenUpSharingSlice();
+}
+
+/** THE TRIGGER HANDLER. Named as a string in `SHARING_SWEEP_RESUME_HANDLER`. */
+function resumeOpenUpAllFileSharing() {
+  runOpenUpSharingSlice();
+}
+
+/** Is a sweep in flight? Stale state reads as "no" — see `75`. */
+function isOpenUpSharingSweepActive() {
+  return isSlicedJobActive(SHARING_SWEEP_STATE_PROP_KEY, SHARING_SWEEP_STALE_MS, minutes =>
+    `ℹ️ A sharing sweep has been idle for ${minutes} minute(s) — treating it as finished.`);
+}
+
+/**
+ * ONE SLICE: work down the plan until the budget runs out, then hand on.
+ *
+ * NO WORKBOOK LOCK, deliberately — unlike the two form sweeps this borrows its
+ * runner from. Every call in here is to Drive; nothing reads or writes a cell,
+ * so holding the workbook shut for four minutes would cost the desk Quick Mark
+ * and buy nothing.
+ */
+function runOpenUpSharingSlice() {
+  return runSlicedJob({
+    label: 'Open up file sharing',
+    propKey: SHARING_SWEEP_STATE_PROP_KEY,
+    resumeHandler: SHARING_SWEEP_RESUME_HANDLER,
+    budgetMs: SHARING_SWEEP_BUDGET_MS,
+    resumeDelayMs: SHARING_SWEEP_RESUME_DELAY_MS,
+    watchdogDelayMs: SHARING_SWEEP_WATCHDOG_DELAY_MS,
+    maxSlices: SHARING_SWEEP_MAX_SLICES,
+    maxStalledSlices: SHARING_SWEEP_MAX_STALLED_SLICES,
+    // An error does not end this sweep, for the same reason it does not end the
+    // in-place rebuild: the commonest failure is transient and lands on a RUN
+    // rather than on a file, every file already done stays done, and a sweep
+    // that gives up with two hundred files left in it is a sweep somebody has
+    // to notice and press again.
+    maxErrorSlices: SHARING_SWEEP_MAX_ERROR_SLICES,
+
+    work: ctx => {
+      const state = ctx.state;
+      const doneSet = {};
+      (state.done || []).forEach(id => { doneSet[id] = true; });
+      const remainingTargets = (state.targets || []).filter(t => !doneSet[t.id]);
+      if (remainingTargets.length === 0) return { finished: true };
+
+      let processed = 0;
+      for (const target of remainingTargets) {
+        if (Date.now() >= ctx.deadline) break;
+
+        const outcome = openUpFileToAnyoneWithLink(target.id, target.what, { folder: target.folder });
+        // A folder never asks for link sharing, so "did anything happen" is the
+        // editors for those and the link for everything else.
+        const worked = target.folder ? outcome.problems.length === 0 : outcome.openedUp;
+        if (worked) state.opened = (state.opened || 0) + 1;
+        else {
+          state.refused.push(`${target.what} (${target.id}) — ${outcome.problems.join('; ') || 'Drive refused'}`);
+        }
+
+        // Recorded as it finishes, not at the end of the slice: a slice killed
+        // outright must not make its successor redo the files it got through.
+        state.done.push(target.id);
+        processed++;
+        ctx.save();
+      }
+
+      const remaining = remainingTargets.length - processed;
+      if (remaining <= 0) return { finished: true };
+      // A slice that got this far did not fail, whatever it did — so the
+      // consecutive-error count starts again from here.
+      state.errorSlices = 0;
+      return { processed: processed, remaining: remaining };
+    },
+
+    onHandOff: (state, result) => {
+      toastIfPossible(`Opening up file sharing: ${state.done.length} done, ${result.remaining} to go. ` +
+        `It carries on by itself in ${Math.round(SHARING_SWEEP_RESUME_DELAY_MS / 1000)}s.`);
+    },
+
+    overrunProblem: () => `stopped after ${SHARING_SWEEP_MAX_SLICES} runs without finishing`,
+    stalledProblem: result => `stopped early — ${result.remaining} file(s) could not be reached at all`,
+
+    onError: (err, n) => {
+      log(`⚠️ A sharing sweep run failed (${err}) — failure ${n} of ${SHARING_SWEEP_MAX_ERROR_SLICES} in a row.`);
+    },
+    errorProblem: (err, n) =>
+      `stopped after ${n} run(s) in a row ended in an error, the last of them: ${err}`,
+    saveErrorProblem: err => `stopped after an error it could not record: ${err}`,
+
+    onDone: (state, problem) => finishOpenUpSharingSweep(state, problem)
+  });
+}
+
+/** Ends the sweep: clear the state, drop the hand-off trigger, say what happened. */
+function finishOpenUpSharingSweep(state, problem) {
+  clearSlicedJobState(SHARING_SWEEP_STATE_PROP_KEY);
+  deleteSlicedJobResumeTriggers(SHARING_SWEEP_RESUME_HANDLER);
+
+  const refused = state.refused || [];
+  const left = Math.max(0, (state.targets || []).length - (state.done || []).length);
 
   refused.forEach(line => {
     noteForAdmin('Files whose sharing could not be changed',
       `${line}. This account cannot change its sharing, which almost always means it does not own the ` +
       `file. Sign in as the account that created it and run Open Up All File Sharing again.`);
   });
-  flushAdminDigest('File sharing');
 
-  const parts = [`Opened up ${opened} file${opened === 1 ? '' : 's'}.`];
-  if (skipped > 0) parts.push(`${skipped} were already done earlier in this pass.`);
+  const parts = [problem
+    ? `⚠️ Opening up file sharing ${problem}. ${state.opened || 0} file(s) were opened up; ${left} still to do.`
+    : `✅ File sharing opened up on ${state.opened || 0} file(s) and folder(s).`];
   if (refused.length > 0) {
     parts.push(`${refused.length} refused this account — run it again signed in as whoever created them ` +
       `(they are named in the log and in the office digest).`);
   }
-  if (remaining > 0) {
-    parts.push(`${remaining} left: this pass ran out of time. Press the item again to carry on where it stopped.`);
-  }
-  const message = parts.join(' ');
+  const headline = parts.join(' ');
 
-  log(`openUpAllGeneratedFileSharing: ${message}`);
-  const ui = tryGetUi_();
-  if (ui) ui.alert('Open Up File Sharing', message, ui.ButtonSet.OK);
-  else toastIfPossible(message);
-  return opened;
+  log(`openUpAllGeneratedFileSharing: ${headline}`);
+  if (problem) noteForAdmin('Open up file sharing', headline);
+  flushAdminDigest('File sharing');
+  toastIfPossible(headline);
+  return state.opened || 0;
 }
 
-/** The UI, or null where there is none (a trigger, a web app). Never throws. */
-function tryGetUi_() {
-  try {
-    return SpreadsheetApp.getUi();
-  } catch (err) {
-    return null;
-  }
+/**
+ * ESCAPE HATCH — run from the Apps Script editor. Stops a sweep that is still
+ * handing itself on. Whatever has been opened up stays opened up.
+ */
+function cancelOpenUpAllFileSharing() {
+  clearSlicedJobState(SHARING_SWEEP_STATE_PROP_KEY);
+  const removed = deleteSlicedJobResumeTriggers(SHARING_SWEEP_RESUME_HANDLER);
+  log(`cancelOpenUpAllFileSharing: state cleared, ${removed} pending hand-off trigger(s) removed.`);
+  toastIfPossible('Sharing sweep stopped. Everything already opened up stays that way.');
 }

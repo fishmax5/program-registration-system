@@ -13,15 +13,19 @@
 //   * the folders they live in — with link sharing OFF, because a
 //     link-editable folder hands over everything inside it.
 //
-// Plus the two behaviors underneath it: that `linkSharing: false` really does
-// skip setSharing() while still adding the named editors, and that a tick
-// column which cannot be drawn as checkboxes is a log line rather than a throw
-// that abandons a half-written roster (`46`).
+// Plus the behaviors underneath it: that `folder: true` really does skip
+// setSharing() while still adding the named editors; that the sweep CARRIES
+// ITSELF ON — a slice that runs out of budget records what it did, arms one
+// resume trigger and finishes the rest on the next slice, with nothing to
+// press again; and that a tick column which cannot be drawn as checkboxes is a
+// log line rather than a throw that abandons a half-written roster (`46`).
 const vm = require('vm');
 
 const src = require('./helpers/source').readSource();
 
 const sharing = { setSharing: [], editors: [] };
+const props = {};
+const triggers = [];
 
 function driveFile(id) {
   return {
@@ -39,9 +43,14 @@ const sandbox = {
       (pattern === 'yyyy-MM-dd' ? d.toISOString().slice(0, 10) : d.toISOString()),
     sleep: () => {}
   },
+  // A REAL store, because the sliced job resumes from what it wrote: a stub
+  // that forgets everything would report a sweep as starting over each slice.
   PropertiesService: {
     getScriptProperties: () => ({
-      getProperty: () => null, setProperty: () => {}, setProperties: () => {}, deleteProperty: () => {}
+      getProperty: k => (k in props ? props[k] : null),
+      setProperty: (k, v) => { props[k] = String(v); },
+      setProperties: obj => { Object.keys(obj).forEach(k => { props[k] = String(obj[k]); }); },
+      deleteProperty: k => { delete props[k]; }
     })
   },
   SpreadsheetApp: {
@@ -64,13 +73,31 @@ const sandbox = {
   },
   HtmlService: {}, LockService: {},
   Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 't@e.com' }) },
-  ScriptApp: {}, MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
+  ScriptApp: {
+    newTrigger: handler => ({
+      timeBased: () => ({ after: () => ({ create: () => { triggers.push(handler); } }) })
+    }),
+    getProjectTriggers: () => triggers.map(h => ({ getHandlerFunction: () => h })),
+    deleteTrigger: t => {
+      const i = triggers.indexOf(t.getHandlerFunction());
+      if (i !== -1) triggers.splice(i, 1);
+    }
+  },
+  MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
 };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.collectGeneratedArtifactTargets = collectGeneratedArtifactTargets;
 this.openUpFileToAnyoneWithLink = openUpFileToAnyoneWithLink;
 this.applyLeaderFlagCheckboxes_ = applyLeaderFlagCheckboxes_;
+this.runOpenUpSharingSlice = runOpenUpSharingSlice;
+this.saveSlicedJobState = saveSlicedJobState;
+this.getSlicedJobState = getSlicedJobState;
+this.SHARING_SWEEP_STATE_PROP_KEY = SHARING_SWEEP_STATE_PROP_KEY;
+this.SHARING_SWEEP_RESUME_HANDLER = SHARING_SWEEP_RESUME_HANDLER;
+// The context has its own Date, so moving the clock here moves it only for the
+// code under test — which is how a four-minute budget is spent in a test.
+this.__setNow = function (fn) { Date.now = fn; };
 // The registries and folder lookups are stubbed IN the script's own scope, so
 // the calls inside collectGeneratedArtifactTargets() resolve to these.
 this.__stub = function (name, fn) { this[name] = fn; eval(name + ' = fn;'); };
@@ -184,6 +211,56 @@ check('a refused checkbox column never abandons the roster', threw, false);
 // index, and is skipped.
 sandbox.applyLeaderFlagCheckboxes_('Confirmed', null);
 check('a column the headers do not have is skipped', true, true);
+
+// --- it carries itself on ---------------------------------------------------
+//
+// The first version of this stopped at its deadline and asked somebody to press
+// the item again, which is a repair that only finishes if a person sits there
+// pressing it — on exactly the workbook where it matters most. So what is
+// pinned is the hand-off: the files done are recorded, ONE resume trigger is
+// armed, the state survives, and the next slice finishes the rest.
+
+sandbox.__stub('requireAuthorizedAdmin', () => true);
+sandbox.__stub('confirmConsequentialAction', () => true);
+sandbox.__stub('toastIfPossible', () => {});
+sandbox.__stub('noteForAdmin', () => {});
+sandbox.__stub('flushAdminDigest', () => {});
+
+const openedInOrder = [];
+let clock = 1000000;
+sandbox.__setNow(() => clock);
+sandbox.__stub('openUpFileToAnyoneWithLink', id => {
+  openedInOrder.push(id);
+  // The second file eats the whole budget — the slice stops after it.
+  if (openedInOrder.length === 2) clock += 5 * 60 * 1000;
+  return { openedUp: true, editors: [], problems: [] };
+});
+
+const plan = [
+  { id: 'A', what: 'form A', folder: false },
+  { id: 'B', what: 'form B', folder: false },
+  { id: 'C', what: 'form C', folder: false },
+  { id: 'D', what: 'form D', folder: false }
+];
+sandbox.saveSlicedJobState(sandbox.SHARING_SWEEP_STATE_PROP_KEY, {
+  startedAt: clock, lastSliceAt: clock, slices: 0, stalledSlices: 0, errorSlices: 0,
+  targets: plan, done: [], opened: 0, refused: []
+});
+
+sandbox.runOpenUpSharingSlice();
+
+check('a slice out of budget stops where it is', openedInOrder, ['A', 'B']);
+const midState = sandbox.getSlicedJobState(sandbox.SHARING_SWEEP_STATE_PROP_KEY);
+check('what it got through is recorded', midState && midState.done, ['A', 'B']);
+check('exactly one resume trigger is armed', triggers, [sandbox.SHARING_SWEEP_RESUME_HANDLER]);
+
+// The next slice, with time to spare: it picks up at C and ends the job.
+sandbox.runOpenUpSharingSlice();
+
+check('the next slice finishes the rest', openedInOrder, ['A', 'B', 'C', 'D']);
+check('a finished sweep clears its state',
+  sandbox.getSlicedJobState(sandbox.SHARING_SWEEP_STATE_PROP_KEY), null);
+check('and drops its hand-off trigger', triggers, []);
 
 console.log(failures === 0 ? '\nall passed' : `\n${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);
