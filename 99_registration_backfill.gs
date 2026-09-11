@@ -250,7 +250,7 @@ function describeUnimportedFormPointer(formId, sessionRows, map) {
       `Form_ID column and the registry disagree, which is what stops the form staff are actually ` +
       `handing out from ever being read.`;
     if (reachable) {
-      text += ` Run 🔧 Admin ▸ 🩺 Repair Dashboard Links to put the column right, then ` +
+      text += ` Run 🔧 Admin ▸ 🔗 Repair Dashboard Links to put the column right, then ` +
         `🔧 Admin ▸ ♻️ Re-import a Form's Responses… on ${describeFormLink(best)} — the repair alone ` +
         `does NOT recover anything already submitted, because those responses are behind the sync clock.`;
     }
@@ -379,7 +379,7 @@ function reportUnimportedForms() {
       lines.push(`  The form registry files it under: ${f.keys.slice(0, 3).join(', ')}`);
     });
     lines.push('');
-    lines.push('For each of these: put the sessions back on the right form (🩺 Repair Dashboard Links, or ' +
+    lines.push('For each of these: put the sessions back on the right form (🔗 Repair Dashboard Links, or ' +
       'Move Sessions to Another Form…), then use ♻️ Re-import a Form\'s Responses… — repairing the ' +
       'pointer alone collects nothing already submitted.');
   }
@@ -506,7 +506,7 @@ function buildReimportFormHtml(forms) {
 </p>
 <p class="hint">
   Check the <b>Form_ID</b> column on ${escapeHtmlForDialog(SHEET_NAMES.PROGRAM_DASHBOARD)} first — if it names
-  the wrong form, run <b>🩺 Repair Dashboard Links</b> before this, or the responses will come back saying
+  the wrong form, run <b>🔗 Repair Dashboard Links</b> (on the Admin menu) before this, or the responses will come back saying
   they match no session.
 </p>
 
@@ -588,5 +588,5 @@ function reimportFormNow(formRef) {
   return `Re-imported "${title}" — all ${total} response(s) read. Anyone who was missing from ` +
     `${SHEET_NAMES.REGISTRANT_DASH} is on it now; everybody already there was left as they were. ` +
     `If names are still missing, the Form_ID column is pointing the sessions at a different form — ` +
-    `run 🩺 Repair Dashboard Links and try again.`;
+    `run 🔗 Admin ▸ Repair Dashboard Links and try again.`;
 }

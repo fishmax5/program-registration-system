@@ -298,6 +298,14 @@ function buildAppMenu(ui, includeAdmin) {
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
       .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
+      // THE DOCTOR'S FIRST FINDING, AS ITS OWN ITEM. The Doctor is a dialog
+      // with several checks in it; this is the one repair people are sent to by
+      // name — by the appointment-form notes (99), by the report beside it, and
+      // by anybody whose Form_ID column has come apart from its link. It has
+      // always existed and was reachable only from inside the dialog or the
+      // Apps Script editor, which is no use to somebody being told to press it.
+      // Reads no calendar, rebuilds no form, and says what it will do first.
+      .addItem('\ud83d\udd17 Repair Dashboard Links (no calendar read)', 'repairDashboardLinks')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
