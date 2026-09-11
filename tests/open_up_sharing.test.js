@@ -148,7 +148,15 @@ check('every kind of artifact is claimed', ids, [
 check('a form named twice is opened once',
   ids.filter(id => id === 'FORM_BOTH').length, 1);
 
-check('folders are named editors only, never link-shared',
+// A FOLDER and a form IMAGE are the two kinds that stop short of the link —
+// the folder because it would hand over everything inside it, the image
+// because `55` promises the uploader it is not made public (the form carries a
+// copy of the bytes, so nothing is lost). Everything else gets the link.
+check('folders and form images are named editors only, never link-shared',
+  targets.filter(t => !t.linkSharing).map(t => t.id),
+  ['IMAGE_1', 'ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
+
+check('only a folder id is fetched as a folder',
   targets.filter(t => t.folder).map(t => t.id),
   ['ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
 
@@ -176,6 +184,10 @@ const folderOutcome = sandbox.openUpFileToAnyoneWithLink('FORMS_FOLDER', 'the fo
 check('a folder gets the named editors', sharing.editors, ['FORMS_FOLDER|admin@example.org', 'FORMS_FOLDER|owner@example.org']);
 check('a folder is never link-shared', sharing.setSharing, []);
 check('a folder reports no problem', folderOutcome.problems, []);
+
+sharing.setSharing.length = 0;
+sandbox.openUpFileToAnyoneWithLink('IMAGE_1', 'a form image', { linkSharing: false });
+check('a form image gets an editor and no link', sharing.setSharing, []);
 
 sharing.setSharing.length = 0;
 const fileOutcome = sandbox.openUpFileToAnyoneWithLink('FORM_BOTH', 'a registration form');

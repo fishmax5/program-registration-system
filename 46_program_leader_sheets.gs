@@ -1085,16 +1085,24 @@ function openUpFileToAnyoneWithLink(fileId, describe, opts) {
   const outcome = { openedUp: false, editors: [], problems: [] };
   if (!fileId) return outcome;
   const label = describe || `file ${fileId}`;
-  // `folder: true` is the FOLDER case (`89`). Two things follow from it, and
-  // both are load-bearing: a folder id has to be fetched with getFolderById()
-  // — getFileById() throws outright on one, which would report every folder as
-  // unreachable — and a folder gets the named editors and NO link sharing,
+  // TWO INDEPENDENT OPTIONS, both used by `89`'s sweep.
+  //
+  // `folder: true` says how to FETCH: a folder id has to go through
+  // getFolderById(), because getFileById() throws outright on one — which
+  // would report every folder as unreachable rather than sharing it.
+  //
+  // `linkSharing` says how far to OPEN, and defaults to the file's own answer:
+  // on for a file (the trade this function's banner argues), off for a folder,
   // because a link-editable folder hands over everything inside it, now and in
-  // future, which is a larger promise than any single file here makes.
+  // future. It is passed explicitly for the one file kind that must stay shut:
+  // a form IMAGE (`55`), whose bytes are copied INTO the form rather than read
+  // from Drive — "a photo put on a public form is not a Drive file made
+  // public" is a promise that file makes, and the named editors are all the
+  // syncing account needs to read its blob.
   const isFolder = !!(opts && opts.folder);
-  const wantsLinkSharing = isFolder
-    ? !!(opts && opts.linkSharing === true)
-    : (!opts || opts.linkSharing !== false);
+  const wantsLinkSharing = opts && opts.linkSharing !== undefined
+    ? !!opts.linkSharing
+    : !isFolder;
 
   let driveFile = null;
   try {

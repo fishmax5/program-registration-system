@@ -13,7 +13,7 @@
 //   a registrant sheet   → a leader's ticks never come back, and the refresh
 //                          fails with whatever Drive threw that hour
 //   a sign-in Doc        → the desk's link opens a file nobody can rebuild
-//   a form image         → a picture that will not load on a public form
+//   a form image         → the question builder cannot copy it onto the form
 //   a folder             → the next generated file cannot be filed into it
 //
 // `46`'s openUpAllFormSharing() already did this for FORMS. Everything else
@@ -28,9 +28,12 @@
 // become named editors, and anyone with the link can edit. A registration form
 // is a public sign-up page and a roster is first names and ticks; the
 // alternative in practice is a file nobody can open and a feature nobody uses.
-// FOLDERS are the one exception — they get the named editors and NOT link
-// sharing, because a link-editable folder hands over everything inside it,
-// including files this sweep deliberately left alone.
+// TWO KINDS STOP SHORT OF THE LINK, and get the named editors only. A FOLDER,
+// because a link-editable folder hands over everything inside it, now and in
+// future. And a form IMAGE, because `55` promises the person who uploaded it
+// that "a photo put on a public form is not a Drive file made public" — the
+// form carries a COPY of the bytes, so nothing is lost by keeping the original
+// shut.
 //
 // RUN IT AS THE ACCOUNT THAT OWNS THE FILES. An account that cannot reach a
 // file cannot change its sharing either, so running this from the account
@@ -101,8 +104,8 @@ const SHARING_SWEEP_MAX_ERROR_SLICES = 3;
 const SHARING_SWEEP_STALE_MS = 60 * 60 * 1000;
 
 /**
- * EVERY GOOGLE FILE THIS WORKBOOK HAS AN ID FOR, as `{ id, what, folder }`,
- * in the order they are worth repairing.
+ * EVERY GOOGLE FILE THIS WORKBOOK HAS AN ID FOR, as
+ * `{ id, what, folder, linkSharing }`, in the order they are worth repairing.
  *
  * Read from the SAME registries organizeGeneratedFiles() (`82`) files things
  * by, deliberately: two lists of "what this system made" would drift, and the
@@ -120,11 +123,20 @@ const SHARING_SWEEP_STALE_MS = 60 * 60 * 1000;
 function collectGeneratedArtifactTargets() {
   const targets = [];
   const seen = {};
-  const add = (id, what, isFolder) => {
+  // `opts` carries the two answers `openUpFileToAnyoneWithLink` takes: how to
+  // FETCH the id (`folder`), and how far to OPEN it (`linkSharing`, defaulting
+  // to on for a file and off for a folder).
+  const add = (id, what, opts) => {
     const fileId = String(id || '').trim();
     if (!fileId || seen[fileId]) return;
     seen[fileId] = true;
-    targets.push({ id: fileId, what: what, folder: !!isFolder });
+    const folder = !!(opts && opts.folder);
+    targets.push({
+      id: fileId,
+      what: what,
+      folder: folder,
+      linkSharing: opts && opts.linkSharing !== undefined ? !!opts.linkSharing : !folder
+    });
   };
   const guarded = (label, fn) => {
     try {
@@ -189,15 +201,25 @@ function collectGeneratedArtifactTargets() {
   });
 
   // --- the pictures on the forms -------------------------------------------
-  // An image is served INTO a form that anyone can open, so a picture only its
-  // uploader can read is a form with a broken tile on it. Listed from the
-  // folder rather than a registry because there is no registry: `55` uploads
-  // them and the form holds the only reference.
+  // NAMED EDITORS, AND NO LINK, which is the one place this sweep deliberately
+  // stops short of what it does to everything else.
+  //
+  // The account that puts a question on a form reads the picture's BYTES
+  // (`DriveApp.getFileById(...).getBlob()` in `54`) and uploads a copy into the
+  // form — routinely the trigger owner rather than whoever uploaded it, which
+  // is why the file needs an editor added at all. But the FORM does not read
+  // the Drive file, and `55`'s banner makes that a promise to the person who
+  // uploaded it: "a photo put on a public form is not a Drive file made
+  // public." Opening these to anyone with the link would quietly break that,
+  // for nothing — the copy on the form is what people see.
+  //
+  // Listed from the folder rather than a registry because there is no
+  // registry: `55` uploads them and the question row holds the only reference.
   guarded('the form images', () => {
     const files = getOrCreateFormImageFolder().getFiles();
     while (files.hasNext()) {
       const file = files.next();
-      add(file.getId(), `the form image "${file.getName()}"`);
+      add(file.getId(), `the form image "${file.getName()}"`, { linkSharing: false });
     }
   });
 
@@ -213,7 +235,7 @@ function collectGeneratedArtifactTargets() {
       getOrCreateProgramLeaderSheetFolder(),
       getOrCreateFormImageFolder()
     ].forEach(folder => {
-      if (folder) add(folder.getId(), `the "${folder.getName()}" folder`, true);
+      if (folder) add(folder.getId(), `the "${folder.getName()}" folder`, { folder: true });
     });
   });
 
@@ -320,10 +342,11 @@ function runOpenUpSharingSlice() {
       for (const target of remainingTargets) {
         if (Date.now() >= ctx.deadline) break;
 
-        const outcome = openUpFileToAnyoneWithLink(target.id, target.what, { folder: target.folder });
-        // A folder never asks for link sharing, so "did anything happen" is the
-        // editors for those and the link for everything else.
-        const worked = target.folder ? outcome.problems.length === 0 : outcome.openedUp;
+        const outcome = openUpFileToAnyoneWithLink(target.id, target.what,
+          { folder: target.folder, linkSharing: target.linkSharing });
+        // A target that never asked for link sharing (a folder, a form image)
+        // is judged on whether anything REFUSED; everything else on the link.
+        const worked = target.linkSharing ? outcome.openedUp : outcome.problems.length === 0;
         if (worked) state.opened = (state.opened || 0) + 1;
         else {
           state.refused.push(`${target.what} (${target.id}) — ${outcome.problems.join('; ') || 'Drive refused'}`);
