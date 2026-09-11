@@ -43,6 +43,13 @@ function isFormula(value) {
  */
 let __countingSheetSerial = 0;
 
+/**
+ * Setters a Range has and a RangeList does not. Anything named here reads back
+ * as undefined off a range list, exactly as it does in Apps Script — see the
+ * note at getRangeList() below for the bug that cost.
+ */
+const RANGE_LIST_MISSING_METHODS = ['setDataValidation', 'setValue', 'setValues', 'getValues'];
+
 function makeCountingSheet(grid, name, options) {
   options = options || {};
   __countingSheetSerial++;
@@ -240,6 +247,14 @@ function makeCountingSheet(grid, name, options) {
         get(target, prop) {
           if (prop in target) return target[prop];
           if (typeof prop !== 'string') return undefined;
+          // A RangeList IS NOT A RANGE, and the difference is not academic: it
+          // carries the formatting setters and NOT setDataValidation. A proxy
+          // that answered every name let a batched rewrite of the registrant
+          // sheet ship calling it, which threw "ticks.setDataValidation is not
+          // a function" on every sheet, every hour. insertCheckboxes() is the
+          // call a RangeList does have; this keeps the harness honest about
+          // which of the two the code under measurement reached for.
+          if (RANGE_LIST_MISSING_METHODS.indexOf(prop) !== -1) return undefined;
           return (...args) => {
             stats.sheetOps++;
             calls.push({ name: `rangeList.${prop}`, ranges: a1List.slice(), args });
