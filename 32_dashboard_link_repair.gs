@@ -50,6 +50,19 @@
 // ============================================================================
 
 /**
+ * The address inside an `=HYPERLINK("…","…")` cell, or '' for anything else.
+ *
+ * A function declaration rather than the local arrow it was, because two
+ * readers need it now: the link repair, and the fork report at the foot of this
+ * file. The VALUE of one of these cells is the words "View Live Form", so the
+ * formula is the only place the address exists — see readSectionedGrid_ (34).
+ */
+function hrefOf(formula) {
+  const match = /HYPERLINK\("([^"]+)"/.exec(formula || '');
+  return match ? match[1] : '';
+}
+
+/**
  * The identity columns a repair needs, read off one row, plus whether the row
  * vouches for itself.
  *
@@ -197,10 +210,6 @@ function planDashboardLinkRepair(registrySheet) {
       .getRange(zone.start, sheetMap['Form_Response_Link'], zone.count, 1).getFormulas();
     const editFormulas = registrySheet
       .getRange(zone.start, sheetMap['Edit_Form_Link'], zone.count, 1).getFormulas();
-    const hrefOf = formula => {
-      const m = /HYPERLINK\("([^"]+)"/.exec(formula || '');
-      return m ? m[1] : '';
-    };
 
     for (let r = 0; r < zone.count; r++) {
       const id = readSessionRowIdentity(values, r);
@@ -1381,3 +1390,464 @@ function cleanupNeverPolicyForms() {
 }
 
 
+
+// ============================================================================
+// TWO FORMS, ONE PROGRAM  (showForkedFormsDialog)
+// ============================================================================
+//
+// THE CASE NOTHING ABOVE CAN DECIDE. A row has three pointers at a form:
+// Form_ID, "Edit Form Settings" and "View Live Form". Everything earlier in
+// this file assumes Form_ID is the truth and the two links are what drifted —
+// which is right when a column slid, and exactly wrong when a program has been
+// left holding TWO forms that are near-identical twins: same title, same
+// questions, same dates. Then the links do not disagree by accident. One of
+// them is where the registrations actually went, and the other is a form
+// nobody has filled in.
+//
+// Repairing that from Form_ID would rewrite the live link to point at the empty
+// twin, which is worse than the fault: the dashboard would agree with itself
+// and send every future registration somewhere nobody reads.
+//
+// WHICH ONE IS RIGHT IS A FACT, AND IT IS NOT ON THE SPREADSHEET. It is the
+// number of responses on each form. So this does not repair anything on its
+// own — it opens both forms, counts what is on them, and asks. The answer is
+// then applied the way "Move Sessions to Another Form" applies it, through
+// writeFormIdOntoSessions(), which writes all three pointers together so they
+// cannot come apart again.
+//
+// READING A VIEW LINK BACKWARDS. A published URL carries its own identifier
+// (/d/e/<published id>) and no file id can be recovered from it — which is why
+// the banner at the top of this file bans harvesting one. The inverse is
+// available though, and is what makes this possible at all: open the forms this
+// workbook already knows about, ask each for its OWN published URL, and the map
+// that falls out turns a link on a row back into the form it opens. Every form
+// in it was opened and asked; nothing is inferred from a cell.
+
+/** The stable half of a published form URL — `/d/e/<published id>` — or ''. */
+function publishedFormKey_(url) {
+  const match = /\/d\/e\/([A-Za-z0-9\-_]+)/.exec(String(url || ''));
+  return match ? match[1] : '';
+}
+
+/**
+ * published-id -> file id, for the forms named in `formIds`.
+ *
+ * One open per form, memoized by openFormCached() like every other read here.
+ * A form that will not open simply is not in the map: it cannot be the answer
+ * to "which form does this link open?" either way.
+ */
+function buildPublishedFormIndex(formIds) {
+  const index = {};
+  dedupePreservingOrder((formIds || []).map(id => String(id || '').trim()).filter(Boolean))
+    .forEach(formId => {
+      try {
+        const key = publishedFormKey_(openFormCached(formId).getPublishedUrl());
+        if (key) index[key] = formId;
+      } catch (err) {
+        // Gone, or out of reach. Named elsewhere; not a candidate here.
+      }
+    });
+  return index;
+}
+
+/**
+ * Every form sitting in the workbook's forms folder.
+ *
+ * NEEDED BECAUSE THE TWIN IS NAMED BY NOTHING. The whole shape of this fault is
+ * a form that no session row, no link column and no registry entry points at —
+ * except through a published URL, which cannot be read backwards. Its file id
+ * exists in exactly one place this code can reach: the folder it was created
+ * in. Without this the inverse index below cannot contain the very form the
+ * report exists to find.
+ *
+ * Bounded like findDuplicateFormTitles(), and for the same reason: a folder
+ * somebody has been rebuilding into for a year is not worth a thousand calls.
+ */
+function formIdsInFormsFolder_() {
+  const out = [];
+  try {
+    const files = getOrCreateFormsFolder().getFiles();
+    while (files.hasNext() && out.length < DOCTOR_MAX_FOLDER_FILES) {
+      const file = files.next();
+      if (file.isTrashed()) continue; // a form in the trash takes no registration
+      if (String(file.getMimeType() || '') === MimeType.GOOGLE_FORMS) out.push(file.getId());
+    }
+  } catch (err) {
+    log(`ℹ️ Two forms, one program: the forms folder could not be listed (${err}) — ` +
+      `only the forms this workbook already names are compared.`);
+  }
+  return out;
+}
+
+/** What one form is, for somebody choosing between two of them. */
+function describeFormForChoice_(formId) {
+  const out = { formId, title: '', responses: 0, latest: null, opens: false };
+  try {
+    const form = openFormCached(formId);
+    out.title = form.getTitle();
+    const responses = form.getResponses();
+    out.responses = responses.length;
+    out.latest = responses.length > 0 ? responses[responses.length - 1].getTimestamp() : null;
+    out.opens = true;
+  } catch (err) {
+    out.title = '(cannot be opened — deleted, or owned by another account)';
+  }
+  return out;
+}
+
+/**
+ * Programs whose rows do not all point at ONE form, with the facts needed to
+ * choose between the forms involved.
+ *
+ * Grouped by PROGRAM rather than by row because that is the unit of the
+ * decision: nobody wants to answer this once per Tuesday. A program is its
+ * calendar and its title, the same pair spreadFlagToSiblingRows() refuses to
+ * cross.
+ */
+function findForkedFormPrograms(registrySheet) {
+  const headers = HEADERS.All_Program_Sessions;
+  const map = getIndexMap(headers);
+  const headerRows = findProgramSessionHeaderRows(registrySheet);
+  if (headerRows.length === 0) return [];
+  const sheetMap = getHeaderMapAt(registrySheet, headerRows[0]);
+  const needed = ['Event_Date', 'Event_ID', 'Calendar_Source', 'Clean_Title', 'Location',
+    'Form_ID', 'Form_Response_Link', 'Edit_Form_Link'];
+  if (needed.some(h => !sheetMap[h])) return [];
+
+  // Every form this tab mentions in ANY of its three pointers, so the inverse
+  // index below can name whatever a view link opens.
+  const rows = [];
+  const namedForms = [];
+  headerRows.forEach((hRow, i) => {
+    const nextHeader = (i + 1 < headerRows.length) ? headerRows[i + 1] : null;
+    const zone = getZoneDataRange(registrySheet, hRow, nextHeader, sheetMap['Event_Date']);
+    if (!zone) return;
+    const read = name => registrySheet.getRange(zone.start, sheetMap[name], zone.count, 1).getValues();
+    const formulas = name => registrySheet.getRange(zone.start, sheetMap[name], zone.count, 1).getFormulas();
+    const dates = read('Event_Date');
+    const sources = read('Calendar_Source');
+    const titles = read('Clean_Title');
+    const locations = read('Location');
+    const formIds = read('Form_ID');
+    const views = formulas('Form_Response_Link');
+    const edits = formulas('Edit_Form_Link');
+    for (let r = 0; r < zone.count; r++) {
+      const date = coerceDate(dates[r][0]);
+      if (!date) continue;
+      const formId = String(formIds[r][0] || '').trim();
+      const editFormId = extractFormId(hrefOf(edits[r][0]));
+      const row = {
+        row: zone.start + r,
+        date,
+        source: String(sources[r][0] || '').trim(),
+        title: String(titles[r][0] || '').trim(),
+        location: String(locations[r][0] || '').trim(),
+        formId,
+        editFormId,
+        viewHref: hrefOf(views[r][0])
+      };
+      rows.push(row);
+      namedForms.push(formId, editFormId);
+    }
+  });
+
+  // THE CANDIDATE SET IS DELIBERATELY WIDER THAN THE TAB. A view link pointing
+  // at a form nothing else names is precisely the case being looked for, so the
+  // folder is read as well as the rows and the registry.
+  const registry = getPersistentFormRegistry();
+  const publishedIndex = buildPublishedFormIndex(namedForms
+    .concat(Object.keys(registry).map(key => registry[key]))
+    .concat(formIdsInFormsFolder_()));
+
+  const byProgram = {};
+  rows.forEach(row => {
+    row.viewFormId = publishedIndex[publishedFormKey_(row.viewHref)] || '';
+    const pointers = dedupePreservingOrder([row.formId, row.editFormId, row.viewFormId].filter(Boolean));
+    if (pointers.length < 2) return; // the three agree, or there is only one of them
+    const key = `${row.source}|${row.title}`;
+    if (!byProgram[key]) {
+      byProgram[key] = { key, title: row.title, location: row.location, source: row.source,
+        rows: [], formCounts: {} };
+    }
+    const program = byProgram[key];
+    program.rows.push(row);
+    pointers.forEach(formId => {
+      if (!program.formCounts[formId]) program.formCounts[formId] = { formId, asFormId: 0, asEdit: 0, asView: 0 };
+    });
+    if (row.formId) program.formCounts[row.formId].asFormId++;
+    if (row.editFormId) program.formCounts[row.editFormId].asEdit++;
+    if (row.viewFormId) program.formCounts[row.viewFormId].asView++;
+  });
+
+  const todayKey = formatDateKey(new Date());
+  return Object.keys(byProgram).map(key => {
+    const program = byProgram[key];
+    const dates = program.rows.map(r => r.date).sort((a, b) => a - b);
+    return {
+      key,
+      title: program.title,
+      location: program.location,
+      rowCount: program.rows.length,
+      upcoming: program.rows.filter(r => formatDateKey(r.date) >= todayKey).length,
+      from: formatDateLabel(dates[0]),
+      to: formatDateLabel(dates[dates.length - 1]),
+      // THE FACTS THAT DECIDE IT, worst-informed first is no use — sorted by
+      // what is actually on each form, because the form with the registrations
+      // on it is the one people have been using.
+      forms: Object.keys(program.formCounts)
+        .map(formId => Object.assign(describeFormForChoice_(formId), program.formCounts[formId]))
+        .sort((a, b) => b.responses - a.responses)
+    };
+  }).sort((a, b) => b.rowCount - a.rowCount);
+}
+
+/**
+ * Points one program's UPCOMING sessions at the form somebody chose, and marks
+ * that form to be read from the beginning on the next sync.
+ *
+ * UPCOMING ONLY, like every other adoption here: a past row's Form_ID is the
+ * record of where that registration came from, and rewriting it would file
+ * September's sign-ups under a form they were never submitted to. It also keeps
+ * the twin readable — a form still named by a past row stays on the import's
+ * work list, so anything it collected is not stranded.
+ *
+ * THE BACKFILL IS THE POINT and is why this is not just the "Move Sessions"
+ * dialog with a different front end: the responses on the chosen form were
+ * submitted while the rows named the other one, so they are behind the sync
+ * clock and no ordinary sync will ever read them. See 99.
+ */
+function resolveForkedProgramNow(programKey, formId) {
+  if (isBootstrapActive()) return `⚠️ ${bootstrapBusyMessage()}`;
+  const chosen = extractFormId(formId) || String(formId || '').trim();
+  if (!chosen) return '⚠️ No form was chosen.';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) return '⚠️ No program dashboard yet.';
+
+  let title = '';
+  let responses = 0;
+  try {
+    const form = openFormCached(chosen);
+    title = form.getTitle();
+    responses = form.getResponses().length;
+  } catch (err) {
+    return `⚠️ That form could not be opened (${err}) — it cannot be the one these sessions book through.`;
+  }
+
+  const headers = HEADERS.All_Program_Sessions;
+  const map = getIndexMap(headers);
+  const [source, programTitle] = String(programKey || '').split('|');
+  const todayKey = formatDateKey(new Date());
+  const wanted = new Set();
+  getSectionedRows(registrySheet, headers, 'Event_ID').forEach(row => {
+    if (String(row[map['Calendar_Source']] || '').trim() !== source) return;
+    if (String(row[map['Clean_Title']] || '').trim() !== programTitle) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date || formatDateKey(date) < todayKey) return;
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    if (eventId) wanted.add(eventId);
+  });
+  if (wanted.size === 0) return `⚠️ "${programTitle}" has no upcoming session to repoint.`;
+
+  const moved = writeFormIdOntoSessions(registrySheet, wanted, chosen);
+  SpreadsheetApp.flush();
+  markFormForBackfill(chosen);
+
+  log(`Two forms, one program: "${programTitle}" — ${moved} upcoming date(s) now point at ` +
+    `${describeFormLink(chosen)}, which holds ${responses} response(s). Marked for re-import.`);
+  noteForAdmin('Programs that were split across two forms',
+    `"${programTitle}" had its sessions pointing at more than one form. Its ${moved} upcoming date(s) now ` +
+    `point at ${describeFormLink(chosen)} ("${title}", ${responses} response(s)), and that form is marked ` +
+    `to be re-read from the beginning so anything it collected while the rows named another form is imported.`);
+
+  return `"${programTitle}": ${moved} upcoming date(s) now point at "${title}" (${responses} response(s)). ` +
+    `It is marked for re-import — run 🔄 Update Everything Now, or wait for the next hourly sync, and ` +
+    `anyone missing from ${SHEET_NAMES.REGISTRANT_DASH} will be added.`;
+}
+
+/** ADMIN ACTION — "🔀 Sessions Split Across Two Forms…". */
+function showForkedFormsDialog() {
+  if (isBootstrapActive()) {
+    toastIfPossible(bootstrapBusyMessage());
+    return;
+  }
+  const html = HtmlService.createHtmlOutput(buildForkedFormsHtml())
+    .setWidth(760)
+    .setHeight(620);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Sessions Split Across Two Forms');
+}
+
+/** Dialog entry points. Stringified, like the Doctor's. */
+function forkedFormsScan() {
+  const registrySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  return JSON.stringify(registrySheet ? findForkedFormPrograms(registrySheet) : []);
+}
+
+function forkedFormsApply(programKey, formId) {
+  return resolveForkedProgramNow(programKey, formId);
+}
+
+/** The dialog's markup. Inline, so this project stays a single .gs file. */
+function buildForkedFormsHtml() {
+  return `
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; margin: 0;
+         display: flex; flex-direction: column; height: 100vh; }
+  header, footer { padding: 10px 14px; background: #F8F9FA; border-bottom: 1px solid #DADCE0; flex: 0 0 auto; }
+  footer { border-bottom: 0; border-top: 1px solid #DADCE0; }
+  main { flex: 1 1 auto; overflow-y: auto; padding: 14px; }
+  h3 { margin: 0; font-size: 16px; }
+  .sub { color: #5F6368; margin-top: 3px; line-height: 1.5; }
+  .card { border: 1px solid #DADCE0; border-left: 4px solid #C5221F; border-radius: 6px;
+          padding: 11px 13px; margin-bottom: 12px; }
+  .card h4 { margin: 0 0 4px 0; font-size: 14px; }
+  .meta { color: #5F6368; font-size: 12px; margin-bottom: 9px; }
+  .form { border: 1px solid #E8EAED; border-radius: 5px; padding: 8px 10px; margin-top: 7px;
+          display: flex; align-items: center; gap: 10px; }
+  .form.best { border-color: #188038; background: #F3FBF5; }
+  .form .facts { flex: 1 1 auto; line-height: 1.5; }
+  .form .facts b { font-size: 13px; }
+  .form .facts span { color: #5F6368; font-size: 12px; display: block; }
+  button { border: 0; border-radius: 4px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+           background: #1155CC; color: #fff; white-space: nowrap; }
+  button.ghost { background: #fff; color: #1155CC; border: 1px solid #C6D4F0; }
+  button[disabled] { background: #9AA0A6; color: #fff; border-color: #9AA0A6; cursor: default; }
+  .allgood { text-align: center; padding: 40px 20px; color: #188038; font-size: 15px; line-height: 1.7; }
+  #status { margin-top: 6px; line-height: 1.5; white-space: pre-wrap; font-size: 12px; }
+  .ok-text { color: #188038; } .err-text { color: #C5221F; }
+</style>
+<header>
+  <h3>🔀 Sessions split across two forms</h3>
+  <div class="sub">A program whose rows do not all point at one form. Pick the form the
+    registrations are actually on — its sessions are repointed at it, and it is re-read from the
+    beginning so nothing it already collected is left behind.</div>
+</header>
+<main id="list"></main>
+<footer>
+  <button class="ghost" id="rescan" onclick="scan()">Check again</button>
+  <button class="ghost" onclick="google.script.host.close()">Close</button>
+  <div id="status"></div>
+</footer>
+<script>
+  var PROGRAMS = null;
+  var busy = false;
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(msg, cls) {
+    var el = document.getElementById('status');
+    el.textContent = msg || '';
+    el.className = cls || '';
+  }
+  function setBusy(on) {
+    busy = on;
+    var buttons = document.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = on;
+  }
+
+  function draw() {
+    var main = document.getElementById('list');
+    main.innerHTML = '';
+    if (!PROGRAMS) {
+      main.innerHTML = '<div class="allgood">⏳ Checking…<br>Opening each form this workbook names to ' +
+        'see which one every link actually goes to.</div>';
+      return;
+    }
+    if (PROGRAMS.length === 0) {
+      main.innerHTML = '<div class="allgood">✅ Every program points at one form.<br>' +
+        'Form_ID, “Edit Form Settings” and “View Live Form” agree on every row.</div>';
+      return;
+    }
+    for (var i = 0; i < PROGRAMS.length; i++) main.appendChild(card(PROGRAMS[i]));
+  }
+
+  function card(p) {
+    var div = document.createElement('div');
+    div.className = 'card';
+    var head = document.createElement('h4');
+    head.textContent = p.title + (p.location ? ' — ' + p.location : '');
+    div.appendChild(head);
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = p.rowCount + ' session row(s), ' + p.upcoming + ' still to come · ' +
+      p.from + ' to ' + p.to;
+    div.appendChild(meta);
+
+    for (var i = 0; i < p.forms.length; i++) div.appendChild(formRow(p, p.forms[i], i === 0));
+    return div;
+  }
+
+  function formRow(program, form, best) {
+    var wrap = document.createElement('div');
+    // THE ONE WITH THE RESPONSES ON IT is marked, never auto-applied: two forms
+    // for one program is exactly the case where a machine should not choose.
+    wrap.className = 'form' + (best && form.responses > 0 ? ' best' : '');
+    var facts = document.createElement('div');
+    facts.className = 'facts';
+    var name = document.createElement('b');
+    name.textContent = form.title;
+    facts.appendChild(name);
+    var line = document.createElement('span');
+    line.textContent = form.responses + ' response(s)' +
+      (form.latest ? ', most recent ' + new Date(form.latest).toLocaleDateString() : '') +
+      ' · named by ' + form.asFormId + ' row(s), ' + form.asView + ' “View” link(s), ' +
+      form.asEdit + ' “Edit” link(s)';
+    facts.appendChild(line);
+    var id = document.createElement('span');
+    id.textContent = form.formId;
+    facts.appendChild(id);
+    wrap.appendChild(facts);
+
+    var button = document.createElement('button');
+    button.textContent = 'Use this one';
+    button.disabled = !form.opens;
+    button.onclick = function () { apply(program, form); };
+    wrap.appendChild(button);
+    return wrap;
+  }
+
+  function apply(program, form) {
+    if (busy) return;
+    if (!window.confirm('Point every upcoming "' + program.title + '" session at "' + form.title +
+      '" (' + form.responses + ' response(s))?\\n\\nPast sessions keep the form they were booked on. ' +
+      'The chosen form is re-read from the beginning, so anything it collected is imported.')) return;
+    setBusy(true);
+    say('Working…');
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        setBusy(false);
+        say(msg, msg.indexOf('\\u26a0') === 0 ? 'err-text' : 'ok-text');
+        scan();
+      })
+      .withFailureHandler(function (err) {
+        setBusy(false);
+        say('Failed: ' + err.message, 'err-text');
+      })
+      .forkedFormsApply(program.key, form.formId);
+  }
+
+  function scan() {
+    if (busy) return;
+    setBusy(true);
+    PROGRAMS = null;
+    draw();
+    google.script.run
+      .withSuccessHandler(function (raw) {
+        setBusy(false);
+        PROGRAMS = JSON.parse(raw);
+        draw();
+      })
+      .withFailureHandler(function (err) {
+        setBusy(false);
+        say('Failed: ' + err.message, 'err-text');
+      })
+      .forkedFormsScan();
+  }
+
+  draw();
+  scan();
+</script>`;
+}

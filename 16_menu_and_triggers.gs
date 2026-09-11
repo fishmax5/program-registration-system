@@ -306,6 +306,12 @@ function buildAppMenu(ui, includeAdmin) {
       // Apps Script editor, which is no use to somebody being told to press it.
       // Reads no calendar, rebuilds no form, and says what it will do first.
       .addItem('\ud83d\udd17 Repair Dashboard Links (no calendar read)', 'repairDashboardLinks')
+      // THE CASE THE REPAIR ABOVE MUST NOT DECIDE. It assumes Form_ID is the
+      // truth and the links drifted — right when a column slid, and exactly
+      // wrong when a program is holding two near-identical forms and the
+      // registrations are on the one the links open. Which is which is a fact
+      // about response counts, not about the spreadsheet, so this one asks.
+      .addItem('\ud83d\udd00 Sessions Split Across Two Forms\u2026', 'showForkedFormsDialog')
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
