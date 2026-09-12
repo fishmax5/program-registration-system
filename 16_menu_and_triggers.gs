@@ -276,6 +276,12 @@ function buildAppMenu(ui, includeAdmin) {
       // THE ANSWER TO "REGISTRATIONS STOPPED ARRIVING FROM ONE FORM". Run as
       // the account that made the forms \u2014 see openUpAllFormSharing().
       .addItem('\ud83d\udd13 Open Up Form Sharing', 'openUpAllFormSharing')
+      // THE SAME REPAIR, OVER EVERY FILE THIS SYSTEM MAKES \u2014 registrant sheets,
+      // sign-in documents, form images and the folders they sit in, not just
+      // the forms. It carries ITSELF on across as many runs as it needs, so
+      // there is nothing to press twice; see openUpAllGeneratedFileSharing()
+      // (`89`).
+      .addItem('\ud83d\udd13 Open Up ALL File Sharing', 'openUpAllGeneratedFileSharing')
       // THE ONE THAT ANSWERS "WHY ISN'T THIS TAG WORKING". Every other item
       // here does something; this one only looks \u2014 at a calendar event, with
       // the sync's own parser \u2014 and says which brackets it read, which it
