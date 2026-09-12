@@ -414,7 +414,12 @@ function buildEventTagInspectorHtml() {
 </script>`;
 }
 
-/** Public entry point: acquires a script lock so overlapping executions can't race each other. */
+/**
+ * Public entry point. The work is a SLICED JOB (89): the lock, the budget and
+ * the hand-off to a follow-up run all live there, so a window too big for one
+ * execution finishes on the next one instead of being killed and restarted
+ * from the top forever.
+ */
 function syncCalendars() {
   // Before the bootstrap check, which reads a Script Property, and before
   // anything touches CalendarApp: a paused run should cost as close to
@@ -440,21 +445,34 @@ function syncCalendars() {
     return;
   }
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
-    log('syncCalendars: another sync is already running — skipping this run.');
-    toastIfPossible('Another sync is already running — try again in a moment.');
-    return;
-  }
-  try {
-    toastIfPossible('Syncing calendars…');
-    syncCalendarsInternal();
-  } finally {
-    lock.releaseLock();
-  }
+  // THE LOCK AND THE BUDGET BOTH LIVE IN THE SLICE now (89). This used to take
+  // the script lock here and run the whole sync inside it, which was right
+  // about the lock and silent about the clock: Apps Script kills an execution
+  // at the account's ceiling with no warning and no `finally`, so a window too
+  // big for one run lost everything AFTER the group loop — the horizon pass,
+  // the link cells, the dashboard render, the lunch forms, and the restoration
+  // of the calendar-edit watchers — every single time, and started again from
+  // the top on the next run.
+  toastIfPossible('Syncing calendars…');
+  return runCalendarSyncSlice({ openWindow: true });
 }
 
-function syncCalendarsInternal() {
+/**
+ * THE SYNC ITSELF, for one execution's worth of it.
+ *
+ * `options.deadline` (epoch ms) is passed straight through to
+ * importCalendarGroups(), which checks it BETWEEN groups — a group is never
+ * interrupted part-way, because its rows, its form and its calendar
+ * description edits have to land together. With no deadline the loop runs to
+ * the end, which is what the program review's own update (58) asks for and
+ * what this function always did.
+ *
+ * Returns importCalendarGroups()'s summary, so the caller can tell a finished
+ * window from a paused one (`outOfTime` / `remaining`).
+ */
+function syncCalendarsInternal(options) {
+  options = options || {};
+  let summary = null;
   // The quiet window — take the calendar watchers down, do the work, advance
   // the sync tokens past our own description edits, put the watchers back
   // (restore-only). All four steps, and the reasons for each, live in
@@ -483,38 +501,58 @@ function syncCalendarsInternal() {
           'the rolling horizon itself is unaffected.');
       }
 
-      const summary = importCalendarGroups(registrySheet);
-      renderProgramDashboard();
+      summary = importCalendarGroups(registrySheet, { deadline: options.deadline || 0 });
+
+      // A PARTIAL RUN NEVER TRIAGES. triageDeletedSessions() takes session
+      // rows off the tab and moves their registrants to Deleted_Event_Triage,
+      // and this slice stopped early precisely because it could not finish
+      // looking at the calendar's work. It is also a second calendar read,
+      // which is the one thing a run that has spent its budget should not pay
+      // for. The slice that FINISHES the window does the ordinary full render.
+      renderProgramDashboard(false, { skipTriage: !!summary.outOfTime });
 
       // AFTER the calendar render, not before: that render owns the triage
       // pass, and the lunch pass adds rows it should not have to re-examine.
       // Guarded on its own — a lunch form that will not build must not be able
       // to fail a calendar sync that has already done its work.
-      try {
-        // The pins are DERIVED from what this returns, and nothing else in
-        // this sync draws them. Without the render below, a month whose menu
-        // was typed this morning got its form here and its link nowhere: the
-        // block went on showing yesterday's answer until the next hourly
-        // registration sync happened to redraw the tab. Rendering only when
-        // the map actually moved keeps that off the ordinary run, where every
-        // month short-circuits and there is nothing new to pin.
-        const before = JSON.stringify(pruneLunchOnlyFormLinks(getLunchOnlyFormLinks()));
-        const after = JSON.stringify(syncLunchOnlySessions(registrySheet));
-        if (after !== before) updateMasterLunchDashboard(null);
-      } catch (err) {
-        log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the program forms are unaffected.`);
-        noteForAdmin('Lunch sign-up forms not refreshed',
-          `${err}. The lunch-only sign-up forms were not built or updated this run; everything else synced normally.`);
+      //
+      // AND NOT AT ALL ON A SLICE THAT RAN OUT OF TIME (89). This builds forms
+      // of its own, which is the very thing the budget just said there is no
+      // room for; the slice that finishes the window does it, a minute later,
+      // with a whole execution in front of it.
+      if (summary.outOfTime) {
+        log(`Calendar sync: ${summary.remaining} group(s) left, so the lunch sign-up forms wait for the ` +
+          `run that finishes the window.`);
+      } else {
+        try {
+          // The pins are DERIVED from what this returns, and nothing else in
+          // this sync draws them. Without the render below, a month whose menu
+          // was typed this morning got its form here and its link nowhere: the
+          // block went on showing yesterday's answer until the next hourly
+          // registration sync happened to redraw the tab. Rendering only when
+          // the map actually moved keeps that off the ordinary run, where every
+          // month short-circuits and there is nothing new to pin.
+          const before = JSON.stringify(pruneLunchOnlyFormLinks(getLunchOnlyFormLinks()));
+          const after = JSON.stringify(syncLunchOnlySessions(registrySheet));
+          if (after !== before) updateMasterLunchDashboard(null);
+        } catch (err) {
+          log(`⚠️ Could not refresh the lunch sign-up forms this run (${err}) — the program forms are unaffected.`);
+          noteForAdmin('Lunch sign-up forms not refreshed',
+            `${err}. The lunch-only sign-up forms were not built or updated this run; everything else synced normally.`);
+        }
       }
 
-      SpreadsheetApp.getActiveSpreadsheet().toast(
-        `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
+      if (!summary.outOfTime) {
+        SpreadsheetApp.getActiveSpreadsheet().toast(
+          `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
+      }
     } finally {
       // Inside the window, so both still happen before the triggers return.
       flushPersistentRegistries(); // never strand a form-label fingerprint written during this run
       flushAdminDigest('Calendar sync');
     }
   });
+  return summary;
 }
 
 /**
