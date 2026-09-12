@@ -415,7 +415,7 @@ function buildEventTagInspectorHtml() {
 }
 
 /**
- * Public entry point. The work is a SLICED JOB (89): the lock, the budget and
+ * Public entry point. The work is a SLICED JOB (90): the lock, the budget and
  * the hand-off to a follow-up run all live there, so a window too big for one
  * execution finishes on the next one instead of being killed and restarted
  * from the top forever.
@@ -445,7 +445,7 @@ function syncCalendars() {
     return;
   }
 
-  // THE LOCK AND THE BUDGET BOTH LIVE IN THE SLICE now (89). This used to take
+  // THE LOCK AND THE BUDGET BOTH LIVE IN THE SLICE now (90). This used to take
   // the script lock here and run the whole sync inside it, which was right
   // about the lock and silent about the clock: Apps Script kills an execution
   // at the account's ceiling with no warning and no `finally`, so a window too
@@ -516,7 +516,7 @@ function syncCalendarsInternal(options) {
       // Guarded on its own — a lunch form that will not build must not be able
       // to fail a calendar sync that has already done its work.
       //
-      // AND NOT AT ALL ON A SLICE THAT RAN OUT OF TIME (89). This builds forms
+      // AND NOT AT ALL ON A SLICE THAT RAN OUT OF TIME (90). This builds forms
       // of its own, which is the very thing the budget just said there is no
       // room for; the slice that finishes the window does it, a minute later,
       // with a whole execution in front of it.

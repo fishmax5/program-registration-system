@@ -1,5 +1,5 @@
 // ============================================================================
-// 89. A CALENDAR SYNC THAT RUNS OUT OF TIME FINISHES LATER  (sliced syncCalendars)
+// 90. A CALENDAR SYNC THAT RUNS OUT OF TIME FINISHES LATER  (sliced syncCalendars)
 // ============================================================================
 //
 // THE FAILURE THIS EXISTS FOR. `syncCalendars()` reads every program calendar
@@ -66,9 +66,8 @@
 // for `skipTriage`, and the slice that FINISHES the window does the ordinary
 // full one. The lunch pass waits for that same slice, for the same reason.
 //
-// Numbered 89 because 89 and 90 were never used and this is a sync, so it
-// belongs beside the sync files rather than at the end of the tail. Safe
-// there: behavior only, its own five constants stand alone, it reads no other
+// Numbered 90 because 89 went to the sharing sweep in the merge that brought
+// both in, and 90 was the next number never used. Safe there: behavior only, its own five constants stand alone, it reads no other
 // file's constants at load time, and everything it calls — syncCalendarsInternal,
 // runSlicedJob, getSyncSliceBudgetMs, automationGateAllows, isBootstrapActive —
 // it reaches through a hoisted function declaration.

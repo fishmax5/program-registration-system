@@ -1,6 +1,6 @@
 // A CALENDAR SYNC THAT RAN OUT OF TIME, AND WHAT IT HANDS ON.
 //
-// syncCalendars() is a sliced job now (89_calendar_sync_slices.gs): it works
+// syncCalendars() is a sliced job now (90_calendar_sync_slices.gs): it works
 // to Config's budget, stops BETWEEN groups, and arms a follow-up run. Before
 // that, an execution killed at the account's ceiling lost everything after the
 // group loop — the horizon pass, the link cells, the dashboard render, the
