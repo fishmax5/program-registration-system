@@ -13,14 +13,23 @@
 // THE TWO FAULTS IT LOOKS FOR, both in the grid path (29_form_response_processing):
 //
 //   1. A RESPONSE THAT READS AS NOTHING. getGridResponseByTitle() resolves a
-//      grid through formIndex.byTitle — items CURRENTLY on the form. When a
-//      question is deleted and replaced rather than edited (the v8→v9 meal
-//      swap in 68_form_state_migrations, and makeFormLunchOnly() every time it
-//      shapes a lunch-only form), a response submitted against the old item
-//      has nothing left to resolve against. processFormResponse() then hits
-//      `if (!attendanceGrid && !mealGrid) return []` and imports NOBODY — with
+//      grid through formIndex.byTitle — items CURRENTLY on the form — so a
+//      response submitted against a question since deleted and replaced has
+//      nothing left to resolve against. processFormResponse() then hits
+//      `if (!attendanceGrid && !mealGrid) return []` and imports NOBODY, with
 //      no warning and no admin note, because returning no rows is also what a
 //      blank submission legitimately does.
+//
+//      WHY A RESPONSE DERIVED NOTHING IS NOT ASSUMED. This file was written
+//      from a hypothesis — the v8→v9 meal swap and makeFormLunchOnly() — and
+//      its first report stated that hypothesis as the CAUSE of every empty
+//      response it found. It had checked no such thing. On the first real run
+//      that heading collected 50 responses across three forms, and the
+//      commonest cause turned out to be answerable without looking at a grid at
+//      all: a form NO session row names, whose every response derives nothing
+//      because there is no date to match against. classifyEmptyResponse_() is
+//      what replaced the assertion — two cheap facts, three named states, and
+//      no verdict where the evidence does not reach one.
 //
 //   2. A RESPONSE READ AGAINST THE WRONG DATES. The same function returns the
 //      grid's rows from the LIVE item (`grid.getRows()`) and the answers as
@@ -93,6 +102,7 @@ const REGISTRATION_AUDIT_MAX_LISTED = 200;
  */
 function withReadOnlyRegistries_(fn) {
   const realClear = clearRegistrantTombstones;
+  const realTombstone = getRegistrantTombstone;
   const wouldClear = [];
   // Snapshotted so an in-memory registry write made during the derivation does
   // not leave the execution looking dirty to anything that flushes later.
@@ -107,10 +117,21 @@ function withReadOnlyRegistries_(fn) {
     return 0; // nothing was cleared, so nothing is saved
   };
 
+  // AND THE TOMBSTONE LOOKUP ITSELF, which is not about writing — it is about
+  // being able to tell two findings apart. buildRegistrantRow() returns null
+  // for a tombstoned row, so a response whose rows were ALL deliberately
+  // deleted derives nothing and is indistinguishable, from outside, from a
+  // response the parser could not read at all. The audit reported the first as
+  // the second. Deriving every row and classifying it here — where the store
+  // is read directly, and where `tombstonedSkips` already exists to say so —
+  // is the only way those two answers stay apart.
+  getRegistrantTombstone = function () { return null; };
+
   try {
     return { result: fn(), tombstonesWouldClear: wouldClear };
   } finally {
     clearRegistrantTombstones = realClear;
+    getRegistrantTombstone = realTombstone;
     __allDatesRegistryDirty = dirtyBefore.allDates;
     __formRegistryDirty = dirtyBefore.form;
     __formLabelFingerprintDirty = dirtyBefore.labels;
@@ -196,6 +217,45 @@ function auditFormGridRows_(formIndex, registryIndex) {
 }
 
 /**
+ * WHY a response derived no rows — asked of the response rather than assumed.
+ *
+ * The first version of this file did not ask. It put every empty response under
+ * one heading and told the reader they were the v8→v9 meal swap and the
+ * lunch-only reshaping, which was the hypothesis the file was written from and
+ * not something it had checked. On the first real run that heading collected 50
+ * responses across three forms, and the causes below are not the same fault and
+ * do not have the same fix — so the report names what it can see and stops.
+ *
+ * Three states, told apart by two cheap facts:
+ *
+ *   noSessions      — the dashboard has NO session row naming this form, so
+ *                     every response on it derives nothing whatever it says.
+ *                     Nothing to do with grids; this is the fault
+ *                     reportUnimportedForms() (99) exists for, and the fix is
+ *                     to repoint the rows and mark the form for re-import.
+ *   unreadable      — the response answered NOTHING the form still carries.
+ *                     getItemResponses() returns answers for items that are
+ *                     still there, so a zero here means the items this was
+ *                     submitted against are gone — a rebuilt form (49), or a
+ *                     question deleted and replaced. It can also just be a
+ *                     blank submission, which is why the count of answers is
+ *                     reported rather than a conclusion.
+ *   answeredNoRows  — it answered N questions the form still has and STILL
+ *                     produced no row. That is the parser, and it is the one
+ *                     worth reading a response by hand over.
+ */
+function classifyEmptyResponse_(response, sessionsOnForm) {
+  if (sessionsOnForm === 0) return { kind: 'noSessions', answers: null };
+  let answers = 0;
+  try {
+    answers = (response.getItemResponses() || []).length;
+  } catch (err) {
+    return { kind: 'unreadable', answers: 0 };
+  }
+  return { kind: answers === 0 ? 'unreadable' : 'answeredNoRows', answers };
+}
+
+/**
  * Reads every response this workbook's forms hold, re-derives the registrant
  * rows they should produce, and compares that against what is actually on
  * All_Registrants.
@@ -261,6 +321,11 @@ function auditRegistrationImport(options) {
         finding.formsExamined++;
         auditFormGridRows_(formIndex, registryIndex)
           .forEach(row => finding.unmatchedRows.push(row));
+        // Counted ONCE per form, not once per response: it is a fact about the
+        // dashboard, and it is what tells a parser fault from a form no session
+        // row names at all.
+        const sessionsOnForm = Object.keys(registryIndex)
+          .filter(k => k.indexOf(`${formId}|`) === 0).length;
 
         responses.forEach(response => {
           finding.responsesRead++;
@@ -289,7 +354,11 @@ function auditRegistrationImport(options) {
           }
 
           if (derived.length === 0) {
-            finding.emptyResponses.push({ formId, name: who, submittedAt: when });
+            const why = classifyEmptyResponse_(response, sessionsOnForm);
+            finding.emptyResponses.push({
+              formId, name: who, submittedAt: when,
+              kind: why.kind, answers: why.answers, sessionsOnForm
+            });
             return;
           }
 
@@ -366,14 +435,43 @@ function describeRegistrationAudit_(finding) {
   }
 
   if (finding.emptyResponses.length > 0) {
-    parts.push(`\n⚠️ ${finding.emptyResponses.length} response(s) read as NOTHING — the questions they ` +
-      `were submitted against are no longer on the form, so no row can be derived from them at all. ` +
-      `This is the v8→v9 meal-question swap and the lunch-only reshaping; the answers are unreachable ` +
-      `through the Forms API and only the responses spreadsheet's own version history still holds them:\n` +
-      describeCappedList_(finding.emptyResponses.map(e =>
-        `  • ${e.name} — submitted ${e.submittedAt
-          ? Utilities.formatDate(e.submittedAt, TIMEZONE, 'd MMM yyyy')
-          : '(unknown)'} · form ${e.formId}`)));
+    // GROUPED BY FORM AND BY CAUSE, because on a real workbook these cluster:
+    // the first run of this audit found 50 of them on three forms, and a flat
+    // list of fifty names says far less than "this form has no session rows".
+    const byKind = { noSessions: {}, unreadable: {}, answeredNoRows: {} };
+    finding.emptyResponses.forEach(e => {
+      const bucket = byKind[e.kind] || byKind.unreadable;
+      if (!bucket[e.formId]) bucket[e.formId] = [];
+      bucket[e.formId].push(e);
+    });
+    const formLines = bucket => Object.keys(bucket).map(formId =>
+      `  • form ${formId} — ${bucket[formId].length} response(s)`);
+
+    parts.push(`\n⚠️ ${finding.emptyResponses.length} response(s) produced NO registrant row. ` +
+      `Three different reasons, which do not have the same fix:`);
+
+    if (Object.keys(byKind.noSessions).length > 0) {
+      parts.push(`\n  NO SESSION ROW NAMES THIS FORM. Every response on it derives nothing, ` +
+        `whatever it says — the grid is not involved. This is what "Find Forms Nothing Is ` +
+        `Importing" reports; the fix is to repoint the sessions at the form and mark it for ` +
+        `re-import, which collects the responses that are behind the sync clock.\n` +
+        describeCappedList_(formLines(byKind.noSessions)));
+    }
+    if (Object.keys(byKind.unreadable).length > 0) {
+      parts.push(`\n  ANSWERED NOTHING THE FORM STILL CARRIES. The questions these were ` +
+        `submitted against are no longer on the form, so no row can be derived from them — ` +
+        `a rebuilt form, or a question deleted and replaced. A genuinely blank submission ` +
+        `looks identical from here, so this is a place to LOOK rather than a verdict:\n` +
+        describeCappedList_(formLines(byKind.unreadable)));
+    }
+    if (Object.keys(byKind.answeredNoRows).length > 0) {
+      parts.push(`\n  ANSWERED THE FORM AND STILL PRODUCED NOTHING. These answered questions ` +
+        `the form still has, so the parser read them and made no row. This is the set worth ` +
+        `opening one of by hand:\n` +
+        describeCappedList_(finding.emptyResponses
+          .filter(e => e.kind === 'answeredNoRows')
+          .map(e => `  • ${e.name} — answered ${e.answers} question(s) · form ${e.formId}`)));
+    }
   }
 
   if (finding.shapeMismatches.length > 0) {

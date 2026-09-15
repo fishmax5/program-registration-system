@@ -23,6 +23,8 @@ vm.runInContext(src + `
 this.auditFormGridRows_ = auditFormGridRows_;
 this.withReadOnlyRegistries_ = withReadOnlyRegistries_;
 this.describeRegistrationAudit_ = describeRegistrationAudit_;
+this.classifyEmptyResponse_ = classifyEmptyResponse_;
+this.callGetTombstone = function (k) { return getRegistrantTombstone(k); };
 this.TEMPLATE_ITEM_TITLES = TEMPLATE_ITEM_TITLES;
 this.LEGACY_LUNCH_ONLY_GRID_TITLE = LEGACY_LUNCH_ONLY_GRID_TITLE;
 this.readTombstoneDirty = function () { return __tombstoneDirty; };
@@ -171,6 +173,62 @@ function responseAnswering(item, values) {
     report.indexOf('NOTHING WAS CHANGED') !== -1, true);
   check('...and does not count a deliberate deletion as a loss',
     report.indexOf('deleted them on purpose') !== -1, true);
+}
+
+// --- WHY a response derived nothing, asked rather than assumed ------------
+//
+// The first version of this file put every empty response under one heading
+// and told the reader it was the v8→v9 meal swap. It had checked no such
+// thing, and on the first real workbook the commonest cause was a form no
+// session row names — which has nothing to do with a grid and a different fix.
+{
+  const answered = { getItemResponses: () => [{}, {}, {}] };
+  const blank = { getItemResponses: () => [] };
+
+  check('a form no session row names is its own answer, whatever the response said',
+    sandbox.classifyEmptyResponse_(answered, 0).kind, 'noSessions');
+  check('a response answering nothing the form still carries is named as that',
+    sandbox.classifyEmptyResponse_(blank, 4).kind, 'unreadable');
+  check('...and a response that DID answer and still made no row is the parser',
+    sandbox.classifyEmptyResponse_(answered, 4), { kind: 'answeredNoRows', answers: 3 });
+  check('a response that cannot be read at all does not throw the audit over',
+    sandbox.classifyEmptyResponse_({ getItemResponses: () => { throw new Error('gone'); } }, 4),
+    { kind: 'unreadable', answers: 0 });
+}
+
+{
+  // The three causes are reported apart, and the noSessions one says what to
+  // do about it rather than blaming a grid it never looked at.
+  const report = sandbox.describeRegistrationAudit_({
+    formsExamined: 3, formsUnread: [], formsNotReached: [], responsesRead: 3,
+    shapeMismatches: [], unmatchedRows: [], missingPeople: [], tombstonedSkips: 0,
+    tombstonesWouldRevive: 0, stoppedEarly: false, elapsedMs: 1000,
+    emptyResponses: [
+      { formId: 'fA', name: 'Ada', kind: 'noSessions', answers: null, sessionsOnForm: 0 },
+      { formId: 'fB', name: 'Bea', kind: 'unreadable', answers: 0, sessionsOnForm: 4 },
+      { formId: 'fC', name: 'Cal', kind: 'answeredNoRows', answers: 7, sessionsOnForm: 4 }
+    ]
+  });
+  check('the three causes are reported apart',
+    [report.indexOf('NO SESSION ROW NAMES THIS FORM') !== -1,
+     report.indexOf('ANSWERED NOTHING THE FORM STILL CARRIES') !== -1,
+     report.indexOf('ANSWERED THE FORM AND STILL PRODUCED NOTHING') !== -1],
+    [true, true, true]);
+  check('...the unreadable one is a place to look, not a verdict',
+    report.indexOf('a place to LOOK rather than a verdict') !== -1, true);
+  check('...and the parser set names the person and what they answered',
+    report.indexOf('Cal — answered 7 question(s)') !== -1, true);
+}
+
+{
+  // The tombstone lookup is neutralized too, so a response whose rows were all
+  // DELIBERATELY DELETED derives its rows and is counted as a deletion — not
+  // reported as a response the parser could not read.
+  const out = sandbox.withReadOnlyRegistries_(() =>
+    sandbox.callGetTombstone('evt|ada|Attendee'));
+  check('a tombstone reads as absent while the audit derives', out.result, null);
+  check('...and the real lookup is restored afterwards',
+    typeof sandbox.callGetTombstone('evt|ada|Attendee'), 'object');
 }
 
 console.log(failures === 0 ? '\nAll registration-audit checks passed.' : `\n${failures} failure(s).`);
