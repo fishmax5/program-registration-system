@@ -1,5 +1,5 @@
 // ============================================================================
-// 18. CHANGING ONE REGISTRATION  (everything Quick Mark could not say)
+// 99a. CHANGING ONE REGISTRATION  (everything Quick Mark could not say)
 // ============================================================================
 //
 // WHAT QUICK MARK COULD ALREADY DO was mark and add: attended, lunch, signed
@@ -50,12 +50,18 @@
 // 5c), and clearRegistrantTombstones() on the destination is what stops a
 // move onto a session somebody was once removed from being silently undone.
 //
-// LOAD ORDER. Numbered last for the usual reason — never renumber, and this
-// landed after 98. Safe there: behavior only, its own two constants stand
-// alone, its schema is HEADERS.All_Registrants in 03 like every other tab's,
-// and everything it reaches for (the cancellation writers in 71, the session
-// lookups in 38, the tombstones in 28, the render and the two recounts) it
-// reads at CALL time or through a hoisted function declaration.
+// LOAD ORDER. Numbered 99a rather than 99: the re-import backfill took that
+// prefix on main while this was being written, and renumbering an EXISTING
+// file is the one edit this project cannot make — so the newcomer moved, the
+// same way 80-82 did. The letter suffix follows 01a_lazy_globals.gs, and it
+// keeps this file sorting where a reader looking for "the last one" expects
+// it, which "100_" would not.
+//
+// Safe at the end for the usual reason: behavior only, its own two constants
+// stand alone, its schema is HEADERS.All_Registrants in 03 like every other
+// tab's, and everything it reaches for (the cancellation writers in 71, the
+// session lookups in 38, the tombstones in 28, the render and the two
+// recounts) it reads at CALL time or through a hoisted function declaration.
 // ============================================================================
 
 /**
