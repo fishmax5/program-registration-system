@@ -55,22 +55,48 @@ function gatherFormLinkFacts(registrySheet, options) {
   const opts = options || {};
   const facts = { linkStats: null, recovery: null, drift: null, duplicates: [], skipped: [] };
 
-  const { stats } = planDashboardLinkRepair(registrySheet);
-  facts.linkStats = stats;
-
-  const headers = HEADERS.All_Program_Sessions;
-  const map = getIndexMap(headers);
-  const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
-  const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
-    getLunchOnlyFormLinks());
-  let folderId = '';
+  // THE LINK PLAN IS THE ONE STAGE THAT MUST SURVIVE, because it is the only
+  // one that answers the question people actually open this for: does the
+  // Form_ID column agree with the link beside it? It is also cheap relative to
+  // the two below — the sheet, plus one open per DISTINCT form to read its
+  // address. Guarded all the same: a single unreachable form used to take the
+  // whole diagnosis down, and a diagnosis that cannot be shown is worse than a
+  // partial one.
   try {
-    folderId = getOrCreateFormsFolder().getId();
+    const { stats } = planDashboardLinkRepair(registrySheet);
+    facts.linkStats = stats;
   } catch (err) {
-    log(`ℹ️ Doctor: the forms folder could not be opened (${err}) — filing is not checked this run.`);
+    log(`⚠️ Doctor: the link plan could not be built (${err}) — links were not checked.`);
+    facts.skipped.push('links');
   }
-  facts.recovery = planFormRecovery(refs, formId => probeFormFile(formId, folderId));
-  facts.duplicates = folderId ? findDuplicateFormTitles(folderId, refs) : [];
+
+  // DRIVE IS SKIPPABLE, and it is the stage that made this dialog unopenable.
+  // It probes EVERY form this workbook depends on, one Drive call each, and
+  // then lists the whole forms folder — on a centre with a hundred forms that
+  // is several hundred round trips before a single pixel is drawn. See
+  // showFormLinkDoctorDialog() for why nothing here runs before the dialog now.
+  if (opts.skipDrive) {
+    facts.skipped.push('drive');
+  } else {
+    try {
+      const headers = HEADERS.All_Program_Sessions;
+      const map = getIndexMap(headers);
+      const sessionRows = getSectionedRows(registrySheet, headers, 'Event_ID');
+      const refs = collectFormsWorkbookDependsOn(sessionRows, map, getPersistentFormRegistry(),
+        getLunchOnlyFormLinks());
+      let folderId = '';
+      try {
+        folderId = getOrCreateFormsFolder().getId();
+      } catch (err) {
+        log(`ℹ️ Doctor: the forms folder could not be opened (${err}) — filing is not checked this run.`);
+      }
+      facts.recovery = planFormRecovery(refs, formId => probeFormFile(formId, folderId));
+      facts.duplicates = folderId ? findDuplicateFormTitles(folderId, refs) : [];
+    } catch (err) {
+      log(`⚠️ Doctor: Drive could not be read (${err}) — the forms themselves were not checked.`);
+      facts.skipped.push('drive');
+    }
+  }
 
   // THE ONLY EXPENSIVE ONE, and the only one that can be turned off: it reads
   // every calendar in the sync window. Everything above is the sheet and Drive.
@@ -273,12 +299,17 @@ function runFormLinkDoctorScan(options) {
 
   const facts = gatherFormLinkFacts(registrySheet, options);
   const findings = buildDoctorFindings(facts);
+  const rec = facts.recovery;
   const checked = {
-    rows: facts.linkStats.scanned,
-    forms: facts.recovery.ok.length + facts.recovery.trashed.length +
-      facts.recovery.strayed.length + facts.recovery.gone.length,
+    rows: facts.linkStats ? facts.linkStats.scanned : 0,
+    forms: rec ? (rec.ok.length + rec.trashed.length + rec.strayed.length + rec.gone.length) : 0,
     events: facts.drift ? facts.drift.stats.scanned : 0,
-    calendarSkipped: facts.skipped.indexOf('calendar') !== -1
+    // WHAT WAS NOT LOOKED AT, carried to the page so a partial pass can never
+    // be drawn as a clean bill of health. "Nothing wrong" about a stage that
+    // never ran is the one thing this dialog must not say.
+    calendarSkipped: facts.skipped.indexOf('calendar') !== -1,
+    driveSkipped: facts.skipped.indexOf('drive') !== -1,
+    linksSkipped: facts.skipped.indexOf('links') !== -1
   };
   log(`Form & Link Doctor: ${checked.rows} row(s), ${checked.forms} form(s), ${checked.events} event(s) — ` +
     `${findings.length} finding(s): ${findings.map(f => `${f.code}×${f.count}`).join(', ') || 'none'}.`);
@@ -293,10 +324,16 @@ function runFormLinkDoctorScan(options) {
  * Doctor is the confirmation, so these call the appliers directly rather than
  * the versions that put up their own dialog.
  */
-function applyFormLinkDoctorFix(code) {
+function applyFormLinkDoctorFix(code, options) {
   if (!requireAuthorizedAdmin('Form & Link Doctor')) {
     return { ok: false, message: 'Not an admin account.', findings: [] };
   }
+  // AT THE DEPTH THE PAGE IS SHOWING. The re-read used to be the full sweep
+  // whatever the person was looking at, so a fix applied from the quick pass
+  // paid the Drive and calendar cost on the way back — and a re-read that runs
+  // out of time after the WRITE has landed reports a failure for a repair that
+  // actually worked.
+  const depth = options || { skipDrive: true, skipCalendar: true };
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return { ok: false, message: 'No program dashboard yet.', findings: [] };
@@ -307,12 +344,12 @@ function applyFormLinkDoctorFix(code) {
     message = runOneDoctorFix(registrySheet, code);
   } catch (err) {
     log(`⚠️ Form & Link Doctor: "${code}" failed (${err}).`);
-    const failed = runFormLinkDoctorScan({ skipCalendar: true });
+    const failed = runFormLinkDoctorScan({ skipCalendar: true, skipDrive: true });
     return { ok: false, message: `That fix failed: ${err}`, findings: failed.findings || [] };
   }
   flushAdminDigest('Form & Link Doctor');
   log(`Form & Link Doctor: ${code} — ${message}`);
-  const rescan = runFormLinkDoctorScan();
+  const rescan = runFormLinkDoctorScan(depth);
   return { ok: true, message, findings: rescan.findings || [], checked: rescan.checked };
 }
 
@@ -383,14 +420,39 @@ function runOneDoctorFix(registrySheet, code) {
   throw new Error(`Unknown fix "${code}".`);
 }
 
-/** ADMIN ACTION — "🩺 Form & Link Doctor…". */
+/**
+ * ADMIN ACTION — "🩺 Form & Link Doctor…".
+ *
+ * THE DIALOG OPENS BEFORE ANYTHING IS CHECKED, and that is the whole of this
+ * function. It used to run the entire diagnosis first and hand the result to
+ * buildFormLinkDoctorHtml() — which meant the menu item probed every form in
+ * Drive, listed the forms folder and read every calendar in the sync window
+ * BEFORE the dialog was created. On a small workbook that was a slow menu
+ * item. On a real one it was several hundred round trips, and Apps Script
+ * stops an execution at its ceiling with no warning and no exception: the
+ * dialog was never created, so nothing appeared, and nothing said why. The
+ * symptom is a menu item that does nothing at all.
+ *
+ * So the scan moved to where every other slow thing in this project already
+ * lives — behind google.script.run, on a page that is already on screen and
+ * can say "Checking…". The page asks for the QUICK pass first (the sheet and
+ * the link plan, which is what people open this for), and asks for Drive and
+ * the calendars only if somebody presses for them. See doctorScanQuick().
+ */
 function showFormLinkDoctorDialog() {
   if (!requireAuthorizedAdmin('Form & Link Doctor')) return;
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return;
   }
-  const html = HtmlService.createHtmlOutput(buildFormLinkDoctorHtml(runFormLinkDoctorScan()))
+  // The one thing worth failing here for: there is no tab to diagnose, and a
+  // dialog that opens only to say so is worse than a toast.
+  const registrySheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+  if (!registrySheet) {
+    toastIfPossible('No program dashboard yet — run Sync Cal first, then try the Doctor.');
+    return;
+  }
+  const html = HtmlService.createHtmlOutput(buildFormLinkDoctorHtml(null))
     .setWidth(720)
     .setHeight(620);
   SpreadsheetApp.getUi().showModalDialog(html, 'Form & Link Doctor');
@@ -435,12 +497,16 @@ function buildFormLinkDoctorHtml(scan) {
 </header>
 <main id="list"></main>
 <footer>
-  <button class="ghost" id="rescan" onclick="rescan()">Check again</button>
+  <button class="ghost" id="rescan" onclick="scan(false)">Check again</button>
+  <button class="ghost" id="deep" onclick="scan(true)">Also check Drive &amp; calendars</button>
   <button class="ghost" onclick="google.script.host.close()">Close</button>
   <div id="status"></div>
 </footer>
 <script>
+  // NULL UNTIL THE FIRST ANSWER COMES BACK. The page is drawn and on screen
+  // before anything is checked — see showFormLinkDoctorDialog().
   var SCAN = ${inlineJson(scan)};
+  var DEEP = false;
   var busy = false;
 
   function esc(s) {
@@ -459,18 +525,40 @@ function buildFormLinkDoctorHtml(scan) {
   }
 
   function draw() {
+    var main = document.getElementById('list');
+    if (!SCAN) {
+      document.getElementById('checked').textContent = 'Checking the session table and its links\u2026';
+      main.innerHTML = '<div class="allgood">\u23f3 Checking\u2026<br>Reading the session table and opening ' +
+        'each form once to read its address.</div>';
+      return;
+    }
+
     var checked = SCAN.checked || {};
-    document.getElementById('checked').textContent =
-      (checked.rows || 0) + ' session row(s), ' + (checked.forms || 0) + ' form(s)' +
-      (checked.calendarSkipped ? ', calendars not read' : ', ' + (checked.events || 0) + ' upcoming event(s)') +
-      ' checked.';
+    // SAY WHAT WAS LOOKED AT, never more. A quick pass that reported "3 forms"
+    // because it never opened Drive would be the dialog lying about its own
+    // depth, which is the failure that hides a trashed form.
+    var parts = [(checked.rows || 0) + ' session row(s)'];
+    parts.push(checked.driveSkipped ? 'forms in Drive not checked' : (checked.forms || 0) + ' form(s)');
+    parts.push(checked.calendarSkipped ? 'calendars not read' : (checked.events || 0) + ' upcoming event(s)');
+    document.getElementById('checked').textContent = parts.join(', ') + '.';
+    document.getElementById('deep').style.display =
+      (checked.driveSkipped || checked.calendarSkipped) ? '' : 'none';
 
     var findings = SCAN.findings || [];
-    var main = document.getElementById('list');
     main.innerHTML = '';
     if (findings.length === 0) {
-      main.innerHTML = '<div class="allgood">✅ Nothing wrong.<br>Every session row names a form that ' +
-        'exists, both its links open that form, and every calendar event agrees with it.</div>';
+      var clean = ['\u2705 Nothing wrong in what was checked.'];
+      clean.push(checked.linksSkipped
+        ? 'The links could not be read this time \u2014 see the log.'
+        : 'Every session row names a form, and both its links open that form.');
+      if (checked.driveSkipped || checked.calendarSkipped) {
+        clean.push('<span class="manual">Not checked yet: ' +
+          (checked.driveSkipped ? 'whether those forms still exist in Drive' : '') +
+          (checked.driveSkipped && checked.calendarSkipped ? ', and ' : '') +
+          (checked.calendarSkipped ? 'whether the calendar events agree' : '') +
+          '. Press \u201cAlso check Drive &amp; calendars\u201d.</span>');
+      }
+      main.innerHTML = '<div class="allgood">' + clean.join('<br>') + '</div>';
       return;
     }
     for (var i = 0; i < findings.length; i++) {
@@ -521,13 +609,20 @@ function buildFormLinkDoctorHtml(scan) {
         setBusy(false);
         say('Failed: ' + err.message, 'err-text');
       })
-      .doctorApplyFix(f.fix);
+      .doctorApplyFix(f.fix, DEEP);
   }
 
-  function rescan() {
+  // ONE ENTRY POINT, TWO DEPTHS. The quick pass reads the sheet and opens each
+  // distinct form once to read its address; the deep one adds a Drive probe per
+  // form, the folder listing and every calendar in the window. The quick one is
+  // what runs on open, because it is the one that answers "is the Form_ID
+  // column pointing at the form the link opens?" — and because a dialog has to
+  // show something before it can afford to be slow.
+  function scan(deep) {
     if (busy) return;
+    DEEP = !!deep;
     setBusy(true);
-    say('Checking…');
+    say(DEEP ? 'Checking Drive and the calendars \u2014 this can take a few minutes\u2026' : 'Checking\u2026');
     google.script.run
       .withSuccessHandler(function (raw) {
         setBusy(false);
@@ -537,21 +632,57 @@ function buildFormLinkDoctorHtml(scan) {
       })
       .withFailureHandler(function (err) {
         setBusy(false);
-        say('Failed: ' + err.message, 'err-text');
+        // A DEEP PASS THAT DIED STILL LEAVES THE QUICK ONE ON SCREEN, which is
+        // the reason the two are separate calls rather than one with a flag.
+        say(DEEP
+          ? 'Drive and the calendars could not be checked (' + err.message + '). What is above was still ' +
+            'checked and is still true.'
+          : 'Failed: ' + err.message, 'err-text');
+        DEEP = false;
+        draw();
       })
-      .doctorRescan();
+      [DEEP ? 'doctorScanFull' : 'doctorScanQuick']();
   }
 
   draw();
+  scan(false);
 </script>`;
 }
 
 /** Dialog entry points. Stringified because google.script.run will not carry a Set or a Date. */
-function doctorApplyFix(code) {
-  return JSON.stringify(applyFormLinkDoctorFix(code));
+function doctorApplyFix(code, deep) {
+  return JSON.stringify(applyFormLinkDoctorFix(code, doctorScanDepth(!!deep)));
 }
 
+/**
+ * The two depths, as one place rather than a literal at each call site.
+ *
+ * The QUICK one is the sheet and the link plan: one read of the session table,
+ * and one form opened per distinct Form_ID to read its published and edit
+ * addresses. That is what decides every `wrongForm` / `staleLiveLink` finding
+ * — which is what somebody opening this dialog is nearly always here for.
+ *
+ * The DEEP one adds the two stages that cost round trips in proportion to the
+ * whole workbook rather than to the problem: a Drive probe for every form, the
+ * forms folder listed in full, and every calendar in the sync window read and
+ * its descriptions compared. Those answer real questions (is a form in the
+ * trash? does the calendar still name the right link?) and they are worth
+ * waiting for — but only once somebody has asked to wait.
+ */
+function doctorScanDepth(deep) {
+  return deep ? {} : { skipDrive: true, skipCalendar: true };
+}
+
+function doctorScanQuick() {
+  return JSON.stringify(runFormLinkDoctorScan(doctorScanDepth(false)));
+}
+
+function doctorScanFull() {
+  return JSON.stringify(runFormLinkDoctorScan(doctorScanDepth(true)));
+}
+
+/** Kept: the name the dialog used before the scan was split in two. */
 function doctorRescan() {
-  return JSON.stringify(runFormLinkDoctorScan());
+  return doctorScanFull();
 }
 

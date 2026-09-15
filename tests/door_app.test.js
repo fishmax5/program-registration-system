@@ -16,6 +16,13 @@
 //      includes the day it was said on — that one is already being signed in.
 //   5. A STANDING PLACE IS REFUSED ON AN APPOINTMENT PROGRAM, in words. One
 //      person holding every slot a program will ever run is the failure.
+//   6. THE FIRST SCREEN ASKS THE PERSON WHAT THEY ARE HERE FOR — not the
+//      tablet, and not once in the morning. Nothing pre-ticked, cleared
+//      between people, and the name list says which answer it is showing:
+//      a filtered list and an empty one look identical to somebody who does
+//      not know a filter is on.
+//   7. A REGULAR IS OFFERED FOR TODAY'S SESSION, never for the one they came
+//      to in August — and somebody who cancelled is not a regular.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
@@ -102,8 +109,99 @@ ok('the walk-in form asks for either contact detail',
   /An email or a phone number/.test(page));
 ok('the recurring choices are offered', /rest of this month/i.test(page) && /club list/i.test(page));
 ok('and the membership question is asked', /Are you a member\?/.test(page));
+// THE APPLICATION ITSELF IS GONE. It was a screen of the office's own form
+// drawn on the tablet; what is left is the question and one note filed for the
+// office. A page that still called doorMembershipForm() would be a screen
+// asking for ten minutes of personal detail against an endpoint that no longer
+// exists — a blank screen with nothing in any log.
+ok('but the application is never drawn on the tablet',
+  !/doorMembershipForm|doorMembershipSubmit/.test(page));
+ok('and the endpoints it called are gone with it',
+  sandbox.doorMembershipForm === undefined && sandbox.doorMembershipSubmit === undefined);
 ok('an unregistered lunch is still never promised',
   /meals are ordered in advance/i.test(page));
+
+// ---------------------------------------------------------------------------
+// 2b. THE FIRST SCREEN IS A QUESTION ASKED OF THE PERSON, not a desk filter.
+//
+// The failures worth pinning are the ones nobody at a door reports: the
+// question worded as setup (a member reads it as staff's and taps past it), a
+// tablet that carries one person's answer into the next person's visit, a
+// filtered list that does not say it is filtered (an empty one looks exactly
+// like nobody came), and no way past the question for somebody who cannot
+// work out which class is theirs.
+// ---------------------------------------------------------------------------
+ok('the person is asked what THEY are here for',
+  /What are you here for today\?/.test(page));
+ok('and told what the answer is for',
+  /then find your name on the next screen/.test(page));
+ok('the events are not pre-ticked — HERE_FOR starts empty',
+  /var HERE_FOR = \{\};/.test(page));
+ok('and every visit starts from an empty one',
+  /function startNextPerson\(\)[\s\S]{0,200}HERE_FOR = \{\}; SHOW_ALL = false;/.test(page));
+ok('a completed sign-in goes back to that question, not to the name list',
+  /startNextPerson\(\);\s*\n\s*STEP = 'events';/.test(page));
+ok('the name list says what it is showing, with a way back',
+  /Here for ' \+ whatIsShowing\(\) \+ ' · Change/.test(page));
+ok('and staff can get past the question entirely',
+  /Not sure\? Show everyone here today/.test(page));
+ok('the regulars have a section of their own', /Here recently/.test(page));
+
+// ---------------------------------------------------------------------------
+// 2c. WHO COUNTS AS A REGULAR — foldPastRegistrants(), section 16h.
+// ---------------------------------------------------------------------------
+{
+  const programs = [
+    { value: 'Chair Yoga · Tue, Sep 2, 2025', title: 'Chair Yoga' },
+    { value: 'Bingo · Tue, Sep 2, 2025', title: 'Bingo' }
+  ];
+  const rows = [
+    { name: 'Ruth Adler', title: 'chair  yoga', dateKey: '2025-08-26', phone: '610-555-0100' },
+    { name: 'Ruth Adler', title: 'Chair Yoga', dateKey: '2025-08-19', phone: '' },
+    { name: 'Sam Boyd', title: 'Concert in the Hall', dateKey: '2025-08-20', phone: '' },
+    { name: 'Joan Alvarez', title: 'Bingo', dateKey: '2025-08-05', phone: '' }
+  ];
+  // Joan is on today's list already — a person twice on one screen is a
+  // volunteer wondering which card is the real one.
+  const past = sandbox.foldPastRegistrants(rows, programs, { 'joan alvarez': {} });
+  const names = past.map(p => p.name);
+  ok('a regular of one of today\'s programs is offered', names.indexOf('Ruth Adler') !== -1);
+  ok('somebody whose program is not on today is not', names.indexOf('Sam Boyd') === -1);
+  ok('and neither is somebody already expected today', names.indexOf('Joan Alvarez') === -1);
+  const ruth = past.filter(p => p.name === 'Ruth Adler')[0];
+  if (ruth) {
+    // A retyped space is not a different program, and the value handed back is
+    // TODAY'S session — a mark against August lands on the wrong session or none.
+    ok('the title match survives a retyped space', ruth.values.length === 1);
+    ok('and what comes back is today\'s session, never the old one',
+      ruth.values[0] === 'Chair Yoga · Tue, Sep 2, 2025');
+    ok('the most recent visit is what is shown', ruth.lastDateKey === '2025-08-26');
+    ok('and a phone number found on any of their rows carries', ruth.phone === '610-555-0100');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2d. WHICH ROWS EVEN REACH THAT FOLD — collectPastRegistrantRow().
+// ---------------------------------------------------------------------------
+{
+  const map = { Name: 0, Event: 1, Program_Status: 2, Phone: 3 };
+  const row = (name, title, status) => [name, title, status, ''];
+  const take = (rowValues, key) => {
+    const out = [];
+    sandbox.collectPastRegistrantRow(out, rowValues, map, key, '2025-07-02', '2025-09-02');
+    return out;
+  };
+  ok('a row inside the window is kept', take(row('A', 'Chair Yoga', 'Active'), '2025-08-01').length === 1);
+  ok('a row older than the window is not', take(row('A', 'Chair Yoga', 'Active'), '2025-06-01').length === 0);
+  ok('and neither is a future one', take(row('A', 'Chair Yoga', 'Active'), '2025-09-20').length === 0);
+  // "They signed up and then cancelled" is exactly the person the door should
+  // not be offering as a regular — 71_cancellation.gs keeps that difference on
+  // purpose, so it is read here rather than flattened.
+  ok('a cancelled row is not an attendance',
+    take(row('A', 'Chair Yoga', 'Cancelled'), '2025-08-01').length === 0);
+  ok('nor is a superseded one',
+    take(row('A', 'Chair Yoga', 'Superseded'), '2025-08-01').length === 0);
+}
 
 // ---------------------------------------------------------------------------
 // 3. A way to reach somebody — either kind.

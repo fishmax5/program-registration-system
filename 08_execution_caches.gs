@@ -37,12 +37,12 @@ let __orderAheadDaysCache = null;
 // nobody") caches as the answer it is rather than being re-read from the sheet
 // by every category lookup in the run.
 let __adminNotificationRowsCache = null;
+// The membership application's form id. Nothing opens that form any more —
+// the door files a note for the office instead of showing the application (see
+// recordMembershipHandoff(), 72_door_app.gs) — so the id is read only to put
+// the form's link in that note, and the shape cache that sat beside this one
+// went with the screen it was for.
 let __membershipFormIdCache = null;
-// The door's membership application, read once per execution — see
-// membershipFormShape(). Wrapped ({ shape }) so a form that could NOT be
-// opened is cached as the refusal it is, rather than re-attempting a remote
-// call that has already failed once in this execution.
-let __membershipFormShapeCache = null;
 let __cateringPolicyIndexCache = null;
 let __linkDisplayCache = null;
 let __calendarInviteModeCache = null;
@@ -57,9 +57,16 @@ let __triggerOwnerCache = null;
 // asks it of every event on every calendar, and a Config round trip per event
 // is a sync's worth of them.
 let __groupSeriesUpToCache = null;
+// How many minutes one slice of a sync may work for — see
+// getSyncSliceBudgetMs(). Read once per execution because the tail of a
+// registration sync asks it between every step.
+let __syncBudgetMinutesCache = null;
 let __calendarEventsCache = null;
 let __formItemIndexCache = {};
 let __formHandleCache = {};
+// The same idea for the spreadsheets this workbook does not live in — see
+// openSpreadsheetCached().
+let __spreadsheetHandleCache = {};
 
 /**
  * Reads Lunch_Schedule ONCE per execution into
@@ -230,7 +237,6 @@ function invalidateConfigCaches() {
   __orderAheadDaysCache = null;
   __adminNotificationRowsCache = null;
   __membershipFormIdCache = null;
-  __membershipFormShapeCache = null;
   __cateringPolicyIndexCache = null;
   __linkDisplayCache = null;
   __calendarInviteModeCache = null;
@@ -239,6 +245,7 @@ function invalidateConfigCaches() {
   __outboundMailPausedCache = null;
   __triggerOwnerCache = null;
   __groupSeriesUpToCache = null;
+  __syncBudgetMinutesCache = null;
   // These two also live in the CROSS-execution cache, which a plain
   // per-execution reset would leave serving the old value to the next
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.
@@ -327,6 +334,34 @@ function openFormCached(formId) {
   const form = FormApp.openById(id);
   __formHandleCache[id] = form;
   return form;
+}
+
+/**
+ * The same bargain as openFormCached(), for the spreadsheets this workbook does
+ * NOT live in — the program registrant sheets (46), one per program.
+ *
+ * A sync opens every one of them TWICE: pullProgramLeaderSheetEdits() reads the
+ * leaders' ticks back in before the Registrants tab is rewritten, and
+ * pushProgramLeaderSheets() writes the settled roster back out at the end.
+ * SpreadsheetApp.openById() loads a whole spreadsheet, which is the most
+ * expensive call either of those makes, and on a centre with forty programs it
+ * was eighty of them an hour for forty documents that had not changed hands in
+ * between.
+ *
+ * FAILURES ARE NOT CACHED, for the same three reasons openFormCached() gives:
+ * a refusal is routinely repaired mid-execution (ensureProgramLeaderSheetAccess
+ * runs in the push, on a file the pull may have been refused), the throw is the
+ * answer at some call sites, and a wrongly remembered "no" silently drops a
+ * leader's edits for a whole run. This throws whatever SpreadsheetApp throws,
+ * at every call, so every caller's own try/catch is unchanged.
+ */
+function openSpreadsheetCached(fileId) {
+  const id = String(fileId || '').trim();
+  if (!id) return SpreadsheetApp.openById(fileId);
+  if (__spreadsheetHandleCache[id]) return __spreadsheetHandleCache[id];
+  const file = SpreadsheetApp.openById(id);
+  __spreadsheetHandleCache[id] = file;
+  return file;
 }
 
 /**

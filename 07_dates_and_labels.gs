@@ -170,6 +170,7 @@ function getRowsPreservingFormulas(sheet, startRow, startCol, numRows, numCols) 
 function applyValueListValidationBounded(sheet, colIndex, options, startRow, numRows) {
   if (!colIndex || colIndex < 1 || numRows < 1 || !options || options.length === 0) return;
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(options, true).setAllowInvalid(false).build();
+  if (stageRenderValidation(sheet, startRow, colIndex, numRows, rule)) return;
   sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
 }
 
@@ -181,6 +182,7 @@ function applyValueListValidationBounded(sheet, colIndex, options, startRow, num
 function applyCheckboxValidationBounded(sheet, colIndex, startRow, numRows) {
   if (!colIndex || colIndex < 1 || numRows < 1) return;
   const rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  if (stageRenderValidation(sheet, startRow, colIndex, numRows, rule)) return;
   sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
 }
 
@@ -193,6 +195,7 @@ function applyCheckboxValidationBounded(sheet, colIndex, startRow, numRows) {
 function applyOpenValueListValidationBounded(sheet, colIndex, options, startRow, numRows) {
   if (!colIndex || colIndex < 1 || numRows < 1 || !options || options.length === 0) return;
   const rule = SpreadsheetApp.newDataValidation().requireValueInList(options, true).setAllowInvalid(true).build();
+  if (stageRenderValidation(sheet, startRow, colIndex, numRows, rule)) return;
   sheet.getRange(startRow, colIndex, numRows, 1).setDataValidation(rule);
 }
 
@@ -350,11 +353,18 @@ function labelManualEntryColumns(sheet, headerRow, headers, manualColumnNames) {
     // A HEADER cell, which is what every sectioned read projects its columns
     // by — so this is a write the cache has to hear about like any other.
     invalidateSectionedRowsCache(sheet);
+    const spec = {
+      value: `${MANUAL_ENTRY_PREFIX} ${name}`,
+      background: MANUAL_ENTRY_HEADER_COLOR,
+      fontColor: '#000000',
+      fontWeight: 'bold'
+    };
+    if (stageRenderHeaderCell(sheet, headerRow, idx + 1, spec)) return;
     sheet.getRange(headerRow, idx + 1)
-      .setValue(`${MANUAL_ENTRY_PREFIX} ${name}`)
-      .setBackground(MANUAL_ENTRY_HEADER_COLOR)
-      .setFontColor('#000000')
-      .setFontWeight('bold');
+      .setValue(spec.value)
+      .setBackground(spec.background)
+      .setFontColor(spec.fontColor)
+      .setFontWeight(spec.fontWeight);
   });
 }
 
@@ -364,6 +374,7 @@ function tintManualEntryColumns(sheet, startRow, numRows, headers, manualColumnN
   manualColumnNames.forEach(name => {
     const idx = headers.indexOf(name);
     if (idx === -1) return;
+    if (stageRenderColumnBackground(sheet, startRow, idx + 1, numRows, MANUAL_ENTRY_CELL_TINT)) return;
     sheet.getRange(startRow, idx + 1, numRows, 1).setBackground(MANUAL_ENTRY_CELL_TINT);
   });
 }
@@ -693,13 +704,31 @@ const MONTH_DISPLAY_FORMAT = 'MMMM yyyy';
  * Master_Program_Dashboard passes MONTH_DISPLAY_FORMAT. Omitted, every tab
  * gets DATE_DISPLAY_FORMAT as it always has.
  */
-function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows, format) {
+function applyMonthColorTint(sheet, colIndex1Based, startRow, numRows, format, dateValues) {
   if (numRows < 1) return;
+  // THE CALLER USUALLY HAS THE DATES ALREADY. This ran immediately after the
+  // rows were written and read the column back to find out what was in it — a
+  // round trip, and a whole column of cells, to be told what the caller had
+  // just handed to setValues(). `dateValues` is that list; the read is the
+  // fallback for the callers that genuinely do not know (a repair pass over
+  // rows nobody rebuilt).
   const range = sheet.getRange(startRow, colIndex1Based, numRows, 1);
-  const values = range.getValues();
-  const backgrounds = values.map(r => { const d = coerceDate(r[0]); return [d ? getMonthColor(getMonthLabel(d)) : PALETTE.PAPER]; });
-  range.setBackgrounds(backgrounds);
-  range.setNumberFormat(format || DATE_DISPLAY_FORMAT);
+  const dates = dateValues || range.getValues().map(r => r[0]);
+  const colors = [];
+  for (let r = 0; r < numRows; r++) {
+    const d = coerceDate(dates[r]);
+    colors.push(d ? getMonthColor(getMonthLabel(d)) : PALETTE.PAPER);
+  }
+  const numberFormat = format || DATE_DISPLAY_FORMAT;
+  // BOTH OR NEITHER: staging one plane and writing the other directly would
+  // write the same column twice. `stageRenderNumberFormat` is the stricter of
+  // the two (it insists on the whole band), so it is asked first.
+  if (stageRenderNumberFormat(sheet, startRow, colIndex1Based, numRows, numberFormat)) {
+    stageRenderColumnBackground(sheet, startRow, colIndex1Based, numRows, colors);
+    return;
+  }
+  range.setBackgrounds(colors.map(c => [c]));
+  range.setNumberFormat(numberFormat);
 }
 
 /** Builds a "text equals" conditional format rule across one or more explicit ranges. */
