@@ -169,18 +169,21 @@
  *      jargon does not belong there. Brackets left in a TITLE are still
  *      honored as a legacy fallback (and logged) so existing calendars keep
  *      their capacity; see parseSettingsBrackets()/resolveEventSettings().
- *        Title "*Yoga Basics"          -> TENTATIVE. A leading "*" means the
+ *        Title "*Yoga Basics"          -> TENTATIVE. A leading "*" — or the
+ *          word "No", which staff write to mean the same thing — means the
  *          session isn't confirmed: no form is generated and no registry
- *          row is written, until the asterisk comes off. parseEventTitle()
- *          strips the asterisk from cleanTitle, and since computeEventId()
+ *          row is written, until that mark comes off. parseEventTitle()
+ *          strips the mark from cleanTitle, and since computeEventId()
  *          keys off cleanTitle, confirming an event later produces the
  *          SAME Event_ID — it just flows through as a new session with no
  *          reconciliation. (Re-adding an asterisk to an already-confirmed
  *          event does NOT triage it; existing registrations are kept.)
- *          The asterisk is also how a CANCELLED occurrence is marked: an
- *          event named "*NO Tai Chi" stays visible on the calendar for
- *          staff and attendees while generating no form and no dashboard
- *          row.
+ *          The mark is also how a CANCELLED occurrence is marked: an
+ *          event named "*NO Tai Chi" — or just "NO Tai Chi" — stays visible
+ *          on the calendar for staff and attendees while generating no form
+ *          and no dashboard row. "No" only counts as the mark when a space
+ *          or colon follows it and a title is left over, so "November
+ *          Social" and "No-Show Clinic" are programs.
  *        description "[Personalized Assistance]" -> this program is booked by
  *          TIME, not by date: each event is cut into back-to-back appointment
  *          slots ("[Slots: 20]" for a length other than the default), its form

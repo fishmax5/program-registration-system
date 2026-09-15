@@ -35,6 +35,21 @@ function computeSyncDateRange() {
 /** A leading "*" on the title marks an event TENTATIVE — see parseEventTitle(). */
 const TENTATIVE_TITLE_PREFIX = '*';
 
+/**
+ * A leading "No" says the same thing in words. Staff write "No Yoga" on the
+ * calendar to say a session is off, which is exactly the "*Yoga" case wearing
+ * a word instead of a symbol — so it is read as the same mark and stripped the
+ * same way, leaving cleanTitle (and therefore the event ID) untouched.
+ *
+ * The WORD BOUNDARY is the whole care here: "November Social" and "Noon
+ * Concert" are programs, not cancellations, so "No" only counts when what
+ * follows it is a space or punctuation and there is a title left afterwards.
+ * A hyphen alone does NOT count: "No-Show Clinic" is a program, so the boundary
+ * has to include a space or a colon somewhere ("No - Yoga" and "No: Yoga" are
+ * both somebody cancelling).
+ */
+const TENTATIVE_TITLE_WORD_REGEX = /^no(?=[\s:–—-]*[\s:])[\s:–—-]+/i;
+
 /** Every bracketed group in a string: "[Cap: 12] [Grouped]" and "[Cap: 12, Grouped]" both work. */
 const BRACKET_GROUP_REGEX = /\[([^\]]*)\]/g;
 
@@ -261,9 +276,10 @@ function parseSettingsBrackets(text) {
 
 /**
  * Parses event titles. The title is now just the program name, optionally
- * prefixed with "*":
+ * prefixed with "*" — or with the word "No", which means the same thing:
  *   "Yoga Basics"    -> a program
  *   "*Yoga Basics"   -> the same program, TENTATIVE (see below)
+ *   "No Yoga Basics" -> the same program, TENTATIVE (same mark, in words)
  *
  * BOTH capacity and Grouped-vs-Regular now live in the event DESCRIPTION —
  * see parseSettingsBrackets() / resolveEventSettings(). The title is what
@@ -272,7 +288,8 @@ function parseSettingsBrackets(text) {
  * legacy fallback (and logged) so existing calendars don't silently lose
  * their capacity, but they're stripped from cleanTitle either way.
  *
- * A title beginning with "*" marks the event TENTATIVE: it is skipped
+ * A title beginning with "*" — or with the word "No" — marks the event
+ * TENTATIVE: it is skipped
  * entirely by the form/registry pipeline until the asterisk is removed
  * (see syncCalendarsInternal()). The asterisk is stripped from cleanTitle,
  * which matters a lot — computeEventId() keys off cleanTitle, so an event's
@@ -283,10 +300,23 @@ function parseEventTitle(title) {
   let raw = String(title || '').trim();
   if (!raw) return null;
 
+  // Both marks, in any order and any number: "* No Yoga" is somebody saying it
+  // twice, not a program called "No Yoga". The word form only strips when
+  // something is LEFT afterwards — an event actually titled "No" is a title.
   let isTentative = false;
-  while (raw.charAt(0) === TENTATIVE_TITLE_PREFIX) {
-    isTentative = true;
-    raw = raw.substring(1).trim();
+  for (;;) {
+    if (raw.charAt(0) === TENTATIVE_TITLE_PREFIX) {
+      isTentative = true;
+      raw = raw.substring(1).trim();
+      continue;
+    }
+    const withoutWord = raw.replace(TENTATIVE_TITLE_WORD_REGEX, '').trim();
+    if (withoutWord && withoutWord !== raw) {
+      isTentative = true;
+      raw = withoutWord;
+      continue;
+    }
+    break;
   }
   if (!raw) return null;
 

@@ -170,5 +170,41 @@ check('...and drops the bracket from the name',
 check('"Yoga [with Rosalie]" keeps its cap unset',
   sandbox.parseEventTitle('Yoga [with Rosalie]').hasLegacyBrackets, false);
 
+console.log('\n-- "No" at the front of a title means what "*" means --');
+
+// The tentative mark, in words. The point of stripping it is that cleanTitle
+// — and therefore computeEventId() — is identical before and after, so taking
+// the mark off is "a new event appears" rather than an ID change.
+const tentative = (title, expected) => {
+  const parsed = sandbox.parseEventTitle(title);
+  check(`"${title}" is tentative`, !!parsed && parsed.isTentative, true);
+  check(`..."${title}" cleans to "${expected}"`, parsed && parsed.cleanTitle, expected);
+};
+const notTentative = title => {
+  const parsed = sandbox.parseEventTitle(title);
+  check(`"${title}" is a program, not a cancellation`, !!parsed && parsed.isTentative, false);
+  check(`..."${title}" keeps its whole name`, parsed && parsed.cleanTitle, title);
+};
+
+tentative('*Yoga Basics', 'Yoga Basics');
+tentative('No Yoga Basics', 'Yoga Basics');
+tentative('NO Yoga Basics', 'Yoga Basics');
+tentative('no yoga basics', 'yoga basics');
+tentative('No: Yoga Basics', 'Yoga Basics');
+tentative('No - Yoga Basics', 'Yoga Basics');
+tentative('* No Yoga Basics', 'Yoga Basics');
+
+// The word boundary is the whole care: these all BEGIN with the letters "no".
+notTentative('November Social');
+notTentative('Noon Concert');
+notTentative('Nordic Walking');
+notTentative('No-Show Clinic');
+// An event actually called "No" leaves nothing behind, so it is a title.
+notTentative('No');
+
+check('a tentative title and a confirmed one share one clean title',
+  sandbox.parseEventTitle('No Yoga [Cap: 12]').cleanTitle,
+  sandbox.parseEventTitle('Yoga [Cap: 12]').cleanTitle);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

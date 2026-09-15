@@ -321,8 +321,8 @@ function renderEventTagReportHtml(report) {
       ? `<p class="detail">⚠️ This event still carries settings in its TITLE. They are still read as a
          fallback, but the supported place is the description.</p>` : '';
     const tentative = e.isTentative
-      ? `<p class="err">⚠️ The title starts with "*", so this event is skipped entirely — no form,
-         no dashboard row — until the asterisk comes off.</p>` : '';
+      ? `<p class="err">⚠️ The title starts with "*" (or the word "No"), so this event is skipped
+         entirely — no form, no dashboard row — until that mark comes off.</p>` : '';
 
     const sheet = !e.sheetRow
       ? `<p class="detail">No row on the dashboard for this date yet — run 🔄 Update Everything Now.</p>`
@@ -821,8 +821,8 @@ function buildGroupsForWindow(eventsByCalendar, options) {
         const parsed = parseEventTitle(ev.getTitle());
         if (!parsed) return;
         // Tentative events are skipped WHOLESALE — no form, no registry
-        // row — until the leading "*" comes off. Because parseEventTitle()
-        // strips the asterisk from cleanTitle, confirming an event later
+        // row — until the leading "*" (or "No") comes off. Because
+        // parseEventTitle() strips that mark from cleanTitle, confirming an event later
         // produces the exact same Event_ID, so it simply flows through as
         // a brand-new session with no reconciliation needed.
         if (parsed.isTentative) {
@@ -854,8 +854,8 @@ function buildGroupsForWindow(eventsByCalendar, options) {
       });
 
     if (tentativeTitles.size > 0) {
-      log(`Skipped ${tentativeTitles.size} tentative program(s) at ${locationName} (title starts with "*"): ` +
-        `${Array.from(tentativeTitles).join(', ')}. Remove the asterisk to generate forms.`);
+      log(`Skipped ${tentativeTitles.size} tentative program(s) at ${locationName} (title starts with "*" or "No"): ` +
+        `${Array.from(tentativeTitles).join(', ')}. Remove that mark to generate forms.`);
     }
   });
 
