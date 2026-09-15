@@ -1,5 +1,5 @@
 // ============================================================================
-// 97. AN OPTIMISTIC WRITE THAT DID NOT LAND  (retry, then tell somebody)
+// 99b. AN OPTIMISTIC WRITE THAT DID NOT LAND  (retry, then tell somebody)
 // ============================================================================
 //
 // THREE PLACES IN THIS WORKBOOK ANSWER BEFORE THEY WRITE. Quick Mark's dialog
@@ -46,8 +46,11 @@
 // failed. The storage underneath is 63's — same chunked properties, same lock,
 // same caps — because that part was already right.
 //
-// Numbered last for the usual reason: never renumber, and this landed after
-// 96. Safe there — behavior only, its own constants stand alone, and
+// Numbered last for the usual reason — never renumber, and this landed last.
+// It was 97 on its own branch until the merge that brought the render-batching
+// file in took that number; the prefix is all that changed, on the precedent of
+// 80, 82, 84 and 94, and 99a beside it is where the 'a' suffix comes from.
+// Safe there — behavior only, its own constants stand alone, and
 // everything it calls (readCheckInList, writeCheckInList, withCheckInQueueLock,
 // applyQuickMarkLocked, walkInSignIn, notifyAdminUrgent, isDeskWorkBlocked) is
 // a hoisted function declaration, so load order cannot reach it.
