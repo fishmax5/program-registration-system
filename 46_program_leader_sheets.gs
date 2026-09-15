@@ -424,6 +424,48 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
 // --- writing the sheets back out --------------------------------------------
 
 /**
+ * ONE tick column, across every session band of the sheet, as real checkboxes.
+ *
+ * THE BUG THIS IS. A RangeList is NOT a Range: it carries setBackground,
+ * setNumberFormat, setHorizontalAlignment and the rest of the formatting, and
+ * it does NOT carry setDataValidation. So the batched write that replaced the
+ * per-run getRange() calls — one range list per column instead of one range
+ * per column per band — threw
+ *
+ *     TypeError: ticks.setDataValidation is not a function
+ *
+ * on every registrant sheet, every hour. pushProgramLeaderSheets() catches per
+ * SHEET, so what a leader saw was the roster abandoned half-written with the
+ * four tick columns reading as the words TRUE and FALSE: the values had been
+ * written and the validation that draws them as boxes had not.
+ *
+ * insertCheckboxes() is the call a RangeList DOES have, and it is the better
+ * one anyway — it sets the validation AND normalizes the cells already holding
+ * TRUE/FALSE, which is what repairs a sheet that has already been through the
+ * failure. setDataValidation stays as the fallback for anything handed in that
+ * has it instead.
+ *
+ * GUARDED, and never throws: a column that reads back as TRUE/FALSE still
+ * round-trips (normalizeLeaderFlag() accepts both), so losing a whole roster
+ * refresh over how a cell is DRAWN is the worse outcome by far. A column the
+ * sheet's headers do not name arrives here as null and is skipped, rather than
+ * becoming a NaN column index and its own unhelpful throw.
+ */
+function applyLeaderFlagCheckboxes_(name, ticks) {
+  if (!ticks) return;
+  try {
+    if (typeof ticks.insertCheckboxes === 'function') ticks.insertCheckboxes();
+    else if (typeof ticks.setDataValidation === 'function') {
+      ticks.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
+    }
+    ticks.setHorizontalAlignment('center');
+  } catch (err) {
+    log(`ℹ️ Could not draw the "${name}" column as checkboxes (${err}) — the ticks still work.`);
+  }
+}
+
+
+/**
  * Refreshes every registered program registrant sheet from the settled picture.
  *
  * Only sheets ALREADY in the registry are touched. Creating one is a
@@ -891,10 +933,7 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     // invitation to tick something that goes nowhere.
     LEADER_FLAG_COLUMNS.forEach(name => {
       if (map[name] === undefined) return;
-      const ticks = rangeListFor(map[name] + 1);
-      if (!ticks) return;
-      ticks.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
+      applyLeaderFlagCheckboxes_(name, rangeListFor(map[name] + 1));
     });
   }
 
@@ -1042,14 +1081,32 @@ function addEditorWithoutNotifying_(driveFile, email) {
  * one. Returns { openedUp, editors, problems } for a caller that wants to say
  * what happened.
  */
-function openUpFileToAnyoneWithLink(fileId, describe) {
+function openUpFileToAnyoneWithLink(fileId, describe, opts) {
   const outcome = { openedUp: false, editors: [], problems: [] };
   if (!fileId) return outcome;
   const label = describe || `file ${fileId}`;
+  // TWO INDEPENDENT OPTIONS, both used by `89`'s sweep.
+  //
+  // `folder: true` says how to FETCH: a folder id has to go through
+  // getFolderById(), because getFileById() throws outright on one — which
+  // would report every folder as unreachable rather than sharing it.
+  //
+  // `linkSharing` says how far to OPEN, and defaults to the file's own answer:
+  // on for a file (the trade this function's banner argues), off for a folder,
+  // because a link-editable folder hands over everything inside it, now and in
+  // future. It is passed explicitly for the one file kind that must stay shut:
+  // a form IMAGE (`55`), whose bytes are copied INTO the form rather than read
+  // from Drive — "a photo put on a public form is not a Drive file made
+  // public" is a promise that file makes, and the named editors are all the
+  // syncing account needs to read its blob.
+  const isFolder = !!(opts && opts.folder);
+  const wantsLinkSharing = opts && opts.linkSharing !== undefined
+    ? !!opts.linkSharing
+    : !isFolder;
 
   let driveFile = null;
   try {
-    driveFile = DriveApp.getFileById(fileId);
+    driveFile = isFolder ? DriveApp.getFolderById(fileId) : DriveApp.getFileById(fileId);
   } catch (err) {
     // Almost always "you do not have permission" — i.e. we are already the
     // account that cannot reach it, and there is nothing to do from here. The
@@ -1085,6 +1142,8 @@ function openUpFileToAnyoneWithLink(fileId, describe) {
       log(`ℹ️ Could not add ${email} as an editor of the ${label}.`);
     }
   });
+
+  if (!wantsLinkSharing) return outcome;
 
   try {
     driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);

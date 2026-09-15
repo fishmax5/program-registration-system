@@ -81,6 +81,31 @@ function runRegistrationImportPhase(sync) {
     plan.formsRead = 0;
   }
 
+  // A FORM MARKED FOR A FULL RE-IMPORT JOINS THE PLAN, on whichever slice is
+  // running. The list above is deliberately the plan's and not this
+  // execution's, for the reason just given — but a mark made while a plan is
+  // already in flight must not have to wait for that plan to finish, and a
+  // form no session row names is not in that list at all, which is exactly the
+  // form a re-import is always needed for. So it is ADDED rather than
+  // recomputed: the plan's own progress, and its count of what is left, are
+  // untouched. See REGISTRATION_BACKFILL_PROP_KEY (99).
+  //
+  // ON THE PLAN, not on this slice, and read back here: a mark is cleared when
+  // the WINDOW closes, which can be several slices after the slice that did
+  // the reading. A per-execution list would be empty by then, and the mark
+  // would never be cleared — the form would be re-read from the epoch on every
+  // plan, forever. It is also what stops a form already read this plan being
+  // added back to the list below on the next slice.
+  const backfillsRead = plan.backfillsRead || (plan.backfillsRead = []);
+  const backfillFormIds = pendingBackfillFormIds();
+  const joiningNow = backfillFormIds.filter(id =>
+    plan.pendingFormIds.indexOf(id) === -1 && backfillsRead.indexOf(id) === -1);
+  if (joiningNow.length > 0) plan.pendingFormIds = plan.pendingFormIds.concat(joiningNow);
+  if (backfillFormIds.length > 0) {
+    log(`Registration sync: ${backfillFormIds.length} form(s) marked for re-import are read from the ` +
+      `beginning, not from the sync clock.`);
+  }
+
   const newRows = [];
   // Two things gathered across every response and written ONCE, below: club
   // joins, and the appointment requests nobody could book a time for (see
@@ -108,7 +133,11 @@ function runRegistrationImportPhase(sync) {
     // workbook's.
     try {
       const form = openFormCached(formId);
-      const responses = form.getResponses(lastSync);
+      // From the sync clock normally; from the beginning for a marked form.
+      // See backfillSinceFor() for why a backfill reads everything rather than
+      // guessing at a date.
+      const responses = form.getResponses(backfillSinceFor(formId, lastSync));
+      if (isFormMarkedForBackfill(formId) && backfillsRead.indexOf(formId) === -1) backfillsRead.push(formId);
       if (responses.length > 0) {
         const formIndex = getFormItemIndex(form); // ONE getItems() round trip for every response on this form
         responses.forEach(response => {
@@ -119,6 +148,22 @@ function runRegistrationImportPhase(sync) {
       }
     } catch (err) {
       log(`⚠️ Could not read form ${formId}: ${err}`);
+      // WHICH PROGRAMS HAVE JUST STOPPED IMPORTING, and whether this workbook's
+      // own form registry disagrees with the Form_ID column that named this
+      // form. Both notes below used to say the form ID and the error and
+      // nothing else, which is a line nobody can act on and — when the cause
+      // is a Form_ID left pointing at a form that has since been deleted —
+      // the only trace an entire program's registrations leave as they stop
+      // arriving. See describeUnimportedFormPointer() (99) for what it can
+      // work out for free, and for why the fix is two steps rather than one.
+      let impact = '';
+      try {
+        impact = describeUnimportedFormPointer(formId, sessionRows, getIndexMap(HEADERS.All_Program_Sessions));
+      } catch (describeErr) {
+        // Diagnostics must never be able to turn one unreadable form into a
+        // failed sync. The bare note below is still sent.
+        log(`ℹ️ Could not work out what form ${formId} affects (${describeErr}).`);
+      }
       // A PERMISSION FAILURE IS REPAIRABLE, and the repair is worth trying
       // from here: this account may hold the file even though the call that
       // failed did not go through Drive. When it works, the next run imports
@@ -133,9 +178,11 @@ function runRegistrationImportPhase(sync) {
           (opened.openedUp
             ? `Its sharing has just been opened to anyone with the link, so the next sync should import it.`
             : `Its sharing could NOT be changed from here. Sign in as the account that created it and run ` +
-              `🔧 Admin ▸ 🔓 Open Up Form Sharing. Until then this form's registrations are not being imported.`));
+              `🔧 Admin ▸ 🔓 Open Up Form Sharing. Until then this form's registrations are not being imported.`) +
+          (impact ? ` ${impact}` : ''));
       } else {
-        noteForAdmin('Forms that could not be opened', `${formId} — ${err}`);
+        noteForAdmin('Forms that could not be opened',
+          `${describeFormLink(formId)} could not be opened — ${err}.` + (impact ? ` ${impact}` : ''));
       }
     }
     // OFF THE LIST WHETHER IT WAS READ OR REFUSED. A form this account cannot
@@ -248,6 +295,11 @@ function runRegistrationImportPhase(sync) {
   // sync clock.
   if (allFormsRead && registrantsWritten) {
     setLastSyncTime(new Date(plan.windowOpenedAt));
+    // THE SAME CONDITION, and for the same reason: a re-import has landed on
+    // the tab only when the whole window is in and the write went through, so
+    // that is when the mark that asked for it stops being owed. Read off the
+    // PLAN, because the slice that read the form may not be this one.
+    clearBackfillMarks(plan.backfillsRead || []);
     plan.importDone = true;
   } else if (!allFormsRead) {
     log(`Registration sync: ${plan.formsRead} form(s) read, ${plan.pendingFormIds.length} to go — ` +

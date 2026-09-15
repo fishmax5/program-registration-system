@@ -162,11 +162,16 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   const lists = rangeListCalls(sheet);
   assert.ok(lists.length > 0, 'the per-run work went out as range lists');
 
-  // Every tick-box column gets exactly one validation call, covering one range
+  // Every tick-box column gets exactly one checkbox call, covering one range
   // per session run — three ranges here, never a band row among them.
-  const validations = lists.filter(c => c.name === 'rangeList.setDataValidation');
+  //
+  // insertCheckboxes(), NOT setDataValidation(): a RangeList does not have the
+  // latter, so the batched version of this threw on every registrant sheet
+  // until it was changed (see applyLeaderFlagCheckboxes_ in `46`). The helper
+  // now refuses that name, which is what makes this assertion mean something.
+  const validations = lists.filter(c => c.name === 'rangeList.insertCheckboxes');
   assert.strictEqual(validations.length, sandbox.LEADER_FLAG_COLUMNS.length,
-    'one validation call per tick-box column, whatever the number of sessions');
+    'one checkbox call per tick-box column, whatever the number of sessions');
   validations.forEach(v => assert.strictEqual(v.ranges.length, 3,
     'covering one range per session run'));
 
