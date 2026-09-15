@@ -25,6 +25,9 @@ this.withReadOnlyRegistries_ = withReadOnlyRegistries_;
 this.describeRegistrationAudit_ = describeRegistrationAudit_;
 this.classifyEmptyResponse_ = classifyEmptyResponse_;
 this.auditFormGridHealth_ = auditFormGridHealth_;
+this.buildNamesOnFormIndex_ = buildNamesOnFormIndex_;
+this.getIndexMap = getIndexMap;
+this.HEADERS = HEADERS;
 this.TEMPLATE_GRID_PLACEHOLDER_ROW = TEMPLATE_GRID_PLACEHOLDER_ROW;
 this.callGetTombstone = function (k) { return getRegistrantTombstone(k); };
 this.TEMPLATE_ITEM_TITLES = TEMPLATE_ITEM_TITLES;
@@ -274,6 +277,58 @@ function responseAnswering(item, values) {
   check('a tombstone reads as absent while the audit derives', out.result, null);
   check('...and the real lookup is restored afterwards',
     typeof sandbox.callGetTombstone('evt|ada|Attendee'), 'object');
+}
+
+// --- a response that cannot be re-read is not the same as a lost seat ------
+//
+// The v8→v9 meal swap deletes the questions a pre-v9 response answered, so
+// re-deriving one today produces nothing. That is harmless if it was read when
+// it ARRIVED — the migration runs after the import loop for exactly that
+// reason. What decides it is whether the person is on the tab anyway, and the
+// audit was not asking.
+{
+  const rmap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
+  const rowFor = (eventId, name) => {
+    const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
+    row[rmap['Event_ID']] = eventId;
+    row[rmap['Name']] = name;
+    return row;
+  };
+  const registryIndex = {
+    'fLunch|Tue 1 Sep': { formId: 'fLunch', eventId: 'LUNCHONLY:2026-09-01' },
+    'fLunch|Thu 3 Sep': { formId: 'fLunch', eventId: 'LUNCHONLY:2026-09-03' }
+  };
+  const onForm = sandbox.buildNamesOnFormIndex_(
+    [rowFor('LUNCHONLY:2026-09-01', 'Flo Rice')], rmap, registryIndex);
+
+  check('somebody imported when their response arrived is found on the form',
+    onForm.has('fLunch|' + sandbox.normalizeNameKey('Flo Rice')), true);
+  check('...and somebody who was never imported is not',
+    onForm.has('fLunch|' + sandbox.normalizeNameKey('Judy Watman')), false);
+}
+
+{
+  // The report leads with that split, because it is the difference between
+  // "32 people lost their place" and "32 old responses cannot be re-read".
+  const base = {
+    formsExamined: 1, formsUnread: [], formsNotReached: [], responsesRead: 2,
+    shapeMismatches: [], unmatchedRows: [], missingPeople: [], emptyGrids: [],
+    tombstonedSkips: 0, tombstonesWouldRevive: 0, stoppedEarly: false, elapsedMs: 1000
+  };
+  const report = sandbox.describeRegistrationAudit_(Object.assign({}, base, {
+    emptyResponses: [
+      { formId: 'fL', name: 'Flo Rice', onTab: true, kind: 'unreadable', answers: 0, titles: [] },
+      { formId: 'fL', name: 'Judy Watman', onTab: false, kind: 'unreadable', answers: 0, titles: [] }
+    ]
+  }));
+  check('the harmless ones are called harmless',
+    report.indexOf('Nobody lost a seat') !== -1, true);
+  check('...the genuinely lost one is named',
+    report.indexOf('Judy Watman') !== -1, true);
+  check('...and the one already on the tab is NOT listed as lost',
+    report.indexOf('• Flo Rice') === -1, true);
+  check('...and the report says where the dates still survive',
+    report.indexOf("version history") !== -1, true);
 }
 
 console.log(failures === 0 ? '\nAll registration-audit checks passed.' : `\n${failures} failure(s).`);

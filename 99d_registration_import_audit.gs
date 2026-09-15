@@ -272,6 +272,52 @@ function auditFormGridHealth_(formIndex) {
 }
 
 /**
+ * **Is this person already on the tab for this form?**
+ *
+ * The distinction this exists for is the one that decides whether anything was
+ * actually lost, and the audit was not making it. A response that cannot be
+ * RE-DERIVED today is not the same as a registration that was never imported:
+ * if it was read back when it arrived — while the questions it answered were
+ * still on the form — its rows are on All_Registrants and nothing is missing.
+ * The re-read failing now is then an artifact of the form having changed, and
+ * costs nobody a seat.
+ *
+ * That is precisely the state the v8→v9 meal swap leaves behind. It deletes
+ * LUNCH_GRID / ALL_DATES_LUNCH_PEOPLE / EXTRA_MEALS (and, on a lunch-only form,
+ * the legacy people-grid) and adds the counting questions in their place — and
+ * it is deliberately sequenced AFTER the import loop in syncRegistrations()
+ * for exactly this reason, so that what those items held was already read. The
+ * fallback in readMealCountGridResponse() cannot help afterwards: it resolves
+ * the old titles through formIndex.byTitle, which is items STILL ON THE FORM,
+ * and the migration has just removed them.
+ *
+ * So the question to ask of an un-derivable response is not "can I read it"
+ * but "is the person on the tab anyway". Keyed on the form rather than the
+ * session, because the dates are the part that did not survive: whether this
+ * person has ANY row against any session this form covers is the most that can
+ * honestly be checked, and a person with none of them is the one to worry
+ * about.
+ */
+function buildNamesOnFormIndex_(existingRows, map, registryIndex) {
+  // Event_ID -> Form_ID, off the index already in hand rather than a second
+  // read of the session tab.
+  const formIdByEventId = {};
+  Object.keys(registryIndex).forEach(key => {
+    const entry = registryIndex[key];
+    if (entry && entry.eventId) formIdByEventId[String(entry.eventId)] = String(entry.formId || '');
+  });
+
+  const onForm = new Set();
+  existingRows.forEach(row => {
+    const formId = formIdByEventId[String(row[map['Event_ID']] || '')];
+    if (!formId) return;
+    const name = normalizeNameKey(row[map['Name']]);
+    if (name) onForm.add(`${formId}|${name}`);
+  });
+  return onForm;
+}
+
+/**
  * WHY a response derived no rows — asked of the response rather than assumed.
  *
  * The first version of this file did not ask. It put every empty response under
@@ -356,6 +402,7 @@ function auditRegistrationImport(options) {
   // a record that the registration was seen, which is the question here.
   const present = new Set(existingRows.map(row => registrantImportKey(row, map)));
   const registryIndex = buildRegistryIndex(registrySheet);
+  const namesOnForm = buildNamesOnFormIndex_(existingRows, map, registryIndex);
   const orderAheadDays = getOrderAheadDays();
   const tombstones = getRegistrantTombstones();
 
@@ -368,6 +415,7 @@ function auditRegistrationImport(options) {
     formsUnread: [],
     formsNotReached: [],
     responsesRead: 0,
+    unreadableButPresent: 0, // ...of those, the ones already on the tab anyway
     emptyGrids: [],         // a live form whose date question offers no date
     emptyResponses: [],     // fault 1 — read as nothing at all
     shapeMismatches: [],    // fault 2 — proved misaligned
@@ -432,8 +480,14 @@ function auditRegistrationImport(options) {
 
           if (derived.length === 0) {
             const why = classifyEmptyResponse_(response, sessionsOnForm);
+            // THE ONLY QUESTION THAT DECIDES WHETHER ANYBODY LOST A SEAT.
+            // A response the form can no longer read is harmless if it was
+            // read when it arrived — see buildNamesOnFormIndex_().
+            const nameKey = normalizeNameKey(who);
+            const onTab = !!nameKey && namesOnForm.has(`${formId}|${nameKey}`);
+            if (onTab) finding.unreadableButPresent++;
             finding.emptyResponses.push({
-              formId, name: who, submittedAt: when,
+              formId, name: who, submittedAt: when, onTab,
               kind: why.kind, answers: why.answers, titles: why.titles, sessionsOnForm
             });
             return;
@@ -547,8 +601,36 @@ function describeRegistrationAudit_(finding) {
     const formLines = bucket => Object.keys(bucket).map(formId =>
       `  • form ${formId} — ${bucket[formId].length} response(s)`);
 
-    parts.push(`\n⚠️ ${finding.emptyResponses.length} response(s) produced NO registrant row. ` +
-      `Three different reasons, which do not have the same fix:`);
+    // THE SPLIT THAT MATTERS, before the causes. An un-derivable response whose
+    // person is already on the tab cost nobody anything — it was read when it
+    // arrived and the form has changed since. One whose person is NOT on the
+    // tab is a registration this workbook never recorded.
+    const lost = finding.emptyResponses.filter(e => !e.onTab);
+    const harmless = finding.emptyResponses.length - lost.length;
+    parts.push(`\n⚠️ ${finding.emptyResponses.length} response(s) produced NO registrant row ` +
+      `on a re-read today.`);
+    if (harmless > 0) {
+      parts.push(`  ✅ ${harmless} of them name somebody who IS already on All_Registrants for ` +
+        `that form. Those were imported when they arrived, while the questions they answered were ` +
+        `still on the form; the re-read fails only because the form has changed since. Nobody lost ` +
+        `a seat and there is nothing to put right.`);
+    }
+    if (lost.length > 0) {
+      parts.push(`  ❌ ${lost.length} of them name somebody with NO row against any session this ` +
+        `form covers. These are registrations this workbook never recorded:\n` +
+        describeCappedList_(lost
+          .slice()
+          .sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0))
+          .map(e => `  • ${e.name} — submitted ${e.submittedAt
+            ? Utilities.formatDate(e.submittedAt, TIMEZONE, 'd MMM yyyy')
+            : '(unknown)'} · form ${e.formId}`)));
+      parts.push(`  What each answered can no longer be read: the v8→v9 meal swap deleted the ` +
+        `questions they were submitted against, and readMealCountGridResponse()'s fallback to the ` +
+        `old titles resolves through the items still ON the form, so it cannot reach them either. ` +
+        `WHO registered is above; WHICH DATES and HOW MANY MEALS survive only in the responses ` +
+        `spreadsheet's own version history, from before the swap ran.`);
+    }
+    parts.push(`\n  The reasons a re-read produced nothing, which do not share a fix:`);
 
     if (Object.keys(byKind.noSessions).length > 0) {
       parts.push(`\n  NO SESSION ROW NAMES THIS FORM. Every response on it derives nothing, ` +
