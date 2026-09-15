@@ -70,8 +70,34 @@ const marked = rowWith({ Name: 'Bob Smith', Program_Status: 'Active', Lunch_Stat
 sandbox.supersedeRegistrantRow(marked, map, new Date('2026-09-06T12:00:00Z'));
 check('a superseded row still says so in both status columns',
   [marked[map['Program_Status']], marked[map['Lunch_Status']]], ['Superseded', 'Superseded']);
-check('...and is what the render then drops',
-  sandbox.dropSupersededRegistrantRows([marked], headers).length, 0);
+// ...and is what the render then drops — BUT ONLY WITH ITS REPLACEMENT BESIDE
+// IT. A mark with no successor is not bookkeeping: it is the only copy of a
+// registration left, and dropping it deletes somebody off every list in the
+// workbook. That is the shape the September lunch registrations went missing
+// in — a row marked as replaced by an import that then failed to write the
+// replacement — so the claim "the person is on the list once, under the newer
+// row" is checked here rather than trusted.
+check('...and is dropped when its replacement is on the tab',
+  sandbox.dropSupersededRegistrantRows(
+    [marked, rowWith({ Name: 'Bob Smith', Program_Status: 'Active' })], headers).length, 1);
+check('...and is KEPT when nothing was written to take its place',
+  sandbox.dropSupersededRegistrantRows([marked], headers).length, 1);
+
+// The pairing is the identity the replacement was written under — Event_ID,
+// name and Person_Type — not the name alone. A live row for the same person on
+// a DIFFERENT session is not this row's replacement, and must not license
+// dropping it.
+const otherSession = [
+  rowWith({ Event_ID: 'evt-a', Name: 'Joan Coltune', Person_Type: 'Attendee', Program_Status: 'Superseded' }),
+  rowWith({ Event_ID: 'evt-b', Name: 'Joan Coltune', Person_Type: 'Attendee', Program_Status: 'Active' })
+];
+check('a live row on another session does not stand in as a replacement',
+  sandbox.dropSupersededRegistrantRows(otherSession, headers).length, 2);
+check('...while one on the same session does',
+  sandbox.dropSupersededRegistrantRows([
+    otherSession[0],
+    rowWith({ Event_ID: 'evt-a', Name: 'Joan Coltune', Person_Type: 'Attendee', Program_Status: 'Active' })
+  ], headers).map(r => r[map['Program_Status']]), ['Active']);
 
 console.log(failures === 0 ? '\nAll superseded-row checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

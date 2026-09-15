@@ -906,6 +906,16 @@ function reportOptimisticQuickMarkFailure(args, result) {
     const where = [String(args.session || '').trim(), String(args.location || '').trim()]
       .filter(Boolean).join(' · ');
     log(`⚠️ Quick Mark did not save for "${name}"${where ? ` (${where})` : ''}: ${result.message}`);
+
+    // TRY IT AGAIN BEFORE TELLING ANYBODY. Almost every refusal here is the
+    // workbook being mid-sync — a mark that would go through two minutes
+    // later — and mailing a person about one is asking them to redo something
+    // the script can simply do itself. Queued and retried by 97; the mail
+    // below is what happens when those retries are spent, or when the queue
+    // could not be written at all, because a mark that is neither written nor
+    // queued nor reported is a mark that never happened.
+    if (queueOptimisticRetry(args.household ? 'quickMarkHousehold' : 'quickMark', args, result.message)) return;
+
     // URGENT, not the daily digest: the desk has already moved on and the
     // person in front of them is unmarked. See notifyAdminUrgent() (15).
     notifyAdminUrgent(`Quick Mark did not save: ${name}`,
@@ -988,8 +998,10 @@ function applyQuickMarkForHousehold(args) {
   });
   // The household path holds the lock itself and calls applyQuickMarkLocked()
   // directly, so it never passes through the report above. Same desk, same
-  // optimistic hand-back, same office to tell.
-  reportOptimisticQuickMarkFailure(base, result);
+  // optimistic hand-back, same office to tell — and `household` is what tells
+  // the retry queue (97) to re-apply it to the whole party rather than to the
+  // one name the press started from.
+  reportOptimisticQuickMarkFailure(Object.assign({}, base, { household: true }), result);
   return result;
 }
 

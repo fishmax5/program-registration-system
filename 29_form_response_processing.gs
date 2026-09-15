@@ -457,6 +457,8 @@ function buildRegistrantRow(args) {
 
   const map = getIndexMap(HEADERS.All_Registrants);
   const existingRow = existingRowIndex.get(key);
+  // The row a resubmission replaces, marked only once its replacement exists.
+  let rowToSupersede = null;
 
   if (existingRow) {
     const existingPartyId = existingRow[map['Party_ID']];
@@ -512,7 +514,13 @@ function buildRegistrantRow(args) {
       const held = sessionOccupancy(registryEntry);
       held.people = Math.max(0, held.people - 1);
     }
-    supersedeRegistrantRow(existingRow, map, submittedAt);
+    // THE MARK IS DEFERRED TO THE END OF THIS FUNCTION, deliberately — see
+    // rowToSupersede below. It used to be applied right here, which was safe
+    // only for as long as nothing between this line and the `return row` could
+    // fail or return early. Since a superseded row is no longer written back
+    // out (dropSupersededRegistrantRows(), 35), that "only for as long as" is
+    // now the difference between a registration and a deleted one.
+    rowToSupersede = existingRow;
   }
 
   // HOW FULL THIS SESSION IS RIGHT NOW, in the unit its capacity is written
@@ -588,6 +596,13 @@ function buildRegistrantRow(args) {
   row[map['Order_Ahead_Flag']] = computeOrderAheadFlag(registryEntry.eventDate, submittedAt, orderAheadDays);
   row[map['Admin_Notes']] = adminNotes || '';
   row[map['Event_ID']] = registryEntry.eventId;
+
+  // NOW, AND NOT BEFORE. The replacement row exists and is about to be
+  // returned, so marking the old one can no longer strand a registration:
+  // every path that gives up on building a row is above this line and leaves
+  // the old row exactly as it found it. See section 5 for the failure this
+  // ordering exists to prevent.
+  if (rowToSupersede) supersedeRegistrantRow(rowToSupersede, map, submittedAt);
 
   existingRowIndex.set(key, row); // reserve/replace immediately so a later row in this same pass supersedes/patches THIS one
   return row;

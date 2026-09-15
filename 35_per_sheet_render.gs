@@ -46,7 +46,58 @@ function renderRegistrantsSheet(force, allRows) {
 function dropSupersededRegistrantRows(rows, headers) {
   const map = getIndexMap(headers || HEADERS.All_Registrants);
   if (map['Program_Status'] === undefined) return rows || [];
-  return (rows || []).filter(row => !isSupersededRegistrantRow(row, map));
+  const all = rows || [];
+
+  // A SUPERSEDED ROW IS ONLY DROPPED WHEN ITS REPLACEMENT IS ACTUALLY HERE.
+  //
+  // The paragraph above says a superseded row is bookkeeping because "the
+  // person is on the list once, under the row their latest submission wrote".
+  // That is a claim about the OTHER row, and this filter used to take it on
+  // trust — so the one case where it was false was also the one case where
+  // this quietly deleted a registration instead of tidying a duplicate.
+  //
+  // It is false whenever a row is marked and its replacement never lands: a
+  // form row whose date label no longer resolves to a session (see
+  // processFormResponse()'s "has NOT been imported" branch), a response that
+  // threw mid-import, a catch-up pass that was skipped by step(). Before the
+  // mark stopped being written back out, that left a visibly Superseded row
+  // somebody could ask about. Afterwards it left nothing at all — the
+  // registration was simply gone, and gone from every reader in the project,
+  // because this tab is what they all read.
+  //
+  // So the claim is CHECKED rather than trusted. A superseded row whose key
+  // has a live row beside it is the ordinary case and still goes. One without
+  // is not bookkeeping — it is the only copy of a registration left — and it
+  // stays on the tab, where its Superseded status and its Admin_Notes stamp
+  // say exactly what happened to it.
+  const liveKeys = {};
+  all.forEach(row => {
+    if (isSupersededRegistrantRow(row, map)) return;
+    liveKeys[supersededRegistrantMatchKey(row, map)] = true;
+  });
+
+  return all.filter(row => {
+    if (!isSupersededRegistrantRow(row, map)) return true;
+    if (liveKeys[supersededRegistrantMatchKey(row, map)]) return false;
+    log(`⚠️ Keeping a superseded registration with no replacement on the tab: ` +
+      `${row[map['Name']]} on ${row[map['Event_ID']]}. Nothing was written to take its place.`);
+    noteForAdmin('Superseded registrations with no replacement',
+      `${row[map['Name']] || '(no name)'} — ${row[map['Event']] || ''} ` +
+      `(${row[map['Event_ID']] || 'no event id'}). The row was marked as replaced by a newer ` +
+      `submission, but no newer row was written. It has been left on the tab rather than dropped; ` +
+      `check whether this person is still expected.`);
+    return true;
+  });
+}
+
+/**
+ * The identity a superseded row and its replacement share: the same key
+ * getExistingRegistrantIndex() and the tombstones are built on, so "is the
+ * replacement here?" is asked in the same terms the replacement was written
+ * under.
+ */
+function supersededRegistrantMatchKey(row, map) {
+  return `${row[map['Event_ID']]}|${normalizeNameKey(row[map['Name']])}|${row[map['Person_Type']]}`;
 }
 
 /**

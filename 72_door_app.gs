@@ -185,6 +185,16 @@ function doorSignInOne(payload) {
  */
 function reportDoorSignInFailure(payload, reason) {
   const args = parseCheckInPayload(payload);
+
+  // THE SAME "TRY IT AGAIN FIRST" AS THE DESK (97). A door sign-in refused
+  // because the workbook was mid-sync is the commonest failure here by a wide
+  // margin, and it is one the script can settle by itself two minutes later
+  // without anybody at the centre reading an email about it. The message below
+  // is what happens once the retries are spent — or straight away when the
+  // queue itself could not be written, because a visit that is neither
+  // recorded nor queued nor reported is a visit nobody knows happened.
+  if (queueOptimisticRetry('doorSignIn', args, reason)) return;
+
   const lines = [
     'A door app sign-in did not complete, but the tablet had already shown the visitor "Signed in" — see 73_door_app_html.gs\'s send().',
     '',
