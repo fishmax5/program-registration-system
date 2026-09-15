@@ -142,5 +142,25 @@ doorResults = [{ ok: true }];
 res = sandbox.flushOptimisticRetryQueue({ waitMs: 1 });
 check('...and is applied without the script lock', [res.applied, res.pending], [1, 0]);
 
+// ---------------------------------------------------------------------------
+// A QUEUED DESK MARK THAT IS GIVEN UP ON REACHES THE OFFICE, not only the next
+// tablet to load a roster. The page list is dismissed by whoever sees it first
+// — routinely a tablet at the other building — so it was the only record of a
+// registration that never landed and it was consumed by the wrong person.
+reset();
+let spooled = [];
+sandbox.__spool = (section, message) => { spooled.push({ section, message }); return true; };
+vm.runInContext(`spoolOfficeNote = function (s, m) { return __spool(s, m); };`, sandbox);
+vm.runInContext(`this.recordCheckInProblem = recordCheckInProblem;`, sandbox);
+sandbox.recordCheckInProblem(
+  { name: 'Joan Coltune', session: 'Lunch', location: 'Narberth' },
+  'Nobody by that name is registered for this session.');
+check('a given-up desk mark is spooled for the office digest', spooled.length, 1);
+check('...naming the person', spooled[0].message.indexOf('Joan Coltune') !== -1, true);
+check('...and saying it needs entering by hand',
+  spooled[0].message.indexOf('by hand') !== -1, true);
+check('...while the page list still has its own copy',
+  sandbox.readCheckInList('CHECK_IN_PROBLEMS_V1').length, 1);
+
 console.log(failures === 0 ? '\nAll optimistic-retry checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
