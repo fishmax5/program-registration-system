@@ -1190,10 +1190,41 @@ function partitionRunningPrograms(rows, map) {
 /** The cell notes — a schedule's outliers and skipped weeks, a seat count's working. */
 function writeProgramMonthNotes(sheet, map, notes, upcoming, past, result) {
   if (!notes || notes.length === 0) return;
+  // ONE CALL PER COLUMN PER ZONE, not one per note. This tab is the rule
+  // "the fact goes in the cell, the follow-up goes in a cell note" applied to
+  // the whole of it, so three of its columns carry a note on nearly every row —
+  // and a centre with thirty programs was a hundred round trips writing them
+  // one at a time, on a tab redrawn by every sync. The zones are contiguous
+  // blocks of rows and a note has a plural setter, which is all it takes.
+  const zones = [
+    { start: result.upcomingDataStart, count: (upcoming || []).length },
+    { start: result.pastDataStart, count: (past || []).length }
+  ];
+  // column (1-based) -> zone index -> array of one note per row of that zone
+  const planes = {};
   notes.forEach(note => {
     const row = programMonthRowPosition(note.row, upcoming, past, result);
-    if (!row) return;
-    sheet.getRange(row, map[note.header] + 1).setNote(note.text);
+    const col = map[note.header];
+    if (!row || col === undefined) return;
+    const zoneIndex = zones.findIndex(z => z.count > 0 && row >= z.start && row < z.start + z.count);
+    if (zoneIndex === -1) return;
+    if (!planes[col + 1]) planes[col + 1] = zones.map(z => new Array(z.count).fill(''));
+    planes[col + 1][zoneIndex][row - zones[zoneIndex].start] = note.text;
+  });
+  Object.keys(planes).forEach(col => {
+    zones.forEach((zone, i) => {
+      if (zone.count < 1) return;
+      const column = planes[col][i];
+      // A zone none of this column's notes landed in is left alone: the tab's
+      // notes were cleared before the render, so writing a block of blanks
+      // would be a call that changes nothing.
+      if (column.every(text => text === '')) return;
+      try {
+        sheet.getRange(zone.start, Number(col), zone.count, 1).setNotes(column.map(text => [text]));
+      } catch (err) {
+        log(`\u2139\ufe0f Could not write the ${SHEET_NAMES.PROGRAM_MONTH} notes for column ${col} (${err}).`);
+      }
+    });
   });
 }
 
@@ -1215,25 +1246,60 @@ function writeProgramMonthNotes(sheet, map, notes, upcoming, past, result) {
 function writeProgramMonthLinkCells(sheet, map, links, upcoming, past, result) {
   if (!links || links.length === 0) return;
   if (map['Links'] === undefined) return;
+  const column = map['Links'] + 1;
+  const zones = [
+    { start: result.upcomingDataStart, rows: upcoming || [] },
+    { start: result.pastDataStart, rows: past || [] }
+  ];
   let failed = 0;
+
+  // ONE CALL PER ZONE, for the same reason the notes beside it are. A rich text
+  // value has a plural setter, and the only thing standing between a column of
+  // them and one write is that the rows WITHOUT a link still need a value: the
+  // plain words already in the cell, which the caller is holding in the row
+  // array it just wrote. So the plane is built from those and the linked ones
+  // are patched into it.
+  const byRow = {};
   links.forEach(entry => {
     const row = programMonthRowPosition(entry.row, upcoming, past, result);
-    if (!row) return;
+    if (row) byRow[row] = entry;
+  });
+
+  zones.forEach(zone => {
+    if (zone.rows.length === 0) return;
+    const plane = [];
+    for (let i = 0; i < zone.rows.length; i++) {
+      const rowNumber = zone.start + i;
+      const entry = byRow[rowNumber];
+      try {
+        if (!entry) {
+          plane.push([SpreadsheetApp.newRichTextValue()
+            .setText(String(zone.rows[i][map['Links']] === undefined ? '' : zone.rows[i][map['Links']]))
+            .build()]);
+          continue;
+        }
+        const text = describeProgramMonthLinks(entry.parts);
+        const builder = SpreadsheetApp.newRichTextValue().setText(text);
+        let at = 0;
+        entry.parts.forEach((part, i2) => {
+          if (i2 > 0) at += PROGRAM_MONTH_JOINER.length;
+          const end = at + part.label.length;
+          if (part.url) builder.setLinkUrl(at, end, part.url);
+          at = end;
+        });
+        plane.push([builder.build()]);
+      } catch (err) {
+        failed++;
+        plane.push([SpreadsheetApp.newRichTextValue().setText('').build()]);
+      }
+    }
     try {
-      const text = describeProgramMonthLinks(entry.parts);
-      const builder = SpreadsheetApp.newRichTextValue().setText(text);
-      let at = 0;
-      entry.parts.forEach((part, i) => {
-        if (i > 0) at += PROGRAM_MONTH_JOINER.length;
-        const end = at + part.label.length;
-        if (part.url) builder.setLinkUrl(at, end, part.url);
-        at = end;
-      });
-      sheet.getRange(row, map['Links'] + 1).setRichTextValue(builder.build());
+      sheet.getRange(zone.start, column, plane.length, 1).setRichTextValues(plane);
     } catch (err) {
-      failed++;
+      failed += plane.length;
     }
   });
+
   if (failed > 0) {
     log(`\u2139\ufe0f ${failed} ${SHEET_NAMES.PROGRAM_MONTH} link cell(s) were left as plain words.`);
   }

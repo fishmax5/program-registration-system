@@ -353,7 +353,7 @@ function buildQuickMarkIndex() {
   /** "location \0 title \0 dateKey" -> the bucket of names for that session. */
   const byLookup = {};
   /**
-   * sessionKey -> { names, keys, times }, three parallel arrays.
+   * sessionKey -> { names, keys, times, statuses }, four parallel arrays.
    *
    * `keys` are normalized, so the browser can subtract this session's people
    * from the roll. `times` is each person's BOOKED SLOT on an appointment
@@ -361,6 +361,13 @@ function buildQuickMarkIndex() {
    * a list of bare names is unusable at a Personalized Assistance desk, where
    * the whole shape of the morning is who is at 10:30 and who is at 11:00,
    * and where the same person can legitimately hold two slots.
+   *
+   * `statuses` is that row's Program_Status, and it is what makes the change
+   * panel honest: "put them back on" is offered to a cancelled row and to
+   * nobody else, "cancel" is not offered to a row that is already cancelled,
+   * and the name list can say "(waiting list)" beside a name rather than
+   * leaving a desk to find out by pressing a button. Read from the same rows
+   * the names come off, so there is no second pass and nothing to keep in step.
    */
   const namesBySession = {};
 
@@ -372,7 +379,7 @@ function buildQuickMarkIndex() {
   orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
     const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
     if (namesBySession[sessionKey]) return;
-    const bucket = { names: [], keys: [], times: [] };
+    const bucket = { names: [], keys: [], times: [], statuses: [] };
     namesBySession[sessionKey] = bucket;
     byLookup[`${choice.location}\u0000${quickMarkTitleKey(choice.title)}\u0000${choice.dateKey}`] = bucket;
     sessions.push({
@@ -409,6 +416,10 @@ function buildQuickMarkIndex() {
     // (appointmentStartLabelOf()). Blank on every ordinary session, which is
     // what the dialog keys "does this list show times?" off.
     const slot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
+    // A blank Program_Status is read as Active, the same way every other reader
+    // in this project reads it — a row written before the column existed holds
+    // a place, it does not hold nothing.
+    const status = String(row[map['Program_Status']] || '').trim() || 'Active';
 
     // This row belongs to its own session, and also to the dateless "program
     // only" entry for the same program — the fallback choice a desk picks
@@ -432,6 +443,7 @@ function buildQuickMarkIndex() {
       bucket.names.push(rowName);
       bucket.keys.push(nameKey);
       bucket.times.push(slot);
+      bucket.statuses.push(status);
     });
   });
 
@@ -906,6 +918,16 @@ function reportOptimisticQuickMarkFailure(args, result) {
     const where = [String(args.session || '').trim(), String(args.location || '').trim()]
       .filter(Boolean).join(' · ');
     log(`⚠️ Quick Mark did not save for "${name}"${where ? ` (${where})` : ''}: ${result.message}`);
+
+    // TRY IT AGAIN BEFORE TELLING ANYBODY. Almost every refusal here is the
+    // workbook being mid-sync — a mark that would go through two minutes
+    // later — and mailing a person about one is asking them to redo something
+    // the script can simply do itself. Queued and retried by 97; the mail
+    // below is what happens when those retries are spent, or when the queue
+    // could not be written at all, because a mark that is neither written nor
+    // queued nor reported is a mark that never happened.
+    if (queueOptimisticRetry(args.household ? 'quickMarkHousehold' : 'quickMark', args, result.message)) return;
+
     // URGENT, not the daily digest: the desk has already moved on and the
     // person in front of them is unmarked. See notifyAdminUrgent() (15).
     notifyAdminUrgent(`Quick Mark did not save: ${name}`,
@@ -988,8 +1010,10 @@ function applyQuickMarkForHousehold(args) {
   });
   // The household path holds the lock itself and calls applyQuickMarkLocked()
   // directly, so it never passes through the report above. Same desk, same
-  // optimistic hand-back, same office to tell.
-  reportOptimisticQuickMarkFailure(base, result);
+  // optimistic hand-back, same office to tell — and `household` is what tells
+  // the retry queue (97) to re-apply it to the whole party rather than to the
+  // one name the press started from.
+  reportOptimisticQuickMarkFailure(Object.assign({}, base, { household: true }), result);
   return result;
 }
 

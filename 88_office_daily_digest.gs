@@ -367,6 +367,13 @@ function sendOfficeDigestForDay(dateKey) {
     deleteOfficeDigestDay_(dateKey);
     return false;
   }
+  // QUIET HOURS (section 9g). The 10am trigger is nowhere near the window, so
+  // this only catches a hand-run or a trigger that fired late; the spool is
+  // KEPT, and the next pass sweeps every day before today anyway.
+  if (isWithinMailQuietHours()) {
+    log(`\ud83c\udf19 The office digest for ${dateKey} was not sent \u2014 ${mailQuietHoursReason()}. It is kept for the next pass.`);
+    return false;
+  }
   const emails = getAllAdminNotificationEmails();
   if (emails.length === 0) {
     log(`ℹ️ The office digest for ${dateKey} was not sent — no addresses on Config's Admin Notification Emails table.`);

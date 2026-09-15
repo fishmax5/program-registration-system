@@ -17,10 +17,22 @@
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
 
+// NOON, TODAY, PINNED. The mailer asks what time it is (quiet hours, section
+// 9g) and the stub below reads the hour off whatever Date it is handed, so an
+// unpinned clock would make every send in part 1 pass or fail by wall time.
+// Only the no-argument constructor is pinned; every explicit date still means
+// what it says.
+const PINNED_NOW = (() => { const d = new Date(); d.setUTCHours(12, 0, 0, 0); return d.getTime(); })();
+class PinnedDate extends Date {
+  constructor(...args) { if (args.length === 0) super(PINNED_NOW); else super(...args); }
+  static now() { return PINNED_NOW; }
+}
+
 const sentMail = [];
 let now = new Date('2026-09-08T14:00:00Z');
 const sandbox = {
   console: { log: () => {} },
+  Date: PinnedDate,
   Utilities: {
     formatDate: (d, tz, pattern) => {
       const pad = n => String(n).padStart(2, '0');
@@ -54,6 +66,9 @@ this.resetRationedMailState = resetRationedMailState;
 this.isWithinRegistrantReminderHours = isWithinRegistrantReminderHours;
 this.REMINDER_EARLIEST_HOUR = REMINDER_EARLIEST_HOUR;
 this.OFFICE_COPY_SUBJECT_PREFIX = OFFICE_COPY_SUBJECT_PREFIX;
+this.isWithinMailQuietHours = isWithinMailQuietHours;
+this.MAIL_QUIET_HOURS_START_HOUR = MAIL_QUIET_HOURS_START_HOUR;
+this.MAIL_QUIET_HOURS_END_HOUR = MAIL_QUIET_HOURS_END_HOUR;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -145,6 +160,45 @@ check('9:00am sends',
   sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 9, 0))), true);
 check('and so does the whole rest of the day',
   sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 23, 30))), true);
+
+// ---------------------------------------------------------------------------
+// 3. NOTHING AT ALL BETWEEN FIVE AND EIGHT.
+//
+// The window is fixed and it covers EVERY send, not just the reminders part 2
+// is about. The two ends are half-open the same way, so a trigger firing on
+// the hour has one answer: 5pm is quiet, 8am is not.
+// ---------------------------------------------------------------------------
+const at = h => new Date(Date.UTC(2026, 8, 8, h, 0));
+check('the window is 5pm to 8am',
+  [sandbox.MAIL_QUIET_HOURS_START_HOUR, sandbox.MAIL_QUIET_HOURS_END_HOUR], [17, 8]);
+check('4:59pm still sends', sandbox.isWithinMailQuietHours(new Date(Date.UTC(2026, 8, 8, 16, 59))), false);
+check('5pm is quiet', sandbox.isWithinMailQuietHours(at(17)), true);
+check('midnight is quiet', sandbox.isWithinMailQuietHours(at(0)), true);
+check('7:59am is still quiet',
+  sandbox.isWithinMailQuietHours(new Date(Date.UTC(2026, 8, 8, 7, 59))), true);
+check('8am sends again', sandbox.isWithinMailQuietHours(at(8)), false);
+check('and so does the middle of the day', sandbox.isWithinMailQuietHours(at(12)), false);
+
+// A message inside the window is HELD, which is not what the pause does with
+// one: nothing is sent, nothing is recorded, and the first pass after 8am owes
+// it. That difference is the whole reason it is not simply 'paused'.
+sentMail.length = 0;
+sandbox.resetRationedMailState();
+let recorded = 0;
+const nightSandboxDate = sandbox.Date;
+class NightDate extends Date {
+  constructor(...args) { if (args.length === 0) super(Date.UTC(2026, 8, 8, 22, 0)); else super(...args); }
+}
+sandbox.Date = NightDate;
+const held = sandbox.sendRationedEmail({
+  to: 'member@example.org', subject: 'Reminder', body: 'x', reserve: 0,
+  recordSent: () => { recorded++; }
+});
+sandbox.Date = nightSandboxDate;
+check('a 10pm message is held', held.status, 'held');
+check('...and nothing was put on the wire', sentMail.length, 0);
+check('...and the ledger did NOT advance, so the morning still owes it', recorded, 0);
+check('...and it says why', /quiet hours/.test(String(held.error)), true);
 
 console.log(failures === 0 ? '\nAll office copy and quiet hours tests passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

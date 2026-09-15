@@ -37,7 +37,19 @@ const sandbox = {
     getActive: () => ({ toast: msg => toasts.push(msg) }),
     newConditionalFormatRule: () => chainableFactory({ build: () => ({}) }),
     newDataValidation: () => chainableFactory({ build: () => ({}) }),
-    newRichTextValue: () => chainableFactory({ build: () => ({}) }),
+    // A rich text value that remembers whether anything was LINKED in it. The
+    // link pass now writes a whole column at once, blank cells included, so
+    // "a link landed" is no longer the same question as "setRichTextValue was
+    // called" — it is whether the value on that row carries a URL.
+    newRichTextValue: () => {
+      const spec = { __linked: false, __text: '' };
+      const builder = chainableFactory({
+        setText: t => { spec.__text = t; return builder; },
+        setLinkUrl: () => { spec.__linked = true; return builder; },
+        build: () => spec
+      });
+      return builder;
+    },
     WrapStrategy: { OVERFLOW: 'overflow', CLIP: 'clip' },
     ProtectionType: { RANGE: 'range' },
     BandingTheme: { LIGHT_GREY: 'grey' }
@@ -99,7 +111,24 @@ function fakeSheet() {
         () => new Array(cols || 1).fill('')),
       getValue: () => '',
       setNote: text => { calls.notes.push({ row, col, text }); return range; },
-      setRichTextValue: v => { calls.richText.push({ row, col }); return range; },
+      // The plural setters are how these two passes write now — one call per
+      // column per zone rather than one per cell — so the recorder unpacks
+      // them back into per-cell entries. What is being checked is still that a
+      // note and a link landed on the right ROW; the batching is the thing
+      // being measured elsewhere (tools/render_bench.js).
+      setNotes: plane => {
+        plane.forEach((line, i) => {
+          if (String(line[0] || '') !== '') calls.notes.push({ row: row + i, col, text: line[0] });
+        });
+        return range;
+      },
+      setRichTextValue: v => { calls.richText.push({ row, col, value: v }); return range; },
+      setRichTextValues: plane => {
+        plane.forEach((line, i) => {
+          if (line[0] && line[0].__linked) calls.richText.push({ row: row + i, col, value: line[0] });
+        });
+        return range;
+      },
       setValues: v => { calls.values.push({ row, col, values: v }); return range; }
     });
     return range;
@@ -187,6 +216,11 @@ check('both program rows were written',
 // is only true if each actually landed on a row.
 check('the cell notes landed', sheet.calls.notes.length >= built.notes.length, true);
 check('the link cell landed', sheet.calls.richText.length, 1);
+// The row it landed on is the row that HAS links, not merely some row in the
+// column — which is the thing a whole-column write could get wrong and a
+// cell-at-a-time write could not.
+check('...on the row that has them',
+  sheet.calls.richText.length === 1 && sheet.calls.richText[0].col === map['Links'] + 1, true);
 check('the unconfirmed leader was washed', sheet.calls.backgrounds, 1);
 
 // AND AGAIN WITH THE METRICS BLOCK ABOVE IT, which is what pushes every row

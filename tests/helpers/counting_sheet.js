@@ -41,13 +41,31 @@ function isFormula(value) {
  * back afterwards to check that a faster path wrote the same cells as a slower
  * one — which is the other half of what a benchmark has to prove.
  */
-function makeCountingSheet(grid, name) {
+let __countingSheetSerial = 0;
+
+/**
+ * Setters a Range has and a RangeList does not. Anything named here reads back
+ * as undefined off a range list, exactly as it does in Apps Script — see the
+ * note at getRangeList() below for the bug that cost.
+ */
+const RANGE_LIST_MISSING_METHODS = ['setDataValidation', 'setValue', 'setValues', 'getValues'];
+
+function makeCountingSheet(grid, name, options) {
+  options = options || {};
+  __countingSheetSerial++;
+  const fileId = options.fileId || `file-${__countingSheetSerial}`;
+  const sheetId = options.sheetId === undefined ? __countingSheetSerial : options.sheetId;
   const stats = {
     getValues: 0, getFormulas: 0, setValues: 0, setValue: 0,
     cellsRead: 0, cellsWritten: 0,
     getLastRow: 0, getLastColumn: 0, getRange: 0,
     // Calls that move no data but still cross the wire — see the Proxy below.
-    formatting: 0
+    formatting: 0,
+    // The same idea one level up: setRowHeights, autoResizeColumns,
+    // getColumnWidth, protect(), setConditionalFormatRules — calls made on the
+    // SHEET rather than on a Range. A render is mostly these, so a harness
+    // that counted only Range calls would report a render as nearly free.
+    sheetOps: 0
   };
 
   const width = () => grid.reduce((w, row) => Math.max(w, row.length), 0);
@@ -56,6 +74,12 @@ function makeCountingSheet(grid, name) {
     const v = row ? row[c] : undefined;
     return v === undefined ? '' : v;
   };
+
+  const protections = [];
+  // Every formatting call this sheet was asked for, in order — see the Proxy
+  // below. Read back as `sheet.calls` by anything asserting on WHAT a render
+  // wrote rather than on how many calls it took.
+  const calls = [];
 
   const sheet = {
     stats,
@@ -105,6 +129,7 @@ function makeCountingSheet(grid, name) {
         setValues(values) {
           stats.setValues++;
           stats.cellsWritten += rows * cols;
+          calls.push({ name: 'setValues', row, col, rows, cols, args: [values] });
           for (let r = 0; r < rows; r++) {
             if (!grid[row - 1 + r]) grid[row - 1 + r] = [];
             for (let c = 0; c < cols; c++) {
@@ -116,6 +141,7 @@ function makeCountingSheet(grid, name) {
         setValue(value) {
           stats.setValue++;
           stats.cellsWritten += 1;
+          calls.push({ name: 'setValue', row, col, rows: 1, cols: 1, args: [value] });
           if (!grid[row - 1]) grid[row - 1] = [];
           grid[row - 1][col - 1] = value;
           return proxy;
@@ -124,7 +150,24 @@ function makeCountingSheet(grid, name) {
         getColumn: () => col,
         getNumRows: () => rows,
         getNumColumns: () => cols,
-        getA1Notation: () => `R${row}C${col}`
+        getA1Notation: () => `R${row}C${col}`,
+        // MODELLED, not merely counted, because the question a render bench
+        // has to answer about protections is whether the NEXT render rebuilds
+        // them. That needs getProtections() to hand back what protect() made.
+        protect() {
+          stats.sheetOps++;
+          const p = {
+            __a1: `R${row}C${col}:${rows}x${cols}`,
+            __description: '',
+            setDescription(text) { stats.sheetOps++; p.__description = text; return p; },
+            setWarningOnly() { stats.sheetOps++; return p; },
+            getDescription: () => p.__description,
+            getRange: () => proxy,
+            remove() { stats.sheetOps++; const i = protections.indexOf(p); if (i >= 0) protections.splice(i, 1); }
+          };
+          protections.push(p);
+          return p;
+        }
       };
       // FORMATTING IS COUNTED, NOT MODELLED. A render makes dozens of calls
       // that move no data — setBackground, clearNote, setFontWeight, the
@@ -138,8 +181,15 @@ function makeCountingSheet(grid, name) {
         get(target, prop) {
           if (prop in target) return target[prop];
           if (typeof prop !== 'string') return undefined;
-          return () => {
+          return (...args) => {
             stats.formatting++;
+            // WHAT was asked for, not only how often. A render's correctness
+            // now lives in the ARGUMENTS of a handful of batched calls rather
+            // than in which of a hundred small ones happened, so a test has to
+            // be able to look at them. Recorded for every non-getter.
+            if (!/^(get|is)[A-Z]/.test(prop)) {
+              calls.push({ name: prop, row, col, rows, cols, args });
+            }
             // A getter is asked for a value, not for chaining. Only the
             // setters and the clears hand the range back, and they hand back
             // the PROXY — a real Range chains indefinitely, and returning the
@@ -152,7 +202,90 @@ function makeCountingSheet(grid, name) {
       return proxy;
     }
   };
-  return sheet;
+
+  // ==========================================================================
+  // THE SHEET ITSELF IS COUNTED TOO.
+  //
+  // A tab rewrite is not mostly getValues/setValues. It is setRowHeights, a
+  // column of data validations, autoResizeColumns, one getColumnWidth per
+  // column, a protection created per column per zone, and a conditional-format
+  // rule list — every one of them a stop-and-wait on the Sheets service, and
+  // none of them a Range call. Counting only the Range surface measured a
+  // render as almost free, which is the opposite of what a render is.
+  //
+  // Same bargain as the Range proxy below it: the calls that have to answer
+  // honestly are written out, and everything else is answered generically,
+  // chained, and tallied.
+  // ==========================================================================
+  const columnWidths = {};
+  const bandings = [];
+  const sheetImpl = Object.assign(sheet, {
+    getMaxRows: () => Math.max(grid.length, 1000),
+    getMaxColumns: () => Math.max(width(), 26),
+    getBandings: () => { stats.sheetOps++; return bandings.slice(); },
+    getProtections: () => { stats.sheetOps++; return protections.slice(); },
+    getColumnWidth: col => { stats.sheetOps++; return columnWidths[col] || 100; },
+    setColumnWidth: (col, px) => { stats.sheetOps++; columnWidths[col] = px; return sheetProxy; },
+    setColumnWidths: (col, n, px) => {
+      stats.sheetOps++;
+      for (let i = 0; i < n; i++) columnWidths[col + i] = px;
+      return sheetProxy;
+    },
+    clear: () => { stats.sheetOps++; grid.length = 0; return sheetProxy; },
+    // A file id and a sheet id, because code under measurement legitimately
+    // keys on them — the same tab NAME lives in forty different spreadsheets
+    // (every program registrant sheet is a "Sign_Up_Sheet"), so a harness that
+    // could not tell two of them apart would hide exactly that bug.
+    getSheetId: () => sheetId,
+    // MODELLED, because it is the whole point of some of the code measured
+    // here: getRangeList() applies one setter to many ranges in ONE call, so a
+    // harness that counted it per range would report the batched version as no
+    // better than the loop it replaced.
+    getRangeList: a1List => {
+      stats.sheetOps++;
+      const list = new Proxy({ __a1: a1List.slice() }, {
+        get(target, prop) {
+          if (prop in target) return target[prop];
+          if (typeof prop !== 'string') return undefined;
+          // A RangeList IS NOT A RANGE, and the difference is not academic: it
+          // carries the formatting setters and NOT setDataValidation. A proxy
+          // that answered every name let a batched rewrite of the registrant
+          // sheet ship calling it, which threw "ticks.setDataValidation is not
+          // a function" on every sheet, every hour. insertCheckboxes() is the
+          // call a RangeList does have; this keeps the harness honest about
+          // which of the two the code under measurement reached for.
+          if (RANGE_LIST_MISSING_METHODS.indexOf(prop) !== -1) return undefined;
+          return (...args) => {
+            stats.sheetOps++;
+            calls.push({ name: `rangeList.${prop}`, ranges: a1List.slice(), args });
+            if (/^(get|is)[A-Z]/.test(prop)) return null;
+            return list;
+          };
+        }
+      });
+      return list;
+    },
+    getParent: () => ({ getId: () => fileId, getSheetByName: () => sheetProxy, toast: () => {} })
+  });
+
+  const sheetProxy = new Proxy(sheetImpl, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      if (typeof prop !== 'string') return undefined;
+      return () => {
+        stats.sheetOps++;
+        if (/^(get|is)[A-Z]/.test(prop)) return prop.startsWith('is') ? false : null;
+        return sheetProxy;
+      };
+    }
+  });
+
+  // What Range.protect() hands back: a Protection this harness can list again
+  // on the next render, which is what makes "the protections were rebuilt"
+  // and "they were left alone" two different numbers.
+  sheet.__protections = protections;
+  sheet.calls = calls;
+  return sheetProxy;
 }
 
 /**
@@ -165,7 +298,7 @@ function makeCountingSheet(grid, name) {
  */
 function roundTrips(stats) {
   return stats.getValues + stats.getFormulas + stats.setValues + stats.setValue +
-    stats.getLastRow + stats.getLastColumn + stats.formatting;
+    stats.getLastRow + stats.getLastColumn + stats.formatting + stats.sheetOps;
 }
 
 module.exports = { makeCountingSheet, roundTrips, displayTextOf };

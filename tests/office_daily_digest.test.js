@@ -37,6 +37,9 @@ const sandbox = {
         return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
       }
       if (pattern === 'HH:mm') return `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+      // Midday, pinned: quiet hours (9g) hold the digest too, and a test that
+      // only passes before 5pm is a test that fails on its own at night.
+      if (pattern === 'H') return '12';
       return date.toISOString();
     },
     sleep: () => {}

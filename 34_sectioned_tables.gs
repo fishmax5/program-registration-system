@@ -538,11 +538,16 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const upcomingHeaderRow = row;
   row++;
   const upcomingDataStart = row;
+  // The band every formatting pass below — and the tab's own afterWrite hook —
+  // stages into when a render scope is open. See 97_render_batching.gs.
+  declareRenderBand(sheet, upcomingDataStart, upcomingRows.length);
   stampTextColumns(sheet, textCols, upcomingDataStart, upcomingRows.length);
   if (upcomingRows.length > 0) sheet.getRange(upcomingDataStart, 1, upcomingRows.length, numCols).setValues(upcomingRows);
   setDataRowHeights(sheet, upcomingDataStart, upcomingRows.length);
   applyZebraStripingManualBounded(sheet, upcomingDataStart, upcomingRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length, options.dateNumberFormat);
+  // The dates are the ones just written, not a read-back of them.
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, upcomingDataStart, upcomingRows.length,
+    options.dateNumberFormat, upcomingRows.map(r => r[dateColIdx]));
   row += upcomingRows.length;
   row++; // spacer
 
@@ -553,11 +558,13 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   const pastHeaderRow = row;
   row++;
   const pastDataStart = row;
+  declareRenderBand(sheet, pastDataStart, pastRows.length);
   stampTextColumns(sheet, textCols, pastDataStart, pastRows.length);
   if (pastRows.length > 0) sheet.getRange(pastDataStart, 1, pastRows.length, numCols).setValues(pastRows);
   setDataRowHeights(sheet, pastDataStart, pastRows.length);
   applyZebraStripingManualBounded(sheet, pastDataStart, pastRows.length, numCols);
-  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length, options.dateNumberFormat);
+  if (dateColIdx >= 0) applyMonthColorTint(sheet, dateColIdx + 1, pastDataStart, pastRows.length,
+    options.dateNumberFormat, pastRows.map(r => r[dateColIdx]));
   row += pastRows.length;
 
   // Old months go away LAST, once the rows are written and formatted — hiding
@@ -604,6 +611,7 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
   const rows = Math.max(numRows, 1);
   cols.forEach(col => {
     try {
+      if (stageRenderNumberFormat(sheet, startRow, col, rows, '@')) return;
       sheet.getRange(startRow, col, rows, 1).setNumberFormat('@');
     } catch (err) {
       log(`ℹ️ Could not stamp column ${col} on "${sheet.getName()}" as text (${err}).`);
@@ -643,10 +651,18 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // the caller afterwards. Nothing uses it today — the Registrants tab's Quick
   // Mark panel did, and is now a dialog (section 6d) — but the parameter is
   // what keeps that an option rather than a rewrite.
-  const result = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
-  freezeRowsSafely(sheet, result.upcomingHeaderRow);
-
-  if (opts.afterWrite) opts.afterWrite(sheet, headers, result);
+  //
+  // THE SCOPE COVERS THE afterWrite HOOK TOO, deliberately: the hook is where
+  // most of a tab's formatting is decided (validations, checkbox columns, the
+  // manual-entry wash), and staging the table's own passes while leaving the
+  // hook to write a column at a time would have moved almost none of the cost.
+  // See 97_render_batching.gs.
+  const result = withRenderBatch(sheet, headers.length, () => {
+    const written = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
+    freezeRowsSafely(sheet, written.upcomingHeaderRow);
+    if (opts.afterWrite) opts.afterWrite(sheet, headers, written);
+    return written;
+  });
 
   autosizeColumns(sheet, { force: !!opts.force, minCols: headers.length });
   return result;

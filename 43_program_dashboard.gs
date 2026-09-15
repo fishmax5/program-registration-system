@@ -874,6 +874,103 @@ function styleMetricTable(sheet, startRow, numRows, numCols) {
   }
 }
 
+/**
+ * The session table itself: the two zones, their formulas, their validations,
+ * the conditional formats, the warning protections and the hidden columns.
+ *
+ * EXTRACTED SO IT CAN BE WRAPPED. withRenderBatch() needs one call to bracket,
+ * and everything from the table's first row to its last piece of formatting is
+ * what has to be inside it — see 97_render_batching.gs. Nothing here changed
+ * but its indentation and the two values it now takes as arguments.
+ */
+function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, todayDataStart, todayRowsOut) {
+  const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
+    upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions'
+    // Event_Date reads as DATE_DISPLAY_FORMAT — "Tue 9/16/2026" — which is the
+    // default and is now the point. This tab is one row per SESSION, and a
+    // session is known here by its weekday as much as by its name; it showed
+    // the MONTH for a while, which meant thirty rows of "September 2026" on
+    // the one column that could have told them apart. The month belongs on
+    // the tab whose rows ARE months (see MONTH_DISPLAY_FORMAT).
+  });
+
+  const dateColLetter = columnToLetter(map['Event_Date'] + 1);
+  setEventTimeFormulas(sheet, result.upcomingDataStart, upcoming.length, map, dateColLetter);
+  setEventTimeFormulas(sheet, result.pastDataStart, past.length, map, dateColLetter);
+
+  // THE LUNCH ROWS ARE ON THE VIEW, and are put back onto it if an older
+  // render (or a person) hid them — see showLunchOnlySessionRows(). The banner
+  // says nothing about them any more because there is nothing left to explain:
+  // they read as what they are.
+  showLunchOnlySessionRows(sheet, map, upcoming, past, result);
+
+  const zones = [
+    { start: result.upcomingDataStart, count: upcoming.length },
+    { start: result.pastDataStart, count: past.length }
+  ];
+  const rules = [];
+  const locationRanges = [];
+  if (todayRowsOut.length > 0) locationRanges.push(sheet.getRange(todayDataStart, 1, todayRowsOut.length, 1));
+
+  zones.forEach(z => {
+    if (z.count < 1) return;
+    ['Active_Count', 'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats'].forEach(h => {
+      applyBoundedColumnFormat(sheet, map[h] + 1, z.start, z.count, { numberFormat: '0' });
+    });
+    applyLocationValidationBounded(sheet, map['Location'] + 1, z.start, z.count);
+    applyValueListValidationBounded(sheet, map['Type_Tag'] + 1, EVENT_TYPE_OPTIONS, z.start, z.count);
+    // Club and No_Registration are real checkboxes — one click, and the click
+    // is what handleProgramFlagEdit() turns into a calendar-description tag.
+    // Text in these columns (a workbook written by an older version says
+    // "Club") is normalized to a tick by reconcileProgramFlagColumns() on the
+    // next sync, and reads correctly in the meantime — see isFlagColumnValue().
+    PROGRAM_FLAG_COLUMNS.forEach(flag => {
+      if (map[flag.column] === undefined) return;
+      applyBoundedColumnFormat(sheet, map[flag.column] + 1, z.start, z.count, {
+        validation: SpreadsheetApp.newDataValidation().requireCheckbox().build(),
+        alignment: 'center'
+      });
+    });
+    // The fourth tick, drawn the same way and belonging to a different list on
+    // purpose: it closes ONE DATE rather than describing the program, so it is
+    // not in PROGRAM_FLAG_COLUMNS and is never spread to the program's other
+    // rows. See WAITLIST_ONLY_TAG and handleWaitlistOnlyEdit().
+    if (map['Waitlist_Only'] !== undefined) {
+      applyBoundedColumnFormat(sheet, map['Waitlist_Only'] + 1, z.start, z.count, {
+        validation: SpreadsheetApp.newDataValidation().requireCheckbox().build(),
+        alignment: 'center'
+      });
+    }
+
+    Object.keys(EVENT_STATUS_COLORS).forEach(text => {
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
+        .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
+    });
+    locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
+  });
+
+  rules.push(...buildLocationColorRules(locationRanges));
+  sheet.setConditionalFormatRules(rules);
+
+  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, the flag
+  // checkboxes and Waitlist_Only are the cells a human changes on this table
+  // (PROGRAM_DASHBOARD_EDITABLE_COLUMNS), but none of
+  // them is a blank waiting to be filled in — each always already holds a
+  // real, calendar-derived value, and washing full columns of correct values
+  // in "please type here" yellow read as columns of problems on the tab people
+  // scan first. A dropdown and two checkboxes, each with a confirmation dialog
+  // behind it (see handleProgramDashboardEdit) — the prompt is the affordance,
+  // not the color. Everything else keeps its warning protection.
+  protectDerivedColumns(sheet, headers,
+    ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
+      'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
+      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
+    zones);
+
+  applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);
+  return result;
+}
+
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   invalidateSectionedRowsCache(sheet); // ...and its rows with them
@@ -940,88 +1037,12 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // --- Section C: All Program Sessions, split into Upcoming / Past ---
   const todayKey = formatDateKey(new Date());
   const { upcoming, past } = partitionByDate(sessionRows, map['Event_Date'], todayKey);
-  const result = writeUpcomingPastSections(sheet, row, headers, upcoming, past, {
-    upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions'
-    // Event_Date reads as DATE_DISPLAY_FORMAT — "Tue 9/16/2026" — which is the
-    // default and is now the point. This tab is one row per SESSION, and a
-    // session is known here by its weekday as much as by its name; it showed
-    // the MONTH for a while, which meant thirty rows of "September 2026" on
-    // the one column that could have told them apart. The month belongs on
-    // the tab whose rows ARE months (see MONTH_DISPLAY_FORMAT).
-  });
-
-  const dateColLetter = columnToLetter(map['Event_Date'] + 1);
-  setEventTimeFormulas(sheet, result.upcomingDataStart, upcoming.length, map, dateColLetter);
-  setEventTimeFormulas(sheet, result.pastDataStart, past.length, map, dateColLetter);
-
-  // THE LUNCH ROWS ARE ON THE VIEW, and are put back onto it if an older
-  // render (or a person) hid them — see showLunchOnlySessionRows(). The banner
-  // says nothing about them any more because there is nothing left to explain:
-  // they read as what they are.
-  showLunchOnlySessionRows(sheet, map, upcoming, past, result);
-
-  const zones = [
-    { start: result.upcomingDataStart, count: upcoming.length },
-    { start: result.pastDataStart, count: past.length }
-  ];
-  const rules = [];
-  const locationRanges = [];
-  if (todayRowsOut.length > 0) locationRanges.push(sheet.getRange(todayDataStart, 1, todayRowsOut.length, 1));
-
-  zones.forEach(z => {
-    if (z.count < 1) return;
-    ['Active_Count', 'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats'].forEach(h => {
-      sheet.getRange(z.start, map[h] + 1, z.count, 1).setNumberFormat('0');
-    });
-    applyLocationValidationBounded(sheet, map['Location'] + 1, z.start, z.count);
-    applyValueListValidationBounded(sheet, map['Type_Tag'] + 1, EVENT_TYPE_OPTIONS, z.start, z.count);
-    // Club and No_Registration are real checkboxes — one click, and the click
-    // is what handleProgramFlagEdit() turns into a calendar-description tag.
-    // Text in these columns (a workbook written by an older version says
-    // "Club") is normalized to a tick by reconcileProgramFlagColumns() on the
-    // next sync, and reads correctly in the meantime — see isFlagColumnValue().
-    PROGRAM_FLAG_COLUMNS.forEach(flag => {
-      if (map[flag.column] === undefined) return;
-      sheet.getRange(z.start, map[flag.column] + 1, z.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
-    });
-    // The fourth tick, drawn the same way and belonging to a different list on
-    // purpose: it closes ONE DATE rather than describing the program, so it is
-    // not in PROGRAM_FLAG_COLUMNS and is never spread to the program's other
-    // rows. See WAITLIST_ONLY_TAG and handleWaitlistOnlyEdit().
-    if (map['Waitlist_Only'] !== undefined) {
-      sheet.getRange(z.start, map['Waitlist_Only'] + 1, z.count, 1)
-        .setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build())
-        .setHorizontalAlignment('center');
-    }
-
-    Object.keys(EVENT_STATUS_COLORS).forEach(text => {
-      rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
-        .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
-    });
-    locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
-  });
-
-  rules.push(...buildLocationColorRules(locationRanges));
-  sheet.setConditionalFormatRules(rules);
-
-  // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, the flag
-  // checkboxes and Waitlist_Only are the cells a human changes on this table
-  // (PROGRAM_DASHBOARD_EDITABLE_COLUMNS), but none of
-  // them is a blank waiting to be filled in — each always already holds a
-  // real, calendar-derived value, and washing full columns of correct values
-  // in "please type here" yellow read as columns of problems on the tab people
-  // scan first. A dropdown and two checkboxes, each with a confirmation dialog
-  // behind it (see handleProgramDashboardEdit) — the prompt is the affordance,
-  // not the color. Everything else keeps its warning protection.
-  protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
-      'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
-      'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
-    zones);
-
-  applyColumnVisibility(sheet, headers, PROGRAM_DASHBOARD_HIDDEN_COLUMNS);
+  // ONE SCOPE OVER THE WHOLE SESSION TABLE — the write, the formatting that
+  // follows it and the protections at the end. Every per-column call inside
+  // stages into the two zones' shared planes and goes out once. See
+  // 97_render_batching.gs.
+  const result = withRenderBatch(sheet, headers.length, () =>
+    writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, todayDataStart, todayRowsOut));
 
   // THROUGH THE SESSION TABLE'S HEADER ROW, like every other tab in this
   // workbook — not through the Today block, which is where this used to stop.

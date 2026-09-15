@@ -1,5 +1,5 @@
 // ============================================================================
-// 17. WHO THE IMPORT SHOULD HAVE WRITTEN AND DID NOT  (read-only audit)
+// 99d. WHO THE IMPORT SHOULD HAVE WRITTEN AND DID NOT  (read-only audit)
 // ============================================================================
 //
 // THE QUESTION THIS ANSWERS: somebody says a registration is missing, and
@@ -66,7 +66,9 @@
 // only, its own two constants stand alone, its schema is HEADERS.All_Registrants
 // in 03 like every other tab's, and everything it calls — buildRegistryIndex,
 // processFormResponse, getSectionedRows, the tombstone readers — is a hoisted
-// function declaration.
+// function declaration. It was 97 on its own branch until the merge that
+// brought the render-batching file in under that number; the prefix is all
+// that changed.
 // ============================================================================
 
 /**
