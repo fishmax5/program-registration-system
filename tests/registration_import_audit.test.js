@@ -24,6 +24,8 @@ this.auditFormGridRows_ = auditFormGridRows_;
 this.withReadOnlyRegistries_ = withReadOnlyRegistries_;
 this.describeRegistrationAudit_ = describeRegistrationAudit_;
 this.classifyEmptyResponse_ = classifyEmptyResponse_;
+this.auditFormGridHealth_ = auditFormGridHealth_;
+this.TEMPLATE_GRID_PLACEHOLDER_ROW = TEMPLATE_GRID_PLACEHOLDER_ROW;
 this.callGetTombstone = function (k) { return getRegistrantTombstone(k); };
 this.TEMPLATE_ITEM_TITLES = TEMPLATE_ITEM_TITLES;
 this.LEGACY_LUNCH_ONLY_GRID_TITLE = LEGACY_LUNCH_ONLY_GRID_TITLE;
@@ -182,7 +184,8 @@ function responseAnswering(item, values) {
 // thing, and on the first real workbook the commonest cause was a form no
 // session row names — which has nothing to do with a grid and a different fix.
 {
-  const answered = { getItemResponses: () => [{}, {}, {}] };
+  const itemNamed = t => ({ getItem: () => ({ getTitle: () => t }) });
+  const answered = { getItemResponses: () => ['Name', 'Phone', 'How Will You Attend?'].map(itemNamed) };
   const blank = { getItemResponses: () => [] };
 
   check('a form no session row names is its own answer, whatever the response said',
@@ -190,10 +193,52 @@ function responseAnswering(item, values) {
   check('a response answering nothing the form still carries is named as that',
     sandbox.classifyEmptyResponse_(blank, 4).kind, 'unreadable');
   check('...and a response that DID answer and still made no row is the parser',
-    sandbox.classifyEmptyResponse_(answered, 4), { kind: 'answeredNoRows', answers: 3 });
+    [sandbox.classifyEmptyResponse_(answered, 4).kind,
+     sandbox.classifyEmptyResponse_(answered, 4).answers], ['answeredNoRows', 3]);
+  // The titles are the diagnosis: what a person answered names the question
+  // they never reached, which a count alone cannot.
+  check('...and it carries WHAT they answered, not just how many',
+    sandbox.classifyEmptyResponse_(answered, 4).titles,
+    ['Name', 'Phone', 'How Will You Attend?']);
   check('a response that cannot be read at all does not throw the audit over',
     sandbox.classifyEmptyResponse_({ getItemResponses: () => { throw new Error('gone'); } }, 4),
-    { kind: 'unreadable', answers: 0 });
+    { kind: 'unreadable', answers: 0, titles: [] });
+}
+
+// --- a live form whose date question offers no date ------------------------
+//
+// 31_form_shape_and_migration's own banner calls this "a form nobody can
+// register on", and it has happened on this project before. The first version
+// of this audit SKIPPED the placeholder row as "a form waiting for the next
+// sync", which hid the most urgent thing it could have found.
+{
+  const form = fakeForm('fEmpty');
+  const grid = form.addGridItem();
+  grid.setTitle(Q.LUNCH_ONLY_GRID).setRows([sandbox.TEMPLATE_GRID_PLACEHOLDER_ROW]);
+  const idx = { form, formId: 'fEmpty', items: form.getItems(),
+    byTitle: { [Q.LUNCH_ONLY_GRID]: [grid] } };
+  const found = sandbox.auditFormGridHealth_(idx);
+  check('a grid carrying only the placeholder is a finding', found.length, 1);
+  check('...and it says so rather than counting it as a date',
+    [found[0].placeholder, found[0].rowCount], [true, 1]);
+
+  grid.setRows(['Tue 1 Sep', 'Thu 3 Sep']);
+  check('a grid with real dates is not a finding',
+    sandbox.auditFormGridHealth_(idx), []);
+}
+
+{
+  const report = sandbox.describeRegistrationAudit_({
+    formsExamined: 1, formsUnread: [], formsNotReached: [], responsesRead: 8,
+    emptyResponses: [], shapeMismatches: [], unmatchedRows: [], missingPeople: [],
+    tombstonedSkips: 0, tombstonesWouldRevive: 0, stoppedEarly: false, elapsedMs: 1000,
+    emptyGrids: [{ formId: 'fEmpty', title: Q.LUNCH_ONLY_GRID, placeholder: true,
+      rowCount: 1, responses: 8, sessionsOnForm: 4 }]
+  });
+  check('an empty date question is reported above the people',
+    report.indexOf('OFFER NO DATE') < report.indexOf('NOTHING WAS CHANGED') + 400, true);
+  check('...and says it will not fix itself, because the write is fingerprinted',
+    report.indexOf('fingerprinted') !== -1, true);
 }
 
 {

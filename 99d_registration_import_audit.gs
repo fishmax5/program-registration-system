@@ -203,9 +203,17 @@ function auditFormGridRows_(formIndex, registryIndex) {
       (grid.getRows() || []).forEach(label => {
         if (seen[label]) return;
         seen[label] = true;
-        // The placeholder a freshly added grid carries before its labels are
-        // written is not a fault — it is a form waiting for the next sync.
-        if (!label || label.indexOf('automatically') !== -1) return;
+        // THE PLACEHOLDER IS NOT SKIPPED ANY MORE, and that was the worst line
+        // in this file. It read "a form waiting for the next sync", which is
+        // true of a form built ten seconds ago and false of every other form
+        // that carries it — and the state it was silently passing over is the
+        // one 31_form_shape_and_migration's own banner calls "a form nobody can
+        // register on". A live form whose date question offers nothing but
+        // TEMPLATE_GRID_PLACEHOLDER_ROW takes submissions all day and records a
+        // name against no date; the audit hid the single most urgent thing it
+        // could have found. It is a finding of its own now — see emptyGrids.
+        if (!label) return;
+        if (String(label) === TEMPLATE_GRID_PLACEHOLDER_ROW) return;
         const plain = resolveSessionLabelForForm(registryIndex, formId, label);
         if (plain && registryIndex[`${formId}|${plain}`]) return;
         unmatched.push({ formId, label: String(label), title });
@@ -214,6 +222,53 @@ function auditFormGridRows_(formIndex, registryIndex) {
   });
 
   return unmatched;
+}
+
+/**
+ * **Does this form's date question actually offer a date?**
+ *
+ * The state this exists for is documented in `31_form_shape_and_migration.gs`
+ * and was observed there: a grid added by a reshape holds
+ * TEMPLATE_GRID_PLACEHOLDER_ROW until a label write replaces it, and a form
+ * left in that state is "a form nobody can register on". It is not theoretical
+ * and it is not self-correcting — `applyFormDateLabels()` is FINGERPRINTED, so
+ * once a fingerprint is on file saying these labels were written, the hourly
+ * pass skips the form. Worse, that fingerprint is stored whenever the write did
+ * not throw, and `setGridItemRows` writes nothing at all when
+ * `findRosterGridItems()` matches no item — so a form can hold a fingerprint
+ * that says "the dates are written" over a grid that never received them, and
+ * never be looked at again.
+ *
+ * What a person sees is a form that submits cleanly. What arrives is a name,
+ * a phone number, and no date — which is exactly what the responses sheet
+ * shows and exactly what `processFormResponse()` turns into no rows at all.
+ *
+ * Returns the grids that offer nothing real, so the report can put them above
+ * everything else when the form is taking responses.
+ */
+function auditFormGridHealth_(formIndex) {
+  const titles = [TEMPLATE_ITEM_TITLES.ATTENDANCE_GRID, LEGACY_LUNCH_ONLY_GRID_TITLE,
+    TEMPLATE_ITEM_TITLES.MEAL_COUNT_GRID, TEMPLATE_ITEM_TITLES.LUNCH_ONLY_GRID,
+    TEMPLATE_ITEM_TITLES.LUNCH_GRID];
+  const empty = [];
+
+  titles.forEach(title => {
+    (formIndex.byTitle[title] || []).forEach(item => {
+      const grid = item.getType() === FormApp.ItemType.GRID
+        ? item.asGridItem() : item.asCheckboxGridItem();
+      const rows = (grid.getRows() || []).map(r => String(r || ''));
+      const real = rows.filter(r => r && r !== TEMPLATE_GRID_PLACEHOLDER_ROW);
+      if (real.length > 0) return;
+      empty.push({
+        formId: formIndex.formId,
+        title,
+        placeholder: rows.indexOf(TEMPLATE_GRID_PLACEHOLDER_ROW) !== -1,
+        rowCount: rows.length
+      });
+    });
+  });
+
+  return empty;
 }
 
 /**
@@ -245,14 +300,29 @@ function auditFormGridRows_(formIndex, registryIndex) {
  *                     worth reading a response by hand over.
  */
 function classifyEmptyResponse_(response, sessionsOnForm) {
-  if (sessionsOnForm === 0) return { kind: 'noSessions', answers: null };
-  let answers = 0;
+  if (sessionsOnForm === 0) return { kind: 'noSessions', answers: null, titles: [] };
+  let titles = [];
   try {
-    answers = (response.getItemResponses() || []).length;
+    // THE TITLES, not just the count — because the count says a response was
+    // answered and the titles say WHICH QUESTION IT NEVER REACHED, and those
+    // are different investigations. A form whose respondents all answered the
+    // name, the phone and the sign-up choice and nothing after it is a form
+    // whose page navigation is sending them past the question that IS the
+    // registration; a form where the dates were answered and no row came out
+    // is the parser. From outside, both are "a response that made no row".
+    titles = (response.getItemResponses() || [])
+      .map(ir => {
+        try { return String(ir.getItem().getTitle() || ''); } catch (err) { return ''; }
+      })
+      .filter(Boolean);
   } catch (err) {
-    return { kind: 'unreadable', answers: 0 };
+    return { kind: 'unreadable', answers: 0, titles: [] };
   }
-  return { kind: answers === 0 ? 'unreadable' : 'answeredNoRows', answers };
+  return {
+    kind: titles.length === 0 ? 'unreadable' : 'answeredNoRows',
+    answers: titles.length,
+    titles
+  };
 }
 
 /**
@@ -298,6 +368,7 @@ function auditRegistrationImport(options) {
     formsUnread: [],
     formsNotReached: [],
     responsesRead: 0,
+    emptyGrids: [],         // a live form whose date question offers no date
     emptyResponses: [],     // fault 1 — read as nothing at all
     shapeMismatches: [],    // fault 2 — proved misaligned
     unmatchedRows: [],      // a grid row resolving to no session
@@ -326,6 +397,12 @@ function auditRegistrationImport(options) {
         // row names at all.
         const sessionsOnForm = Object.keys(registryIndex)
           .filter(k => k.indexOf(`${formId}|`) === 0).length;
+        // ABOVE EVERYTHING ELSE when this form is taking responses: a date
+        // question offering no date cannot be registered through at all.
+        auditFormGridHealth_(formIndex).forEach(grid => {
+          finding.emptyGrids.push(Object.assign({ responses: responses.length,
+            sessionsOnForm }, grid));
+        });
 
         responses.forEach(response => {
           finding.responsesRead++;
@@ -357,7 +434,7 @@ function auditRegistrationImport(options) {
             const why = classifyEmptyResponse_(response, sessionsOnForm);
             finding.emptyResponses.push({
               formId, name: who, submittedAt: when,
-              kind: why.kind, answers: why.answers, sessionsOnForm
+              kind: why.kind, answers: why.answers, titles: why.titles, sessionsOnForm
             });
             return;
           }
@@ -423,6 +500,29 @@ function describeRegistrationAudit_(finding) {
   parts.push(`Read ${finding.responsesRead} response(s) across ${finding.formsExamined} form(s) ` +
     `in ${Math.round(finding.elapsedMs / 1000)}s. NOTHING WAS CHANGED.`);
 
+  // FIRST, ABOVE THE PEOPLE. A form whose date question offers no date is
+  // still open and still taking submissions, so this is the only finding here
+  // that is losing registrations while somebody reads the report.
+  // Defaulted rather than assumed: this field was added after the first real
+  // run, and a report is the wrong place to throw over a finding object that
+  // predates one of its keys.
+  const emptyGrids = finding.emptyGrids || [];
+  if (emptyGrids.length > 0) {
+    const live = emptyGrids.filter(g => g.responses > 0);
+    parts.push(`\n🚨 ${emptyGrids.length} date question(s) on ${
+      emptyGrids.length === 1 ? 'a live form' : 'live forms'} OFFER NO DATE` +
+      `${live.length > 0 ? `, and ${live.length} of them ${live.length === 1 ? 'is' : 'are'} ` +
+        `taking responses` : ''}. Anybody registering through one of these submits a name ` +
+      `against no date, which is recorded as nothing — and it does not fix itself: ` +
+      `applyFormDateLabels() is fingerprinted, so once the labels are recorded as written ` +
+      `the hourly pass skips the form for good. Force a rewrite on each of these ` +
+      `(🔧 Admin ▸ 🩹 Update One Form, which keeps the link):\n` +
+      describeCappedList_(emptyGrids.map(g =>
+        `  • form ${g.formId} — "${g.title}" has ${
+          g.placeholder ? 'only the template placeholder' : `${g.rowCount} row(s), none of them a date`
+        } · ${g.responses} response(s) so far · ${g.sessionsOnForm} session row(s) name it`)));
+  }
+
   if (finding.missingPeople.length === 0) {
     parts.push('\n✅ Every response re-derives to a row that is already on All_Registrants.');
   } else {
@@ -471,6 +571,24 @@ function describeRegistrationAudit_(finding) {
         describeCappedList_(finding.emptyResponses
           .filter(e => e.kind === 'answeredNoRows')
           .map(e => `  • ${e.name} — answered ${e.answers} question(s) · form ${e.formId}`)));
+      // AND THE SHAPE OF THOSE ANSWERS, folded. Thirty-two people who all
+      // answered the same four questions and stopped are not thirty-two
+      // separate mysteries — they are one, and the list of what they DID
+      // answer names the question none of them ever reached.
+      const bySet = {};
+      finding.emptyResponses.filter(e => e.kind === 'answeredNoRows').forEach(e => {
+        const key = `${e.formId}\n${(e.titles || []).join(' | ')}`;
+        bySet[key] = (bySet[key] || 0) + 1;
+      });
+      parts.push(`\n  What those responses actually answered — the question they never ` +
+        `reached is the one missing from these lists:\n` +
+        describeCappedList_(Object.keys(bySet)
+          .sort((a, b) => bySet[b] - bySet[a])
+          .map(key => {
+            const [formId, joined] = key.split('\n');
+            return `  • ${bySet[key]} response(s) on ${formId} answered: ` +
+              `${joined || '(nothing)'}`;
+          })));
     }
   }
 
