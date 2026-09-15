@@ -1,0 +1,177 @@
+// A RESPONSE THAT NEVER BECAME A ROW LEAVES NO TRACE, which is why the audit
+// in 97_registration_import_audit.gs exists and why this file pins it.
+//
+// Two faults in the grid path are what it looks for, and the important thing
+// about both is that they are SILENT: processFormResponse() returns an empty
+// array for a response whose questions have been deleted out from under it,
+// and zips a response's answers against the LIVE grid's rows by index when the
+// grid has changed shape since. Neither writes a warning anywhere, and a
+// missing name looks exactly like a person who never registered.
+//
+// So what is pinned here is the detection, the caveat the report has to carry
+// about what it CANNOT see, and — separately and at least as importantly —
+// that running the audit writes nothing.
+const vm = require('vm');
+const { fakeForm, baseSandbox } = require('./helpers/fake_form');
+const src = require('./helpers/source').readSource();
+
+const sandbox = baseSandbox();
+sandbox.SpreadsheetApp.getUi = () => { throw new Error('no UI in a test'); };
+vm.createContext(sandbox);
+vm.runInContext(src + `
+;this.auditResponseGridShape_ = auditResponseGridShape_;
+this.auditFormGridRows_ = auditFormGridRows_;
+this.withReadOnlyRegistries_ = withReadOnlyRegistries_;
+this.describeRegistrationAudit_ = describeRegistrationAudit_;
+this.TEMPLATE_ITEM_TITLES = TEMPLATE_ITEM_TITLES;
+this.LEGACY_LUNCH_ONLY_GRID_TITLE = LEGACY_LUNCH_ONLY_GRID_TITLE;
+this.readTombstoneDirty = function () { return __tombstoneDirty; };
+this.readAllDatesDirty = function () { return __allDatesRegistryDirty; };
+this.setAllDatesDirty = function (v) { __allDatesRegistryDirty = v; };
+this.callClear = function (k) { return clearRegistrantTombstones(k); };
+this.log = function () {};
+`, sandbox, { filename: 'program.gs' });
+
+let failures = 0;
+function check(name, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) { failures++; console.log(`FAIL ${name}\n  got      ${a}\n  expected ${e}`); }
+  else console.log(`ok   ${name}`);
+}
+
+const Q = sandbox.TEMPLATE_ITEM_TITLES;
+
+/** A form index of the shape getFormItemIndex() returns, over one grid item. */
+function indexOverGrid(formId, title, rows, type) {
+  const form = fakeForm(formId);
+  const item = type === 'GRID' ? form.addGridItem() : form.addCheckboxGridItem();
+  item.setTitle(title).setRows(rows);
+  return { form, formId, items: form.getItems(), byTitle: { [title]: [item] }, item };
+}
+
+/** A FormResponse that answered `values` against `item`, and nothing else. */
+function responseAnswering(item, values) {
+  return {
+    getResponseForItem: it => (it === item ? { getResponse: () => values } : null),
+    getTimestamp: () => new Date('2026-09-01T12:00:00Z')
+  };
+}
+
+// --- fault 2: a grid that changed size since the response was submitted -----
+{
+  // The form now lists four dates. This person answered when it listed two —
+  // which is exactly what happens when a menu row is typed for a date partway
+  // through the month and inserts above the ones already there.
+  const idx = indexOverGrid('form1', Q.MEAL_COUNT_GRID,
+    ['Tue 1 Sep', 'Thu 3 Sep', 'Tue 8 Sep', 'Thu 10 Sep'], 'GRID');
+  const found = sandbox.auditResponseGridShape_(idx, responseAnswering(idx.item, ['2', '0']));
+  check('a response answered against a smaller grid is caught', found.length, 1);
+  check('...and says both sizes, because the gap is the finding',
+    [found[0].submittedRows, found[0].liveRows], [2, 4]);
+}
+
+{
+  // The same grid, answered in full. Nothing to report: this response is
+  // aligned, and claiming otherwise would bury the real findings.
+  const idx = indexOverGrid('form1', Q.MEAL_COUNT_GRID, ['Tue 1 Sep', 'Thu 3 Sep'], 'GRID');
+  check('a response of the right size is not a finding',
+    sandbox.auditResponseGridShape_(idx, responseAnswering(idx.item, ['2', '0'])), []);
+}
+
+{
+  // THE LIMIT, stated as a test so nobody later reads the count as a total: a
+  // grid whose rows were REORDERED but not resized misreads every answer and
+  // is indistinguishable from a correct one through the Forms API.
+  const idx = indexOverGrid('form1', Q.MEAL_COUNT_GRID, ['Thu 3 Sep', 'Tue 1 Sep'], 'GRID');
+  check('a reorder that kept the row count cannot be detected',
+    sandbox.auditResponseGridShape_(idx, responseAnswering(idx.item, ['2', '0'])), []);
+  const report = sandbox.describeRegistrationAudit_({
+    formsExamined: 1, formsUnread: [], formsNotReached: [], responsesRead: 1,
+    emptyResponses: [], unmatchedRows: [], missingPeople: [], tombstonedSkips: 0,
+    tombstonesWouldRevive: 0, stoppedEarly: false, elapsedMs: 1000,
+    shapeMismatches: [{ formId: 'form1', name: 'Ada', submittedAt: new Date(),
+      title: Q.MEAL_COUNT_GRID, submittedRows: 2, liveRows: 4 }]
+  });
+  check('...so the report says the count is a floor, not a total',
+    report.indexOf('a floor, not a total') !== -1, true);
+}
+
+// --- a live grid row that resolves to no session ----------------------------
+{
+  const idx = indexOverGrid('form2', Q.ATTENDANCE_GRID,
+    ['Tue 1 Sep', 'Thu 3 Sep'], 'CHECKBOX_GRID');
+  // Only the first date is on the dashboard. Anybody ticking the second is
+  // refused by processFormResponse() with nothing said to them about it.
+  const registryIndex = { 'form2|Tue 1 Sep': { eventId: 'e1' } };
+  sandbox.resolveSessionLabelForForm = (ri, formId, label) => label;
+  const found = sandbox.auditFormGridRows_(idx, registryIndex);
+  check('a date row matching no session is reported', found.map(f => f.label), ['Thu 3 Sep']);
+}
+
+{
+  // A grid that has been added but not yet had its labels written carries the
+  // template's placeholder. That is a form waiting for the next sync, not a
+  // fault, and reporting it would cry wolf on every freshly built form.
+  const idx = indexOverGrid('form3', Q.ATTENDANCE_GRID,
+    ['(dates will be filled in automatically)'], 'CHECKBOX_GRID');
+  sandbox.resolveSessionLabelForForm = (ri, formId, label) => label;
+  check('the unwritten placeholder row is not a fault',
+    sandbox.auditFormGridRows_(idx, {}), []);
+}
+
+// --- the read-only guarantee ------------------------------------------------
+{
+  // clearRegistrantTombstones() writes to Script Properties the moment it is
+  // called, so not-flushing is not enough to make the audit read-only: it has
+  // to be neutralized outright for the duration.
+  sandbox.setAllDatesDirty(false);
+  const out = sandbox.withReadOnlyRegistries_(() => {
+    sandbox.setAllDatesDirty(true);          // as saveAllDatesRegistryEntry() would
+    sandbox.callClear('evt|ada|Attendee');   // as buildRegistrantRow() would
+    return 'derived';
+  });
+  check('the audit body still runs', out.result, 'derived');
+  check('a tombstone the import would have cleared is recorded, not cleared',
+    out.tombstonesWouldClear, ['evt|ada|Attendee']);
+  check('...and nothing was marked dirty for a later flush to write',
+    sandbox.readAllDatesDirty(), false);
+  check('...and the tombstone store itself was never dirtied',
+    sandbox.readTombstoneDirty(), false);
+
+  // Restored afterwards, or the next real sync in this execution would quietly
+  // stop lifting tombstones on genuine re-registrations.
+  sandbox.setAllDatesDirty(false);
+  check('the real clear is put back', sandbox.callClear('nothing-here'), 0);
+}
+
+{
+  // A form that throws mid-audit must not leave the swapped function in place.
+  let threw = false;
+  try {
+    sandbox.withReadOnlyRegistries_(() => { throw new Error('form refused'); });
+  } catch (err) { threw = true; }
+  check('a throw inside the audit propagates', threw, true);
+  check('...and the real clear is still restored', sandbox.callClear('nothing-here'), 0);
+}
+
+// --- the report -------------------------------------------------------------
+{
+  const report = sandbox.describeRegistrationAudit_({
+    formsExamined: 2, formsUnread: [], formsNotReached: [], responsesRead: 9,
+    emptyResponses: [], shapeMismatches: [], unmatchedRows: [], tombstonedSkips: 3,
+    tombstonesWouldRevive: 0, stoppedEarly: false, elapsedMs: 2000,
+    missingPeople: [{ formId: 'f', name: 'Ada Lovelace', personType: 'Attendee',
+      eventDate: new Date('2026-09-08T12:00:00Z'), location: 'Narberth',
+      event: 'Lunch', submittedAt: new Date('2026-09-01T12:00:00Z') }]
+  });
+  check('the report names the person who is missing',
+    report.indexOf('Ada Lovelace') !== -1, true);
+  check('...says plainly that it changed nothing',
+    report.indexOf('NOTHING WAS CHANGED') !== -1, true);
+  check('...and does not count a deliberate deletion as a loss',
+    report.indexOf('deleted them on purpose') !== -1, true);
+}
+
+console.log(failures === 0 ? '\nAll registration-audit checks passed.' : `\n${failures} failure(s).`);
+process.exit(failures === 0 ? 0 : 1);

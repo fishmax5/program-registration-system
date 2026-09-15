@@ -360,6 +360,11 @@ function buildAppMenu(ui, includeAdmin) {
         // calendar ID is the whole question, so it is read first. See 84.
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
+        // The measurement this submenu was missing: not which ROWS are stale,
+        // but which RESPONSES never became rows. Read-only like the two above
+        // it, and ungated for the same reason \u2014 the person who noticed the
+        // missing name is the person who should be able to press it. See 97.
+        .addItem('Find Missing Registrations (read-only report)', 'reportMissingRegistrations')
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.
