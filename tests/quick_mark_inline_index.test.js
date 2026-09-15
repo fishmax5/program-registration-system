@@ -62,6 +62,19 @@ if (m) {
   ok('including the hostile name, intact', parsed.members[0].name === nasty);
 }
 
+// THE CHANGE PANEL travels with the same page, and every action in it has to
+// be reachable from the one server function — a panel offering nine changes
+// and calling something that is not there is a dialog that looks complete and
+// does nothing.
+ok('the change panel is in the markup', withIndex.indexOf('Change this registration') !== -1);
+ok('and it calls the one change endpoint',
+  withIndex.indexOf('.applyRegistrantChangeFromDialog(payload)') !== -1);
+['move', 'cancel', 'restore', 'waitlist', 'undo', 'lunch', 'contact', 'note', 'remove']
+  .forEach(action => {
+    ok('the panel offers "' + action + '"',
+      withIndex.indexOf('<option value="' + action + '">') !== -1);
+  });
+
 // The whole script block has to be valid JS.
 const js = body.replace(/^<script>/,'').replace(/<\/script>[\s\S]*$/,'');
 try { new vm.Script('(function(){' + js + '})'); ok('the dialog script parses as JavaScript', true); }
