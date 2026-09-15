@@ -39,6 +39,8 @@ const sandbox = {
     formatDate: (d, tz, pattern) => {
       const pad = n => String(n).padStart(2, '0');
       if (pattern === 'yyyy-MM-dd') return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      // Midday, pinned — see quiet hours (section 9g).
+      if (pattern === 'H') return '12';
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     },
     sleep: () => {}

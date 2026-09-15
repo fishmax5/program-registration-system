@@ -1533,6 +1533,15 @@ function notifyAdmin(subject, body) {
  * message that reports the shortage is exactly backwards.
  */
 function notifyAdminUrgent(subject, body) {
+  // QUIET HOURS (section 9g) reach even this one — nobody is at the desk at
+  // 2am to act on it. It is FILED for the 10am digest rather than held, since
+  // this path has no ledger and no next pass to retry it with.
+  if (quietHoursHoldsUrgentMail()) {
+    log(`\ud83c\udf19 Quiet hours \u2014 "${subject}" was filed for the office digest instead of sent.`);
+    spoolOfficeNote('Urgent notices raised outside office hours',
+      `${subject}: ${body}`);
+    return false;
+  }
   const ticked = adminEmailsForCategory('syncDigest');
   const emails = ticked.length > 0 ? ticked : getAllAdminNotificationEmails();
   if (emails.length === 0) return false;

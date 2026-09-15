@@ -28,7 +28,12 @@ const src = require('./helpers/source').readSource();
 const sentMail = [];
 const sandbox = {
   console: { log: () => {} },
-  Utilities: { formatDate: d => new Date(d).toISOString(), sleep: () => {} },
+  Utilities: {
+    // 'H' is pinned to midday: quiet hours (section 9g) hold every send
+    // between 5pm and 8am, and what is under test here is the PAUSE.
+    formatDate: (d, tz, pattern) => (pattern === 'H' ? '12' : new Date(d).toISOString()),
+    sleep: () => {}
+  },
   PropertiesService: {
     getScriptProperties: () => ({
       getProperty: () => null, setProperty: () => {}, setProperties: () => {}, deleteProperty: () => {}

@@ -27,6 +27,9 @@ const sandbox = {
     formatDate: (d, tz, pattern) => {
       if (pattern === 'yyyy-MM-dd') return '2026-09-08';
       if (pattern === 'HH:mm') return '11:30';
+      // Midday, pinned: quiet hours (section 9g) hold every send between 5pm
+      // and 8am, and a test whose answer depends on when it is run is not one.
+      if (pattern === 'H') return '12';
       return new Date(d).toISOString();
     },
     sleep: () => {}

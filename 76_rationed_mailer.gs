@@ -61,6 +61,12 @@
 // registrations that never really changed, on the day somebody switched it
 // off.
 //
+// A SECOND, SEPARATE HOLD sits beside it: quiet hours (section 9g), which
+// stops everything between 5pm and 8am. It is the opposite kind of hold —
+// nothing is recorded and the first pass after 8am sends it — and the two
+// read in that order, because a message the office has paused is not a
+// message anybody is waiting for at eight tomorrow.
+//
 // notifyAdmin() is not affected, here as everywhere else: the office still
 // hears what the workbook did, including how many messages the pause held.
 //
@@ -265,7 +271,10 @@ function normalizeBccList(bcc) {
  * Returns { status, cost, error } where status is one of:
  *   'sent'        it went. `cost` is what it took off the quota.
  *   'duplicate'   alreadySent() said this one has already gone. Nothing spent.
- *   'held'        sending it would have crossed the caller's reserve.
+ *   'held'        sending it would have crossed the caller's reserve, or it
+ *                 is quiet hours (section 9g) and nothing leaves the workbook
+ *                 between 5pm and 8am. Nothing spent, nothing recorded: the
+ *                 next pass sends it.
  *   'paused'      outbound mail is paused on the Config tab. Nothing spent,
  *                 and the message is DROPPED: recordSent() is called, so the
  *                 caller's ledger advances and nothing is delivered late when
@@ -319,6 +328,18 @@ function sendRationedEmail(request) {
         `to resume. This run held at least one message; the log lists every one.`);
     }
     if (typeof req.recordSent === 'function') req.recordSent();
+    return result;
+  }
+
+  // ------------------------------------------------- QUIET HOURS
+  //
+  // HELD, NOT DROPPED, which is the one line that separates this from the
+  // pause above: recordSent() is NOT called, so the caller's ledger stays put
+  // and the first pass after 8am sends this. See section 9g.
+  if (isWithinMailQuietHours()) {
+    result.status = 'held';
+    result.error = mailQuietHoursReason();
+    log(`\ud83c\udf19 Held (quiet hours): "${req.subject || ''}" to ${to}.`);
     return result;
   }
 

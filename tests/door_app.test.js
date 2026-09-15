@@ -30,6 +30,9 @@ const sandbox = {
   console: { log: () => {} },
   Utilities: {
     formatDate: (d, tz, fmt) => {
+      // Midday, pinned — quiet hours (section 9g) would otherwise decide at
+      // run time whether the door's urgent notices go out.
+      if (fmt === 'H') return '12';
       if (fmt === 'yyyy-MM-dd') {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-` +
           `${String(d.getDate()).padStart(2, '0')}`;
