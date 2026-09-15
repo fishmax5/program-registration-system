@@ -346,8 +346,9 @@ function buildNamesOnFormIndex_(existingRows, map, registryIndex) {
  *                     worth reading a response by hand over.
  */
 function classifyEmptyResponse_(response, sessionsOnForm) {
-  if (sessionsOnForm === 0) return { kind: 'noSessions', answers: null, titles: [] };
+  if (sessionsOnForm === 0) return { kind: 'noSessions', answers: null, titles: [], mode: '' };
   let titles = [];
+  let mode = '';
   try {
     // THE TITLES, not just the count — because the count says a response was
     // answered and the titles say WHICH QUESTION IT NEVER REACHED, and those
@@ -356,18 +357,32 @@ function classifyEmptyResponse_(response, sessionsOnForm) {
     // whose page navigation is sending them past the question that IS the
     // registration; a form where the dates were answered and no row came out
     // is the parser. From outside, both are "a response that made no row".
-    titles = (response.getItemResponses() || [])
-      .map(ir => {
-        try { return String(ir.getItem().getTitle() || ''); } catch (err) { return ''; }
-      })
-      .filter(Boolean);
+    const answersList = response.getItemResponses() || [];
+    answersList.forEach(ir => {
+      let title = '';
+      try { title = String(ir.getItem().getTitle() || ''); } catch (err) { return; }
+      if (!title) return;
+      titles.push(title);
+      // THE BRANCH THEY TOOK, as a value rather than a tick. The mode question
+      // is the fork the whole rest of the form hangs off — one answer leads to
+      // a single meal total, the other to the date grid — and knowing only
+      // that it WAS answered leaves both branches open. It is the one answer
+      // worth reading out of a response, so it is the one this reads.
+      if (title === TEMPLATE_ITEM_TITLES.ATTENDANCE_MODE) {
+        try {
+          const value = ir.getResponse();
+          mode = String(Array.isArray(value) ? value.join(', ') : (value || ''));
+        } catch (err) { /* an answer that will not read is not worth a throw */ }
+      }
+    });
   } catch (err) {
-    return { kind: 'unreadable', answers: 0, titles: [] };
+    return { kind: 'unreadable', answers: 0, titles: [], mode: '' };
   }
   return {
     kind: titles.length === 0 ? 'unreadable' : 'answeredNoRows',
     answers: titles.length,
-    titles
+    titles,
+    mode
   };
 }
 
@@ -488,7 +503,8 @@ function auditRegistrationImport(options) {
             if (onTab) finding.unreadableButPresent++;
             finding.emptyResponses.push({
               formId, name: who, submittedAt: when, onTab,
-              kind: why.kind, answers: why.answers, titles: why.titles, sessionsOnForm
+              kind: why.kind, answers: why.answers, titles: why.titles,
+              mode: why.mode, sessionsOnForm
             });
             return;
           }
@@ -624,11 +640,9 @@ function describeRegistrationAudit_(finding) {
           .map(e => `  • ${e.name} — submitted ${e.submittedAt
             ? Utilities.formatDate(e.submittedAt, TIMEZONE, 'd MMM yyyy')
             : '(unknown)'} · form ${e.formId}`)));
-      parts.push(`  What each answered can no longer be read: the v8→v9 meal swap deleted the ` +
-        `questions they were submitted against, and readMealCountGridResponse()'s fallback to the ` +
-        `old titles resolves through the items still ON the form, so it cannot reach them either. ` +
-        `WHO registered is above; WHICH DATES and HOW MANY MEALS survive only in the responses ` +
-        `spreadsheet's own version history, from before the swap ran.`);
+      parts.push(`  WHO registered is above. WHY each made no row is the question-by-question ` +
+        `evidence below — this report does not name a cause, because the first two it named ` +
+        `were wrong: what a response answered is checkable and what happened to the form is not.`);
     }
     parts.push(`\n  The reasons a re-read produced nothing, which do not share a fix:`);
 
@@ -659,7 +673,7 @@ function describeRegistrationAudit_(finding) {
       // answer names the question none of them ever reached.
       const bySet = {};
       finding.emptyResponses.filter(e => e.kind === 'answeredNoRows').forEach(e => {
-        const key = `${e.formId}\n${(e.titles || []).join(' | ')}`;
+        const key = `${e.formId}\n${(e.titles || []).join(' | ')}\n${e.mode || ''}`;
         bySet[key] = (bySet[key] || 0) + 1;
       });
       parts.push(`\n  What those responses actually answered — the question they never ` +
@@ -667,9 +681,9 @@ function describeRegistrationAudit_(finding) {
         describeCappedList_(Object.keys(bySet)
           .sort((a, b) => bySet[b] - bySet[a])
           .map(key => {
-            const [formId, joined] = key.split('\n');
-            return `  • ${bySet[key]} response(s) on ${formId} answered: ` +
-              `${joined || '(nothing)'}`;
+            const [formId, joined, mode] = key.split('\n');
+            return `  • ${bySet[key]} response(s) on ${formId}` +
+              `${mode ? ` chose "${mode}"` : ''} and answered: ${joined || '(nothing)'}`;
           })));
     }
   }

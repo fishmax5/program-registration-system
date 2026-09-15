@@ -187,8 +187,8 @@ function responseAnswering(item, values) {
 // thing, and on the first real workbook the commonest cause was a form no
 // session row names — which has nothing to do with a grid and a different fix.
 {
-  const itemNamed = t => ({ getItem: () => ({ getTitle: () => t }) });
-  const answered = { getItemResponses: () => ['Name', 'Phone', 'How Will You Attend?'].map(itemNamed) };
+  const itemNamed = (t, v) => ({ getItem: () => ({ getTitle: () => t }), getResponse: () => v });
+  const answered = { getItemResponses: () => ['Name', 'Phone', 'How Will You Attend?'].map(t => itemNamed(t)) };
   const blank = { getItemResponses: () => [] };
 
   check('a form no session row names is its own answer, whatever the response said',
@@ -203,9 +203,22 @@ function responseAnswering(item, values) {
   check('...and it carries WHAT they answered, not just how many',
     sandbox.classifyEmptyResponse_(answered, 4).titles,
     ['Name', 'Phone', 'How Will You Attend?']);
+
+  // The mode question is the fork the rest of the form hangs off, so its
+  // VALUE is read rather than just ticked off as answered: one branch leads to
+  // a single meal total, the other to the date grid, and "it was answered"
+  // leaves both open.
+  const branched = { getItemResponses: () => [
+    itemNamed('Name'),
+    itemNamed(Q.ATTENDANCE_MODE, 'Pick Your Dates')
+  ] };
+  check('the branch a respondent took is read as a value',
+    sandbox.classifyEmptyResponse_(branched, 4).mode, 'Pick Your Dates');
+  check('...and a response that never met the mode question says so with a blank',
+    sandbox.classifyEmptyResponse_(answered, 4).mode, '');
   check('a response that cannot be read at all does not throw the audit over',
     sandbox.classifyEmptyResponse_({ getItemResponses: () => { throw new Error('gone'); } }, 4),
-    { kind: 'unreadable', answers: 0, titles: [] });
+    { kind: 'unreadable', answers: 0, titles: [], mode: '' });
 }
 
 // --- a live form whose date question offers no date ------------------------
@@ -254,7 +267,8 @@ function responseAnswering(item, values) {
     emptyResponses: [
       { formId: 'fA', name: 'Ada', kind: 'noSessions', answers: null, sessionsOnForm: 0 },
       { formId: 'fB', name: 'Bea', kind: 'unreadable', answers: 0, sessionsOnForm: 4 },
-      { formId: 'fC', name: 'Cal', kind: 'answeredNoRows', answers: 7, sessionsOnForm: 4 }
+      { formId: 'fC', name: 'Cal', kind: 'answeredNoRows', answers: 7, sessionsOnForm: 4,
+        titles: ['Name', 'How would you like to sign up?'], mode: 'Pick Your Dates' }
     ]
   });
   check('the three causes are reported apart',
@@ -266,6 +280,11 @@ function responseAnswering(item, values) {
     report.indexOf('a place to LOOK rather than a verdict') !== -1, true);
   check('...and the parser set names the person and what they answered',
     report.indexOf('Cal — answered 7 question(s)') !== -1, true);
+  // The report no longer names a cause for the un-derivable ones. The first
+  // two it named were wrong, and what a response answered is checkable where
+  // what happened to the form is not.
+  check('...and it no longer blames the meal swap it never checked',
+    report.indexOf('meal swap deleted') === -1, true);
 }
 
 {
@@ -327,8 +346,8 @@ function responseAnswering(item, values) {
     report.indexOf('Judy Watman') !== -1, true);
   check('...and the one already on the tab is NOT listed as lost',
     report.indexOf('• Flo Rice') === -1, true);
-  check('...and the report says where the dates still survive',
-    report.indexOf("version history") !== -1, true);
+  check('...and the report does not assert a cause it has not checked',
+    report.indexOf('meal swap deleted') === -1, true);
 }
 
 console.log(failures === 0 ? '\nAll registration-audit checks passed.' : `\n${failures} failure(s).`);
