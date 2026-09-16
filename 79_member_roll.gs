@@ -25,13 +25,18 @@
 // this tab alone is exactly how a person's history is left behind under their
 // old spelling.
 //
-// A DUPLICATE IS NOT A DELETION. "Bob Smith" and "bob smith " already collapse
-// (normalizeNameKey), but "Robert Delgado" on one form and "R. Delgado" with
-// the same telephone number on another are two rows with half a history each,
-// and the half carrying the notes is usually the one nobody is looking at.
-// mergeMemberRollRows() folds them together every time the tab is written —
-// which is every sync, so "every so often" is "continuously" — and it is
-// deliberately additive: counts add, dates widen to the earliest and the
+// A DUPLICATE IS NOT A DELETION, AND A SHARED NUMBER IS NOT A DUPLICATE.
+// "Bob Smith" and "bob smith " collapse (normalizeNameKey), and that is now
+// the WHOLE of what folds automatically. This used to also fold two rows
+// sharing a telephone number or an email address with the same surname and
+// first initial — which is a description of a married couple, and of everybody
+// registered under the centre's own information address because they have no
+// address of their own. They were merged, silently, and the correction map
+// then kept them merged. See memberRollMatchKeys() for the whole account.
+// A contact match is now REPORTED for a person to decide on, never folded.
+// mergeMemberRollRows() runs every time the tab is written — which is every
+// sync, so "every so often" is "continuously" — and it is deliberately
+// additive: counts add, dates widen to the earliest and the
 // latest, locations union, notes concatenate, and every spelling that was
 // absorbed is written into Merged_From so the merge can be read back. Nothing
 // on this tab is ever dropped to make a merge tidy.
@@ -275,33 +280,72 @@ function retireMemberRow(row, map, status, when) {
 // ---------------------------------------------------------------------------
 
 /**
- * The keys one row can be recognized by: its name, and its contact details
- * PAIRED with enough of a name to be safe.
+ * The keys one row can be recognized by: ITS NAME, and nothing else.
  *
- * A shared telephone number is the reason for the pairing. Much of this roll
- * lives with somebody else on it, so "same number" alone merges a married
- * couple into one person and loses one of them. "Same number AND same surname
- * AND same first initial" is the narrow case that really is a duplicate:
- * R. Delgado and Robert Delgado, entered on two different mornings.
+ * THIS USED TO READ CONTACT DETAILS AND THE COST WAS PEOPLE. A row also
+ * answered to "same phone AND same surname AND same first initial" (and the
+ * same for an email address), on the reasoning that R. Delgado and Robert
+ * Delgado entered on two mornings are one man. What that rule actually
+ * describes is a household: Drew and Toni Meiers share a number and a surname
+ * and differ in the first initial only — until one of them is entered as
+ * "D. Meiers", or the pair is caught by the email half, which is worse still.
+ * Members with no address of their own were registered under the centre's own
+ * information address, and the roll folded every one of them into a single
+ * person. Nobody saw it happen: a fold here is silent, and rememberMember‑
+ * NameCorrection() then makes it durable, so the absorbed person stops coming
+ * back on the next sync.
+ *
+ * So the automatic fold is now NAME-ONLY — the case that is safe by default,
+ * which is all this write-time dedupe was ever entitled to do. Two rows that
+ * share contact details and differ in name are handed to a person instead:
+ * memberRollContactSuggestions() below collects them and the menu reports
+ * them. See the same correction in dedupeSignInEntries() (section 45).
  */
 function memberRollMatchKeys(row, map) {
   const name = String(row[map['Name']] || '').trim();
-  const last = String(row[map['Last_Name']] || '').trim().toLowerCase();
-  const first = String(row[map['First_Name']] || '').trim().toLowerCase();
   const keys = [];
   const nameKey = normalizeNameKey(name);
   if (nameKey) keys.push(`n:${nameKey}`);
-  if (last && first) {
-    const initial = `${last}|${first.charAt(0)}`;
-    // The same two contact keys the household grouping is built on
-    // (section 77), for the same reason: a number is an identity only as its
-    // last ten digits, and an address only lowercased.
-    const phone = householdPhoneKey(row[map['Phone']]);
-    const email = householdEmailKey(row[map['Email']]);
-    if (phone) keys.push(`p:${initial}|${phone}`);
-    if (email) keys.push(`e:${initial}|${email}`);
-  }
   return keys;
+}
+
+/**
+ * The folds this no longer makes, as something to look at: rows that share a
+ * telephone number or an email address and are NOT the same name.
+ *
+ * Returns [{ contact, kind, names }] — one entry per number or address, naming
+ * everybody on it, because four people on the centre's information address is
+ * one thing to explain rather than six pairs to tick.
+ *
+ * INSTITUTIONAL ADDRESSES ARE DROPPED, not reported: an address a great many
+ * rows share is the office's own, and listing it would bury every real
+ * suggestion under it. HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN (section 77) is the
+ * same threshold the household grouping throws them out at, and for the same
+ * reason.
+ */
+function memberRollContactSuggestions(rows, map) {
+  const byContact = {};
+  const note = (contact, kind, name) => {
+    if (!contact || !name) return;
+    const id = `${kind}:${contact}`;
+    if (!byContact[id]) byContact[id] = { contact, kind, names: [], keys: [] };
+    const key = normalizeNameKey(name);
+    if (!key || byContact[id].keys.indexOf(key) !== -1) return;
+    byContact[id].keys.push(key);
+    byContact[id].names.push(name);
+  };
+
+  (rows || []).forEach(row => {
+    if (isMemberRollDividerValue(row[map['Name']])) return;
+    const name = String(row[map['Name']] || '').trim();
+    note(householdPhoneKey(row[map['Phone']]), 'phone', name);
+    note(householdEmailKey(row[map['Email']]), 'email', name);
+  });
+
+  return Object.keys(byContact)
+    .map(id => byContact[id])
+    .filter(group => group.names.length > 1 && group.names.length < HOUSEHOLD_INSTITUTIONAL_CONTACT_MIN)
+    .map(group => ({ contact: group.contact, kind: group.kind, names: group.names }));
 }
 
 /** Joins two notes without losing either, and without repeating one. */
@@ -500,7 +544,14 @@ function writeMemberRollTab(sheet, rows) {
   invalidateWalkInMembersMemo();
   invalidateHouseholdIndexMemo();
   if (merged.merges.length) invalidateQuickMarkIndexCache();
-  return { active: ordered.active.length, retired: ordered.retired.length, merges: merged.merges };
+  return {
+    active: ordered.active.length,
+    retired: ordered.retired.length,
+    merges: merged.merges,
+    // Computed on the rows as WRITTEN, so a suggestion never names a spelling
+    // that this same write has just folded away.
+    contactSuggestions: memberRollContactSuggestions(out, map)
+  };
 }
 
 /**
@@ -551,10 +602,23 @@ function dedupeMemberRollNow() {
       (merges.length > 12 ? `\n… and ${merges.length - 12} more.` : '') +
       '\n\nEvery merged row kept its notes, and the names it absorbed are in Merged_From.'
     : '';
-  log(`dedupeMemberRollNow: ${merges.length} merged, ${result.active} active, ${result.retired} retired.`);
+  // THE SECOND HALF OF THE ANSWER, and the more important one: what was NOT
+  // merged. Two people on one telephone number are two people here now, and
+  // saying so is what stops somebody assuming the roll has tidied itself.
+  const suggestions = result.contactSuggestions || [];
+  const flagged = suggestions.length
+    ? `\n\n${suggestions.length} shared phone number(s)/email address(es) were left as separate ` +
+      `people — spouses and siblings share both, so nothing is merged on them:\n` +
+      suggestions.slice(0, 8).map(g => `• ${g.names.join(' + ')} (same ${g.kind})`).join('\n') +
+      (suggestions.length > 8 ? `\n… and ${suggestions.length - 8} more.` : '') +
+      `\n\nIf any of those really is one person under two spellings, fix the spelling on the roll ` +
+      `and press this again.`
+    : '';
+  log(`dedupeMemberRollNow: ${merges.length} merged, ${result.active} active, ${result.retired} retired, ` +
+    `${suggestions.length} shared-contact group(s) left alone.`);
   ui.alert('Member Roll',
     `${merges.length} duplicate row(s) merged.\n` +
-    `${result.active} active member(s), ${result.retired} retired.${detail}`,
+    `${result.active} active member(s), ${result.retired} retired.${detail}${flagged}`,
     ui.ButtonSet.OK);
 }
 

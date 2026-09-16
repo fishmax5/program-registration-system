@@ -149,29 +149,52 @@ const oneCancelled = sandbox.dedupeSignInEntries([
 check('Active beats a cancellation on the merged row', oneCancelled[0].status, 'Active');
 
 // ---------------------------------------------------------------------------
-// The phone pass: two spellings of one person
+// NOBODY IS MERGED ON A PHONE NUMBER. The pass that did merged the Meierses,
+// the Bonds and the Magnattas \u2014 spouses share a surname and a landline, which
+// is exactly what its guard tested for. Two spellings of one person are now a
+// SUGGESTION somebody reads, never a fold nobody sees.
 // ---------------------------------------------------------------------------
 const nicknamed = sandbox.dedupeSignInEntries([
   entry({ name: 'Bob Smith', program: 'Art', phone: '(610) 555-1212', lunch: true, meals: 1 }),
   entry({ name: 'Robert Smith', program: 'Chorus', phone: '610-555-1212', lunch: true, meals: 1 })
 ]);
-check('Bob and Robert Smith on one phone number are one person', nicknamed.length, 1);
-check('and one lunch', nicknamed[0].meals, 1);
+check('two spellings on one number stay two rows', nicknamed.length, 2);
 
-// A HOUSEHOLD, not a person. Same landline, nothing else in common.
+// The couple the old pass lost, and the whole reason for the change.
+const spouses = sandbox.dedupeSignInEntries([
+  entry({ name: 'Drew Meiers', program: 'Art', phone: '610-555-9000', lunch: true, meals: 1 }),
+  entry({ name: 'Toni Meiers', program: 'Art', phone: '610-555-9000', lunch: true, meals: 1 })
+]);
+check('a couple on one number are two people', spouses.length, 2);
+check('and both meals are still on the page', spouses.reduce((n, e) => n + e.meals, 0), 2);
+
+// A HOUSEHOLD sharing nothing but the number was always two rows and still is.
 const household = sandbox.dedupeSignInEntries([
   entry({ name: 'Bob Smith', program: 'Art', phone: '610-555-1212', lunch: true, meals: 1 }),
   entry({ name: 'Ada Perez', program: 'Art', phone: '610-555-1212', lunch: true, meals: 1 })
 ]);
 check('two names sharing a landline stay two people', household.length, 2);
 
-// A GUEST is normally on their host's phone. Merging them costs a meal, so the
-// phone pass does not look at guests at all.
+// What is REPORTED instead of merged: a shared number with a shared name token.
+const suggested = sandbox.collectSignInContactSuggestions([
+  entry({ name: 'Drew Meiers', program: 'Art', phone: '610-555-9000' }),
+  entry({ name: 'Toni Meiers', program: 'Art', phone: '610-555-9000' }),
+  entry({ name: 'Ada Perez', program: 'Art', phone: '610-555-1212' })
+]);
+check('a shared number with a shared surname is flagged once', suggested.length, 1);
+check('and it names both people', suggested[0].names.sort(), ['Drew Meiers', 'Toni Meiers']);
+
+// A GUEST is normally on their host's phone and is a second mouth besides, so
+// they are neither merged nor suggested.
 const guestOnHostPhone = sandbox.dedupeSignInEntries([
   entry({ name: 'Bob Smith', program: 'Art', phone: '610-555-1212', lunch: true, meals: 1 }),
   entry({ name: 'Sue Smith', program: 'Art', phone: '610-555-1212', lunch: true, meals: 1, isGuest: true })
 ]);
 check('a guest on the host\'s phone is still their own person', guestOnHostPhone.length, 2);
+check('and a guest is never offered as a duplicate', sandbox.collectSignInContactSuggestions([
+  entry({ name: 'Bob Smith', program: 'Art', phone: '610-555-1212' }),
+  entry({ name: 'Sue Smith', program: 'Art', phone: '610-555-1212', isGuest: true })
+]).length, 0);
 
 // Two nameless rows are two rows, not one merged nobody.
 check('nameless rows do not collapse into each other',

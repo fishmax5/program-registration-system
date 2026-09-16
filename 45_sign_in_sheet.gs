@@ -89,11 +89,23 @@
 // walking through one door, and printing them three times means three lookups,
 // three ticks, and — the reason this got rewritten — a lunch count of three for
 // somebody who eats one lunch. Names are matched loosely (punctuation, middle
-// initials, honorifics and "Last, First" order all collapse away) and a shared
-// phone number merges two spellings that share a name token. Meal counts across
-// a merged person are taken as the MAXIMUM, never the sum: `Meals_Ordered` on
-// one row is how this workbook says "she wants four", and the same person
-// answering the lunch question on two forms wants one.
+// initials, honorifics and "Last, First" order all collapse away) — AND ON THE
+// NAME ALONE. Meal counts across a merged person are taken as the MAXIMUM,
+// never the sum: `Meals_Ordered` on one row is how this workbook says "she
+// wants four", and the same person answering the lunch question on two forms
+// wants one.
+//
+// WHAT THIS SHEET USED TO DO INSTEAD, and the reason for the rule above. A
+// second pass merged two DIFFERENT spellings that shared a phone number and
+// one name token, to catch "Bob Smith" and "Robert Smith". A married couple
+// shares a telephone number and a surname, so it caught them too: Drew and
+// Toni Meiers, Jim and Kanra Magnatta, Sue and Bob Bond each printed as one
+// person with one meal, and the kitchen cooked for half of them. Two rows
+// wrongly split cost a glance at the desk; two rows wrongly MERGED lose a
+// person and their lunch, silently, on the one document the day is run from.
+// So a shared number no longer merges anything here — it is REPORTED instead
+// (collectSignInContactSuggestions), and Rosters & Sharing ▸ Review Duplicate
+// Registrations is where somebody decides.
 //
 // A GUEST PRINTS UNDER THEIR REGISTRANT, NEVER AS A ROW OF THEIR OWN. Their
 // name goes in Notes and their ordered meal is ADDED to the registrant's own
@@ -445,9 +457,19 @@ function createSignInSheetDoc(sessionValue, include) {
   const message = `✅ ${data.lunchRows.length} on the lunch list (${data.lunchCount} meal(s)), ` +
     `${data.rows.length} on the full roster` +
     (data.mergedAway > 0 ? `, ${data.mergedAway} duplicate row(s) merged` : '') +
+    // NOBODY WAS MERGED ON A PHONE NUMBER — said out loud, because the version
+    // that did merge on one said nothing at all, and the missing people were
+    // only ever found by somebody counting the page.
+    ((data.contactSuggestions || []).length > 0
+      ? `, ${data.contactSuggestions.length} shared phone number(s) left as separate people`
+      : '') +
     (data.meal ? `. Lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
   log(`createSignInSheetDoc: wrote "${file.getName()}" — ${data.rows.length} person(s), ` +
-    `${data.lunchRows.length} eating, ${data.lunchCount} meal(s), ${data.mergedAway} duplicate(s) merged.`);
+    `${data.lunchRows.length} eating, ${data.lunchCount} meal(s), ${data.mergedAway} duplicate(s) merged, ` +
+    `${(data.contactSuggestions || []).length} shared-number group(s) kept apart` +
+    ((data.contactSuggestions || []).length > 0
+      ? `: ${data.contactSuggestions.map(g => g.names.join(' + ')).join('; ')}`
+      : '') + '.');
   return { url: file.getUrl(), message };
 }
 
@@ -623,9 +645,14 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     host.guests.push(guest);
   });
 
-  // ONE PERSON, ONE ROW. The second fold, and the aggressive one.
+  // ONE PERSON, ONE ROW — on the name, and only on the name.
   const merged = dedupeSignInEntries(hosts);
   const mergedAway = hosts.length - merged.length;
+  // And the pairs nothing merged: people who share a number and a surname, who
+  // are two people until somebody says otherwise. Counted here so the build's
+  // own message can say they exist; the deciding is done on the duplicate
+  // review dialog (section 85).
+  const contactSuggestions = collectSignInContactSuggestions(hosts);
 
   // The standing needs that decide the Handling column and its wash. Read once
   // for the whole sheet: this is a tab read, and a per-person one would be a
@@ -650,6 +677,7 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     rows,
     lunchRows,
     mergedAway,
+    contactSuggestions,
     meal: meal && CATERED_LUNCH_TYPES.indexOf(meal.type) !== -1 ? meal : null,
     lunchCount,
     // PEOPLE, not meals — this is the count the "rows pre-filled with 0" note
@@ -719,18 +747,21 @@ function signInPhoneKey(phone) {
 /**
  * Collapses a day's entries down to one per person.
  *
- * TWO PASSES. The first groups on signInPersonKey(), which catches every
- * ordinary duplicate: the same person on two programs, the same registration
- * imported twice, a name retyped with a middle initial.
+ * ONE PASS, ON THE NAME. signInPersonKey() catches every ordinary duplicate:
+ * the same person on two programs, the same registration imported twice, a
+ * name retyped with a middle initial.
  *
- * The second is for the case the name key cannot see — two genuinely different
- * spellings of one person, "Bob Smith" and "Robert Smith". Those merge only
- * when they share a PHONE NUMBER *and* share at least one name token, which is
- * tight enough that a household sharing a landline does not collapse into one
- * row. GUESTS ARE EXEMPT FROM THE PHONE PASS for exactly that reason: a guest
- * is normally reachable on the phone of whoever brought them, and merging the
- * two would silently drop a meal — a guest is a second mouth (see the meal
- * arithmetic in mergeSignInEntries()).
+ * THERE WAS A SECOND PASS AND IT IS GONE. It merged two entries that shared a
+ * PHONE NUMBER and at least one name token, to catch "Bob Smith" and "Robert
+ * Smith". The guard was supposed to be the shared token; what actually shares
+ * a token and a landline is a married couple, so Drew and Toni Meiers were one
+ * row with one meal, and so were the Bonds and the Magnattas. The desk found
+ * out by printing the sheet and finding half the people it had registered.
+ *
+ * A number two people share is not an identity, so nothing here reads one any
+ * more. Where it would have merged, it now RECORDS the pair
+ * (collectSignInContactSuggestions) and the caller reports the count — a
+ * flag somebody looks at, never a fold nobody sees.
  *
  * ORDER IS PRESERVED: the first entry seen for a person is the one that keeps
  * its position, so the caller's sort is still the only thing deciding order.
@@ -738,34 +769,61 @@ function signInPhoneKey(phone) {
 function dedupeSignInEntries(entries) {
   const byKey = {};
   const order = [];
-  const groupOfPhone = {};
 
   (entries || []).forEach(entry => {
     let key = signInPersonKey(entry.name);
     if (!key) key = `#${order.length}`; // a nameless row is its own row, not everyone's
-
-    const phoneKey = entry.isGuest ? '' : signInPhoneKey(entry.phone);
-    if (!byKey[key] && phoneKey && groupOfPhone[phoneKey]) {
-      const candidate = groupOfPhone[phoneKey];
-      if (shareANameToken(key, candidate)) key = candidate;
-    }
-
     if (!byKey[key]) {
       byKey[key] = { key, entries: [] };
       order.push(key);
     }
     byKey[key].entries.push(entry);
-    if (phoneKey && !groupOfPhone[phoneKey]) groupOfPhone[phoneKey] = key;
   });
 
   return order.map(key => mergeSignInEntries(byKey[key].entries));
 }
 
-/** Do two aggressive name keys have a word in common? The guard on the phone merge. */
+/** Do two aggressive name keys have a word in common? */
 function shareANameToken(a, b) {
   const left = String(a || '').split(' ').filter(Boolean);
   const right = String(b || '').split(' ').filter(Boolean);
   return left.some(token => right.indexOf(token) !== -1);
+}
+
+/**
+ * The pairs the retired phone pass would have merged, as something to LOOK at.
+ *
+ * Two entries sharing a telephone number and one name token are a spouse and a
+ * spouse far more often than they are two spellings of one person — which is
+ * why this reports rather than folds. Guests are left out entirely: a guest is
+ * reachable on the number of whoever brought them, and they are a second mouth
+ * by definition (see the meal arithmetic in mergeSignInEntries()).
+ *
+ * Pure, and returns [{ names, phone }] — one entry per number, naming everybody
+ * on it, so "four people on one number" is one line rather than six pairs.
+ */
+function collectSignInContactSuggestions(entries) {
+  const byPhone = {};
+  (entries || []).forEach(entry => {
+    if (entry.isGuest) return;
+    const phoneKey = signInPhoneKey(entry.phone);
+    if (!phoneKey) return;
+    const name = String(entry.name || '').trim();
+    if (!name) return;
+    if (!byPhone[phoneKey]) byPhone[phoneKey] = { phone: entry.phone, names: [], keys: [] };
+    const key = signInPersonKey(name);
+    if (byPhone[phoneKey].keys.indexOf(key) !== -1) return;
+    byPhone[phoneKey].keys.push(key);
+    byPhone[phoneKey].names.push(name);
+  });
+
+  return Object.keys(byPhone)
+    .map(k => byPhone[k])
+    // Two DIFFERENT people on one number, sharing a name token — exactly the
+    // set the old pass folded. Anything else is two households or one person.
+    .filter(group => group.names.length > 1 &&
+      group.keys.some((key, i) => group.keys.some((other, j) => i !== j && shareANameToken(key, other))))
+    .map(group => ({ names: group.names, phone: group.phone }));
 }
 
 /**

@@ -37,6 +37,7 @@ vm.runInContext(src + `
 this.composeMemberName = composeMemberName;
 this.backfillMemberNameParts = backfillMemberNameParts;
 this.mergeMemberRollRows = mergeMemberRollRows;
+this.memberRollContactSuggestions = memberRollContactSuggestions;
 this.orderMemberRollRows = orderMemberRollRows;
 this.memberRollIsRetired = memberRollIsRetired;
 this.memberRollStatus = memberRollStatus;
@@ -53,6 +54,7 @@ this.getIndexMap = getIndexMap;
 
 const {
   splitPersonName, composeMemberName, backfillMemberNameParts, mergeMemberRollRows,
+  memberRollContactSuggestions,
   orderMemberRollRows, memberRollIsRetired, isMemberRollDividerValue, buildMemberImportRow,
   guessMemberImportField, looksLikeMemberImportHeader, buildMemberRollImportHtml,
   HEADERS, MEMBER_ROLL_STAFF_COLUMNS, MEMBER_ROLL_RETIRED_DIVIDER, getIndexMap
@@ -117,26 +119,40 @@ check('typed parts are left alone',
   [read(typed, 'First_Name'), read(typed, 'Last_Name')], ['Mary Ellen', 'Carter']);
 
 // --- The dedupe -----------------------------------------------------------
+//
+// NAME ONLY. The contact keys this used to also fold on ("same number, same
+// surname, same first initial") describe a married couple at least as well as
+// they describe one person typed twice, and the roll was quietly losing the
+// spouse \u2014 and losing everybody with no address of their own, who had all been
+// registered under the centre's information address. A contact match is a
+// SUGGESTION now (memberRollContactSuggestions), not a fold.
 const rows = [
   row({
     Name: 'Robert Delgado', First_Name: 'Robert', Last_Name: 'Delgado', Phone: '(610) 555-0182',
     Times_Seen: 9, First_Seen: new Date('2024-03-04'), Last_Seen: new Date('2026-01-10'),
     Locations: 'Narberth', Staff_Notes: 'Brings his sister'
   }),
+  // The same name, typed with different case and spacing \u2014 which is the whole
+  // of what folds automatically now.
   row({
-    Name: 'R. Delgado', First_Name: 'R.', Last_Name: 'Delgado', Phone: '610-555-0182',
+    Name: '  robert  delgado ', First_Name: 'Robert', Last_Name: 'Delgado', Phone: '610-555-0182',
     Email: 'rd@example.com', Times_Seen: 2, First_Seen: new Date('2023-11-02'),
     Last_Seen: new Date('2025-06-01'), Locations: 'Ashbridge', Dietary_Notes: 'No dairy'
   }),
   row({ Name: 'Jane Smith', First_Name: 'Jane', Last_Name: 'Smith', Times_Seen: 4 }),
   // A spouse on the same telephone number is NOT the same person.
   row({ Name: 'Elena Delgado', First_Name: 'Elena', Last_Name: 'Delgado', Phone: '610-555-0182',
-        Times_Seen: 3 })
+        Times_Seen: 3 }),
+  // And neither is an initial: it may be him, and it may be his brother. This
+  // is the row the old rule folded away without asking.
+  row({ Name: 'R. Delgado', First_Name: 'R.', Last_Name: 'Delgado', Phone: '610-555-0182',
+        Times_Seen: 1 })
 ];
 const merged = mergeMemberRollRows(rows, map);
-check('two spellings become one row', merged.rows.length, 3);
+check('two spellings of one name become one row', merged.rows.length, 4);
 check('and the spouse is left alone',
   merged.rows.filter(r => read(r, 'Name') === 'Elena Delgado').length, 1);
+check('and so is the initial', merged.rows.filter(r => read(r, 'Name') === 'R. Delgado').length, 1);
 
 const kept = merged.rows.filter(r => String(read(r, 'Name')).indexOf('Robert') === 0)[0];
 check('the longer history survives', read(kept, 'Name'), 'Robert Delgado');
@@ -147,14 +163,28 @@ check('locations union', read(kept, 'Locations'), 'Ashbridge, Narberth');
 check('a blank email is filled in', read(kept, 'Email'), 'rd@example.com');
 check('both sets of notes survive', [read(kept, 'Staff_Notes'), read(kept, 'Dietary_Notes')],
   ['Brings his sister', 'No dairy']);
-check('and the merge leaves a receipt', read(kept, 'Merged_From'), 'R. Delgado');
-check('the merge is reported', merged.merges, [{ kept: 'Robert Delgado', absorbed: 'R. Delgado' }]);
+check('and the merge leaves a receipt', read(kept, 'Merged_From'), 'robert  delgado');
+check('the merge is reported', merged.merges,
+  [{ kept: 'Robert Delgado', absorbed: 'robert  delgado' }]);
 
 // Running it again changes nothing: the dedupe is on every write, so it has to
 // be idempotent or the roll churns on every sync.
 const again = mergeMemberRollRows(merged.rows, map);
 check('a second pass merges nothing', again.merges.length, 0);
-check('and keeps every row', again.rows.length, 3);
+check('and keeps every row', again.rows.length, 4);
+
+// What is offered to a person instead of being folded.
+const suggestions = memberRollContactSuggestions(merged.rows, map);
+check('one shared telephone number, named once', suggestions.length, 1);
+check('and it names everybody on it', suggestions[0].names.length, 3);
+check('and says which detail they share', suggestions[0].kind, 'phone');
+
+// An address a great many people share is the office's own, and reporting it
+// would bury every real suggestion underneath it.
+const institutional = memberRollContactSuggestions(
+  ['A One', 'B Two', 'C Three', 'D Four', 'E Five', 'F Six', 'G Seven']
+    .map(name => row({ Name: name, Email: 'info@example.org' })), map);
+check('an institutional address is not a suggestion', institutional.length, 0);
 
 // --- Retirement -----------------------------------------------------------
 check('blank Status is Active', memberRollIsRetired(row({ Name: 'A B' }), map), false);

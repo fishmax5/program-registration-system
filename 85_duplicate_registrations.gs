@@ -57,10 +57,13 @@
 //
 //   • the marks (Attended, Lunch_Served, Contacted, Confirmed) are OR-ed — a
 //     tick on either row is a tick;
-//   • the meal counts take the MAXIMUM per column, never the sum: the two rows
-//     are two records of ONE person's meal, and adding them is how a duplicate
-//     becomes a double order (see dedupeSignInEntries() in 45, which reads the
-//     same way);
+//   • the meal counts take the MAXIMUM per column by default — the two rows
+//     are usually two records of ONE person's meal, and adding them is how a
+//     duplicate becomes a double order — but the dialog offers the other
+//     answer, because the other case is real and costs a lunch: two people
+//     entered under one spelling (a couple registered by telephone as
+//     "Bob Bond"), where one meal is one meal too few. The choice is made per
+//     press, on the whole batch, and it is stated in the summary;
 //   • Party_Size takes the maximum, for the same reason;
 //   • text columns keep what the surviving row has, and take the other row's
 //     where the survivor's cell is empty; the two notes columns are JOINED
@@ -91,6 +94,26 @@ const DUPLICATE_REGISTRATIONS_DEAD_STATUSES = ['Cancelled', 'Superseded'];
 
 /** Program_Status values in order of how ACTIVE they are — the survivor takes the first one present. */
 const DUPLICATE_REGISTRATIONS_STATUS_RANK = ['Active', 'Waitlisted', ''];
+
+/**
+ * What a merge does with the meals, and the only thing about a collapse the
+ * person pressing it gets to choose.
+ *
+ * 'one'  — the highest count on any row in the group (the default, and right
+ *          for the duplicate this file was written for: one person, twice).
+ * 'add'  — the counts summed, for two PEOPLE who ended up under one spelling.
+ *          Nobody's lunch is dropped; the seat count is still one row, which
+ *          is why the summary says so out loud.
+ */
+const DUPLICATE_REGISTRATIONS_MEAL_MODES = ['one', 'add'];
+const DUPLICATE_REGISTRATIONS_DEFAULT_MEAL_MODE = 'one';
+
+/** Reads the dialog's answer, defaulting rather than throwing: an unknown mode is 'one'. */
+function duplicateRegistrationMealMode(requested) {
+  const want = String(requested || '').trim().toLowerCase();
+  return DUPLICATE_REGISTRATIONS_MEAL_MODES.indexOf(want) !== -1
+    ? want : DUPLICATE_REGISTRATIONS_DEFAULT_MEAL_MODE;
+}
 
 /** MENU ENTRY: show what looks like a duplicate, and collapse what is ticked. */
 function showDuplicateRegistrationsDialog() {
@@ -325,16 +348,24 @@ function joinRegistrantNotes(kept, absorbed) {
  * Folds `absorbed` into `kept` in place, by the rules in this file's banner.
  * Additive in every column.
  */
-function mergeRegistrantRow(kept, absorbed, map) {
+function mergeRegistrantRow(kept, absorbed, map, mealMode) {
+  const mode = duplicateRegistrationMealMode(mealMode);
   REGISTRANT_DAYOF_COLUMNS.concat(LEADER_FLAG_COLUMNS).forEach(h => {
     if (map[h] === undefined) return;
     if (isTruthyCheckbox(absorbed[map[h]])) kept[map[h]] = true;
   });
+  // The meals, and PARTY_SIZE WITH THEM under 'add': if the two rows were two
+  // people, the row that stays is a party of both of them, and a party size
+  // that still says one is the same lost person in a different column.
   REGISTRANT_MEAL_COUNT_COLUMNS.concat(['Meals_Ordered', 'Party_Size']).forEach(h => {
     if (map[h] === undefined) return;
     const mine = Number(kept[map[h]]) || 0;
     const theirs = Number(absorbed[map[h]]) || 0;
-    if (theirs > mine) kept[map[h]] = theirs;
+    if (mode === 'add') {
+      if (mine || theirs) kept[map[h]] = mine + theirs;
+    } else if (theirs > mine) {
+      kept[map[h]] = theirs;
+    }
   });
   ['Admin_Notes', 'Leader_Notes'].forEach(h => {
     if (map[h] === undefined) return;
@@ -369,7 +400,7 @@ function mergeRegistrantRow(kept, absorbed, map) {
  *
  * Returns a human-readable summary for the dialog to show.
  */
-function collapseDuplicateRegistrationGroups(groupKeys) {
+function collapseDuplicateRegistrationGroups(groupKeys, mealMode) {
   if (!isAuthorizedAdmin()) {
     return '⚠️ Collapsing duplicate registrations is an admin action — ask an admin to run it.';
   }
@@ -381,13 +412,14 @@ function collapseDuplicateRegistrationGroups(groupKeys) {
     return '⚠️ A sync is running right now — try again in a moment.';
   }
   try {
-    return collapseDuplicateRegistrationGroupsInternal(wanted);
+    return collapseDuplicateRegistrationGroupsInternal(wanted, duplicateRegistrationMealMode(mealMode));
   } finally {
     lock.releaseLock();
   }
 }
 
-function collapseDuplicateRegistrationGroupsInternal(wanted) {
+function collapseDuplicateRegistrationGroupsInternal(wanted, mealMode) {
+  const mode = duplicateRegistrationMealMode(mealMode);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   if (!sheet) return '⚠️ There is no registrants tab yet.';
@@ -419,7 +451,7 @@ function collapseDuplicateRegistrationGroupsInternal(wanted) {
     const keptName = String(kept[map['Name']] || '').trim();
     rows.forEach(row => {
       if (row === kept) return;
-      mergeRegistrantRow(kept, row, map);
+      mergeRegistrantRow(kept, row, map, mode);
       dropped.push(row);
       const goneName = String(row[map['Name']] || '').trim();
       // ONLY WHERE THE IMPORT WOULD WRITE THE ROW BACK — judged on the key the
@@ -467,7 +499,11 @@ function collapseDuplicateRegistrationGroupsInternal(wanted) {
   }
 
   const message = `Collapsed ${collapsed} duplicate registration(s), removing ${dropped.length} extra row(s). ` +
-    `Every mark, meal and note from the removed rows was kept on the row that stayed.` +
+    `Every mark, meal and note from the removed rows was kept on the row that stayed. ` +
+    (mode === 'add'
+      ? `Meals were ADDED TOGETHER, so the row that stayed orders for everybody who was merged into it — ` +
+        `check the name on it still describes who is coming.`
+      : `Meals took the highest count on any row, not the total.`) +
     (renames.length > 0
       ? ` ${renames.length} row(s) were spelled differently — those spellings now file under the name that ` +
         `was kept, so the next sync will not write them back.`
@@ -498,6 +534,9 @@ function buildDuplicateRegistrationsHtml(groups) {
            font-size: 13px; cursor: pointer; margin-top: 14px; }
   button.plain { background: #5F6368; margin-left: 8px; }
   button[disabled] { background: #9aa0a6; cursor: default; }
+  fieldset#meals { margin-top: 12px; border: 1px solid #ccc; border-radius: 4px; padding: 8px 10px; }
+  fieldset#meals legend { font-weight: bold; padding: 0 4px; }
+  fieldset#meals label.row { color: #444; line-height: 1.4; padding: 3px 0; }
   #status { margin-top: 12px; min-height: 18px; font-weight: bold; line-height: 1.5; }
   .ok { color: #188038; } .err { color: #C5221F; }
 </style>
@@ -513,6 +552,16 @@ function buildDuplicateRegistrationsHtml(groups) {
   somebody who cancelled and signed up again has two rows on purpose.
 </p>
 <div id="groups">${groupTags}</div>
+
+<fieldset id="meals">
+  <legend>What should happen to the meals?</legend>
+  <label class="row"><input type="radio" name="meal" value="one" checked>
+    <b>One person, one meal</b> — keep the highest count on any row. The usual answer: these rows are
+    one person who answered the lunch question twice.</label>
+  <label class="row"><input type="radio" name="meal" value="add">
+    <b>Merge the names but add the meals up</b> — for two people entered under one spelling
+    (a couple registered over the telephone). Nobody's lunch is dropped; the party size adds too.</label>
+</fieldset>
 
 <button id="go" onclick="submit()">Collapse the ticked groups</button>
 <button class="plain" onclick="none()">Untick all</button>
@@ -535,7 +584,11 @@ function buildDuplicateRegistrationsHtml(groups) {
         document.getElementById('go').disabled = false;
         say('Failed: ' + err.message, 'err');
       })
-      .collapseDuplicateRegistrationGroups(picked);
+      .collapseDuplicateRegistrationGroups(picked, mealMode());
+  }
+  function mealMode() {
+    var el = document.querySelector('input[name=meal]:checked');
+    return el ? el.value : 'one';
   }
   function say(msg, cls) {
     var el = document.getElementById('status');

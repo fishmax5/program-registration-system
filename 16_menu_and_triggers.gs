@@ -420,7 +420,14 @@ function buildAppMenu(ui, includeAdmin) {
         // reads. Registrants go to Triage rather than being deleted and no
         // form is touched, but a whole location can leave the table in one
         // press \u2014 which is what puts it here. Read the report first. See 84.
-        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')));
+        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')
+        .addSeparator()
+        // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
+        // Jobs takes the OFFICE off; this takes everybody off, which is why it
+        // is behind this door instead. It asks first and it is re-runnable.
+        // See section 5d.
+        .addItem('\ud83d\udcc5 Remove ALL Calendar Invitations\u2026', 'removeAllCalendarInvitesFromEvents')
+        .addItem('\u21a9\ufe0f Start the Invitation Removal Over', 'resetRemoveAllCalendarInvitesSweep')));
   } else {
     // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
     // execution contexts cannot resolve the signed-in account at all — and

@@ -685,3 +685,170 @@ function removeAdminGuestsFromCalendarEvents() {
   toastIfPossible(summary);
   return summary;
 }
+
+// ============================================================================
+// 5d. TAKE EVERY GUEST BACK OFF  (the Admin undo for the whole channel)
+// ============================================================================
+//
+// The sweep above answers one question — "are there STAFF addresses on these
+// events?" — and it is the only question this file could ask until somebody
+// needed the other one: "take the invitations off ALTOGETHER."
+//
+// There is no way to un-send a calendar invitation, but there is a way to stop
+// it being an invitation: removing a guest from an event withdraws it from
+// their calendar. So this is the item for the day the office decides the
+// invitations were a mistake, or that a mis-keyed program invited the wrong
+// list of people to the wrong week — a thing that otherwise has to be undone
+// by hand, one event at a time, on every upcoming date of every program.
+//
+// WHAT IT DOES NOT DO, deliberately:
+//   • it does not touch a PAST event. An event that has happened is a record
+//     of who was invited to it, and rewriting the guest list of last Tuesday
+//     tells nobody anything and loses that;
+//   • it does not turn the channel off. Add_Guest_To_Calendar on
+//     Program_Settings (section 81) is what decides whether the next sync
+//     invites anybody, and a sweep that left it ticked would be undone within
+//     the hour. So this SAYS so rather than deciding for somebody: the
+//     confirmation names the tick and the summary names it again;
+//   • it does not delete or alter the events themselves. The event is the
+//     calendar's; this workbook has only ever added names to it.
+//
+// THE LEDGER IS CLEARED for every event it empties, which is the half that
+// makes it stick within a run: an address left in CALENDAR_INVITES_V1 is one a
+// later pass counts as "already invited" and never re-adds — fine while the
+// tick is off, and exactly wrong once somebody turns it back on.
+//
+// Capped and resumable on the same pattern as the sweep above, with its own
+// state key, because a centre with a hundred programs has more upcoming events
+// than one execution can open.
+// ============================================================================
+
+/** Events this sweep has already emptied: { Event_ID: true }. */
+const ALL_INVITE_REMOVAL_PROP_KEY = 'ALL_INVITE_REMOVAL_V1';
+
+/** How many events one execution will open. The item is re-runnable. */
+const MAX_INVITE_REMOVAL_EVENTS_PER_RUN = 60;
+
+function getAllInviteRemovalState() {
+  const raw = PropertiesService.getScriptProperties().getProperty(ALL_INVITE_REMOVAL_PROP_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+function saveAllInviteRemovalState(state) {
+  PropertiesService.getScriptProperties()
+    .setProperty(ALL_INVITE_REMOVAL_PROP_KEY, JSON.stringify(state));
+}
+
+/**
+ * Clears the record of what this sweep has already looked at, so the next run
+ * starts from the top. Pressed when the office wants a second pass over events
+ * a first pass emptied — a program re-invited in between, say.
+ */
+function resetRemoveAllCalendarInvitesSweep() {
+  PropertiesService.getScriptProperties().deleteProperty(ALL_INVITE_REMOVAL_PROP_KEY);
+  toastIfPossible('The invitation-removal sweep will start from the first upcoming event again.');
+}
+
+/**
+ * MENU ENTRY (Admin ▸ Destructive). Takes EVERY guest off the calendar event
+ * of every UPCOMING session, and empties the invitation ledger for each one.
+ *
+ * Gated, and asks first: the invitations are gone from other people's
+ * calendars afterwards and nothing in this workbook puts them back — the next
+ * sync re-invites only where Add_Guest_To_Calendar is still ticked, which is
+ * a different decision on a different tab.
+ */
+function removeAllCalendarInvitesFromEvents() {
+  if (!requireAuthorizedAdmin('Remove All Calendar Invites')) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const regHeaders = HEADERS.Master_Program_Dashboard;
+  const regMap = getIndexMap(regHeaders);
+  const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+  const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
+  if (rows.length === 0) {
+    toastIfPossible('There are no sessions on the dashboard, so there is nothing to take anybody off.');
+    return 'No session rows, so no calendar events were opened.';
+  }
+
+  if (!confirmConsequentialAction(
+    'Remove ALL calendar invitations?',
+    'This takes every guest off the calendar event of every UPCOMING session — the invitation ' +
+    'disappears from their calendar, and nothing here puts it back.\n\n' +
+    'Past events are left exactly as they are.\n\n' +
+    'It does NOT stop future invitations: untick Add_Guest_To_Calendar on Program_Settings for ' +
+    'that, or the next hourly sync will invite everybody again.',
+    false)) {
+    return 'Cancelled — nothing was changed.';
+  }
+
+  const todayKey = formatDateKey(new Date());
+  const seen = getAllInviteRemovalState();
+  const ledger = getCalendarInviteLedger();
+  let removed = 0;
+  let eventsTouched = 0;
+  let looked = 0;
+  let deferred = 0;
+
+  for (const row of rows) {
+    const eventId = String(row[regMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[regMap['Event_Date']]);
+    const calendarId = String(row[regMap['Calendar_Source']] || '').trim();
+    if (!eventId || !date || !calendarId) continue;
+    if (formatDateKey(date) < todayKey) continue; // upcoming only — see the banner
+    if (seen[eventId]) continue;
+    if (looked >= MAX_INVITE_REMOVAL_EVENTS_PER_RUN) { deferred++; continue; }
+
+    const session = {
+      eventId, date, calendarId,
+      title: String(row[regMap['Clean_Title']] || '').trim(),
+      location: String(row[regMap['Location']] || '').trim()
+    };
+    const event = findCalendarEventForSession(session);
+    looked++;
+    if (!event) { seen[eventId] = true; continue; }
+
+    let guests = [];
+    try {
+      guests = event.getGuestList().map(guest => guest.getEmail());
+    } catch (err) {
+      log(`⚠️ Could not read the guest list for "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
+      continue; // NOT marked seen: an unread event is one to try again.
+    }
+
+    let changedHere = false;
+    dedupePreservingOrder(guests.map(email => String(email || '').trim()).filter(Boolean))
+      .forEach(email => {
+        try {
+          event.removeGuest(email);
+          removed++;
+          changedHere = true;
+        } catch (err) {
+          log(`⚠️ Could not remove ${email} from "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
+        }
+      });
+    if (changedHere) eventsTouched++;
+
+    // The whole ledger entry, not a filtered one: nobody is invited to this
+    // event any more, so a record saying otherwise is only a way to not
+    // re-invite them if the office changes its mind.
+    if (ledger[eventId]) {
+      delete ledger[eventId];
+      __calendarInviteLedgerDirty = true;
+    }
+    seen[eventId] = true;
+  }
+
+  saveCalendarInviteLedger();
+  saveAllInviteRemovalState(seen);
+  if (removed > 0) invalidateCalendarEventsCache();
+
+  const summary = `Removed ${removed} guest(s) from ${eventsTouched} upcoming event(s); ` +
+    `${looked} event(s) checked` +
+    (deferred > 0 ? `. ${deferred} left — run it again to finish.` : '.') +
+    ` Future invitations are governed by Add_Guest_To_Calendar on Program_Settings, which this ` +
+    `did not change.`;
+  log(`removeAllCalendarInvitesFromEvents: ${summary}`);
+  toastIfPossible(summary);
+  return summary;
+}

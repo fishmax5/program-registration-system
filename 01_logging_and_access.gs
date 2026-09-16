@@ -85,7 +85,11 @@ const ADMIN_GATED_ACTIONS = [
   // Takes whole sessions off the table when a calendar is retired. The
   // read-only report beside it (reportOrphanedSessionRows) is deliberately NOT
   // here — measuring is open to whoever can open the workbook; removing is not.
-  'Remove Leftover Calendar Rows'
+  'Remove Leftover Calendar Rows',
+  // Withdraws every invitation from every upcoming event. There is no un-send
+  // and no un-remove: the next sync re-invites only where the guest-list tick
+  // on Program_Settings is still on, which is a separate decision. See 33.
+  'Remove All Calendar Invites'
 ];
 
 /** Does this action still ask who is signed in? */
