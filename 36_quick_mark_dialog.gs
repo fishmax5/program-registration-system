@@ -399,6 +399,16 @@ function buildQuickMarkHtml(preloadedIndex) {
 <div id="status"></div>
 <div id="log"></div>
 
+<!-- THE OTHER PERSON AT THE DESK. A volunteer is signed in at the same moment
+     and by the same hand as everybody else, and the one thing that stopped
+     their hours being recorded was that there was nowhere to record them from
+     here. This swaps this dialog for that one; nothing on this screen is
+     saved, because every mark on it is already written the moment it is
+     pressed (see the optimistic writes above). See 99e. -->
+<p style="margin-top:14px;border-top:1px solid #eee;padding-top:10px">
+  <a href="#" onclick="openVolunteers(); return false;">🤝 A volunteer, not a registrant — log their hours…</a>
+</p>
+
 <script>
   var WALK_IN = '__WALK_IN__';
   var LOCATIONS = ${locations};
@@ -412,6 +422,10 @@ function buildQuickMarkHtml(preloadedIndex) {
   // workbook that has never built its lists, and then the fetch below fills it
   // in exactly as it used to.
   var INDEX = ${inlineIndex} ? JSON.parse(${inlineIndex}) : null;
+
+  function openVolunteers() {
+    google.script.run.showVolunteerHoursDialog();
+  }
 
   function el(id) { return document.getElementById(id); }
   function say(msg, cls) { var s = el('status'); s.textContent = msg; s.className = cls || ''; }

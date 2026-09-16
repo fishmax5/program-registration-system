@@ -175,6 +175,13 @@ function buildAppMenu(ui, includeAdmin) {
       // one lists what it found and merges only what somebody ticks. See
       // section 85.
       .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', 'showDuplicateRegistrationsDialog')
+      .addSeparator()
+      // THE OTHER PEOPLE IN THE BUILDING. A volunteer is not a registrant \u2014
+      // they are working, not attending, and a good many of them are not at
+      // either building \u2014 so their hours are a tab of their own. Filed here
+      // because it is roster work: who was here and what they did. See 99e.
+      .addItem('\ud83e\udd1d Log Volunteer Hours\u2026', 'showVolunteerHoursDialog')
+      .addItem('\ud83e\udd1d Open the Volunteer Hours Tab', 'openVolunteerHoursTab')
       // THE ONE-ROW DELETE, beside the roll tools because it is the same job
       // at the other tab: a duplicate found while reading down a list. Mark
       // the rows on All_Registrants (Manual_Override → "Remove This Row"),
@@ -398,6 +405,9 @@ function buildAppMenu(ui, includeAdmin) {
         // the missing name is the person who should be able to press it.
         // See 99d.
         .addItem('Find Missing Registrations (read-only report)', 'reportMissingRegistrations')
+        // The year's volunteer hours, by person \u2014 the figure the centre is
+        // credited on. Read-only and ungated like the four above it. See 99e.
+        .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', 'reportVolunteerHours')
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.

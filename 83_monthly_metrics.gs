@@ -119,7 +119,11 @@ function collectMetricsSourceRows(ss) {
     sessionMap: getIndexMap(HEADERS.All_Program_Sessions),
     registrantRows: registrantSheet
       ? readAllSectionedRowValues(registrantSheet, HEADERS.All_Registrants, 'Event_ID') : [],
-    registrantMap: getIndexMap(HEADERS.All_Registrants)
+    registrantMap: getIndexMap(HEADERS.All_Registrants),
+    // The volunteer visits, parsed once for the whole capture rather than per
+    // month (99e). A workbook with no volunteer tab reads as an empty list,
+    // which is what makes the three columns below zero rather than absent.
+    volunteerVisits: readVolunteerVisits()
   };
 }
 
@@ -138,6 +142,10 @@ function metricsMonthsPresent(source) {
   };
   source.sessionRows.forEach(row => note(row, source.sessionMap));
   source.registrantRows.forEach(row => note(row, source.registrantMap));
+  // A month in which nobody registered for anything and two volunteers worked
+  // is still a month this centre ran, and the hours are the part it is
+  // credited for.
+  (source.volunteerVisits || []).forEach(visit => { months[visit.monthKey] = true; });
   return Object.keys(months).sort().reverse();
 }
 
@@ -296,8 +304,10 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
     }
   });
 
+  const volunteers = volunteerMetricsForMonth(monthKey, source.volunteerVisits || []);
+
   if (sessions === 0 && lunchSessions === 0 && registrations === 0 &&
-      waitlisted === 0 && cancellations === 0) {
+      waitlisted === 0 && cancellations === 0 && volunteers.visits === 0) {
     return null; // nothing left to count — see the banner above
   }
 
@@ -339,6 +349,12 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
     Meals_Served: mealsServed,
     Meals_Consumed: mealsConsumed,
     Lunch_Only_Signups: lunchOnlySignups,
+    // DISTINCT PEOPLE and VISITS as two columns, because "how many volunteers
+    // do you have" and "how often did they come" are the two questions the
+    // annual return asks and one number answers neither.
+    Volunteers: volunteers.volunteers,
+    Volunteer_Visits: volunteers.visits,
+    Volunteer_Hours: volunteers.hours,
     Captured_On: new Date(),
     Notes: ''
   };

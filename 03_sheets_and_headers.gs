@@ -77,7 +77,13 @@ const SHEET_NAMES = {
   // RECORD rather than a projection of the current data: the registrant rows
   // a month was counted from are eventually archived, and a stored row is
   // what still answers "how did last September compare to the one before".
-  METRICS: 'Metrics'
+  METRICS: 'Metrics',
+  // One row per volunteer VISIT — who came, when, for how long, and whether it
+  // was for a program or from their own kitchen table. A visit is not a
+  // registration (a volunteer is working, not attending) and the hours are
+  // reported on annually, which is why it is a tab of its own rather than a
+  // Person_Type on All_Registrants. See 99e_volunteer_hours.gs.
+  VOLUNTEER_HOURS: 'Volunteer_Hours'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -908,9 +914,44 @@ defineLazyGlobal_('HEADERS', () => ({
     'Waitlisted', 'Cancellations',
     'Attended', 'Attendance_Rate', 'Seats_Filled_Rate', 'Empty_Seats',
     'Meals_Ordered', 'Meals_Served', 'Meals_Consumed', 'Lunch_Only_Signups',
-    'Captured_On', 'Notes'
+    'Captured_On', 'Notes',
+    // The volunteer side of the same month, counted off Volunteer_Hours
+    // (99e). Stored like everything else here, so a year whose visit rows have
+    // been tidied away still reports the hours that were worked.
+    'Volunteers', 'Volunteer_Visits', 'Volunteer_Hours'
+  ],
+  /**
+   * Volunteer_Hours — ONE ROW PER VISIT, which is the grain the year-end
+   * report needs: the same person leading the same class every Tuesday is
+   * thirty-six rows and thirty-six sets of hours, not one row somebody keeps
+   * adding to.
+   *
+   * Arrived/Departed are times of day and Hours is worked out from them
+   * (volunteerVisitHours); a volunteer who worked from home and reports "two
+   * hours on the telephone" types Hours and leaves the times blank, which is
+   * the whole reason Hours is a column rather than a formula.
+   *
+   * Program and Location are both allowed to be blank: a Mah Jongg leader
+   * ringing round from home on a Thursday is affiliated with a program and at
+   * no building, and somebody covering the front desk is at a building and on
+   * no program.
+   */
+  Volunteer_Hours: [
+    'Date', 'Name', 'Role', 'Program', 'Location',
+    'Arrived', 'Departed', 'Hours',
+    'Logged_By', 'Logged_On', 'Staff_Notes', 'Entry_ID'
   ]
 }));
+
+/**
+ * Volunteer_Hours is entirely staff-authored — nothing in this workbook
+ * derives a volunteer visit, because nothing in this workbook is told about
+ * one. Entry_ID is the exception and it is hidden.
+ */
+const VOLUNTEER_HOURS_STAFF_COLUMNS = [
+  'Date', 'Name', 'Role', 'Program', 'Location',
+  'Arrived', 'Departed', 'Hours', 'Staff_Notes'
+];
 
 /** Assistance_Requests columns the importer must never overwrite — the staff's own follow-up. */
 const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Notes'];
