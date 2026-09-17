@@ -610,7 +610,13 @@ function removeAdminGuestsFromCalendarEvents() {
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  // The SESSION table (SHEET_NAMES.PROGRAM_DASHBOARD is 'All_Program_Sessions'),
+  // so its header list is HEADERS.All_Program_Sessions — the one carrying
+  // Event_ID, Event_Date and Calendar_Source. Reading it under
+  // HEADERS.Master_Program_Dashboard (the one-row-per-PROGRAM tab) left every
+  // one of those three undefined, so every row was skipped and the sweep
+  // reported nothing to remove however many guests were on the events.
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
@@ -762,7 +768,13 @@ function removeAllCalendarInvitesFromEvents() {
   if (!requireAuthorizedAdmin('Remove All Calendar Invites')) return;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  // The SESSION table (SHEET_NAMES.PROGRAM_DASHBOARD is 'All_Program_Sessions'),
+  // so its header list is HEADERS.All_Program_Sessions — the one carrying
+  // Event_ID, Event_Date and Calendar_Source. Reading it under
+  // HEADERS.Master_Program_Dashboard (the one-row-per-PROGRAM tab) left every
+  // one of those three undefined, so every row was skipped and the sweep
+  // reported nothing to remove however many guests were on the events.
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
