@@ -157,11 +157,18 @@ function optionsOf(html) {
   const m = /var OPTS = JSON\.parse\(("(?:[^"\\]|\\.)*")\);/.exec(html);
   return m ? JSON.parse(JSON.parse(m[1])) : null;
 }
+// RELATIVE TO TODAY, not a date typed into the file: a hard-coded key is
+// "upcoming" until the morning it is not, and then this test fails for a
+// reason that has nothing to do with the code. Same rule as
+// tests/appointment_review.test.js.
+const soon = new Date(Date.now() + 30 * 86400000);
+const soonKey = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, '0')}-` +
+  `${String(soon.getDate()).padStart(2, '0')}`;
 const index = {
   builtAt: '9:00 AM',
   sessions: [
     { value: session, label: session, location: 'Narberth', title: 'Chair Yoga',
-      dateKey: '2026-09-16', byAppointment: false, times: [], group: 'Upcoming' },
+      dateKey: soonKey, byAppointment: false, times: [], group: 'Upcoming' },
     // A session that has already happened: markable, but never registerable.
     { value: 'Chair Yoga · Wed, Jan 7, 2015', label: 'Chair Yoga · Wed, Jan 7, 2015',
       location: 'Narberth', title: 'Chair Yoga', dateKey: '2015-01-07',
@@ -177,7 +184,7 @@ ok('?page=register opens the second screen', reg.page === 'register');
 
 // Registering somebody for last Tuesday is not a thing a desk does.
 ok('only upcoming sessions can be registered onto',
-  reg.upcoming.length === 1 && reg.upcoming[0].dateKey === '2026-09-16');
+  reg.upcoming.length === 1 && reg.upcoming[0].dateKey === soonKey);
 
 // The names travel with the page for the register screen's type-ahead — a
 // server call at the moment a volunteer starts typing is the wait this page
