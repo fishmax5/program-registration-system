@@ -913,8 +913,11 @@ function describeWhyNoLunchSignUpForms() {
       'come closer.';
   }
   if (s.upcomingDates === 0 && s.pastDates > 0) {
-    return `every catered date on ${SHEET_NAMES.LUNCH_SCHEDULE} has already passed. Add next month's ` +
-      'Hot/Cold rows and run this again.';
+    // A MONTH THAT IS OVER, matching what syncLunchOnlySessions() actually
+    // counted — a date earlier THIS month is still on this month's form, so it
+    // is never one of these.
+    return `every catered date on ${SHEET_NAMES.LUNCH_SCHEDULE} is in a month that has already ended. ` +
+      "Add this month's or next month's Hot/Cold rows and run this again.";
   }
   if (s.cateredRows === 0) {
     return `there are no Hot or Cold rows on ${SHEET_NAMES.LUNCH_SCHEDULE} at a location that caters. ` +

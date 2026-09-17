@@ -148,10 +148,29 @@ check('...and is counted as such, not as a missing menu',
 check('a menu that is only too far ahead says so',
   /more than 6\s*months out/.test(sandbox.describeWhyNoLunchSignUpForms()), true);
 
-menuRows = [menu(2026, 7, 3, 'Narberth', 'Hot')]; // 3 August: gone by
+// A MONTH THAT IS OVER, not a date that is. NOW is 21 August, so a 3 August
+// date is still on THIS month's form — see the startKey banner in
+// syncLunchOnlySessions(). July is the one that has actually gone.
+menuRows = [menu(2026, 6, 3, 'Narberth', 'Hot')]; // 3 July: the month is over
 run();
-check('a menu that has entirely passed says THAT instead',
-  /already passed/.test(sandbox.describeWhyNoLunchSignUpForms()), true);
+check('a menu whose month has ended says THAT instead',
+  /month that has already ended/.test(sandbox.describeWhyNoLunchSignUpForms()), true);
+check('...and the date is counted as past', sandbox.getLastLunchSignUpRunStats().pastDates, 1);
+
+// THE REGRESSION THIS FILE NOW HOLDS THE LINE ON. A date earlier this month is
+// not past: it belongs to the form this month's respondents are holding a link
+// to, and dropping it mid-month rewrote that form's grid under the responses
+// already on it. See getGridResponseByTitle().
+menuRows = [
+  menu(2026, 7, 3, 'Narberth', 'Hot'),   // 3 August, before NOW
+  menu(2026, 7, 28, 'Narberth', 'Hot')   // 28 August, after NOW
+];
+run();
+check('a date earlier THIS month is still built, not dropped',
+  [sandbox.getLastLunchSignUpRunStats().upcomingDates,
+    sandbox.getLastLunchSignUpRunStats().pastDates], [2, 0]);
+check('so the month builds one form carrying both its dates', built,
+  ['Narberth August 2026']);
 
 menuRows = [menu(2026, 8, 3, 'Zoom', 'Hot')]; // a location that never caters
 run();

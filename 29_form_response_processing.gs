@@ -86,6 +86,29 @@ function processFormResponse(formIndex, response, registryIndex, protectedKeys, 
 
   const rows = [];
   const formId = form.getId();
+
+  // A GRID THAT WAS RESHAPED AFTER THIS RESPONSE WAS SUBMITTED IS NOT READ.
+  //
+  // getGridResponseByTitle() explains what `misaligned` means and why it
+  // cannot be recovered from: the answers are positional, the rows beside them
+  // are the form's rows now, and the two stopped describing the same list. The
+  // only readings available here are "the right person at the wrong session"
+  // and "nothing" — so this takes nothing, and says whose response it was, on
+  // the same channel a row that matches no session already uses.
+  //
+  // It is reported per RESPONSE rather than per row on purpose: one submission
+  // is one thing for somebody to re-enter, and the whole of it is suspect, not
+  // some of it.
+  if ((attendanceGrid && attendanceGrid.misaligned) || (mealGrid && mealGrid.misaligned)) {
+    const message = `${name || 'A response'} on form ${formId} (submitted ` +
+      `${submittedAt ? formatDateLabel(submittedAt) : 'at an unknown time'}) answered a date grid that has ` +
+      'since been reshaped, so its answers no longer line up with the dates now on the form. It has NOT been ' +
+      'imported, because the alignment cannot be recovered and importing it would book somebody onto a session ' +
+      'they did not choose. Open the response and enter it by hand.';
+    log(`⚠️ ${message}`);
+    noteForAdmin('Form response could not be read against its dates', message);
+    return [];
+  }
   // The dates to walk: every date the respondent was shown. On a v9 lunch-only
   // form the meal grid is the only grid there is, so it is also the date list.
   const dateRows = attendanceGrid ? attendanceGrid.rows : mealGrid.rows;

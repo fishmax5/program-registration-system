@@ -44,6 +44,16 @@
 //      definitely submitted to a different grid. A reorder that kept the count
 //      the same cannot be proved and is not claimed; see the report's wording.
 //
+//      WHAT CHANGED SINCE, and why this audit is still worth running.
+//      getGridResponseByTitle() now MARKS that provable half (`misaligned`)
+//      and processFormResponse() refuses such a response outright, naming it
+//      for the office instead of importing a version of it nobody submitted.
+//      So fault 2 is no longer silent at import — but it is also not gone:
+//      what the import can refuse is exactly what this audit can prove, and
+//      the reorder that kept the row count is still invisible to both. This
+//      audit remains the way to sweep a workbook for responses that were read
+//      wrongly BEFORE the refusal existed.
+//
 // WHAT IT IS NOT. It does not repair anything, and it deliberately cannot. Its
 // output is a list of people and sessions for somebody to look at, because the
 // repair for fault 2 is a judgement about which date a person meant and this

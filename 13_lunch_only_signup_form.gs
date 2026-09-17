@@ -159,15 +159,41 @@ function syncLunchOnlySessions(registrySheet) {
   const map = getIndexMap(headers);
   const menuMap = getIndexMap(HEADERS.Lunch_Schedule);
   // NOT the calendar's 60-day window — see LUNCH_SIGNUP_LOOKAHEAD_MONTHS.
-  const { end } = computeLunchSignUpDateRange();
-  const todayKey = formatDateKey(new Date());
+  const { start, end } = computeLunchSignUpDateRange();
+  // THE FIRST OF THIS MONTH, not today — and the difference is the whole of
+  // why this line exists.
+  //
+  // This used to cut at today, so a form lost its Tuesday on Wednesday. Two
+  // things went wrong with that, and only the second is visible.
+  //
+  // The quiet one: nothing else in this system narrows a live form mid-month.
+  // computeSyncDateRange() opens on the first of the month for exactly this
+  // reason, and refreshFormShapeForAllForms() rebuilds a form's labels from
+  // its session ROWS — which keep every date of the month, because deleting a
+  // past lunch row would take the anchor out from under anybody signed up for
+  // it. So the two passes disagreed: this one stripped the past dates, the
+  // hourly form check put them straight back, and the form gained a revision a
+  // day forever while ending up exactly where it started. Same shape as the
+  // two-window problem 94_assistance_program_forms.gs exists to avoid, and
+  // the same fix: one window, read by both.
+  //
+  // The dangerous one: narrowing a live grid REWRITES its rows on the same
+  // item (setGridItemRows()), while the responses already on it keep an answer
+  // array sized to the rows they were submitted against. Anything that re-reads
+  // an older response — a form marked for re-import, an edited submission —
+  // would then pair a stored tick with the wrong date. getGridResponseByTitle()
+  // refuses to guess when it sees that mismatch now, but the real fix is not
+  // to create it: a lunch form covers ONE calendar month, so a window that
+  // opens on the first of the month is a window it never shrinks inside.
+  const startKey = formatDateKey(start);
 
-  // WHICH DATES. Catered (Hot/Cold) rows only, from today forward, inside the
-  // sign-up horizon (LUNCH_SIGNUP_LOOKAHEAD_MONTHS — NOT the calendar import's
-  // shorter one, which is a different question) — and never at a location whose
-  // Config policy is "Never", which is a standing statement that no food is
-  // served there and outranks a menu row somebody typed by mistake (the same
-  // rule buildDashboardRollup() applies, and it reports the contradiction).
+  // WHICH DATES. Catered (Hot/Cold) rows only, from the start of this month,
+  // inside the sign-up horizon (LUNCH_SIGNUP_LOOKAHEAD_MONTHS — NOT the
+  // calendar import's shorter one, which is a different question) — and never
+  // at a location whose Config policy is "Never", which is a standing statement
+  // that no food is served there and outranks a menu row somebody typed by
+  // mistake (the same rule buildDashboardRollup() applies, and it reports the
+  // contradiction).
   const wanted = {};
   /** Location -> the furthest-out catered month it has rows for past the horizon. */
   const beyondHorizonBy = {};
@@ -185,7 +211,10 @@ function syncLunchOnlySessions(registrySheet) {
     // than this runs" — two states that produced the same silence, and only
     // one of which is anybody's mistake.
     const dateKey = formatDateKey(d);
-    if (dateKey < todayKey) { stats.pastDates++; return; }
+    // A MONTH THAT IS OVER, not a date that is. See startKey above: a date
+    // earlier this month still belongs to this month's form, and counting it
+    // as "already passed" is what would take it off one.
+    if (dateKey < startKey) { stats.pastDates++; return; }
     if (d > end) {
       stats.beyondHorizon++;
       const label = getMonthLabel(d);

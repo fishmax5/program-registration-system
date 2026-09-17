@@ -26,6 +26,7 @@ this.describeRegistrationAudit_ = describeRegistrationAudit_;
 this.classifyEmptyResponse_ = classifyEmptyResponse_;
 this.auditFormGridHealth_ = auditFormGridHealth_;
 this.buildNamesOnFormIndex_ = buildNamesOnFormIndex_;
+this.getGridResponseByTitle = getGridResponseByTitle;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.TEMPLATE_GRID_PLACEHOLDER_ROW = TEMPLATE_GRID_PLACEHOLDER_ROW;
@@ -348,6 +349,33 @@ function responseAnswering(item, values) {
     report.indexOf('• Flo Rice') === -1, true);
   check('...and the report does not assert a cause it has not checked',
     report.indexOf('meal swap deleted') === -1, true);
+}
+
+// --- and the IMPORT itself now refuses the same mismatch --------------------
+// The audit above REPORTS a reshaped grid after the fact. This is the other
+// half: getGridResponseByTitle() marks it, so processFormResponse() can decline
+// to guess rather than book somebody onto a session they did not pick. Pinned
+// here because the audit's own banner is what promised this was unguarded.
+{
+  const idx = indexOverGrid('form9', Q.ATTENDANCE_GRID,
+    ['Tue 1 Sep', 'Thu 3 Sep', 'Tue 8 Sep'], 'CHECKBOX_GRID');
+  const shrunk = sandbox.getGridResponseByTitle(idx,
+    responseAnswering(idx.item, [['Me'], []]), Q.ATTENDANCE_GRID);
+  check('a response answered against a smaller grid is flagged at import',
+    shrunk.misaligned, true);
+  check('...and its answers are still carried, for whoever reports it',
+    shrunk.values.length, 2);
+}
+
+{
+  // THE ORDINARY CASE, which must stay ordinary: same shape, no flag, nothing
+  // reported, the response imported exactly as before.
+  const idx = indexOverGrid('form9', Q.ATTENDANCE_GRID,
+    ['Tue 1 Sep', 'Thu 3 Sep'], 'CHECKBOX_GRID');
+  const aligned = sandbox.getGridResponseByTitle(idx,
+    responseAnswering(idx.item, [['Me'], []]), Q.ATTENDANCE_GRID);
+  check('a response of the right size is not flagged', aligned.misaligned, false);
+  check('...and reads its rows as it always did', aligned.rows.length, 2);
 }
 
 console.log(failures === 0 ? '\nAll registration-audit checks passed.' : `\n${failures} failure(s).`);

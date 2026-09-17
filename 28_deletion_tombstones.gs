@@ -303,6 +303,28 @@ function getResponseValueByTitle(formIndex, response, title) {
  *
  * getRows()/getColumns() are themselves remote calls, so the resolved grid
  * is memoized on the formIndex — every response on a form shares one read.
+ *
+ * AND IT REFUSES TO GUESS WHEN THE SHAPES DISAGREE. `values` is positional:
+ * values[i] is the answer to the row that was i'th ON THE FORM AT THE MOMENT
+ * THIS RESPONSE WAS SUBMITTED. The rows beside it are the form's rows NOW, and
+ * those two are the same list only for as long as nobody has rewritten the
+ * grid — which setGridItemRows() does in place, on the same item id, every
+ * time a form's date list changes.
+ *
+ * So a response read after its grid was reshaped can pair a tick with a date
+ * the respondent never chose: someone who asked for Tuesday's lunch imported
+ * against Thursday's, taking a seat and a meal at the wrong sitting. The
+ * import normally never meets this, because it reads only responses newer than
+ * the sync clock — but a form marked for a full re-import reads from the
+ * beginning (see REGISTRATION_BACKFILL_PROP_KEY), and an edited submission
+ * comes back round whenever it was first made.
+ *
+ * A length mismatch is the one thing that says this happened and can be seen
+ * from here. There is no way to recover the true alignment from this side — a
+ * shorter array could be a row dropped from anywhere, not only the end — so
+ * the answer is `misaligned`, and the callers report the response rather than
+ * import a version of it that nobody submitted. One named response somebody
+ * has to enter by hand is a far smaller thing than a silently wrong one.
  */
 function getGridResponseByTitle(formIndex, response, title) {
   const items = formIndex.byTitle[title] || [];
@@ -324,7 +346,15 @@ function getGridResponseByTitle(formIndex, response, title) {
       shape = { rows: grid.getRows(), columns: grid.getColumns() };
       formIndex.gridShapeByItemId[itemId] = shape;
     }
-    return { rows: shape.rows, columns: shape.columns, values };
+    // See the banner: equal lengths are what make values[i] and rows[i] the
+    // same session. Carried rather than thrown, so the caller can name the
+    // form and the respondent in what it reports.
+    return {
+      rows: shape.rows,
+      columns: shape.columns,
+      values,
+      misaligned: values.length !== shape.rows.length
+    };
   }
   return null;
 }
@@ -468,6 +498,9 @@ function readMealCountGridResponse(formIndex, response, people) {
   if (mealGrid) {
     return {
       rows: mealGrid.rows,
+      // Carried through so the caller sees a reshaped grid here exactly as it
+      // sees one on the attendance grid — see getGridResponseByTitle().
+      misaligned: !!mealGrid.misaligned,
       countForRow: rowIdx => {
         const value = mealGrid.values[rowIdx];
         // A multiple-choice grid answers with one string per row; a stray
@@ -485,6 +518,7 @@ function readMealCountGridResponse(formIndex, response, people) {
   const extras = readExtraMealsResponse(formIndex, response);
   return {
     rows: legacyGrid.rows,
+    misaligned: !!legacyGrid.misaligned,
     countForRow: rowIdx => {
       const ticked = legacyGrid.values[rowIdx] || [];
       const list = Array.isArray(ticked) ? ticked : [ticked];
