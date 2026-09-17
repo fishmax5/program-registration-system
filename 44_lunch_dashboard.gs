@@ -588,6 +588,38 @@ function buildDashboardRollup(registrantRows) {
   }).sort((a, b) => (a.dateKey === b.dateKey ? a.location.localeCompare(b.location) : (a.dateKey < b.dateKey ? -1 : 1)));
 }
 
+/**
+ * Which of the hand-entry columns the schedule's live header row(s) no longer
+ * name — the check updateMasterLunchDashboard() refuses to render past.
+ *
+ * Read off the SHEET rather than off HEADERS, because HEADERS is what we are
+ * about to write and always has every column in it; the question is what the
+ * tab currently says, since that is what the sectioned read projects through.
+ * A tab with no schedule header row at all (a fresh or placeholder workbook)
+ * reports nothing missing — there are no typed values there to protect.
+ */
+function missingManualEntryHeaders(sheet, headers) {
+  let zones = [];
+  const present = {};
+  try {
+    zones = getSectionZones(sheet, 'Standard_Buffer');
+    zones.forEach(z => {
+      const map = getHeaderMapAt(sheet, z.headerRow);
+      Object.keys(map).forEach(name => { present[name] = true; });
+    });
+  } catch (err) {
+    // A probe that cannot read the header row answers "nothing missing" — the
+    // sectioned read that just succeeded is the evidence the tab is readable,
+    // and a guard that blocked the render whenever IT failed would be a second
+    // way for the dashboard to stop updating rather than a protection.
+    log(`ℹ️ Could not check the lunch dashboard's hand-entry headers (${err}) — rendering as usual.`);
+    return [];
+  }
+  if (zones.length === 0) return [];
+  return LUNCH_DASHBOARD_MANUAL_COLUMNS.filter(
+    name => headers.indexOf(name) !== -1 && !present[name]);
+}
+
 function updateMasterLunchDashboard(registrantRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_DASHBOARD);
@@ -601,6 +633,36 @@ function updateMasterLunchDashboard(registrantRows) {
   // on TODAY_LUNCH_HEADERS), so it safely finds only the schedule's own
   // header rows and not the Today block's.
   const existingTable = getSectionedRows(sheet, headers, 'Standard_Buffer');
+
+  // THE RENDER IS A READ, A CLEAR AND A REWRITE, so anything the read fails to
+  // see is gone when the write lands. For a derived column that costs nothing
+  // — the next pass recomputes it. For the columns a person TYPES
+  // (LUNCH_DASHBOARD_MANUAL_COLUMNS: what was actually ordered, and the
+  // reconciliation numbers beside it) there is nothing to recompute from: the
+  // kitchen's own record of the day exists only in that cell.
+  //
+  // buildHeaderProjectionFromRow() resolves a canonical column the header row
+  // does not carry to -1, which reads as blank — so one header cell edited,
+  // translated or overwritten on the schedule's header row would blank the
+  // whole column on the next sync, silently and for every date at once. Better
+  // to leave the tab exactly as it is and say so: a stale dashboard is a
+  // complaint, an erased one is unrecoverable. The lunch roster is skipped
+  // with it — it is wholly derived and redraws on the next pass, and drawing
+  // today's roster beside a schedule that was not refreshed would say the two
+  // agree.
+  if (existingTable.length > 0) {
+    const lost = missingManualEntryHeaders(sheet, headers);
+    if (lost.length > 0) {
+      noteForAdmin('Lunch dashboard not refreshed — a hand-entry column is missing',
+        `${SHEET_NAMES.LUNCH_DASHBOARD} was left untouched this pass because its header row no longer ` +
+        `carries: ${lost.join(', ')}. Those columns hold what the kitchen actually ordered, which nothing ` +
+        `can recompute, and a refresh would have written them back blank. Put the header name(s) back ` +
+        `exactly as spelled and the next sync will pick up where it left off.`);
+      log(`⚠️ Master_Lunch_Dashboard render skipped: header row missing ${lost.join(', ')}.`);
+      return;
+    }
+  }
+
   const tableByKey = {};
   existingTable.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
@@ -822,6 +884,16 @@ function applyLunchRosterFormatting(sheet, headers, result) {
  *   this workbook treats those as untouchable; an exception here would be the
  *   one place a person's own row disappears under them. Reported instead.
  *
+ *   ROWS CARRYING A TYPED ORDERING NUMBER, whatever Manual_Override says.
+ *   That flag is set by autoFlipManualOverride() from a SIMPLE onEdit, which
+ *   never fires for a write made by a script or the API and only flips a cell
+ *   reading "Auto-Synced" or blank — so a row somebody set back to
+ *   "Auto-Synced" afterwards, or filled in from anywhere but the keyboard,
+ *   carries the kitchen's number with no flag on it. A value in one of
+ *   LUNCH_DASHBOARD_MANUAL_COLUMNS is itself the evidence a person was here,
+ *   and it is evidence that cannot be recomputed; the flag is a second-hand
+ *   account of the same thing.
+ *
  *   ROWS STILL IN THE ROLLUP. A "Not Serving" day where somebody's
  *   Lunch_Served box is ticked stays, because food demonstrably happened —
  *   Served_Confirmed records reality, not the plan.
@@ -845,10 +917,15 @@ function dropNotServingRows(tableRows, map, rollup) {
     if (!isExplicitlyNotServing(d, location)) { kept.push(row); return; }
 
     const override = String(row[map['Manual_Override']] || '').trim();
-    if (override === 'Manually Added' || override === 'Manually Edited') {
+    const typed = LUNCH_DASHBOARD_MANUAL_COLUMNS.filter(
+      name => map[name] !== undefined && String(row[map[name]] || '').trim() !== '');
+    if (override === 'Manually Added' || override === 'Manually Edited' || typed.length > 0) {
+      const why = (override === 'Manually Added' || override === 'Manually Edited')
+        ? `hand-edited (${override})`
+        : `carries hand-entered numbers (${typed.join(', ')})`;
       noteForAdmin('Not-Serving date still on the lunch dashboard',
-        `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row was ` +
-        `hand-edited (${override}) so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
+        `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row ` +
+        `${why} so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
       kept.push(row);
       return;
     }

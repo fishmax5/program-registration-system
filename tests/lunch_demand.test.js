@@ -57,6 +57,7 @@ this.buildRegistrantRow = buildRegistrantRow;
 this.updateMasterLunchDashboard = updateMasterLunchDashboard;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
+this.dropNotServingRowsReal = dropNotServingRows;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -164,6 +165,75 @@ check('and the buffer Config says', edited[dashMap['Standard_Buffer']], 2);
 // A row somebody created outright is still theirs, whole.
 const added = renderWith('Manually Added');
 check('a manually ADDED row is left alone entirely', added[dashMap['Registered_Count']], 9);
+
+// --- 3. and neither of the two ways it could be ERASED ----------------------
+// Actual_Ordered is the one number on this tab nothing can recompute: it is
+// what the kitchen actually ordered, typed by a person. The render is a read,
+// a sheet.clear() and a rewrite, so anything the read misses is gone.
+
+// (a) A header cell edited out from under the column. The sectioned read
+//     resolves a canonical column the header row doesn't name to blank, so the
+//     rewrite would put a blank back over every typed number at once.
+let noted = [];
+sandbox.noteForAdmin = (subject) => { noted.push(subject); };
+
+function renderWithHeaders(headerNames) {
+  const table = [existingRow('Manually Edited')];
+  written = null;
+  noted = [];
+  sandbox.getOrCreateSheet = (ss, name) => ({ __name: name });
+  sandbox.readAllSectionedRows = () => table;
+  sandbox.buildLunchSignUpRows = () => [];
+  sandbox.getLunchOnlyFormLinks = () => ({});
+  sandbox.getDashboardRowPlan = () => ({});
+  sandbox.buildDashboardRollup = () => [{
+    dateKey: '2026-09-14', location: 'Narberth', registeredCount: 13, servedConfirmed: 0,
+    mealType: 'Hot', mealShorthand: 'Chicken'
+  }];
+  sandbox.getMealBufferConfigForLocation = () => ({ standardBufferAmount: 2, testerBufferAmount: 1 });
+  sandbox.dropNotServingRows = rows => rows;
+  sandbox.renderLunchRosterSheet = () => {};
+  sandbox.writeMasterLunchDashboardSheet = (sheet, plan, headers, rows) => { written = rows; };
+  // Stand in for the live header probe: these are the names the tab's own
+  // header row currently carries.
+  sandbox.getSectionZones = () => [{ headerRow: 5, dataStart: 6, dataEnd: 6 }];
+  sandbox.getHeaderMapAt = () => {
+    const map = {};
+    headerNames.forEach((name, i) => { map[name] = i + 1; });
+    return map;
+  };
+  sandbox.updateMasterLunchDashboard(null);
+  return written;
+}
+
+check('a header row carrying every column renders as usual',
+  renderWithHeaders(dashHeaders) !== null, true);
+const blanked = renderWithHeaders(dashHeaders.filter(h => h !== 'Actual_Ordered'));
+check('a header row missing Actual_Ordered writes NOTHING', blanked, null);
+check('and the office is told which column went', noted.length, 1);
+
+// (b) A "Not Serving" future date whose row carries a typed order. The
+//     hand-edited flag comes from a simple onEdit, which never fires for a
+//     script write and only flips a cell reading "Auto-Synced" or blank — so
+//     the typed number itself has to be what saves the row.
+sandbox.noteForAdmin = () => {};
+sandbox.isExplicitlyNotServing = () => true;
+const future = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+function notServingRow(override, actualOrdered) {
+  const row = new Array(dashHeaders.length).fill('');
+  row[dashMap['Event_Date']] = future;
+  row[dashMap['Location']] = 'Narberth';
+  row[dashMap['Manual_Override']] = override;
+  row[dashMap['Actual_Ordered']] = actualOrdered;
+  return row;
+}
+const dropRows = rows => sandbox.dropNotServingRowsReal(rows, dashMap, []);
+check('an auto-synced Not-Serving row with nothing typed on it goes',
+  dropRows([notServingRow('Auto-Synced', '')]).length, 0);
+check('the same row carrying a typed order STAYS',
+  dropRows([notServingRow('Auto-Synced', 30)]).length, 1);
+check('and so does a hand-edited one, as before',
+  dropRows([notServingRow('Manually Edited', '')]).length, 1);
 
 console.log(failures === 0 ? '\nAll lunch-demand checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);
