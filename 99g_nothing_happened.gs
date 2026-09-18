@@ -268,6 +268,7 @@ function clearStuckBackgroundJobs() {
   }
 
   const cleared = [];
+  const refused = [];
   inFlight.forEach(job => {
     try {
       // Its own escape hatch where it has one, because those put back what the
@@ -277,16 +278,29 @@ function clearStuckBackgroundJobs() {
       if (job.cancel === 'cancelBootstrapCalendars') cancelBootstrapCalendars();
       else if (job.cancel === 'cancelFormRebuildSweep') cancelFormRebuildSweep();
       else clearSlicedJobState(job.key);
-      cleared.push(job.label);
+      // A CANCEL CAN ITSELF BE REFUSED: both escape hatches are admin-gated
+      // (ADMIN_GATED_ACTIONS, `01`), so the account pressing this may not be
+      // allowed to run them — and reporting "stood down" for a job still
+      // sitting there would be this file committing the very fault it exists
+      // to report. The state is the honest check.
+      if (getSlicedJobState(job.key, job.label)) refused.push(job.label);
+      else cleared.push(job.label);
     } catch (err) {
       log(`⚠️ Could not stand down ${job.label} (${err}).`);
     }
   });
 
-  const summary = cleared.length > 0
-    ? `Stood down: ${cleared.join(', ')}. Run 🔄 Update Everything Now when you are ready — and if the ` +
-      'hourly runs had been paused, run 🔧 Admin ▸ Check Triggers once to be sure they are back.'
-    : 'Nothing could be stood down — see the log.';
+  const summary = [
+    cleared.length > 0
+      ? `Stood down: ${cleared.join(', ')}. Run 🔄 Update Everything Now when you are ready — and if the ` +
+        'hourly runs had been paused, run 🔧 Admin ▸ Check Triggers once to be sure they are back.'
+      : '',
+    refused.length > 0
+      ? `Still in flight: ${refused.join(', ')}. Standing those down is restricted to ` +
+        `${listAuthorizedAdminEmails().join(', ')} — the refusal says which account. Sign in as one of ` +
+        'them and press this again.'
+      : ''
+  ].filter(Boolean).join('\n\n') || 'Nothing could be stood down — see the log.';
   log(`clearStuckBackgroundJobs: ${summary}`);
   if (ui) ui.alert('Background jobs', summary, ui.ButtonSet.OK);
 }

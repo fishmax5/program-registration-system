@@ -194,7 +194,11 @@ function requireAuthorizedAdmin(actionName) {
   const message = `⛔ "${actionName}" is restricted to: ${listAuthorizedAdminEmails().join(', ')} — ${whoami}. ` +
     `Ask one of those accounts to run it, or switch to one of them.`;
   log(message);
-  toastIfPossible(message);
+  // AN ALERT, NOT A TOAST. A refusal nobody reads is a menu item that appears
+  // to do nothing — and this one is doubly so, because the answer ("you are
+  // signed in as the wrong account") is not something anybody guesses. See the
+  // banner in 99g_nothing_happened.gs for the symptom this produced.
+  explainRefusal(message);
   return false;
 }
 
