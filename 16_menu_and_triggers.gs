@@ -401,6 +401,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addSubMenu(ui.createMenu('\ud83d\udcc4 Reports')
         // Both READ-ONLY, and named so. They measure; they change nothing.
         .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        // "Nobody has signed up yet" is what a program registrant sheet says
+        // about a class nobody booked AND about one whose rows never reached
+        // it. This is which of the two, per sheet, and what to do about each.
+        // See 99h.
+        .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', 'reportLeaderSheetRosters')
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the
