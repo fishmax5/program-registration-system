@@ -134,6 +134,36 @@ function diagnoseLeaderSheetRosters() {
   };
 }
 
+/** The sheet a finding is about, as an address somebody can open. */
+function leaderSheetDoctorLink_(finding) {
+  return finding && finding.fileId
+    ? `https://docs.google.com/spreadsheets/d/${finding.fileId}/edit`
+    : '(no file id on the registry entry)';
+}
+
+/**
+ * Registry keys that describe the SAME program — two entries whose title and
+ * building match once normalized.
+ *
+ * This is a fault in itself and it is invisible from either sheet: the push
+ * writes the roster to ONE of them and stamps the other's refresh note, and
+ * whichever file the leader was actually sent may be the empty one. It happens
+ * when the key changes under an existing entry — a re-keying, a title that was
+ * briefly different, a sheet re-created from the menu while the old entry was
+ * still in the registry — because nothing has ever removed the old key.
+ */
+function findDuplicateLeaderSheetPrograms_(findings) {
+  const byName = {};
+  (findings || []).forEach(f => {
+    const key = leaderProgramKey(f.title, f.location);
+    if (!byName[key]) byName[key] = [];
+    byName[key].push(f);
+  });
+  return Object.keys(byName)
+    .filter(key => byName[key].length > 1)
+    .map(key => byName[key]);
+}
+
 /**
  * The report in words — the empty ones first, because they are the only reason
  * anybody opens this, and each with the sentence that says WHICH empty it is.
@@ -150,12 +180,38 @@ function describeLeaderSheetRosters(diagnosis) {
   const empty = data.findings.filter(f => f.rosterRows === 0);
   const filled = data.findings.filter(f => f.rosterRows > 0);
 
+  // FIRST, BECAUSE IT EXPLAINS EVERY OTHER LINE BELOW IT. Two registry entries
+  // for one program means the roster is written to one file while somebody is
+  // looking at the other, and both halves of that look perfectly healthy on
+  // their own — the workbook reports rows written, the leader reports an empty
+  // sheet, and both are telling the truth about different files.
+  const twins = findDuplicateLeaderSheetPrograms_(data.findings);
+  if (twins.length > 0) {
+    lines.push(`⚠️ TWO SHEETS FOR ONE PROGRAM (${twins.length}) — the roster goes to one of them and ` +
+      'whoever holds the other link sees an empty sheet:');
+    twins.forEach(group => {
+      const f = group[0];
+      lines.push(`• ${f.title || f.programKey}${f.location ? ` — ${f.location}` : ''}`);
+      group.forEach(entry => {
+        lines.push(`    ${entry.rosterRows} row(s) · key "${entry.programKey}" · ${leaderSheetDoctorLink_(entry)}`);
+      });
+      lines.push('    → Hand out the link with the rows on it, and delete the other sheet. ' +
+        'Re-creating the sheet from Rosters & Sharing writes a fresh entry for the key in use now.');
+    });
+    lines.push('');
+  }
+
   if (empty.length === 0) {
     lines.push('Every registered sheet has a roster to write. None of them is empty.');
   } else {
     lines.push(`EMPTY ROSTERS (${empty.length}) — what each one means:`);
     empty.forEach(f => {
       lines.push(`• ${f.title || f.programKey}${f.location ? ` — ${f.location}` : ''}`);
+      // THE ADDRESS, ON EVERY LINE. "The sheet is empty" and "the sheet I am
+      // looking at is empty" are the same sentence about two different files
+      // when a program has two registry entries, and the only thing that tells
+      // them apart is which file each line is about.
+      lines.push(`    ${leaderSheetDoctorLink_(f)}`);
       if (f.openError) {
         lines.push(`    ⚠️ The sheet itself could not be opened: ${f.openError}`);
         lines.push('    → Nothing has been written to it since that started. Run ' +
@@ -192,6 +248,7 @@ function describeLeaderSheetRosters(diagnosis) {
         `${f.rosterRows} row(s) across ${f.sessionsInWindow} session(s)` +
         (f.fingerprintMatches ? ' — already written, the next push will skip it.' : ' — due to be written.') +
         (f.openError ? ` ⚠️ but the sheet could not be opened: ${f.openError}` : ''));
+      lines.push(`    ${leaderSheetDoctorLink_(f)}`);
     });
   }
 

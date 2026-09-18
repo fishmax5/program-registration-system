@@ -139,6 +139,32 @@ checkTrue('a roster with people on it is not in the empty list',
 checkTrue('...and says how many rows it holds',
   /Chair Yoga.*: 1 row\(s\)/.test(report));
 
+// --- Two sheets for one program -------------------------------------------
+// THE CASE THAT LOOKS HEALTHY FROM BOTH ENDS: the registry holds two entries
+// for one program, the push writes the roster to one of them and stamps the
+// other's refresh note, and the leader holding the second link sees "Nobody
+// has signed up yet" while the workbook reports rows written. Neither side is
+// lying; they are about different files.
+const twinRegistry = {
+  [leaderProgramKey('Computer Tech Support', 'Narberth')]:
+    { title: 'Computer Tech Support', location: 'Narberth', fileId: 'LIVE', accessOpened: true },
+  'computer tech support|narberth ':
+    { title: 'Computer Tech Support', location: 'Narberth', fileId: 'STALE', accessOpened: true }
+};
+sandbox.__stub(sessions, [
+  registrantRow({
+    Event_ID: 'TECH', Event_Date: soon, Event: 'Computer Tech Support', Location: 'Narberth',
+    Name: 'Donna Inners', Program_Status: 'Active'
+  })
+], twinRegistry, []);
+const twinReport = describeLeaderSheetRosters();
+checkTrue('two entries for one program lead the report',
+  twinReport.indexOf('TWO SHEETS FOR ONE PROGRAM (1)') !== -1);
+checkTrue('...and both files are named by their links',
+  /LIVE\/edit[\s\S]*STALE\/edit|STALE\/edit[\s\S]*LIVE\/edit/.test(twinReport));
+checkTrue('...with the row count beside each, so the live one is obvious',
+  /1 row\(s\) · key/.test(twinReport) && /0 row\(s\) · key/.test(twinReport));
+
 // The healthy workbook says so in one line rather than listing nothing.
 sandbox.__stub(sessions, registrants, {}, []);
 checkTrue('no registered sheets is not reported as a fault',
