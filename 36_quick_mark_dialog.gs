@@ -98,7 +98,23 @@ function showQuickMarkDialog() {
   // opening the dialog must not be the thing that pays for a rebuild, because
   // that is a modal with a spinner in front of a queue. A workbook with no
   // stored index yet gets null here and the dialog fetches as it always did.
-  const html = HtmlService.createHtmlOutput(buildQuickMarkHtml(readyQuickMarkIndex()))
+  // NOTHING BEFORE THE DIALOG MAY BE ABLE TO STOP IT APPEARING. readyQuickMarkIndex()
+  // already answers null rather than throwing, but buildQuickMarkHtml() is
+  // handed whatever it returns and the markup is assembled from it — and this
+  // whole stretch runs BEFORE the dialog exists. An execution that dies in
+  // here (the account's ceiling, reached with no warning and no exception) or
+  // a throw whose red toast is gone before anybody looks up are the same thing
+  // to the person at the desk: a menu item that does nothing and says nothing.
+  // The page is built to fetch its own lists when it is handed none, so the
+  // fallback is a working dialog rather than no dialog.
+  let markup = '';
+  try {
+    markup = buildQuickMarkHtml(readyQuickMarkIndex());
+  } catch (err) {
+    log(`⚠️ Quick Mark: could not inline the stored lists (${err}) — opening the dialog to fetch them.`);
+    markup = buildQuickMarkHtml(null);
+  }
+  const html = HtmlService.createHtmlOutput(markup)
     .setWidth(560)
     // Taller than it was, because the change panel (99_registrant_changes.gs)
     // opens below the Mark button: at 620 the one control that says what is

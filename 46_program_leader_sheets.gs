@@ -518,6 +518,24 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     if (!entry.fileId) return;
     try {
       const rows = byProgram[programKey] || [];
+      // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
+      // has signed up yet" is ordinary on a class nobody has booked and is a
+      // fault on one with a dozen names on the Registrants tab — and the two
+      // are indistinguishable on the sheet itself, which is why this went
+      // unnoticed. Counted only when the roster came out empty, so the healthy
+      // case pays nothing.
+      if (rows.length === 0) {
+        const stranded = countStrandedRegistrantRows_(entry, registrantRows);
+        if (stranded > 0) {
+          log(`⚠️ Program registrant sheet for ${programKey}: ${stranded} registrant row(s) name this ` +
+            `program but match no session, so the sheet is empty.`);
+          noteForAdmin('Program registrant sheets that came out empty',
+            `"${entry.title}" (${entry.location}) — the Registrants tab holds ${stranded} row(s) for this ` +
+            `program, but none of them matches a session on ${SHEET_NAMES.PROGRAM_DASHBOARD}, so the ` +
+            `leader's sheet says nobody has signed up. That is an Event_ID that has come apart from its ` +
+            `session — run 🔧 Admin ▸ 🔗 Repair Dashboard Links, then 🔄 Update Everything Now.`);
+        }
+      }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
       // The file is opened either way: the pull at the head of this sync
       // already paid for it (openSpreadsheetCached), and the banner's "Refreshed
@@ -601,14 +619,35 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
   const programByEventId = {};
+  // THE SECOND WAY IN, and the failure it is for. A registrant row reaches its
+  // program through its Event_ID and nothing else, which is right — the
+  // session table is what knows a session's title and location, and a renamed
+  // program's older rows still carry the old title (see the note above). But
+  // an Event_ID is DERIVED from the event's clean title, so anything that
+  // changes what "clean" means changes it: a title mark read one way today and
+  // another way tomorrow ("*Tai Chi", "NO Tai Chi") re-keys every session of
+  // that program, and the registrant rows written under the old key then match
+  // no session at all. The rows are still on the tab, the sessions are still
+  // on the dashboard, and the leader's sheet says "Nobody has signed up yet" —
+  // a silent, complete wrong answer, on the one screen that is somebody else's
+  // only view of their own class.
+  //
+  // So a row that cannot find its Event_ID is asked the other question before
+  // it is dropped: is there a session of THIS program title, at THIS building,
+  // on THIS date? That is the same identity the sheet is keyed on, narrowed by
+  // the day, so it can only ever pull in a row that belongs to exactly the
+  // program the sheet is about.
+  const programByTitleDate = {};
   (sessionRows || []).forEach(row => {
     const eventId = String(row[sessionMap['Event_ID']] || '').trim();
     const date = coerceDate(row[sessionMap['Event_Date']]);
-    if (!eventId || !date) return;
+    if (!date) return;
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
-    programByEventId[eventId] =
+    const programKey =
       leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+    if (eventId) programByEventId[eventId] = programKey;
+    programByTitleDate[`${programKey}|${dateKey}`] = programKey;
   });
 
   const map = getIndexMap(HEADERS.All_Registrants);
@@ -617,7 +656,8 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
 
   (registrantRows || []).forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
-    const programKey = programByEventId[eventId];
+    const programKey = programByEventId[eventId]
+      || leaderProgramByTitleAndDate_(row, map, programByTitleDate);
     if (!programKey) return;
     // Superseded rows are bookkeeping — a registration that a later submission
     // replaced. Showing them would list the same person twice with no way for
@@ -669,6 +709,52 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   });
 
   return byProgram;
+}
+
+/**
+ * How many rows on the Registrants tab name this program and a date inside the
+ * sheet's own window — whatever their Event_ID says.
+ *
+ * Only ever COUNTED, and only when the roster is empty: this decides what the
+ * office is told, never what the sheet holds. A row is matched the way a
+ * person would match it, on the program's name and building.
+ */
+function countStrandedRegistrantRows_(entry, registrantRows) {
+  const map = getIndexMap(HEADERS.All_Registrants);
+  if (map['Event'] === undefined || map['Event_Date'] === undefined) return 0;
+  const wanted = leaderProgramKey(entry && entry.title, entry && entry.location);
+  const today = parseDateKey(formatDateKey(new Date()));
+  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
+
+  let count = 0;
+  (registrantRows || []).forEach(row => {
+    if (String(row[map['Program_Status']] || '').trim() === 'Superseded') return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < from || dateKey > to) return;
+    if (leaderProgramKey(row[map['Event']], row[map['Location']]) !== wanted) return;
+    count++;
+  });
+  return count;
+}
+
+/**
+ * The fallback identity for a registrant row whose Event_ID names no session
+ * this window holds — its own program title, building and date, and only when
+ * a session answering to all three is on the table. See the banner in
+ * buildLeaderSheetRowsByProgram() for the fault this exists for.
+ *
+ * A lunch-only row's Event is "Lunch @ Narberth — …" and a triaged row's date
+ * is outside the window, so neither can be pulled into a program's roster by
+ * accident: the key has to match a session that is actually running.
+ */
+function leaderProgramByTitleAndDate_(row, map, programByTitleDate) {
+  const date = coerceDate(row[map['Event_Date']]);
+  if (!date) return '';
+  const key = `${leaderProgramKey(row[map['Event']], row[map['Location']])}|${formatDateKey(date)}`;
+  return programByTitleDate[key] || '';
 }
 
 /**
