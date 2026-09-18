@@ -49,6 +49,7 @@ this.BOOTSTRAP_STATE_PROP_KEY = BOOTSTRAP_STATE_PROP_KEY;
 this.FORM_REBUILD_STATE_PROP_KEY = FORM_REBUILD_STATE_PROP_KEY;
 this.__stubAutomation = fn => { isAutomationEnabled = fn; };
 this.__stubMailPause = fn => { isOutboundMailPaused = fn; };
+this.__stubTestMode = fn => { isNotificationTestMode = fn; };
 `, sandbox, { filename: 'program.gs' });
 
 const { collectWorkbookRefusals, describeWorkbookRefusals } = sandbox;
@@ -68,6 +69,7 @@ const titles = () => collectWorkbookRefusals().map(r => r.title);
 // --- A healthy workbook ----------------------------------------------------
 sandbox.__stubAutomation(() => true);
 sandbox.__stubMailPause(() => false);
+sandbox.__stubTestMode(() => false);
 check('nothing blocking is nothing reported', titles(), []);
 checkTrue('and it says so, and says what that rules out',
   describeWorkbookRefusals([]).indexOf('different fault') !== -1);
@@ -75,6 +77,17 @@ checkTrue('and it says so, and says what that rules out',
 // --- The kill switch -------------------------------------------------------
 sandbox.__stubAutomation(() => false);
 check('a paused workbook is the first thing said', titles(), ['Automation is paused']);
+
+// --- The rehearsal switch --------------------------------------------------
+// THE ONE THAT LOOKS LEAST LIKE A REFUSAL: the syncs run, the log says messages
+// went, and no member heard anything because every one went to the office.
+sandbox.__stubAutomation(() => true);
+sandbox.__stubTestMode(() => true);
+check('notification test mode is reported as a reason nothing arrived',
+  titles(), ['Notification test mode is on']);
+checkTrue('...and says the real messages are still owed',
+  collectWorkbookRefusals()[0].detail.indexOf('still') !== -1);
+sandbox.__stubTestMode(() => false);
 
 // --- A job in flight, and a job stuck --------------------------------------
 sandbox.__stubAutomation(() => true);

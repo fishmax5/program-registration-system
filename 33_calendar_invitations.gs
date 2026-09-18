@@ -184,7 +184,18 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     let changed = false;
     const addedHere = [];
     const removedHere = [];
+    // NOTHING IS ADDED WHILE THE REHEARSAL SWITCH IS ON. Google emails a guest
+    // the moment they are added to an event, so this is mail in everything but
+    // name — and the guest list is left untouched rather than added-and-removed,
+    // because an invitation withdrawn a second later is two emails instead of
+    // none. The office gets one line per person. See 99i.
+    const holdInvites = isNotificationTestMode();
     toAdd.forEach(email => {
+      if (holdInvites) {
+        recordHeldCalendarInvite(email, session);
+        result.deferred++;
+        return;
+      }
       try {
         event.addGuest(email);
         already.add(email);

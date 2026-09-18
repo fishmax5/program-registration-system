@@ -168,6 +168,24 @@ function collectWorkbookRefusals() {
     });
   });
 
+  // 4. THE REHEARSAL SWITCH, which is the one that looks most like a fault: the
+  //    syncs run, the tabs fill, the log says messages went — and no member,
+  //    leader or guest hears anything, because every message went to the office
+  //    instead. Left on by somebody who meant to press it once, that is a week
+  //    of reminders nobody received.
+  guardRefusalRead_(found, 'notification test mode', () => {
+    if (!isNotificationTestMode()) return;
+    found.push({
+      title: 'Notification test mode is on',
+      detail: 'Every message that would leave the office — leader alerts, day-before digests, registrant ' +
+        'reminders and confirmations — is being diverted to the office\'s own addresses instead, and ' +
+        'calendar guests are not being added at all. Nothing is consumed: the real messages are still ' +
+        'owed and go out once this is off.',
+      fix: `Set ${CONFIG_LAYOUT.TEST_MAIL.title} back to "No" on the Config tab ` +
+        `(${CONFIG_LAYOUT.TEST_MAIL.headers[0]}).`
+    });
+  });
+
   return found;
 }
 

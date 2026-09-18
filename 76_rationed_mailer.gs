@@ -331,6 +331,46 @@ function sendRationedEmail(request) {
     return result;
   }
 
+  // ------------------------------------------- NOTIFICATION TEST MODE
+  //
+  // AFTER THE PAUSE (a workbook that is sending nothing at all has nothing to
+  // rehearse) AND BEFORE QUIET HOURS, deliberately: quiet hours exist so a
+  // member is not written to at 6am, and the diverted copy goes to the office
+  // that asked for it. Holding a rehearsal until 8am is a rehearsal nobody
+  // sees.
+  //
+  // recordSent() IS NOT CALLED — the one line that separates this from the
+  // pause above. A diverted message is still owed, so turning the switch off
+  // gives the member the reminder they were always going to get. See 99i for
+  // why that is also what makes this capped.
+  if (isNotificationTestMode()) {
+    const diverted = divertNotificationForTest(req);
+    if (!diverted) {
+      result.status = 'held';
+      result.error = 'notification test mode (nothing sent)';
+      return result;
+    }
+    try {
+      MailApp.sendEmail(diverted);
+    } catch (err) {
+      __rationedMailRefused[diverted.to.toLowerCase()] = String(err) || RATIONED_MAIL_REFUSED_REASON;
+      result.error = err;
+      return result;
+    }
+    __rationedMailQuota = Math.max(0, rationedMailRemainingQuota() - 1);
+    // 'held', NOT a status of its own, and that is the interesting decision.
+    // Every caller of this function already knows what held means — not sent,
+    // not recorded, tried again next pass — which is exactly what a diverted
+    // message is. A new status would fall through all three branches in `66`
+    // and `70` into their "could not send" log line, so a mode whose whole
+    // promise is that nothing went wrong would print a warning per message.
+    result.status = 'held';
+    result.cost = 1;
+    result.error = 'notification test mode — a copy went to the office instead';
+    log(`🧪 Diverted to the office instead of ${to}: "${req.subject || ''}".`);
+    return result;
+  }
+
   // ------------------------------------------------- QUIET HOURS
   //
   // HELD, NOT DROPPED, which is the one line that separates this from the
