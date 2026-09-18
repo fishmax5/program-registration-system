@@ -53,16 +53,22 @@ this.describeLeaderSheetRosters = describeLeaderSheetRosters;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.leaderProgramKey = leaderProgramKey;
-this.__stub = function (sessions, registrants, registry, openFails) {
-  getOrCreateSheet = () => ({});
+// tabText maps a fileId to what sits in its first data cell, so a test can put
+// a sheet into the one state the workbook cannot see from its own tabs: the
+// placeholder, under a registry entry claiming a roster.
+this.__stub = function (sessions, registrants, registry, openFails, tabText) {
   getSectionedRows = (sheet, headers) =>
     (headers === HEADERS.All_Program_Sessions ? sessions : registrants);
   getProgramLeaderSheetRegistry = () => registry;
+  getOrCreateSheet = ss => (ss && ss.__fileId
+    ? { getRange: () => ({ getValue: () => (tabText || {})[ss.__fileId] || '' }) }
+    : {});
   openSpreadsheetCached = id => {
     if (openFails && openFails.indexOf(id) !== -1) throw new Error('You do not have permission');
-    return {};
+    return { __fileId: id };
   };
 };
+this.LEADER_SHEET_EMPTY_ROSTER_TEXT = LEADER_SHEET_EMPTY_ROSTER_TEXT;
 `, sandbox, { filename: 'program.gs' });
 
 const { diagnoseLeaderSheetRosters, describeLeaderSheetRosters, HEADERS, getIndexMap, leaderProgramKey } = sandbox;
@@ -164,6 +170,60 @@ checkTrue('...and both files are named by their links',
   /LIVE\/edit[\s\S]*STALE\/edit|STALE\/edit[\s\S]*LIVE\/edit/.test(twinReport));
 checkTrue('...with the row count beside each, so the live one is obvious',
   /1 row\(s\) · key/.test(twinReport) && /0 row\(s\) · key/.test(twinReport));
+
+// --- The fingerprint that claims a roster over a tab that says nobody -------
+// THE PAIR THAT SHOULD BE IMPOSSIBLE, and was not. Ten rows join onto the
+// program, the registry says they were written, and the sheet the leader opens
+// reads "Nobody has signed up yet." Before this, the report printed "already
+// written, the next push will skip it" beside that file — true about the
+// fingerprint, and the single most misleading sentence it could have offered
+// the person staring at the empty sheet.
+const liveRegistry = {
+  [leaderProgramKey('Computer Tech Support', 'Narberth')]:
+    { title: 'Computer Tech Support', location: 'Narberth', fileId: 'LIVE', accessOpened: true }
+};
+const oneRegistrant = [
+  registrantRow({
+    Event_ID: 'TECH', Event_Date: soon, Event: 'Computer Tech Support', Location: 'Narberth',
+    Name: 'Donna Inners', Program_Status: 'Active'
+  })
+];
+sandbox.__stub(sessions, oneRegistrant, liveRegistry, [],
+  { LIVE: sandbox.LEADER_SHEET_EMPTY_ROSTER_TEXT });
+const lyingReport = describeLeaderSheetRosters();
+checkTrue('a sheet showing an empty roster it should not leads the report',
+  lyingReport.indexOf('SHEETS SHOWING AN EMPTY ROSTER THEY SHOULD NOT (1)') !== -1);
+checkTrue('...named with its own link, because that is the file to look at',
+  /SHEETS SHOWING AN EMPTY ROSTER[\s\S]*LIVE\/edit/.test(lyingReport));
+checkTrue('...and says the next sync fixes it by itself',
+  /rewrites these by itself/.test(lyingReport));
+checkTrue('...and the filled section stops claiming it is already written',
+  lyingReport.indexOf('already written, the next push will skip it') === -1);
+
+// The same workbook with the roster actually ON the sheet says nothing of the
+// kind — a check that fires on a healthy sheet is a check that gets removed.
+sandbox.__stub(sessions, oneRegistrant, liveRegistry, [], { LIVE: 'Donna Inners' });
+const honestReport = describeLeaderSheetRosters();
+checkTrue('a sheet that really holds its roster is not accused',
+  honestReport.indexOf('SHEETS SHOWING AN EMPTY ROSTER') === -1);
+
+// --- Two registry entries, ONE spreadsheet ---------------------------------
+// Worse than two files and invisible to the twin check above, which groups on
+// the program's name: both entries write the same tab in the same pass, so the
+// last one reached decides what is on it while the other reports rows written.
+sandbox.__stub(sessions, oneRegistrant, {
+  [leaderProgramKey('Computer Tech Support', 'Narberth')]:
+    { title: 'Computer Tech Support', location: 'Narberth', fileId: 'SHARED', accessOpened: true },
+  [leaderProgramKey('Tech Help', 'Narberth')]:
+    { title: 'Tech Help', location: 'Narberth', fileId: 'SHARED', accessOpened: true }
+}, [], {});
+const sharedReport = describeLeaderSheetRosters();
+checkTrue('two entries naming one spreadsheet are reported',
+  sharedReport.indexOf('TWO REGISTRY ENTRIES SHARING ONE SPREADSHEET (1)') !== -1);
+checkTrue('...with both programs named, since the names are what differ',
+  /SHARING ONE SPREADSHEET[\s\S]*Computer Tech Support[\s\S]*Tech Help/.test(sharedReport));
+checkTrue('...and two differently-named entries are NOT the name-based twin case',
+  sharedReport.indexOf('TWO SHEETS FOR ONE PROGRAM') === -1);
 
 // The healthy workbook says so in one line rather than listing nothing.
 sandbox.__stub(sessions, registrants, {}, []);

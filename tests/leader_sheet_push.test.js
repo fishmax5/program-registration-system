@@ -95,6 +95,7 @@ this.getIndexMap = getIndexMap;
 this.writeProgramLeaderSheetTab = writeProgramLeaderSheetTab;
 this.pushProgramLeaderSheets = pushProgramLeaderSheets;
 this.computeLeaderSheetFingerprint = computeLeaderSheetFingerprint;
+this.LEADER_SHEET_EMPTY_ROSTER_TEXT = LEADER_SHEET_EMPTY_ROSTER_TEXT;
 this.getProgramLeaderSheetRegistry = getProgramLeaderSheetRegistry;
 this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
 this.__stubRowsByProgram = function (fn) { buildLeaderSheetRowsByProgram = fn; };
@@ -257,6 +258,90 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
 
   const renamed = sandbox.computeLeaderSheetFingerprint({ title: 'Gentle Yoga', location: 'Ashbridge' }, rows);
   assert.notStrictEqual(a, renamed, 'and so is one that was renamed');
+}
+
+// ---------------------------------------------------------------------------
+// 5. A FINGERPRINT THAT CLAIMS A ROSTER OVER A TAB THAT SAYS NOBODY SIGNED UP
+//
+// The state a real workbook reached and could not leave. The registry said ten
+// rows were already written; the shared sheet said "Nobody has signed up yet";
+// the push matched the fingerprint, skipped, restamped the banner — which kept
+// the file's modified time moving, so it looked alive — and did that every
+// hour. Both halves were internally consistent and neither had ever been
+// checked against the other.
+//
+// What this pins is that the skip path now READS the tab before believing
+// itself, that finding the contradiction falls through to the rewrite (so the
+// repair needs nobody to press anything), and — the other half, because a
+// check that fires on a healthy workbook is a check that gets removed — that a
+// sheet which is empty because nobody HAS signed up is still skipped.
+// ---------------------------------------------------------------------------
+{
+  const rows = rosterRows(3, 2);
+  const KEY = 'chair yoga|ashbridge';
+  const ENTRY = { fileId: 'F9', title: 'Chair Yoga', location: 'Ashbridge' };
+
+  // A tab in the state the fault leaves it in: the banner and header a write
+  // put there, and the placeholder on the first data row.
+  const emptyLooking = () => {
+    const grid = [[''], [''], []];
+    // The constant the writer uses, not a copy of its wording: a literal here
+    // is a test that quietly stops testing the day the sentence is improved.
+    grid[sandbox.MEMORY_TAB_DATA_ROW - 1] = [sandbox.LEADER_SHEET_EMPTY_ROSTER_TEXT];
+    return grid;
+  };
+
+  const mount = sheet => {
+    sandbox.__clearSpreadsheetHandles();
+    sandbox.SpreadsheetApp.openById = () => ({
+      getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet]
+    });
+  };
+
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [KEY]: rows }));
+
+  const sheet = makeCountingSheet(emptyLooking(), 'Sign_Up_Sheet');
+  mount(sheet);
+  // The fingerprint the push would compute for those ten rows, stored as
+  // though a previous run had written them — which is exactly what the
+  // workbook's registry held.
+  sandbox.__setRegistry({
+    [KEY]: Object.assign({}, ENTRY, {
+      accessOpened: true,
+      pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, rows)
+    })
+  });
+
+  const repaired = sandbox.pushProgramLeaderSheets([], []);
+  assert.strictEqual(repaired, 1,
+    'a fingerprint that agrees over a tab reading "nobody has signed up" is rewritten, not skipped');
+  assert.ok(callsNamed(sheet, 'setValues').some(c => c.rows >= rows.length),
+    'and the rewrite is the real one — the roster grid goes back on the tab');
+  // The stored fingerprint is untouched: it already described these rows, and
+  // that agreement is what made this a repair rather than a change.
+  assert.strictEqual(sandbox.getProgramLeaderSheetRegistry()[KEY].pushedFingerprint,
+    sandbox.computeLeaderSheetFingerprint(ENTRY, rows),
+    'the fingerprint still describes what is now genuinely on the sheet');
+
+  // THE OTHER HALF. An empty tab whose roster is genuinely empty is the
+  // ordinary case on a class nobody has booked, and it must still cost one
+  // call — otherwise this check rewrites every quiet sheet in the workbook
+  // every hour, which is the round trip the fingerprint exists to avoid.
+  const quiet = makeCountingSheet(emptyLooking(), 'Sign_Up_Sheet');
+  mount(quiet);
+  sandbox.__stubRowsByProgram(() => ({ [KEY]: [] }));
+  sandbox.__setRegistry({
+    [KEY]: Object.assign({}, ENTRY, {
+      accessOpened: true,
+      pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, [])
+    })
+  });
+  const before = roundTrips(quiet.stats);
+  const skipped = sandbox.pushProgramLeaderSheets([], []);
+  assert.strictEqual(skipped, 0, 'a sheet that is empty because nobody signed up is still skipped');
+  assert.ok(roundTrips(quiet.stats) - before <= 2,
+    'and still costs the refresh stamp and no more — the tab is not even read');
 }
 
 console.log('✅ leader_sheet_push.test.js passed');

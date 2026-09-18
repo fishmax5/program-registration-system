@@ -146,6 +146,57 @@ const LEADER_SHEET_FORWARD_DAYS = 90;
 const LEADER_SHEET_MAX_ROWS = 3000;
 
 /**
+ * The sentence an empty roster is written with — a CONSTANT because two
+ * separate pieces of code now depend on it meaning the same thing: the writer
+ * below puts it on the tab, and leaderSheetTabReadsEmpty_() reads it back to
+ * decide whether the tab holds what the registry claims it holds. A literal in
+ * two places is a check that silently stops checking the day somebody improves
+ * the wording.
+ */
+const LEADER_SHEET_EMPTY_ROSTER_TEXT =
+  'Nobody has signed up yet — this fills in by itself as registrations come in.';
+
+/**
+ * Does this tab currently hold the "nobody has signed up yet" placeholder?
+ *
+ * ONE CELL, AND ONLY EVER ASKED ON THE SKIP PATH — see the fault below.
+ *
+ * THE FAULT THIS EXISTS FOR. The fingerprint (computeLeaderSheetFingerprint)
+ * is a claim about what the tab holds, stored in Script Properties by the run
+ * that wrote it; the tab itself is in somebody else's spreadsheet. Nothing ever
+ * checked that the two agreed, so when they came apart the push did the one
+ * thing that could not recover: it read a fingerprint saying "ten people",
+ * matched it, and skipped the sheet — every hour, forever, over a tab reading
+ * "Nobody has signed up yet." Both halves looked healthy on their own. The
+ * workbook reported ten rows already written, the leader reported an empty
+ * roster, and both were telling the truth about a different thing.
+ *
+ * The two can come apart for more than one reason (a write that threw after
+ * sheet.clear(), a registry flushed by a run whose sheet write was lost, an
+ * older createProgramLeaderSheet() that wrote the tab and stored no
+ * fingerprint at all), which is exactly why the repair is stated over the
+ * OBSERVED tab rather than over any one of those causes.
+ *
+ * Deliberately not a general "is the sheet right?" check. A fingerprint cannot
+ * be verified cheaply — that would mean reading the whole roster back, which
+ * is the round trip the fingerprint exists to avoid. This asks the one
+ * question that is answerable in a single getValue() and is the only state
+ * that is unrecoverable: the tab says nobody, the registry says somebody.
+ */
+function leaderSheetTabReadsEmpty_(sheet) {
+  try {
+    return String(sheet.getRange(MEMORY_TAB_DATA_ROW, 1).getValue() || '').trim() ===
+      LEADER_SHEET_EMPTY_ROSTER_TEXT;
+  } catch (err) {
+    // A tab that will not answer is not evidence of anything. Reported as "not
+    // empty" so the caller takes its ordinary path rather than rewriting every
+    // sheet in the workbook on the strength of a failed read.
+    log(`ℹ️ Could not read the first row of a program registrant sheet (${err}).`);
+    return false;
+  }
+}
+
+/**
  * The shared sheet's own columns. A SUBSET of All_Registrants plus two hidden
  * machine columns — deliberately not the whole row: Lunch_Type, the meal
  * counts, Admin_Notes and the internal keys are staff business, and every
@@ -542,7 +593,34 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // …" line has to stay true even on an hour when nothing moved.
       const file = openSpreadsheetCached(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-      if (!force && entry.pushedFingerprint === fingerprint && entry.accessOpened) {
+      // THE FINGERPRINT IS A CLAIM, AND THIS IS WHERE IT IS CHECKED.
+      //
+      // Skipping is right when the tab already holds these rows and wrong in
+      // exactly one way that never heals on its own: the tab holding the
+      // "nobody has signed up yet" placeholder while the fingerprint claims a
+      // roster. That pair was reached on a real workbook and cost a program
+      // leader an empty sheet for weeks — the push matched the fingerprint,
+      // skipped, restamped the banner (which is why the file's modified time
+      // kept moving, making it look alive) and never looked at what was on it.
+      //
+      // One getValue(), on the skip path only, and only when there IS a roster
+      // to contradict — so the healthy case pays one cell per sheet per hour
+      // and the empty-and-truthfully-empty case pays nothing. Finding the
+      // contradiction falls THROUGH to the write below, which is the repair:
+      // this is the migration for every sheet already in that state, and it
+      // runs itself on the next sync rather than waiting for somebody to press
+      // something. See leaderSheetTabReadsEmpty_().
+      const fingerprintAgrees = !force && entry.pushedFingerprint === fingerprint && entry.accessOpened;
+      const contradicted = fingerprintAgrees && rows.length > 0 && leaderSheetTabReadsEmpty_(tab);
+      if (contradicted) {
+        log(`⚠️ Program registrant sheet for ${programKey}: the stored fingerprint claims ` +
+          `${rows.length} row(s) but the sheet reads "nobody has signed up yet" — rewriting it.`);
+        noteForAdmin('Program registrant sheets that had come apart from their fingerprint',
+          `"${entry.title}" (${entry.location}) — this workbook had recorded ${rows.length} roster row(s) ` +
+          `as already written, and the shared sheet was showing the leader an empty roster instead. It has ` +
+          `been rewritten. Nothing needs doing; the sheet is correct from now on.`);
+      }
+      if (fingerprintAgrees && !contradicted) {
         stampLeaderSheetRefreshed(tab);
         unchanged++;
         return;
@@ -552,6 +630,9 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         saveProgramLeaderSheetRegistryEntry(programKey,
           Object.assign({}, entry, { pushedFingerprint: fingerprint }));
       }
+      // No re-store on the repair path: the fingerprint it would write is the
+      // one already stored — that agreement is what made this a repair. Said
+      // here rather than left to be rediscovered from the condition above.
       pushed++;
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
       // ensureProgramLeaderSheetAccess() existed was shared with its creator and
@@ -894,7 +975,7 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
 
   if (rows.length === 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
-      .setValue('Nobody has signed up yet — this fills in by itself as registrations come in.')
+      .setValue(LEADER_SHEET_EMPTY_ROSTER_TEXT)
       .setFontStyle('italic')
       .setFontColor(TYPO.MUTED.color);
     freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
@@ -1375,8 +1456,14 @@ function createProgramLeaderSheet(programValue) {
     location,
     createdAt: (existing && existing.createdAt) || new Date().toISOString()
   };
+  // DELIBERATELY WITHOUT pushedFingerprint, at this point. The entry is
+  // registered BEFORE the fill so a timeout mid-write still leaves a findable
+  // sheet — and a fingerprint stored before the write it describes is a claim
+  // about a tab that may never be written, which is the exact pair
+  // pushProgramLeaderSheets() now has to repair. It is stored below, after the
+  // write, from the rows that write was given.
   saveProgramLeaderSheetRegistryEntry(programKey, entry);
-  flushPersistentRegistries(); // registered before the fill, so a timeout mid-write still leaves a findable sheet
+  flushPersistentRegistries();
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
@@ -1386,7 +1473,21 @@ function createProgramLeaderSheet(programValue) {
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
 
   const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-  writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
+  const writtenRows = byProgram[programKey] || [];
+  writeProgramLeaderSheetTab(tab, entry, writtenRows);
+  // THE INVARIANT: NOBODY WRITES THIS TAB WITHOUT RECORDING WHAT THEY WROTE.
+  //
+  // This function is the project's second writer of the roster tab, and it
+  // used to leave the registry entry with no fingerprint at all — so the push
+  // an hour later rewrote a sheet that was already correct, and, worse, the
+  // registry's fingerprint and the tab's contents were set by two code paths
+  // with no stated relationship between them. That is the gap the push's
+  // skip path reads as gospel. Stated as one rule instead: the fingerprint on
+  // the entry always describes the last write this project made to the tab.
+  saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, {
+    pushedFingerprint: computeLeaderSheetFingerprint(entry, writtenRows)
+  }));
+  flushPersistentRegistries();
   // A brand-new spreadsheet arrives with an empty "Sheet1" beside ours.
   removeDefaultSheetIfIdle(file, LEADER_SHEET_TAB_NAME);
 
@@ -1395,6 +1496,13 @@ function createProgramLeaderSheet(programValue) {
   // sheet created before this existed is repaired the next time somebody
   // presses the menu item. See ensureProgramLeaderSheetAccess().
   const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${title}"`);
+  // Merged onto the CURRENT entry, not onto the `entry` this function built —
+  // the fingerprint save above is on the registry now and a second assign from
+  // the stale copy would drop it. Same trap the push's two saves document.
+  if (access.openedUp || access.editors.length > 0) {
+    saveProgramLeaderSheetRegistryEntry(programKey,
+      Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
+  }
 
   const emails = getProgramLeaderEmailsForProgram(title, location);
   const shared = [];

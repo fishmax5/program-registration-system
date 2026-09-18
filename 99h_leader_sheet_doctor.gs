@@ -34,6 +34,11 @@
 //   • whether the stored fingerprint MATCHES what the rows would produce,
 //     because that is the one state in which the push looks at a sheet and
 //     deliberately writes nothing;
+//   • whether the TAB ITSELF agrees — the fingerprint is a claim stored in
+//     Script Properties about a file in somebody else's Drive, and the two
+//     came apart on a real workbook: a fingerprint saying ten people, a tab
+//     saying "Nobody has signed up yet", and a push that matched the first,
+//     never read the second, and skipped the sheet every hour for weeks;
 //   • and whether the file can still be opened at all.
 //
 // IT WRITES NOTHING, TAKES NO LOCK AND IS UNGATED — the person staring at an
@@ -93,6 +98,7 @@ function diagnoseLeaderSheetRosters() {
         stranded: 0,
         fingerprintMatches: false,
         accessOpened: !!entry.accessOpened,
+        tabReadsEmpty: false,
         openError: ''
       };
 
@@ -121,7 +127,17 @@ function diagnoseLeaderSheetRosters() {
       // ago with nothing on any tab to say so.
       if (entry.fileId) {
         try {
-          openSpreadsheetCached(entry.fileId);
+          // AND WHAT IS ACTUALLY ON IT. The fingerprint above says what this
+          // project BELIEVES it wrote; this one cell says what the leader is
+          // looking at. A report that trusts the first and never reads the
+          // second is how "already written" was printed beside a sheet saying
+          // nobody had signed up — the two numbers agreed with each other and
+          // neither had been checked against the tab. See
+          // leaderSheetTabReadsEmpty_() in `46` for the fault itself; this is
+          // the half that lets somebody SEE it rather than wait for the next
+          // sync to repair it quietly.
+          finding.tabReadsEmpty = leaderSheetTabReadsEmpty_(
+            getOrCreateSheet(openSpreadsheetCached(entry.fileId), LEADER_SHEET_TAB_NAME));
         } catch (err) {
           finding.openError = String(err);
         }
@@ -165,6 +181,31 @@ function findDuplicateLeaderSheetPrograms_(findings) {
 }
 
 /**
+ * Two registry entries naming ONE spreadsheet — the other shape of the same
+ * fault, and the one the check above cannot see.
+ *
+ * findDuplicateLeaderSheetPrograms_() groups on the entry's title and
+ * building, so it finds two entries for one program. It says nothing about two
+ * entries whose names differ but whose fileId is the same — and that pair is
+ * strictly worse, because both entries write to the same tab in the same pass:
+ * whichever the push reaches LAST decides what is on it, each stores its own
+ * fingerprint under its own key, and the one with the roster then reports
+ * itself as written while the tab holds the other one's answer. Keyed on the
+ * file, because the file is what they are fighting over.
+ */
+function findSharedLeaderSheetFiles_(findings) {
+  const byFile = {};
+  (findings || []).forEach(f => {
+    if (!f.fileId) return;
+    if (!byFile[f.fileId]) byFile[f.fileId] = [];
+    byFile[f.fileId].push(f);
+  });
+  return Object.keys(byFile)
+    .filter(fileId => byFile[fileId].length > 1)
+    .map(fileId => byFile[fileId]);
+}
+
+/**
  * The report in words — the empty ones first, because they are the only reason
  * anybody opens this, and each with the sentence that says WHICH empty it is.
  */
@@ -185,6 +226,41 @@ function describeLeaderSheetRosters(diagnosis) {
   // looking at the other, and both halves of that look perfectly healthy on
   // their own — the workbook reports rows written, the leader reports an empty
   // sheet, and both are telling the truth about different files.
+  // FIRST OF ALL, BECAUSE IT IS THE ONE ANSWER THAT CONTRADICTS THIS REPORT'S
+  // OWN ARITHMETIC. Everything below reasons from the rows the join produced;
+  // this says that what is ON the sheet is not those rows and never was. It is
+  // printed even though the push now repairs it unprompted, because somebody
+  // reading this is looking at the empty sheet NOW and deserves to be told
+  // which of the two things they are looking at is wrong.
+  const lying = data.findings.filter(f => f.rosterRows > 0 && f.tabReadsEmpty);
+  if (lying.length > 0) {
+    lines.push(`⚠️ SHEETS SHOWING AN EMPTY ROSTER THEY SHOULD NOT (${lying.length}) — the roster exists ` +
+      'in this workbook and the sheet is showing the leader "nobody has signed up yet":');
+    lying.forEach(f => {
+      lines.push(`• ${f.title || f.programKey}${f.location ? ` — ${f.location}` : ''}: ` +
+        `${f.rosterRows} row(s) across ${f.sessionsInWindow} session(s) that are not on the sheet.`);
+      lines.push(`    ${leaderSheetDoctorLink_(f)}`);
+    });
+    lines.push('    → The next 🔄 Update Everything Now rewrites these by itself. Nothing else to do.');
+    lines.push('');
+  }
+
+  const shared = findSharedLeaderSheetFiles_(data.findings);
+  if (shared.length > 0) {
+    lines.push(`⚠️ TWO REGISTRY ENTRIES SHARING ONE SPREADSHEET (${shared.length}) — they both write to ` +
+      'the same tab, so the last one written wins and the other reports rows nobody can see:');
+    shared.forEach(group => {
+      lines.push(`• ${leaderSheetDoctorLink_(group[0])}`);
+      group.forEach(entry => {
+        lines.push(`    ${entry.rosterRows} row(s) · "${entry.title}" (${entry.location}) · ` +
+          `key "${entry.programKey}"`);
+      });
+      lines.push('    → Re-create the sheet for the program that should own it from Rosters & Sharing: ' +
+        'that builds a file of its own and leaves the other entry pointing at the original.');
+    });
+    lines.push('');
+  }
+
   const twins = findDuplicateLeaderSheetPrograms_(data.findings);
   if (twins.length > 0) {
     lines.push(`⚠️ TWO SHEETS FOR ONE PROGRAM (${twins.length}) — the roster goes to one of them and ` +
@@ -246,7 +322,9 @@ function describeLeaderSheetRosters(diagnosis) {
     filled.forEach(f => {
       lines.push(`• ${f.title || f.programKey}${f.location ? ` — ${f.location}` : ''}: ` +
         `${f.rosterRows} row(s) across ${f.sessionsInWindow} session(s)` +
-        (f.fingerprintMatches ? ' — already written, the next push will skip it.' : ' — due to be written.') +
+        (f.tabReadsEmpty
+          ? ' — ⚠️ but the sheet itself is showing an empty roster (see the top of this report).'
+          : f.fingerprintMatches ? ' — already written, the next push will skip it.' : ' — due to be written.') +
         (f.openError ? ` ⚠️ but the sheet could not be opened: ${f.openError}` : ''));
       lines.push(`    ${leaderSheetDoctorLink_(f)}`);
     });
