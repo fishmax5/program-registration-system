@@ -1426,7 +1426,11 @@ function automationGateAllows(actionLabel, quiet) {
   const message = `⏸️ Automation is paused — "${actionLabel}" did nothing. ` +
     `Set Automation_Enabled back to "Yes" on the Config tab (${CONFIG_LAYOUT.AUTOMATION.title}) to resume.`;
   log(message);
-  if (!quiet) toastIfPossible(message);
+  // AN ALERT WHERE THERE IS SOMEBODY TO READ ONE, the toast where there is not
+  // (every trigger run). A toast lands in the corner of a sheet showing
+  // Google's own "Running script…" banner and is gone before anybody looks up
+  // — which is how a paused workbook came to look like a broken menu. See 99g.
+  if (!quiet) explainRefusal(message);
   return false;
 }
 

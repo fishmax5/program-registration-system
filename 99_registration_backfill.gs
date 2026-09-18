@@ -567,7 +567,7 @@ function reimportFormLabel_(entry) {
  */
 function showReimportFormDialog() {
   if (isBootstrapActive()) {
-    toastIfPossible(bootstrapBusyMessage());
+    explainRefusal(bootstrapBusyMessage());
     return;
   }
   const html = HtmlService.createHtmlOutput(buildReimportFormHtml(null))

@@ -149,6 +149,13 @@ function buildAppMenu(ui, includeAdmin) {
     // with the calendar and the forms. Both still exist on their own under
     // Settings & Fixes for the times one of them is what you actually want.
     .addItem('\ud83d\udd04 Update Everything Now', 'syncEverythingNow')
+    // DIRECTLY UNDER IT, because this is the item somebody reaches for about
+    // the item above. Half the menu here begins by asking whether it is
+    // allowed to run — automation paused, a background job in flight — and
+    // every one of those refusals used to be a toast nobody saw, which reads
+    // as "the menu does nothing and gives no error". Ungated and read-only, so
+    // it answers on exactly the workbook where nothing else will. See 99g.
+    .addItem('\u2753 Why did nothing happen?', 'reportWhyNothingHappened')
     .addSeparator()
     .addSubMenu(ui.createMenu('\ud83c\udf71 Lunch')
       .addItem('Add Menu Items (paste/upload CSV)\u2026', 'showLunchMenuImportDialog')
@@ -378,6 +385,13 @@ function buildAppMenu(ui, includeAdmin) {
       .addSubMenu(ui.createMenu('\u23f0 Triggers')
         .addItem('Trigger Status', 'showTriggerStatus')
         .addItem('Check Triggers', 'writeTriggers')
+        // THE ESCAPE HATCH, OUT OF THE EDITOR. A multi-execution job whose run
+        // was killed part-way leaves its state in flight, and everything gated
+        // behind it declines for good — including the hourly syncs, if the job
+        // was one that paused them. Standing it down was cancelBootstrapCalendars()
+        // or cancelFormRebuildSweep() in the Apps Script editor, which is not
+        // something a front desk can do. See 99g.
+        .addItem('\ud83e\uddf9 Clear a Stuck Background Job', 'clearStuckBackgroundJobs')
         .addSeparator()
         .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
         .addItem('Release My Triggers', 'releaseMyTriggers'))
