@@ -102,6 +102,9 @@ function isWithinRegistrantReminderHours(now) {
 const MAX_REMINDER_EMAILS_PER_RUN = 40;
 const REMINDER_QUOTA_RESERVE = 10;
 
+/** What this pass calls itself to recordDayLongMailHold() (`76`). */
+const REMINDER_MAIL_PASS = 'registrantReminders';
+
 /** Who has already been told what: { eventId: { "email|offset": true } }. */
 const REMINDER_LEDGER_PROP_KEY = 'REGISTRANT_REMINDERS_V1';
 const REMINDER_LEDGER_CHUNK_CHARS = 8000;
@@ -239,7 +242,17 @@ function notificationPolicyForSession(session) {
  * item passes it, the hourly sync does not.
  */
 function sendRegistrantReminders(sessionRows, registrantRows, options) {
-  const result = { sent: 0, held: 0, paused: 0, eventsTouched: 0 };
+  const result = { sent: 0, held: 0, paused: 0, eventsTouched: 0, stoppedForToday: false };
+
+  // Already stopped for the day — the mail quota, or a rehearsal notification
+  // test mode has shown the office once already. Checked before the rows are
+  // read, because the read is the expensive half and there is nothing this
+  // pass could do with it. The menu item asks anyway; a person pressing it is
+  // not an hourly trigger. See WHICH HOLD in 76_rationed_mailer.gs.
+  if (!(options && options.ignoreQuietHours) && dayLongMailHoldInEffect(REMINDER_MAIL_PASS)) {
+    result.stoppedForToday = true;
+    return result;
+  }
 
   // Too early in the day to write to anybody. Deferred, not dropped: the
   // ledger is untouched, so the first sync at or after REMINDER_EARLIEST_HOUR
@@ -327,6 +340,7 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
 
     const sentFor = ledger[eventId] || {};
     wanted.forEach(offset => {
+      if (result.stoppedForToday) return;
       const stamp = `${email}|${offset}`;
       // Read here as well as inside the send: a message that has already gone
       // must not count against the per-run cap the way a held one does.
@@ -376,6 +390,21 @@ function sendRegistrantReminders(sessionRows, registrantRows, options) {
       }
       if (outcome.status === 'held') {
         result.held++;
+        // A hold that lasts the day — the mail quota, or a reminder
+        // notification test mode has already shown the office — is not worth
+        // asking about again this hour. The ledger is untouched either way, so
+        // the reminder still goes out; stopping only keeps the next twenty
+        // syncs from re-spending a real message on the same rehearsal. See
+        // WHICH HOLD in 76_rationed_mailer.gs.
+        if (mailHoldLastsAllDay(outcome)) {
+          result.stoppedForToday = true;
+          if (recordDayLongMailHold(REMINDER_MAIL_PASS)) {
+            noteForAdmin('Registrant reminders held until tomorrow',
+              `Reminders stopped for the rest of today (${outcome.error}). Nothing has been recorded as ` +
+              `sent, so tomorrow's first sync sends everything still due. Later syncs today will not ` +
+              `try again.`);
+          }
+        }
         return;
       }
       // PAUSED IS NOT HELD. The mailer has already called recordSent() for it

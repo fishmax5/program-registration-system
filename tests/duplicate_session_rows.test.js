@@ -1,5 +1,5 @@
 // TWO ROWS, ONE SESSION — the collapse (26_event_descriptions.gs) and the
-// sweep for the rows written before it existed (99f_duplicate_session_rows.gs).
+// sweep for the rows written before it existed (99k_duplicate_session_rows.gs).
 //
 // An Event_ID is `calendarId | cleanTitle | dateKey` and everything downstream
 // treats it as the identity of a session, so two rows carrying one Event_ID is

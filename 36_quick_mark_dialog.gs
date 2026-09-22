@@ -81,11 +81,23 @@
 // ============================================================================
 
 /** Menu entry: opens the Quick Mark dialog. */
+/**
+ * How much of the stored index may travel INSIDE the dialog's markup.
+ *
+ * Not a Google-documented limit — it is a working ceiling well under the size
+ * at which a modal stops rendering, chosen so the failure this guards against
+ * (a dialog that never appears, with the execution reported as completed)
+ * cannot be reached by an index simply growing. Above it the page fetches its
+ * lists instead, which is one round trip on open and exactly what a workbook
+ * with no stored index has always done.
+ */
+const QUICK_MARK_INLINE_INDEX_MAX_CHARS = 400000;
+
 function showQuickMarkDialog() {
   // isDeskWorkBlocked(), not isBootstrapActive(): a forms sweep is no reason to
   // shut the sign-in desk. See isDeskWorkBlocked().
   if (isDeskWorkBlocked()) {
-    toastIfPossible(deskBusyMessage());
+    explainRefusal(deskBusyMessage());
     return;
   }
   // THE LISTS TRAVEL WITH THE PAGE. Every google.script.run costs a round trip
@@ -98,7 +110,23 @@ function showQuickMarkDialog() {
   // opening the dialog must not be the thing that pays for a rebuild, because
   // that is a modal with a spinner in front of a queue. A workbook with no
   // stored index yet gets null here and the dialog fetches as it always did.
-  const html = HtmlService.createHtmlOutput(buildQuickMarkHtml(readyQuickMarkIndex()))
+  // NOTHING BEFORE THE DIALOG MAY BE ABLE TO STOP IT APPEARING. readyQuickMarkIndex()
+  // already answers null rather than throwing, but buildQuickMarkHtml() is
+  // handed whatever it returns and the markup is assembled from it — and this
+  // whole stretch runs BEFORE the dialog exists. An execution that dies in
+  // here (the account's ceiling, reached with no warning and no exception) or
+  // a throw whose red toast is gone before anybody looks up are the same thing
+  // to the person at the desk: a menu item that does nothing and says nothing.
+  // The page is built to fetch its own lists when it is handed none, so the
+  // fallback is a working dialog rather than no dialog.
+  let markup = '';
+  try {
+    markup = buildQuickMarkHtml(readyQuickMarkIndex());
+  } catch (err) {
+    log(`⚠️ Quick Mark: could not inline the stored lists (${err}) — opening the dialog to fetch them.`);
+    markup = buildQuickMarkHtml(null);
+  }
+  const html = HtmlService.createHtmlOutput(markup)
     .setWidth(560)
     // Taller than it was, because the change panel (99_registrant_changes.gs)
     // opens below the Mark button: at 620 the one control that says what is
@@ -148,9 +176,27 @@ function buildQuickMarkHtml(preloadedIndex) {
   // once to make it a STRING LITERAL that cannot break out of the <script>
   // block. A name with a quote in it, or the two-character sequence that ends
   // a script tag, would otherwise end the page mid-sentence.
-  const inlineIndex = preloadedIndex
+  // AND A CEILING ON IT, because the lists grow with the workbook and the page
+  // does not. A modal dialog is served as one HTML document, and a document of
+  // several megabytes does not fail loudly — the execution completes, the
+  // "Running script…" banner clears, and NO DIALOG APPEARS. That is
+  // indistinguishable, from the desk, from the menu item being broken, and it
+  // gets worse every month as the index grows: six hundred sessions with their
+  // rosters is not the same page the first workbook shipped.
+  //
+  // So an index too big to carry is simply not carried. The page has always
+  // known how to fetch its own lists (that is what a workbook with no stored
+  // index has always done) — one round trip on open, against a dialog that
+  // never opens at all.
+  const inlineCandidate = preloadedIndex
     ? JSON.stringify(JSON.stringify(preloadedIndex)).replace(/<\//g, '<\\/')
     : 'null';
+  const tooBig = inlineCandidate.length > QUICK_MARK_INLINE_INDEX_MAX_CHARS;
+  if (tooBig) {
+    log(`ℹ️ Quick Mark: the stored lists are ${inlineCandidate.length} characters — too big to ship ` +
+      `inside the dialog (limit ${QUICK_MARK_INLINE_INDEX_MAX_CHARS}), so the page will fetch them.`);
+  }
+  const inlineIndex = tooBig ? 'null' : inlineCandidate;
 
   return `
 <style>

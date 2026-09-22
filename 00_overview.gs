@@ -567,8 +567,10 @@
  *      sessions (triaging every one of them and their registrants), detach a
  *      club's standing roster, and orphan the staff's own notes — three of
  *      those four silently. detectRenamedPrograms() now recognizes the pattern
- *      before anything acts on it and applyProgramRenames() moves all seven
- *      stores onto the new name. The form is kept and retitled to match
+ *      before anything acts on it and applyProgramRenames() moves all NINE
+ *      stores onto the new name — the ninth being the program registrant
+ *      sheet registry, which was missed until a roster that had silently gone
+ *      empty was traced back to it. The form is kept and retitled to match
  *      (renameFormForGroup()), so links already handed out keep working and
  *      stop advertising the old name. Event_ID itself was deliberately NOT
  *      re-keyed onto the calendar's event UID: the current hash is identical

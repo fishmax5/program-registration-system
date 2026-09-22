@@ -595,26 +595,10 @@ function renderProgramQuestionsSheet(allRows) {
   });
 
   // EVERY COLUMN WITH A FIXED VOCABULARY GETS A DROPDOWN, and they reach a
-  // band of blank rows past the data — because the row that matters is the
-  // NEXT one, the empty one somebody is about to type a question into. See
-  // MEMORY_TAB_SPARE_ROWS for what this used to do instead.
-  //
-  // Program and Location are dropdowns for the first time here. Both are
-  // matched against the calendar by exact text (questionsForFormContext()),
-  // so a title typed from memory — "Bookclub", "Book Club " — is a question
-  // that silently applies to no form at all, with nothing on the tab to say
-  // so. They are OPEN lists rather than closed ones: "*" is a legitimate
-  // answer to both, a program that has not been imported yet is a
-  // legitimate answer to Program, and refusing either would be worse than
-  // not knowing it.
-  const span = applyMemoryTabValidation(sheet, headers, rows.length, {
-    checkboxes: ['Required', 'Active'],
-    lists: { Type: PROGRAM_QUESTION_TYPE_OPTIONS },
-    openLists: {
-      Program: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(listKnownProgramTitles()),
-      Location: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(Object.values(CALENDAR_MAP))
-    }
-  });
+  // band of blank rows past the data — see applyProgramQuestionsValidation(),
+  // which is also what the sync re-runs on its own pass so the Program list
+  // does not go stale between rewrites of this tab.
+  const span = applyProgramQuestionsValidation(sheet, rows.length);
   // Choices is one option per line, so the cell has to be able to show them.
   sheet.getRange(MEMORY_TAB_DATA_ROW, map['Choices'] + 1, span, 1).setWrap(true);
   // Same for the keywords, which are a list in exactly the same way.
@@ -805,6 +789,62 @@ function sendAssistanceRequestNotification(rows, map) {
   return notifyAdminCategory('appointmentRequests',
     `[Calendar & Form Manager] ${rows.length} appointment request(s) need a date`,
     lines.join('\n'));
+}
+
+/**
+ * The dropdowns on Program_Questions, applied to the rows AND to the blank
+ * band past them — because the row that matters is the NEXT one, the empty one
+ * somebody is about to type a question into. See MEMORY_TAB_SPARE_ROWS.
+ *
+ * SPLIT OUT OF THE RENDER so it can be re-applied on its own. The Program list
+ * is built from the session table, which grows every time the calendar sync
+ * imports a program — and the tab was only ever redrawn by first-run setup and
+ * by the question-builder dialog, so a workbook that had been running for a
+ * month offered a dropdown from the month before, and the programs missing
+ * from it are exactly the new ones somebody is writing questions for. Now
+ * refreshProgramQuestionsValidation() runs it on the sync's own pass too.
+ *
+ * Program and Location are OPEN lists rather than closed ones: "*" is a
+ * legitimate answer to both, a program that has not been imported yet is a
+ * legitimate answer to Program, and refusing either would be worse than not
+ * knowing it. What catches the typo that gets through is
+ * reportOrphanedProgramQuestions() (53), not a refusal here.
+ */
+function applyProgramQuestionsValidation(sheet, rowCount) {
+  return applyMemoryTabValidation(sheet, HEADERS.Program_Questions, rowCount, {
+    checkboxes: ['Required', 'Active'],
+    lists: { Type: PROGRAM_QUESTION_TYPE_OPTIONS },
+    openLists: {
+      Program: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(listKnownProgramTitles()),
+      Location: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(Object.values(CALENDAR_MAP))
+    }
+  });
+}
+
+/**
+ * Re-offers the current program list on the tab, without rewriting it.
+ *
+ * Called from refreshMemoryTabs() on every sync. Deliberately NOT a call to
+ * renderProgramQuestionsSheet(): that one clears the sheet, its formats and
+ * its validations and writes every row back, which is a great deal of work to
+ * do hourly to a tab nothing else has touched — and it would drop the specs
+ * cache mid-sync for no reason. This writes the validation bands and nothing
+ * else.
+ *
+ * Never lets a dropdown take down a sync: the tab is reference material, and a
+ * stale list is a smaller problem than a stopped pass.
+ */
+function refreshProgramQuestionsValidation() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_QUESTIONS);
+    if (!sheet) return 0;
+    const rows = readProgramQuestionRows(sheet);
+    return applyProgramQuestionsValidation(sheet, rows.length);
+  } catch (err) {
+    log(`Could not refresh the "${SHEET_NAMES.PROGRAM_QUESTIONS}" dropdowns (${err}) — the tab keeps ` +
+      `the list it had.`);
+    return 0;
+  }
 }
 
 /** Writes the requests tab: newest first, Status as a dropdown, the response ID hidden. */

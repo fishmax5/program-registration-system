@@ -91,6 +91,14 @@ const CONFIG_LAYOUT = {
     title: '⏱️ How Long a Sync May Run',
     startCol: 38,
     headers: ['Sync_Minutes_Per_Run']
+  },
+  // Fresh columns once more, same rule as every block above it: a section here
+  // is keyed by COLUMN on workbooks already running, so a new one is appended
+  // and nothing between is ever reflowed.
+  TEST_MAIL: {
+    title: '🧪 Notification Test Mode',
+    startCol: 40,
+    headers: ['Divert_Mail_To_Admin']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -580,6 +588,51 @@ const DEFAULT_OUTBOUND_MAIL_PAUSED = false;
  */
 const OUTBOUND_MAIL_PAUSE_CACHE_SECONDS = 60;
 const OUTBOUND_MAIL_PAUSE_CACHE_KEY = 'OUTBOUND_MAIL_PAUSED_FLAG';
+
+// ---------------------------------------------------------------------------
+// THE THIRD SWITCH, AND THE ONE THAT ANSWERS A QUESTION THE OTHER TWO CANNOT:
+// "what would this workbook say to people if I let it?"
+//
+// `Pause_Outbound_Mail` stops the mail and DISCARDS it, which is right for a
+// repair and useless for a rehearsal — you learn that nothing went out and
+// nothing about what it would have said. `Automation_Enabled` stops the syncs
+// altogether, so there is nothing to look at at all. Neither shows you the
+// reminder a member would have read, in the words they would have read it in,
+// with the address it was going to.
+//
+// NOTIFICATION TEST MODE DIVERTS INSTEAD OF DROPPING. Every message that would
+// leave the organization is addressed to the office's own Admin Notification
+// Emails table instead, with the real To / Cc / Bcc, the real subject and what
+// sent it stated in a block at the top of the body, and the message itself
+// underneath exactly as the member would have received it. See 99i.
+//
+// TWO THINGS IT DELIBERATELY DOES DIFFERENTLY FROM THE PAUSE:
+//
+//   1. THE LEDGER DOES NOT ADVANCE. A rehearsal must not consume the real
+//      reminder — turn the switch off and the member still gets theirs. That is
+//      the opposite bargain from the pause, and it is what a test is for.
+//   2. BECAUSE OF (1), IT IS CAPPED PER RUN (see 99i). A ledger that does not
+//      advance means the same messages divert again on the next hourly pass, so
+//      an unbounded test mode left on overnight is a hundred copies of the same
+//      twelve reminders and a spent daily quota.
+//
+// It also stops CALENDAR INVITATIONS reaching guests, which the pause does not:
+// Google emails a guest the moment they are added to an event, so a test mode
+// that left that alone would notify exactly the people it promised not to.
+//
+// FAILS OPEN like both other switches: only the literal "Yes" diverts, because
+// a Config tab that is missing or mid-rebuild must never be able to quietly
+// redirect a member's reminder into the office's inbox forever.
+// ---------------------------------------------------------------------------
+
+const NOTIFICATION_TEST_MODE_OPTIONS = ['No', 'Yes'];
+
+/** Blank, unreadable, anything but a deliberate "Yes": mail goes where it is addressed. */
+const DEFAULT_NOTIFICATION_TEST_MODE = false;
+
+/** Cached the same two ways the pause is, and for the same reason. */
+const NOTIFICATION_TEST_MODE_CACHE_SECONDS = 60;
+const NOTIFICATION_TEST_MODE_CACHE_KEY = 'NOTIFICATION_TEST_MODE_FLAG';
 
 /** Script Property prefix for the per-handler "which accounts actually ran this" record. */
 const HANDLER_ATTRIBUTION_PROP_PREFIX = 'HANDLER_RUN_BY_';

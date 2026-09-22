@@ -1,5 +1,5 @@
 // ============================================================================
-// 99g. CLOSING A RUN OF DATES AT ONCE  (bulk [Waitlist Only])
+// 99l. CLOSING A RUN OF DATES AT ONCE  (bulk [Waitlist Only])
 // ============================================================================
 //
 // Waitlist_Only is the one tick on the session table that means something

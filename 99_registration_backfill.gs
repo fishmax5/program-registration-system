@@ -544,24 +544,74 @@ function reimportFormLabel_(entry) {
   return `⚠️ NO SESSION ROW POINTS AT THIS FORM — registered as ${key}`;
 }
 
-/** ADMIN ACTION — "Re-import a Form's Responses…". */
+/**
+ * ADMIN ACTION — "Re-import a Form's Responses…".
+ *
+ * IT OPENS BEFORE IT LOOKS AT ANYTHING, which is the same lesson `51` learned
+ * the hard way and for the same reason. This used to call
+ * listFormsForReimport() — a whole read of the session table, plus the stored
+ * form registry — and hand the answer to a dialog that had not been created
+ * yet. Apps Script stops an execution at the account's ceiling with no warning
+ * and no exception, and a menu item whose work happens BEFORE the dialog is
+ * created is a menu item that, on the workbook where the read is slowest,
+ * silently does nothing at all: no dialog, no error, nothing to press again.
+ * The same is true of a THROW in that read — the red toast is gone before
+ * anybody reading the menu has looked up.
+ *
+ * So the page is created and shown first, says "Reading the form list…", and
+ * asks for it through google.script.run like every other slow thing here. A
+ * list that cannot be read is then a sentence ON THE DIALOG, where the person
+ * who pressed the item is looking, and the box for pasting a form id by hand
+ * is on screen and usable either way — which is the one control somebody
+ * reaching for this repair most often already knows the answer for.
+ */
 function showReimportFormDialog() {
   if (isBootstrapActive()) {
-    toastIfPossible(bootstrapBusyMessage());
+    explainRefusal(bootstrapBusyMessage());
     return;
   }
-  const forms = listFormsForReimport();
-  const html = HtmlService.createHtmlOutput(buildReimportFormHtml(forms))
+  const html = HtmlService.createHtmlOutput(buildReimportFormHtml(null))
     .setWidth(620)
     .setHeight(520);
   SpreadsheetApp.getUi().showModalDialog(html, "Re-import a Form's Responses");
 }
 
-/** The dialog's markup. Inline, so this project stays a single .gs file. */
+/**
+ * The picker's contents, for the page to ask for once it is on screen.
+ *
+ * Answers rather than throws: a failure here has to reach the dialog as words,
+ * because the alternative is a spinner that never stops beside a form box that
+ * works perfectly well.
+ */
+function reimportFormChoices() {
+  try {
+    return { ok: true, forms: listFormsForReimport() };
+  } catch (err) {
+    log(`⚠️ Could not list the forms for a re-import (${err}).`);
+    return {
+      ok: false,
+      forms: [],
+      message: `The form list could not be read (${err}). Paste the form's URL or id below instead — ` +
+        `the re-import itself does not need this list.`
+    };
+  }
+}
+
+/**
+ * The dialog's markup. Inline, so this project stays a single .gs file.
+ *
+ * `forms` is now normally NULL — the page fetches the list itself once it is on
+ * screen (see showReimportFormDialog above). A caller that already holds the
+ * list may still pass it and have it inlined, which is what the test does and
+ * what keeps this function answerable without a spreadsheet.
+ */
 function buildReimportFormHtml(forms) {
-  const formTags = forms.length > 0
-    ? forms.map(f => `<option value="${escapeHtmlForDialog(f.value)}">${escapeHtmlForDialog(f.label)}</option>`).join('\n')
-    : '<option value="">(no form on this workbook yet)</option>';
+  const pending = forms === null || forms === undefined;
+  const formTags = pending
+    ? '<option value="">Reading the form list…</option>'
+    : (forms.length > 0
+      ? forms.map(f => `<option value="${escapeHtmlForDialog(f.value)}">${escapeHtmlForDialog(f.label)}</option>`).join('\n')
+      : '<option value="">(no form on this workbook yet)</option>');
 
   return `
 <style>
@@ -604,6 +654,46 @@ function buildReimportFormHtml(forms) {
 <button id="go" onclick="submit()">Re-import this form</button>
 <div id="status"></div>
 <script>
+  var PENDING = ${pending ? 'true' : 'false'};
+
+  /**
+   * THE LIST, ASKED FOR FROM A PAGE THAT IS ALREADY DRAWN. Every failure ends
+   * in a sentence in the picker rather than in a dialog that never appeared —
+   * and the form box below stays usable throughout, because pasting an id is
+   * the path somebody sent here by name is on anyway.
+   */
+  function loadForms() {
+    if (!PENDING) return;
+    google.script.run
+      .withSuccessHandler(function (result) {
+        var picker = document.getElementById('pickedForm');
+        picker.textContent = '';
+        var forms = (result && result.forms) || [];
+        if (forms.length === 0) {
+          var none = document.createElement('option');
+          none.value = '';
+          none.textContent = (result && result.ok)
+            ? '(no form on this workbook yet)'
+            : '(the form list could not be read — paste an id below)';
+          picker.appendChild(none);
+        }
+        for (var i = 0; i < forms.length; i++) {
+          var option = document.createElement('option');
+          option.value = forms[i].value;
+          // textContent, not innerHTML: a program called "Tai Chi <b>" is a
+          // program, and this list is built from titles staff typed.
+          option.textContent = forms[i].label;
+          picker.appendChild(option);
+        }
+        if (result && !result.ok && result.message) say(result.message, 'err');
+      })
+      .withFailureHandler(function (err) {
+        say('The form list could not be read (' + (err && err.message ? err.message : err) +
+            '). Paste the form URL or id below instead.', 'err');
+      })
+      .reimportFormChoices();
+  }
+
   function submit() {
     var ref = document.getElementById('formRef').value || document.getElementById('pickedForm').value;
     if (!ref) { say('Pick a form, or paste its URL.', 'err'); return; }
@@ -625,6 +715,8 @@ function buildReimportFormHtml(forms) {
     el.textContent = msg;
     el.className = cls;
   }
+
+  loadForms();
 </script>`;
 }
 

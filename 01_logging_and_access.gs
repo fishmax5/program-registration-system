@@ -86,7 +86,7 @@ const ADMIN_GATED_ACTIONS = [
   // read-only report beside it (reportOrphanedSessionRows) is deliberately NOT
   // here — measuring is open to whoever can open the workbook; removing is not.
   'Remove Leftover Calendar Rows',
-  // Its gentler sibling (99f). It removes only rows another row already
+  // Its gentler sibling (99k). It removes only rows another row already
   // duplicates and moves nobody off a roster, but a row is still gone
   // afterwards and nothing here puts it back. The read-only report beside it
   // (reportDuplicateSessionRows) is deliberately NOT here, for the same reason.
@@ -199,7 +199,11 @@ function requireAuthorizedAdmin(actionName) {
   const message = `⛔ "${actionName}" is restricted to: ${listAuthorizedAdminEmails().join(', ')} — ${whoami}. ` +
     `Ask one of those accounts to run it, or switch to one of them.`;
   log(message);
-  toastIfPossible(message);
+  // AN ALERT, NOT A TOAST. A refusal nobody reads is a menu item that appears
+  // to do nothing — and this one is doubly so, because the answer ("you are
+  // signed in as the wrong account") is not something anybody guesses. See the
+  // banner in 99g_nothing_happened.gs for the symptom this produced.
+  explainRefusal(message);
   return false;
 }
 

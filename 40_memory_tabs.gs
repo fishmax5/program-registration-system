@@ -55,6 +55,13 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // function, with the marker set only once the write has landed.
     refreshProgramLeadersTab(ss, sessions);
     refreshProgramSettings(ss, sessions);
+    // NOT A REWRITE OF THAT TAB — just its dropdowns. Program_Questions is
+    // written by hand and redrawn only by first-run setup and the question
+    // builder, so its Program list was built from whatever the session table
+    // held on the day it was last drawn: a program imported since is missing
+    // from the dropdown, which is exactly the program somebody is about to
+    // write a question for. See refreshProgramQuestionsValidation() (55).
+    refreshProgramQuestionsValidation();
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
     // reference material, not the system of record.

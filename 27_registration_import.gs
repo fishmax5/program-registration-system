@@ -16,7 +16,10 @@ function syncRegistrations() {
   recordHandlerRun('syncRegistrations');
 
   if (isBootstrapActive()) {
-    log(`syncRegistrations: a large-setup import or forms-rebuild sweep is writing to the session table — skipping this run.`);
+    // SAID WHERE SOMEBODY CAN SEE IT when a person is driving. This used to be
+    // a log line and nothing else, so pressing "Sync Registrations" during a
+    // stuck sweep looked exactly like a menu item that does nothing. See 99g.
+    explainRefusal(`Nothing was imported: ${bootstrapBusyMessage()}`);
     return;
   }
 

@@ -149,6 +149,13 @@ function buildAppMenu(ui, includeAdmin) {
     // with the calendar and the forms. Both still exist on their own under
     // Settings & Fixes for the times one of them is what you actually want.
     .addItem('\ud83d\udd04 Update Everything Now', 'syncEverythingNow')
+    // DIRECTLY UNDER IT, because this is the item somebody reaches for about
+    // the item above. Half the menu here begins by asking whether it is
+    // allowed to run — automation paused, a background job in flight — and
+    // every one of those refusals used to be a toast nobody saw, which reads
+    // as "the menu does nothing and gives no error". Ungated and read-only, so
+    // it answers on exactly the workbook where nothing else will. See 99g.
+    .addItem('\u2753 Why did nothing happen?', 'reportWhyNothingHappened')
     .addSeparator()
     .addSubMenu(ui.createMenu('\ud83c\udf71 Lunch')
       .addItem('Add Menu Items (paste/upload CSV)\u2026', 'showLunchMenuImportDialog')
@@ -232,7 +239,7 @@ function buildAppMenu(ui, includeAdmin) {
       // hundred. This picks the program first — so a tick can only ever land
       // on that program's dates — then offers its upcoming dates with a date
       // range beside them. It queues the calendar tag exactly as an edit
-      // does, and it unticks as well as ticks. See 99g.
+      // does, and it unticks as well as ticks. See 99l.
       .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', 'showBulkWaitlistOnlyDialog')
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
@@ -278,6 +285,10 @@ function buildAppMenu(ui, includeAdmin) {
       // the other order — somebody looking at the year-over-year block today
       // and wanting the month running counted in.
       .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      // A copy of the registrants tab in Drive, right now, for somebody about
+      // to do something they are not sure about. The nightly one runs at 3am
+      // on its own; this is the other order. See 99b.
+      .addItem('\ud83d\udcbe Save a Copy of the Registrants Tab', 'snapshotRegistrantsNow')
       .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
@@ -386,6 +397,13 @@ function buildAppMenu(ui, includeAdmin) {
       .addSubMenu(ui.createMenu('\u23f0 Triggers')
         .addItem('Trigger Status', 'showTriggerStatus')
         .addItem('Check Triggers', 'writeTriggers')
+        // THE ESCAPE HATCH, OUT OF THE EDITOR. A multi-execution job whose run
+        // was killed part-way leaves its state in flight, and everything gated
+        // behind it declines for good — including the hourly syncs, if the job
+        // was one that paused them. Standing it down was cancelBootstrapCalendars()
+        // or cancelFormRebuildSweep() in the Apps Script editor, which is not
+        // something a front desk can do. See 99g.
+        .addItem('\ud83e\uddf9 Clear a Stuck Background Job', 'clearStuckBackgroundJobs')
         .addSeparator()
         .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
         .addItem('Release My Triggers', 'releaseMyTriggers'))
@@ -395,6 +413,11 @@ function buildAppMenu(ui, includeAdmin) {
       .addSubMenu(ui.createMenu('\ud83d\udcc4 Reports')
         // Both READ-ONLY, and named so. They measure; they change nothing.
         .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        // "Nobody has signed up yet" is what a program registrant sheet says
+        // about a class nobody booked AND about one whose rows never reached
+        // it. This is which of the two, per sheet, and what to do about each.
+        // See 99h.
+        .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', 'reportLeaderSheetRosters')
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the
@@ -402,7 +425,7 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         // Its sibling fault: not a row from a calendar that left, but two rows
         // for one date under one Event_ID — which everything downstream reads
-        // as one session, so the second row's counts are stale forever. See 99f.
+        // as one session, so the second row's counts are stale forever. See 99k.
         .addItem('Find Duplicate Session Rows (read-only report)', 'reportDuplicateSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
         // The check nothing else in the project makes: a form holding
@@ -417,6 +440,11 @@ function buildAppMenu(ui, includeAdmin) {
         // the missing name is the person who should be able to press it.
         // See 99d.
         .addItem('Find Missing Registrations (read-only report)', 'reportMissingRegistrations')
+        // The same silence one tab over: a question aimed at a program title
+        // nothing answers to is a question that appears on no form at all,
+        // and the tab shows it ticked Active either way. Suggests, never
+        // re-binds — see findUnmatchedProgramQuestionRows() (53).
+        .addItem('Find Questions Aimed At Nothing (read-only report)', 'reportOrphanedProgramQuestions')
         // The year's volunteer hours, by person \u2014 the figure the centre is
         // credited on. Read-only and ungated like the four above it. See 99e.
         .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', 'reportVolunteerHours')
@@ -447,7 +475,7 @@ function buildAppMenu(ui, includeAdmin) {
         // removes rows only where another row already carries the same
         // Event_ID, merges what each held onto the one that stays, and moves
         // nobody to Triage — the surviving row keeps the Event_ID every
-        // registration is attached to. See 99f.
+        // registration is attached to. See 99k.
         .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', 'removeDuplicateSessionRows')
         .addSeparator()
         // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
@@ -618,6 +646,16 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('sendOfficeDailyDigest', () =>
     ScriptApp.newTrigger('sendOfficeDailyDigest')
       .timeBased().everyDays(1).atHour(OFFICE_DIGEST_HOUR).create());
+  // YESTERDAY'S REGISTRATIONS, KEPT. All_Registrants is rebuilt by reading
+  // itself, clearing itself and writing the rows back, so one short row array
+  // is a permanent loss with no second copy anywhere — see
+  // 99j_registrant_safety_net.gs. This is that second copy: one dated CSV a
+  // night, pruned after ninety days. 3am, ahead of every other nightly job, so
+  // the copy is of the day that ended rather than of whatever the 5am calendar
+  // sync has since made of it.
+  removed += resetTriggersForHandler('snapshotRegistrantsDaily', () =>
+    ScriptApp.newTrigger('snapshotRegistrantsDaily')
+      .timeBased().everyDays(1).atHour(3).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
