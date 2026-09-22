@@ -40,20 +40,13 @@ is lost with no second copy anywhere in the system.
 
 The shrink guard and the nightly CSV snapshot that landed in
 `99j_registrant_safety_net.gs` are the smoke alarm: they notice a loss and they
-keep a copy from some hours ago. They cannot tell you which registrations went,
-they cannot restore one without overwriting the hours since, and a guard that
-refuses a legitimate shrink is a guard somebody turns off.
-
-> **Note for the reader of this branch:** `99j_registrant_safety_net.gs` is not
-> on `claude/awesome-knuth-y1zsz1`, nor in this repository's history on any
-> branch reachable here. This document treats it as landed, per the premise it
-> was written to; §4.3 states what has to be true of it before it is retired,
-> and that section should be checked against the file itself once it is in
-> front of the reader.
-
-**The durable fix is to stop the tab being the record.** A registration becomes
-an entry in an append-only ledger; `All_Registrants` becomes a projection of
-that ledger, and a bad render costs a redraw rather than a roster.
+keep a copy from some hours ago. The guard fires at a loss of half the tab and
+at least ten rows, which is calibrated so it cannot be hit legitimately — and
+therefore cannot see the loss of nine. The snapshot is last night's, so a
+registration taken this morning and lost this afternoon was never in it, and
+reading one back out of a CSV is a person retyping a row. Neither can tell you
+*which* registrations went, because neither knows what the tab was supposed to
+say.
 
 ---
 
@@ -369,20 +362,38 @@ the fold does the rest.
 
 ### 4.3 Both halves of `99j_registrant_safety_net.gs`
 
-The shrink guard is a heuristic answer to "did the render just lose rows". With
-the ledger the question is decidable: the fold says how many live registrations
-there are, and a render that writes a different number is a bug in the
-projection rather than a possible data loss — reported, not blocked. The
-nightly CSV snapshot is a partial second copy taken hours late; the ledger is a
-complete second copy taken at the moment of the change, in the workbook, and
-`All_Registrants` is the derived thing.
+The guard (`guardRegistrantRowLoss_`, consulted by `renderFlatDateSheet()`
+immediately before its `clear()`) is a heuristic answer to "did this render
+just lose rows": refuse at a loss of half the tab and at least ten rows, warn
+and snapshot at five. Its own banner is honest about the calibration — the
+fraction is what makes it impossible to hit legitimately, which is another way
+of saying **it cannot see the loss of nine rows**, and nine registrations is a
+week of a class.
 
-Retired **last**, in phase 5, and only once phase 2's verifier has run clean
-for a month. A smoke alarm comes out after the fire is out, and the guard
-costing a little is exactly the price of being sure. If the file as it actually
-stands does anything this paragraph does not describe — a restore path, a
-per-row diff, an alert somebody relies on — that part is kept and this section
-is wrong about it.
+With the ledger the question stops being a heuristic and becomes decidable: the
+fold says how many live registrations there are, and a render that would write
+a different number is a bug in the projection rather than a possible data loss.
+It is still reported — the refusal is still the right outcome in front of
+somebody, and `99j`'s reasoning about throwing rather than skipping quietly
+(the sliced sync records a step that threw and steps over it) holds exactly as
+written. What changes is the threshold: **one row**, because with a second copy
+in the workbook a false refusal costs a redraw instead of a roster.
+
+So `guardRegistrantRowLoss_` is not deleted. It is re-pointed at the fold's
+count in phase 5, its two constants go, and the file keeps its name and its
+banner.
+
+The CSV snapshot stays too, and outlives all of this — see §6's last bullet: a
+copy outside the workbook is the one thing the ledger cannot be, and after
+phase 5 `snapshotRegistrantsDaily()` snapshots the **ledger** as well as the
+tab. `REGISTRANT_SNAPSHOT_KEEP_DAYS` (90, chosen against how these losses are
+actually found — not on the day, but when somebody turns up for a session they
+registered for weeks ago) is the one number here that should probably go up
+rather than away: the ledger makes the 91st day recoverable from inside the
+workbook, which is a reason to trust the export less, not more.
+
+`tests/registrant_shrink_guard.test.js` pins the current thresholds, so phase 5
+changes that test rather than removing it.
 
 ---
 
@@ -457,7 +468,8 @@ it is the one that has to be undoable in a hurry.
 
 ### Phase 5 — the retirements and the archive
 
-`28`'s store, `99j`'s two halves, `99d`'s `withReadOnlyRegistries_()` swap, and
+`28`'s store, `99j`'s guard re-pointed at the fold's count (and its snapshot
+re-pointed at the ledger), `99d`'s `withReadOnlyRegistries_()` swap, and
 `archiveLedgerThrough()` with its checkpoint entries. Each is its own commit,
 each after its own quiet month.
 
@@ -477,5 +489,6 @@ each after its own quiet month.
   ledger entry; `99d`'s audit is unaffected and still needed.
 - **Sheets.** The ledger is a tab in the same workbook as the thing it protects.
   A workbook lost is both lost. That is what the nightly export is actually for,
-  and it is the one part of `99j` worth keeping past phase 5 — pointed at the
-  ledger instead of at `All_Registrants`.
+  and it is why `99j`'s snapshot is the one part of that file this design does
+  not touch except to widen — pointed at the ledger as well as at
+  `All_Registrants`.

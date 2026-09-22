@@ -60,6 +60,7 @@ this.clearBackfillMarks = clearBackfillMarks;
 this.describeUnimportedFormPointer = describeUnimportedFormPointer;
 this.findUnimportedForms = findUnimportedForms;
 this.listFormsForReimport = listFormsForReimport;
+this.buildReimportFormHtml = buildReimportFormHtml;
 this.classifyReimportRegistryEntry_ = classifyReimportRegistryEntry_;
 this.registryKeySpanMonthKey_ = registryKeySpanMonthKey_;
 this.HEADERS = HEADERS;
@@ -284,6 +285,29 @@ const sessionRow = fields => {
     offered[0].label.indexOf('NO SESSION ROW') === -1, true);
   check('...and says why instead',
     offered[0].label.indexOf('could not be read') !== -1, true);
+}
+
+// THE DIALOG OPENS BEFORE IT READS ANYTHING (section 99).
+//
+// listFormsForReimport() reads the whole session table and the stored form
+// registry. It used to run BEFORE the dialog was created, which on a workbook
+// where that read is slow is a menu item that silently does nothing: Apps
+// Script stops an execution at its ceiling with no warning and no exception,
+// and there is no dialog yet to say so. Same lesson as the Form & Link Doctor
+// (51). So the page is built with no list and asks for one once it is drawn.
+{
+  const pending = sandbox.buildReimportFormHtml(null);
+  check('a dialog built with no list says it is still reading',
+    pending.indexOf('Reading the form list') !== -1, true);
+  check('...and asks the server for it once it is on screen',
+    pending.indexOf('.reimportFormChoices()') !== -1, true);
+  check('...while the paste-an-id box is on screen either way',
+    pending.indexOf('id="formRef"') !== -1, true);
+  // Still answerable without a spreadsheet, which is what a caller holding the
+  // list already does — and what this test does.
+  const inlined = sandbox.buildReimportFormHtml([{ value: 'formA', label: 'Tech Support — 4 rows' }]);
+  check('a list handed over is still inlined',
+    inlined.indexOf('Tech Support — 4 rows') !== -1, true);
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

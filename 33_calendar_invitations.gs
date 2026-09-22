@@ -184,7 +184,18 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     let changed = false;
     const addedHere = [];
     const removedHere = [];
+    // NOTHING IS ADDED WHILE THE REHEARSAL SWITCH IS ON. Google emails a guest
+    // the moment they are added to an event, so this is mail in everything but
+    // name — and the guest list is left untouched rather than added-and-removed,
+    // because an invitation withdrawn a second later is two emails instead of
+    // none. The office gets one line per person. See 99i.
+    const holdInvites = isNotificationTestMode();
     toAdd.forEach(email => {
+      if (holdInvites) {
+        recordHeldCalendarInvite(email, session);
+        result.deferred++;
+        return;
+      }
       try {
         event.addGuest(email);
         already.add(email);
@@ -610,7 +621,13 @@ function removeAdminGuestsFromCalendarEvents() {
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  // The SESSION table (SHEET_NAMES.PROGRAM_DASHBOARD is 'All_Program_Sessions'),
+  // so its header list is HEADERS.All_Program_Sessions — the one carrying
+  // Event_ID, Event_Date and Calendar_Source. Reading it under
+  // HEADERS.Master_Program_Dashboard (the one-row-per-PROGRAM tab) left every
+  // one of those three undefined, so every row was skipped and the sweep
+  // reported nothing to remove however many guests were on the events.
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];
@@ -762,7 +779,13 @@ function removeAllCalendarInvitesFromEvents() {
   if (!requireAuthorizedAdmin('Remove All Calendar Invites')) return;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.Master_Program_Dashboard;
+  // The SESSION table (SHEET_NAMES.PROGRAM_DASHBOARD is 'All_Program_Sessions'),
+  // so its header list is HEADERS.All_Program_Sessions — the one carrying
+  // Event_ID, Event_Date and Calendar_Source. Reading it under
+  // HEADERS.Master_Program_Dashboard (the one-row-per-PROGRAM tab) left every
+  // one of those three undefined, so every row was skipped and the sweep
+  // reported nothing to remove however many guests were on the events.
+  const regHeaders = HEADERS.All_Program_Sessions;
   const regMap = getIndexMap(regHeaders);
   const registrySheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
   const rows = registrySheet ? getSectionedRows(registrySheet, regHeaders, 'Event_ID') : [];

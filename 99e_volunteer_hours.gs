@@ -354,7 +354,11 @@ function logVolunteerVisit(payload) {
     row[map['Arrived']] = formatVolunteerClockTime(visit.arrived);
     row[map['Departed']] = formatVolunteerClockTime(visit.departed);
     row[map['Hours']] = hours;
-    row[map['Logged_By']] = getCurrentUserEmail() || '';
+    // WHO TYPED IT, not who did the work. The dialog leaves this to the
+    // signed-in account; the volunteer's own page (99f) passes it explicitly,
+    // because a web app runs as the workbook's OWNER and would otherwise sign
+    // every self-logged row with the office's address.
+    row[map['Logged_By']] = String(visit.loggedBy || '').trim() || getCurrentUserEmail() || '';
     row[map['Logged_On']] = new Date();
     row[map['Staff_Notes']] = String(visit.notes || '').trim();
     row[map['Entry_ID']] = Utilities.getUuid();
