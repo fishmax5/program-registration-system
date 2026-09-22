@@ -226,6 +226,14 @@ function buildAppMenu(ui, includeAdmin) {
       // the ticks you made on the dashboard have not reached the calendar yet,
       // and this sends them.
       .addItem('Push Dashboard Ticks to the Calendar', 'applyProgramTagChangesToCalendar')
+      // THE PER-SESSION TICK, IN BULK. Waitlist_Only is the one box on the
+      // session table that means something about a DATE rather than a
+      // program, and setting it meant finding each row on a tab of several
+      // hundred. This picks the program first — so a tick can only ever land
+      // on that program's dates — then offers its upcoming dates with a date
+      // range beside them. It queues the calendar tag exactly as an edit
+      // does, and it unticks as well as ticks. See 99g.
+      .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', 'showBulkWaitlistOnlyDialog')
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
       // sense together — a [Personalized Assistance] program is booked by time
@@ -392,6 +400,10 @@ function buildAppMenu(ui, includeAdmin) {
         // thing that names WHICH calendar the leftover rows are from, and the
         // calendar ID is the whole question, so it is read first. See 84.
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
+        // Its sibling fault: not a row from a calendar that left, but two rows
+        // for one date under one Event_ID — which everything downstream reads
+        // as one session, so the second row's counts are stale forever. See 99f.
+        .addItem('Find Duplicate Session Rows (read-only report)', 'reportDuplicateSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
         // The check nothing else in the project makes: a form holding
         // responses that NO session row names, which is to say a form nobody
@@ -431,6 +443,12 @@ function buildAppMenu(ui, includeAdmin) {
         // form is touched, but a whole location can leave the table in one
         // press \u2014 which is what puts it here. Read the report first. See 84.
         .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')
+        // Gentler than the item above and here for the company it keeps: it
+        // removes rows only where another row already carries the same
+        // Event_ID, merges what each held onto the one that stays, and moves
+        // nobody to Triage — the surviving row keeps the Event_ID every
+        // registration is attached to. See 99f.
+        .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', 'removeDuplicateSessionRows')
         .addSeparator()
         // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
         // Jobs takes the OFFICE off; this takes everybody off, which is why it

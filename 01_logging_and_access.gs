@@ -86,6 +86,11 @@ const ADMIN_GATED_ACTIONS = [
   // read-only report beside it (reportOrphanedSessionRows) is deliberately NOT
   // here — measuring is open to whoever can open the workbook; removing is not.
   'Remove Leftover Calendar Rows',
+  // Its gentler sibling (99f). It removes only rows another row already
+  // duplicates and moves nobody off a roster, but a row is still gone
+  // afterwards and nothing here puts it back. The read-only report beside it
+  // (reportDuplicateSessionRows) is deliberately NOT here, for the same reason.
+  'Remove Duplicate Session Rows',
   // Withdraws every invitation from every upcoming event. There is no un-send
   // and no un-remove: the next sync re-invites only where the guest-list tick
   // on Program_Settings is still on, which is a separate decision. See 33.

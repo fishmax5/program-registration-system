@@ -806,7 +806,13 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
   // rather than folded into group.capacity.
   const slotMinutes = resolveSlotMinutes(group);
 
-  const rows = group.sessions.map(session => {
+  // ONE ROW PER Event_ID, ALWAYS — see collapseSessionsByEventId_(). The
+  // sessions are collapsed here rather than in buildEventGroups() because the
+  // group's `events` list is also what backInjectCalendarDescriptions() writes
+  // the registration link onto: a second event on one day is still a real
+  // event on the calendar and still needs its link, even though it must not
+  // become a second row.
+  const rows = collapseSessionsByEventId_(group).map(session => {
     const ev = session.event;
     const startTime = ev.getStartTime();
     const dateKey = formatDateKey(startTime);
@@ -894,6 +900,92 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     invalidateSectionedRowsCache(registrySheet); // rows the cached read has never seen
     invalidateEventTimeIndex(); // new sessions, and therefore new times to look up
   }
+}
+
+/**
+ * TWO CALENDAR EVENTS, ONE SESSION ROW — the collapse that keeps an Event_ID
+ * unique.
+ *
+ * An Event_ID is `calendarId | cleanTitle | dateKey` and nothing else (see
+ * computeEventId), and EVERYTHING downstream treats it as the identity of a
+ * session: the registrant rows join on it, the tombstones match on it, the
+ * counts are recomputed per it, Quick Mark and both door pages look a session
+ * up by it, and the form's date labels resolve a response back through it.
+ *
+ * buildEventGroups() pushed every calendar event onto its group's session list
+ * unconditionally, and writeEventRegistryRows() mapped that list one-to-one
+ * into rows. So two events on ONE calendar, on ONE day, under ONE clean title
+ * — an appointment program typed as a 9–12 block and a 1–4 block, a recurring
+ * event with a one-off copy beside it, an event somebody duplicated instead of
+ * moved — became TWO rows carrying ONE Event_ID. The calendar was right and
+ * the form was right (a form's date list is keyed by date, so the twins
+ * collapse there by themselves), which is exactly why this went unnoticed: the
+ * duplication was visible only on the tab everybody reads.
+ *
+ * WHAT IS KEPT AND WHAT IS NOT. The EARLIEST event wins the row, because it is
+ * the one whose start time the date label and the sign-in sheet already say.
+ * Nothing is invented from the others — in particular the span is NOT widened
+ * to cover them, which for an appointment program would manufacture slots over
+ * a lunch break nobody is working through. The one thing that is merged is
+ * [Waitlist Only]: it is a statement about the DATE (see WAITLIST_ONLY_TAG),
+ * so tagging either event closes the date, on the same "a missing tag is an
+ * omission, not a contradiction" reading buildEventGroups() takes for every
+ * program flag.
+ *
+ * AND IT IS NEVER SILENT. A day holding two events of one program is usually a
+ * calendar that wants tidying — which is what "⏱️ Merge Half-Hour Blocks" (56)
+ * exists for — so every collision is logged and filed for the office digest
+ * rather than quietly swallowed. Collapsing without saying so would trade a
+ * visible duplicate for an invisible one.
+ */
+function collapseSessionsByEventId_(group) {
+  const sessions = group.sessions || [];
+  if (sessions.length < 2) return sessions;
+
+  const byId = {};
+  const order = [];
+  const collisions = [];
+
+  sessions.forEach(session => {
+    const startTime = session.event.getStartTime();
+    const eventId = computeEventId(session.calendarId, group.cleanTitle, formatDateKey(startTime));
+    const kept = byId[eventId];
+    if (!kept) {
+      byId[eventId] = session;
+      order.push(eventId);
+      return;
+    }
+    // A date is closed if EITHER event says so.
+    if (session.waitlistOnly) kept.waitlistOnly = true;
+    collisions.push({ eventId, startTime, keptStart: kept.event.getStartTime() });
+    // The earliest start keeps the row; a later-sorted twin only ever donates
+    // its waitlist tick, which has already been taken above.
+    if (startTime < kept.event.getStartTime()) {
+      session.waitlistOnly = kept.waitlistOnly;
+      byId[eventId] = session;
+    }
+  });
+
+  if (collisions.length > 0) reportCollapsedSessionTwins_(group, collisions);
+  return order.map(id => byId[id]);
+}
+
+/** Says, in the log and in the office's daily digest, which dates held more than one event. */
+function reportCollapsedSessionTwins_(group, collisions) {
+  const days = dedupePreservingOrder(collisions.map(c => formatDateLabel(c.keptStart)));
+  const detail = collisions.map(c =>
+    `${formatDateLabel(c.keptStart)} — kept ${formatTimeLabel(c.keptStart)}, ` +
+    `ignored a second event starting ${formatTimeLabel(c.startTime)}`).join('; ');
+
+  log(`⚠️ ${describeGroup(group)}: ${collisions.length} calendar event(s) fell on a date this program ` +
+    `already has, so they were collapsed into the existing session row rather than duplicating it. ${detail}`);
+
+  noteForAdmin('Two calendar events on one program date',
+    `"${group.cleanTitle}" has more than one calendar event on ${days.length} date(s) ` +
+    `(${days.join(', ')}). One session row is kept per date — a date is one session to everything ` +
+    `downstream — so the extra event(s) add no row and no seats. If those really are separate ` +
+    `sittings, merge them into one event on the calendar (Programs & Forms ▸ Appointments ▸ ` +
+    `"⏱️ Merge Half-Hour Blocks"); if one is a stray copy, delete it.`);
 }
 
 /**
