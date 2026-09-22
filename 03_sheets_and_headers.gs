@@ -83,7 +83,14 @@ const SHEET_NAMES = {
   // registration (a volunteer is working, not attending) and the hours are
   // reported on annually, which is why it is a tab of its own rather than a
   // Person_Type on All_Registrants. See 99e_volunteer_hours.gs.
-  VOLUNTEER_HOURS: 'Volunteer_Hours'
+  VOLUNTEER_HOURS: 'Volunteer_Hours',
+  // The append-only record of what happened to every registration — one row
+  // per EVENT (registered, cancelled, moved, corrected), never edited, never
+  // removed. All_Registrants is one row per person per session MUTATED IN
+  // PLACE, so "Joan cancelled" is the absence of a word she used to have and
+  // there is no second copy of any of it; this tab is that second copy, and
+  // the thing a lost row can be recovered from. See 99k_registration_ledger.gs.
+  REGISTRATION_LEDGER: 'Registration_Ledger'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -940,6 +947,38 @@ defineLazyGlobal_('HEADERS', () => ({
     'Date', 'Name', 'Role', 'Program', 'Location',
     'Arrived', 'Departed', 'Hours',
     'Logged_By', 'Logged_On', 'Staff_Notes', 'Entry_ID'
+  ],
+  /**
+   * Registration_Ledger — ONE ROW PER EVENT, appended and never touched again.
+   *
+   * Not a projection of anything and not rendered by a sectioned writer: this
+   * tab is never sorted, never cleared and never rewritten, because the one
+   * property it has that All_Registrants does not is that nothing in this
+   * project is capable of shortening it.
+   *
+   * ENTRY_AT IS NOT OCCURRED_AT. Entry_At is when the append happened, which
+   * is always knowable; Occurred_At is when the thing being recorded actually
+   * happened, which often is not — a leader's tick is read back hours later
+   * and a form response was submitted before any sync saw it. Blank means "the
+   * same as Entry_At" rather than "unknown", so a reader never has to decide
+   * which of the two a blank meant.
+   *
+   * REGISTRATION_ID IS THE FOLD KEY, and it is not Party_ID: a party is a
+   * household submitting together (four rows, one id) and it is blank on
+   * everything this system writes outside the form import. Party_ID stays
+   * beside it because the import still needs it to tell "the same response
+   * came round again" from "they registered again".
+   *
+   * PAYLOAD carries the fields this entry SETS and no others — never a whole
+   * row. A whole row per entry would make every entry a fresh assertion of
+   * every field, and a stale field would then silently undo a change made
+   * between the read and the append, which is the class of fault this tab
+   * exists to remove.
+   */
+  Registration_Ledger: [
+    'Entry_ID', 'Entry_At', 'Occurred_At', 'Kind', 'Registration_ID',
+    'Event_ID', 'Name', 'Person_Type', 'Party_ID',
+    'Source', 'Actor', 'Payload', 'Note'
   ]
 }));
 

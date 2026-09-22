@@ -116,6 +116,20 @@ function flushPersistentRegistries() {
     props.setProperty(FORM_TEMPLATE_VERSION_PROP_KEY, JSON.stringify(__formTemplateVersionCache));
     __formTemplateVersionDirty = false;
   }
+
+  // THE LEDGER FLUSHES HERE TOO, rather than at twenty call sites of its own.
+  // 99k's buffer is the same bargain this function makes — record in memory,
+  // write once — and an entry buffered and never written is exactly the silent
+  // loss that tab exists to end. Every place that knows to flush the registries
+  // is a place that knows the execution is at a point where nothing may be left
+  // owing, so it is the right list and it is already maintained. It is a
+  // hoisted call into a later file, which load order does not care about; it is
+  // guarded because a flush failing must not strand the registry writes above.
+  try {
+    flushLedger();
+  } catch (err) {
+    log(`⚠️ Could not write the registration ledger's pending entries (${err}).`);
+  }
 }
 
 const SYNC_LOCK_WAIT_MS = 10 * 1000;
