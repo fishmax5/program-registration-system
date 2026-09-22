@@ -17,6 +17,10 @@ function renderRegistrantsSheet(force, allRows) {
     pastLabel: '🕓 Past Registrants',
     // "10:00 AM" is words, not a time value — see stampTextColumns().
     textColumns: ['Event_Time'],
+    // The shrink guard (99b) — this tab only. Every other tab renderFlatDateSheet
+    // draws is a projection of the calendar and is rebuilt from it; a short row
+    // array here is an unrecoverable loss of registrations.
+    guardMarker: 'Event_ID',
     force,
     afterWrite: applyRegistrantsFormatting
   });

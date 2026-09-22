@@ -626,6 +626,15 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
+  // THE LAST THING BEFORE THE WIPE. A tab whose caller declared a guard marker
+  // (All_Registrants, and nothing else today) gets its incoming row count
+  // compared against what it is currently holding, and a rewrite that would
+  // remove most of the tab THROWS here rather than clearing. See
+  // 99b_registrant_safety_net.gs for why this tab in particular. The order is
+  // load-bearing twice over: before invalidateSectionedRowsCache(), so the
+  // guard's count is the memoized read the render already paid for, and
+  // before clear(), so a refusal leaves the tab exactly as it was.
+  if (opts.guardMarker) guardRegistrantRowLoss_(sheet, headers, opts.guardMarker, allRows);
   // Belt and braces: writeUpcomingPastSections() below drops this tab's cached
   // reads too, but the clear() happens first and a throw in between would
   // otherwise leave the old rows cached against an emptied tab.

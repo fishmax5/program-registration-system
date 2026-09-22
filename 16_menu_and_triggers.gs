@@ -263,6 +263,10 @@ function buildAppMenu(ui, includeAdmin) {
       // the other order — somebody looking at the year-over-year block today
       // and wanting the month running counted in.
       .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      // A copy of the registrants tab in Drive, right now, for somebody about
+      // to do something they are not sure about. The nightly one runs at 3am
+      // on its own; this is the other order. See 99b.
+      .addItem('\ud83d\udcbe Save a Copy of the Registrants Tab', 'snapshotRegistrantsNow')
       .addSeparator()
       .addItem('Show All Past Rows', 'showAllPastRows')
       .addItem('Resize All Sheets', 'resizeAllSheets'));
@@ -577,6 +581,16 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('sendOfficeDailyDigest', () =>
     ScriptApp.newTrigger('sendOfficeDailyDigest')
       .timeBased().everyDays(1).atHour(OFFICE_DIGEST_HOUR).create());
+  // YESTERDAY'S REGISTRATIONS, KEPT. All_Registrants is rebuilt by reading
+  // itself, clearing itself and writing the rows back, so one short row array
+  // is a permanent loss with no second copy anywhere — see
+  // 99b_registrant_safety_net.gs. This is that second copy: one dated CSV a
+  // night, pruned after ninety days. 3am, ahead of every other nightly job, so
+  // the copy is of the day that ended rather than of whatever the 5am calendar
+  // sync has since made of it.
+  removed += resetTriggersForHandler('snapshotRegistrantsDaily', () =>
+    ScriptApp.newTrigger('snapshotRegistrantsDaily')
+      .timeBased().everyDays(1).atHour(3).create());
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a
