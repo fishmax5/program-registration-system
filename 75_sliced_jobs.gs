@@ -268,6 +268,23 @@ function runOneSlice_(job, state) {
     // hand-off, exactly as the ordinary end-of-slice path does.
     armSlicedJobResume(job.resumeHandler, job.resumeDelayMs);
     return current;
+  } finally {
+    // EVERY SLICE, HOWEVER IT ENDS. The registration ledger (99k) buffers its
+    // entries and writes them in one call, and a slice that hands off, stalls,
+    // overruns or throws must not take what it recorded with it — an entry
+    // buffered and never flushed is the silent loss that tab exists to end,
+    // wearing a new coat. This is the one place every sliced job in this
+    // project passes through, which is why it is here rather than repeated in
+    // each job's own `around`.
+    //
+    // It cannot cover an outright KILL at the account's ceiling, which runs no
+    // `finally` at all — that is what the per-step flushes inside the long jobs
+    // are for, and it is the same bargain flushPersistentRegistries() makes.
+    try {
+      flushLedger();
+    } catch (err) {
+      log(`⚠️ ${job.label || job.propKey}: could not write the ledger's pending entries (${err}).`);
+    }
   }
 }
 

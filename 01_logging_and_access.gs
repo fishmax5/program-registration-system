@@ -86,7 +86,7 @@ const ADMIN_GATED_ACTIONS = [
   // read-only report beside it (reportOrphanedSessionRows) is deliberately NOT
   // here — measuring is open to whoever can open the workbook; removing is not.
   'Remove Leftover Calendar Rows',
-  // Its gentler sibling (99k). It removes only rows another row already
+  // Its gentler sibling (99l). It removes only rows another row already
   // duplicates and moves nobody off a roster, but a row is still gone
   // afterwards and nothing here puts it back. The read-only report beside it
   // (reportDuplicateSessionRows) is deliberately NOT here, for the same reason.

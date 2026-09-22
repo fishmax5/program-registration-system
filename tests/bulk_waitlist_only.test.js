@@ -1,4 +1,4 @@
-// CLOSING A RUN OF DATES AT ONCE — the bulk [Waitlist Only] picker (99l).
+// CLOSING A RUN OF DATES AT ONCE — the bulk [Waitlist Only] picker (99m).
 //
 // waitlist_only.test.js pins what the tag MEANS: it describes one date, it is
 // never folded up onto the program, and its calendar write reaches that date's

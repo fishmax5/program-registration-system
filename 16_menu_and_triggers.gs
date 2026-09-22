@@ -239,7 +239,7 @@ function buildAppMenu(ui, includeAdmin) {
       // hundred. This picks the program first — so a tick can only ever land
       // on that program's dates — then offers its upcoming dates with a date
       // range beside them. It queues the calendar tag exactly as an edit
-      // does, and it unticks as well as ticks. See 99l.
+      // does, and it unticks as well as ticks. See 99m.
       .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', 'showBulkWaitlistOnlyDialog')
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
@@ -425,7 +425,7 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
         // Its sibling fault: not a row from a calendar that left, but two rows
         // for one date under one Event_ID — which everything downstream reads
-        // as one session, so the second row's counts are stale forever. See 99k.
+        // as one session, so the second row's counts are stale forever. See 99l.
         .addItem('Find Duplicate Session Rows (read-only report)', 'reportDuplicateSessionRows')
         .addItem('Archive Old Months (report)', 'reportArchivableMonths')
         // The check nothing else in the project makes: a form holding
@@ -475,7 +475,7 @@ function buildAppMenu(ui, includeAdmin) {
         // removes rows only where another row already carries the same
         // Event_ID, merges what each held onto the one that stays, and moves
         // nobody to Triage — the surviving row keeps the Event_ID every
-        // registration is attached to. See 99k.
+        // registration is attached to. See 99l.
         .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', 'removeDuplicateSessionRows')
         .addSeparator()
         // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
