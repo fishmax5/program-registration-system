@@ -143,6 +143,11 @@ function detectRenamedPrograms(registrySheet, groups, existingState, eventsByCal
       // import even though the remap has left it with no new dates — that
       // pass is what renames the FORM. See collectCalendarWork().
       groupKey: candidate.groupKey,
+      // The BUILDINGS this program runs in, which the ninth store needs and
+      // no other one does: a registrant sheet is keyed on title AND location
+      // (that pair is the privacy boundary — see the section header in `46`),
+      // so a [Shared] program renamed once has two keys to move.
+      locations: collectRenameLocations_(candidate.rows, map),
       idMap,
       rowCount: Object.keys(idMap).length
     });
@@ -256,6 +261,26 @@ function splitGroupKey(groupKey) {
 }
 
 /**
+ * The distinct buildings a renamed program's rows name, in the order they are
+ * met. Read off the rows the candidate already holds rather than the group,
+ * because the rows are what the OLD name's records were filed under and those
+ * are the ones being moved.
+ */
+function collectRenameLocations_(rows, map) {
+  const out = [];
+  const seen = {};
+  (rows || []).forEach(row => {
+    const location = String(row[map['Location']] || '').trim();
+    if (!location) return;
+    const key = normalizeNameKey(location);
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(location);
+  });
+  return out;
+}
+
+/**
  * { oldEventId: newEventId } for every row of a renamed program.
  *
  * Keyed off each row's OWN stored Event_ID rather than a recomputed one, so a
@@ -286,12 +311,27 @@ function buildRenameIdMap(candidate, map) {
 /**
  * Moves every trace of a renamed program onto its new name.
  *
- * SEVEN STORES, and missing any one of them is its own quiet bug:
+ * NINE STORES, and missing any one of them is its own quiet bug:
  *   the session table (Event_ID + Clean_Title), the registrant rows and the
  *   triage rows (both join on Event_ID and display the title), the calendar
  *   invite ledger and the deletion tombstones (both keyed by Event_ID), the
- *   club roster (keyed by a hash of the title) and Program_Settings (keyed by
- *   title + location, and holding the staff's own notes and ticks).
+ *   club roster (keyed by a hash of the title), Program_Settings and
+ *   Program_Leaders (both keyed by title + location, and holding the staff's
+ *   own notes and ticks) — and the program registrant SHEET REGISTRY, which
+ *   was missed for exactly as long as it took somebody to look.
+ *
+ * THAT NINTH ONE IS THE QUIETEST FAULT THIS FUNCTION HAS PRODUCED, because
+ * missing it reports NOTHING. The registry keeps the old key and the old
+ * stored title while the session table carries the new Clean_Title, so
+ * pushProgramLeaderSheets() iterates a key `buildLeaderSheetRowsByProgram()`
+ * no longer produces, writes an empty roster over a real one, and stamps the
+ * banner — and countStrandedRegistrantRows_() compares the rows against that
+ * same stale `entry.title`, finds none, and files no note. A program leader is
+ * then holding a live link to a sheet that will say "Nobody has signed up yet"
+ * for as long as the program runs, and every screen in this workbook agrees
+ * that everything is fine. Four of them were found on one real workbook
+ * ("Glee Club" beside "Glee Club Rehearsal", "Healthy Exercise (H)" beside
+ * "Healthy Exercise(H)" — one space), by a report that had to be written first.
  */
 function applyProgramRenames(registrySheet, renames) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -308,6 +348,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameClubRosterKeys(ss, renames);
   renameProgramSettingRows(ss, renames);
   renameProgramLeaderRows(ss, renames);
+  renameLeaderSheetRegistryKeys(renames);
 
   renames.forEach(rename => {
     const message = `"${rename.oldTitle}" was renamed to "${rename.newTitle}" on the calendar — moved ` +
@@ -316,6 +357,79 @@ function applyProgramRenames(registrySheet, renames) {
     log(message);
     noteForAdmin('Programs renamed on the calendar', message);
   });
+}
+
+/**
+ * THE NINTH STORE: the program registrant sheet registry, re-keyed onto the
+ * new name — the KEY it is filed under and the `title` it carries, which are
+ * two facts and both of them are read.
+ *
+ * The key is what `pushProgramLeaderSheets()` iterates and looks up in
+ * `buildLeaderSheetRowsByProgram()`; the stored title is what
+ * `describeStrandedRegistrantRows_()` matches registrant rows against and what
+ * every line the office reads names the program by. Moving one without the
+ * other trades a silent empty sheet for a confusing report.
+ *
+ * NOTHING IS MERGED AND NOTHING IS DELETED. A sheet already registered under
+ * the new name is somebody's real roster in somebody's Drive: overwriting its
+ * entry would strand that file with nothing naming it, which is the one state
+ * in this project that no report can see and no sweep can repair — the file is
+ * not in any registry, so `89`'s sharing sweep, `82`'s filing sweep and `99h`'s
+ * doctor all stop being about it at once. So a collision leaves BOTH entries
+ * exactly as they are and says so; `findDuplicateLeaderSheetPrograms_()` in
+ * `99h` is what then reports the pair, and a person decides which file the
+ * leader is actually holding.
+ *
+ * Flushed here rather than left to the caller's flush: renames are applied
+ * partway through the group loop (`21`), and the sliced calendar sync (`90`)
+ * may be killed at its ceiling before reaching it — which would leave the
+ * session table renamed and this registry not, silently, which is the whole
+ * fault being fixed.
+ */
+function renameLeaderSheetRegistryKeys(renames) {
+  const registry = getProgramLeaderSheetRegistry();
+  let moved = 0;
+
+  (renames || []).forEach(rename => {
+    (rename.locations || []).forEach(location => {
+      const oldKey = leaderProgramKey(rename.oldTitle, location);
+      const newKey = leaderProgramKey(rename.newTitle, location);
+      // A rename that normalizes to the same key is a spelling the key does
+      // not see (case, spacing) — the stored title is still worth correcting,
+      // since that is the name the office reads.
+      const entry = registry[oldKey];
+      if (!entry) return;
+      if (oldKey === newKey) {
+        if (entry.title !== rename.newTitle) {
+          entry.title = rename.newTitle;
+          saveProgramLeaderSheetRegistryEntry(oldKey, entry);
+          moved++;
+        }
+        return;
+      }
+      if (registry[newKey]) {
+        log(`⚠️ "${rename.newTitle}" (${location}) already has a program registrant sheet, so the entry ` +
+          `for "${rename.oldTitle}" was left alone rather than overwriting it. Two sheets now name one ` +
+          `program — 🔧 Admin ▸ 📄 Reports ▸ Why Is A Roster Sheet Empty? reports the pair.`);
+        noteForAdmin('Programs renamed on the calendar',
+          `"${rename.oldTitle}" (${location}) was renamed to "${rename.newTitle}", which ALREADY has a ` +
+          `program registrant sheet of its own. Both sheets have been left exactly as they are — one of ` +
+          `them is the link your program leader is holding and nothing here can tell which. ` +
+          `Run 🔧 Admin ▸ 📄 Reports ▸ Why Is A Roster Sheet Empty? to see both, then share the right one.`);
+        return;
+      }
+      entry.title = rename.newTitle;
+      entry.location = location;
+      saveProgramLeaderSheetRegistryEntry(newKey, entry);
+      removeProgramLeaderSheetRegistryEntry(oldKey);
+      moved++;
+    });
+  });
+
+  if (moved > 0) {
+    flushPersistentRegistries();
+    log(`Renamed program(s): moved ${moved} program registrant sheet registry entr(ies) onto the new name.`);
+  }
 }
 
 /** The session table itself: new Event_ID and new Clean_Title, written in place. */
