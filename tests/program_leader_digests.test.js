@@ -75,6 +75,8 @@ this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.LEADER_ALERT_MAX_LINES_PER_PROGRAM = LEADER_ALERT_MAX_LINES_PER_PROGRAM;
 this.__setLeaderIndex = function (rows) { __programLeaderIndexCache = rows; };
+this.__adminNotes = [];
+noteForAdmin = function (section, message) { this.__adminNotes.push(\`\${section}: \${message}\`); }.bind(this);
 this.__resetDigestLedger = function () {
   __leaderDigestLedgerCache = null;
   __leaderDigestLedgerDirty = false;
@@ -138,6 +140,7 @@ function reset() {
   sentMail.length = 0;
   remainingQuota = 100;
   sandbox.resetRationedMailState();
+  sandbox.__adminNotes.length = 0;
   sandbox.__resetDigestLedger();
 }
 
@@ -264,7 +267,13 @@ check('Notify_Roster_Changes is still the on/off switch',
     [registrant('EV_SOON', 'Ann Smith', 'Active', 1)]), 0);
 
 // ---------------------------------------------------------------------------
-// A SEND THAT DID NOT GO IS NOT RECORDED — the next sync owes it again.
+// A SEND THAT DID NOT GO IS NOT RECORDED — but the retry waits for TOMORROW.
+//
+// The ledger entry is still unwritten, so nothing is lost. What changed is
+// when it is tried again: 'held' from the mailer means the DAY's quota, which
+// no later sync today can do anything about. Retrying every hour re-spent a
+// MailApp call and filed another held-back line in the office digest — 21 of
+// them for one leader on 2026-09-21.
 // ---------------------------------------------------------------------------
 
 reset();
@@ -277,9 +286,18 @@ const quietRegistrants = [registrant('EV_SOON', 'Ann Smith', 'Active', 1)];
 check('a held message is not a sent one',
   sandbox.sendProgramLeaderDaySnapshotDigests(quietSessions, quietRegistrants), 0);
 
-remainingQuota = 100; // ...and the next run, with quota again, still owes it
+remainingQuota = 100; // even with quota back, today is stamped and stays stamped
 sandbox.resetRationedMailState();
-check('...so the next run sends it rather than swallowing it',
+check('...and no later sync today tries again, which is what stopped the flood',
+  sandbox.sendProgramLeaderDaySnapshotDigests(quietSessions, quietRegistrants), 0);
+check('...nor mails anything on the way to that answer', sentMail.length, 0);
+check('the office is told once for the day, not once an hour',
+  sandbox.__adminNotes.filter(n => n.indexOf('held until tomorrow') !== -1).length, 1);
+
+// Tomorrow — the hold is a date key, so a different day is a clean slate.
+delete properties.PROGRAM_LEADER_MAIL_QUOTA_HOLD_V1;
+sandbox.resetRationedMailState();
+check('...and the digest it owed goes out on the next day\'s first sync, not lost',
   sandbox.sendProgramLeaderDaySnapshotDigests(quietSessions, quietRegistrants), 1);
 
 // ---------------------------------------------------------------------------

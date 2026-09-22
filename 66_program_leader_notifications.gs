@@ -52,15 +52,50 @@
 //
 // ------------------------------------------------------ AND IF THE MAIL FAILS
 //
-// The snapshot for a program advances only once its email is actually away.
-// A send that fails leaves the old snapshot in place, so the next run reports
-// those changes again along with anything newer — late, but not lost. The
-// alternative loses the one thing this feature exists to deliver, silently.
+// A leader's snapshot advances only once THEIR email is actually away. A send
+// that fails leaves that leader's old snapshot in place, so the next run
+// reports those changes again along with anything newer — late, but not lost.
+// The alternative loses the one thing this feature exists to deliver, silently.
+//
+// THE SNAPSHOT IS PER LEADER AND NOT PER PROGRAM, and that is a repair rather
+// than a preference. It was one snapshot per program, advanced only when
+// NOBODY was still owed its changes — so a program with two leaders, one of
+// whom could not be emailed, kept its old snapshot and sent the leader who
+// COULD be emailed the identical diff again on the next sync. The file said so
+// itself and called the cost "one duplicate email"; that reasoning holds only
+// while the blocker clears within the hour. When it is the day's mail quota or
+// an address MailApp will not take, it never clears, and "one duplicate" is one
+// an hour until midnight. On 2026-09-11 one leader had "6 change(s) across
+// Computer Tech Support" three times and another "7 change(s) across Low Cost
+// Wills" four times — the same count every time, which is what an un-advanced
+// snapshot looks like from an inbox. Keyed per leader, one leader's failure
+// cannot reach another's baseline, and a leader who was told is told once.
 // ============================================================================
 
-/** Where the per-program roster snapshots live. Chunked: see writeChunkedScriptProperty(). */
-const LEADER_ALERT_STATE_PROP_KEY = 'PROGRAM_LEADER_ROSTER_STATE_V1';
+/** Where the per-leader roster snapshots live. Chunked: see writeChunkedScriptProperty(). */
+const LEADER_ALERT_STATE_PROP_KEY = 'PROGRAM_LEADER_ROSTER_STATE_V2';
+const LEADER_ALERT_STATE_LEGACY_PROP_KEY = 'PROGRAM_LEADER_ROSTER_STATE_V1';
 const LEADER_ALERT_STATE_CHUNK_CHARS = 8000;
+
+/**
+ * Where "the day's mail quota is gone" is remembered, as one date key.
+ *
+ * THE FEEDBACK LOOP THIS EXISTS TO STOP. MailApp's allowance is a DAY's
+ * allowance. Both passes below rode the hourly sync and, on a held or refused
+ * send, deliberately kept their bookkeeping put so the message went out "on
+ * the next sync" — which, when the blocker is the day's quota, is another
+ * twenty-odd syncs that cannot possibly succeed. Each one rebuilt the same
+ * diff, re-attempted the same send, and filed another held-back line in the
+ * office digest: 25 alerts held for one leader on 2026-09-21, 29 on 2026-09-20,
+ * 21 digests for another, and 21 outright "Service invoked too many times for
+ * one day: email" failures from the attempts that did reach MailApp.
+ *
+ * So the FIRST hold stamps today, and every later pass today stops before it
+ * builds anything. Nothing is lost: the diff is still a diff against the same
+ * un-advanced snapshot, and the ledger is still un-written, so tomorrow's first
+ * sync says everything today's would have.
+ */
+const LEADER_MAIL_QUOTA_HOLD_PROP_KEY = 'PROGRAM_LEADER_MAIL_QUOTA_HOLD_V1';
 
 /**
  * How many chunks the snapshot may occupy — about 320KB, against a 500KB
@@ -129,7 +164,10 @@ const LEADER_ALERT_STATUS_WORDS = { A: 'Active', W: 'Waitlisted', C: 'Cancelled'
 let __leaderAlertStateCache = null;
 
 /**
- * { programs: { programKey: { at: iso, roster: { "dateKey|name": "A2" } } } }
+ * { programs: { programKey: { at: iso, leaders: { email: { "dateKey|name": "A2" } } } } }
+ *
+ * ONE BASELINE PER LEADER PER PROGRAM — see THE SNAPSHOT IS PER LEADER in the
+ * section header for the duplicate-email loop that shape exists to close.
  *
  * `at` is when an alert last went out for that program, and it is what the
  * Program_Leaders tab's Last_Notified column renders — kept here rather than
@@ -148,8 +186,65 @@ function readProgramLeaderNotifyState() {
     // claiming the whole roster just arrived.
     log(`⚠️ The program leader alert state could not be parsed (${err}) — starting a fresh baseline.`);
   }
+  if (!parsed || !parsed.programs) parsed = readLegacyProgramLeaderNotifyState_();
   __leaderAlertStateCache = (parsed && parsed.programs) ? parsed : { programs: {} };
   return __leaderAlertStateCache;
+}
+
+/**
+ * The V1 state — one roster per PROGRAM — lifted into the per-leader shape.
+ *
+ * A stored shape that changed takes a new key rather than a silent
+ * reinterpretation of the old one, so the old blob is read once, converted
+ * with no leader named, and left where it is; the first V2 write is what
+ * supersedes it. A program's one old roster becomes the `''` baseline, which
+ * leaderAlertBaselineFor() hands to every leader of that program who has none
+ * of their own — so the sync after this ships diffs against exactly what the
+ * sync before it recorded, and nobody is mailed a roster they already have.
+ */
+function readLegacyProgramLeaderNotifyState_() {
+  const raw = readChunkedScriptProperty(LEADER_ALERT_STATE_LEGACY_PROP_KEY);
+  if (!raw) return null;
+  let old = null;
+  try {
+    old = JSON.parse(raw);
+  } catch (err) {
+    log(`⚠️ The old program leader alert state could not be parsed (${err}) — starting a fresh baseline.`);
+    return null;
+  }
+  if (!old || !old.programs) return null;
+  const state = { programs: {} };
+  Object.keys(old.programs).forEach(key => {
+    const stored = old.programs[key] || {};
+    if (!stored.roster) return;
+    state.programs[key] = { at: stored.at || '', leaders: { '': stored.roster } };
+  });
+  log(`Carried ${Object.keys(state.programs).length} roster baseline(s) onto the per-leader state.`);
+  return state;
+}
+
+/**
+ * What this leader was last told about this program, or null for a first sight.
+ *
+ * The `''` entry is the shared baseline the V1 carry-over left behind, and is
+ * consumed rather than diffed away: a leader with no baseline of their own
+ * inherits it, which is what keeps the upgrade quiet. Once every leader of a
+ * program has been told once, nothing reads it again.
+ */
+function leaderAlertBaselineFor(stored, email) {
+  if (!stored || !stored.leaders) return null;
+  const own = stored.leaders[String(email || '').toLowerCase()];
+  if (own) return own;
+  return stored.leaders[''] || null;
+}
+
+/** Records what this leader has now been told, and retires the shared carry-over once nobody needs it. */
+function setLeaderAlertBaseline(state, key, email, roster, stamp) {
+  const stored = state.programs[key] || { at: '', leaders: {} };
+  if (!stored.leaders) stored.leaders = {};
+  stored.leaders[String(email || '').toLowerCase()] = roster || {};
+  if (stamp) stored.at = stamp;
+  state.programs[key] = stored;
 }
 
 function writeProgramLeaderNotifyState(state) {
@@ -157,6 +252,65 @@ function writeProgramLeaderNotifyState(state) {
   return writeChunkedScriptProperty(LEADER_ALERT_STATE_PROP_KEY, JSON.stringify(state),
     LEADER_ALERT_STATE_CHUNK_CHARS, LEADER_ALERT_STATE_MAX_CHUNKS);
 }
+
+// --- the day's mail quota ----------------------------------------------------
+
+/**
+ * Has a send already been held for the day's mail quota today?
+ *
+ * Read from Script Properties rather than a module variable because the thing
+ * being remembered outlives the execution: the quota is a DAY's, and the next
+ * hourly sync is a new execution reading the same exhausted allowance.
+ */
+function leaderMailQuotaHeldToday() {
+  const props = tryGetScriptProperties();
+  if (!props) return false;
+  try {
+    return props.getProperty(LEADER_MAIL_QUOTA_HOLD_PROP_KEY) === formatDateKey(new Date());
+  } catch (err) {
+    // A store that cannot be read is not a reason to stop sending — the same
+    // fail-open reading isOutboundMailPaused() gets in 76.
+    return false;
+  }
+}
+
+/**
+ * Remembers that today's quota is spent, and tells the office ONCE.
+ *
+ * Once, and not once per run, is the whole point: the office digest carried
+ * twenty-five identical held-back lines on 2026-09-21 because every hourly
+ * pass filed its own. `who` is named because "which leader missed out?" is the
+ * only thing anybody reading it can act on.
+ */
+function recordLeaderMailQuotaHold(who) {
+  const props = tryGetScriptProperties();
+  if (!props) return;
+  const todayKey = formatDateKey(new Date());
+  try {
+    if (props.getProperty(LEADER_MAIL_QUOTA_HOLD_PROP_KEY) === todayKey) return;
+    props.setProperty(LEADER_MAIL_QUOTA_HOLD_PROP_KEY, todayKey);
+  } catch (err) {
+    return;
+  }
+  noteForAdmin('Leader mail held until tomorrow',
+    `The day's email quota is spent, so roster alerts and digests are held for the rest of today ` +
+    `(first affected: ${who || 'a program leader'}). Nothing is lost — the changes are still ` +
+    `un-reported, so tomorrow's first sync says everything today's would have. Later syncs today ` +
+    `will not try again, which is what stops this filling the digest.`);
+}
+
+/**
+ * The one line both passes open with.
+ *
+ * Stopping BEFORE the rosters are built is deliberate: the expensive half of
+ * either pass is the diff, and there is nothing it could do with the answer.
+ */
+function leaderMailHeldForToday(what) {
+  if (!leaderMailQuotaHeldToday()) return false;
+  log(`\u23f8\ufe0f ${what}: the day's mail quota is spent — nothing will be tried again until tomorrow.`);
+  return true;
+}
+
 
 /** One roster line's identity within its program: the date it is for, and who. See THE DIFF. */
 function leaderAlertEntryKey(dateKey, name) {
@@ -442,6 +596,7 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       { programs: leader.programs.filter(p => !p.timing || p.timing.mode === 'each_change') }))
     .filter(leader => leader.programs.length > 0);
   if (leaders.length === 0) return 0;
+  if (leaderMailHeldForToday('Roster alerts')) return 0;
 
   const state = readProgramLeaderNotifyState();
   const programKeys = [];
@@ -452,38 +607,39 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
   const rosters = buildLeaderAlertRosters(sessionRows, registrantRows, programKeys);
   const window = leaderAlertWindow();
   const registry = getProgramLeaderSheetRegistry();
+  const stamp = new Date().toISOString();
 
-  // Every program's diff, once — a program with two leaders is diffed once and
-  // reported to both, and the snapshot it advances to is the same one either
-  // way.
+  // ONE DIFF PER LEADER PER PROGRAM, against that leader's own baseline. A
+  // program with two leaders is diffed twice and they may legitimately differ
+  // — one of them was told an hour ago and the other has been unreachable
+  // since Tuesday — which is exactly the difference the old per-program
+  // snapshot could not hold, and the reason it re-sent.
   const diffs = {};
-  const baselined = [];
-  programKeys.forEach(key => {
-    const stored = state.programs[key];
-    if (!stored || !stored.roster) {
-      // FIRST SIGHT OF THIS PROGRAM. Record it and say nothing — see THE FIRST
-      // RUN. Written immediately rather than with the sends below, because
-      // there is no email whose success it should wait on.
-      state.programs[key] = { at: (stored && stored.at) || '', roster: rosters[key] || {} };
-      baselined.push(key);
+  let baselined = 0;
+  leaders.forEach(leader => leader.programs.forEach(program => {
+    const diffKey = `${program.key}\u0000${leader.email.toLowerCase()}`;
+    if (diffs[diffKey] !== undefined) return;
+    const baseline = leaderAlertBaselineFor(state.programs[program.key], leader.email);
+    if (!baseline) {
+      // FIRST SIGHT OF THIS PROGRAM FOR THIS LEADER. Record it and say nothing
+      // — see THE FIRST RUN. Written immediately rather than with the sends
+      // below, because there is no email whose success it should wait on.
+      setLeaderAlertBaseline(state, program.key, leader.email, rosters[program.key] || {}, '');
+      diffs[diffKey] = [];
+      baselined++;
       return;
     }
-    diffs[key] = diffLeaderAlertRosters(stored.roster, rosters[key] || {}, window);
-  });
+    diffs[diffKey] = diffLeaderAlertRosters(baseline, rosters[program.key] || {}, window);
+  }));
 
   let sent = 0;
   let paused = 0;
-  // A program is re-baselined only once NOBODY is still owed its current
-  // changes. Any leader who was skipped or whose mail bounced puts every
-  // program they were owed in here, and those keep their old snapshot.
-  const stillOwed = {};
-  const told = {};
   const skipped = [];
 
   leaders.forEach(leader => {
     const programs = [];
     leader.programs.forEach(program => {
-      const changes = diffs[program.key];
+      const changes = diffs[`${program.key}\u0000${leader.email.toLowerCase()}`];
       if (!changes || changes.length === 0) return;
       // The registry's spelling wins where there IS a shared sheet — that is
       // the title the leader sees on the file the email links to, and the two
@@ -500,7 +656,8 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     if (programs.length === 0) return;
 
     if (sent >= LEADER_ALERT_MAX_EMAILS_PER_RUN) {
-      programs.forEach(program => { stillOwed[program.key] = true; });
+      // The per-run cap, unlike the day's quota, clears in an hour: this
+      // leader's baselines stay put and the next sync picks them up.
       skipped.push(leader.email);
       return;
     }
@@ -524,7 +681,9 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
 
     if (outcome.status === 'sent') {
       sent++;
-      programs.forEach(program => { told[program.key] = true; });
+      programs.forEach(program => {
+        setLeaderAlertBaseline(state, program.key, leader.email, rosters[program.key] || {}, stamp);
+      });
       const changeCount = programs.reduce((sum, p) => sum + p.changes.length, 0);
       log(`Roster alert sent to ${leader.email} — ${programs.length} program(s), ` +
         `${changeCount} change(s).`);
@@ -545,14 +704,20 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     // working" mean the churn is gone rather than merely late.
     if (outcome.status === 'paused') {
       paused++;
-      programs.forEach(program => { told[program.key] = true; });
+      programs.forEach(program => {
+        setLeaderAlertBaseline(state, program.key, leader.email, rosters[program.key] || {}, stamp);
+      });
       return;
     }
 
-    // Nothing went out, whatever the reason: the snapshot stays put, so these
-    // changes are reported again next hour rather than lost.
-    programs.forEach(program => { stillOwed[program.key] = true; });
+    // Nothing went out, whatever the reason: this leader's baselines stay put,
+    // so these changes are reported to them again rather than lost.
     if (outcome.status === 'held') {
+      // HELD IS THE DAY'S QUOTA, and only that — the per-run cap is handled
+      // above, before sendRationedEmail() is reached at all. So there is no
+      // point in the next twenty syncs building this diff again: stamp today
+      // and stop. See LEADER_MAIL_QUOTA_HOLD_PROP_KEY.
+      recordLeaderMailQuotaHold(leader.email);
       skipped.push(leader.email);
       return;
     }
@@ -568,27 +733,29 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
     }
   });
 
-  // A program whose two leaders both had changes, one of whom bounced, keeps
-  // its old snapshot: the cost is one duplicate email to the leader who did
-  // get it, and the alternative is the other one never hearing about this
-  // hour's cancellations at all. Duplicates are cheap; silence is not.
-  //
-  // A program with changes that NOBODY is owed any more cannot happen — a
-  // change only exists here because some leader asked to be told about it.
-  const stamp = new Date().toISOString();
-  Object.keys(told).forEach(key => {
-    if (stillOwed[key]) return;
-    state.programs[key] = { at: stamp, roster: rosters[key] || {} };
-  });
+  // A leader whose diff came back EMPTY is re-baselined too, and has to be:
+  // their roster is unchanged by definition, but writing it retires the V1
+  // carry-over, keeps the stored snapshot in the current shape, and stops a
+  // program that never changes from looking stale for ever.
+  leaders.forEach(leader => leader.programs.forEach(program => {
+    const changes = diffs[`${program.key}\u0000${leader.email.toLowerCase()}`];
+    if (!changes || changes.length > 0) return;
+    setLeaderAlertBaseline(state, program.key, leader.email, rosters[program.key] || {}, '');
+  }));
 
-  // A program whose diff came back EMPTY is re-baselined too, and has to be:
-  // its roster is unchanged by definition, but writing it keeps the stored
-  // snapshot in the current shape and stops a program that never changes from
-  // looking stale for ever.
-  Object.keys(diffs).forEach(key => {
-    if (diffs[key].length > 0) return;
-    const stored = state.programs[key] || {};
-    state.programs[key] = { at: stored.at || '', roster: rosters[key] || {} };
+  // Leaders nobody has for a program any more — a reassignment, a corrected
+  // address — would otherwise keep a roster apiece for ever.
+  const watching = {};
+  leaders.forEach(leader => leader.programs.forEach(program => {
+    if (!watching[program.key]) watching[program.key] = {};
+    watching[program.key][leader.email.toLowerCase()] = true;
+  }));
+  Object.keys(state.programs).forEach(key => {
+    const stored = state.programs[key];
+    if (!stored || !stored.leaders || !watching[key]) return;
+    Object.keys(stored.leaders).forEach(email => {
+      if (!watching[key][email]) delete stored.leaders[email];
+    });
   });
 
   // Programs nobody is watching any more would otherwise sit in the state for
@@ -601,15 +768,19 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
 
   writeProgramLeaderNotifyState(state);
 
-  if (baselined.length > 0) {
-    log(`Roster alerts: recorded a first baseline for ${baselined.length} program(s) — nothing sent for those.`);
+  if (baselined > 0) {
+    log(`Roster alerts: recorded a first baseline for ${baselined} leader/program pair(s) — nothing sent for those.`);
   }
   if (skipped.length > 0) {
     log(`⚠️ Roster alerts: ${skipped.length} leader(s) not emailed this run (per-run cap or daily mail quota).`);
-    noteForAdmin('Roster alerts held back',
-      `${skipped.length} leader(s) were not emailed this run because the per-run cap or the daily mail ` +
-      `quota was reached: ${skipped.join(', ')}. Their changes were NOT discarded — they go out on the ` +
-      `next sync.`);
+    // Only when the blocker was the per-run cap: a quota hold has already told
+    // the office once for the whole day, and repeating it every hour is the
+    // flood this pass was the biggest contributor to.
+    if (!leaderMailQuotaHeldToday()) {
+      noteForAdmin('Roster alerts held back',
+        `${skipped.length} leader(s) were not emailed this run because the per-run cap was reached: ` +
+        `${skipped.join(', ')}. Their changes were NOT discarded — they go out on the next sync.`);
+    }
   }
   if (paused > 0) {
     log(`\u23f8\ufe0f Roster alerts: ${paused} leader(s) not emailed \u2014 mail to members and leaders is ` +
@@ -787,6 +958,7 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
       { programs: leader.programs.filter(p => p.timing &&
         (p.timing.mode === 'days_before' || p.timing.mode === 'weekday')) }))
     .filter(leader => leader.programs.length > 0);
+  if (leaders.length > 0 && leaderMailHeldForToday('Roster digests')) return 0;
 
   const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
   const todayKey = formatDateKey(new Date());
@@ -942,6 +1114,11 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
     // NOT recorded, whatever the reason: the next sync tries again rather
     // than the leader simply never hearing about this session.
     if (outcome.status === 'held') {
+      // ...except when the blocker is the day's quota, which is the only thing
+      // 'held' means here — the per-run cap is checked above. Stamp today so
+      // the remaining syncs stop rather than filing twenty-one more held-back
+      // lines in the office digest, as they did on 2026-09-21.
+      recordLeaderMailQuotaHold(leader.email);
       skipped.push(leader.email);
       return;
     }
@@ -958,9 +1135,12 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
 
   if (skipped.length > 0) {
     log(`⚠️ Roster digests: ${skipped.length} leader(s) not emailed this run (per-run cap or daily mail quota).`);
-    noteForAdmin('Roster digests held back',
-      `${skipped.length} leader(s) were not sent their roster digest this run because the per-run cap or ` +
-      `the daily mail quota was reached: ${skipped.join(', ')}. Not discarded — they go out on the next sync.`);
+    // As above: a quota hold has told the office once for the whole day.
+    if (!leaderMailQuotaHeldToday()) {
+      noteForAdmin('Roster digests held back',
+        `${skipped.length} leader(s) were not sent their roster digest this run because the per-run cap ` +
+        `was reached: ${skipped.join(', ')}. Not discarded — they go out on the next sync.`);
+    }
   }
   if (paused > 0) {
     log(`\u23f8\ufe0f Roster digests: ${paused} leader(s) not emailed \u2014 mail to members and leaders is paused.`);
