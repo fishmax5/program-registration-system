@@ -67,6 +67,26 @@
 // read in that order, because a message the office has paused is not a
 // message anybody is waiting for at eight tomorrow.
 //
+// ------------------------------------------------------------- WHICH HOLD
+//
+// FOUR THINGS NOW ANSWER 'held' — the caller's quota reserve, quiet hours,
+// a message diverted by notification test mode, and test mode with nowhere to
+// divert to — and they clear at three different speeds. A caller that reads
+// them all as "try again on the next sync" turns a day-long blocker into
+// twenty-odd identical retries, and that is not hypothetical: with test mode
+// on over 2026-09-20/21 this workbook filed 25 held-back roster alerts for one
+// leader in a day, 21 held-back digests for another, and 21 outright "Service
+// invoked too many times for one day: email" failures — because every hourly
+// sync rebuilt the same diff, diverted the same copy to the office at the cost
+// of a real message, recorded nothing, and came back an hour later to do it
+// again.
+//
+// So a held result also carries `retry`, and the passes in `66` and `70` read
+// it. Quiet hours and the per-run cap are 'later' and behave exactly as they
+// always did. The day's quota is 'tomorrow'. A diverted rehearsal is
+// 'diverted' — the office has seen that message today, and the member is
+// still owed it the moment the switch goes off.
+//
 // notifyAdmin() is not affected, here as everywhere else: the office still
 // hears what the workbook did, including how many messages the pause held.
 //
@@ -182,6 +202,79 @@ function rationedMailRemainingQuota() {
 }
 
 /**
+ * Where "no more of this today" is remembered, as one date key per pass.
+ *
+ * A DAY-LONG HOLD OUTLIVES THE EXECUTION, which is the whole reason this is a
+ * Script Property and not one of the module variables above: the blocker is
+ * the day's mail allowance, or a rehearsal the office has already read, and
+ * the thing that keeps asking is the NEXT hourly sync — a different execution
+ * reading the same exhausted day. See WHICH HOLD in this file's banner.
+ */
+const DAY_LONG_MAIL_HOLD_PROP_KEY = 'DAY_LONG_MAIL_HOLD_V1';
+
+/** The retry answers that no later pass today can improve on. */
+const DAY_LONG_MAIL_RETRIES = { tomorrow: true, diverted: true };
+
+/**
+ * Is `pass` already held for the rest of today?
+ *
+ * Fails OPEN on a store it cannot read, like every other switch here: a
+ * property that will not load is not a reason to stop sending.
+ */
+function dayLongMailHoldInEffect(pass) {
+  const props = tryGetScriptProperties();
+  if (!props) return false;
+  try {
+    const raw = props.getProperty(DAY_LONG_MAIL_HOLD_PROP_KEY);
+    if (!raw) return false;
+    return (JSON.parse(raw) || {})[pass] === formatDateKey(new Date());
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * Remembers that `pass` is done for today, and answers whether this call is
+ * the one that set it.
+ *
+ * The answer is what keeps the office's digest to ONE line: every pass tells
+ * the office on the run that stamps the day and says nothing on the twenty
+ * after it. Keyed per pass rather than globally because the roster alerts and
+ * the registrant reminders spend from the same hundred messages but stop for
+ * their own reasons, and one of them hitting its reserve is not a statement
+ * about the other.
+ */
+function recordDayLongMailHold(pass) {
+  const props = tryGetScriptProperties();
+  if (!props) return false;
+  const todayKey = formatDateKey(new Date());
+  try {
+    const raw = props.getProperty(DAY_LONG_MAIL_HOLD_PROP_KEY);
+    const held = raw ? (JSON.parse(raw) || {}) : {};
+    if (held[pass] === todayKey) return false;
+    // Yesterday's entries are dropped on the way past rather than by a sweep
+    // of their own: this object has one key per pass and is rewritten here.
+    Object.keys(held).forEach(key => { if (held[key] !== todayKey) delete held[key]; });
+    held[pass] = todayKey;
+    props.setProperty(DAY_LONG_MAIL_HOLD_PROP_KEY, JSON.stringify(held));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * Does this outcome mean "and not again today"?
+ *
+ * Read off `retry` rather than off `status`, because all four holds share one
+ * status on purpose — see the note beside the diverted return for why a new
+ * status would have fallen through every caller's branches.
+ */
+function mailHoldLastsAllDay(outcome) {
+  return !!(outcome && outcome.status === 'held' && DAY_LONG_MAIL_RETRIES[outcome.retry]);
+}
+
+/**
  * Forgets the shared estimate and the refused addresses.
  *
  * For a test, and for the menu entries that run a pass by hand: those are
@@ -273,8 +366,17 @@ function normalizeBccList(bcc) {
  *   'duplicate'   alreadySent() said this one has already gone. Nothing spent.
  *   'held'        sending it would have crossed the caller's reserve, or it
  *                 is quiet hours (section 9g) and nothing leaves the workbook
- *                 between 5pm and 8am. Nothing spent, nothing recorded: the
- *                 next pass sends it.
+ *                 between 5pm and 8am, or notification test mode diverted it
+ *                 to the office. Nothing recorded: the message is still owed.
+ *
+ *                 `retry` SAYS WHICH, because those do not clear at the same
+ *                 speed and a caller that treats them alike is the loop this
+ *                 field exists to stop — see WHICH HOLD below. It is 'later'
+ *                 (the next pass may well succeed), 'tomorrow' (the day's
+ *                 quota is spent and no pass today can do anything about it)
+ *                 or 'diverted' (a rehearsal copy went to the office and cost
+ *                 a real message; there is nothing more to learn from sending
+ *                 the same one again this hour).
  *   'paused'      outbound mail is paused on the Config tab. Nothing spent,
  *                 and the message is DROPPED: recordSent() is called, so the
  *                 caller's ledger advances and nothing is delivered late when
@@ -291,7 +393,7 @@ function normalizeBccList(bcc) {
  */
 function sendRationedEmail(request) {
   const req = request || {};
-  const result = { status: 'failed', cost: 0, error: null };
+  const result = { status: 'failed', cost: 0, error: null, retry: '' };
 
   const to = String(req.to === null || req.to === undefined ? '' : req.to).trim();
   if (!to) {
@@ -346,7 +448,10 @@ function sendRationedEmail(request) {
   if (isNotificationTestMode()) {
     const diverted = divertNotificationForTest(req);
     if (!diverted) {
+      // Nothing went out at all — no office addresses, or this run's diversion
+      // cap. The next pass may well find room, so this one is 'later'.
       result.status = 'held';
+      result.retry = 'later';
       result.error = 'notification test mode (nothing sent)';
       return result;
     }
@@ -365,6 +470,7 @@ function sendRationedEmail(request) {
     // and `70` into their "could not send" log line, so a mode whose whole
     // promise is that nothing went wrong would print a warning per message.
     result.status = 'held';
+    result.retry = 'diverted';
     result.cost = 1;
     result.error = 'notification test mode — a copy went to the office instead';
     log(`🧪 Diverted to the office instead of ${to}: "${req.subject || ''}".`);
@@ -378,6 +484,8 @@ function sendRationedEmail(request) {
   // and the first pass after 8am sends this. See section 9g.
   if (isWithinMailQuietHours()) {
     result.status = 'held';
+    // The one hold that really does clear on its own, and soon: 8am.
+    result.retry = 'later';
     result.error = mailQuietHoursReason();
     log(`\ud83c\udf19 Held (quiet hours): "${req.subject || ''}" to ${to}.`);
     return result;
@@ -399,6 +507,9 @@ function sendRationedEmail(request) {
   const reserve = Number(req.reserve) || 0;
   if (rationedMailRemainingQuota() - cost < reserve) {
     result.status = 'held';
+    // A DAY's allowance. No later pass today can change this answer, which is
+    // why it is told apart from the two above — see WHICH HOLD.
+    result.retry = 'tomorrow';
     result.error = 'the daily mail quota';
     return result;
   }
