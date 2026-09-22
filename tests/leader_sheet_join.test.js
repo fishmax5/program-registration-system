@@ -43,6 +43,8 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.buildLeaderSheetRowsByProgram = buildLeaderSheetRowsByProgram;
 this.countStrandedRegistrantRows_ = countStrandedRegistrantRows_;
+this.describeStrandedRegistrantRows_ = describeStrandedRegistrantRows_;
+this.describeStrandedRepair_ = describeStrandedRepair_;
 this.leaderProgramKey = leaderProgramKey;
 this.HEADERS = HEADERS;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
@@ -51,6 +53,7 @@ this.getIndexMap = getIndexMap;
 
 const {
   buildLeaderSheetRowsByProgram, countStrandedRegistrantRows_, leaderProgramKey,
+  describeStrandedRegistrantRows_, describeStrandedRepair_,
   HEADERS, LEADER_SHEET_HEADERS, getIndexMap
 } = sandbox;
 
@@ -165,6 +168,58 @@ check('the stranded count names the rows the sheet is missing',
   ]), 1);
 check('and an empty roster on a program nobody booked is not reported',
   countStrandedRegistrantRows_({ title: 'Chair Yoga', location: 'Narberth' }, []), 0);
+
+// --- WHICH fault stranded them, which is what the office is told ----------
+// The count alone said "an Event_ID has come apart from its session" about
+// every stranded row and sent the office to Repair Dashboard Links. That is
+// right only when a session of the program IS running on the row's date; when
+// none is, the row is orphaned from the CALENDAR and the link repair finds
+// nothing wrong — which reads as "the workbook is fine" to somebody looking at
+// an empty roster.
+const onADayItRuns = registrantRow({
+  Event_ID: 'GONE', Event_Date: soon, Event: 'Computer Tech Support',
+  Location: 'Narberth', Name: 'Arnold Feldman', Program_Status: 'Active'
+});
+const noSessionThatDay = new Date();
+noSessionThatDay.setDate(noSessionThatDay.getDate() + 9);
+const onADayItDoesNot = registrantRow({
+  Event_ID: 'GONE2', Event_Date: noSessionThatDay, Event: 'Computer Tech Support',
+  Location: 'Narberth', Name: 'Flo Rice', Program_Status: 'Active'
+});
+const techEntry = { title: 'Computer Tech Support', location: 'Narberth' };
+
+check('a stranded row on a day the program runs is Event_ID drift',
+  (({ total, withSession, withoutSession }) => ({ total, withSession, withoutSession }))(
+    describeStrandedRegistrantRows_(techEntry, [onADayItRuns], sessions)),
+  { total: 1, withSession: 1, withoutSession: 0 });
+
+check('a stranded row on a day it does not run is a calendar question',
+  (({ total, withSession, withoutSession }) => ({ total, withSession, withoutSession }))(
+    describeStrandedRegistrantRows_(techEntry, [onADayItDoesNot], sessions)),
+  { total: 1, withSession: 0, withoutSession: 1 });
+
+check('the total is unchanged whether or not the sessions are handed in',
+  describeStrandedRegistrantRows_(techEntry, [onADayItRuns, onADayItDoesNot], null).total,
+  describeStrandedRegistrantRows_(techEntry, [onADayItRuns, onADayItDoesNot], sessions).total);
+
+// Without the session rows nothing is classified, rather than every row being
+// quietly reported as the fault that happens to be checked first.
+check('no sessions handed in means nothing is claimed about which fault it is',
+  describeStrandedRegistrantRows_(techEntry, [onADayItRuns], null).unclassified, 1);
+
+// The advice is the point of the split, so it is pinned as advice.
+check('the calendar case is never sent to Repair Dashboard Links',
+  /Repair Dashboard Links/.test(
+    describeStrandedRepair_({ total: 1, withSession: 0, withoutSession: 1, unclassified: 0 })),
+  false);
+check('the drift case is',
+  /Repair Dashboard Links/.test(
+    describeStrandedRepair_({ total: 1, withSession: 1, withoutSession: 0, unclassified: 0 })),
+  true);
+check('and a program with both is told to look before repairing',
+  /must NOT be sent through Repair Dashboard Links/.test(
+    describeStrandedRepair_({ total: 2, withSession: 1, withoutSession: 1, unclassified: 0 })),
+  true);
 
 console.log(failures === 0 ? '\nAll leader sheet join checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

@@ -576,15 +576,22 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // unnoticed. Counted only when the roster came out empty, so the healthy
       // case pays nothing.
       if (rows.length === 0) {
-        const stranded = countStrandedRegistrantRows_(entry, registrantRows);
-        if (stranded > 0) {
-          log(`⚠️ Program registrant sheet for ${programKey}: ${stranded} registrant row(s) name this ` +
-            `program but match no session, so the sheet is empty.`);
+        // CLASSIFIED, NOT JUST COUNTED. This used to report every stranded row
+        // as "an Event_ID that has come apart from its session" and send the
+        // office to Repair Dashboard Links. That is right for one of the two
+        // cases and wrong for the other, which is the commoner one — and on a
+        // program holding two forms the wrong advice repoints a live link at
+        // the empty twin (see the fork warning in `32`). So the breakdown
+        // decides the sentence.
+        const stranded = describeStrandedRegistrantRows_(entry, registrantRows, sessionRows);
+        if (stranded.total > 0) {
+          log(`⚠️ Program registrant sheet for ${programKey}: ${stranded.total} registrant row(s) name ` +
+            `this program but match no session (${stranded.withSession} with a session that day, ` +
+            `${stranded.withoutSession} without), so the sheet is empty.`);
           noteForAdmin('Program registrant sheets that came out empty',
-            `"${entry.title}" (${entry.location}) — the Registrants tab holds ${stranded} row(s) for this ` +
-            `program, but none of them matches a session on ${SHEET_NAMES.PROGRAM_DASHBOARD}, so the ` +
-            `leader's sheet says nobody has signed up. That is an Event_ID that has come apart from its ` +
-            `session — run 🔧 Admin ▸ 🔗 Repair Dashboard Links, then 🔄 Update Everything Now.`);
+            `"${entry.title}" (${entry.location}) — the Registrants tab holds ${stranded.total} row(s) ` +
+            `for this program, but none of them reached the leader's sheet, so it says nobody has ` +
+            `signed up. ` + describeStrandedRepair_(stranded));
         }
       }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
@@ -793,32 +800,117 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
 }
 
 /**
- * How many rows on the Registrants tab name this program and a date inside the
- * sheet's own window — whatever their Event_ID says.
+ * WHY a roster came out empty when the Registrants tab is not — broken down,
+ * because the two answers need opposite repairs and were being reported as
+ * one.
+ *
+ * A row that names this program and falls inside the sheet's own window is
+ * still missing from the roster for one of two reasons, and the difference is
+ * whether a SESSION of this program is on the calendar on that row's date:
+ *
+ *   • `withSession` — there IS a session that day, so the row should have
+ *     joined and did not. That is the Event_ID drift this file's fallback
+ *     exists to heal; reaching here means the fallback could not either, which
+ *     happens when the SHEET REGISTRY's stored title no longer matches the
+ *     session table's Clean_Title (a rename that moved the eight stores in
+ *     `22` and not this registry, which is not one of them). Repairing links
+ *     is the right advice only here.
+ *
+ *   • `withoutSession` — there is NO session of this program that day at all.
+ *     The row is orphaned from the CALENDAR, not from its session's identity:
+ *     the date moved or the event went. Telling somebody to repair dashboard
+ *     links sends them to a screen that will find nothing wrong, and on a
+ *     program holding two forms it is worse than nothing — see the fork
+ *     warning in `32`.
  *
  * Only ever COUNTED, and only when the roster is empty: this decides what the
  * office is told, never what the sheet holds. A row is matched the way a
  * person would match it, on the program's name and building.
+ *
+ * `sessionRows` is optional. Without it every matching row is returned as
+ * `unclassified` and the totals still add up, which is what keeps the old
+ * count-only callers honest rather than silently reclassifying their rows.
  */
-function countStrandedRegistrantRows_(entry, registrantRows) {
+function describeStrandedRegistrantRows_(entry, registrantRows, sessionRows) {
+  const out = { total: 0, withSession: 0, withoutSession: 0, unclassified: 0 };
   const map = getIndexMap(HEADERS.All_Registrants);
-  if (map['Event'] === undefined || map['Event_Date'] === undefined) return 0;
+  if (map['Event'] === undefined || map['Event_Date'] === undefined) return out;
   const wanted = leaderProgramKey(entry && entry.title, entry && entry.location);
   const today = parseDateKey(formatDateKey(new Date()));
   const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
   const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
-  let count = 0;
+  // The same title+building+date index the fallback joins on, so "there is a
+  // session that day" cannot mean one thing here and another there.
+  let sessionDates = null;
+  if (sessionRows) {
+    const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
+    sessionDates = {};
+    sessionRows.forEach(row => {
+      const date = coerceDate(row[sessionMap['Event_Date']]);
+      if (!date) return;
+      const dateKey = formatDateKey(date);
+      if (dateKey < from || dateKey > to) return;
+      const key = leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+      sessionDates[`${key}|${dateKey}`] = true;
+    });
+  }
+
   (registrantRows || []).forEach(row => {
     if (String(row[map['Program_Status']] || '').trim() === 'Superseded') return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) return;
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
-    if (leaderProgramKey(row[map['Event']], row[map['Location']]) !== wanted) return;
-    count++;
+    const rowKey = leaderProgramKey(row[map['Event']], row[map['Location']]);
+    if (rowKey !== wanted) return;
+    out.total++;
+    if (!sessionDates) out.unclassified++;
+    else if (sessionDates[`${rowKey}|${dateKey}`]) out.withSession++;
+    else out.withoutSession++;
   });
-  return count;
+  return out;
+}
+
+/**
+ * The sentence the office reads, chosen by which fault actually happened.
+ *
+ * TWO FAULTS, TWO REPAIRS, and saying the wrong one costs more than saying
+ * nothing: "repair the links" on a program whose sessions simply are not on
+ * the calendar that day sends somebody to a screen that reports everything
+ * healthy, which reads as "the workbook is fine" about a leader staring at an
+ * empty roster.
+ */
+function describeStrandedRepair_(stranded) {
+  if (stranded.withSession > 0 && stranded.withoutSession > 0) {
+    return `${stranded.withSession} of them fall on a day this program IS running, and ` +
+      `${stranded.withoutSession} fall on a day it is not. Do the first one first: ` +
+      `run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? — it names which, and a program holding two ` +
+      `forms must NOT be sent through Repair Dashboard Links until the fork is settled.`;
+  }
+  if (stranded.withSession > 0) {
+    return `They fall on days this program IS running, so their Event_ID has come apart from its ` +
+      `session. Run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? first — if it reports this program ` +
+      `under a different name than the sessions carry, the sheet registry is stale and rebuilding ` +
+      `the sheet fixes it; only otherwise is 🔗 Repair Dashboard Links the answer.`;
+  }
+  if (stranded.withoutSession > 0) {
+    return `None of them falls on a day this program is running — the dates moved or the events ` +
+      `went, so this is a CALENDAR question, not a broken link. Check the calendar for those dates ` +
+      `before repairing anything; ${SHEET_NAMES.PROGRAM_DASHBOARD} has what the workbook can see.`;
+  }
+  return `Run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? for which of the two it is.`;
+}
+
+/**
+ * How many rows on the Registrants tab name this program and a date inside the
+ * sheet's own window — whatever their Event_ID says.
+ *
+ * The total of the breakdown above, kept as its own name because two callers
+ * only ever wanted the number.
+ */
+function countStrandedRegistrantRows_(entry, registrantRows) {
+  return describeStrandedRegistrantRows_(entry, registrantRows, null).total;
 }
 
 /**

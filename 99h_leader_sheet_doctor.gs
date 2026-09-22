@@ -114,7 +114,14 @@ function diagnoseLeaderSheetRosters() {
       // Only asked when the roster is empty, exactly as the push asks it: the
       // count is the difference between "nobody booked" and "they are on the
       // tab and did not arrive".
-      if (rows.length === 0) finding.stranded = countStrandedRegistrantRows_(entry, registrantRows);
+      // Classified the same way the push classifies it, so the screen and the
+      // digest cannot name two different faults for one program.
+      if (rows.length === 0) {
+        const stranded = describeStrandedRegistrantRows_(entry, registrantRows, sessionRows);
+        finding.stranded = stranded.total;
+        finding.strandedWithSession = stranded.withSession;
+        finding.strandedWithoutSession = stranded.withoutSession;
+      }
 
       try {
         finding.fingerprintMatches = entry.pushedFingerprint === computeLeaderSheetFingerprint(entry, rows);
