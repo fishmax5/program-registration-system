@@ -146,6 +146,57 @@ const LEADER_SHEET_FORWARD_DAYS = 90;
 const LEADER_SHEET_MAX_ROWS = 3000;
 
 /**
+ * The sentence an empty roster is written with — a CONSTANT because two
+ * separate pieces of code now depend on it meaning the same thing: the writer
+ * below puts it on the tab, and leaderSheetTabReadsEmpty_() reads it back to
+ * decide whether the tab holds what the registry claims it holds. A literal in
+ * two places is a check that silently stops checking the day somebody improves
+ * the wording.
+ */
+const LEADER_SHEET_EMPTY_ROSTER_TEXT =
+  'Nobody has signed up yet — this fills in by itself as registrations come in.';
+
+/**
+ * Does this tab currently hold the "nobody has signed up yet" placeholder?
+ *
+ * ONE CELL, AND ONLY EVER ASKED ON THE SKIP PATH — see the fault below.
+ *
+ * THE FAULT THIS EXISTS FOR. The fingerprint (computeLeaderSheetFingerprint)
+ * is a claim about what the tab holds, stored in Script Properties by the run
+ * that wrote it; the tab itself is in somebody else's spreadsheet. Nothing ever
+ * checked that the two agreed, so when they came apart the push did the one
+ * thing that could not recover: it read a fingerprint saying "ten people",
+ * matched it, and skipped the sheet — every hour, forever, over a tab reading
+ * "Nobody has signed up yet." Both halves looked healthy on their own. The
+ * workbook reported ten rows already written, the leader reported an empty
+ * roster, and both were telling the truth about a different thing.
+ *
+ * The two can come apart for more than one reason (a write that threw after
+ * sheet.clear(), a registry flushed by a run whose sheet write was lost, an
+ * older createProgramLeaderSheet() that wrote the tab and stored no
+ * fingerprint at all), which is exactly why the repair is stated over the
+ * OBSERVED tab rather than over any one of those causes.
+ *
+ * Deliberately not a general "is the sheet right?" check. A fingerprint cannot
+ * be verified cheaply — that would mean reading the whole roster back, which
+ * is the round trip the fingerprint exists to avoid. This asks the one
+ * question that is answerable in a single getValue() and is the only state
+ * that is unrecoverable: the tab says nobody, the registry says somebody.
+ */
+function leaderSheetTabReadsEmpty_(sheet) {
+  try {
+    return String(sheet.getRange(MEMORY_TAB_DATA_ROW, 1).getValue() || '').trim() ===
+      LEADER_SHEET_EMPTY_ROSTER_TEXT;
+  } catch (err) {
+    // A tab that will not answer is not evidence of anything. Reported as "not
+    // empty" so the caller takes its ordinary path rather than rewriting every
+    // sheet in the workbook on the strength of a failed read.
+    log(`ℹ️ Could not read the first row of a program registrant sheet (${err}).`);
+    return false;
+  }
+}
+
+/**
  * The shared sheet's own columns. A SUBSET of All_Registrants plus two hidden
  * machine columns — deliberately not the whole row: Lunch_Type, the meal
  * counts, Admin_Notes and the internal keys are staff business, and every
@@ -518,13 +569,65 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     if (!entry.fileId) return;
     try {
       const rows = byProgram[programKey] || [];
+      // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
+      // has signed up yet" is ordinary on a class nobody has booked and is a
+      // fault on one with a dozen names on the Registrants tab — and the two
+      // are indistinguishable on the sheet itself, which is why this went
+      // unnoticed. Counted only when the roster came out empty, so the healthy
+      // case pays nothing.
+      if (rows.length === 0) {
+        // CLASSIFIED, NOT JUST COUNTED. This used to report every stranded row
+        // as "an Event_ID that has come apart from its session" and send the
+        // office to Repair Dashboard Links. That is right for one of the two
+        // cases and wrong for the other, which is the commoner one — and on a
+        // program holding two forms the wrong advice repoints a live link at
+        // the empty twin (see the fork warning in `32`). So the breakdown
+        // decides the sentence.
+        const stranded = describeStrandedRegistrantRows_(entry, registrantRows, sessionRows);
+        if (stranded.total > 0) {
+          log(`⚠️ Program registrant sheet for ${programKey}: ${stranded.total} registrant row(s) name ` +
+            `this program but match no session (${stranded.withSession} with a session that day, ` +
+            `${stranded.withoutSession} without), so the sheet is empty.`);
+          noteForAdmin('Program registrant sheets that came out empty',
+            `"${entry.title}" (${entry.location}) — the Registrants tab holds ${stranded.total} row(s) ` +
+            `for this program, but none of them reached the leader's sheet, so it says nobody has ` +
+            `signed up. ` + describeStrandedRepair_(stranded));
+        }
+      }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
       // The file is opened either way: the pull at the head of this sync
       // already paid for it (openSpreadsheetCached), and the banner's "Refreshed
       // …" line has to stay true even on an hour when nothing moved.
       const file = openSpreadsheetCached(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-      if (!force && entry.pushedFingerprint === fingerprint && entry.accessOpened) {
+      // THE FINGERPRINT IS A CLAIM, AND THIS IS WHERE IT IS CHECKED.
+      //
+      // Skipping is right when the tab already holds these rows and wrong in
+      // exactly one way that never heals on its own: the tab holding the
+      // "nobody has signed up yet" placeholder while the fingerprint claims a
+      // roster. That pair was reached on a real workbook and cost a program
+      // leader an empty sheet for weeks — the push matched the fingerprint,
+      // skipped, restamped the banner (which is why the file's modified time
+      // kept moving, making it look alive) and never looked at what was on it.
+      //
+      // One getValue(), on the skip path only, and only when there IS a roster
+      // to contradict — so the healthy case pays one cell per sheet per hour
+      // and the empty-and-truthfully-empty case pays nothing. Finding the
+      // contradiction falls THROUGH to the write below, which is the repair:
+      // this is the migration for every sheet already in that state, and it
+      // runs itself on the next sync rather than waiting for somebody to press
+      // something. See leaderSheetTabReadsEmpty_().
+      const fingerprintAgrees = !force && entry.pushedFingerprint === fingerprint && entry.accessOpened;
+      const contradicted = fingerprintAgrees && rows.length > 0 && leaderSheetTabReadsEmpty_(tab);
+      if (contradicted) {
+        log(`⚠️ Program registrant sheet for ${programKey}: the stored fingerprint claims ` +
+          `${rows.length} row(s) but the sheet reads "nobody has signed up yet" — rewriting it.`);
+        noteForAdmin('Program registrant sheets that had come apart from their fingerprint',
+          `"${entry.title}" (${entry.location}) — this workbook had recorded ${rows.length} roster row(s) ` +
+          `as already written, and the shared sheet was showing the leader an empty roster instead. It has ` +
+          `been rewritten. Nothing needs doing; the sheet is correct from now on.`);
+      }
+      if (fingerprintAgrees && !contradicted) {
         stampLeaderSheetRefreshed(tab);
         unchanged++;
         return;
@@ -534,6 +637,9 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         saveProgramLeaderSheetRegistryEntry(programKey,
           Object.assign({}, entry, { pushedFingerprint: fingerprint }));
       }
+      // No re-store on the repair path: the fingerprint it would write is the
+      // one already stored — that agreement is what made this a repair. Said
+      // here rather than left to be rediscovered from the condition above.
       pushed++;
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
       // ensureProgramLeaderSheetAccess() existed was shared with its creator and
@@ -601,14 +707,35 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
 
   const programByEventId = {};
+  // THE SECOND WAY IN, and the failure it is for. A registrant row reaches its
+  // program through its Event_ID and nothing else, which is right — the
+  // session table is what knows a session's title and location, and a renamed
+  // program's older rows still carry the old title (see the note above). But
+  // an Event_ID is DERIVED from the event's clean title, so anything that
+  // changes what "clean" means changes it: a title mark read one way today and
+  // another way tomorrow ("*Tai Chi", "NO Tai Chi") re-keys every session of
+  // that program, and the registrant rows written under the old key then match
+  // no session at all. The rows are still on the tab, the sessions are still
+  // on the dashboard, and the leader's sheet says "Nobody has signed up yet" —
+  // a silent, complete wrong answer, on the one screen that is somebody else's
+  // only view of their own class.
+  //
+  // So a row that cannot find its Event_ID is asked the other question before
+  // it is dropped: is there a session of THIS program title, at THIS building,
+  // on THIS date? That is the same identity the sheet is keyed on, narrowed by
+  // the day, so it can only ever pull in a row that belongs to exactly the
+  // program the sheet is about.
+  const programByTitleDate = {};
   (sessionRows || []).forEach(row => {
     const eventId = String(row[sessionMap['Event_ID']] || '').trim();
     const date = coerceDate(row[sessionMap['Event_Date']]);
-    if (!eventId || !date) return;
+    if (!date) return;
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
-    programByEventId[eventId] =
+    const programKey =
       leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+    if (eventId) programByEventId[eventId] = programKey;
+    programByTitleDate[`${programKey}|${dateKey}`] = programKey;
   });
 
   const map = getIndexMap(HEADERS.All_Registrants);
@@ -617,7 +744,8 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
 
   (registrantRows || []).forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
-    const programKey = programByEventId[eventId];
+    const programKey = programByEventId[eventId]
+      || leaderProgramByTitleAndDate_(row, map, programByTitleDate);
     if (!programKey) return;
     // Superseded rows are bookkeeping — a registration that a later submission
     // replaced. Showing them would list the same person twice with no way for
@@ -669,6 +797,137 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   });
 
   return byProgram;
+}
+
+/**
+ * WHY a roster came out empty when the Registrants tab is not — broken down,
+ * because the two answers need opposite repairs and were being reported as
+ * one.
+ *
+ * A row that names this program and falls inside the sheet's own window is
+ * still missing from the roster for one of two reasons, and the difference is
+ * whether a SESSION of this program is on the calendar on that row's date:
+ *
+ *   • `withSession` — there IS a session that day, so the row should have
+ *     joined and did not. That is the Event_ID drift this file's fallback
+ *     exists to heal; reaching here means the fallback could not either, which
+ *     happens when the SHEET REGISTRY's stored title no longer matches the
+ *     session table's Clean_Title (a rename that moved the eight stores in
+ *     `22` and not this registry, which is not one of them). Repairing links
+ *     is the right advice only here.
+ *
+ *   • `withoutSession` — there is NO session of this program that day at all.
+ *     The row is orphaned from the CALENDAR, not from its session's identity:
+ *     the date moved or the event went. Telling somebody to repair dashboard
+ *     links sends them to a screen that will find nothing wrong, and on a
+ *     program holding two forms it is worse than nothing — see the fork
+ *     warning in `32`.
+ *
+ * Only ever COUNTED, and only when the roster is empty: this decides what the
+ * office is told, never what the sheet holds. A row is matched the way a
+ * person would match it, on the program's name and building.
+ *
+ * `sessionRows` is optional. Without it every matching row is returned as
+ * `unclassified` and the totals still add up, which is what keeps the old
+ * count-only callers honest rather than silently reclassifying their rows.
+ */
+function describeStrandedRegistrantRows_(entry, registrantRows, sessionRows) {
+  const out = { total: 0, withSession: 0, withoutSession: 0, unclassified: 0 };
+  const map = getIndexMap(HEADERS.All_Registrants);
+  if (map['Event'] === undefined || map['Event_Date'] === undefined) return out;
+  const wanted = leaderProgramKey(entry && entry.title, entry && entry.location);
+  const today = parseDateKey(formatDateKey(new Date()));
+  const from = formatDateKey(new Date(today.getTime() - LEADER_SHEET_BACK_DAYS * 86400000));
+  const to = formatDateKey(new Date(today.getTime() + LEADER_SHEET_FORWARD_DAYS * 86400000));
+
+  // The same title+building+date index the fallback joins on, so "there is a
+  // session that day" cannot mean one thing here and another there.
+  let sessionDates = null;
+  if (sessionRows) {
+    const sessionMap = getIndexMap(HEADERS.All_Program_Sessions);
+    sessionDates = {};
+    sessionRows.forEach(row => {
+      const date = coerceDate(row[sessionMap['Event_Date']]);
+      if (!date) return;
+      const dateKey = formatDateKey(date);
+      if (dateKey < from || dateKey > to) return;
+      const key = leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
+      sessionDates[`${key}|${dateKey}`] = true;
+    });
+  }
+
+  (registrantRows || []).forEach(row => {
+    if (String(row[map['Program_Status']] || '').trim() === 'Superseded') return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < from || dateKey > to) return;
+    const rowKey = leaderProgramKey(row[map['Event']], row[map['Location']]);
+    if (rowKey !== wanted) return;
+    out.total++;
+    if (!sessionDates) out.unclassified++;
+    else if (sessionDates[`${rowKey}|${dateKey}`]) out.withSession++;
+    else out.withoutSession++;
+  });
+  return out;
+}
+
+/**
+ * The sentence the office reads, chosen by which fault actually happened.
+ *
+ * TWO FAULTS, TWO REPAIRS, and saying the wrong one costs more than saying
+ * nothing: "repair the links" on a program whose sessions simply are not on
+ * the calendar that day sends somebody to a screen that reports everything
+ * healthy, which reads as "the workbook is fine" about a leader staring at an
+ * empty roster.
+ */
+function describeStrandedRepair_(stranded) {
+  if (stranded.withSession > 0 && stranded.withoutSession > 0) {
+    return `${stranded.withSession} of them fall on a day this program IS running, and ` +
+      `${stranded.withoutSession} fall on a day it is not. Do the first one first: ` +
+      `run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? — it names which, and a program holding two ` +
+      `forms must NOT be sent through Repair Dashboard Links until the fork is settled.`;
+  }
+  if (stranded.withSession > 0) {
+    return `They fall on days this program IS running, so their Event_ID has come apart from its ` +
+      `session. Run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? first — if it reports this program ` +
+      `under a different name than the sessions carry, the sheet registry is stale and rebuilding ` +
+      `the sheet fixes it; only otherwise is 🔗 Repair Dashboard Links the answer.`;
+  }
+  if (stranded.withoutSession > 0) {
+    return `None of them falls on a day this program is running — the dates moved or the events ` +
+      `went, so this is a CALENDAR question, not a broken link. Check the calendar for those dates ` +
+      `before repairing anything; ${SHEET_NAMES.PROGRAM_DASHBOARD} has what the workbook can see.`;
+  }
+  return `Run 🔧 Admin ▸ 🩺 Why Is A Roster Sheet Empty? for which of the two it is.`;
+}
+
+/**
+ * How many rows on the Registrants tab name this program and a date inside the
+ * sheet's own window — whatever their Event_ID says.
+ *
+ * The total of the breakdown above, kept as its own name because two callers
+ * only ever wanted the number.
+ */
+function countStrandedRegistrantRows_(entry, registrantRows) {
+  return describeStrandedRegistrantRows_(entry, registrantRows, null).total;
+}
+
+/**
+ * The fallback identity for a registrant row whose Event_ID names no session
+ * this window holds — its own program title, building and date, and only when
+ * a session answering to all three is on the table. See the banner in
+ * buildLeaderSheetRowsByProgram() for the fault this exists for.
+ *
+ * A lunch-only row's Event is "Lunch @ Narberth — …" and a triaged row's date
+ * is outside the window, so neither can be pulled into a program's roster by
+ * accident: the key has to match a session that is actually running.
+ */
+function leaderProgramByTitleAndDate_(row, map, programByTitleDate) {
+  const date = coerceDate(row[map['Event_Date']]);
+  if (!date) return '';
+  const key = `${leaderProgramKey(row[map['Event']], row[map['Location']])}|${formatDateKey(date)}`;
+  return programByTitleDate[key] || '';
 }
 
 /**
@@ -808,7 +1067,7 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
 
   if (rows.length === 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
-      .setValue('Nobody has signed up yet — this fills in by itself as registrations come in.')
+      .setValue(LEADER_SHEET_EMPTY_ROSTER_TEXT)
       .setFontStyle('italic')
       .setFontColor(TYPO.MUTED.color);
     freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
@@ -1289,8 +1548,14 @@ function createProgramLeaderSheet(programValue) {
     location,
     createdAt: (existing && existing.createdAt) || new Date().toISOString()
   };
+  // DELIBERATELY WITHOUT pushedFingerprint, at this point. The entry is
+  // registered BEFORE the fill so a timeout mid-write still leaves a findable
+  // sheet — and a fingerprint stored before the write it describes is a claim
+  // about a tab that may never be written, which is the exact pair
+  // pushProgramLeaderSheets() now has to repair. It is stored below, after the
+  // write, from the rows that write was given.
   saveProgramLeaderSheetRegistryEntry(programKey, entry);
-  flushPersistentRegistries(); // registered before the fill, so a timeout mid-write still leaves a findable sheet
+  flushPersistentRegistries();
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionRows = getSectionedRows(
@@ -1300,7 +1565,21 @@ function createProgramLeaderSheet(programValue) {
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
 
   const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
-  writeProgramLeaderSheetTab(tab, entry, byProgram[programKey] || []);
+  const writtenRows = byProgram[programKey] || [];
+  writeProgramLeaderSheetTab(tab, entry, writtenRows);
+  // THE INVARIANT: NOBODY WRITES THIS TAB WITHOUT RECORDING WHAT THEY WROTE.
+  //
+  // This function is the project's second writer of the roster tab, and it
+  // used to leave the registry entry with no fingerprint at all — so the push
+  // an hour later rewrote a sheet that was already correct, and, worse, the
+  // registry's fingerprint and the tab's contents were set by two code paths
+  // with no stated relationship between them. That is the gap the push's
+  // skip path reads as gospel. Stated as one rule instead: the fingerprint on
+  // the entry always describes the last write this project made to the tab.
+  saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, {
+    pushedFingerprint: computeLeaderSheetFingerprint(entry, writtenRows)
+  }));
+  flushPersistentRegistries();
   // A brand-new spreadsheet arrives with an empty "Sheet1" beside ours.
   removeDefaultSheetIfIdle(file, LEADER_SHEET_TAB_NAME);
 
@@ -1309,6 +1588,13 @@ function createProgramLeaderSheet(programValue) {
   // sheet created before this existed is repaired the next time somebody
   // presses the menu item. See ensureProgramLeaderSheetAccess().
   const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${title}"`);
+  // Merged onto the CURRENT entry, not onto the `entry` this function built —
+  // the fingerprint save above is on the registry now and a second assign from
+  // the stale copy would drop it. Same trap the push's two saves document.
+  if (access.openedUp || access.editors.length > 0) {
+    saveProgramLeaderSheetRegistryEntry(programKey,
+      Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
+  }
 
   const emails = getProgramLeaderEmailsForProgram(title, location);
   const shared = [];

@@ -51,6 +51,8 @@ let __calendarInviteModeCache = null;
 let __registrationHorizonCache = null;
 let __automationEnabledCache = null;
 let __outboundMailPausedCache = null;
+/** Notification test mode — read once per execution, like the pause beside it (99i). */
+let __notificationTestModeCache = null;
 let __triggerOwnerCache = null;
 // How long a bounded recurrence may be and still be read as a series — see
 // getGroupSeriesUpTo(). Read once per execution because resolveEventSettings()
@@ -243,6 +245,7 @@ function invalidateConfigCaches() {
   __registrationHorizonCache = null;
   __automationEnabledCache = null;
   __outboundMailPausedCache = null;
+  __notificationTestModeCache = null;
   __triggerOwnerCache = null;
   __groupSeriesUpToCache = null;
   __syncBudgetMinutesCache = null;
@@ -251,6 +254,7 @@ function invalidateConfigCaches() {
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.
   clearAutomationFlagCache();
   clearOutboundMailPauseCache();
+  clearNotificationTestModeCache();
 }
 
 /**

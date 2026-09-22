@@ -101,6 +101,8 @@ function styleConfigSheet(sheet) {
   // the same thing to isOutboundMailPaused(), and none of them stops anything.
   applyValueListValidationBounded(sheet, CONFIG_LAYOUT.OUTBOUND_MAIL.startCol,
     OUTBOUND_MAIL_PAUSE_OPTIONS, CONFIG_DATA_START_ROW, 1);
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.TEST_MAIL.startCol,
+    NOTIFICATION_TEST_MODE_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
   // Who is copied on what: a tick box per category, bounded to the rows the
   // table actually has, so the columns below it stay clean.
@@ -124,6 +126,7 @@ function styleConfigSheet(sheet) {
   seedOutboundMailRow(sheet);
   seedSeriesDetectionRow(sheet);
   seedSyncBudgetRow(sheet);
+  seedNotificationTestModeRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 
@@ -478,6 +481,31 @@ function seedMembershipFormRow(sheet) {
  * reach — because the one thing a kill switch must never be is ambiguous
  * about its own scope.
  */
+/**
+ * The rehearsal switch's own cell and the note that keeps it from being read as
+ * the pause beside it. See the banner over NOTIFICATION_TEST_MODE_OPTIONS (04).
+ */
+function seedNotificationTestModeRow(sheet) {
+  const section = CONFIG_LAYOUT.TEST_MAIL;
+  const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
+  if (String(cell.getValue() || '').trim() === '') {
+    cell.setValue(NOTIFICATION_TEST_MODE_OPTIONS[0]); // 'No'
+  }
+  cell.setNote('Set to "Yes" to REHEARSE. Nothing reaches a member, a program leader or a guest: every '
+    + 'message that would leave the office is sent to the addresses on '
+    + `${CONFIG_LAYOUT.ADMIN_NOTIFICATIONS.title} instead, with the real To, Cc, Bcc, subject and `
+    + 'what sent it printed at the top, and the message itself underneath exactly as it would have '
+    + 'been read.\n\n'
+    + 'It also holds back CALENDAR INVITATIONS, which the pause does not — Google emails a guest the '
+    + 'moment they are added to an event. You get one line per invitation that was held instead.\n\n'
+    + 'NOTHING IS CONSUMED. Unlike '
+    + `${CONFIG_LAYOUT.OUTBOUND_MAIL.title}, a diverted message is still owed: turn this back to "No" `
+    + 'and the real one goes out on the next pass. That is what makes it a test.\n\n'
+    + 'Because nothing is consumed, the same messages divert again every hour — so it is CAPPED per run '
+    + 'and the office is told how many more there were. Turn it off when you have read what you came for. '
+    + 'Anything other than "Yes" (including blank) means mail goes where it is addressed.');
+}
+
 function seedOutboundMailRow(sheet) {
   const section = CONFIG_LAYOUT.OUTBOUND_MAIL;
   const cell = sheet.getRange(CONFIG_DATA_START_ROW, section.startCol);
@@ -493,7 +521,10 @@ function seedOutboundMailRow(sheet) {
     + 'It does NOT stop calendar invitations — Google sends those itself when a guest is added to an event. '
     + `Use ${CONFIG_LAYOUT.CALENDAR_INVITES.title} for those.\n\n`
     + 'It does NOT stop the office being told what happened here: the sync digest and error mail still '
-    + 'arrive, and they say how many messages were held.');
+    + 'arrive, and they say how many messages were held.\n\n'
+    + `If what you want is to SEE what would go out, use ${CONFIG_LAYOUT.TEST_MAIL.title} instead: that `
+    + 'one sends every message to the office with its real address and subject on it, and nothing is '
+    + 'dropped.');
 }
 
 /** Seeds "Show link" and explains the trade-off in the cell note. */
@@ -1413,6 +1444,63 @@ function clearOutboundMailPauseCache() {
 }
 
 /**
+ * Is every message that would leave the organization being DIVERTED to the
+ * office instead — the rehearsal switch rather than the pause?
+ *
+ * Read by `sendRationedEmail()` (76) and by the calendar-invite pass (33), and
+ * nowhere else, so there are exactly two places this can be got wrong and both
+ * are named in the banner over NOTIFICATION_TEST_MODE_OPTIONS (04). Cached the
+ * two ways the pause is, for the same reason.
+ *
+ * Only the literal "Yes" diverts. See DEFAULT_NOTIFICATION_TEST_MODE for why
+ * this fails open: a Config tab that is missing or mid-rebuild must never be
+ * able to redirect a member's reminder into the office's inbox unasked.
+ */
+function isNotificationTestMode() {
+  if (__notificationTestModeCache !== null) return __notificationTestModeCache;
+
+  const cache = tryGetScriptCache();
+  if (cache) {
+    try {
+      const cached = cache.get(NOTIFICATION_TEST_MODE_CACHE_KEY);
+      if (cached === 'yes' || cached === 'no') {
+        __notificationTestModeCache = cached === 'yes';
+        return __notificationTestModeCache;
+      }
+    } catch (err) { /* cache is an optimization; never let it decide anything */ }
+  }
+
+  let raw = '';
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.CONFIG) : null;
+    if (sheet) {
+      raw = String(sheet.getRange(CONFIG_DATA_START_ROW,
+        CONFIG_LAYOUT.TEST_MAIL.startCol).getValue() || '').trim();
+    }
+  } catch (err) {
+    log(`\u26a0\ufe0f Could not read the ${CONFIG_LAYOUT.TEST_MAIL.title} section of Config (${err}) ` +
+      `\u2014 mail goes where it is addressed.`);
+  }
+
+  const testing = raw === '' ? DEFAULT_NOTIFICATION_TEST_MODE : raw.toLowerCase() === 'yes';
+  if (cache) {
+    try {
+      cache.put(NOTIFICATION_TEST_MODE_CACHE_KEY, testing ? 'yes' : 'no',
+        NOTIFICATION_TEST_MODE_CACHE_SECONDS);
+    } catch (err) { /* non-fatal */ }
+  }
+  __notificationTestModeCache = testing;
+  return testing;
+}
+
+function clearNotificationTestModeCache() {
+  const cache = tryGetScriptCache();
+  if (!cache) return;
+  try { cache.remove(NOTIFICATION_TEST_MODE_CACHE_KEY); } catch (err) { /* non-fatal */ }
+}
+
+/**
  * The gate itself. Call as the first line of a managed handler and return
  * immediately if it comes back false.
  *
@@ -1426,7 +1514,11 @@ function automationGateAllows(actionLabel, quiet) {
   const message = `⏸️ Automation is paused — "${actionLabel}" did nothing. ` +
     `Set Automation_Enabled back to "Yes" on the Config tab (${CONFIG_LAYOUT.AUTOMATION.title}) to resume.`;
   log(message);
-  if (!quiet) toastIfPossible(message);
+  // AN ALERT WHERE THERE IS SOMEBODY TO READ ONE, the toast where there is not
+  // (every trigger run). A toast lands in the corner of a sheet showing
+  // Google's own "Running script…" banner and is gone before anybody looks up
+  // — which is how a paused workbook came to look like a broken menu. See 99g.
+  if (!quiet) explainRefusal(message);
   return false;
 }
 

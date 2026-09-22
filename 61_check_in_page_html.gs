@@ -1215,6 +1215,13 @@ function readCheckInPageInfo() {
     // for the part of a website that is about joining a class rather than
     // about what is on this week.
     regularUrl: checkInPageUrl({ mode: 'regular' }),
+    // THE PAGE THAT IS NOT FOR STAFF AND NOT FOR THE PUBLIC: the volunteers'
+    // own hours page (99f). Listed here because it is the other link on this
+    // screen meant to be COPIED — into an email to the people who lead the
+    // classes and take the phone calls — and because the sentence beside it
+    // is the one place anybody is told that sending it out without a PIN set
+    // is sending out a write endpoint.
+    volunteerUrl: checkInPageUrl({ mode: 'volunteer' }),
     regularEmbedSnippet: publicRegularEmbedSnippet({})
   };
 }
@@ -1422,6 +1429,16 @@ function buildCheckInPageHtml(info) {
         'The other question: what runs every Monday, every Tuesday, and so on \u2014 one line ' +
         'per program under each weekday, for somebody deciding whether to join something ' +
         'rather than what to do on Thursday. Also safe to publish, and embeddable the same way.');
+    }
+    if (INFO.volunteerUrl) {
+      html += linkRow('The volunteer hours page', INFO.volunteerUrl,
+        'Send this to anybody who volunteers \u2014 leaders, desk cover, drivers, and the ' +
+        'people who take support calls at home. They fill in a date and how long it was, and it ' +
+        'lands on the Volunteer_Hours tab; you get one line per entry in the daily digest. ' +
+        (INFO.pinSet
+          ? 'Give them the PIN with it.'
+          : 'Set a PIN below before you send it \u2014 without one, anybody the link reaches ' +
+            'can write to that tab.'));
     }
     el.innerHTML = html +
       '<p class="hint">Open it on the tablet and add it to the home screen.' +

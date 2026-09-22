@@ -193,6 +193,19 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     })
   },
   {
+    id: 'volunteer',
+    mode: 'volunteer',
+    title: 'Volunteer Hours',
+    // BEFORE THE CATCH-ALL AND AFTER THE STAFF ROSTER, because it is neither:
+    // it is opened by a VOLUNTEER, on their own phone, usually nowhere near
+    // either building — see the banner in 99f_volunteer_self_log.gs. It takes
+    // no ?location= (the visit it exists for is off-site), and it is gated by
+    // the same PIN as everything else below this line, because it writes.
+    match: params => VOLUNTEER_SELF_LOG_MODES.indexOf(doorRequestedMode_(params)) !== -1,
+    build: (params, ctx) => buildVolunteerSelfLogHtml(
+      volunteerSelfLogContext({ pinRequired: ctx.pinRequired }))
+  },
+  {
     id: 'door',
     mode: '',
     title: 'Sign In',

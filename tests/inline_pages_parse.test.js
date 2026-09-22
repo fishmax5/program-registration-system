@@ -126,6 +126,14 @@ const pages = [
     }]
     }]
   }, {})],
+  // The volunteers' own hours page (99f), which is opened on a phone by
+  // somebody who is not at either building and has nobody to tell that it came
+  // up blank.
+  ['the volunteer hours page', () => sandbox.buildVolunteerSelfLogHtml({
+    roles: ["Bob's job"], locations: ['Narberth', 'Off-site'], offSite: 'Off-site',
+    programs: ["Women's </script> Group"], today: '2026-10-01', pinRequired: true,
+    centerName: 'New Horizons'
+  })],
   ['the cancel page', () => sandbox.buildCancelPageHtml({
     formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
   })]

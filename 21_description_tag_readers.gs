@@ -429,7 +429,9 @@ function syncCalendars() {
   recordHandlerRun('syncCalendars');
 
   if (isBootstrapActive()) {
-    log(`syncCalendars: a large-setup import or forms-rebuild sweep is in progress — skipping this run so they don't fight over the same forms.`);
+    // See the note in syncRegistrations(): a refusal a person cannot see is
+    // indistinguishable from a broken menu item. 99g.
+    explainRefusal(`The calendar was not read: ${bootstrapBusyMessage()}`);
     return;
   }
 
