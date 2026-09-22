@@ -286,12 +286,14 @@ function buildRenameIdMap(candidate, map) {
 /**
  * Moves every trace of a renamed program onto its new name.
  *
- * SEVEN STORES, and missing any one of them is its own quiet bug:
+ * EIGHT STORES, and missing any one of them is its own quiet bug:
  *   the session table (Event_ID + Clean_Title), the registrant rows and the
  *   triage rows (both join on Event_ID and display the title), the calendar
  *   invite ledger and the deletion tombstones (both keyed by Event_ID), the
- *   club roster (keyed by a hash of the title) and Program_Settings (keyed by
- *   title + location, and holding the staff's own notes and ticks).
+ *   club roster (keyed by a hash of the title), Program_Settings (keyed by
+ *   title + location, and holding the staff's own notes and ticks) and
+ *   Program_Questions (keyed by title, and the only one of the eight whose
+ *   rows are aimed at a program rather than owned by it).
  */
 function applyProgramRenames(registrySheet, renames) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -308,6 +310,7 @@ function applyProgramRenames(registrySheet, renames) {
   renameClubRosterKeys(ss, renames);
   renameProgramSettingRows(ss, renames);
   renameProgramLeaderRows(ss, renames);
+  renameProgramQuestionRows(ss, renames);
 
   renames.forEach(rename => {
     const message = `"${rename.oldTitle}" was renamed to "${rename.newTitle}" on the calendar — moved ` +
@@ -588,6 +591,54 @@ function renameProgramSettingRows(ss, renames) {
   log(`Renamed program(s): moved ${renamed.length} ${SHEET_NAMES.PROGRAM_SETTINGS} row(s) onto ` +
     `the new name` +
     (kept.length < rows.length ? `, dropping ${rows.length - kept.length} blank duplicate(s)` : '') + '.');
+}
+
+
+/**
+ * THE ONE THAT IS AIMED RATHER THAN OWNED. Program_Questions rows are matched
+ * to a form by TITLE (questionsForFormContext, section 6g-ii), so a renamed
+ * program leaves every question written for it pointing at a name nothing
+ * answers to: the question stops appearing on the form, the row still sits on
+ * the tab ticked Active, and nothing anywhere says the two have come apart.
+ * This is the same repair applyMemberNameCorrection() makes for a person's
+ * spelling in section 77 — the rename is carried onto the rows, rather than
+ * discovered weeks later by somebody wondering where their waiver went.
+ *
+ * MATCHED ON THE WORN-DOWN KEY (programTitleMatchKey), because a row typed by
+ * hand is exactly the row most likely to be a spelling apart from the
+ * calendar's, and it is the one this has to move. "*" and blank are every
+ * program and are never touched.
+ *
+ * The rewrite goes through renderProgramQuestionsSheet(), which is the tab's
+ * own writer — it drops the specs cache and re-offers the dropdowns, both of
+ * which are stale the moment these rows move.
+ */
+function renameProgramQuestionRows(ss, renames) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_QUESTIONS);
+  if (!sheet) return;
+  const headers = HEADERS.Program_Questions;
+  const map = getIndexMap(headers);
+  if (map['Program'] === undefined) return;
+  const rows = readProgramQuestionRows(sheet);
+  if (rows.length === 0) return;
+
+  const titleByKey = {};
+  renames.forEach(rename => {
+    const key = programTitleMatchKey(rename.oldTitle);
+    if (key) titleByKey[key] = rename.newTitle;
+  });
+
+  let changed = 0;
+  rows.forEach(row => {
+    const replacement = titleByKey[programTitleMatchKey(row[map['Program']])];
+    if (!replacement || String(row[map['Program']] || '').trim() === replacement) return;
+    row[map['Program']] = replacement;
+    changed++;
+  });
+  if (changed === 0) return;
+
+  renderProgramQuestionsSheet(rows);
+  log(`Renamed program(s): moved ${changed} ${SHEET_NAMES.PROGRAM_QUESTIONS} row(s) onto the new name.`);
 }
 
 

@@ -134,6 +134,35 @@ function listKnownProgramTitles() {
   }
 }
 
+/**
+ * A program or location title worn down to what two spellings of ONE thing
+ * have in common: no case, no punctuation, no spaces, no bracket tag, no
+ * accents.
+ *
+ * WHY THIS EXISTS. Program and Location on Program_Questions are matched
+ * against the calendar by exact text, so "Book Club" typed as "Bookclub", or
+ * a title that gained a comma on the calendar, is a question that silently
+ * applies to no form at all — the exact failure the dropdown was added to
+ * prevent, still reachable by anybody who types instead of picking, or whose
+ * row was written before the program was renamed.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO is decide that two DIFFERENT titles are
+ * the same one. "Chair Yoga" and "Chair Yoga (Beginner)" have different keys
+ * and always will: re-binding a question on a resemblance is how a waiver
+ * written for one class ends up on another, silently, and nobody can tell
+ * from the form which it was meant for. Those are REPORTED instead — see
+ * findUnmatchedProgramQuestionRows().
+ */
+function programTitleMatchKey(value) {
+  let text = String(value || '').trim();
+  if (!text) return '';
+  // A bracket tag describes how a program RUNS, not which program it is, so
+  // "[Club] Mah Jongg" and "Mah Jongg" are one title typed two ways.
+  text = text.replace(/\[[^\]]*\]/g, ' ');
+  if (text.normalize) text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
 /** True for the three types that need a Choices cell to mean anything. */
 function questionTypeNeedsChoices(kind) {
   return kind === 'LIST' || kind === 'CHECKBOX' || kind === 'MULTIPLE_CHOICE';
@@ -431,8 +460,12 @@ function readProgramQuestionRow(row, map, reserved, index) {
  */
 function questionsForFormContext(specs, context) {
   const norm = v => String(v || '').trim().toLowerCase();
-  const titles = new Set((context.titles || []).map(norm));
-  const locations = new Set((context.locations || []).map(norm));
+  // MATCHED ON THE WORN-DOWN KEY, not on the text. A row saying "Bookclub"
+  // against a calendar saying "Book Club" is one program typed two ways, and
+  // matching it exactly is a question nobody can find and nothing anywhere
+  // says was dropped. See programTitleMatchKey() for what this will NOT do.
+  const titles = new Set((context.titles || []).map(programTitleMatchKey));
+  const locations = new Set((context.locations || []).map(programTitleMatchKey));
   // WHAT A KEYWORD IS MATCHED AGAINST: everything about this form that names
   // what it is for — the programs on it, the sites it runs at, and the
   // bracket tags its calendar events carry ([Club], [Personalized
@@ -448,11 +481,13 @@ function questionsForFormContext(specs, context) {
   // dropdown on that column now offers, and what somebody copying the
   // Program cell would write — matched no location at all and the question
   // was asked on nothing. Blank still means the same thing, as it always did.
-  const isEvery = value => !value || value === '*';
+  // "*" and blank both wear down to the empty key, so one test covers both
+  // spellings on both columns, exactly as the text version did.
+  const isEvery = key => !key;
   return (specs || []).filter(spec => {
-    const p = norm(spec.program);
+    const p = programTitleMatchKey(spec.program);
     if (!isEvery(p) && !titles.has(p)) return false;
-    const l = norm(spec.location);
+    const l = programTitleMatchKey(spec.location);
     if (!isEvery(l) && !locations.has(l)) return false;
     // ANY keyword matching is enough, and all three columns narrow TOGETHER.
     // A row naming Location "Narberth" and keyword "wills" is asking for the
@@ -505,3 +540,133 @@ function applyDescriptionInjectionsToText(description, context, specs) {
   return `${description}${injection}`;
 }
 
+
+
+// ---------------------------------------------------------------------------
+// QUESTIONS AIMED AT A PROGRAM THAT IS NOT THERE
+// ---------------------------------------------------------------------------
+
+/** How many near-matches a row is offered. More than a few is not a shortlist. */
+const PROGRAM_QUESTION_SUGGESTION_LIMIT = 3;
+
+/**
+ * Every row on Program_Questions whose Program names something no live
+ * program answers to — with the titles it MIGHT have meant, and no change of
+ * any kind.
+ *
+ * THE FAULT THIS IS FOR. A question aimed at a program is matched by title
+ * (questionsForFormContext), so a title that has moved on leaves the row
+ * pointing at nothing: the form never grows the question, the tab still shows
+ * it ticked Active, and there is no error anywhere — the row simply matches no
+ * form, which is indistinguishable from a row for a program that is not
+ * running this month. A rename detected on the calendar is carried across by
+ * renameProgramQuestionRows() (section 5c) and never reaches this report; what
+ * reaches it is everything else — a typo, a title tidied up by hand on the
+ * calendar between syncs, a program typed from memory.
+ *
+ * SUGGESTED, NEVER APPLIED. A resemblance is not an identity: "Chair Yoga" and
+ * "Chair Yoga (Beginner)" resemble each other and are two classes, and a
+ * question silently re-bound onto the wrong one is a waiver on the wrong
+ * form that nobody can spot from either. So this hands back a shortlist for a
+ * person to choose from, which is the same bargain showForkedFormsDialog()
+ * (32) and the duplicate review (85) make with the facts they cannot settle.
+ */
+function findUnmatchedProgramQuestionRows(rows, liveTitles) {
+  const map = getIndexMap(HEADERS.Program_Questions);
+  const questionRows = rows || readProgramQuestionRows(null);
+  const live = liveTitles || listKnownProgramTitles();
+  const liveKeys = {};
+  live.forEach(title => { liveKeys[programTitleMatchKey(title)] = title; });
+
+  const unmatched = [];
+  (questionRows || []).forEach((row, i) => {
+    const title = String(row[map['Question']] || '').trim();
+    if (!title) return; // not a row
+    const program = String(row[map['Program']] || '').trim();
+    // Blank and "*" are every program, which is never unmatched.
+    const key = programTitleMatchKey(program);
+    if (!key) return;
+    if (liveKeys[key]) return;
+    unmatched.push({
+      // The tab's own row number, because "row 14" is how somebody finds it.
+      sheetRow: MEMORY_TAB_DATA_ROW + i,
+      question: title,
+      program,
+      active: !(row[map['Active']] === false),
+      suggestions: suggestProgramTitlesFor(program, live)
+    });
+  });
+  return { checked: (questionRows || []).length, live: live.length, unmatched };
+}
+
+/**
+ * The live titles a typed one might have meant: one key inside the other, or
+ * a first word in common. Deliberately crude — it is read by a person who can
+ * see both spellings, and a cleverer score would only make a wrong guess look
+ * more considered.
+ */
+function suggestProgramTitlesFor(program, liveTitles) {
+  const key = programTitleMatchKey(program);
+  if (!key) return [];
+  const firstWord = String(program || '').trim().toLowerCase().split(/\s+/)[0] || '';
+  const scored = [];
+  (liveTitles || []).forEach(title => {
+    const other = programTitleMatchKey(title);
+    if (!other) return;
+    if (other.indexOf(key) !== -1 || key.indexOf(other) !== -1) { scored.push({ title, rank: 0 }); return; }
+    if (firstWord.length >= 3 && programTitleMatchKey(firstWord) &&
+        other.indexOf(programTitleMatchKey(firstWord)) === 0) {
+      scored.push({ title, rank: 1 });
+    }
+  });
+  scored.sort((a, b) => a.rank - b.rank || a.title.localeCompare(b.title));
+  return scored.slice(0, PROGRAM_QUESTION_SUGGESTION_LIMIT).map(s => s.title);
+}
+
+/** What the report says, including when there is nothing to say. */
+function describeUnmatchedProgramQuestions(found) {
+  if (!found || found.live === 0) {
+    return 'No programs are on the session table yet, so there is nothing to check these rows against. ' +
+      'Run a calendar sync first.';
+  }
+  if (found.unmatched.length === 0) {
+    return `All ${found.checked} row(s) on "${SHEET_NAMES.PROGRAM_QUESTIONS}" name a program this ` +
+      `workbook is running. Nothing to fix.`;
+  }
+  const lines = [
+    `${found.unmatched.length} of ${found.checked} row(s) on "${SHEET_NAMES.PROGRAM_QUESTIONS}" name a ` +
+    `program no session row answers to. Each one is on NO form — the question is never asked.`,
+    ''
+  ];
+  found.unmatched.forEach(item => {
+    lines.push(`• Row ${item.sheetRow}: "${item.question}"${item.active ? '' : '  (Active unticked)'}`);
+    lines.push(`    Program says: "${item.program}"`);
+    lines.push(item.suggestions.length > 0
+      ? `    Did you mean: ${item.suggestions.map(t => `"${t}"`).join('  ·  ')}`
+      : '    No live program resembles it.');
+  });
+  lines.push('');
+  lines.push('NOTHING WAS CHANGED. Pick the right program from the dropdown in the Program column — a ' +
+    'question moved onto a program by guesswork is a question on the wrong form, and neither form says so.');
+  lines.push('A program that simply is not running at the moment is not a fault: its row waits, and starts ' +
+    'matching again the next time the program is on the calendar.');
+  return lines.join('\n');
+}
+
+/**
+ * Menu: 🔧 Admin ▸ 📄 Reports. Read-only and ungated, like the reports beside
+ * it — the person who noticed a question missing from a form is the person who
+ * should be able to press it.
+ */
+function reportOrphanedProgramQuestions() {
+  const found = findUnmatchedProgramQuestionRows(null, null);
+  const report = describeUnmatchedProgramQuestions(found);
+  log(report);
+  try {
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('Questions Aimed At Nothing', report, ui.ButtonSet.OK);
+  } catch (err) {
+    toastIfPossible(`${found.unmatched.length} question row(s) name a program nothing is running — see the log.`);
+  }
+  return found;
+}

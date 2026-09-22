@@ -405,6 +405,11 @@ function buildAppMenu(ui, includeAdmin) {
         // the missing name is the person who should be able to press it.
         // See 99d.
         .addItem('Find Missing Registrations (read-only report)', 'reportMissingRegistrations')
+        // The same silence one tab over: a question aimed at a program title
+        // nothing answers to is a question that appears on no form at all,
+        // and the tab shows it ticked Active either way. Suggests, never
+        // re-binds — see findUnmatchedProgramQuestionRows() (53).
+        .addItem('Find Questions Aimed At Nothing (read-only report)', 'reportOrphanedProgramQuestions')
         // The year's volunteer hours, by person \u2014 the figure the centre is
         // credited on. Read-only and ungated like the four above it. See 99e.
         .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', 'reportVolunteerHours')
