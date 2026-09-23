@@ -178,7 +178,7 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
       // The list a leader hands over on the first day of term: one program,
       // a pasted list, matched against the roll and reviewed before anything is
-      // written. Every write is Quick Mark's Register — see section 99n.
+      // written. Every write is Quick Mark's Register — see section 99q.
       .addItem('\ud83d\udccb Add Registrants in Bulk (paste list)\u2026', 'showBulkRegistrantsDialog')
       // The same job one tab over, and deliberately NOT the same shape: a
       // duplicate on the roll is a person listed twice and safe to fold, a
@@ -199,6 +199,11 @@ function buildAppMenu(ui, includeAdmin) {
       // then press this. Section 83 says why marking and removing are two
       // steps. Its session-wide sibling stays behind Admin → Destructive.
       .addItem('\ud83d\uddd1\ufe0f Remove Marked Registrants\u2026', 'removeMarkedRegistrants')
+      // ITS OPPOSITE: registrations that went missing, read back out of an
+      // older copy of this workbook, reviewed by cause and put back. Ungated
+      // for the same reason as the item above \u2014 it lists every row by name
+      // before anything is written, and it only ever adds. See 99p.
+      .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', 'showRestoreRegistrantsFromCopyDialog')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
@@ -386,6 +391,13 @@ function buildAppMenu(ui, includeAdmin) {
         // events (the office is mailed a digest instead now — see section 5b).
         // A run that hits its cap says so.
         .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
+        // Everything on the Registrants tab predates the registration ledger
+        // (99k), so until this has been run the ledger's own check (99p) says
+        // "not in the fold" about the whole workbook and can say nothing
+        // useful. It records one entry per row, writes a hidden internal id
+        // back onto each, changes nothing anybody reads, and is safe to run
+        // twice. See 99o.
+        .addItem('\ud83d\udcd2 Back-fill the Registration Ledger', 'backfillLedgerFromTab')
         .addSeparator()
         // THE FIRST RUN, which is the one-time job by definition. It was filed
         // under "Setup & Reports" beside two read-only reports, which is how a
@@ -422,6 +434,11 @@ function buildAppMenu(ui, includeAdmin) {
         // it. This is which of the two, per sheet, and what to do about each.
         // See 99h.
         .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', 'reportLeaderSheetRosters')
+        // The registration ledger's own check (99p), run on every sync and
+        // filed for the 10am digest — this is the same answer on demand, for
+        // somebody standing in front of a roster that is missing a name. It
+        // folds the ledger and reads the tab and writes nothing at all.
+        .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', 'showLedgerVerificationReport')
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the

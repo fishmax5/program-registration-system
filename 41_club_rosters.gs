@@ -270,6 +270,9 @@ function applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, 
         existingRowIndex,
         submittedAt: joinedOn,
         orderAheadDays,
+        // The club roster's catch-up, said on every entry rather than inferred
+        // from the Form_Source text beside it. See LEDGER_SOURCES (99k).
+        ledgerSource: LEDGER_SOURCES.CLUB,
         // A stable synthetic Party_ID, so a re-run recognizes its own earlier
         // rows as the same submission and patches them instead of superseding
         // them into a growing pile of history.

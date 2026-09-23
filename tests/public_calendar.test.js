@@ -126,6 +126,10 @@ function row(fields) {
   return out;
 }
 
+// The far edge of the page's own window (`deskMonthHorizonKey`): the last day
+// of NEXT month, which is a month-ish out whatever day of the month it is run.
+const lastDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0, 9, 30);
+
 const VIEW = 'https://docs.google.com/forms/d/e/PUB1/viewform';
 const endAt = (offset, hour) => new Date(today.getFullYear(), today.getMonth(),
   today.getDate() + offset, hour, 30);
@@ -181,8 +185,11 @@ const rows = [
     Max_Capacity: 8, Remaining_Seats: 0
   }),
   // A month out, with no form generated yet — a real state, not an error.
+  // Dated off the HORIZON rather than by a day offset: the window is "end of
+  // next month", so a fixed +40 days falls outside it whenever today is late
+  // in the month, and the fixture expires the way this file's own banner warns.
   row({
-    Event_Date: dayAt(40), Location: 'Ashbridge', Clean_Title: 'Tai Chi',
+    Event_Date: lastDayOfNextMonth, Location: 'Ashbridge', Clean_Title: 'Tai Chi',
     Event_Time: '10:00 AM', Status: '🟢 Open', Event_ID: 'EV5'
   }),
   row({ Event_Date: dayAt(-3), Location: 'Narberth', Clean_Title: 'Last Week', Event_ID: 'EV6' }),

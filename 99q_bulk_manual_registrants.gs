@@ -1,5 +1,5 @@
 // ============================================================================
-// 99n. BULK MANUAL REGISTRANTS  (one program, a pasted list, reviewed first)
+// 99q. BULK MANUAL REGISTRANTS  (one program, a pasted list, reviewed first)
 // ============================================================================
 //
 // Quick Mark's Register tick puts ONE person on ONE session, and that is the
@@ -312,6 +312,10 @@ function commitBulkRegistrants(args) {
         if (res.ok) done++;
         else if (!refused) refused = res.message || '';
       });
+      // Inside the lock, per person: the desk write buffers its ledger entries
+      // (99k), and an entry buffered and never flushed is the loss the ledger
+      // exists to prevent. One flush per person, not per date.
+      flushPersistentRegistries();
       return { done, refused };
     }, null);
 

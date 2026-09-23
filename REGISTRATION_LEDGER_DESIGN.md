@@ -1,7 +1,9 @@
 # The registration ledger — design draft
 
-**Status: proposal. Nothing here is built.** Phase 0 below is a prerequisite
-read of the code, not a change; phases 1–5 are the shippable sequence.
+**Status: phase 1 is built** (`99k_registration_ledger.gs` — the tab, the
+vocabulary, the appender and its buffer, and the fold; nothing calls the
+appender). Phases 2–5 are unbuilt. Phase 0 below is a prerequisite read of the
+code, not a change; phases 1–5 are the shippable sequence.
 
 ---
 
@@ -450,9 +452,50 @@ one entry that puts it in that state, so the fold reproduces the tab rather
 than reviving everybody.
 
 Sliced on `runSlicedJob` (`75`) like the four other long jobs, idempotent per
-row (a row that already carries a `Registration_ID` is skipped), and run once
-from Admin ▸ One-Time Jobs. After it, bucket one of the verifier is empty for
-historical reasons as well as behavioural ones.
+row, and run once from Admin ▸ One-Time Jobs. After it, bucket one of the
+verifier is empty for historical reasons as well as behavioural ones.
+
+**Correction (2026-09-23), and it is the whole of what makes the backfill
+safe.** An earlier draft of this section said the job is "idempotent per row (a
+row that already carries a `Registration_ID` is skipped)" — which keys the
+idempotency on the one field that is blank on every row the job exists to
+process. The starting state is a tab where EVERY `Registration_ID` is empty,
+and the job is SLICED, and Apps Script kills an execution at its ceiling with
+no exception and no `finally`. So a slice that dies between appending the
+`registered` entry and writing the id back onto the row leaves a still-blank
+row, and the next slice mints a SECOND id and appends a SECOND `registered`
+entry. The fold keys state on `Registration_ID`, so that is two live states for
+one person: two rows, two seats against a capacity and two meals against a
+catering count — the exact duplication `85` exists to clean up, manufactured by
+the migration meant to be invisible.
+
+So the rule is **resolve before you mint**: per row, ask
+`resolveRegistrationId(index, eventId, name, personType)` against the folded
+ledger and mint only when it answers null. A blank row is then idempotent
+whether or not the row write landed, and it is §1.4's second resolution path
+doing exactly the job it was written for — the row's blankness is a hint, not
+the key. Where an order must still be chosen, write the row's id BEFORE
+appending: a row with an id and no entry is the safe failure (the tab is
+authoritative until phase 4, and the verifier's bucket one names it), while an
+entry no row claims is the unsafe one.
+
+Two more things follow from the blank window, which lasts as long as the
+backfill does:
+
+- **`Registration_ID` is not a column the verifier compares.** While the
+  backfill runs, the tab's column is blank and the fold's rows carry ids, so a
+  naive per-column diff puts every row into bucket three. A verifier reporting
+  twelve hundred disagreements is a verifier nobody reads, and it would bury
+  the real findings during precisely the month phase 4's gate is measured over.
+  A blank there means "not yet backfilled", not a disagreement: it is ledger
+  bookkeeping rather than registration state.
+- **The ids go back as a targeted column write, never a re-render.** Having the
+  backfill call `renderRegistrantsSheet()` per slice to persist them is the
+  read-self / `clear()` / rewrite operation this entire document distrusts, run
+  repeatedly over the whole tab and straight into `99j`'s shrink guard. Write
+  the column directly, one `setValues()` per section zone on the pattern
+  `96_session_grid.gs` uses, and never against row positions read in an earlier
+  execution.
 
 ### Phase 4 — the fold becomes the source
 

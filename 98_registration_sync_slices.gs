@@ -230,6 +230,18 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     id: 'registrant_reminders',
     label: 'sending the registrant reminders',
     run: ctx => sendRegistrantReminders(ctx.sessionRows(), ctx.reusableRows())
+  },
+  {
+    // LAST, AND READ-ONLY. The registration ledger's verifier (99n) folds the
+    // ledger, reads the tab and files the differences for the office's 10am
+    // digest. It runs after everything else because it is a statement about
+    // the picture this sync SETTLED on — a comparison made half way through
+    // would report the steps above as faults — and because it writes nothing,
+    // so being the step that a spent budget defers costs a day's report and
+    // nothing else.
+    id: 'ledger_verify',
+    label: 'checking the registration ledger against the Registrants tab',
+    run: () => reportLedgerVerification()
   }
 ];
 

@@ -285,8 +285,22 @@ function runRegistrationImportPhase(sync) {
   // skipped and picked up next hour; this is the write that puts the imported
   // registrations on the sheet, and if it does not land, advancing
   // LAST_FORM_SYNC_TIME would mean those responses are never read again.
-  const registrantsWritten = sync.step('writing the Registrants tab',
-    () => { renderRegistrantsSheet(false, combinedRegistrantRows); return true; }) === true;
+  const registrantsWritten = sync.step('writing the Registrants tab', () => {
+    // THE LEDGER FIRST, IN THE SAME STEP (§2: append first, then do what you
+    // do now). buildRegistrantRow() composed an entry for every row this slice
+    // built and handed them up through 99k's compose buffer; they reach the
+    // ledger's own buffer HERE, beside the write of the rows they describe, so
+    // that a slice which ran out of budget mid-loop records exactly the
+    // registrations it wrote and no others.
+    //
+    // A composition that throws stops the write: `sync.step` records the
+    // failure, the clock does not move, and the responses are read again next
+    // hour. That is the bargain §2 asks for — better to re-read a form than to
+    // take a registration that leaves no record.
+    appendLedgerEntries(takeImportLedgerEntries());
+    renderRegistrantsSheet(false, combinedRegistrantRows);
+    return true;
+  }) === true;
   if (registrantsWritten) sync.setRegistrantRows(combinedRegistrantRows);
 
   plan.importedRows = (plan.importedRows || 0) + newRows.length;

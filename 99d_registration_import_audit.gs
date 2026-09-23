@@ -63,7 +63,8 @@
 // THE READ-ONLY GUARANTEE, and why it needs code rather than a promise.
 //
 // Re-deriving rows means calling processFormResponse(), which is written for
-// the live import and has three side effects that would be wrong here:
+// the live import and has FOUR side effects that would be wrong here (the
+// fourth arrived with the registration ledger's phase 2):
 //
 //   • buildRegistrantRow() MUTATES a matching existing row in place when the
 //     Party_ID is the same. Answered by handing it an EMPTY existingRowIndex
@@ -80,6 +81,11 @@
 //     declarations are ordinary bindings in it, so this is the same mechanism
 //     10_form_date_labels.gs already uses to set __formLabelFingerprintDirty.
 //     Restored in a finally, including when a form throws.
+//   • buildRegistrantRow() composes a ledger entry per row and
+//     supersedeRegistrantRow() appends one for the row it replaces (99k).
+//     Swapped for no-ops by the same mechanism, because a re-derivation is not
+//     a registration and the ledger is append-only — an entry written here
+//     could not be taken back out.
 //
 // Nothing here is numbered or ordered in any load-bearing way: it is behavior
 // only, its own two constants stand alone, its schema is HEADERS.All_Registrants
@@ -113,6 +119,8 @@ const REGISTRATION_AUDIT_MAX_LISTED = 200;
 function withReadOnlyRegistries_(fn) {
   const realClear = clearRegistrantTombstones;
   const realTombstone = getRegistrantTombstone;
+  const realAppend = appendLedgerEntries;
+  const realRecord = recordImportLedgerEntries;
   const wouldClear = [];
   // Snapshotted so an in-memory registry write made during the derivation does
   // not leave the execution looking dirty to anything that flushes later.
@@ -137,11 +145,24 @@ function withReadOnlyRegistries_(fn) {
   // is the only way those two answers stay apart.
   getRegistrantTombstone = function () { return null; };
 
+  // AND THE LEDGER, which is the fourth side effect and arrived with phase 2.
+  // buildRegistrantRow() now composes a `registered` entry per row and
+  // supersedeRegistrantRow() appends one for the row it replaces — true of the
+  // live import and exactly wrong here, where every row is being re-derived
+  // for comparison and none of it is happening. Dropped rather than not
+  // flushed, because ledgerIdForRegistrantRow() appends straight into the
+  // ledger's own buffer (it is recording a row that is already on the tab) and
+  // the next flush in this execution would write the lot.
+  appendLedgerEntries = function () { return 0; };
+  recordImportLedgerEntries = function () { return 0; };
+
   try {
     return { result: fn(), tombstonesWouldClear: wouldClear };
   } finally {
     clearRegistrantTombstones = realClear;
     getRegistrantTombstone = realTombstone;
+    appendLedgerEntries = realAppend;
+    recordImportLedgerEntries = realRecord;
     __allDatesRegistryDirty = dirtyBefore.allDates;
     __formRegistryDirty = dirtyBefore.form;
     __formLabelFingerprintDirty = dirtyBefore.labels;

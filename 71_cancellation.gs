@@ -49,8 +49,42 @@ const CANCELLATION_SOURCES = {
   STAFF: 'in the workbook'
 };
 
+/**
+ * The same four doors, said in the ledger's vocabulary (LEDGER_SOURCES, 99k).
+ *
+ * TWO LISTS AND NOT ONE, because they answer different questions and one of
+ * them cannot answer the other's. CANCELLATION_SOURCES is written to be READ
+ * in Admin_Notes by a person six weeks later — "at the door" covers the
+ * check-in page and the change panel alike, and that is the right amount of
+ * detail in a sentence. The ledger's Source is one value per CALL SITE,
+ * because "where did this come from" is a column to be read rather than
+ * inferred, and those two doors need telling apart in it.
+ *
+ * So this is the default and `opts.ledgerSource` is the answer where the
+ * default cannot be right — which is exactly the desk's two doors.
+ *
+ * LAZY (01a) because every value in it comes out of another file: reading
+ * LEDGER_SOURCES at load time is the eager cross-file read this project's one
+ * structural rule forbids, and tests/load_order.test.js is what holds that
+ * line.
+ */
+defineLazyGlobal_('CANCELLATION_LEDGER_SOURCES', () => Object.freeze({
+  [CANCELLATION_SOURCES.DESK]: LEDGER_SOURCES.DOOR,
+  [CANCELLATION_SOURCES.SELF]: LEDGER_SOURCES.CANCEL_PAGE,
+  [CANCELLATION_SOURCES.LEADER]: LEDGER_SOURCES.LEADER_SHEET,
+  [CANCELLATION_SOURCES.STAFF]: LEDGER_SOURCES.CHANGE_PANEL
+}));
+
 /** One sentence's worth of reason. See cancellationStamp(). */
 const CANCELLATION_REASON_MAX_CHARS = 200;
+
+/** Which call site a cancellation came through, for the ledger. The caller's word wins. */
+function ledgerSourceForCancellation_(opts) {
+  const o = opts || {};
+  const explicit = String(o.ledgerSource || '').trim();
+  if (explicit) return explicit;
+  return CANCELLATION_LEDGER_SOURCES[String(o.source || '').trim()] || LEDGER_SOURCES.CHANGE_PANEL;
+}
 
 /** Statuses that are already not-coming. Cancelling one again is a no-op, not an error. */
 const CANCELLATION_TERMINAL_STATUSES = ['Cancelled', 'Superseded'];
@@ -151,7 +185,18 @@ function cancelRegistrantRowsLocked(matcher, opts) {
   let cancelled = 0;
   rows.forEach(row => {
     if (!matcher(row, map)) return;
-    if (stampRegistrantRowCancelled(row, map, o)) cancelled++;
+    // THE ENTRY IS COMPOSED BEFORE THE FOUR CELLS ARE STAMPED and buffered
+    // only once they have been (§2: append first, then do what you do now).
+    // Composition is where the throw lives — a kind or a source outside the
+    // vocabulary crashes here, with the row untouched — while the stamper's
+    // own refusal (a row that is already cancelled, superseded or removed) is
+    // an answer rather than a failure, and recording a cancellation that did
+    // not happen would put a seat back twice.
+    const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.CANCELLED, o,
+      { source: ledgerSourceForCancellation_(o) });
+    if (!stampRegistrantRowCancelled(row, map, o)) return;
+    appendLedgerEntry(entry);
+    cancelled++;
   });
 
   if (cancelled === 0) {
@@ -293,10 +338,31 @@ function applyLeaderDropsAsCancellations(registrantRows) {
     if (!isCheckedTrue(row[map['Dropped']])) return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date || formatDateKey(date) < todayKey) return;
-    if (stampRegistrantRowCancelled(row, map, {
+    const opts = {
       source: CANCELLATION_SOURCES.LEADER,
       reason: String(row[map['Leader_Notes']] || '')
-    })) cancelled++;
+    };
+    // THIS PATH APPENDS ITS OWN ENTRY, which the design (§2, row 4) says it
+    // does not need to: it reads "applyLeaderDropsAsCancellations reaches
+    // these same writers and so needs no append of their own". It reaches the
+    // STAMPER (stampRegistrantRowCancelled), not cancelRegistrantRowsLocked —
+    // and the stamper cannot be where the append lives, because the fold calls
+    // it too (foldRegistrationLedger, 99k) and a replay that appended would
+    // write the history it was reading back into the ledger, doubled, every
+    // time anybody drew the tab.
+    //
+    // What the design is right about is the two things this entry must say
+    // that no other cancellation does: it came from a shared sheet
+    // (LEDGER_SOURCES.LEADER_SHEET), and its Occurred_At is BLANK — a tick made
+    // at some point since the last sync is a time nobody knows, and blank
+    // means "the same as Entry_At" rather than a guess dressed as a fact.
+    const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.CANCELLED, opts, {
+      source: LEDGER_SOURCES.LEADER_SHEET,
+      note: 'Dropped was ticked on the shared program registrant sheet; the tick was read back on this sync.'
+    });
+    if (!stampRegistrantRowCancelled(row, map, opts)) return;
+    appendLedgerEntry(entry);
+    cancelled++;
   });
 
   if (cancelled > 0) {
@@ -952,8 +1018,15 @@ function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
     const seat = seats[String(row[map['Event_ID']] || '').trim()];
     const opts = { source: WAITLIST_SOURCES.LEADER, reason: String(row[map['Leader_Notes']] || '') };
 
+    const leaderSheet = {
+      source: LEDGER_SOURCES.LEADER_SHEET,
+      note: 'The tick was read back off the shared program registrant sheet on this sync.'
+    };
+
     if (isCheckedTrue(row[map['Waitlisted']])) {
+      const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.WAITLISTED, opts, leaderSheet);
       if (!stampRegistrantRowWaitlisted(row, map, opts)) return;
+      appendLedgerEntry(entry);
       waitlisted++;
       if (seat) seat.active = Math.max(0, seat.active - 1);
       return;
@@ -967,7 +1040,9 @@ function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
       refused++;
       return;
     }
+    const restoredEntry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.REACTIVATED, opts, leaderSheet);
     if (!stampRegistrantRowActive(row, map, opts)) return;
+    appendLedgerEntry(restoredEntry);
     restored++;
     if (seat) seat.active++;
   });
