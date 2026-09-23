@@ -160,6 +160,13 @@ function withScriptLock(waitMs, fn, onBusy) {
   try {
     return fn();
   } finally {
+    // Every desk write (Quick Mark, the household press, 99a's changes, 71's
+    // cancels, the door app, 99b's retries) runs inside this lock and none of
+    // them reaches flushPersistentRegistries(), so a ledger entry appended
+    // here would otherwise die with the execution. Flushed BEFORE the release
+    // so the append lands under the same lock as the rows it describes;
+    // flushLedger() never throws, and the guard keeps it that way.
+    try { flushLedger(); } catch (err) { log(`⚠️ Ledger flush in withScriptLock failed: ${err}`); }
     lock.releaseLock();
   }
 }

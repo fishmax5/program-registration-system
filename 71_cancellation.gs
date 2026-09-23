@@ -291,13 +291,20 @@ function checkInCancel(payload) {
   const name = String(args.name || '').trim();
   if (!name) return { ok: false, message: 'Nothing was cancelled — no name.' };
 
-  const result = cancelOneRegistration({
-    eventId: String(args.eventId || '').trim(),
-    name,
-    reason: String(args.reason || ''),
-    source: CANCELLATION_SOURCES.DESK,
-    by: getCurrentUserEmail() || ''
-  });
+  let result;
+  try {
+    result = cancelOneRegistration({
+      eventId: String(args.eventId || '').trim(),
+      name,
+      reason: String(args.reason || ''),
+      source: CANCELLATION_SOURCES.DESK,
+      by: getCurrentUserEmail() || ''
+    });
+  } finally {
+    // A web-app door: no sync follows it, so nothing else would flush. The
+    // lock's own flush normally got there first; this is for whatever did not.
+    flushLedger();
+  }
   return { ok: !!result.ok, message: result.message };
 }
 
@@ -570,7 +577,9 @@ function cancelPageApply(payload) {
   }
   const sessions = upcomingEventIdsForForm(identity.formId);
 
-  const result = cancelRegistrantRows((row, map) => {
+  let result;
+  try {
+  result = cancelRegistrantRows((row, map) => {
     const eventId = String(row[map['Event_ID']] || '').trim();
     if (!wanted[eventId] || !sessions[eventId]) return false;
     if (cancellationIdentityMatches(row, map, identity)) return true;
@@ -584,6 +593,9 @@ function cancelPageApply(payload) {
     by: identity.name,
     emptyMessage: 'Those dates were already cancelled — there is nothing more to do.'
   });
+  } finally {
+    flushLedger(); // a web-app door, as in checkInCancel()
+  }
 
   return {
     ok: !!result.ok,
