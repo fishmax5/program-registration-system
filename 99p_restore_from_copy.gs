@@ -1,5 +1,5 @@
 // ============================================================================
-// 99n. RESTORING REGISTRANTS FROM A COPY OF THE WORKBOOK
+// 99p. RESTORING REGISTRANTS FROM A COPY OF THE WORKBOOK
 // ============================================================================
 //
 // THE SITUATION THIS FILE IS FOR. Registrations went missing from
@@ -71,9 +71,15 @@
 // missing and still offerable — so two people pressing Restore, or a sync
 // landing between the scan and the press, cannot put anybody in twice.
 //
-// NOT THE LEDGER. The ledger (99k) is in phase 1 and nothing appends to it
-// yet; when phase 2 wires its writers, this is one of them (a `registered`
-// entry per restored row, source 'restore from copy').
+// THE LEDGER FIRST, THEN THE TAB (99k §2), like every other writer. Each
+// restored row gets the entries ledgerEntriesForExistingRow() composes — a
+// `registered` carrying the row, plus the one entry that puts it in the state
+// it was in (a restored waitlisting must not fold back as a seat) — under
+// LEDGER_SOURCES.RESTORE, and the ledger is FLUSHED before either tab is
+// written: an append that cannot land means nothing is restored, rather than
+// a row the fold does not know about. A copy's own Registration_ID is not
+// trusted — the copy may predate the column, or name an id the ledger has
+// since closed — so every restored row is minted a fresh one.
 // ============================================================================
 
 /** What the Admin_Notes stamp and the Manual_Override say about a restored row. */
@@ -268,7 +274,7 @@ function buildRestoredRegistrantRow(row, map, note) {
   if (override !== 'Manually Added') out[map['Manual_Override']] = RESTORE_FROM_COPY_OVERRIDE;
   const notes = String(out[map['Admin_Notes']] || '').trim();
   out[map['Admin_Notes']] = notes ? `${notes} | ${note}` : note;
-  ['Registrant_Sheet_Link', 'Sign_In_Sheet_Link'].forEach(col => {
+  ['Registrant_Sheet_Link', 'Sign_In_Sheet_Link', 'Registration_ID'].forEach(col => {
     if (map[col] !== undefined) out[map[col]] = '';
   });
   if (map['Event_Time'] !== undefined && /^=/.test(String(out[map['Event_Time']] || ''))) {
@@ -450,6 +456,22 @@ function restoreRegistrantsFromCopyLocked_(payload) {
 
   if (restored.length === 0 && restoredMembers.length === 0) {
     return { ok: true, message: 'Nothing to restore — everything ticked is already back, or was not offered.' };
+  }
+
+  if (restored.length > 0) {
+    const entries = [];
+    restored.forEach(row => {
+      const rowEntries = ledgerEntriesForExistingRow(row, map, { source: LEDGER_SOURCES.RESTORE, note });
+      if (map['Registration_ID'] !== undefined) row[map['Registration_ID']] = rowEntries[0].registrationId;
+      rowEntries.forEach(e => entries.push(e));
+    });
+    appendLedgerEntries(entries);
+    flushLedger();
+    // flushLedger() reports a refused write by leaving the entries pending
+    // rather than by throwing. Here that has to stop the restore.
+    if (pendingLedgerEntryCount() > 0) {
+      throw new Error(`the ${SHEET_NAMES.REGISTRATION_LEDGER} tab could not be written, so no row was put back.`);
+    }
   }
 
   if (restoredMembers.length > 0) {

@@ -134,7 +134,7 @@ const pages = [
     programs: ["Women's </script> Group"], today: '2026-10-01', pinRequired: true,
     centerName: 'New Horizons'
   })],
-  // The restore-from-a-copy dialog (99n). It inlines no workbook data at all,
+  // The restore-from-a-copy dialog (99p). It inlines no workbook data at all,
   // which is exactly what this pins: a script block that still compiles.
   ['the restore-from-a-copy dialog', () => sandbox.buildRestoreFromCopyHtml()],
   ['the cancel page', () => sandbox.buildCancelPageHtml({

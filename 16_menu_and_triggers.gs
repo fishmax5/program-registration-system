@@ -198,7 +198,7 @@ function buildAppMenu(ui, includeAdmin) {
       // ITS OPPOSITE: registrations that went missing, read back out of an
       // older copy of this workbook, reviewed by cause and put back. Ungated
       // for the same reason as the item above \u2014 it lists every row by name
-      // before anything is written, and it only ever adds. See 99n.
+      // before anything is written, and it only ever adds. See 99p.
       .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', 'showRestoreRegistrantsFromCopyDialog')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it

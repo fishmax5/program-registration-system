@@ -113,7 +113,12 @@ const LEDGER_SOURCES = Object.freeze({
   CHANGE_PANEL: 'change-panel',
   DEDUPE: 'dedupe',
   REMOVE_SWEEP: 'remove-sweep',
-  MIGRATION: 'migration'
+  MIGRATION: 'migration',
+  // A row read back out of an older copy of the workbook (99p). Not
+  // `migration`: that word means "was already on the tab when the ledger
+  // started", and a restored row is the opposite — it was NOT on the tab, and
+  // somebody decided it should be.
+  RESTORE: 'restore-from-copy'
 });
 
 /** Every source, for validation. */

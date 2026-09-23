@@ -1,4 +1,4 @@
-// RESTORING REGISTRANTS FROM A COPY OF THE WORKBOOK (99n).
+// RESTORING REGISTRANTS FROM A COPY OF THE WORKBOOK (99p).
 //
 // What this pins is the classifier's promise: offer exactly the rows that are
 // missing with no record of having been removed on purpose, name the cause,
@@ -33,6 +33,8 @@ this.buildRestoredRegistrantRow = buildRestoredRegistrantRow;
 this.clubMemberKey = clubMemberKey;
 this.restoreCopySpreadsheetId_ = restoreCopySpreadsheetId_;
 this.makeLunchOnlyEventId = makeLunchOnlyEventId;
+this.ledgerEntriesForExistingRow = ledgerEntriesForExistingRow;
+this.LEDGER_SOURCES = LEDGER_SOURCES;
 `, sandbox);
 
 let fail = 0;
@@ -153,6 +155,18 @@ const restoredForm = sandbox.buildRestoredRegistrantRow(copyRows[6], map, 'n');
 ok('a form row is protected as edited, its link and Party_ID kept',
   restoredForm[map.Manual_Override] === 'Manually Edited' && restoredForm[map.Form_Source] === FORM_LINK &&
   restoredForm[map.Party_ID] === 'P7');
+
+if (map.Registration_ID !== undefined) {
+  const withId = copyRows[6].slice(); withId[map.Registration_ID] = 'OLD-ID';
+  ok('a copy\'s Registration_ID is not carried back',
+    sandbox.buildRestoredRegistrantRow(withId, map, 'n')[map.Registration_ID] === '');
+}
+const waitRow = sandbox.buildRestoredRegistrantRow(
+  reg({ Event_ID: 'E1', Event: 'Yoga', Event_Date: d(20), Name: 'Wai Tlist', Program_Status: 'Waitlisted' }), map, 'n');
+const entries = sandbox.ledgerEntriesForExistingRow(waitRow, map, { source: sandbox.LEDGER_SOURCES.RESTORE, note: 'n' });
+ok('a restored row is recorded under its own ledger source, waitlisting and all',
+  entries.length === 2 && entries[0].kind === 'registered' && entries[1].kind === 'waitlisted' &&
+  entries.every(e => e.source === 'restore-from-copy') && entries[1].registrationId === entries[0].registrationId);
 
 ok('the id comes out of a pasted link',
   sandbox.restoreCopySpreadsheetId_('https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123/edit#gid=0') ===
