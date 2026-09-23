@@ -1083,6 +1083,17 @@ function applyQuickMarkLocked(args) {
   // whichever of the two sorts first. Blank everywhere else, which matches
   // every row and so changes nothing.
   const bookedTime = appointmentStartLabelOf(args.bookedTime);
+  // WHICH DOOR THIS MARK CAME THROUGH, for the ledger and for nothing else.
+  // The desk dialog sends nothing and means itself; the door app (74) sends
+  // LEDGER_SOURCES.DOOR, because "where did this come from" is a column to be
+  // read rather than a thing to infer from what else a row says — and because
+  // the door is where the absence of a second copy is worst: there is no form
+  // response behind the row, so 99d's audit cannot reconstruct it.
+  //
+  // It rides in `args`, which is what 99b's retry queue stores VERBATIM, so a
+  // mark refused mid-sync and re-applied twenty minutes later is still
+  // recorded as the door's.
+  const ledgerSource = String(args.ledgerSource || '').trim() || LEDGER_SOURCES.QUICK_MARK;
   // "She rang to move to 11:30" — a rebooking, which is neither an attendance
   // mark nor a registration and had no way to be expressed here at all.
   const moveTime = !!args.moveTime && !!bookedTime && !!appointmentTime &&
@@ -1160,7 +1171,7 @@ function applyQuickMarkLocked(args) {
     // walk-in case rather than a dead end.
     return addQuickMarkWalkIn(sheet, {
       name, selection, location, attended, lunch, signup, register, waitlist, standing, standingLunch,
-      appointmentTime, earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge,
+      appointmentTime, earlierAppointment, mealsOrdered, ateHere, tookHome, inFridge, ledgerSource,
       // HOW TO REACH SOMEBODY THE WORKBOOK IS MEETING FOR THE FIRST TIME. The
       // dialog has never had these to send — a desk registering a walk-in
       // types the name and nothing else — but the door page asks a new member
@@ -1226,6 +1237,12 @@ function applyQuickMarkLocked(args) {
     }
     const slots = appointmentSlotsForRow(sheet, map, target);
     const moved = slots.filter(slot => slot.startLabel === appointmentTime)[0];
+    // A `corrected` entry and deliberately NOT a `moved` one. `moved` is the
+    // same registration on a different SESSION — Event_ID is its destination
+    // and the fold clears the marks, because attended is a fact about a day
+    // (§3.1). This is the same session at a different hour of it: the Event_ID
+    // does not change, nobody's attendance stops being true, and recording it
+    // as a move would have the replay wipe a tick the desk had just made.
     if (map['Event_Time'] !== undefined) {
       // Text first, THEN the value: a single "11:30 AM" written into a cell
       // Sheets may interpret comes back as a 1899 time value. See
@@ -1233,6 +1250,8 @@ function applyQuickMarkLocked(args) {
       sheet.getRange(target.sheetRow, map['Event_Time'] + 1)
         .setNumberFormat('@')
         .setValue(moved ? moved.rangeLabel : appointmentTime);
+      appendQuickMarkCorrection_(sheet, map, target, ledgerSource, ['Event_Time'],
+        `The appointment moved from ${bookedTime} to ${appointmentTime}.`);
     }
     movedNote = ` Moved from ${bookedTime} to ${appointmentTime}.`;
   }
@@ -1245,11 +1264,19 @@ function applyQuickMarkLocked(args) {
   // whole of what the button did.
   if (waitlist) {
     const rowValues = sheet.getRange(target.sheetRow, 1, 1, numCols).getValues()[0];
-    if (!stampRegistrantRowWaitlisted(rowValues, map, {
+    const waitlistStampOpts = {
       source: WAITLIST_SOURCES.DESK,
       by: getCurrentUserEmail() || '',
       reason: String(args.reason || '')
-    })) {
+    };
+    // Composed before the four cells are stamped and buffered only once they
+    // have been — the rule every status writer in phase 2 follows, and the
+    // reason is here in miniature: the stamper refuses a row that is already
+    // waitlisted or already cancelled, and an entry for a change that did not
+    // happen would take a seat back twice in the replay.
+    const waitlistEntry = ledgerEntryForStatusChange_(rowValues, map, LEDGER_KINDS.WAITLISTED,
+      waitlistStampOpts, { source: ledgerSource });
+    if (!stampRegistrantRowWaitlisted(rowValues, map, waitlistStampOpts)) {
       const why = String(rowValues[map['Program_Status']] || '').trim();
       return {
         ok: false,
@@ -1258,6 +1285,7 @@ function applyQuickMarkLocked(args) {
           `nothing was changed.`
       };
     }
+    appendLedgerEntry(waitlistEntry);
     sheet.getRange(target.sheetRow, 1, 1, numCols).setValues([rowValues]);
     invalidateSectionedRowsCache(sheet);
     // The seat and the meal go back NOW, not at the next hourly sync — a desk
@@ -1281,7 +1309,17 @@ function applyQuickMarkLocked(args) {
     }));
   }
 
-  if (attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+  // WHICH COLUMNS THIS MARK TOUCHED, collected as the cells are written and
+  // read back once at the end. A Payload states the fields an entry SETS
+  // (§1.5), and the desk's meal counts are ADDED to whatever the row already
+  // held — so what has to go on the record is the number the row ends up
+  // carrying, not the number somebody typed. Reading it back is also the only
+  // answer that cannot drift from what actually landed.
+  const touched = [];
+  if (attended) {
+    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
+    touched.push('Attended');
+  }
   // Signing an existing registration up for lunch changes only the two lunch
   // columns. Attended is deliberately left exactly as it is: whether they were
   // here is a separate fact from whether they want feeding, and a sign-up made
@@ -1289,40 +1327,58 @@ function applyQuickMarkLocked(args) {
   if (signup) {
     if (map['Lunch_Status'] !== undefined) {
       sheet.getRange(target.sheetRow, map['Lunch_Status'] + 1).setValue('Needed');
+      touched.push('Lunch_Status');
     }
     if (map['Lunch_Type'] !== undefined) {
       sheet.getRange(target.sheetRow, map['Lunch_Type'] + 1).setValue(resolveWalkInLunchType(signupSession));
+      touched.push('Lunch_Type');
     }
     // Only ever WRITTEN UP, never down to a blank: one is the default the
     // dialog sends when nobody touched the box, and a desk signing somebody up
     // for the meal they already have four of must not quietly cancel three.
     if (map['Meals_Ordered'] !== undefined && mealsOrdered > 1) {
       sheet.getRange(target.sheetRow, map['Meals_Ordered'] + 1).setValue(mealsOrdered);
+      touched.push('Meals_Ordered');
     }
   }
   if (lunch) {
     sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
+    touched.push('Lunch_Served');
     // Lunch without Attended is the take-out case, and saying so has to be
     // able to UNDO an earlier mistaken attendance mark — otherwise the one
     // correction staff actually need is the one thing they cannot make here.
-    if (!attended) sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
+    if (!attended) {
+      sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
+      touched.push('Attended');
+    }
     // The counts are ADDED to whatever the row already holds, not set over it.
     // A person comes back for a second meal an hour later, and the desk marks
     // the second handover the same way it marked the first; overwriting would
     // make the later, smaller number erase the earlier one.
-    addQuickMarkMealCounts(sheet, map, target.sheetRow,
-      { ateHere, tookHome, inFridge });
+    if (addQuickMarkMealCounts(sheet, map, target.sheetRow, { ateHere, tookHome, inFridge })) {
+      touched.push('Day1_Dined_In', 'Day1_Taken_Out', 'Meals_In_Fridge');
+    }
   }
 
   // Hand-marking is a manual edit — say so, the same as any other.
   if (map['Manual_Override'] !== undefined) {
     const overrideCell = sheet.getRange(target.sheetRow, map['Manual_Override'] + 1);
     const current = String(overrideCell.getValue() || '').trim();
-    if (current === 'Auto-Synced' || current === '') overrideCell.setValue('Manually Edited');
+    if (current === 'Auto-Synced' || current === '') {
+      overrideCell.setValue('Manually Edited');
+      touched.push('Manual_Override');
+    }
   }
   // Everything above wrote cells on the Registrants tab, one at a time. Drop
   // the cached read of it before anything below looks at the roster again.
   invalidateSectionedRowsCache(sheet);
+  // AND THE SECOND COPY OF WHAT WAS JUST MARKED. One entry per press, carrying
+  // the columns that moved and no others — a household press (see
+  // applyQuickMarkForHousehold) is several people and therefore several
+  // entries, because a household is a convenience at the desk and not one
+  // registration.
+  appendQuickMarkCorrection_(sheet, map, target, ledgerSource, touched,
+    `Marked at the desk: ${describeQuickMark(attended, lunch, signup)}.`);
 
   // ALREADY REGISTERED. A tick on Register for somebody who has a row for this
   // session is not an error and not a second registration — it is somebody at
@@ -1340,6 +1396,8 @@ function applyQuickMarkLocked(args) {
   if (earlierAppointment && map['Earlier_Appointment'] !== undefined) {
     sheet.getRange(target.sheetRow, map['Earlier_Appointment'] + 1).setValue(earlierAppointment);
     invalidateSectionedRowsCache(sheet);
+    appendQuickMarkCorrection_(sheet, map, target, ledgerSource, ['Earlier_Appointment'],
+      'To be called if an earlier appointment opens up.');
     earlierNote = ' Marked to be called if an earlier appointment opens up.';
   }
   const moveResult = moveResultFor(moveTime, { bookedTime: appointmentTime, freedTime: bookedTime, name });
@@ -1487,6 +1545,38 @@ function quickMarkCount(value) {
  * means what it always meant: served, and the count comes off the paper sheet
  * later.
  */
+/**
+ * ONE `corrected` ENTRY FOR THE COLUMNS A MARK JUST MOVED.
+ *
+ * `columns` names them; the values are READ BACK off the row rather than taken
+ * from what the caller meant to write, which is the only version that cannot
+ * drift from what landed — the meal counts in particular are added to whatever
+ * the row already held, so the number the desk typed is not the number the
+ * registration now carries.
+ *
+ * Nothing touched is nothing recorded: an entry that sets no fields says
+ * somebody pressed something and not what it did (ledgerEntryForCorrection_).
+ *
+ * One read of one row, inside the desk lock this whole function holds. No new
+ * lock is taken here or anywhere else the ledger is appended to — LockService
+ * locks are not reentrant and 99b's banner is on exactly that failure.
+ */
+function appendQuickMarkCorrection_(sheet, map, target, source, columns, note) {
+  const wanted = (columns || []).filter((h, i, all) => map[h] !== undefined && all.indexOf(h) === i);
+  if (!wanted.length) return 0;
+  let row;
+  try {
+    row = sheet.getRange(target.sheetRow, 1, 1, HEADERS.All_Registrants.length).getValues()[0];
+  } catch (err) {
+    log(`⚠️ Quick Mark: could not read the row back to record it in the ledger (${err}).`);
+    return 0;
+  }
+  const payload = {};
+  wanted.forEach(header => { payload[header] = ledgerCellValue_(row[map[header]]); });
+  const entry = ledgerEntryForCorrection_(row, map, payload, { source: source, note: note || '' });
+  return entry ? appendLedgerEntry(entry) : 0;
+}
+
 function addQuickMarkMealCounts(sheet, map, sheetRow, counts) {
   const columns = [
     { header: 'Day1_Dined_In', amount: counts.ateHere },
@@ -1550,6 +1640,8 @@ function describeQuickMark(attended, lunch, signup, register, waitlist) {
  */
 function addQuickMarkWalkIn(sheet, args) {
   const { name, selection, location, attended, lunch, signup, register, waitlist, standing, standingLunch } = args;
+  // The desk unless the door said otherwise — see applyQuickMarkLocked().
+  const ledgerSource = String(args.ledgerSource || '').trim() || LEDGER_SOURCES.QUICK_MARK;
   const appointmentTime = String(args.appointmentTime || '').trim();
   const earlierAppointment = String(args.earlierAppointment || '').trim();
   const program = selection ? selection.title : '';
@@ -1749,6 +1841,39 @@ function addQuickMarkWalkIn(sheet, args) {
   // on the same session — lift the tombstone rather than leave the next sync
   // arguing with the row just typed in. See section 5c.
   clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, personType));
+
+  // THE LEDGER FIRST, THEN THE TAB (§2). A walk-in is where the absence of a
+  // second copy is worst: there is no form response behind this row, so if it
+  // is lost in a render 99d's audit cannot reconstruct it and nothing else in
+  // this project even knows it existed. An append that throws therefore means
+  // the row is not written — the desk is refused, which is the right outcome
+  // when the alternative is a registration nothing can recover.
+  //
+  // TWO ENTRIES WHEN THE DESK WAITLISTED THEM, for the reason the import's
+  // are two (composeImportLedgerEntries_, 29): the fold's `registered` creates
+  // an Active registration by construction, so "we put her down" and "there
+  // was no seat" are recorded as the two facts they are.
+  const walkInEntries = [makeLedgerEntry({
+    kind: LEDGER_KINDS.REGISTERED,
+    source: ledgerSource,
+    eventId: row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    payload: ledgerPayloadFromRow(row, map),
+    note: `${how} — no form response behind this row.`
+  })];
+  if (waitlist) {
+    walkInEntries.push(makeLedgerEntry({
+      kind: LEDGER_KINDS.WAITLISTED,
+      source: ledgerSource,
+      registrationId: walkInEntries[0].registrationId,
+      eventId: row[map['Event_ID']],
+      name: row[map['Name']],
+      personType: row[map['Person_Type']],
+      note: 'Added straight onto the waitlist at the desk — no seat and no meal.'
+    }));
+  }
+  appendLedgerEntries(walkInEntries);
 
   const existing = getSectionedRows(sheet, headers, 'Event_ID');
   existing.push(row);

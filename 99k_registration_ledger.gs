@@ -35,14 +35,20 @@
 // further entry — that is what `removed` is for — and the fold's job is to
 // make the last word win.
 //
-// WHAT THIS PHASE IS. The tab, the vocabulary, the appender and its buffer,
-// and the fold, unit-tested against hand-built entry arrays. NOTHING CALLS THE
-// APPENDER YET and nothing reads the fold: the writers come in phase 2, the
-// verifier beside them, and the tab does not become a projection of this until
-// phase 4. Shippable, inert, and reversible by deleting a tab. See
-// REGISTRATION_LEDGER_DESIGN.md for the whole sequence and for what it
-// retires (28's tombstones, Manual_Override's protection role, 99j's
-// thresholds).
+// WHAT THESE PHASES ARE. Phase 1 was the tab, the vocabulary, the appender and
+// its buffer, and the fold, unit-tested against hand-built entry arrays, with
+// nothing calling any of it. Phase 2 is the nine writers of §2, the id
+// resolution they all begin with (below), and the verifier that proves each of
+// them is appending (99n). Phase 3 is the backfill (99o) and the
+// Registration_ID column it puts on every row.
+//
+// THE TAB IS STILL THE STATE. Nothing renders from the replay and no caller of
+// renderRegistrantsSheet() has stopped passing its own array: that is phase 4,
+// and it is gated on a month of clean verifier runs and on the onEdit appender
+// (18) proving itself in production, because it is the only phase that can
+// lose anything. See REGISTRATION_LEDGER_DESIGN.md for the whole sequence and
+// for what it retires (28's tombstones, Manual_Override's protection role,
+// 99j's thresholds) — none of which has happened yet.
 
 /**
  * The nine kinds, and the whole vocabulary of what can happen to a
@@ -90,6 +96,14 @@ const LEDGER_ENTRY_KINDS = Object.freeze([
  */
 const LEDGER_SOURCES = Object.freeze({
   IMPORT: 'import',
+  // THE ONE THE DESIGN'S LIST DOES NOT HAVE. §1.2 names ten call sites and
+  // §2's table names eleven writers, and the eleventh — row 9, the
+  // Registrants-tab onEdit — is a person typing on the tab itself. It is not
+  // the change panel (nobody opened a dialog), not the desk (nobody was at
+  // one) and not a migration; it is the writer the whole of phase 4 turns on,
+  // so it gets a word of its own rather than borrowing one that would make
+  // "where did this come from" a guess again.
+  SHEET_EDIT: 'sheet-edit',
   ALL_DATES: 'all-dates',
   CLUB: 'club',
   DOOR: 'door',
@@ -313,6 +327,12 @@ function flushLedger() {
 
   pending.forEach(entry => { __ledgerWrittenIds[entry.entryId] = true; });
   __ledgerBuffer = [];
+  // What was just appended is part of the answer to the next question — a
+  // second writer in this execution resolving the same person must find the id
+  // the first one minted. Same reason invalidateSectionedRowsCache() drops the
+  // session grid after a write, and it is a no-op before phase 2's readers
+  // exist.
+  invalidateLedgerFold();
   return pending.length;
 }
 
@@ -710,4 +730,372 @@ function ledgerRegistrationKey_(row, map) {
 function resolveRegistrationId(index, eventId, name, personType) {
   if (!index) return null;
   return index[registrantTombstoneKey(eventId, name, personType)] || null;
+}
+
+
+// --- phase 2: how a writer finds the id it is acting on ----------------------
+//
+// §1.4 gives two answers, in order. The first — the row carries a
+// Registration_ID of its own — needs the column, which HEADERS.All_Registrants
+// does not gain until phase 3; the second is this: resolve the row's identity
+// against the fold's index, and answer a miss with a `registered` entry.
+//
+// SO PHASE 2 DOES READ THE LEDGER, and the phase's title ("every writer
+// appends; nothing reads") is about the TAB: All_Registrants is still the
+// state and no render takes its rows from the replay. What is read here is one
+// getValues() of the ledger, folded, memoized for the execution — the cost a
+// desk mark pays to know which registration it is about.
+
+/** The fold of the tab as it stood when this execution first asked. */
+let __ledgerFold = null;
+
+/**
+ * Ids minted THIS execution, by registrantTombstoneKey.
+ *
+ * The memoized fold above is the tab as it was at the start of the execution
+ * and the buffer has not been written yet, so without this overlay two writers
+ * touching one person in one run would mint two `registered` entries for them
+ * — two registrations, two seats, from one sign-in.
+ */
+let __ledgerMintedIds = {};
+
+/**
+ * The ledger, read once and folded once per execution.
+ *
+ * Memoized here rather than in 08 beside the other hot-path memos because
+ * nothing on a hot path reads it yet: in phase 4 the fold becomes the source
+ * of the Registrants tab and `foldedRegistrantRows()` moves there with the
+ * rest of them. Dropped by flushLedger(), for the same reason
+ * invalidateSectionedRowsCache() drops the session grid: what was just
+ * appended is part of the answer to the next question.
+ */
+function ledgerFoldNow() {
+  if (!__ledgerFold) __ledgerFold = foldRegistrationLedger(readLedgerEntries());
+  return __ledgerFold;
+}
+
+/** Drops the memo. Called by flushLedger(), and by any caller that has written the tab. */
+function invalidateLedgerFold() {
+  __ledgerFold = null;
+}
+
+/**
+ * THE ONE CALL EVERY PHASE-2 WRITER MAKES FIRST: which registration is this
+ * row about?
+ *
+ * Resolved through the fold's index, and a miss MINTS one — which is not a
+ * fallback but the correct reading of "this person is on a roster and the
+ * ledger has never heard of them" (§1.4). Before phase 3's backfill that is
+ * true of every row in the workbook, so in practice the first thing anybody
+ * does to a pre-ledger registration is put it on the record.
+ *
+ * WHAT THE MINTED ENTRY CARRIES IS THE ROW, not just its identity. A bare
+ * `registered` entry would fold to a row holding a name and a session and
+ * nothing else, and the verifier would then report every column of a perfectly
+ * healthy registration as a disagreement — thousands of them, drowning the one
+ * bucket this phase is worth shipping for. So the entry is the same shape
+ * phase 3's backfill writes (ledgerEntriesForExistingRow), and the two are one
+ * function precisely so they cannot come to disagree about what a migrated
+ * registration looks like.
+ *
+ * Returns the Registration_ID. Never null: a writer that has a row has a
+ * registration, whether or not the ledger knew about it a moment ago.
+ */
+function ledgerIdForRegistrantRow(row, map, opts) {
+  const o = opts || {};
+  // The column, where phase 3 has put one on the row: the cheapest answer and
+  // the only one that survives a person being renamed or a session re-keyed.
+  if (map['Registration_ID'] !== undefined) {
+    const onRow = String(row[map['Registration_ID']] || '').trim();
+    if (onRow) return onRow;
+  }
+
+  const key = registrantTombstoneKey(row[map['Event_ID']], row[map['Name']], row[map['Person_Type']]);
+  if (__ledgerMintedIds[key]) return __ledgerMintedIds[key];
+
+  const found = resolveRegistrationId(ledgerFoldNow().index, row[map['Event_ID']],
+    row[map['Name']], row[map['Person_Type']]);
+  if (found) return found;
+
+  const entries = ledgerEntriesForExistingRow(row, map, {
+    source: o.source || LEDGER_SOURCES.MIGRATION,
+    occurredAt: o.occurredAt || null,
+    note: o.note || 'On the Registrants tab before the ledger existed — recorded when a writer first touched it.'
+  });
+  appendLedgerEntries(entries);
+  const id = entries[0].registrationId;
+  __ledgerMintedIds[key] = id;
+  if (map['Registration_ID'] !== undefined) row[map['Registration_ID']] = id;
+  return id;
+}
+
+/**
+ * THE ENTRIES THAT MAKE THE FOLD REPRODUCE ONE EXISTING ROW.
+ *
+ * A `registered` entry carrying the row's own columns, plus — when the row is
+ * not Active — the ONE entry that puts it in the state it is in. That second
+ * entry is what stops a replay reviving everybody: `registered` creates an
+ * Active registration by construction (newFoldedRegistrantRow_), so a
+ * cancelled row recorded with a `registered` entry alone folds back onto the
+ * tab as somebody holding a seat they gave up.
+ *
+ * Shared by phase 2's on-demand mint above and phase 3's backfill, which is
+ * the same act at two moments: one row because somebody touched it, every row
+ * because somebody pressed the menu item.
+ */
+function ledgerEntriesForExistingRow(row, map, opts) {
+  const o = opts || {};
+  const source = o.source || LEDGER_SOURCES.MIGRATION;
+  const registered = makeLedgerEntry({
+    kind: LEDGER_KINDS.REGISTERED,
+    source: source,
+    occurredAt: o.occurredAt || null,
+    eventId: row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
+    payload: ledgerPayloadFromRow(row, map),
+    note: o.note || ''
+  });
+
+  const entries = [registered];
+  const kind = LEDGER_STATUS_ENTRY_KINDS[String(row[map['Program_Status']] || '').trim()];
+  if (kind) {
+    entries.push(makeLedgerEntry({
+      kind: kind,
+      source: source,
+      occurredAt: o.occurredAt || null,
+      registrationId: registered.registrationId,
+      eventId: row[map['Event_ID']],
+      name: row[map['Name']],
+      personType: row[map['Person_Type']],
+      note: `The row already read ${row[map['Program_Status']]} when it was recorded.`
+    }));
+  }
+  return entries;
+}
+
+/**
+ * Program_Status -> the kind that puts a fresh registration in that state.
+ *
+ * Only the three a row can WEAR. 'Active' is absent deliberately: it is what a
+ * `registered` entry already produces, and an entry saying so would be a
+ * reactivation of something that was never anything else.
+ */
+const LEDGER_STATUS_ENTRY_KINDS = Object.freeze({
+  Cancelled: LEDGER_KINDS.CANCELLED,
+  Waitlisted: LEDGER_KINDS.WAITLISTED,
+  Superseded: LEDGER_KINDS.SUPERSEDED
+});
+
+/**
+ * One registrant row as a Payload: every column that says something, in
+ * HEADERS.All_Registrants spelling.
+ *
+ * DATES ARE yyyy-MM-dd AND NOTHING IS A Date OBJECT (§1.5). The Payload is
+ * JSON in a cell; a Date crosses JSON.stringify as an ISO string in UTC, which
+ * on an evening session is yesterday. Everything else is left exactly as the
+ * tab holds it — a checkbox is a boolean, a count is a number, and Event_Time
+ * is the label string the tab already carries rather than a time value.
+ *
+ * Blank cells are omitted rather than written as '': a Payload states what an
+ * entry SETS, and "this column is empty" is not a thing a `registered` entry
+ * has any business asserting over a later correction.
+ */
+function ledgerPayloadFromRow(row, map) {
+  const payload = {};
+  Object.keys(map).forEach(header => {
+    if (LEDGER_PAYLOAD_SKIPPED_COLUMNS.indexOf(header) !== -1) return;
+    const value = ledgerCellValue_(row[map[header]]);
+    if (value === '') return;
+    payload[header] = value;
+  });
+  return payload;
+}
+
+/**
+ * ONE CELL, AS A PAYLOAD CARRIES IT. Every writer in phase 2 builds its
+ * Payload through this, so four files cannot come to disagree about what a
+ * date or a tick looks like in a ledger entry.
+ *
+ * A DATE BECOMES yyyy-MM-dd (§1.5) and nothing stays a Date object: the
+ * Payload is JSON in a cell, and a Date crosses JSON.stringify as an ISO
+ * string in UTC — which on an evening session is yesterday. The check is
+ * Object.prototype.toString rather than `instanceof Date` deliberately: a
+ * value read out of ANOTHER document (openSpreadsheetCached(), 08 — the
+ * leaders' shared sheets are read back on every sync) is a Date from a
+ * different realm, and `instanceof` answers false for one.
+ *
+ * A blank is '' rather than null or undefined, so a caller that means to set a
+ * cell empty can, and one that does not can test for it.
+ */
+function ledgerCellValue_(value) {
+  if (value === null || value === undefined) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') return formatDateKey(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  return String(value).trim();
+}
+
+/**
+ * Columns a Payload never carries.
+ *
+ * The four the ENTRY already states in columns of its own (a second copy in
+ * the Payload is a second thing to keep in step), and the two link cells,
+ * which are stamped onto every row by the render from a registry (69) and are
+ * therefore a fact about the workbook rather than about the registration.
+ */
+const LEDGER_PAYLOAD_SKIPPED_COLUMNS = Object.freeze([
+  'Event_ID', 'Name', 'Person_Type', 'Party_ID',
+  'Registrant_Sheet_Link', 'Sign_In_Sheet_Link', 'Registration_ID'
+]);
+
+
+/**
+ * EVERY registration the ledger holds, live or dead, by the key a row
+ * resolves through. For the backfill (99o) and for nothing else.
+ *
+ * resolveRegistrationId() deliberately sees only LIVE registrations: handing a
+ * writer the id of one that was removed, superseded or absorbed would have the
+ * fold drop the entry it then appends, silently, which is the worst kind of
+ * answer a resolver can give.
+ *
+ * The backfill needs the other question. It records a `registered` entry for
+ * EVERY row on the tab including the dead ones (a Superseded row backfilled as
+ * though it were live is a second seat in the replay), so the id it mints for
+ * a cancelled row is dead the moment it exists — and a second slice asking the
+ * live index would find nothing, mint again, and write the duplicate history
+ * the design's own correction of 2026-09-23 is about. Asked this way, a row
+ * already recorded is recognized whatever state it ended in.
+ *
+ * ONE ID PER KEY, first wins. Two tab rows sharing one key are a duplicate
+ * registration, which is 85's problem and not this map's; the backfill claims
+ * the id for the first row and mints for the second, so the ledger reproduces
+ * the tab rather than quietly collapsing two rows into one.
+ */
+function ledgerRegistrationIdsByKey(fold) {
+  const map = getIndexMap(HEADERS.All_Registrants);
+  const byKey = {};
+  const states = (fold && fold.states) || {};
+  Object.keys(states).forEach(id => {
+    const state = states[id];
+    if (!state || !state.row) return;
+    const key = ledgerRegistrationKey_(state.row, map);
+    if (key && byKey[key] === undefined) byKey[key] = id;
+  });
+  return byKey;
+}
+
+
+// --- phase 2: the import's compose buffer -----------------------------------
+//
+// buildRegistrantRow() (29) is where the KIND is decided — the capacity check,
+// the Waitlist Only branch, supersedeRegistrantRow() — so it is where the
+// entry is composed. It is deliberately not where it is appended.
+//
+// THE REASON IS ORDERING, not round trips: appendLedgerEntries() buffers, so a
+// direct append would cost nothing per response. But a row this function
+// builds is not a row anybody has written yet — the import holds them in an
+// array until `27` renders the tab — and an entry that reached the ledger's
+// own buffer would be flushed by the `finally` in the sliced runner (75)
+// whether or not that render ever happened. The appends have to go with the
+// rows, in the same order, which is the one property that stops the ledger and
+// the tab disagreeing about a slice that ran out of budget.
+//
+// So 29 composes into here, and 27 hands the batch to the appender in the same
+// step that writes the tab.
+
+let __ledgerComposed = [];
+
+/** 29 records a composed entry against the row it just built. */
+function recordImportLedgerEntries(entries) {
+  (entries || []).forEach(entry => { if (entry) __ledgerComposed.push(entry); });
+  return __ledgerComposed.length;
+}
+
+/** 27 takes the batch, at the moment it writes the rows those entries are about. */
+function takeImportLedgerEntries() {
+  const batch = __ledgerComposed;
+  __ledgerComposed = [];
+  return batch;
+}
+
+/** What is composed but not yet handed on — and what the audit (99d) drops on its way out. */
+function pendingImportLedgerEntryCount() {
+  return __ledgerComposed.length;
+}
+
+
+// --- phase 2: the entry a status change composes ----------------------------
+//
+// Four of the nine call sites change a status (71's three doors and its two
+// leader-sheet ticks, 38's Add to waitlist, 99a's cancel / waitlist / put-them-
+// back-on), and every one of them writes it through 71's and 99a's four-cell
+// stampers. THE APPEND CANNOT LIVE IN THOSE STAMPERS, which is the one place
+// it would otherwise obviously belong: foldRegistrationLedger() calls them too,
+// against its in-progress state, and a stamper that appended would write the
+// history it was replaying back into the ledger — doubled, every time anybody
+// folded. So the callers compose, and this is the one composer they share, so
+// that five writers cannot come to disagree about what a cancellation entry
+// says.
+
+/**
+ * The entry for one status change on one row.
+ *
+ * `stampOpts` is what the row's own stamper is being given (CANCELLATION_SOURCES'
+ * words, who, and the reason) — reused rather than restated, so the sentence in
+ * Admin_Notes and the Note on the ledger cannot drift apart. `ledgerOpts`
+ * carries what only the ledger has vocabulary for: which call site this is
+ * (`source`), when it actually happened where that is knowable (`occurredAt`,
+ * blank by design on a tick read back off a shared sheet), and a Note of its
+ * own where the stamp's reason is not the whole story.
+ *
+ * COMPOSED, NOT APPENDED. The caller appends only if its stamper returned
+ * true: a refusal ("already cancelled", "not waitlisted by hand") is an answer
+ * rather than a failure, and an entry for a change that did not happen is a
+ * seat given back twice by the replay.
+ */
+function ledgerEntryForStatusChange_(row, map, kind, stampOpts, ledgerOpts) {
+  const stamp = stampOpts || {};
+  const o = ledgerOpts || {};
+  return makeLedgerEntry({
+    kind: kind,
+    source: o.source || LEDGER_SOURCES.CHANGE_PANEL,
+    occurredAt: o.occurredAt || null,
+    registrationId: ledgerIdForRegistrantRow(row, map),
+    eventId: row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
+    payload: o.payload || {},
+    actor: o.actor,
+    note: o.note || String(stamp.reason || '').trim() ||
+      `${kind} ${String(stamp.source || '').trim()}`.trim()
+  });
+}
+
+/**
+ * The entry for a correction: the fields that moved, and nothing else (§1.5).
+ *
+ * A whole row would make every correction a fresh assertion of every column,
+ * so a stale field would silently undo a change made between the read and the
+ * append — which is the class of fault this tab exists to remove. A caller
+ * with nothing to report composes nothing, because an entry that sets no
+ * fields records that somebody pressed something and not what it did.
+ */
+function ledgerEntryForCorrection_(row, map, payload, opts) {
+  const o = opts || {};
+  const fields = payload || {};
+  if (!Object.keys(fields).length) return null;
+  return makeLedgerEntry({
+    kind: o.kind || LEDGER_KINDS.CORRECTED,
+    source: o.source || LEDGER_SOURCES.QUICK_MARK,
+    occurredAt: o.occurredAt || null,
+    registrationId: o.registrationId || ledgerIdForRegistrantRow(row, map),
+    eventId: o.eventId || row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
+    payload: fields,
+    note: o.note || ''
+  });
 }

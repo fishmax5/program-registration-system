@@ -314,6 +314,7 @@ function applyDoorRecurring(args) {
     }
     if (choice === 'club') {
       const res = applyQuickMarkFromDialog({
+        ledgerSource: LEDGER_SOURCES.DOOR,
         location,
         session: program.value,
         name,
@@ -338,6 +339,7 @@ function applyDoorRecurring(args) {
     let refused = '';
     later.forEach(session => {
       const res = applyQuickMarkFromDialog({
+        ledgerSource: LEDGER_SOURCES.DOOR,
         location,
         session: session.value,
         name,

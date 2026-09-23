@@ -340,7 +340,12 @@ function applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, or
           mealsOrdered: entry.mealsOrdered === undefined || entry.mealsOrdered === null
             ? 1 + (Number(entry.extraMeals) || 0)
             : (Number(entry.mealsOrdered) || 0),
-          phone: entry.phone || '', email: entry.email || ''
+          phone: entry.phone || '', email: entry.email || '',
+          // ONE VALUE PER CALL SITE (§1.2): this is the catch-up re-deriving a
+          // standing "every date" registration, not a response being read as
+          // it arrives, and the ledger says which on every entry rather than
+          // leaving a reader to infer it from what else the row holds.
+          ledgerSource: LEDGER_SOURCES.ALL_DATES
         });
         if (row) newRows.push(row);
       });
@@ -354,8 +359,26 @@ function applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, or
  * just vanishing. Applied when a genuinely different submission (a
  * different Party_ID) shows up for the same Event_ID+Name+Person_Type.
  */
-function supersedeRegistrantRow(row, map, supersededAt) {
+function supersedeRegistrantRow(row, map, supersededAt, replacedBy) {
   if (row[map['Program_Status']] === 'Superseded') return; // already marked by an earlier resubmission this pass
+  // THE LEDGER FIRST, while the row still says what it is being replaced from.
+  // ledgerIdForRegistrantRow() mints a `registered` entry for a row the ledger
+  // has never heard of, which before phase 3's backfill is every row there is
+  // — so the replay has something to supersede rather than an entry about a
+  // registration it cannot find. See §2's rule: append first, then do what you
+  // do now.
+  recordImportLedgerEntries([makeLedgerEntry({
+    kind: LEDGER_KINDS.SUPERSEDED,
+    source: LEDGER_SOURCES.IMPORT,
+    occurredAt: supersededAt,
+    registrationId: ledgerIdForRegistrantRow(row, map),
+    eventId: row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
+    payload: replacedBy ? { by: replacedBy } : {},
+    note: 'A newer submission arrived for the same person on the same session.'
+  })]);
   row[map['Program_Status']] = 'Superseded';
   row[map['Lunch_Status']] = 'Superseded';
   const note = `Superseded by a newer submission on ${Utilities.formatDate(supersededAt, TIMEZONE, 'M/d/yyyy h:mm a')}.`;
@@ -520,6 +543,27 @@ function buildRegistrantRow(args) {
       // that skipped the phone box must not erase the number we already have.
       if (phone) existingRow[map['Phone']] = phone;
       if (email) existingRow[map['Email']] = email;
+      // A RESUBMISSION OF THE SAME RESPONSE IS A CORRECTION, and it is the one
+      // path through this function the design's table (§2, row 2) does not
+      // name — it lists `registered`, `waitlisted` and `superseded`, which are
+      // the three kinds a row being BUILT can be. This branch builds nothing:
+      // somebody used their edit link and the row was rewritten in place. An
+      // entry is appended anyway, because the alternative is a change that
+      // happened with no record of it, which is the fault this whole design
+      // exists to remove — and because without it the verifier would report
+      // every edited response as a fold disagreement for ever.
+      recordImportLedgerEntries([makeLedgerEntry({
+        kind: LEDGER_KINDS.CORRECTED,
+        source: args.ledgerSource || LEDGER_SOURCES.IMPORT,
+        occurredAt: submittedAt,
+        registrationId: ledgerIdForRegistrantRow(existingRow, map),
+        eventId: existingRow[map['Event_ID']],
+        name: existingRow[map['Name']],
+        personType: existingRow[map['Person_Type']],
+        partyId: partyId || '',
+        payload: ledgerPayloadFromRow(existingRow, map),
+        note: 'The same response was submitted again through its edit link.'
+      })]);
       return null; // nothing new to append — the existing row was updated in place
     }
     // A genuinely different submission (a different Party_ID) for the same
@@ -625,10 +669,72 @@ function buildRegistrantRow(args) {
   // every path that gives up on building a row is above this line and leaves
   // the old row exactly as it found it. See section 5 for the failure this
   // ordering exists to prevent.
-  if (rowToSupersede) supersedeRegistrantRow(rowToSupersede, map, submittedAt);
+  // Composed BEFORE the supersession, so the `superseded` entry can name the id
+  // that replaces it (§1.3's Payload.by) — a replay that knows only that a
+  // registration ended cannot say which seat took its place.
+  const entries = composeImportLedgerEntries_(row, map, {
+    registryEntry, partyId, submittedAt, programStatus,
+    source: args.ledgerSource || LEDGER_SOURCES.IMPORT
+  });
+  if (rowToSupersede) supersedeRegistrantRow(rowToSupersede, map, submittedAt, entries[0].registrationId);
+  recordImportLedgerEntries(entries);
 
   existingRowIndex.set(key, row); // reserve/replace immediately so a later row in this same pass supersedes/patches THIS one
   return row;
+}
+
+/**
+ * THE LEDGER ENTRIES FOR ONE ROW THE IMPORT HAS JUST BUILT.
+ *
+ * One `registered` entry always, and a `waitlisted` entry beside it when the
+ * capacity arithmetic above — or the session's own [Waitlist Only] tick — put
+ * this submission in the queue instead of a seat. TWO ENTRIES AND NOT ONE
+ * KIND, because the fold's `registered` creates an Active registration by
+ * construction (newFoldedRegistrantRow_): "they registered" and "and there was
+ * no room" are two facts, and a replay that collapsed them could not tell a
+ * person waitlisted at import from one a desk put in the queue afterwards.
+ *
+ * OCCURRED_AT IS THE SUBMISSION'S OWN TIMESTAMP, not now. A response sat in a
+ * form for an hour before any sync saw it, and the whole reason that column
+ * exists is that Entry_At cannot say when somebody signed up.
+ *
+ * Composed, never appended: see recordImportLedgerEntries() in 99k for why the
+ * import's entries go up to `27` with the rows rather than into the ledger's
+ * own buffer.
+ */
+function composeImportLedgerEntries_(row, map, args) {
+  const source = args.source || LEDGER_SOURCES.IMPORT;
+  const registered = makeLedgerEntry({
+    kind: LEDGER_KINDS.REGISTERED,
+    source: source,
+    occurredAt: args.submittedAt,
+    eventId: row[map['Event_ID']],
+    name: row[map['Name']],
+    personType: row[map['Person_Type']],
+    partyId: args.partyId || '',
+    payload: ledgerPayloadFromRow(row, map),
+    note: source === LEDGER_SOURCES.IMPORT
+      ? 'Read off a form response.'
+      : 'Booked by the standing-registration catch-up.'
+  });
+
+  const entries = [registered];
+  if (args.programStatus === 'Waitlisted') {
+    entries.push(makeLedgerEntry({
+      kind: LEDGER_KINDS.WAITLISTED,
+      source: source,
+      occurredAt: args.submittedAt,
+      registrationId: registered.registrationId,
+      eventId: row[map['Event_ID']],
+      name: row[map['Name']],
+      personType: row[map['Person_Type']],
+      partyId: args.partyId || '',
+      note: args.registryEntry && args.registryEntry.waitlistOnly
+        ? `The session is marked ${WAITLIST_ONLY_TAG}, so every sign-up for it waits.`
+        : 'The session was full when this submission arrived.'
+    }));
+  }
+  return entries;
 }
 
 /**

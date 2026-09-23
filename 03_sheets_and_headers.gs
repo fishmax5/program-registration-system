@@ -451,7 +451,19 @@ defineLazyGlobal_('HEADERS', () => ({
     'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
     'Primary_Registrant', 'Party_Size', 'Order_Ahead_Flag', 'Admin_Notes', 'Form_Answers',
     'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
-    'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID'
+    'Manual_Override', 'Form_Source', 'Event_ID', 'Party_ID',
+    // THE LEDGER'S FOLD KEY, ON THE ROW (99k, §1.4's first resolution path).
+    // Written by the one-time backfill (99o) and by any writer that has to
+    // mint an id for a row the ledger has never heard of; read by every phase
+    // 2 writer, so a desk mark answers "which registration is this" off the
+    // row it is already holding instead of folding the whole ledger.
+    //
+    // ADDED AT THE END, which is what makes it safe on a live tab: a canonical
+    // column the sheet does not have yet projects to -1 and reads back blank
+    // (buildHeaderProjectionFromRow, 34), and the next render writes the
+    // header and the column. Hidden like every other internal key — see
+    // REGISTRANT_HIDDEN_COLUMNS (39).
+    'Registration_ID'
   ],
   // Registered_Count (what the forms say) and Served_Confirmed (what was
   // actually ticked off on the Registrants tab) sit side by side on purpose —
