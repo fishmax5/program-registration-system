@@ -2249,7 +2249,12 @@ function appendRegistrantEditToLedger_(sheet, headerMap, e) {
     });
     if (!edited.length) return 0;
 
-    const width = HEADERS.All_Registrants.length;
+    // Clamped to what the tab actually HAS. Registration_ID is the newest
+    // column and a workbook that has not re-rendered since it was added is
+    // still one short — asking for a column past the grid's edge throws, and
+    // this appender must not be the thing that stops working on exactly the
+    // tabs the backfill has not reached yet.
+    const width = Math.min(HEADERS.All_Registrants.length, sheet.getMaxColumns());
     const values = sheet.getRange(e.range.getRow(), 1, numRows, width).getValues();
     const entries = [];
     values.forEach(row => {

@@ -209,9 +209,11 @@ function runLedgerBackfillSlice_(ctx) {
     // The map the SHEET actually has, not the one the code expects: on a
     // workbook whose columns were reordered by hand, or mid-migration, those
     // are two different answers and only one of them names a real column.
-    // Built here rather than through getLiveHeaderMap() (18) because this job
-    // needs Event_Date, and that helper tests a 1-based column for truthiness
-    // — which drops whatever sits in column A.
+    // Built here rather than through getLiveHeaderMap() (18) because that one
+    // falls back to the canonical order when Manual_Override is missing, which
+    // is right for an edit handler (it is about to flip one well-known cell)
+    // and wrong for this: a header row a projection cannot read is a tab to
+    // leave alone, not one to write a column into by position.
     const map = ledgerBackfillHeaderMap_(sheet, zone.headerRow, headers);
     if (map['Registration_ID'] === undefined) continue;
 
