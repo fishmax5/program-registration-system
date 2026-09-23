@@ -2197,6 +2197,87 @@ function handleRegistrantsEdit(e, sheet) {
   if (countingColumnsEdited) {
     recalculateCateringCounts(sheet, headerMap, editedRow, e.range.getNumRows());
   }
+
+  // AND THE SECOND COPY OF WHAT WAS JUST TYPED — the one the design says this
+  // work must not forget (§2, row 9), and the reason phase 3 is gated on it.
+  //
+  // Staff edit this tab by hand and today that edit IS the state: nothing else
+  // records it, and nothing needs to, because the next render writes the tab
+  // back from itself. The moment the tab becomes a projection of the ledger
+  // (phase 4) a hand edit that was never appended is overwritten by the next
+  // fold — which is a NEW way to lose somebody's change, introduced by the fix
+  // for losing rows. So it is appended now, a phase before anything reads it,
+  // and the verifier (99n) is what proves it is landing.
+  appendRegistrantEditToLedger_(sheet, headerMap, e);
+}
+
+/**
+ * One `corrected` entry per row a hand edit touched.
+ *
+ * ONLY SpreadsheetApp AND Utilities, which is the constraint this whole file
+ * is written under: onEdit is a SIMPLE trigger and runs without
+ * authorization, so PropertiesService, FormApp and CalendarApp are all
+ * unavailable (see the banner over onEdit). Appending is one getValues() of the
+ * edited rows and one setValues() into the ledger; Utilities.getUuid() is the
+ * only other service it needs, and 99k already answers a missing one.
+ *
+ * IT FLUSHES ITSELF, immediately, rather than leaving the entry buffered.
+ * Everywhere else in phase 2 the buffer is written by
+ * flushPersistentRegistries() or by the sliced runner's `finally` — and both of
+ * those touch Script Properties, which is precisely what this path cannot do.
+ * An edit is one person typing one thing, so one write is the right cost
+ * anyway.
+ *
+ * GUARDED WHOLE. A ledger that cannot be written must not stop an edit being
+ * accepted: the cell is already saved by the time this runs, and onEdit's own
+ * catch would otherwise tell somebody their edit "didn't fully process" about
+ * a second copy they have never heard of. The failure is logged and the
+ * verifier reports the row as a disagreement the following morning, which is
+ * the outcome that reaches a person who can do something about it.
+ */
+function appendRegistrantEditToLedger_(sheet, headerMap, e) {
+  try {
+    const numRows = e.range.getNumRows();
+    const firstCol = e.range.getColumn();
+    const lastCol = firstCol + e.range.getNumColumns() - 1;
+    // WHICH COLUMNS MOVED, from the RANGE rather than from its top-left cell:
+    // a fill-down or a paste over a block is how somebody cancels a table's
+    // worth of people at once, and it is one edit event.
+    const edited = Object.keys(headerMap).filter(header => {
+      const col = headerMap[header] + 1;
+      return col >= firstCol && col <= lastCol;
+    });
+    if (!edited.length) return 0;
+
+    const width = HEADERS.All_Registrants.length;
+    const values = sheet.getRange(e.range.getRow(), 1, numRows, width).getValues();
+    const entries = [];
+    values.forEach(row => {
+      // A row with no identity is a blank line inside the zone — somebody
+      // typing into the space under the last registration. There is nothing to
+      // correct and nothing to mint an id for.
+      if (!String(row[headerMap['Name']] || '').trim()) return;
+      const payload = {};
+      edited.forEach(header => { payload[header] = ledgerCellValue_(row[headerMap[header]]); });
+      // ledgerIdForRegistrantRow() reads the Registration_ID off the row when
+      // there is one and folds the whole ledger when there is not. After phase
+      // 3's backfill every row carries one, which is most of the reason that
+      // column exists: a hand edit must not cost a full read of the ledger.
+      const entry = ledgerEntryForCorrection_(row, headerMap, payload, {
+        source: LEDGER_SOURCES.SHEET_EDIT,
+        note: `Typed onto ${SHEET_NAMES.REGISTRANT_DASH} by hand.`
+      });
+      if (entry) entries.push(entry);
+    });
+
+    if (!entries.length) return 0;
+    appendLedgerEntries(entries);
+    return flushLedger();
+  } catch (err) {
+    log(`⚠️ A hand edit on ${SHEET_NAMES.REGISTRANT_DASH} was saved but could not be recorded in the ` +
+      `ledger (${err}). The verifier will report the row.`);
+    return 0;
+  }
 }
 
 /**

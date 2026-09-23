@@ -449,9 +449,35 @@ function collapseDuplicateRegistrationGroupsInternal(wanted, mealMode) {
     if (rows.length < 2) return;
     const kept = pickSurvivingRegistrantRow(rows, map);
     const keptName = String(kept[map['Name']] || '').trim();
+    // THE SURVIVOR'S ID BEFORE ANYTHING IS FOLDED INTO IT.
+    // ledgerIdForRegistrantRow() resolves on Event_ID | name | Person_Type, and
+    // mergeRegistrantRow() fills the survivor's blanks from the row it absorbs
+    // — including, on a group spanning two Event_IDs, that row's. Asked after
+    // the merge it could resolve the absorbed registration and hand the merge
+    // the id it is about to declare dead.
+    const keptId = ledgerIdForRegistrantRow(kept, map);
     rows.forEach(row => {
       if (row === kept) return;
+      const absorbedId = ledgerIdForRegistrantRow(row, map);
       mergeRegistrantRow(kept, row, map, mode);
+      // THE ARITHMETIC IS THE ENTRY'S, not something the replay works out
+      // later (§2, row 7). By the time anybody folds this the two rows cannot
+      // be seen separately, so the merge's own answer — the meal mode applied,
+      // the marks OR-ed, the most active status kept — is written down here
+      // and the fold assigns it rather than re-deriving a number the desk was
+      // never shown.
+      appendLedgerEntry(makeLedgerEntry({
+        kind: LEDGER_KINDS.MERGED,
+        source: LEDGER_SOURCES.DEDUPE,
+        registrationId: keptId,
+        eventId: kept[map['Event_ID']],
+        name: kept[map['Name']],
+        personType: kept[map['Person_Type']],
+        partyId: map['Party_ID'] === undefined ? '' : kept[map['Party_ID']],
+        payload: Object.assign({ absorbed: absorbedId }, ledgerPayloadFromRow(kept, map)),
+        note: `Collapsed with ${String(row[map['Name']] || '').trim() || 'a duplicate row'} — ` +
+          `meals ${mode === 'add' ? 'added together' : 'taken as the larger of the two'}.`
+      }));
       dropped.push(row);
       const goneName = String(row[map['Name']] || '').trim();
       // ONLY WHERE THE IMPORT WOULD WRITE THE ROW BACK — judged on the key the

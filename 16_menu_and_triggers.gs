@@ -418,6 +418,11 @@ function buildAppMenu(ui, includeAdmin) {
         // it. This is which of the two, per sheet, and what to do about each.
         // See 99h.
         .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', 'reportLeaderSheetRosters')
+        // The registration ledger's own check (99n), run on every sync and
+        // filed for the 10am digest — this is the same answer on demand, for
+        // somebody standing in front of a roster that is missing a name. It
+        // folds the ledger and reads the tab and writes nothing at all.
+        .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', 'showLedgerVerificationReport')
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the

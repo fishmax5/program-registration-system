@@ -304,6 +304,11 @@ function stampRegistrantRowUncancelled(row, map, opts) {
 function registrantChangeStampOptions(args) {
   return {
     source: CANCELLATION_SOURCES.DESK,
+    // The change panel and the check-in page's cancel button are both "at the
+    // door" to a person reading Admin_Notes and are two different call sites to
+    // the ledger — see CANCELLATION_LEDGER_SOURCES (71) for why those are two
+    // lists rather than one.
+    ledgerSource: LEDGER_SOURCES.CHANGE_PANEL,
     by: getCurrentUserEmail() || '',
     reason: String((args && args.reason) || '')
   };
@@ -408,6 +413,67 @@ function finishRegistrantChange(ss, sheet, rows, message) {
   toastIfPossible(said);
   log(`applyRegistrantChangeFromDialog: ${said}`);
   return { ok: true, message: said, listsChanged: true };
+}
+
+// --- what each change puts on the record -------------------------------------
+//
+// Every action in this file ends at finishRegistrantChange(), which renders
+// the tab from the rows in hand. The ledger entry goes in BEFORE that (§2:
+// append first, then do what you do now) and is buffered rather than written,
+// so the whole panel costs one setValues() of the ledger at the end of the
+// execution however many rows a change touched.
+//
+// NO NEW LOCK, here or anywhere else phase 2 appends: applyRegistrantChangeFromDialog()
+// already holds the desk lock for all of this, LockService locks are not
+// reentrant, and 99b's banner is on exactly that failure.
+
+/** One `corrected` entry for a row, or nothing at all when no field moved. */
+function appendLedgerCorrection_(row, map, payload, note) {
+  const entry = ledgerEntryForCorrection_(row, map, payload,
+    { source: LEDGER_SOURCES.CHANGE_PANEL, note: note || '' });
+  return entry ? appendLedgerEntry(entry) : 0;
+}
+
+/**
+ * The named columns of a row as a Payload — what they ARE now, read off the
+ * row the change has just rewritten.
+ *
+ * A blank is carried as '' here rather than dropped, which is the one place
+ * this differs from ledgerPayloadFromRow() (99k): a correction that empties a
+ * cell is saying something, and a Payload that left it out would have the
+ * replay keep whatever was there before.
+ */
+function ledgerColumnsPayload_(row, map, headers) {
+  const payload = {};
+  (headers || []).forEach(header => {
+    if (map[header] === undefined) return;
+    payload[header] = ledgerCellValue_(row[map[header]]);
+  });
+  return payload;
+}
+
+/** The marks an "I ticked the wrong Mary" undo just cleared, and Manual_Override with them. */
+function ledgerClearedMarksPayload_(row, map, attended, lunch) {
+  const headers = ['Manual_Override', 'Admin_Notes'];
+  if (attended) headers.push('Attended');
+  if (lunch) headers.push('Lunch_Served', ...REGISTRANT_MOVE_CLEARED_COUNTS);
+  return ledgerColumnsPayload_(row, map, headers);
+}
+
+/**
+ * What a `moved` entry carries beyond its destination Event_ID: the session
+ * columns the move rewrote, and the meal where the destination's menu changed
+ * the answer.
+ *
+ * Read off the row AFTER the move, so what is recorded is what landed rather
+ * than what was intended — the lunch in particular is decided by whether the
+ * new date serves one at all.
+ */
+function ledgerMovePayload_(row, map) {
+  return ledgerColumnsPayload_(row, map, [
+    'Event_Date', 'Event_Time', 'Location', 'Event',
+    'Lunch_Type', 'Lunch_Status', 'Meals_Ordered', 'Manual_Override', 'Admin_Notes'
+  ]);
 }
 
 /** "Chair Yoga — Thu, Sep 17 (Ashbridge)", for every message in this file. */
@@ -544,6 +610,12 @@ function moveRegistrantChange(ss, sheet, rows, map, target, party, args) {
 
   let marksCleared = 0;
   let mealsDropped = false;
+  // THE IDS BEFORE THE ROWS MOVE. ledgerIdForRegistrantRow() resolves a row
+  // through its Event_ID, name and person type (registrantTombstoneKey), and
+  // the next few lines rewrite the first of those three — asked afterwards it
+  // would resolve the DESTINATION, find nothing there, and mint a second
+  // registration for somebody who has just been given one seat.
+  const movedIds = party.map(member => ledgerIdForRegistrantRow(member, map));
   party.forEach(member => {
     if (dateChanged && clearRegistrantMarksOnRow(member, map)) marksCleared++;
     member[map['Event_Date']] = to.date;
@@ -580,6 +652,30 @@ function moveRegistrantChange(ss, sheet, rows, map, target, party, args) {
   // walk-in typed at the desk, and must not be argued with by the next sync.
   clearRegistrantTombstones(party.map(member =>
     registrantTombstoneKey(to.eventId, member[map['Name']], member[map['Person_Type']])));
+
+  // ONE `moved` ENTRY PER PERSON, because a guest is a registration of their
+  // own even though they never travel alone. Event_ID on the entry is the
+  // DESTINATION and Payload.from is where they came from (§1.3) — the origin
+  // is recorded and never replayed, since a fold that moved somebody back
+  // would be undoing the thing it is reading.
+  //
+  // The marks are NOT in the Payload: the fold clears them itself when the
+  // session changes, through 99a's own clearRegistrantMarksOnRow(), so that
+  // "attended is a fact about a day" is one rule in one place rather than a
+  // list of blanked columns each writer has to remember.
+  party.forEach((member, i) => {
+    appendLedgerEntry(makeLedgerEntry({
+      kind: LEDGER_KINDS.MOVED,
+      source: LEDGER_SOURCES.CHANGE_PANEL,
+      registrationId: movedIds[i],
+      eventId: to.eventId,
+      name: member[map['Name']],
+      personType: member[map['Person_Type']],
+      partyId: map['Party_ID'] === undefined ? '' : member[map['Party_ID']],
+      payload: Object.assign({ from: fromEventId }, ledgerMovePayload_(member, map)),
+      note: `Moved from ${fromLabel} to ${toLabel}.`
+    }));
+  });
 
   const others = party.length > 1 ? ` (with ${party.length - 1} guest(s))` : '';
   const slotNote = slot ? ` at ${slot.rangeLabel}` : '';
@@ -742,11 +838,21 @@ function restoreRegistrantChange(ss, sheet, rows, map, target, party, args) {
   let restored = 0;
   party.forEach(member => {
     const memberStatus = String(member[map['Program_Status']] || '').trim();
+    // Composed before either stamper runs and appended only if one of them
+    // said it did something — both refuse a row that is not in the state they
+    // undo, and an entry for a restoration that was refused would give a seat
+    // back in the replay that the tab never gave back.
+    const entry = ledgerEntryForStatusChange_(member, map, LEDGER_KINDS.REACTIVATED, stamp,
+      { source: LEDGER_SOURCES.CHANGE_PANEL, note: memberStatus === 'Waitlisted'
+        ? 'Taken off the waiting list at the desk — the seat was free.'
+        : 'Put back on the list at the desk after a cancellation.' });
     if (memberStatus === 'Waitlisted') {
-      if (stampRegistrantRowActive(member, map, stamp)) restored++;
-    } else if (stampRegistrantRowUncancelled(member, map, stamp)) {
-      restored++;
+      if (!stampRegistrantRowActive(member, map, stamp)) return;
+    } else if (!stampRegistrantRowUncancelled(member, map, stamp)) {
+      return;
     }
+    appendLedgerEntry(entry);
+    restored++;
   });
   if (restored === 0) {
     return { ok: false, message: `⚠️ Nothing about ${name}'s row could be put back — it is already ${status.toLowerCase()}.` };
@@ -778,7 +884,11 @@ function waitlistRegistrantChange(ss, sheet, rows, map, target, party, args) {
 
   let moved = 0;
   party.forEach(member => {
-    if (stampRegistrantRowWaitlisted(member, map, stamp)) moved++;
+    const entry = ledgerEntryForStatusChange_(member, map, LEDGER_KINDS.WAITLISTED, stamp,
+      { source: LEDGER_SOURCES.CHANGE_PANEL });
+    if (!stampRegistrantRowWaitlisted(member, map, stamp)) return;
+    appendLedgerEntry(entry);
+    moved++;
   });
   if (moved === 0) {
     const status = String(row[map['Program_Status']] || '').trim() || 'Active';
@@ -833,6 +943,12 @@ function undoRegistrantMarks(ss, sheet, rows, map, target, args) {
   appendAdminNote(row, map, waitlistStamp(
     `${[attended ? 'Attended' : '', lunch ? 'Lunch' : ''].filter(Boolean).join(' and ')} unticked`,
     registrantChangeStampOptions(args)));
+  // The columns clearRegistrantMarksOnRow() just blanked, stated as what they
+  // now ARE rather than as a list of names: a Payload sets fields (§1.5), and
+  // "Attended is false" is a correction a replay can apply where "Attended was
+  // cleared" is a sentence only this file understands.
+  appendLedgerCorrection_(row, map, ledgerClearedMarksPayload_(row, map, attended, lunch),
+    `${[attended ? 'the attendance mark' : '', lunch ? 'the lunch mark' : ''].filter(Boolean).join(' and ')} taken back off at the desk.`);
 
   const what = attended && lunch ? 'attendance and lunch marks' : (attended ? 'attendance mark' : 'lunch mark');
   return finishRegistrantChange(ss, sheet, rows,
@@ -886,6 +1002,9 @@ function changeRegistrantLunch(ss, sheet, rows, map, target, args) {
   row[map['Manual_Override']] = 'Manually Edited';
   appendAdminNote(row, map, waitlistStamp(
     `Meal set to ${wanted}${meals > 1 ? ` ×${meals}` : ''}`, registrantChangeStampOptions(args)));
+  appendLedgerCorrection_(row, map, ledgerColumnsPayload_(row, map,
+    ['Lunch_Type', 'Lunch_Status', 'Meals_Ordered', 'Manual_Override']),
+    `The meal was set to ${wanted}${meals > 1 ? ` ×${meals}` : ''} at the desk.`);
 
   const said = wantsLunch
     ? `✅ ${name} is down for ${meals > 1 ? `${meals} ${wanted.toLowerCase()} meals` : `a ${wanted.toLowerCase()} meal`} on ${where}.`
@@ -936,6 +1055,14 @@ function changeRegistrantContact(ss, sheet, rows, map, target, args) {
     if (phone && map['Phone'] !== undefined) other[map['Phone']] = phone;
     if (email && map['Email'] !== undefined) other[map['Email']] = email;
     other[map['Manual_Override']] = 'Manually Edited';
+    // ONE ENTRY PER ROW, because a phone number is a fact about a person and a
+    // registration is a fact about a booking: eleven upcoming rows corrected
+    // in one press are eleven registrations whose recorded details moved, and
+    // an entry against only the picked one would leave the replay disagreeing
+    // with the other ten for ever.
+    appendLedgerCorrection_(other, map,
+      ledgerColumnsPayload_(other, map, ['Phone', 'Email', 'Manual_Override']),
+      'Contact details corrected at the desk.');
     touched++;
   });
   appendAdminNote(row, map, waitlistStamp(
@@ -969,6 +1096,11 @@ function noteOnRegistrantRow(ss, sheet, rows, map, target, args) {
   appendAdminNote(row, map, `${text} (noted at the desk on ${formatDateLabel(new Date())}` +
     `${who ? ` by ${who}` : ''})`);
   row[map['Manual_Override']] = 'Manually Edited';
+  // The WHOLE of Admin_Notes, not the sentence just added: appendAdminNote()
+  // joins onto what was already there, and a Payload carrying only the new
+  // clause would have the replay produce a row missing every note before it.
+  appendLedgerCorrection_(row, map, ledgerColumnsPayload_(row, map, ['Admin_Notes', 'Manual_Override']),
+    `Noted at the desk: ${text}`);
   return finishRegistrantChange(ss, sheet, rows, `✅ Noted on ${name}'s row for ${where}: ${text}`);
 }
 
@@ -1020,6 +1152,25 @@ function removeRegistrantChange(ss, sheet, rows, map, target, party, args) {
   if (kept.length === rows.length) {
     return { ok: false, message: `⚠️ ${name}'s row could not be found to remove. Nothing was changed.` };
   }
+
+  // `removed` AND the tombstone, not `removed` INSTEAD of it. The design (§4.1)
+  // has the entry replace the tombstone store — in PHASE 5, once the fold is
+  // what buildRegistrantRow() asks, which is two phases away. Until then the
+  // tombstone is still the only thing stopping the next sync writing this row
+  // straight back, and dropping it here would turn a deletion into an hour's
+  // pause. The ledger entry is the second copy beside it.
+  party.forEach(member => {
+    appendLedgerEntry(makeLedgerEntry({
+      kind: LEDGER_KINDS.REMOVED,
+      source: LEDGER_SOURCES.CHANGE_PANEL,
+      registrationId: ledgerIdForRegistrantRow(member, map),
+      eventId: member[map['Event_ID']],
+      name: member[map['Name']],
+      personType: member[map['Person_Type']],
+      partyId: map['Party_ID'] === undefined ? '' : member[map['Party_ID']],
+      note: 'Deleted at the desk — a row that should never have existed. The form response was left in place.'
+    }));
+  });
 
   const others = party.length > 1 ? ` and ${party.length - 1} guest row(s)` : '';
   return finishRegistrantChange(ss, sheet, kept,

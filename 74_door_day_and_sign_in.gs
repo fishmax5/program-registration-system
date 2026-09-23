@@ -632,6 +632,7 @@ function walkInSignIn(payload) {
       return;
     }
     const res = applyQuickMarkFromDialog({
+      ledgerSource: LEDGER_SOURCES.DOOR,
       location,
       session: program.value,
       name,
@@ -657,6 +658,7 @@ function walkInSignIn(payload) {
       (person && person.guests || []).forEach(guest => {
         if (guest.registered.indexOf(program.value) === -1) return;
         const guestRes = applyQuickMarkFromDialog({
+          ledgerSource: LEDGER_SOURCES.DOOR,
           location, session: program.value, name: guest.name, attended: true, register: false
         });
         lines.push((guestRes && guestRes.message)
@@ -681,6 +683,7 @@ function walkInSignIn(payload) {
       // applyQuickMarkLocked() — and somebody standing at the door plainly
       // came in.
       const res = applyQuickMarkFromDialog({
+        ledgerSource: LEDGER_SOURCES.DOOR,
         location,
         session: person.lunchOn || firstProgramValue || day.lunch.value,
         name,
@@ -705,6 +708,7 @@ function walkInSignIn(payload) {
       // day's own lunch session is what the meal belongs to.
       const lunchSession = firstProgramValue || day.lunch.value;
       const res = applyQuickMarkFromDialog({
+        ledgerSource: LEDGER_SOURCES.DOOR,
         location,
         session: lunchSession,
         name,
@@ -725,6 +729,7 @@ function walkInSignIn(payload) {
         // a served tick as mutually exclusive on purpose, because one is a
         // meal expected and the other a meal already gone.
         const handed = applyQuickMarkFromDialog({
+          ledgerSource: LEDGER_SOURCES.DOOR,
           location, session: lunchSession, name, attended: true, lunch: true
         });
         lines.push(`${res.message} ${handed && handed.ok ? 'Marked handed over. ' : ''}` +
@@ -750,6 +755,7 @@ function walkInSignIn(payload) {
   // every future date of that program rather than on this one date.
   upcoming.forEach(session => {
     const res = applyQuickMarkFromDialog({
+      ledgerSource: LEDGER_SOURCES.DOOR,
       location,
       session,
       name,

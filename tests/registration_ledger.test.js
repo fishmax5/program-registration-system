@@ -58,13 +58,26 @@ this.foldRegistrationLedger = foldRegistrationLedger;
 this.resolveRegistrationId = resolveRegistrationId;
 this.registrantTombstoneKey = registrantTombstoneKey;
 this.setLedgerSheetForTest = function (sheet) { __ledgerTestSheet = sheet; };
+this.ledgerIdForRegistrantRow = ledgerIdForRegistrantRow;
+this.ledgerEntriesForExistingRow = ledgerEntriesForExistingRow;
+this.ledgerPayloadFromRow = ledgerPayloadFromRow;
+this.recordImportLedgerEntries = recordImportLedgerEntries;
+this.takeImportLedgerEntries = takeImportLedgerEntries;
+this.pendingImportLedgerEntryCount = pendingImportLedgerEntryCount;
+this.ledgerEntryForCorrection_ = ledgerEntryForCorrection_;
+this.setFoldedLedgerForTest = function (entries) {
+  readLedgerEntries = function () { return entries; };
+  invalidateLedgerFold();
+};
 `, sandbox, { filename: 'program.gs' });
 
 const {
   HEADERS, SHEET_NAMES, getIndexMap, LEDGER_KINDS, LEDGER_SOURCES, LEDGER_ENTRY_KINDS,
   makeLedgerEntry, appendLedgerEntries, pendingLedgerEntryCount, flushLedger,
   ledgerEntryToRow, ledgerRowToEntry, foldRegistrationLedger, resolveRegistrationId,
-  registrantTombstoneKey
+  registrantTombstoneKey, ledgerIdForRegistrantRow, ledgerEntriesForExistingRow,
+  ledgerPayloadFromRow, recordImportLedgerEntries, takeImportLedgerEntries,
+  pendingImportLedgerEntryCount, ledgerEntryForCorrection_, setFoldedLedgerForTest
 } = sandbox;
 
 let failures = 0;
@@ -410,6 +423,82 @@ check('each resolvable by its own key',
 // every workbook there is.
 check('an empty ledger folds to nothing', foldRegistrationLedger([]).rows.length, 0);
 check('and so does a null one', foldRegistrationLedger(null).problems.length, 0);
+
+// --- phase 2: how a writer finds the id it is acting on ---------------------
+//
+// §1.4's two answers, in order, and the third thing that has to be true of
+// both: a miss MINTS, because "this person is on a roster and the ledger has
+// never heard of them" is the ordinary state of every row in the workbook
+// until phase 3's backfill has run.
+
+function registrantRow(fields) {
+  const row = new Array(HEADERS.All_Registrants.length).fill('');
+  row[RMAP['Program_Status']] = 'Active';
+  row[RMAP['Person_Type']] = 'Registrant';
+  Object.keys(fields).forEach(h => { row[RMAP[h]] = fields[h]; });
+  return row;
+}
+
+const known = entry({
+  kind: LEDGER_KINDS.REGISTERED, source: LEDGER_SOURCES.IMPORT,
+  eventId: 'ev-916', name: 'Joan Meier', personType: 'Registrant'
+});
+setFoldedLedgerForTest([known]);
+sheet = stubSheet();
+
+const joanRow = registrantRow({ Name: 'Joan Meier', Event_ID: 'ev-916', Meals_Ordered: 2 });
+check('a row the ledger knows resolves to its own id',
+  ledgerIdForRegistrantRow(joanRow, RMAP), known.registrationId);
+check('and mints nothing', pendingLedgerEntryCount(), 0);
+
+const strangerRow = registrantRow({ Name: 'Bob Kaplan', Event_ID: 'ev-916', Meals_Ordered: 1 });
+const mintedId = ledgerIdForRegistrantRow(strangerRow, RMAP);
+check('a row it does not know is given one', !!mintedId, true);
+check('as a registered entry, buffered', pendingLedgerEntryCount(), 1);
+// The SAME id the second time, from an overlay rather than from the fold: the
+// buffer has not been written yet, and two writers touching one person in one
+// run minting two ids is two registrations and two seats from one sign-in.
+check('and the same id again before the flush',
+  ledgerIdForRegistrantRow(strangerRow, RMAP), mintedId);
+check('with no second entry', pendingLedgerEntryCount(), 1);
+
+// WHAT THE MINTED ENTRY CARRIES IS THE ROW. A bare entry would fold to a name
+// and a session and nothing else, and the verifier would then report every
+// column of a healthy registration as a disagreement.
+const mintedEntries = ledgerEntriesForExistingRow(strangerRow, RMAP, { source: LEDGER_SOURCES.MIGRATION });
+check('its payload is the row\u2019s own columns', mintedEntries[0].payload.Meals_Ordered, 1);
+check('the source says where it came from', mintedEntries[0].source, LEDGER_SOURCES.MIGRATION);
+
+// --- the import's compose buffer -------------------------------------------
+//
+// 29 composes and 27 hands the batch on beside the write of the rows those
+// entries describe — so a slice that ran out of budget mid-loop records
+// exactly the registrations it wrote and no others.
+
+flushLedger();
+sheet = stubSheet();
+const composedA = makeLedgerEntry(base);
+recordImportLedgerEntries([composedA]);
+check('composing is not appending', pendingLedgerEntryCount(), 0);
+check('it waits for 27', pendingImportLedgerEntryCount(), 1);
+appendLedgerEntries(takeImportLedgerEntries());
+check('and the batch is handed over whole', pendingLedgerEntryCount(), 1);
+check('leaving nothing composed', pendingImportLedgerEntryCount(), 0);
+
+// --- a correction says what MOVED, and nothing else -------------------------
+
+check('a correction with no fields is no entry',
+  ledgerEntryForCorrection_(joanRow, RMAP, {}, { source: LEDGER_SOURCES.QUICK_MARK }), null);
+const correction = ledgerEntryForCorrection_(joanRow, RMAP, { Attended: true },
+  { source: LEDGER_SOURCES.QUICK_MARK, registrationId: known.registrationId });
+check('and one that does carries only those fields', correction.payload, { Attended: true });
+check('about the registration it was given', correction.registrationId, known.registrationId);
+
+// A Payload never restates the identity the entry already carries in columns
+// of its own, and never a link cell the render stamps on every row.
+const payload = ledgerPayloadFromRow(joanRow, RMAP);
+check('the payload leaves the identity to the entry', payload.Name, undefined);
+check('and carries what the registration says', payload.Program_Status, 'Active');
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll registration ledger checks passed.');
 process.exit(failures ? 1 : 0);

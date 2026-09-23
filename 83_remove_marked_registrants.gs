@@ -164,6 +164,21 @@ function removeMarkedRegistrantsInternal(marked) {
   let registrantKeep = null;
 
   marked.tabs.forEach(tab => {
+    // THE LEDGER FIRST, THEN THE TOMBSTONES, THEN THE RENDER (§2: append
+    // first, then do what you do now) — and only for the REGISTRANTS tab. The
+    // other tab this sweep clears is Deleted_Event_Triage, which holds rows
+    // that were moved off a session whose calendar event went; they are a
+    // record of a registration that has already ended, not registrations, and
+    // the ledger has never had an entry for one.
+    //
+    // `removed` ACCOMPANIES the tombstone here rather than replacing it, which
+    // is what §4.1 of the design asks for — in PHASE 5, once the fold is what
+    // buildRegistrantRow() checks. Until then the tombstone is the only thing
+    // stopping the next sync writing these rows back, and this sweep exists
+    // precisely because the next sync would.
+    if (tab.spec.name === SHEET_NAMES.REGISTRANT_DASH) {
+      appendRemovalLedgerEntries_(tab.doomed, tab.map);
+    }
     recordRegistrantTombstones(tab.doomed, tab.map);
     tab.spec.render(false, tab.keep);
     if (tab.spec.name === SHEET_NAMES.REGISTRANT_DASH) registrantKeep = tab.keep;
@@ -186,4 +201,38 @@ function removeMarkedRegistrantsInternal(marked) {
   }
 
   return `Removed ${marked.total} marked registrant row(s). The form responses were left in place.`;
+}
+
+
+/**
+ * One `removed` entry per swept row.
+ *
+ * `removed` IS NOT A CANCELLATION (99k's banner, and the design's §1.3): a
+ * cancellation is a fact about a person, a removal is a fact about a mistake.
+ * This sweep is the mistake case by construction — somebody typed "Remove This
+ * Row" into Manual_Override because the row should never have existed — which
+ * is why these rows do not get their seat counted back the way a cancellation
+ * does. The replay reads it the same way: the registration stops existing
+ * rather than ending.
+ *
+ * Buffered, not written: one setValues() of the ledger at the end of the
+ * execution covers a sweep of three duplicates as readily as one of thirty,
+ * and no new lock is taken (LockService locks are not reentrant — 99b).
+ */
+function appendRemovalLedgerEntries_(rows, map) {
+  let recorded = 0;
+  (rows || []).forEach(row => {
+    appendLedgerEntry(makeLedgerEntry({
+      kind: LEDGER_KINDS.REMOVED,
+      source: LEDGER_SOURCES.REMOVE_SWEEP,
+      registrationId: ledgerIdForRegistrantRow(row, map),
+      eventId: row[map['Event_ID']],
+      name: row[map['Name']],
+      personType: row[map['Person_Type']],
+      partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
+      note: `Marked "${REGISTRANT_REMOVE_OVERRIDE_OPTION}" and swept. The form response was left in place.`
+    }));
+    recorded++;
+  });
+  return recorded;
 }
