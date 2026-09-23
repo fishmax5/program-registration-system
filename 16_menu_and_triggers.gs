@@ -382,6 +382,13 @@ function buildAppMenu(ui, includeAdmin) {
         // events (the office is mailed a digest instead now — see section 5b).
         // A run that hits its cap says so.
         .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
+        // Everything on the Registrants tab predates the registration ledger
+        // (99k), so until this has been run the ledger's own check (99n) says
+        // "not in the fold" about the whole workbook and can say nothing
+        // useful. It records one entry per row, writes a hidden internal id
+        // back onto each, changes nothing anybody reads, and is safe to run
+        // twice. See 99o.
+        .addItem('\ud83d\udcd2 Back-fill the Registration Ledger', 'backfillLedgerFromTab')
         .addSeparator()
         // THE FIRST RUN, which is the one-time job by definition. It was filed
         // under "Setup & Reports" beside two read-only reports, which is how a

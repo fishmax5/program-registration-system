@@ -950,6 +950,42 @@ const LEDGER_PAYLOAD_SKIPPED_COLUMNS = Object.freeze([
 ]);
 
 
+/**
+ * EVERY registration the ledger holds, live or dead, by the key a row
+ * resolves through. For the backfill (99o) and for nothing else.
+ *
+ * resolveRegistrationId() deliberately sees only LIVE registrations: handing a
+ * writer the id of one that was removed, superseded or absorbed would have the
+ * fold drop the entry it then appends, silently, which is the worst kind of
+ * answer a resolver can give.
+ *
+ * The backfill needs the other question. It records a `registered` entry for
+ * EVERY row on the tab including the dead ones (a Superseded row backfilled as
+ * though it were live is a second seat in the replay), so the id it mints for
+ * a cancelled row is dead the moment it exists — and a second slice asking the
+ * live index would find nothing, mint again, and write the duplicate history
+ * the design's own correction of 2026-09-23 is about. Asked this way, a row
+ * already recorded is recognized whatever state it ended in.
+ *
+ * ONE ID PER KEY, first wins. Two tab rows sharing one key are a duplicate
+ * registration, which is 85's problem and not this map's; the backfill claims
+ * the id for the first row and mints for the second, so the ledger reproduces
+ * the tab rather than quietly collapsing two rows into one.
+ */
+function ledgerRegistrationIdsByKey(fold) {
+  const map = getIndexMap(HEADERS.All_Registrants);
+  const byKey = {};
+  const states = (fold && fold.states) || {};
+  Object.keys(states).forEach(id => {
+    const state = states[id];
+    if (!state || !state.row) return;
+    const key = ledgerRegistrationKey_(state.row, map);
+    if (key && byKey[key] === undefined) byKey[key] = id;
+  });
+  return byKey;
+}
+
+
 // --- phase 2: the import's compose buffer -----------------------------------
 //
 // buildRegistrantRow() (29) is where the KIND is decided — the capacity check,

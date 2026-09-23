@@ -66,6 +66,15 @@
  * own sentence to — comparing it would report every cancellation in the
  * workbook as a disagreement, which is a bucket nobody would read twice).
  *
+ * AND `Registration_ID` IS DELIBERATELY NOT ON IT, which is the one exclusion
+ * worth stating on its own. It is the ledger's own bookkeeping rather than
+ * anything about the registration, and while the backfill (99o) is running the
+ * tab's column is blank on every row it has not reached yet while the fold's
+ * rows all carry one — so a naive per-column diff would put the entire
+ * workbook into bucket three and bury the real findings during exactly the
+ * month phase 4's gate is measured over. A blank there means "not yet
+ * backfilled", not a disagreement.
+ *
  * Widening this list is how a fold bug gets found; widening it to everything
  * is how the report stops being read.
  */
@@ -296,8 +305,9 @@ function describeLedgerVerification(result) {
 
   if (result.missingFromFold.length) {
     lines.push(`${result.missingFromFold.length} row(s) on ${SHEET_NAMES.REGISTRANT_DASH} have no ` +
-      `registration in the ledger. Until the one-time backfill has been run that is every row written ` +
-      `before the ledger existed; afterwards it is a writer that is not appending.`);
+      `registration in the ledger. Until the one-time backfill has been run (Admin \u25b8 One-Time Jobs \u25b8 ` +
+      `Back-fill the Registration Ledger) that is every row written before the ledger existed; ` +
+      `afterwards it is a writer that is not appending.`);
     ledgerVerifyList_(result.missingFromFold.map(r => r.said)).forEach(line => lines.push(`   • ${line}`));
   }
 
