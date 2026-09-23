@@ -195,6 +195,11 @@ function buildAppMenu(ui, includeAdmin) {
       // then press this. Section 83 says why marking and removing are two
       // steps. Its session-wide sibling stays behind Admin → Destructive.
       .addItem('\ud83d\uddd1\ufe0f Remove Marked Registrants\u2026', 'removeMarkedRegistrants')
+      // ITS OPPOSITE: registrations that went missing, read back out of an
+      // older copy of this workbook, reviewed by cause and put back. Ungated
+      // for the same reason as the item above \u2014 it lists every row by name
+      // before anything is written, and it only ever adds. See 99n.
+      .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', 'showRestoreRegistrantsFromCopyDialog')
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
