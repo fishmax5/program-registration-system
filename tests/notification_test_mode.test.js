@@ -155,14 +155,15 @@ check('a paused workbook diverts nothing', sent.length, 0);
 check('...and says paused', paused.status, 'paused');
 check('...and consumes it, exactly as the pause always has', ledgerWrites, 1);
 
-// --- Quiet hours do not hold a rehearsal ----------------------------------
-// The copy goes to the office that asked for it; holding it until 8am is a
-// rehearsal nobody sees.
+// --- Quiet hours hold a rehearsal too ------------------------------------
+// The office's 9-to-5 rule covers its own inbox: a diverted copy arrived at
+// 1:07am. Held as 'later', ledger untouched, so it diverts at 9am instead.
 sandbox.__stub({ testing: true, quiet: true });
 sandbox.resetCounters();
 sent.length = 0;
-sendRationedEmail(request());
-check('a rehearsal is not held by quiet hours', sent.length, 1);
+const quietOutcome = sendRationedEmail(request());
+check('a rehearsal is held by quiet hours', sent.length, 0);
+check('...as later', quietOutcome.retry, 'later');
 
 // --- No office addresses --------------------------------------------------
 sandbox.__stub({ testing: true, office: [] });

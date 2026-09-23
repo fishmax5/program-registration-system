@@ -1,5 +1,5 @@
 // ============================================================================
-// 9g. QUIET HOURS  (nothing leaves this workbook between 5pm and 8am)
+// 9g. QUIET HOURS  (nothing leaves this workbook between 5pm and 9am)
 // ============================================================================
 //
 // An hourly sync does not know what time it is for the person on the other
@@ -18,7 +18,7 @@
 //
 // A quiet-hours message is HELD, which is the opposite of what the pause does
 // with one (see THE PAUSE in section 9f). Nothing is recorded, so the caller's
-// ledger does not advance and the next hourly pass after 8am sends it. That is
+// ledger does not advance and the next hourly pass after 9am sends it. That is
 // the right answer here and the wrong one for the pause, because the pause
 // exists to THROW AWAY churn about registrations that never changed, while
 // quiet hours only ever mean "not yet".
@@ -37,7 +37,7 @@
 // The window is read in the WORKBOOK's timezone (TIMEZONE, section 07), not
 // the script's, because that is the timezone every date this system prints is
 // already in. It is half-open at both ends by the same rule — 17:00 is quiet,
-// 08:00 is not — so a trigger firing exactly on the hour has one answer and
+// 09:00 is not — so a trigger firing exactly on the hour has one answer and
 // not two.
 //
 // Numbered 99c, last for the usual reason: behavior only, its two constants stand
@@ -48,8 +48,11 @@
 /** The hour mail stops going out, in the workbook's timezone. 17 = 5pm. */
 const MAIL_QUIET_HOURS_START_HOUR = 17;
 
-/** The hour mail may go out again. 8 = 8am. Quiet hours run across midnight. */
-const MAIL_QUIET_HOURS_END_HOUR = 8;
+/**
+ * The hour mail may go out again. 9 = 9am. Quiet hours run across midnight.
+ * Office rule: email goes out between 9am and 5pm only (it was 8am).
+ */
+const MAIL_QUIET_HOURS_END_HOUR = 9;
 
 /**
  * Is it now — or at the moment given — inside the quiet window?
@@ -73,7 +76,7 @@ function isWithinMailQuietHours(now) {
   return hour >= MAIL_QUIET_HOURS_START_HOUR || hour < MAIL_QUIET_HOURS_END_HOUR;
 }
 
-/** "5:00 PM" / "8:00 AM", for the one sentence every caller says about this. */
+/** "5:00 PM" / "9:00 AM", for the one sentence every caller says about this. */
 function describeMailQuietHours() {
   const label = hour => {
     const h12 = hour % 12 === 0 ? 12 : hour % 12;

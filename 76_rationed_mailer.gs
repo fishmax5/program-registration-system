@@ -62,8 +62,8 @@
 // off.
 //
 // A SECOND, SEPARATE HOLD sits beside it: quiet hours (section 9g), which
-// stops everything between 5pm and 8am. It is the opposite kind of hold —
-// nothing is recorded and the first pass after 8am sends it — and the two
+// stops everything between 5pm and 9am. It is the opposite kind of hold —
+// nothing is recorded and the first pass after 9am sends it — and the two
 // read in that order, because a message the office has paused is not a
 // message anybody is waiting for at eight tomorrow.
 //
@@ -366,7 +366,7 @@ function normalizeBccList(bcc) {
  *   'duplicate'   alreadySent() said this one has already gone. Nothing spent.
  *   'held'        sending it would have crossed the caller's reserve, or it
  *                 is quiet hours (section 9g) and nothing leaves the workbook
- *                 between 5pm and 8am, or notification test mode diverted it
+ *                 between 5pm and 9am, or notification test mode diverted it
  *                 to the office. Nothing recorded: the message is still owed.
  *
  *                 `retry` SAYS WHICH, because those do not clear at the same
@@ -433,13 +433,30 @@ function sendRationedEmail(request) {
     return result;
   }
 
+  // ------------------------------------------------- QUIET HOURS
+  //
+  // HELD, NOT DROPPED, which is the one line that separates this from the
+  // pause above: recordSent() is NOT called, so the caller's ledger stays put
+  // and the first pass after 9am sends this. See section 9g.
+  //
+  // BEFORE TEST MODE, as of 2026-09-23: a rehearsal copy is still an email
+  // landing in the office's inboxes, and the office rule is 9am-5pm for ALL
+  // mail. A diverted digest arrived at 1:07am; holding it is 'later', and the
+  // test-mode ledger is untouched either way, so it diverts at 9am instead.
+  if (isWithinMailQuietHours()) {
+    result.status = 'held';
+    // The one hold that really does clear on its own, and soon: 9am.
+    result.retry = 'later';
+    result.error = mailQuietHoursReason();
+    log(`\ud83c\udf19 Held (quiet hours): "${req.subject || ''}" to ${to}.`);
+    return result;
+  }
+
   // ------------------------------------------- NOTIFICATION TEST MODE
   //
   // AFTER THE PAUSE (a workbook that is sending nothing at all has nothing to
-  // rehearse) AND BEFORE QUIET HOURS, deliberately: quiet hours exist so a
-  // member is not written to at 6am, and the diverted copy goes to the office
-  // that asked for it. Holding a rehearsal until 8am is a rehearsal nobody
-  // sees.
+  // rehearse) AND AFTER QUIET HOURS: the office's 9-to-5 rule covers the
+  // office's own inbox too.
   //
   // recordSent() IS NOT CALLED — the one line that separates this from the
   // pause above. A diverted message is still owed, so turning the switch off
@@ -474,20 +491,6 @@ function sendRationedEmail(request) {
     result.cost = 1;
     result.error = 'notification test mode — a copy went to the office instead';
     log(`🧪 Diverted to the office instead of ${to}: "${req.subject || ''}".`);
-    return result;
-  }
-
-  // ------------------------------------------------- QUIET HOURS
-  //
-  // HELD, NOT DROPPED, which is the one line that separates this from the
-  // pause above: recordSent() is NOT called, so the caller's ledger stays put
-  // and the first pass after 8am sends this. See section 9g.
-  if (isWithinMailQuietHours()) {
-    result.status = 'held';
-    // The one hold that really does clear on its own, and soon: 8am.
-    result.retry = 'later';
-    result.error = mailQuietHoursReason();
-    log(`\ud83c\udf19 Held (quiet hours): "${req.subject || ''}" to ${to}.`);
     return result;
   }
 

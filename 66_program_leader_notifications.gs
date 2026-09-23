@@ -973,6 +973,10 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
     if (!eventId || !date) return;
     const dateKey = liveEventDateKeys[eventId];
     if (dateKey < todayKey) return; // a session that already happened is never "before" any more
+    // A Waitlist_Only date takes no new Active registrations, so a "who is
+    // coming" countdown about it tells the leader nothing they can act on.
+    if (sessionMap['Waitlist_Only'] !== undefined &&
+        isWaitlistOnlyColumnValue(row[sessionMap['Waitlist_Only']])) return;
     const programKey = leaderProgramKey(row[sessionMap['Clean_Title']], row[sessionMap['Location']]);
     const maxDays = programMaxDays[programKey];
     if (maxDays === undefined) return;
@@ -1038,6 +1042,10 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
         if (dueDays <= 0 || s.daysAway > dueDays) return;
         const sentFor = ledger[s.eventId] || {};
         if (sentFor[leader.email.toLowerCase()]) return;
+        // An EMPTY roster is not news: "Nobody is registered yet" for a sheet
+        // that was merely created is mail about nothing. Not recorded, so the
+        // digest still goes out if somebody signs up before the day.
+        if (!(rosterByEvent[s.eventId] || []).length) return;
         const entry = registry[program.key] || {};
         sessions.push({
           eventId: s.eventId, date: s.date, dateKey: s.dateKey,
