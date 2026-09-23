@@ -176,6 +176,10 @@ function buildAppMenu(ui, includeAdmin) {
       // afternoon somebody has just pasted a list in and wants the number.
       .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', 'showMemberRollImportDialog')
       .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
+      // The list a leader hands over on the first day of term: one program,
+      // a pasted list, matched against the roll and reviewed before anything is
+      // written. Every write is Quick Mark's Register — see section 99n.
+      .addItem('\ud83d\udccb Add Registrants in Bulk (paste list)\u2026', 'showBulkRegistrantsDialog')
       // The same job one tab over, and deliberately NOT the same shape: a
       // duplicate on the roll is a person listed twice and safe to fold, a
       // duplicate REGISTRATION is a record of something that happened, so this
