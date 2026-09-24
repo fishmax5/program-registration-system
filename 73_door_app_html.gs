@@ -159,6 +159,18 @@ function buildDoorAppHtml(options) {
   ul.result li { background: #fff; border: 1px solid #E8EAED; border-radius: 8px; padding: 12px;
                  margin-bottom: 8px; font-size: 15px; line-height: 1.45; }
   .hide { display: none !important; }
+  /* THE ON-SCREEN KEYBOARD — for a tablet whose own keyboard is missing,
+     covers half the screen, or is locked away by a kiosk app. Off unless
+     setup turns it on; see the TOUCH KEYBOARD block in the script. */
+  #okb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+         background: #e8e8e8; border-top: 1px solid #bbb; padding: 6px 4px 10px; }
+  #okb .row { display: flex; justify-content: center; gap: 5px; margin-top: 5px; }
+  #okb button { flex: 1 1 0; max-width: 64px; min-height: 52px; font-size: 20px;
+                border: 1px solid #aaa; border-radius: 8px; background: #fff; color: #111; }
+  #okb button.wide { max-width: 160px; flex: 2 1 0; font-size: 16px; }
+  #okb button.space { max-width: 360px; flex: 6 1 0; }
+  #okb button.on { background: #333; color: #fff; }
+  body.okb-open { padding-bottom: 300px; }
 </style>
 
 <header>
@@ -177,6 +189,7 @@ function buildDoorAppHtml(options) {
 
 <main id="app" class="hide"></main>
 <div id="status"></div>
+<div id="okb" class="hide"></div>
 
 <script>
   var OPTS = JSON.parse(${inlineOptions});
@@ -396,6 +409,20 @@ function buildDoorAppHtml(options) {
     main.appendChild(button('plain', 'Use today', function () {
       document.getElementById('setupdate').value = OPTS.todayKey;
     }));
+
+    var kbWrap = document.createElement('label');
+    kbWrap.style.display = 'block';
+    kbWrap.style.margin = '16px 0';
+    var kbBox = document.createElement('input');
+    kbBox.type = 'checkbox';
+    kbBox.checked = KEYBOARD_ON;
+    kbBox.onchange = function () { setKeyboardOn(kbBox.checked); };
+    kbWrap.appendChild(kbBox);
+    kbWrap.appendChild(document.createTextNode(' Show touch screen keyboard'));
+    main.appendChild(el('h2', '', 'Keyboard'));
+    main.appendChild(el('p', 'hint',
+      'For a tablet whose own keyboard is hidden or gets in the way. Remembered on this tablet.'));
+    main.appendChild(kbWrap);
 
     var go = button('big', 'Start', function () {
       var day = document.getElementById('setupdate').value || OPTS.todayKey;
@@ -1339,6 +1366,117 @@ function buildDoorAppHtml(options) {
     return String(value == null ? '' : value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // TOUCH KEYBOARD. Per tablet, like the setup: a door tablet in kiosk mode
+  // often has no system keyboard at all, and one that has it covers the name
+  // list it is typing into. When on, every text box opens this instead
+  // (inputmode="none" keeps the system one away) and each key fires an
+  // 'input' event, so the search and the walk-in form see typing exactly as
+  // they would from a real keyboard.
+  var KEYBOARD_KEY = 'doorKeyboard:v1';
+  var KEYBOARD_ON = false;
+  try { KEYBOARD_ON = window.localStorage.getItem(KEYBOARD_KEY) === '1'; } catch (err) { KEYBOARD_ON = false; }
+  var KB_TARGET = null;
+  var KB_SHIFT = true;
+  var KB_NUMS = false;
+
+  function setKeyboardOn(on) {
+    KEYBOARD_ON = !!on;
+    try { window.localStorage.setItem(KEYBOARD_KEY, KEYBOARD_ON ? '1' : '0'); } catch (err) { /* private browsing */ }
+    if (!KEYBOARD_ON) hideKeyboard();
+  }
+
+  function keyboardWants(node) {
+    if (!node || node.tagName !== 'INPUT') return false;
+    var t = (node.type || 'text').toLowerCase();
+    return t === 'text' || t === 'search' || t === 'tel' || t === 'email' || t === 'password';
+  }
+
+  document.addEventListener('focusin', function (e) {
+    if (!KEYBOARD_ON || !keyboardWants(e.target)) return;
+    e.target.setAttribute('inputmode', 'none');
+    KB_TARGET = e.target;
+    var t = (KB_TARGET.type || '').toLowerCase();
+    KB_NUMS = t === 'tel' || KB_TARGET.id === 'pin';
+    KB_SHIFT = !KB_NUMS && !KB_TARGET.value;
+    drawKeyboard();
+  });
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () {
+      if (!keyboardWants(document.activeElement)) hideKeyboard();
+    }, 0);
+  });
+
+  function hideKeyboard() {
+    KB_TARGET = null;
+    document.getElementById('okb').className = 'hide';
+    document.body.classList.remove('okb-open');
+  }
+
+  function drawKeyboard() {
+    var box = document.getElementById('okb');
+    box.innerHTML = '';
+    var rows = KB_NUMS
+      ? [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['@', '0', '.', '-']]
+      : [['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+         ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', "'"],
+         ['z', 'x', 'c', 'v', 'b', 'n', 'm', '-', '.', '@']];
+    rows.forEach(function (keys) {
+      var row = el('div', 'row', '');
+      keys.forEach(function (k) {
+        var label = KB_SHIFT ? k.toUpperCase() : k;
+        row.appendChild(kbKey(label, '', function () { kbType(label); }));
+      });
+      box.appendChild(row);
+    });
+    var last = el('div', 'row', '');
+    last.appendChild(kbKey(KB_NUMS ? 'ABC' : '123', 'wide', function () { KB_NUMS = !KB_NUMS; drawKeyboard(); }));
+    if (!KB_NUMS) last.appendChild(kbKey('Shift', 'wide' + (KB_SHIFT ? ' on' : ''), function () { KB_SHIFT = !KB_SHIFT; drawKeyboard(); }));
+    last.appendChild(kbKey('space', 'space', function () { kbType(' '); }));
+    last.appendChild(kbKey('Delete', 'wide', kbBackspace));
+    last.appendChild(kbKey('Done', 'wide', function () { if (KB_TARGET) KB_TARGET.blur(); hideKeyboard(); }));
+    box.appendChild(last);
+    box.className = '';
+    document.body.classList.add('okb-open');
+  }
+
+  function kbKey(label, cls, fn) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    // mousedown/touch would otherwise take focus off the box being typed in.
+    b.onmousedown = function (e) { e.preventDefault(); };
+    b.ontouchstart = function (e) { e.preventDefault(); fn(); };
+    b.onclick = fn;
+    return b;
+  }
+
+  function kbType(ch) {
+    var t = KB_TARGET;
+    if (!t || !document.body.contains(t)) return hideKeyboard();
+    var v = t.value;
+    var a = t.selectionStart == null ? v.length : t.selectionStart;
+    var z = t.selectionEnd == null ? v.length : t.selectionEnd;
+    t.value = v.slice(0, a) + ch + v.slice(z);
+    try { t.setSelectionRange(a + ch.length, a + ch.length); } catch (err) { /* email boxes refuse */ }
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+    // Capitalize the start of each word — names are what is typed here.
+    var shiftNext = ch === ' ' || ch === '-';
+    if (!KB_NUMS && KB_SHIFT !== shiftNext && (t.type || '') !== 'email') { KB_SHIFT = shiftNext; drawKeyboard(); }
+  }
+
+  function kbBackspace() {
+    var t = KB_TARGET;
+    if (!t || !document.body.contains(t)) return hideKeyboard();
+    var v = t.value;
+    var a = t.selectionStart == null ? v.length : t.selectionStart;
+    var z = t.selectionEnd == null ? v.length : t.selectionEnd;
+    if (a === z && a > 0) a -= 1;
+    t.value = v.slice(0, a) + v.slice(z);
+    try { t.setSelectionRange(a, a); } catch (err) { /* email boxes refuse */ }
+    t.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   start();
