@@ -544,6 +544,9 @@ function refreshFormForNewDates(formId, group, configInfo) {
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
     { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
       isAssistance: group.isAssistance, dateLines: allDateLines }));
+  // A bare base: the calendar text and the description rows go back on in
+  // applyProgramFormExtensions() below (99t).
+  forgetFormDescriptionState(form.getId());
   // Re-asserted on every refresh, not only at creation: [Club] can be added to
   // (or taken off) a program's calendar events at any time, and the sign-up
   // options are the only place a respondent can act on that.
@@ -731,6 +734,9 @@ function configureCopiedRegistrationForm(form, group, configInfo, formTitle) {
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
     { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,
       isAssistance: group.isAssistance, dateLines: allDateLines }));
+  // A bare base: the calendar text and the description rows go back on in
+  // applyProgramFormExtensions() below (99t).
+  forgetFormDescriptionState(form.getId());
   applyAttendanceModeChoices(form,
     { isFixed: group.isFixed, isClub: group.isClub, programTitle: group.cleanTitle,
       isLunchOnly: group.isLunchOnly, isAssistance: group.isAssistance });
@@ -892,6 +898,9 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Calendar_Synced?']] = true;
     row[map['Event_ID']] = eventId;
     row[map['Calendar_Source']] = session.calendarId;
+    // What the top of the form says — see 99t. Kept current afterwards by
+    // reconcileEventDescriptionsFromCalendar().
+    row[map['Event_Description']] = eventDescriptionCellValue(calendarTextOfEvent(ev));
     return row;
   });
 

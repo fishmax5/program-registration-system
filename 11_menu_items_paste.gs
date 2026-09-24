@@ -1069,15 +1069,27 @@ function applyFormDescription(form, context, allDateLabels, lunchDateLabels, dat
       isAssistance: context.isAssistance,
       dateLines
     });
-  const wanted = applyDescriptionInjectionsToText(description, context);
-  // RECORDED EVEN WHEN NOTHING IS WRITTEN. This is the same block
-  // syncDescriptionInjectionsOnForm() strips before appending its own, and a
-  // rebuild that wrote one without recording it would leave that function
-  // stripping nothing and stacking a second copy underneath.
-  rememberDescriptionInjection(form.getId(), wanted.slice(description.length));
-  if (wanted === (form.getDescription() || '')) return false;
-  form.setDescription(wanted);
-  return true;
+  // The calendar text on top, the description rows around it (99t). A tab
+  // that will not read costs the rows, not the description: the base and the
+  // calendar text still go on, and nothing is recorded as settled, so the
+  // hourly check tries again.
+  let matching = [];
+  let settled = true;
+  try {
+    matching = questionsForFormContext(getProgramQuestionSpecs(), context);
+  } catch (err) {
+    settled = false;
+    log(`Could not read the description rows for form ${context.formId || ''} (${err}) — ` +
+      `the form keeps its plain description.`);
+  }
+  const parts = formDescriptionPartsForContext(context, matching);
+  // RECORDED EVEN WHEN NOTHING IS WRITTEN (inside writeComposedFormDescription).
+  // These are the blocks syncDescriptionInjectionsOnForm() strips before
+  // putting its own on, and a rebuild that wrote them without recording them
+  // would leave that function stripping nothing and stacking a second copy.
+  const written = writeComposedFormDescription(form, description, parts);
+  if (!settled) forgetFormDescriptionState(form.getId());
+  return written;
 }
 
 /** Records the description block this script last appended to one form. See syncDescriptionInjectionsOnForm(). */
