@@ -94,7 +94,11 @@ const ADMIN_GATED_ACTIONS = [
   // Withdraws every invitation from every upcoming event. There is no un-send
   // and no un-remove: the next sync re-invites only where the guest-list tick
   // on Program_Settings is still on, which is a separate decision. See 33.
-  'Remove All Calendar Invites'
+  'Remove All Calendar Invites',
+  // Repoints a dead form's sessions to another form, or takes its id out of
+  // every registry and ledger (99r). The review itself is read-only and open.
+  'Swap Unopenable Forms',
+  'Purge Unopenable Forms'
 ];
 
 /** Does this action still ask who is signed in? */

@@ -339,6 +339,7 @@ function buildAppMenu(ui, includeAdmin) {
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
       .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
+      .addItem('\ud83e\udea6 Review Unopenable Forms\u2026', 'showUnopenableFormsDialog') // 99r
       // THE DOCTOR'S FIRST FINDING, AS ITS OWN ITEM. The Doctor is a dialog
       // with several checks in it; this is the one repair people are sent to by
       // name — by the appointment-form notes (99), by the report beside it, and
