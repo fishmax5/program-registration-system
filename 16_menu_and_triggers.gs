@@ -147,12 +147,6 @@ function buildAppMenu(ui, includeAdmin) {
   const menu = ui.createMenu(APP_MENU_NAME)
     // --- A SERVING DAY. The whole of ordinary use, at the top, unnested. ---
     .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', menuFn_('showQuickMarkDialog'))
-    // The printed sheet and the tablet at the door are the other half of
-    // Quick Mark (section 16), used on exactly the days it is — grouped so the
-    // top of the menu stays one item per job.
-    .addSubMenu(ui.createMenu('\ud83d\udeaa Sign-In & Door')
-      .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
-      .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog')))
     .addSeparator()
     // --- THE WEEKLY JOBS, promoted out of their submenus. Each of these was
     // one click too deep for how often it is pressed: a leader's list on the
@@ -292,6 +286,11 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('Link Program Across Locations\u2026', menuFn_('linkProgramAcrossLocations'))
         .addItem('Move Sessions to Another Form\u2026', menuFn_('showRepointSessionsDialog'))))
     .addSeparator()
+    // The printed sheet and the tablet at the door: set up once and rarely
+    // pressed after (menu usage, 99r), so they sit below the everyday groups.
+    .addSubMenu(ui.createMenu('\ud83d\udeaa Sign-In & Door')
+      .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
+      .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog')))
     .addSubMenu(ui.createMenu('\u2699\ufe0f Settings & Fixes')
       // The two halves of "Update Everything Now", for the times one of them
       // is what you actually want. Diagnostic rather than daily, which is why
