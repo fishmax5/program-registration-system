@@ -218,6 +218,7 @@ function menu_showEventTagInspectorDialog() { recordMenuUsage_('showEventTagInsp
 function menu_showFixOneFormDialog() { recordMenuUsage_('showFixOneFormDialog'); return showFixOneFormDialog(); }
 function menu_showForkedFormsDialog() { recordMenuUsage_('showForkedFormsDialog'); return showForkedFormsDialog(); }
 function menu_showFormLinkDoctorDialog() { recordMenuUsage_('showFormLinkDoctorDialog'); return showFormLinkDoctorDialog(); }
+function menu_showUnopenableFormsDialog() { recordMenuUsage_('showUnopenableFormsDialog'); return showUnopenableFormsDialog(); }
 function menu_showLedgerVerificationReport() { recordMenuUsage_('showLedgerVerificationReport'); return showLedgerVerificationReport(); }
 function menu_showLunchMenuImportDialog() { recordMenuUsage_('showLunchMenuImportDialog'); return showLunchMenuImportDialog(); }
 function menu_showMemberRollImportDialog() { recordMenuUsage_('showMemberRollImportDialog'); return showMemberRollImportDialog(); }
