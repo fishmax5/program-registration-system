@@ -357,25 +357,14 @@ function applyAppointmentLunchQuestion(form, wantsLunch) {
 function syncDescriptionInjectionsOnForm(form, context, matching) {
   const formId = form.getId();
   const specs = matching || questionsForFormContext(getProgramQuestionSpecs(), context);
-  const injection = buildDescriptionInjectionText(specs);
-
-  const store = getAppliedCustomQuestions();
-  const entry = store[formId] || {};
-  const previous = String(entry.description || '');
-
-  const current = form.getDescription() || '';
-  let base = current;
-  if (previous && current.lastIndexOf(previous) === current.length - previous.length) {
-    base = current.slice(0, current.length - previous.length);
-  }
-
-  const wanted = `${base}${injection}`;
-  if (wanted !== current) form.setDescription(wanted);
-  if (previous === injection && wanted === current) return 0;
-
-  store[formId] = Object.assign({}, store[formId], { description: injection });
-  saveAppliedCustomQuestions(store);
-  return wanted === current ? 0 : 1;
+  // The calendar text at the top and the Below rows at the bottom — see 99r,
+  // which also holds how the top is stripped (by length and hash) the way the
+  // bottom always has been (by the exact text recorded here last time).
+  const parts = formDescriptionPartsForContext(context, specs);
+  const entry = getAppliedCustomQuestions()[formId] || {};
+  const base = stripRecordedDescriptionParts(form.getDescription() || '',
+    entry.description, getFormDescriptionState()[formId]);
+  return writeComposedFormDescription(form, base, parts) ? 1 : 0;
 }
 
 /**
@@ -410,7 +399,9 @@ function formContextFromGroup(group, formId) {
         : computeEventId(s.calendarId, group.cleanTitle, formatDateKey(start)),
       slotMinutes: group.slotMinutes || 0,
       location,
-      title: group.cleanTitle
+      title: group.cleanTitle,
+      // The event's own words, for the top of the form (99r).
+      calendarText: s.event ? calendarTextOfEvent(s.event) : ''
     };
   }).filter(Boolean);
 

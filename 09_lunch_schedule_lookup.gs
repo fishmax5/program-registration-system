@@ -281,7 +281,11 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
       eventId: String(row[map['Event_ID']] || '').trim(),
       slotMinutes: map['Slot_Minutes'] === undefined ? 0 : (Number(row[map['Slot_Minutes']]) || 0),
       location: String(row[map['Location']] || '').trim(),
-      title: String(row[map['Clean_Title']] || '').trim()
+      title: String(row[map['Clean_Title']] || '').trim(),
+      // The calendar event's own words, already cleaned (99r) — what the top
+      // of the form description says.
+      calendarText: map['Event_Description'] === undefined
+        ? '' : readEventDescriptionCell(row[map['Event_Description']]).trim()
     }))
     .filter(s => s.date)
     .sort((a, b) => a.date - b.date);

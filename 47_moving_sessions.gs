@@ -475,6 +475,8 @@ function configureFormFromSpec(form, spec, sessions, formTitle, context) {
   form.setDescription(buildFormDescription(locations, allDateLabels, spec.isFixed, lunchDateLabels.length > 0,
     { isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly,
       dateLines: allDateLines }));
+  // A bare base; the hourly form check puts the calendar text back on (99r).
+  forgetFormDescriptionState(form.getId());
   applyAttendanceModeChoices(form,
     { isFixed: spec.isFixed, isClub: spec.isClub, programTitle: spec.programTitle, isLunchOnly: spec.isLunchOnly });
   syncLunchQuestionsOnForm(form, locations, lunchDateLabels.length > 0, spec);

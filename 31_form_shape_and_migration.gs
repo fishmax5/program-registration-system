@@ -50,7 +50,19 @@ function refreshFormShapeForAllForms(registrySheet) {
     const shape = formLunchShapeKey(formContext, lunchDateLabels.length > 0);
     // The same hash refreshOneFormDateLabels() will store if it writes, so a
     // form that is already right is not opened at all.
-    if (fingerprints[formId] === computeFormLabelFingerprint(allDateLabels, lunchDateLabels, shape)) return;
+    if (fingerprints[formId] === computeFormLabelFingerprint(allDateLabels, lunchDateLabels, shape)) {
+      // THE LABELS ARE RIGHT; IS THE DESCRIPTION? The calendar text at its top
+      // (99r) moves with the calendar rather than the dates, so it has a
+      // fingerprint of its own — a hash compare, and a form opened only when
+      // the text it should carry has changed. This is also how every live form
+      // picks the calendar text up the first time, inside this pass's cap.
+      const described = formDescriptionWork_(formId, formContext);
+      if (!described) return;
+      if (opened >= FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN) { deferred++; return; }
+      opened++;
+      syncFormDescriptionFromContext(formId, formContext, described.matching);
+      return;
+    }
     if (opened >= FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN) { deferred++; return; }
     opened++;
     refreshOneFormDateLabels(formId, formRows, map, 'form check');
@@ -61,6 +73,23 @@ function refreshFormShapeForAllForms(registrySheet) {
         `${FORM_SHAPE_CHECK_MAX_FORMS_PER_RUN} forms).` : '.'));
   }
   flushPersistentRegistries();
+}
+
+/**
+ * { matching } when this form's description is out of date with its calendar
+ * text or its description rows, null when it is not — or when the tab will
+ * not read, in which case the form is left as it is rather than written from
+ * half an answer.
+ */
+function formDescriptionWork_(formId, formContext) {
+  try {
+    const matching = questionsForFormContext(getProgramQuestionSpecs(), formContext);
+    const parts = formDescriptionPartsForContext(formContext, matching);
+    return formDescriptionNeedsSync(formId, parts) ? { matching } : null;
+  } catch (err) {
+    log(`Could not work out the description for form ${formId} (${err}) — left as it is.`);
+    return null;
+  }
 }
 
 /** Former name of the pass above, kept so any existing trigger or hand-run call still reaches it. */
@@ -161,6 +190,7 @@ function rebuildFormFromCurrentTemplate(form, context) {
   form.setDescription(buildFormDescription(context.locations, allDateLabels, context.isFixed, lunchDateLabels.length > 0,
     { isClub: context.isClub, programTitle: context.programTitle, isLunchOnly: context.isLunchOnly,
       isAssistance: context.isAssistance, dateLines: allDateLines }));
+  forgetFormDescriptionState(form.getId()); // recomposed by applyProgramFormExtensions() below (99r)
 
   // THE DATE LABELS ARE THE ONE STEP THAT CANNOT BE SKIPPED. A rebuilt form's
   // grids hold the template's placeholder row until they are written, so a

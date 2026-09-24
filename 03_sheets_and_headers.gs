@@ -245,7 +245,12 @@ defineLazyGlobal_('HEADERS', () => ({
     'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
-    'Max_Per_Month'
+    'Max_Per_Month',
+    // The calendar event's description, cleaned of our links and tags — what
+    // the top of the form says (99r). LAST and hidden, for the same reason as
+    // Program_Questions' Description_Placement: existing rows read it as blank
+    // until the sync's reconcile pass fills it in.
+    'Event_Description'
   ],
   /**
    * Master_Program_Dashboard — ONE ROW PER PROGRAM (see SHEET_NAMES.PROGRAM_MONTH).
@@ -877,7 +882,12 @@ defineLazyGlobal_('HEADERS', () => ({
    */
   Program_Questions: [
     'Program', 'Location', 'Match_Keywords', 'Question', 'Type', 'Choices', 'Help_Text',
-    'Required', 'Sort', 'Active'
+    'Required', 'Sort', 'Active',
+    // LAST, so a tab already holding rows reads back aligned (a column the
+    // sheet does not have yet projects to blank — Below, the old behavior).
+    // Where a "Form description" row goes relative to the calendar event's own
+    // text at the top of the form: Above / Below (default) / Replace (99r).
+    'Description_Placement'
   ],
   /**
    * Assistance_Requests — people who want a personalized-assistance
@@ -1010,7 +1020,7 @@ const ASSISTANCE_REQUEST_STAFF_COLUMNS = ['Status', 'Scheduled_For', 'Staff_Note
 /** Program_Questions columns staff type into — which is all of them. */
 const PROGRAM_QUESTIONS_STAFF_COLUMNS = [
   'Program', 'Location', 'Match_Keywords', 'Question', 'Type', 'Choices', 'Help_Text',
-  'Required', 'Sort', 'Active'
+  'Required', 'Sort', 'Active', 'Description_Placement'
 ];
 
 /** The one column on Metrics a person types into. Carried across every recount. */
