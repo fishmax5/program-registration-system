@@ -156,8 +156,10 @@ function triageDeletedSessions(sessionRows, map, registrantsSheet) {
     });
   });
 
-  if (readableCalendars.size === 0) {
-    log('Triage skipped: no calendar could be read this run.');
+  // ANY unreadable calendar stops triage outright, not just all of them: a
+  // run that could not see one location is not a run to judge deletions on.
+  if (readableCalendars.size < Object.keys(CALENDAR_MAP).length) {
+    log('Triage skipped: at least one calendar could not be read this run — nothing was removed.');
     return empty;
   }
 

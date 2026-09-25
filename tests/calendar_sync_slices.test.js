@@ -59,7 +59,7 @@ const sandbox = {
     flush: () => {}
   },
   FormApp: { ItemType: {}, openById: () => { throw new Error('no form'); } },
-  CalendarApp: {}, DriveApp: {}, HtmlService: {},
+  CalendarApp: { getCalendarById: () => ({ getEvents: () => [] }) }, DriveApp: {}, HtmlService: {},
   LockService: { getScriptLock: () => ({ tryLock: () => LOCK_FREE, releaseLock: () => {} }) },
   Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'a@b.c' }) },
   ScriptApp: {

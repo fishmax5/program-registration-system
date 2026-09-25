@@ -482,6 +482,29 @@ function syncCalendarsInternal(options) {
   // most of the duplicate calendar triggers before that rule existed.
   withCalendarChangeTriggersPaused('sync', () => {
     try {
+      // A CALENDAR THAT CANNOT BE REACHED STOPS THE RUN. Every pass after this
+      // point (the import, triage, the link columns, the dashboards, and the
+      // registration sync that reads them an hour later) treats the calendar
+      // as the truth about which sessions exist — so a run that could not see
+      // one of them can only make the workbook WRONG, never more right. Bail
+      // out before anything is written, say so loudly, and leave every tab and
+      // every program registrant sheet exactly as it was; the next run that can
+      // reach every calendar carries on as normal.
+      const unreachable = findUnreachableCalendars_();
+      if (unreachable.length > 0) {
+        const names = unreachable.map(id => `"${CALENDAR_MAP[id] || id}" (${id})`).join(', ');
+        const message = `Calendar sync stopped before changing anything: could not reach ${names}. ` +
+          'No sessions, registrations or registrant sheets were touched. The next sync that can ' +
+          'reach every calendar picks up where this left off — check the calendar is still shared ' +
+          'with the account that owns the triggers.';
+        log(`🛑 ${message}`);
+        try { notifyAdminUrgent('Calendar sync stopped: calendar unreachable', message); }
+        catch (err) { log(`⚠️ Could not notify the office (${err}).`); }
+        summary = { calendarsUnreachable: unreachable, groupsProcessed: 0, eventsAdded: 0,
+          formsCreated: 0, formsReused: 0, groupsFailed: 0, outOfTime: false };
+        return;
+      }
+
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       migrateLegacySheetNames(ss);
       const registrySheet = getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD);
@@ -555,6 +578,17 @@ function syncCalendarsInternal(options) {
     }
   });
   return summary;
+}
+
+/**
+ * The configured calendars this run could NOT read (not found, not shared,
+ * or no calendar authorization in this context). Shares the one window fetch
+ * every other reader uses, so asking costs nothing extra.
+ */
+function findUnreachableCalendars_() {
+  const { start, end } = computeSyncDateRange();
+  const byCalendar = getCalendarEventsForWindow(start, end);
+  return Object.keys(CALENDAR_MAP).filter(id => !byCalendar[id]);
 }
 
 /**
