@@ -206,15 +206,38 @@ const LEADER_SHEET_HEADERS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
   'Phone', 'Email', 'Program_Status',
   'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
-  'Row_Key', 'Pushed_Snapshot'
+  'Row_Key', 'Pushed_Snapshot', 'Answers'
 ];
+
+/**
+ * THE ANSWERS TO THE PROGRAM'S OWN QUESTIONS (Program_Questions, `53`/`54`) —
+ * "What was your computer issue?" is asked FOR the leader, and until this
+ * column it stopped at the Registrants tab. Already stored there as one
+ * `Form_Answers` string ("Title: answer | Title: answer", `28`), so nothing on
+ * the import or the forms changed: this only carries it across, one question
+ * per LINE, because a leader reads it down a cell rather than along one.
+ *
+ * ONE column rather than one per question: a program's question set moves
+ * (a question added in October is not answered by September's registrants),
+ * and a column per title would reshape the sheet every time it did.
+ *
+ * LAST on the list, after the two hidden machine columns, and sync-owned: the
+ * pull reads this sheet by HEADER (readSimpleTable's projection), so a sheet
+ * written before this column existed reads it back blank and the leader-owned
+ * ticks are found exactly where they always were.
+ */
+function leaderSheetAnswersText(formAnswers) {
+  return String(formAnswers || '').split(' | ')
+    .map(part => part.trim()).filter(Boolean).join('\n');
+}
 
 /** Machine columns on the shared sheet. Hidden, never typed in — see writeProgramLeaderSheetTab(). */
 const LEADER_SHEET_HIDDEN_COLUMNS = ['Row_Key', 'Pushed_Snapshot'];
 
 /** What the shared sheet shows but the leader may not change — everything the sync owns. */
 const LEADER_SHEET_DERIVED_COLUMNS = [
-  'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status'
+  'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status',
+  'Answers'
 ];
 
 /**
@@ -529,7 +552,8 @@ function applyLeaderFlagCheckboxes_(name, ticks) {
  * band, a reworded banner note. Without it, a change to the drawing would
  * reach only the sheets whose rosters happened to move afterwards.
  */
-const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v1';
+// v2: the Answers column.
+const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v2';
 
 /**
  * WHAT THIS SHEET WOULD BE WRITTEN WITH, as one short string.
@@ -762,6 +786,9 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
     out[sheetMap['Phone']] = row[map['Phone']] || '';
     out[sheetMap['Email']] = row[map['Email']] || '';
     out[sheetMap['Program_Status']] = row[map['Program_Status']] || '';
+    // In the row, so in the fingerprint: a changed answer redraws the sheet.
+    out[sheetMap['Answers']] = map['Form_Answers'] === undefined
+      ? '' : leaderSheetAnswersText(row[map['Form_Answers']]);
     LEADER_OWNED_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
     out[sheetMap['Row_Key']] =
       leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
@@ -1181,6 +1208,9 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     if (dates) dates.setNumberFormat(DATE_DISPLAY_FORMAT);
     const sizes = rangeListFor(map['Party_Size'] + 1);
     if (sizes) sizes.setNumberFormat('0');
+    // One question per line — wrapped, or the lines collapse into one.
+    const answers = rangeListFor(map['Answers'] + 1);
+    if (answers) answers.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
     LEADER_OWNED_COLUMNS.forEach(name => {
       if (map[name] === undefined) return;
       const wash = rangeListFor(map[name] + 1);

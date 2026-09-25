@@ -235,7 +235,8 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS =
  * can offer it, and it is the whole reason the two lists are kept apart.
  */
 const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Club', 'No_Registration', 'Personalized_Assistance',
-  'Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month'];
+  'Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month',
+  'Event_Description'];
 const MANUAL_ENTRY_HEADER_COLOR = PALETTE.ENTRY_HEADER;
 const MANUAL_ENTRY_CELL_TINT = PALETTE.ENTRY_TINT;
 /**

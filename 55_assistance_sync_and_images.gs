@@ -668,6 +668,14 @@ function renderProgramQuestionsSheet(allRows) {
     'narrow TOGETHER: Location "Narberth" plus keyword "wills" means the\n' +
     'wills clinic at Narberth, not either of them.\n\n' +
     'Leave it blank not to narrow by keyword at all.');
+  headerNote('Description_Placement',
+    'For "Form description" rows only. The top of every form now carries the\n' +
+    'calendar event\'s own description (links and [tags] taken off).\n\n' +
+    '  Above calendar   — this wording first, then the calendar text\n' +
+    '  Below calendar   — the default (blank means this): at the end of the\n' +
+    '                     description, where these rows have always gone\n' +
+    '  Replace calendar — this wording INSTEAD of the calendar text\n\n' +
+    'Ignored by every other type.');
   return rows.length;
 }
 
@@ -813,7 +821,7 @@ function sendAssistanceRequestNotification(rows, map) {
 function applyProgramQuestionsValidation(sheet, rowCount) {
   return applyMemoryTabValidation(sheet, HEADERS.Program_Questions, rowCount, {
     checkboxes: ['Required', 'Active'],
-    lists: { Type: PROGRAM_QUESTION_TYPE_OPTIONS },
+    lists: { Type: PROGRAM_QUESTION_TYPE_OPTIONS, Description_Placement: FORM_DESCRIPTION_PLACEMENT_OPTIONS },
     openLists: {
       Program: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(listKnownProgramTitles()),
       Location: [PROGRAM_QUESTION_ALL_PROGRAMS].concat(Object.values(CALENDAR_MAP))

@@ -134,114 +134,129 @@ function buildAppMenu(ui, includeAdmin) {
   //   named groups, with everything irreversible collected behind one clearly
   //   labelled door instead of sitting a slot away from a report.
   //
+  //   Add Registrants in Bulk, Log Volunteer Hours and Build a Form Question
+  //   came UP to the top, beside the serving-day three: each is pressed every
+  //   week and was a submenu deep.
+  //
   // Nothing was removed. Every function that was on this menu is still on it.
+  //
+  // EVERY ITEM NAMES menuFn_('action'), never the action itself: that is the
+  // thin `menu_<action>` wrapper in 99r, which counts the click and then calls
+  // the action. A new item needs its wrapper there, and
+  // tests/menu_usage.test.js fails until it has one.
   const menu = ui.createMenu(APP_MENU_NAME)
     // --- A SERVING DAY. The whole of ordinary use, at the top, unnested. ---
-    .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', 'showQuickMarkDialog')
-    .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', 'showSignInSheetDialog')
-    // The tablet at the door is the other half of Quick Mark (section 16), and
-    // it is used on exactly the days those two are.
-    .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', 'showCheckInPageDialog')
+    .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', menuFn_('showQuickMarkDialog'))
+    .addSeparator()
+    // --- THE WEEKLY JOBS, promoted out of their submenus. Each of these was
+    // one click too deep for how often it is pressed: a leader's list on the
+    // first day of term, a volunteer at the desk, a question somebody wants on
+    // next week's form. They still belong to the jobs their old submenus name
+    // (see the comments there); they are up here because of how often, not
+    // what. Menu Usage (Admin ▸ Reports, 99r) is how the next such move is
+    // decided rather than guessed.
+    // The list a leader hands over on the first day of term: one program,
+    // a pasted list, matched against the roll and reviewed before anything is
+    // written. Every write is Quick Mark's Register — see section 99q.
+    .addItem('\ud83d\udccb Add Registrants in Bulk (paste list)\u2026', menuFn_('showBulkRegistrantsDialog'))
+    // A volunteer is not a registrant — see 99e and the note under Rosters &
+    // Sharing, where the tab itself still opens from.
+    .addItem('\ud83e\udd1d Log Volunteer Hours\u2026', menuFn_('showVolunteerHoursDialog'))
+    // WRITES a question (and says which forms it would reach before it does);
+    // "Update Program Questions on Forms" under Programs & Forms sends
+    // whatever the tab currently says.
+    .addItem('\u2795 Build a Form Question\u2026', menuFn_('showQuestionBuilderDialog'))
     .addSeparator()
     // ONE ITEM, NOT TWO. "Sync Cal" and "Sync Registrations" are a distinction
     // between two halves of one machine, and nobody outside this file should
     // have to hold it: what a person wants is for the workbook to catch up
     // with the calendar and the forms. Both still exist on their own under
     // Settings & Fixes for the times one of them is what you actually want.
-    .addItem('\ud83d\udd04 Update Everything Now', 'syncEverythingNow')
+    .addItem('\ud83d\udd04 Update Everything Now', menuFn_('syncEverythingNow'))
     // DIRECTLY UNDER IT, because this is the item somebody reaches for about
     // the item above. Half the menu here begins by asking whether it is
     // allowed to run — automation paused, a background job in flight — and
     // every one of those refusals used to be a toast nobody saw, which reads
     // as "the menu does nothing and gives no error". Ungated and read-only, so
     // it answers on exactly the workbook where nothing else will. See 99g.
-    .addItem('\u2753 Why did nothing happen?', 'reportWhyNothingHappened')
+    .addItem('\u2753 Why did nothing happen?', menuFn_('reportWhyNothingHappened'))
     .addSeparator()
     .addSubMenu(ui.createMenu('\ud83c\udf71 Lunch')
-      .addItem('Add Menu Items (paste/upload CSV)\u2026', 'showLunchMenuImportDialog')
+      .addItem('Add Menu Items (paste/upload CSV)\u2026', menuFn_('showLunchMenuImportDialog'))
       // Directly under the item that WRITES the menu, because it is what you
       // press next: typing a menu changes nothing out in the world until the
       // forms are told about it.
-      .addItem('Push Menu Changes to Forms', 'pushLunchMenuToForms')
+      .addItem('Push Menu Changes to Forms', menuFn_('pushLunchMenuToForms'))
       .addSeparator()
-      .addItem('Build / Refresh Lunch Sign-Up Forms', 'refreshLunchSignUpForms'))
+      .addItem('Build / Refresh Lunch Sign-Up Forms', menuFn_('refreshLunchSignUpForms')))
     .addSubMenu(ui.createMenu('\ud83d\udc69\u200d\ud83c\udfeb Rosters & Sharing')
       // On this submenu rather than under Settings, because a standing need is
       // roster work: it is what somebody has to know to serve the person, and
       // it is edited by the same people who keep the rosters.
-      .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', 'openRegularNeedsTab')
+      .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', menuFn_('openRegularNeedsTab'))
       // Beside the standing notes because it is the same tab's other half: who
       // the office knows, as against what it knows about them. The dedupe runs
       // on every write already (section 77) — this is the item for the
       // afternoon somebody has just pasted a list in and wants the number.
-      .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', 'showMemberRollImportDialog')
-      .addItem('Merge Duplicate Members Now', 'dedupeMemberRollNow')
-      // The list a leader hands over on the first day of term: one program,
-      // a pasted list, matched against the roll and reviewed before anything is
-      // written. Every write is Quick Mark's Register — see section 99q.
-      .addItem('\ud83d\udccb Add Registrants in Bulk (paste list)\u2026', 'showBulkRegistrantsDialog')
+      .addItem('\ud83d\udc65 Add Members to the Roll (paste/upload)\u2026', menuFn_('showMemberRollImportDialog'))
+      .addItem('Merge Duplicate Members Now', menuFn_('dedupeMemberRollNow'))
       // The same job one tab over, and deliberately NOT the same shape: a
       // duplicate on the roll is a person listed twice and safe to fold, a
       // duplicate REGISTRATION is a record of something that happened, so this
       // one lists what it found and merges only what somebody ticks. See
       // section 85.
-      .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', 'showDuplicateRegistrationsDialog')
+      .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', menuFn_('showDuplicateRegistrationsDialog'))
       .addSeparator()
       // THE OTHER PEOPLE IN THE BUILDING. A volunteer is not a registrant \u2014
       // they are working, not attending, and a good many of them are not at
       // either building \u2014 so their hours are a tab of their own. Filed here
       // because it is roster work: who was here and what they did. See 99e.
-      .addItem('\ud83e\udd1d Log Volunteer Hours\u2026', 'showVolunteerHoursDialog')
-      .addItem('\ud83e\udd1d Open the Volunteer Hours Tab', 'openVolunteerHoursTab')
+      .addItem('\ud83e\udd1d Open the Volunteer Hours Tab', menuFn_('openVolunteerHoursTab'))
       // THE ONE-ROW DELETE, beside the roll tools because it is the same job
       // at the other tab: a duplicate found while reading down a list. Mark
       // the rows on All_Registrants (Manual_Override → "Remove This Row"),
       // then press this. Section 83 says why marking and removing are two
       // steps. Its session-wide sibling stays behind Admin → Destructive.
-      .addItem('\ud83d\uddd1\ufe0f Remove Marked Registrants\u2026', 'removeMarkedRegistrants')
+      .addItem('\ud83d\uddd1\ufe0f Remove Marked Registrants\u2026', menuFn_('removeMarkedRegistrants'))
       // ITS OPPOSITE: registrations that went missing, read back out of an
       // older copy of this workbook, reviewed by cause and put back. Ungated
       // for the same reason as the item above \u2014 it lists every row by name
       // before anything is written, and it only ever adds. See 99p.
-      .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', 'showRestoreRegistrantsFromCopyDialog')
+      .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', menuFn_('showRestoreRegistrantsFromCopyDialog'))
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride
       // the hourly sync already — these are for when somebody does not want to
       // wait an hour.
-      .addItem('Share a Program Registrant Sheet\u2026', 'showProgramLeaderSheetDialog')
-      .addItem('Refresh Program Registrant Sheets Now', 'refreshProgramLeaderSheetsNow')
-      .addItem('Send Roster Change Alerts Now', 'sendProgramLeaderRosterAlertsNow')
+      .addItem('Share a Program Registrant Sheet\u2026', menuFn_('showProgramLeaderSheetDialog'))
+      .addItem('Refresh Program Registrant Sheets Now', menuFn_('refreshProgramLeaderSheetsNow'))
+      .addItem('Send Roster Change Alerts Now', menuFn_('sendProgramLeaderRosterAlertsNow'))
       // The countdown-channel twin of the item above — see Notify_Timing on
       // Program_Leaders for which leaders are on which.
-      .addItem('Send Roster Digests Now', 'sendProgramLeaderDayDigestsNow')
+      .addItem('Send Roster Digests Now', menuFn_('sendProgramLeaderDayDigestsNow'))
       .addSeparator()
-      .addItem('Personalized Assistance Schedule\u2026', 'showAssistanceScheduleDialog')
-      .addItem('Invite Registrants to Calendar Events\u2026', 'showCalendarInviteDialog')
+      .addItem('Personalized Assistance Schedule\u2026', menuFn_('showAssistanceScheduleDialog'))
+      .addItem('Invite Registrants to Calendar Events\u2026', menuFn_('showCalendarInviteDialog'))
       // Beside the invitations because they are the two channels one
       // Program_Settings row governs, and this is the one that can
       // say "your appointment is at 2:15". See sections 9e and 9h.
-      .addItem('Send Registrant Reminders Now', 'sendRegistrantRemindersNow'))
+      .addItem('Send Registrant Reminders Now', menuFn_('sendRegistrantRemindersNow')))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
       // else here is worth pressing. Everything below acts on one program;
       // this is how somebody finds out which. See section 14.
-      .addItem('\ud83d\udd0d Review Programs, Then Update Once\u2026', 'showProgramReviewDialog')
+      .addItem('\ud83d\udd0d Review Programs, Then Update Once\u2026', menuFn_('showProgramReviewDialog'))
       .addSeparator()
-      // ABOVE the push, because it is the half somebody does first: this
-      // WRITES a question (and says which forms it would reach before it
-      // does), the item below sends whatever the tab currently says.
-      .addItem('\u2795 Build a Form Question\u2026', 'showQuestionBuilderDialog')
-      .addItem('Update Program Questions on Forms', 'pushProgramQuestionsToForms')
+      .addItem('Update Program Questions on Forms', menuFn_('pushProgramQuestionsToForms'))
       .addSeparator()
       // The single-form repair staff actually reach for: one form has gone
       // wrong, and rebuilding every form on the workbook to correct it is a
       // sweep nobody wants to wait for. Same repair, same kept link.
-      .addItem('\ud83e\ude79 Update One Form (keeps its link)\u2026', 'showFixOneFormDialog')
+      .addItem('\ud83e\ude79 Update One Form (keeps its link)\u2026', menuFn_('showFixOneFormDialog'))
       // NAMED FOR WHAT IT DOES, not for the four columns it happens to read:
       // the ticks you made on the dashboard have not reached the calendar yet,
       // and this sends them.
-      .addItem('Push Dashboard Ticks to the Calendar', 'applyProgramTagChangesToCalendar')
+      .addItem('Push Dashboard Ticks to the Calendar', menuFn_('applyProgramTagChangesToCalendar'))
       // THE PER-SESSION TICK, IN BULK. Waitlist_Only is the one box on the
       // session table that means something about a DATE rather than a
       // program, and setting it meant finding each row on a tab of several
@@ -249,7 +264,7 @@ function buildAppMenu(ui, includeAdmin) {
       // on that program's dates — then offers its upcoming dates with a date
       // range beside them. It queues the calendar tag exactly as an edit
       // does, and it unticks as well as ticks. See 99m.
-      .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', 'showBulkWaitlistOnlyDialog')
+      .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', menuFn_('showBulkWaitlistOnlyDialog'))
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
       // sense together — a [Personalized Assistance] program is booked by time
@@ -258,75 +273,80 @@ function buildAppMenu(ui, includeAdmin) {
         // First: the one that walks the appointment MONTHS — the unit a form
         // actually covers — and says whether the form somebody is about to
         // hand out offers every date in it and every time on every date.
-        .addItem('Review Appointment Months\u2026', 'showAssistanceReviewDialog')
+        .addItem('Review Appointment Months\u2026', menuFn_('showAssistanceReviewDialog'))
         // Under it because it is the same job at the other altitude, and it
         // fixes the CALENDAR rather than the sheet: a day typed as one event
         // per appointment is not a form problem. See section 12.
-        .addItem('\u23f1\ufe0f Merge Half-Hour Blocks\u2026', 'showTimeBlockDialog')
+        .addItem('\u23f1\ufe0f Merge Half-Hour Blocks\u2026', menuFn_('showTimeBlockDialog'))
         .addSeparator()
-        .addItem('Rebuild Appointment Forms + Report\u2026', 'rebuildAssistanceFormsNow'))
+        .addItem('Rebuild Appointment Forms + Report\u2026', menuFn_('rebuildAssistanceFormsNow')))
       // THE TWO THAT MOVE SESSIONS BETWEEN FORMS. Rare, consequential, and
       // easy to press by mistake when they sit in a list of ordinary repairs.
       .addSubMenu(ui.createMenu('\ud83d\udd00 Move & Merge')
-        .addItem('Link Program Across Locations\u2026', 'linkProgramAcrossLocations')
-        .addItem('Move Sessions to Another Form\u2026', 'showRepointSessionsDialog')))
+        .addItem('Link Program Across Locations\u2026', menuFn_('linkProgramAcrossLocations'))
+        .addItem('Move Sessions to Another Form\u2026', menuFn_('showRepointSessionsDialog'))))
     .addSeparator()
+    // The printed sheet and the tablet at the door: set up once and rarely
+    // pressed after (menu usage, 99r), so they sit below the everyday groups.
+    .addSubMenu(ui.createMenu('\ud83d\udeaa Sign-In & Door')
+      .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
+      .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog')))
     .addSubMenu(ui.createMenu('\u2699\ufe0f Settings & Fixes')
       // The two halves of "Update Everything Now", for the times one of them
       // is what you actually want. Diagnostic rather than daily, which is why
       // they are here and not at the top.
-      .addItem('Sync Cal only', 'syncCalendars')
-      .addItem('Sync Registrations only', 'syncRegistrations')
+      .addItem('Sync Cal only', menuFn_('syncCalendars'))
+      .addItem('Sync Registrations only', menuFn_('syncRegistrations'))
       .addSeparator()
       // The \u21bb link inside the Quick Mark dialog does the same thing. This is
       // for the other order \u2014 rebuild the lists first, THEN walk to the desk.
-      .addItem('Rebuild Quick Mark Lists', 'rebuildQuickMarkListsNow')
+      .addItem('Rebuild Quick Mark Lists', menuFn_('rebuildQuickMarkListsNow'))
       // The month view is redrawn by every dashboard render; this is for
       // somebody who deleted the tab, or who wants it caught up without
       // waiting for the next sync. See 78_program_month_dashboard.gs.
-      .addItem('Rebuild the Program Month View', 'renderProgramMonthSheetNow')
+      .addItem('Rebuild the Program Month View', menuFn_('renderProgramMonthSheetNow'))
       // The check-in page queues its marks and a trigger writes them; this is
       // the "write them NOW" for somebody standing over the tab wondering
       // where this morning's ticks are. See flushCheckInQueue().
-      .addItem('Write Queued Check-Ins Now', 'flushCheckInQueueNow')
+      .addItem('Write Queued Check-Ins Now', menuFn_('flushCheckInQueueNow'))
       .addSeparator()
       // The Metrics tab writes itself on the 2nd of every month. This is for
       // the other order — somebody looking at the year-over-year block today
       // and wanting the month running counted in.
-      .addItem('\ud83d\udcc8 Update Metrics Now', 'refreshMetricsTabNow')
+      .addItem('\ud83d\udcc8 Update Metrics Now', menuFn_('refreshMetricsTabNow'))
       // A copy of the registrants tab in Drive, right now, for somebody about
       // to do something they are not sure about. The nightly one runs at 3am
       // on its own; this is the other order. See 99b.
-      .addItem('\ud83d\udcbe Save a Copy of the Registrants Tab', 'snapshotRegistrantsNow')
+      .addItem('\ud83d\udcbe Save a Copy of the Registrants Tab', menuFn_('snapshotRegistrantsNow'))
       .addSeparator()
-      .addItem('Show All Past Rows', 'showAllPastRows')
-      .addItem('Resize All Sheets', 'resizeAllSheets'));
+      .addItem('Show All Past Rows', menuFn_('showAllPastRows'))
+      .addItem('Resize All Sheets', menuFn_('resizeAllSheets')));
 
   if (includeAdmin) {
     menu.addSeparator().addSubMenu(ui.createMenu('\ud83d\udd27 Admin')
       // THE FOUR THAT ARE SAFE TO PRESS, at the top of the submenu. Each one
       // repairs something in place and none of them can lose data.
-      .addItem('\ud83e\uddf1 Rebuild Layout (no calendar sync)', 'rebuildLayoutFromSheet')
-      .addItem('\ud83d\udd17 Rewrite Event Links (fix duplicates)', 'rewriteEventRegistrationLinks')
+      .addItem('\ud83e\uddf1 Rebuild Layout (no calendar sync)', menuFn_('rebuildLayoutFromSheet'))
+      .addItem('\ud83d\udd17 Rewrite Event Links (fix duplicates)', menuFn_('rewriteEventRegistrationLinks'))
       // THE ANSWER TO "REGISTRATIONS STOPPED ARRIVING FROM ONE FORM". Run as
       // the account that made the forms \u2014 see openUpAllFormSharing().
-      .addItem('\ud83d\udd13 Open Up Form Sharing', 'openUpAllFormSharing')
+      .addItem('\ud83d\udd13 Open Up Form Sharing', menuFn_('openUpAllFormSharing'))
       // THE SAME REPAIR, OVER EVERY FILE THIS SYSTEM MAKES \u2014 registrant sheets,
       // sign-in documents, form images and the folders they sit in, not just
       // the forms. It carries ITSELF on across as many runs as it needs, so
       // there is nothing to press twice; see openUpAllGeneratedFileSharing()
       // (`89`).
-      .addItem('\ud83d\udd13 Open Up ALL File Sharing', 'openUpAllGeneratedFileSharing')
+      .addItem('\ud83d\udd13 Open Up ALL File Sharing', menuFn_('openUpAllGeneratedFileSharing'))
       // THE ONE THAT ANSWERS "WHY ISN'T THIS TAG WORKING". Every other item
       // here does something; this one only looks \u2014 at a calendar event, with
       // the sync's own parser \u2014 and says which brackets it read, which it
       // ignored, and whether the dashboard agrees. See section 4c-bis.
-      .addItem('\ud83c\udff7\ufe0f Read an Event\'s Tags\u2026', 'showEventTagInspectorDialog')
+      .addItem('\ud83c\udff7\ufe0f Read an Event\'s Tags\u2026', menuFn_('showEventTagInspectorDialog'))
       // THE WEEKEND, ON PURPOSE. A Saturday on a program calendar is as often
       // a rental or a placeholder as a program, so this lists the Sat/Sun
       // dates that are not loaded yet and loads only the ones somebody ticks.
       // It adds dates; it changes nothing about what the sync does. See 80.
-      .addItem('\ud83d\uddd3\ufe0f Load Weekend Events\u2026', 'showWeekendEventLoaderDialog')
+      .addItem('\ud83d\uddd3\ufe0f Load Weekend Events\u2026', menuFn_('showWeekendEventLoaderDialog'))
       .addSeparator()
       // EVERYTHING ABOUT A LINK THAT LOOKS WRONG, BEHIND ONE ITEM. There were
       // four here \u2014 check the tab against itself, check the calendar against
@@ -338,7 +358,8 @@ function buildAppMenu(ui, includeAdmin) {
       // each finding carrying its own button. The four functions are still
       // here and still work from the Apps Script editor; they are just no
       // longer four things to choose between. See section 6f-vi.
-      .addItem('\ud83e\ude7a Form & Link Doctor\u2026', 'showFormLinkDoctorDialog')
+      .addItem('\ud83e\ude7a Form & Link Doctor\u2026', menuFn_('showFormLinkDoctorDialog'))
+      .addItem('\ud83e\udea6 Review Unopenable Forms\u2026', menuFn_('showUnopenableFormsDialog')) // 99s
       // THE DOCTOR'S FIRST FINDING, AS ITS OWN ITEM. The Doctor is a dialog
       // with several checks in it; this is the one repair people are sent to by
       // name — by the appointment-form notes (99), by the report beside it, and
@@ -346,26 +367,26 @@ function buildAppMenu(ui, includeAdmin) {
       // always existed and was reachable only from inside the dialog or the
       // Apps Script editor, which is no use to somebody being told to press it.
       // Reads no calendar, rebuilds no form, and says what it will do first.
-      .addItem('\ud83d\udd17 Repair Dashboard Links (no calendar read)', 'repairDashboardLinks')
+      .addItem('\ud83d\udd17 Repair Dashboard Links (no calendar read)', menuFn_('repairDashboardLinks'))
       // THE CASE THE REPAIR ABOVE MUST NOT DECIDE. It assumes Form_ID is the
       // truth and the links drifted — right when a column slid, and exactly
       // wrong when a program is holding two near-identical forms and the
       // registrations are on the one the links open. Which is which is a fact
       // about response counts, not about the spreadsheet, so this one asks.
-      .addItem('\ud83d\udd00 Sessions Split Across Two Forms\u2026', 'showForkedFormsDialog')
+      .addItem('\ud83d\udd00 Sessions Split Across Two Forms\u2026', menuFn_('showForkedFormsDialog'))
       // NOT under "Destructive": it moves no link and rebuilds nothing — it
       // writes only the specific repairs a live form needs to match the
       // current template (FORM_STATE_MIGRATIONS). It is the thing to reach for
       // BEFORE "Rebuild Forms In Place", not after. The handler is still
       // called repairFormRoutingNow() because the first such repair was the
       // page routing; renaming it would strand the trigger that resumes it.
-      .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', 'repairFormRoutingNow')
+      .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', menuFn_('repairFormRoutingNow'))
       // BESIDE THE DOCTOR, because it is the other half of the same repair.
       // The Doctor puts a session row's Form_ID back on the form its link
       // opens; this reads what that form collected while the two disagreed,
       // which the ordinary sync never will — it reads from the sync clock, and
       // those responses are behind it. Adds only what is missing; see 99.
-      .addItem('\u267b\ufe0f Re-import a Form\'s Responses\u2026', 'showReimportFormDialog')
+      .addItem('\u267b\ufe0f Re-import a Form\'s Responses\u2026', menuFn_('showReimportFormDialog'))
       .addSeparator()
       // THE ONE-TIME JOBS, BEHIND ONE DOOR. Each of these is pressed once on a
       // workbook upgraded from an older version and never again — they catch
@@ -379,100 +400,107 @@ function buildAppMenu(ui, includeAdmin) {
         // before those links existed: it reads the PDF folder once and teaches
         // the registry about what is already in it. New PDFs register
         // themselves as they are built. See backfillSignInSheetRegistry().
-        .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', 'backfillSignInSheetRegistry')
+        .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', menuFn_('backfillSignInSheetRegistry'))
         // The same kind of job one tab over: every folder lookup used to create
         // at My Drive ROOT, so a year of forms, leader sheets and sign-in
         // documents can be sitting loose there. This files them under the
         // folder the workbook lives in. It moves files; it changes no link and
         // deletes nothing. See section 82.
-        .addItem('\ud83d\uddc2\ufe0f Organize Generated Files', 'organizeGeneratedFiles')
+        .addItem('\ud83d\uddc2\ufe0f Organize Generated Files', menuFn_('organizeGeneratedFiles'))
         // For a workbook upgraded from the version that put the office on every
         // event's guest list: it takes those addresses back off the upcoming
         // events (the office is mailed a digest instead now — see section 5b).
         // A run that hits its cap says so.
-        .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', 'removeAdminGuestsFromCalendarEvents')
+        .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', menuFn_('removeAdminGuestsFromCalendarEvents'))
         // Everything on the Registrants tab predates the registration ledger
         // (99k), so until this has been run the ledger's own check (99p) says
         // "not in the fold" about the whole workbook and can say nothing
         // useful. It records one entry per row, writes a hidden internal id
         // back onto each, changes nothing anybody reads, and is safe to run
         // twice. See 99o.
-        .addItem('\ud83d\udcd2 Back-fill the Registration Ledger', 'backfillLedgerFromTab')
+        .addItem('\ud83d\udcd2 Back-fill the Registration Ledger', menuFn_('backfillLedgerFromTab'))
         .addSeparator()
         // THE FIRST RUN, which is the one-time job by definition. It was filed
         // under "Setup & Reports" beside two read-only reports, which is how a
         // full import came to sit one slot from something that only measures.
-        .addItem('\ud83c\udfc1 Import Everything (First Run)', BOOTSTRAP_ENTRY_NAME))
+        .addItem('\ud83c\udfc1 Import Everything (First Run)', menuFn_(BOOTSTRAP_ENTRY_NAME)))
       // ARRANGEMENTS SOMEBODY MAKES BY HAND that the next rebuild would
       // otherwise undo. They belong together because that is the one thing
       // they have in common. See section 2a-ii.
       .addSubMenu(ui.createMenu('\ud83c\udfa8 Appearance')
-        .addItem('\ud83d\udccf Column Widths\u2026', 'showColumnWidthDialog')
-        .addItem('\ud83d\uddc2\ufe0f Save This Tab Order', 'saveCurrentTabOrder')
-        .addItem('Reset to the Built-In Tab Order', 'clearSavedTabOrder'))
+        .addItem('\ud83d\udccf Column Widths\u2026', menuFn_('showColumnWidthDialog'))
+        .addItem('\ud83d\uddc2\ufe0f Save This Tab Order', menuFn_('saveCurrentTabOrder'))
+        .addItem('Reset to the Built-In Tab Order', menuFn_('clearSavedTabOrder')))
       .addSubMenu(ui.createMenu('\u23f0 Triggers')
-        .addItem('Trigger Status', 'showTriggerStatus')
-        .addItem('Check Triggers', 'writeTriggers')
+        .addItem('Trigger Status', menuFn_('showTriggerStatus'))
+        .addItem('Check Triggers', menuFn_('writeTriggers'))
         // THE ESCAPE HATCH, OUT OF THE EDITOR. A multi-execution job whose run
         // was killed part-way leaves its state in flight, and everything gated
         // behind it declines for good — including the hourly syncs, if the job
         // was one that paused them. Standing it down was cancelBootstrapCalendars()
         // or cancelFormRebuildSweep() in the Apps Script editor, which is not
         // something a front desk can do. See 99g.
-        .addItem('\ud83e\uddf9 Clear a Stuck Background Job', 'clearStuckBackgroundJobs')
+        .addItem('\ud83e\uddf9 Clear a Stuck Background Job', menuFn_('clearStuckBackgroundJobs'))
         .addSeparator()
-        .addItem('Take Over Trigger Ownership', 'takeOverTriggerOwnership')
-        .addItem('Release My Triggers', 'releaseMyTriggers'))
+        .addItem('Take Over Trigger Ownership', menuFn_('takeOverTriggerOwnership'))
+        .addItem('Release My Triggers', menuFn_('releaseMyTriggers')))
       // REPORTS ONLY, now that the first-run import moved to One-Time Jobs
       // above — which is what lets the label promise that nothing in here
       // writes anything.
       .addSubMenu(ui.createMenu('\ud83d\udcc4 Reports')
         // Both READ-ONLY, and named so. They measure; they change nothing.
-        .addItem('Find Leftover Tabs (read-only report)', 'previewLegacyTabMerge')
+        .addItem('Find Leftover Tabs (read-only report)', menuFn_('previewLegacyTabMerge'))
         // "Nobody has signed up yet" is what a program registrant sheet says
         // about a class nobody booked AND about one whose rows never reached
         // it. This is which of the two, per sheet, and what to do about each.
         // See 99h.
-        .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', 'reportLeaderSheetRosters')
+        .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', menuFn_('reportLeaderSheetRosters'))
         // The registration ledger's own check (99p), run on every sync and
         // filed for the 10am digest — this is the same answer on demand, for
         // somebody standing in front of a roster that is missing a name. It
         // folds the ledger and reads the tab and writes nothing at all.
-        .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', 'showLedgerVerificationReport')
+        .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', menuFn_('showLedgerVerificationReport'))
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the
         // calendar ID is the whole question, so it is read first. See 84.
-        .addItem('Find Leftover Calendar Rows (read-only report)', 'reportOrphanedSessionRows')
+        .addItem('Find Leftover Calendar Rows (read-only report)', menuFn_('reportOrphanedSessionRows'))
         // Its sibling fault: not a row from a calendar that left, but two rows
         // for one date under one Event_ID — which everything downstream reads
         // as one session, so the second row's counts are stale forever. See 99l.
-        .addItem('Find Duplicate Session Rows (read-only report)', 'reportDuplicateSessionRows')
-        .addItem('Archive Old Months (report)', 'reportArchivableMonths')
+        .addItem('Find Duplicate Session Rows (read-only report)', menuFn_('reportDuplicateSessionRows'))
+        .addItem('Archive Old Months (report)', menuFn_('reportArchivableMonths'))
         // The check nothing else in the project makes: a form holding
         // responses that NO session row names, which is to say a form nobody
         // is importing. It is silent by construction — the import walks the
         // Form_ID column, so a form missing from it is not read and not
         // missed. See 99.
-        .addItem('Find Forms Nothing Is Importing (read-only report)', 'reportUnimportedForms')
+        .addItem('Find Forms Nothing Is Importing (read-only report)', menuFn_('reportUnimportedForms'))
         // The question one level in from that one: a form IS being read, and a
         // response on it still never became a row. Read-only like the three
         // above it, and ungated for the same reason — the person who noticed
         // the missing name is the person who should be able to press it.
         // See 99d.
-        .addItem('Find Missing Registrations (read-only report)', 'reportMissingRegistrations')
+        .addItem('Find Missing Registrations (read-only report)', menuFn_('reportMissingRegistrations'))
         // The same silence one tab over: a question aimed at a program title
         // nothing answers to is a question that appears on no form at all,
         // and the tab shows it ticked Active either way. Suggests, never
         // re-binds — see findUnmatchedProgramQuestionRows() (53).
-        .addItem('Find Questions Aimed At Nothing (read-only report)', 'reportOrphanedProgramQuestions')
+        .addItem('Find Questions Aimed At Nothing (read-only report)', menuFn_('reportOrphanedProgramQuestions'))
         // The year's volunteer hours, by person \u2014 the figure the centre is
         // credited on. Read-only and ungated like the four above it. See 99e.
-        .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', 'reportVolunteerHours')
+        .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', menuFn_('reportVolunteerHours'))
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.
-        .addItem('\ud83d\udce8 Send the Office Digest Now', 'sendOfficeDigestNow'))
+        .addItem('\ud83d\udce8 Send the Office Digest Now', menuFn_('sendOfficeDigestNow'))
+        .addSeparator()
+        // Which of everything above (and on the rest of this menu) anybody
+        // actually presses — the evidence the next reorganization should start
+        // from. Read-only and ungated like the reports beside it; the reset
+        // asks first. See 99r.
+        .addItem('\ud83d\udcca Menu Usage (read-only report)', menuFn_('showMenuUsageReport'))
+        .addItem('Reset Menu Usage Counts\u2026', menuFn_('resetMenuUsage')))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
       // sit interleaved with the repairs above \u2014 "Delete Registrations" was
@@ -483,28 +511,28 @@ function buildAppMenu(ui, includeAdmin) {
         // Directly above its destructive twin on purpose: this is the one to
         // pick once links are out in the world, and the pairing is the only
         // place the difference between them is visible at a glance.
-        .addItem('\ud83e\ude79 Rebuild Forms In Place (keeps links)\u2026', 'rebuildAllFormsInPlace')
-        .addItem('\ud83d\udca3 Destroy & Rebuild Forms\u2026', 'destroyAndRebuildAllForms')
+        .addItem('\ud83e\ude79 Rebuild Forms In Place (keeps links)\u2026', menuFn_('rebuildAllFormsInPlace'))
+        .addItem('\ud83d\udca3 Destroy & Rebuild Forms\u2026', menuFn_('destroyAndRebuildAllForms'))
         .addSeparator()
-        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', 'showDeleteRegistrationsDialog')
+        .addItem('\ud83d\uddd1\ufe0f Delete Registrations\u2026', menuFn_('showDeleteRegistrationsDialog'))
         // Takes every session row off a calendar this workbook no longer
         // reads. Registrants go to Triage rather than being deleted and no
         // form is touched, but a whole location can leave the table in one
         // press \u2014 which is what puts it here. Read the report first. See 84.
-        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', 'removeOrphanedSessionRows')
+        .addItem('\ud83e\uddf9 Remove Leftover Calendar Rows\u2026', menuFn_('removeOrphanedSessionRows'))
         // Gentler than the item above and here for the company it keeps: it
         // removes rows only where another row already carries the same
         // Event_ID, merges what each held onto the one that stays, and moves
         // nobody to Triage — the surviving row keeps the Event_ID every
         // registration is attached to. See 99l.
-        .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', 'removeDuplicateSessionRows')
+        .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', menuFn_('removeDuplicateSessionRows'))
         .addSeparator()
         // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
         // Jobs takes the OFFICE off; this takes everybody off, which is why it
         // is behind this door instead. It asks first and it is re-runnable.
         // See section 5d.
-        .addItem('\ud83d\udcc5 Remove ALL Calendar Invitations\u2026', 'removeAllCalendarInvitesFromEvents')
-        .addItem('\u21a9\ufe0f Start the Invitation Removal Over', 'resetRemoveAllCalendarInvitesSweep')));
+        .addItem('\ud83d\udcc5 Remove ALL Calendar Invitations\u2026', menuFn_('removeAllCalendarInvitesFromEvents'))
+        .addItem('\u21a9\ufe0f Start the Invitation Removal Over', menuFn_('resetRemoveAllCalendarInvitesSweep'))));
   } else {
     // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
     // execution contexts cannot resolve the signed-in account at all — and
@@ -512,7 +540,7 @@ function buildAppMenu(ui, includeAdmin) {
     // can open the workbook and find no Admin submenu. Clicking a menu ITEM
     // always runs fully authorized, so this re-checks and rebuilds. A
     // non-admin who clicks it just gets told no.
-    menu.addSeparator().addItem('\ud83d\udd27 Admin Tools (sign-in check)\u2026', 'showAdminMenu');
+    menu.addSeparator().addItem('\ud83d\udd27 Admin Tools (sign-in check)\u2026', menuFn_('showAdminMenu'));
   }
 
   menu.addToUi();

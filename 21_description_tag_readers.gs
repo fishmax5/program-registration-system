@@ -672,6 +672,8 @@ function importCalendarGroups(registrySheet, options) {
     // rather than sets — see reconcileAssistanceSessionSettings().
     reconcileAssistanceSessionSettings(registrySheet, work.allGroups || []);
     applyNoRegistrationEffects(registrySheet, work.allGroups || []);
+    // The event's own words, for the top of its form — see 99t.
+    reconcileEventDescriptionsFromCalendar(registrySheet, work.allGroups || []);
   });
 
   const summary = {

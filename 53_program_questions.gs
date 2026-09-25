@@ -436,6 +436,10 @@ function readProgramQuestionRow(row, map, reserved, index) {
       program, location, keywords, title, kind, choices, imageFileId,
       scale: kind === 'SCALE' ? parseQuestionScale(row[map['Choices']]) : null,
       help: String(row[map['Help_Text']] || '').trim(),
+      // Where a "Form description" row sits relative to the calendar's own
+      // text (99t). Read for every row and meaningful for that one kind only.
+      placement: normalizeDescriptionPlacement(
+        map['Description_Placement'] === undefined ? '' : row[map['Description_Placement']]),
       // A notice, an image and a description collect nothing, so Required
       // cannot apply to them however the cell is filled in — see
       // questionTypeIsDisplayOnly().
@@ -510,8 +514,11 @@ function questionsForFormContext(specs, context) {
  * they came to.
  */
 function buildDescriptionInjectionText(specs) {
+  // BELOW-CALENDAR ROWS ONLY — the ones that always went here. Above and
+  // Replace rows go into the top part instead; see composeFormDescriptionParts().
   const blocks = (specs || [])
     .filter(spec => questionTypeIsDescription(spec.kind))
+    .filter(spec => normalizeDescriptionPlacement(spec.placement) === FORM_DESCRIPTION_PLACEMENTS.BELOW)
     .map(spec => String(spec.help || spec.title || '').trim())
     .filter(Boolean);
   return blocks.length === 0 ? '' : `\n\n${blocks.join('\n\n')}`;
