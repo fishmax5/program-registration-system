@@ -2430,6 +2430,23 @@ function handleMemberRollEdit(e, sheet) {
     return;
   }
 
+  if (map['Name'] !== undefined && ['Phone', 'Email'].some(h =>
+    map[h] !== undefined && col === map[h] + 1 && e.range.getNumRows() === 1)) {
+    const field = col === map['Phone'] + 1 ? 'Phone' : 'Email';
+    const person = String(sheet.getRange(row, map['Name'] + 1).getValue() || '').trim();
+    const value = String(e.value === undefined ? '' : e.value).trim();
+    if (!person || !value) return; // a cleared cell is refilled by the refresh; nothing to carry
+    const touched = withScriptLock(DESK_LOCK_WAIT_MS,
+      () => carryMemberRollContactToRegistrants(person, field, value), -1);
+    if (touched < 0) {
+      toastIfPossible(`⚠️ The workbook is mid-update — ${person}'s ${field} was not carried to their ` +
+        'registrations and the next sync will put the old one back. Type it again in a minute.');
+    } else {
+      toastIfPossible(`✏️ ${person}'s ${field} is now ${value} on ${touched} registration row(s).`);
+    }
+    return;
+  }
+
   if (map['Display_Name'] === undefined || map['Name'] === undefined) return;
   if (col !== map['Display_Name'] + 1) return;
   const corrected = String(e.value === undefined ? '' : e.value).trim();
@@ -2459,4 +2476,63 @@ function handleMemberRollEdit(e, sheet) {
   }
   const changed = applyMemberNameCorrection(current, corrected);
   toastIfPossible(`✏️ "${current}" is now "${corrected}" — ${changed} cell(s) updated.`);
+}
+
+/**
+ * A PHONE OR EMAIL TYPED ON MEMBER_ROLL HAS TO LAND WHERE THE ROLL IS READ FROM.
+ *
+ * The roll's Phone/Email are not stored answers: refreshMemberRoll() (40)
+ * rebuilds them on every sync from the newest registrant row carrying one. So
+ * a correction typed on the roll alone was put back within the hour by the
+ * very row it was correcting — and the reminders, which read the REGISTRANT
+ * row, never saw it at all.
+ *
+ * So the correction goes onto that person's rows instead: every upcoming one
+ * (the rows mail is actually sent from — 99a's changeRegistrantContact rule),
+ * plus their single most recent row whatever its date, because that is the
+ * row the refresh takes its answer from when nothing is upcoming. Older past
+ * rows stay as the record of how we reached them at the time. A LATER form
+ * submission with a different address still wins, which is right: that is the
+ * person telling us something newer than the correction.
+ *
+ * Caller holds the script lock. Returns how many rows changed.
+ */
+function carryMemberRollContactToRegistrants(personName, field, value) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
+  const map = getIndexMap(HEADERS.All_Registrants);
+  const rows = getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID');
+  const nameKey = normalizeNameKey(personName);
+  const todayKey = formatDateKey(new Date());
+
+  let latest = null;
+  let latestKey = '';
+  const targets = [];
+  rows.forEach(row => {
+    if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
+    if (isSupersededRegistrantRow(row, map)) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    const key = date ? formatDateKey(date) : '';
+    if (key && key >= todayKey) targets.push(row);
+    if (!latest || key > latestKey) { latest = row; latestKey = key; }
+  });
+  if (latest && targets.indexOf(latest) === -1) targets.push(latest);
+
+  let touched = 0;
+  targets.forEach(row => {
+    if (String(row[map[field]] || '').trim() === value) return;
+    row[map[field]] = value;
+    row[map['Manual_Override']] = 'Manually Edited';
+    const entry = ledgerEntryForCorrection_(row, map,
+      ledgerColumnsPayload_(row, map, [field, 'Manual_Override']),
+      { source: LEDGER_SOURCES.SHEET_EDIT, note: `${field} corrected on ${SHEET_NAMES.MEMBER_ROLL}.` });
+    if (entry) appendLedgerEntry(entry);
+    touched++;
+  });
+  if (touched > 0) {
+    renderRegistrantsSheet(false, rows);
+    invalidateQuickMarkIndexCache();
+  }
+  log(`carryMemberRollContactToRegistrants: ${personName} ${field} → ${value} on ${touched} row(s).`);
+  return touched;
 }
