@@ -253,5 +253,59 @@ ok('a date already closed arrives ticked',
   ok('an empty selection changes nothing', /⚠/.test(msg), msg);
 }
 
+// --- why nothing happened, said and logged --------------------------------
+//
+// The reported fault: the item "changes nothing and logs nothing". Every way
+// Apply can decline now comes back to the dialog AND lands in the log, the
+// commonest (a sync holding the workbook) says so, and two quieter causes no
+// longer happen at all — a tab missing a column is named rather than refused
+// blind, and a cell holding a formula still matches the text it displays.
+vm.runInContext('this.__logs = []; log = function (m) { this.__logs.push(String(m)); }.bind(this);', sandbox);
+const logged = re => sandbox.__logs.some(l => re.test(l));
+{
+  sandbox.__logs.length = 0;
+  sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, []);
+  ok('a refusal is logged, not only shown', logged(/applyBulkWaitlistOnly: .*Nothing was selected/),
+    JSON.stringify(sandbox.__logs));
+}
+{
+  sandbox.__logs.length = 0;
+  const realLock = sandbox.LockService.getScriptLock;
+  sandbox.LockService.getScriptLock = () => ({ tryLock: () => false, releaseLock: () => {} });
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  sandbox.LockService.getScriptLock = realLock;
+  ok('a busy workbook says a sync is running, and nothing was changed',
+    /A sync is running/.test(msg) && /nothing was changed/.test(msg), msg);
+  ok('...and that is logged too', logged(/A sync is running/), JSON.stringify(sandbox.__logs));
+}
+{
+  // A tab whose header row predates the column: the dialog lists dates from
+  // the canonical layout, so it opens — and Apply must say what is wrong.
+  const wl = col('Waitlist_Only');
+  const saved = [grid[2][wl], grid[10][wl]];
+  grid[2][wl] = 'Something_Else';
+  grid[10][wl] = 'Something_Else';
+  sandbox.invalidateSectionedRowsCache(sheet);
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  grid[2][wl] = saved[0];
+  grid[10][wl] = saved[1];
+  sandbox.invalidateSectionedRowsCache(sheet);
+  ok('a missing column is named, with what to do', /missing Waitlist_Only/.test(msg) && /Sync Cal/.test(msg), msg);
+}
+{
+  // A title cell holding a formula reads back as its text through values and
+  // as the formula through the grid this pass writes — it must match on text.
+  sandbox.__queued.length = 0;
+  const title = col('Clean_Title');
+  const saved = grid[3][title];
+  grid[3][title] = '=HYPERLINK("https://example.test","Chair Yoga")';
+  sandbox.invalidateSectionedRowsCache(sheet);
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  grid[3][title] = saved;
+  sandbox.invalidateSectionedRowsCache(sheet);
+  ok('a title held in a formula still matches the program it displays',
+    /1 date\(s\) reopened/.test(msg) && sandbox.__queued.length === 1, msg);
+}
+
 console.log(failures === 0 ? '\nAll bulk waitlist tests passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

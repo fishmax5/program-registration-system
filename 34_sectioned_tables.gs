@@ -633,28 +633,36 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // 99j_registrant_safety_net.gs for why this tab in particular. The order is
   // load-bearing twice over: before invalidateSectionedRowsCache(), so the
   // guard's count is the memoized read the render already paid for, and
-  // before clear(), so a refusal leaves the tab exactly as it was.
+  // before the early write below, so a refusal leaves the tab exactly as it was.
   if (opts.guardMarker) guardRegistrantRowLoss_(sheet, headers, opts.guardMarker, allRows);
   // Belt and braces: writeUpcomingPastSections() below drops this tab's cached
-  // reads too, but the clear() happens first and a throw in between would
-  // otherwise leave the old rows cached against an emptied tab.
+  // reads too, but the early write happens first and a throw in between would
+  // otherwise leave the old rows cached against a rewritten tab.
   invalidateSectionedRowsCache(sheet);
-  sheet.clear();
+
+  const todayKey = formatDateKey(new Date());
+  const dateColIdx = headers.indexOf('Event_Date');
+  const { upcoming, past } = partitionByDate(allRows, dateColIdx, todayKey);
+
+  // WRITE BEFORE CLEARING. The new rows land in one call, where the render
+  // below will put them, before anything is wiped — so a run killed mid-render
+  // leaves this tab holding its rows rather than nothing. Validations go
+  // first because a value landing under an old rule that rejects it throws.
+  // See 99u_write_before_clear.gs.
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  const tableStart = opts.startRow || 1;
+  writeTabValuesBeforeRender_(sheet,
+    [sectionedTableValueBlock_(tableStart, headers, upcoming, past, opts)]);
   sheet.clearFormats();
   // Row visibility is a sheet-level property that survives clear(), exactly
   // like column visibility below — so last render's hidden old-month range
   // has to be released before this render decides its own.
   showAllRows(sheet);
   sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   // Column visibility is a sheet-level property that survives clear(), so a
   // tab whose hidden-column list has changed needs it re-asserted, not
   // inherited. applyColumnVisibility() (called from the afterWrite hooks)
   // shows everything not currently on the list.
-
-  const todayKey = formatDateKey(new Date());
-  const dateColIdx = headers.indexOf('Event_Date');
-  const { upcoming, past } = partitionByDate(allRows, dateColIdx, todayKey);
 
   // opts.startRow leaves room above the tables for a fixed block written by
   // the caller afterwards. Nothing uses it today — the Registrants tab's Quick
@@ -668,6 +676,7 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // See 97_render_batching.gs.
   const result = withRenderBatch(sheet, headers.length, () => {
     const written = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
+    checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(tableStart), written.upcomingHeaderRow);
     freezeRowsSafely(sheet, written.upcomingHeaderRow);
     if (opts.afterWrite) opts.afterWrite(sheet, headers, written);
     return written;

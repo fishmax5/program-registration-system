@@ -12,6 +12,11 @@
 //     renderFlatDateSheet()     ->  sheet.clear()                  // wipe
 //                               ->  writeUpcomingPastSections()    // rewrite
 //
+// (Since 99u there is no clear(): the new rows are written over the old in
+// one call before any formatting is wiped, so a run KILLED mid-render no
+// longer leaves the tab empty. What follows is still true of a SHORT array —
+// writing it first only means the short version lands sooner.)
+//
 // Read-self, wipe, rewrite. Every registration in the building depends on ONE
 // in-memory array being complete at the instant of that clear(). Anything that
 // makes the array short — a partial read, an over-broad tombstone match, a

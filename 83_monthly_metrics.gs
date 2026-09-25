@@ -593,7 +593,19 @@ function writeMetricsSheet(sheet, rows, now) {
   const numCols = headers.length;
   const summary = buildYearOverYearSummary(rows, now);
 
-  sheet.clear();
+  // WRITE BEFORE CLEARING. This is the one tab in the workbook that is a
+  // RECORD rather than a projection, so a run killed between a clear and the
+  // rows' write lost months nothing can recount. The month-by-month table
+  // lands first at the row the draw below will use (under the banner, a blank
+  // row, and the two summary tables with a blank row after each); the
+  // summaries themselves are left blank here and drawn as they always were.
+  // See 99u_write_before_clear.gs.
+  const ordered = rows.slice().sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  const historyBannerRow = 3 + (1 + summary.indicators.length) + 1 + (1 + summary.thisMonth.length) + 1;
+  writeTabValuesBeforeRender_(sheet, [
+    { row: historyBannerRow + 1, values: [headers.slice()] },
+    { row: historyBannerRow + 2, values: ordered }
+  ]);
   sheet.clearFormats();
   sheet.getBandings().forEach(b => b.remove());
 
@@ -633,8 +645,9 @@ function writeMetricsSheet(sheet, rows, now) {
   labelManualEntryColumns(sheet, headerRow, headers, METRICS_STAFF_COLUMNS);
   row++;
 
-  // Newest first: the month somebody opens this tab to read is the last one.
-  const ordered = rows.slice().sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+  // Newest first: the month somebody opens this tab to read is the last one
+  // (`ordered`, sorted above for the early write).
+  checkPredictedTableRow_(sheet, historyBannerRow + 1, headerRow);
   if (ordered.length > 0) {
     sheet.getRange(row, 1, ordered.length, numCols).setValues(ordered);
     const map = getIndexMap(headers);

@@ -909,10 +909,17 @@ function writeMemoryTab(sheet, headers, rows, options) {
   // Member_Roll and Program_Settings are read with the same sectioned readers
   // as the date-bearing tabs, and this is the only thing that rewrites them.
   invalidateSectionedRowsCache(sheet);
-  sheet.clear();
+  // WRITE BEFORE CLEARING — the banner, the header and every row land in one
+  // call before anything is wiped, so a run killed mid-draw leaves the roll
+  // on the tab. See 99u_write_before_clear.gs.
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [
+    { row: MEMORY_TAB_BANNER_ROW, values: [[options.banner]] },
+    { row: MEMORY_TAB_HEADER_ROW, values: [headers.slice()] },
+    { row: MEMORY_TAB_DATA_ROW, values: rows }
+  ]);
   sheet.clearFormats();
   sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, options.banner, { note: options.bannerNote });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);

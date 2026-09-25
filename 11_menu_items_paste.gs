@@ -198,6 +198,13 @@ function harvestPastedMenuRows(sheet, add) {
   // everything else — so the accepted rows are now in the table above and the
   // block is empty.
   const merged = upsertLunchScheduleRows(parsed.rows);
+  if (!merged) {
+    // Nothing was written and nothing was redrawn, so every pasted row is
+    // still in the add area exactly as it was typed.
+    explainRefusal('A sync is running, so the menu rows were not added yet — they are still in the add area. ' +
+      'Edit any cell there in a minute and they will go in.');
+    return;
+  }
 
   // Put the rejects back into the fresh block so they can be corrected in
   // place rather than silently lost. Its row numbers moved with the render,
@@ -344,6 +351,15 @@ function parseLunchMenuGrid(grid) {
  * Does not render; callers do that once at the end.
  */
 function upsertLunchScheduleRows(newRows) {
+  // UNDER THE WORKBOOK LOCK: this reads Lunch_Schedule and redraws it whole,
+  // and both of its callers (a paste on the tab, and the paste dialog) run
+  // outside any lock — beside an hourly sync redrawing the same tab, one of
+  // the two writes would have been lost. Answers null when a sync holds the
+  // workbook, having written nothing; the callers say so.
+  return withScriptLock(SYNC_LOCK_WAIT_MS, () => upsertLunchScheduleRowsLocked_(newRows), null);
+}
+
+function upsertLunchScheduleRowsLocked_(newRows) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_SCHEDULE);
   const headers = HEADERS.Lunch_Schedule;
@@ -594,6 +610,7 @@ function importLunchMenuCsv(text) {
   }
 
   const merged = upsertLunchScheduleRows(parsed.rows);
+  if (!merged) return '⚠️ A sync is running, so nothing was added. Press "Add to Lunch_Schedule" again in a minute.';
   log(`importLunchMenuCsv: ${merged.added} added, ${merged.updated} updated, ${parsed.rejects.length} skipped.`);
 
   const parts = [`${merged.added} added`];
@@ -847,6 +864,20 @@ function describeLunchPushOutcome(scope, stats) {
  * put in a newsletter rather than in an hour.
  */
 function refreshLunchSignUpForms() {
+  // UNDER THE WORKBOOK LOCK, like pushLunchMenuNow() beside it. This reads the
+  // session table and rewrites it whole (syncLunchOnlySessions() mints the
+  // lunch rows and redraws), so run beside an hourly sync it was two
+  // processes rewriting one tab from two different reads, which duplicates
+  // rows or loses them depending on which finishes last.
+  const result = withScriptLock(SYNC_LOCK_WAIT_MS, () => refreshLunchSignUpFormsLocked_(), null);
+  if (result === null) {
+    explainRefusal('Another sync is running, so the lunch sign-up forms were not rebuilt. Try again in a minute.');
+    return 0;
+  }
+  return result;
+}
+
+function refreshLunchSignUpFormsLocked_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) {

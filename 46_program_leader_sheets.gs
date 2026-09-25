@@ -1077,17 +1077,44 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
   const numCols = headers.length;
   const map = getIndexMap(headers);
 
-  sheet.clear();
+  // The grid to write, and — built in the same pass — where the bands landed
+  // and which stretches of it are registrants. Everything after this works off
+  // those three, so the layout is decided exactly once — and decided BEFORE
+  // the sheet is touched, because it is also what the early write lands.
+  const grid = [];
+  const bandRowNumbers = [];
+  const runs = [];
+  groupLeaderSheetRowsBySession(rows, map).forEach(group => {
+    const band = new Array(numCols).fill('');
+    band[map['Event_Date']] = leaderSheetSessionBandLabel(group);
+    bandRowNumbers.push(MEMORY_TAB_DATA_ROW + grid.length);
+    grid.push(band);
+
+    runs.push({ start: MEMORY_TAB_DATA_ROW + grid.length, count: group.rows.length });
+    group.rows.forEach(row => grid.push(row));
+  });
+
+  const bannerText = `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`;
+
+  // WRITE BEFORE CLEARING. This is somebody else's live roster: a run killed
+  // between a clear() and the rows' write left a leader holding a link to an
+  // empty sheet — the "Nobody has signed up yet" this file's banner spends a
+  // page on. The banner, the header and every row now land in one call first.
+  // See 99u_write_before_clear.gs.
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [
+    { row: MEMORY_TAB_BANNER_ROW, values: [[bannerText]] },
+    { row: MEMORY_TAB_HEADER_ROW, values: [headers.slice()] },
+    { row: MEMORY_TAB_DATA_ROW, values: rows.length === 0 ? [[LEADER_SHEET_EMPTY_ROSTER_TEXT]] : grid }
+  ]);
   sheet.clearFormats();
   sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
   // The program and where it runs. The refresh stamp and the "tick the
   // yellow columns" instruction are a note: this sheet goes to a program leader
   // who reads the top line to check they have opened the right one, and a
   // heading that is three facts joined by bullets is not a top line.
-  writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols,
-    `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`,
+  writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, bannerText,
     { note: leaderSheetBannerNote() });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
   labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
@@ -1104,22 +1131,6 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, numCols));
     return;
   }
-
-  // The grid to write, and — built in the same pass — where the bands landed
-  // and which stretches of it are registrants. Everything after this works off
-  // those three, so the layout is decided exactly once.
-  const grid = [];
-  const bandRowNumbers = [];
-  const runs = [];
-  groupLeaderSheetRowsBySession(rows, map).forEach(group => {
-    const band = new Array(numCols).fill('');
-    band[map['Event_Date']] = leaderSheetSessionBandLabel(group);
-    bandRowNumbers.push(MEMORY_TAB_DATA_ROW + grid.length);
-    grid.push(band);
-
-    runs.push({ start: MEMORY_TAB_DATA_ROW + grid.length, count: group.rows.length });
-    group.rows.forEach(row => grid.push(row));
-  });
 
   // Before the values, never after — a bare "10:00 AM" that Sheets is
   // allowed to read as a time stops being those words. See stampTextColumns().

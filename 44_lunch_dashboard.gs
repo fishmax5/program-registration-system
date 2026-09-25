@@ -1022,22 +1022,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   const numCols = headers.length;
 
   invalidateSectionedRowsCache(sheet);
-  sheet.clear();
-  sheet.clearFormats();
-  showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
-  // ...and so do row heights. Everything above the schedule is re-measured
-  // from scratch every render and changes size when the pinned block does, so
-  // it starts flat and the writers below make tall only what they use.
-  resetRowHeights(sheet, 1, plan.scheduleStartRow + 1);
-  sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
 
-  writeLunchSignUpBlock(sheet, plan, numCols, signUpRows);
-
-  writeSectionBanner(sheet, plan.todayBannerRow, numCols,
-    `📋 TODAY'S LUNCH — ${Utilities.formatDate(new Date(), TIMEZONE, 'EEEE, MMM d, yyyy')}`,
-    { hero: true });
-  writeSectionHeader(sheet, plan.todayHeaderRow, TODAY_LUNCH_HEADERS.length, TODAY_LUNCH_HEADERS);
   const todayMap = getIndexMap(TODAY_LUNCH_HEADERS);
 
   const todayKey = formatDateKey(new Date());
@@ -1069,6 +1054,29 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   };
   upcoming.forEach((row, i) => assignRowKeyAndFormula(row, upcomingDataStart + i));
   past.forEach((row, i) => assignRowKeyAndFormula(row, pastDataStart + i));
+
+  // WRITE BEFORE CLEARING — see renderFlatDateSheet() and 99u. Everything
+  // above this line is arithmetic; nothing has touched the tab yet. The
+  // schedule lands at plan.scheduleStartRow, formulas and all, and the
+  // sign-up and Today blocks above it are left blank for the writers below.
+  const scheduleLabels = { upcomingLabel: '📊 Upcoming Lunch Schedule', pastLabel: '📊 Past Lunch Schedule' };
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet,
+    [sectionedTableValueBlock_(plan.scheduleStartRow, headers, upcoming, past, scheduleLabels)]);
+  sheet.clearFormats();
+  showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
+  // ...and so do row heights. Everything above the schedule is re-measured
+  // from scratch every render and changes size when the pinned block does, so
+  // it starts flat and the writers below make tall only what they use.
+  resetRowHeights(sheet, 1, plan.scheduleStartRow + 1);
+  sheet.getBandings().forEach(b => b.remove());
+
+  writeLunchSignUpBlock(sheet, plan, numCols, signUpRows);
+
+  writeSectionBanner(sheet, plan.todayBannerRow, numCols,
+    `📋 TODAY'S LUNCH — ${Utilities.formatDate(new Date(), TIMEZONE, 'EEEE, MMM d, yyyy')}`,
+    { hero: true });
+  writeSectionHeader(sheet, plan.todayHeaderRow, TODAY_LUNCH_HEADERS.length, TODAY_LUNCH_HEADERS);
 
   const locations = Object.values(CALENDAR_MAP);
   const todayRows = locations.map(loc => {
@@ -1126,9 +1134,8 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
   // where the scope is the table's full width, so nothing it writes is inside
   // a declared band and every one of its calls goes straight through.
   const result = withRenderBatch(sheet, numCols, () => {
-    const result = writeUpcomingPastSections(sheet, plan.scheduleStartRow, headers, upcoming, past, {
-      upcomingLabel: '📊 Upcoming Lunch Schedule', pastLabel: '📊 Past Lunch Schedule'
-    });
+    const result = writeUpcomingPastSections(sheet, plan.scheduleStartRow, headers, upcoming, past,
+      scheduleLabels);
     if (result.upcomingDataStart !== upcomingDataStart || result.pastDataStart !== pastDataStart) {
       log(`⚠️ Master_Lunch_Dashboard row math mismatch — Total_to_Order cross-references may be off. ` +
         `Expected upcoming@${upcomingDataStart}/past@${pastDataStart}, got upcoming@${result.upcomingDataStart}/past@${result.pastDataStart}.`);

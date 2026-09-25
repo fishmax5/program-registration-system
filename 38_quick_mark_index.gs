@@ -277,20 +277,19 @@ function writeSheetQuickMarkIndex(index) {
       chunks.push([packed.substring(i, i + QUICK_MARK_INDEX_CHUNK_CHARS)]);
     }
 
-    sheet.clear();
-    sheet.getRange(1, 1).setValue(
-      `⚙️ Quick Mark's lists, pre-built so the dialog opens without a wait. Do not edit — ` +
-      `it is rewritten by every registrations sync. Built ${index.builtAt}.`);
-    sheet.getRange(2, 1).setValue(
-      `${index.sessions.length} session(s), ${index.members.length} name(s), ` +
-      `${(index.needs || []).length} regular need(s).`);
-    if (sheet.getMaxRows() < QUICK_MARK_INDEX_FIRST_ROW + chunks.length) {
-      sheet.insertRowsAfter(sheet.getMaxRows(),
-        QUICK_MARK_INDEX_FIRST_ROW + chunks.length - sheet.getMaxRows());
-    }
-    if (chunks.length > 0) {
-      sheet.getRange(QUICK_MARK_INDEX_FIRST_ROW, 1, chunks.length, 1).setValues(chunks);
-    }
+    // ONE write, blanks padded over whatever the last index held — never a
+    // clear() followed by the chunks, which a killed run left as an empty tab
+    // (and a stale-but-whole index is worth more than none). See 99u.
+    sheet.clearFormats();
+    writeTabValuesBeforeRender_(sheet, [
+      { row: 1, values: [[
+        `⚙️ Quick Mark's lists, pre-built so the dialog opens without a wait. Do not edit — ` +
+        `it is rewritten by every registrations sync. Built ${index.builtAt}.`]] },
+      { row: 2, values: [[
+        `${index.sessions.length} session(s), ${index.members.length} name(s), ` +
+        `${(index.needs || []).length} regular need(s).`]] },
+      { row: QUICK_MARK_INDEX_FIRST_ROW, values: chunks }
+    ]);
     // Hidden LAST, and never fatal: a lone or active tab cannot be hidden, and
     // a visible machine tab is untidy rather than broken.
     try { sheet.hideSheet(); } catch (err) { /* fine */ }

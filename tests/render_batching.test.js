@@ -31,6 +31,7 @@ const assert = require('assert');
 const vm = require('vm');
 const { readSource } = require('./helpers/source');
 const { makeCountingSheet, roundTrips } = require('./helpers/counting_sheet');
+const { checkWriteBeforeClear } = require('./helpers/write_before_clear');
 
 const NOW = new Date(2026, 8, 9, 9, 0, 0); // Wed 9 Sep 2026
 const RealDate = Date;
@@ -428,6 +429,22 @@ const callsNamed = (sheet, name) => sheet.calls.filter(c => c.name === name);
   assert.ok(repeat < 120,
     `a re-render of a settled tab should stay near a hundred round trips, was ${repeat}`);
   assert.ok(rows.length > 300, 'measured on a tab big enough for the number to mean something');
+}
+
+// ---------------------------------------------------------------------------
+// WRITE BEFORE CLEARING (99u). A tab that held more than this render will
+// write — more rows, more columns — is never cleared: the rows land first, in
+// the place the render puts them, and nothing old survives.
+// ---------------------------------------------------------------------------
+{
+  const grid = [];
+  const sheet = makeCountingSheet(grid, 'All_Registrants');
+  sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
+    getSheetByName: n => (n === 'All_Registrants' ? sheet : null), getSheets: () => [sheet], toast: () => {}
+  });
+  const rows = buildRows(4, 3);
+  checkWriteBeforeClear('All_Registrants', sheet, grid, () => render(sheet, rows),
+    { expectRows: rows.map(r => r.slice(0, 3)) });
 }
 
 console.log('✅ render_batching.test.js passed');

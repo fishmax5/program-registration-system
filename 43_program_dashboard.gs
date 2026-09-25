@@ -974,11 +974,21 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
 function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force) {
   invalidateEventTimeIndex(); // the session table's times are about to be rewritten
   invalidateSectionedRowsCache(sheet); // ...and its rows with them
-  sheet.clear();
+
+  // WRITE BEFORE CLEARING — see renderFlatDateSheet() and 99u. The session
+  // table lands at the row the render below will put it (under the Today
+  // block: banner, header, one row per location, spacer); the Today block
+  // itself is left blank here and drawn by the render as it always was.
+  const todayRowCount = todayData.length;
+  const sessionTableStart = 4 + todayRowCount;
+  const partitioned = partitionByDate(sessionRows, map['Event_Date'], formatDateKey(new Date()));
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [sectionedTableValueBlock_(sessionTableStart, headers,
+    partitioned.upcoming, partitioned.past,
+    { upcomingLabel: '🔜 Upcoming Sessions', pastLabel: '🕓 Past Sessions' })]);
   sheet.clearFormats();
   showAllRows(sheet); // see renderFlatDateSheet() — hidden rows outlive clear()
   sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   // NOTES OUTLIVE clear(), like hidden rows and validations do, and this tab
   // now carries a dozen of them explaining the metric columns. They are
   // written at whatever row the block lands on, and that row MOVES — a
@@ -1043,6 +1053,7 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // 97_render_batching.gs.
   const result = withRenderBatch(sheet, headers.length, () =>
     writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, todayDataStart, todayRowsOut));
+  checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(sessionTableStart), result.upcomingHeaderRow);
 
   // THROUGH THE SESSION TABLE'S HEADER ROW, like every other tab in this
   // workbook — not through the Today block, which is where this used to stop.

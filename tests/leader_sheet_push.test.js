@@ -24,6 +24,7 @@ const assert = require('assert');
 const vm = require('vm');
 const { readSource } = require('./helpers/source');
 const { makeCountingSheet, roundTrips } = require('./helpers/counting_sheet');
+const { checkWriteBeforeClear } = require('./helpers/write_before_clear');
 
 const RealDate = Date;
 const NOW = new RealDate(2026, 8, 9, 9, 0, 0).getTime();
@@ -184,7 +185,10 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   washes.forEach(w => assert.strictEqual(w.ranges.length, 3, 'covering all three session runs'));
 
   // The rows themselves: a band row, then its people, per session.
-  const grid = callsNamed(sheet, 'setValues').find(c => c.rows > 1).args[0];
+  // The render's own write at the data row — not the early write from row 1
+  // that lands the same rows before anything is cleared (99u).
+  const grid = callsNamed(sheet, 'setValues')
+    .find(c => c.rows > 1 && c.row === sandbox.MEMORY_TAB_DATA_ROW).args[0];
   assert.strictEqual(grid.length, 3 * (1 + 2), 'three bands and six people');
   assert.strictEqual(grid[0][map['Name']], '', 'the first row is a band, not a person');
   assert.strictEqual(grid[1][map['Name']], 'Person 0-0');
@@ -342,6 +346,26 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(skipped, 0, 'a sheet that is empty because nobody signed up is still skipped');
   assert.ok(roundTrips(quiet.stats) - before <= 2,
     'and still costs the refresh stamp and no more — the tab is not even read');
+}
+
+// ---------------------------------------------------------------------------
+// WRITE BEFORE CLEARING (99u). A leader's roster is never an empty sheet for
+// the length of a redraw: banner, header, bands and people land in one call
+// first, where the redraw then puts them — and so does the empty-roster line.
+// ---------------------------------------------------------------------------
+{
+  const entry = { title: 'Chair Yoga', location: 'Ashbridge' };
+  const grid = [];
+  const sheet = makeCountingSheet(grid, 'Sign_Up_Sheet');
+  const rows = rosterRows(3, 2);
+  checkWriteBeforeClear('registrant sheet', sheet, grid,
+    () => sandbox.writeProgramLeaderSheetTab(sheet, entry, rows),
+    { expectRows: rows.map(r => r.slice(0, 2)) });
+
+  const emptyGrid = [];
+  const empty = makeCountingSheet(emptyGrid, 'Sign_Up_Sheet');
+  checkWriteBeforeClear('empty registrant sheet', empty, emptyGrid,
+    () => sandbox.writeProgramLeaderSheetTab(empty, entry, []));
 }
 
 console.log('✅ leader_sheet_push.test.js passed');

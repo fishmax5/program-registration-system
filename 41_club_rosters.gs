@@ -316,6 +316,7 @@ function handleClubMembersEdit(e, sheet) {
   }
 
   const cancelled = cancelUpcomingClubRegistrations({ clubKey, club, name, personType });
+  if (cancelled === null) return; // the workbook was busy, and the person has been told
   if (cancelled === 0) {
     toastIfPossible(`${name} taken off "${club}". They had no upcoming bookings to cancel.`);
     return;
@@ -345,12 +346,11 @@ function cancelUpcomingClubRegistrations(args) {
 
   const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
-  const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const todayKey = formatDateKey(new Date());
   const nameKey = normalizeNameKey(name);
   const isSharedClub = clubKey.indexOf(`${SHARED_LOCATION_SCOPE}::`) === 0;
 
-  const targets = rows.filter(row => {
+  const findTargets = rows => rows.filter(row => {
     if (normalizeNameKey(row[map['Name']]) !== nameKey) return false;
     if (String(row[map['Person_Type']] || 'Attendee').trim() !== personType) return false;
     const d = coerceDate(row[map['Event_Date']]);
@@ -361,34 +361,55 @@ function cancelUpcomingClubRegistrations(args) {
     return rowKey === clubKey;
   });
 
-  if (targets.length === 0) return 0;
+  // Counted for the question only. The rows that are CHANGED are read again
+  // under the lock below: this is a read-modify-write of the whole tab, and
+  // one begun from a stale read while an hourly sync was writing it put back
+  // the sync's rows as they were before it — or lost them.
+  const preview = findTargets(getSectionedRows(sheet, headers, 'Event_ID'));
+  if (preview.length === 0) return 0;
 
   if (!confirmConsequentialAction(`Cancel ${name}'s upcoming ${club || 'club'} bookings?`,
-    `${name} has ${targets.length} upcoming registration(s) that came from their ${club || 'club'} membership.\n\n` +
+    `${name} has ${preview.length} upcoming registration(s) that came from their ${club || 'club'} membership.\n\n` +
     `They will be marked Cancelled (not deleted) and taken out of the catering counts. ` +
     `Answer No to leave those bookings alone — they will simply stop being renewed.`, false)) {
     return 0;
   }
 
-  const stamp = `Cancelled on ${formatDateLabel(new Date())}: taken off the ${club || 'club'} list.`;
-  targets.forEach(row => {
-    row[map['Program_Status']] = 'Cancelled';
-    row[map['Lunch_Status']] = 'Cancelled';
-    row[map['Manual_Override']] = 'Manually Edited';
-    const notes = String(row[map['Admin_Notes']] || '').trim();
-    row[map['Admin_Notes']] = notes ? `${notes} | ${stamp}` : stamp;
-  });
+  // THE LOCK IS TAKEN AFTER THE ANSWER, never around the question: a dialog
+  // somebody walks away from must not hold every sync in the building.
+  const cancelled = withScriptLock(SYNC_LOCK_WAIT_MS, () => {
+    invalidateSectionedRowsCache(sheet);
+    const rows = getSectionedRows(sheet, headers, 'Event_ID');
+    const targets = findTargets(rows);
+    if (targets.length === 0) return 0;
 
-  renderRegistrantsSheet(false, rows);
-  try {
-    const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (registrySheet) recomputeEventRegistryCounts(registrySheet, sheet, rows);
-    updateMasterLunchDashboard(rows);
-  } catch (err) {
-    log(`⚠️ Cancelled ${targets.length} club booking(s) for ${name}, but could not recalculate the counts (${err}).`);
+    const stamp = `Cancelled on ${formatDateLabel(new Date())}: taken off the ${club || 'club'} list.`;
+    targets.forEach(row => {
+      row[map['Program_Status']] = 'Cancelled';
+      row[map['Lunch_Status']] = 'Cancelled';
+      row[map['Manual_Override']] = 'Manually Edited';
+      const notes = String(row[map['Admin_Notes']] || '').trim();
+      row[map['Admin_Notes']] = notes ? `${notes} | ${stamp}` : stamp;
+    });
+
+    renderRegistrantsSheet(false, rows);
+    try {
+      const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+      if (registrySheet) recomputeEventRegistryCounts(registrySheet, sheet, rows);
+      updateMasterLunchDashboard(rows);
+    } catch (err) {
+      log(`⚠️ Cancelled ${targets.length} club booking(s) for ${name}, but could not recalculate the counts (${err}).`);
+    }
+    log(`cancelUpcomingClubRegistrations: cancelled ${targets.length} row(s) for ${name} on "${club}".`);
+    return targets.length;
+  }, null);
+
+  if (cancelled === null) {
+    explainRefusal(`The workbook is mid-update, so ${name}'s upcoming ${club || 'club'} bookings were NOT cancelled. ` +
+      `Their membership is off. Untick and tick Active again in a minute to be asked again.`);
+    return null; // said already — the caller must not add "they had no bookings"
   }
-  log(`cancelUpcomingClubRegistrations: cancelled ${targets.length} row(s) for ${name} on "${club}".`);
-  return targets.length;
+  return cancelled;
 }
 
 /**

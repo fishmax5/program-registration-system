@@ -1022,11 +1022,26 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
   const numCols = headers.length;
 
   invalidateSectionedRowsCache(sheet);
-  sheet.clear();
+
+  // WRITE BEFORE CLEARING — see renderFlatDateSheet() and 99u. The program
+  // table lands where the render below will put it: under the metrics block
+  // (writeProgramMetricsSection() is a banner, a header, one row per window, a
+  // header and three month rows), the coverage line when there is one, and a
+  // spacer. Those blocks are left blank here and drawn as they always were.
+  const early = partitionRunningPrograms(built.rows, map);
+  let programTableStart = 1;
+  if (metrics) {
+    programTableStart += 6 + metrics.windows.length;
+    if (programMonthLeaderCoverage(early.running, map)) programTableStart += 1;
+    programTableStart += 1;
+  }
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [sectionedTableValueBlock_(programTableStart, headers,
+    early.running, early.finished,
+    { upcomingLabel: '▶️ Running', pastLabel: '⏸️ Not Currently Running' })]);
   sheet.clearFormats();
   showAllRows(sheet); // hidden rows outlive clear() — see renderFlatDateSheet()
   sheet.getBandings().forEach(b => b.remove());
-  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   // Notes outlive clear() as well, and this tab writes them onto whichever row
   // a group lands on — a row that MOVES the moment a session is added. Last
   // render's notes go before this render's are written, or the tab
@@ -1059,6 +1074,7 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     // got, which is the quieter half of the same mistake.
     collapseOldMonths: false
   });
+  checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(programTableStart), result.upcomingHeaderRow);
 
   const zones = [
     { start: result.upcomingDataStart, count: running.length },

@@ -375,10 +375,12 @@ function renderProgramDashboardFromRows(rows) {
   // Write the combined rows into a bare table the normal render will find,
   // then let renderProgramDashboard() lay it out properly.
   invalidateSectionedRowsCache(sheet);
-  sheet.clear();
+  // One write, padded over the old tab, rather than clear() then write: a run
+  // killed in between would lose the very rows being merged. See 99u.
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [{ row: 1, values: [headers.slice()] }, { row: 2, values: rows }]);
   sheet.clearFormats();
   writeSectionHeader(sheet, 1, headers.length, headers);
-  if (rows.length > 0) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   renderProgramDashboard(true);
 }
 

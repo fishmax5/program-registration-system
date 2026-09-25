@@ -40,15 +40,26 @@
 /** How far ahead the picker looks, in days. Past dates are never offered — closing one says nothing. */
 const BULK_WAITLIST_WINDOW_FORWARD_DAYS = 365;
 
+/**
+ * How long Apply waits for the workbook lock. Longer than SYNC_LOCK_WAIT_MS
+ * because somebody is watching and a sync slice holds the lock for minutes;
+ * well inside the six minutes a dialog's server call is allowed.
+ */
+const BULK_WAITLIST_LOCK_WAIT_MS = 30 * 1000;
+
 /** MENU ENTRY: pick a program, then pick its dates. */
 function showBulkWaitlistOnlyDialog() {
+  // AN ALERT, NOT A TOAST, for both refusals (99g): a toast lands under the
+  // "Running script" banner and is gone before anybody looks up, which made
+  // this item "change nothing and log nothing".
   if (isBootstrapActive()) {
-    toastIfPossible(bootstrapBusyMessage());
+    explainRefusal(bootstrapBusyMessage());
     return;
   }
   const programs = listWaitlistProgramSessions();
   if (programs.length === 0) {
-    toastIfPossible('No upcoming sessions to close — run Sync Cal first.');
+    explainRefusal(`There are no upcoming sessions from a calendar in the next ` +
+      `${BULK_WAITLIST_WINDOW_FORWARD_DAYS} days to close — run Sync Cal first.`);
     return;
   }
   const html = HtmlService.createHtmlOutput(buildBulkWaitlistOnlyHtml(programs))
@@ -333,37 +344,81 @@ function applyBulkWaitlistOnly(programKey, picks) {
     const id = String((pick && pick.eventId) || '').trim();
     if (id) wanted[id] = !!pick.on;
   });
-  if (Object.keys(wanted).length === 0) return '⚠️ Nothing was selected, so nothing changed.';
+  if (Object.keys(wanted).length === 0) {
+    return bulkWaitlistSay_(programKey, '⚠️ Nothing was selected, so nothing changed.');
+  }
 
-  return withScriptLock(SYNC_LOCK_WAIT_MS,
-    () => applyBulkWaitlistOnlyLocked_(programKey, wanted),
-    '⚠️ The workbook is mid-update — nothing was changed. Try again in a moment.');
+  // Waits longer than a sync slice's own lock wait: a person is looking at a
+  // "Working…" line, and a sliced sync holds this lock for minutes at a time.
+  // Ten seconds was short enough that on a busy hour this button did nothing.
+  const result = withScriptLock(BULK_WAITLIST_LOCK_WAIT_MS,
+    () => applyBulkWaitlistOnlyLocked_(programKey, wanted), null);
+  if (result === null) {
+    return bulkWaitlistSay_(programKey, '⚠️ A sync is running and held the workbook for more than ' +
+      `${Math.round(BULK_WAITLIST_LOCK_WAIT_MS / 1000)} seconds — nothing was changed. ` +
+      'Press Apply again in a minute; your ticks are still here.');
+  }
+  return result;
+}
+
+/**
+ * EVERY ANSWER IS LOGGED, not only a success. The refusals below used to go
+ * back to the dialog alone, so the executions log showed a run that did
+ * nothing and said nothing about why.
+ */
+function bulkWaitlistSay_(programKey, message) {
+  log(`applyBulkWaitlistOnly: ${programKey} — ${message}`);
+  return message;
 }
 
 /** The write itself, under the lock. */
 function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-  if (!sheet) return '⚠️ There is no session table to change.';
+  const say = message => bulkWaitlistSay_(programKey, message);
+  if (!sheet) return say('⚠️ There is no session table to change.');
 
   const flag = getSessionFlagByColumn('Waitlist_Only');
-  if (!flag) return '⚠️ This workbook has no Waitlist Only column.';
+  if (!flag) return say('⚠️ This workbook has no Waitlist Only column.');
 
   const model = loadSessionGrid(sheet);
-  if (!model || model.map['Waitlist_Only'] === undefined) {
-    return '⚠️ This workbook has no Waitlist Only column.';
+  if (!model) return say('⚠️ The session table has no header row this could read. Run Sync Cal and try again.');
+  // Told apart from "no such column in this version": the dialog lists dates
+  // from the canonical layout, which always has the column, so a tab that has
+  // not been redrawn since the column was added opened the dialog and then
+  // refused every Apply without saying why.
+  const missing = ['Waitlist_Only', 'Event_ID', 'Clean_Title', 'Calendar_Source', 'Event_Date']
+    .filter(h => model.map[h] === undefined);
+  if (missing.length > 0) {
+    return say(`⚠️ The session table's header row is missing ${missing.join(', ')} — it has not been ` +
+      'redrawn since that column was added. Run Sync Cal (or Update Everything Now) and try again.');
   }
+
+  // IDENTITY IS COMPARED ON VALUES. The grid this pass writes through keeps
+  // formulas (so a link column is never flattened), and the dialog was drawn
+  // from values; a cell holding a formula would otherwise never match its own
+  // displayed text and every date would be skipped as "no longer this program".
+  const valueGrid = readSheetGrid(sheet, true).values;
+  const valueColumn = (zone, header) => {
+    const out = new Array(zone.count);
+    for (let r = 0; r < zone.count; r++) {
+      const line = valueGrid[zone.start - 1 + r];
+      out[r] = line ? line[model.map[header] - 1] : '';
+    }
+    return out;
+  };
 
   const changed = [];
   let alreadyRight = 0;
+  let otherProgram = 0;
 
   model.zones.forEach(zone => {
-    const ids = sessionGridColumn(model, zone, 'Event_ID');
+    const ids = valueColumn(zone, 'Event_ID');
     const flags = sessionGridColumn(model, zone, 'Waitlist_Only');
-    const titles = sessionGridColumn(model, zone, 'Clean_Title');
-    const sources = sessionGridColumn(model, zone, 'Calendar_Source');
-    const dates = sessionGridColumn(model, zone, 'Event_Date');
-    if (!ids || !flags || !titles || !sources || !dates) return;
+    const titles = valueColumn(zone, 'Clean_Title');
+    const sources = valueColumn(zone, 'Calendar_Source');
+    const dates = valueColumn(zone, 'Event_Date');
+    if (!flags) return;
 
     let dirty = false;
     for (let r = 0; r < zone.count; r++) {
@@ -375,7 +430,7 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
       // The row has to still be the session that was ticked. A rename or a
       // repointed calendar between the dialog opening and this running makes
       // it a different program, and closing that one is not what anybody said.
-      if (`${calendarId}|${title}` !== programKey) continue;
+      if (`${calendarId}|${title}` !== programKey) { otherProgram++; continue; }
 
       const on = wanted[eventId];
       if (isWaitlistOnlyColumnValue(flags[r]) === on) { alreadyRight++; continue; }
@@ -390,9 +445,12 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   });
 
   if (changed.length === 0) {
-    return alreadyRight > 0
-      ? `Nothing to do — all ${alreadyRight} date(s) already say what you asked for.`
-      : '⚠️ None of those dates are on the session table any more. Run Sync Cal and try again.';
+    if (alreadyRight > 0) return say(`Nothing to do — all ${alreadyRight} date(s) already say what you asked for.`);
+    if (otherProgram > 0) {
+      return say(`⚠️ ${otherProgram} of those date(s) are on the session table under a different program ` +
+        'name or calendar now (renamed since this dialog opened?). Close it, open it again and retry.');
+    }
+    return say('⚠️ None of those dates are on the session table any more. Run Sync Cal and try again.');
   }
 
   flushSessionGrid(model, true);
