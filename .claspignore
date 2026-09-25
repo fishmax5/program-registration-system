@@ -1,0 +1,5 @@
+# Only the numbered .gs files and the manifest are the deliverable (CLAUDE.md).
+**/**
+!*.gs
+!appsscript.json
+Code.bundle.gs
