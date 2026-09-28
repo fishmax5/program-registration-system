@@ -514,6 +514,13 @@ function buildRegistrantRow(args) {
       // form.setAllowResponseEdits(true) in getOrCreateTemplateForm()), so
       // this is the SAME submission being re-seen, not a new one. Refresh
       // the one row in place rather than appending a duplicate.
+      //
+      // The row as it stood BEFORE the refresh, so the ledger hears about a
+      // change and not about a re-read. The every-date and club catch-ups run
+      // every sync with a stable synthetic Party_ID and land here each time;
+      // appending unconditionally wrote an identical `corrected` entry per
+      // registration per sync, forever.
+      const payloadBefore = JSON.stringify(ledgerPayloadFromRow(existingRow, map));
       existingRow[map['Lunch_Type']] = resolveRegistrantLunchType(wantsLunch, registryEntry);
       existingRow[map['Lunch_Status']] = existingRow[map['Program_Status']] === 'Waitlisted'
         ? 'Waitlisted'
@@ -552,6 +559,8 @@ function buildRegistrantRow(args) {
       // happened with no record of it, which is the fault this whole design
       // exists to remove — and because without it the verifier would report
       // every edited response as a fold disagreement for ever.
+      const payloadAfter = ledgerPayloadFromRow(existingRow, map);
+      if (JSON.stringify(payloadAfter) === payloadBefore) return null;
       recordImportLedgerEntries([makeLedgerEntry({
         kind: LEDGER_KINDS.CORRECTED,
         source: args.ledgerSource || LEDGER_SOURCES.IMPORT,
@@ -561,7 +570,7 @@ function buildRegistrantRow(args) {
         name: existingRow[map['Name']],
         personType: existingRow[map['Person_Type']],
         partyId: partyId || '',
-        payload: ledgerPayloadFromRow(existingRow, map),
+        payload: payloadAfter,
         note: 'The same response was submitted again through its edit link.'
       })]);
       return null; // nothing new to append — the existing row was updated in place
