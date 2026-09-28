@@ -26,7 +26,12 @@ def access_token():
         'client_id': t['client_id'], 'client_secret': t['client_secret'],
         'refresh_token': t['refresh_token'], 'grant_type': 'refresh_token',
     }).encode()
-    return json.load(urllib.request.urlopen('https://oauth2.googleapis.com/token', data))['access_token']
+    try:
+        return json.load(urllib.request.urlopen('https://oauth2.googleapis.com/token', data))['access_token']
+    except urllib.error.HTTPError as e:
+        # Google's error body names the reason (invalid_grant = the stored login
+        # was revoked or expired) and never echoes the token back.
+        sys.exit(f'token refresh refused ({e.code}): {e.read().decode(errors="replace")[:300]}')
 
 
 def main():
