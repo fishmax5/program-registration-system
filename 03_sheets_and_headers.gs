@@ -748,8 +748,8 @@ defineLazyGlobal_('HEADERS', () => ({
    *                      guest, so "your appointment is at 2:15" can only be
    *                      said in an email.
    *
-   * A NEW ROW IS BORN TICKED THE WAY ITS KIND IS NORMALLY NOTIFIED
-   * (defaultNotificationPolicy), never blank. Unticked has to mean OFF for a
+   * A NEW ROW IS BORN WITH EVERY BOX CLEAR (defaultNotificationPolicy,
+   * September 2026 — it used to be born ticked the way its kind was notified). Unticked has to mean OFF for a
    * tick box to be honest, so "nobody has decided yet" cannot also be blank —
    * the refresh decides on the program's behalf when it first writes the row,
    * and from then on the boxes say exactly what happens.

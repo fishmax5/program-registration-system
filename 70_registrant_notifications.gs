@@ -150,9 +150,13 @@ function saveRegistrantReminderLedger() {
  * more — so switching to this layout changes no program's mail on its own.
  */
 function defaultNotificationPolicy(isAssistance) {
-  return isAssistance
-    ? { invite: true, remind: true, days: [1], confirmTime: true, personalizeTime: true }
-    : { invite: true, remind: false, days: [], confirmTime: false, personalizeTime: false };
+  // NOTHING, for every kind (September 2026). A program new to the calendar
+  // used to be born invited — and an appointment one reminded and confirmed
+  // too — which meant a placeholder or a rental on a program calendar mailed
+  // people before anybody had looked at it. Now a new row is born with every
+  // box clear and staff tick what they want; an existing row's ticks are
+  // untouched. personalizeTime is not a send, so an appointment keeps it.
+  return { invite: false, remind: false, days: [], confirmTime: false, personalizeTime: !!isAssistance };
 }
 
 /**

@@ -171,17 +171,18 @@ check('...and an ordinary one has no personal time to state',
 // A program with no row yet: notified the way its KIND is notified.
 // ---------------------------------------------------------------------------
 const ordinary = sandbox.defaultNotificationPolicy(false);
-check('a new ordinary program invites and nothing else',
-  [ordinary.invite, ordinary.remind, ordinary.days], [true, false, []]);
+check('a new ordinary program sends nothing',
+  [ordinary.invite, ordinary.remind, ordinary.days], [false, false, []]);
 const assistance = sandbox.defaultNotificationPolicy(true);
-check('a new appointment program invites, confirms and reminds',
+check('a new appointment program sends nothing either',
   [assistance.invite, assistance.remind, assistance.confirmTime, assistance.personalizeTime,
     assistance.days],
-  [true, true, true, true, [1]]);
+  [false, false, false, true, []]);
 
 // ...and what the refresh seeds that row with reads back as the same policy.
 const seeded = new Array(NOTIFY_HEADERS.length).fill('');
-sandbox.writeNotificationTicks(seeded, notifyMap, assistance);
+sandbox.writeNotificationTicks(seeded, notifyMap,
+  { invite: true, remind: true, days: [1], confirmTime: true, personalizeTime: true });
 const seededPolicy = sandbox.policyFromNotificationRow(seeded, notifyMap, true);
 check('a seeded row round-trips to the policy it was seeded from',
   [seededPolicy.invite, seededPolicy.remind, seededPolicy.confirmTime, seededPolicy.days],
@@ -219,7 +220,7 @@ check('"+ reminders" with no days typed takes the default cadence',
 // A typo must not be the way a program is carried across as silent.
 const typo = legacy('inviite', '', true);
 check('an unrecognized mode carries across as the kind default',
-  [typo.invite, typo.remind, typo.days], [true, true, [1]]);
+  [typo.invite, typo.remind, typo.days], [false, false, []]);
 
 // Case and spacing are what a person typed, not what they meant.
 check('the retired value is matched case-insensitively',
@@ -317,13 +318,13 @@ check('the retired dropdown is the next answer down',
 
 // 4. Nothing anywhere: the program's KIND, never a blank row.
 const fromDefault = seed({}, {});
-check('a program with no history is ticked the way its kind is notified',
+check('a program with no history is born with every box clear',
   [fromDefault.from, fromDefault.policy.invite, fromDefault.policy.remind],
-  ['default', true, false]);
+  ['default', false, false]);
 const appointment = seed({}, {}, true);
-check('...and an appointment program is written to as well as invited',
+check('...and an appointment program is born clear too',
   [appointment.policy.invite, appointment.policy.remind, appointment.policy.confirmTime],
-  [true, true, true]);
+  [false, false, false]);
 
 // 5. STAFF_NOTES IS JOINED, NEVER PICKED. Both retired tabs had one, both were
 //    typed by hand, and choosing between two sentences on somebody's behalf is
