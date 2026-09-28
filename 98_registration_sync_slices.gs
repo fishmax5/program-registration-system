@@ -444,6 +444,8 @@ function runRegistrationSyncSlice(options) {
         return run();
       } finally {
         lock.releaseLock();
+        // The desk's marks that queued behind this slice go in now (99b).
+        flushDeskWritesAfterSync();
       }
     },
 

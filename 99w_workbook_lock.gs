@@ -213,6 +213,20 @@ function workbookLock(label) {
   };
 }
 
+/**
+ * True when ANOTHER run holds the workbook right now — a live lease that is
+ * not ours. One property read and no lock, which is what lets Quick Mark
+ * (38) decide to queue a mark without first waiting to be refused. False when
+ * the lease cannot be read, so the caller falls back to trying the lock.
+ */
+function workbookHeldElsewhere() {
+  try {
+    return workbookLeaseBlocks(readWorkbookLease(), workbookLockExecId_get_(), Date.now());
+  } catch (err) {
+    return false;
+  }
+}
+
 /** True while this execution holds the workbook lock. */
 function holdsWorkbookLock() {
   return workbookLockDepth_ > 0;

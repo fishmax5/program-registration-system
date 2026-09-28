@@ -192,6 +192,8 @@ function runCalendarSyncSlice(options) {
         // A killed slice's form-label fingerprints must never be stranded.
         flushPersistentRegistries();
         lock.releaseLock();
+        // The desk's marks that queued behind this slice go in now (99b).
+        flushDeskWritesAfterSync();
       }
     },
 

@@ -880,12 +880,58 @@ function applyQuickMarkFromDialog(args) {
   // A short wait, and an honest answer when it expires: the person at the desk
   // can press the button again in a moment, which is a far better outcome than
   // either a hang or a mark on the wrong row.
-  const result = withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), {
+  //
+  // BEHIND A SYNC, NOT BESIDE IT. When the dialog is not waiting for this
+  // answer (`optimistic`) and a sync is holding the workbook, the mark is
+  // queued straight away rather than after DESK_LOCK_WAIT_MS of trying, and
+  // written by the sync itself as each slice lets go (flushDeskWritesAfterSync,
+  // 99b). The desk already saw it land; see deferQuickMarkBehindSync_().
+  const deferred = deferQuickMarkBehindSync_('quickMark', args, false);
+  if (deferred) return deferred;
+  const busy = {
     ok: false,
+    busy: true,
     message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
-  });
+  };
+  const result = withScriptLock(DESK_LOCK_WAIT_MS, () => applyQuickMarkLocked(args), busy);
+  if (result === busy) {
+    const queued = deferQuickMarkBehindSync_('quickMark', args, true);
+    if (queued) return queued;
+  }
   reportOptimisticQuickMarkFailure(args, result);
   return result;
+}
+
+/**
+ * A MARK THAT WAITS FOR THE SYNC INSTEAD OF COMPETING WITH IT.
+ *
+ * Quick Mark is optimistic: the dialog draws the mark as done and moves on
+ * before the server answers. So a mark made while a sync holds the workbook
+ * has nobody waiting on it — and fighting that sync for the lock buys
+ * nothing but a refusal, a struck-through line on the desk's log that says
+ * "nothing was marked", and the mark queued anyway. Now it is queued FIRST
+ * (99b's queue, the one the refusal path already used) and the answer says
+ * so: saved, and written when the sync lets go. The sync flushes the queue at
+ * the end of every slice, so "after the sync" means minutes, not the next
+ * two-minute retry tick.
+ *
+ * `force` queues without checking the lease — for the lock wait that timed
+ * out with no lease visible (a raw script lock held by something older).
+ * Returns the queued answer, or null when the caller should write now: not
+ * optimistic (somebody IS waiting), the workbook is free, or the queue could
+ * not be written (then the ordinary refusal and its mail are the right path).
+ */
+function deferQuickMarkBehindSync_(kind, args, force) {
+  if (!args || !args.optimistic) return null;
+  if (!force && !workbookHeldElsewhere()) return null;
+  if (!queueOptimisticRetry(kind, args, 'Queued behind a sync that was holding the workbook.')) return null;
+  const name = String(args.name || '').trim();
+  return {
+    ok: true,
+    queued: true,
+    message: `⏳ Saved${name ? ` for ${name}` : ''} — a sync is running, so it goes onto the sheet the ` +
+      `moment the sync lets go.`
+  };
 }
 
 /**
@@ -943,6 +989,13 @@ function reportOptimisticQuickMarkFailure(args, result) {
   }
 }
 
+/** The household press's lock-busy answer, compared by identity. */
+const HOUSEHOLD_BUSY_ = Object.freeze({
+  ok: false,
+  busy: true,
+  message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
+});
+
 /**
  * THE WHOLE HOUSEHOLD, ONE PRESS — the same mark, applied to this person and
  * to everybody Member_Roll says arrives with them (77_households_and_names.gs).
@@ -971,6 +1024,10 @@ function applyQuickMarkForHousehold(args) {
   if (names.length < 2) {
     return applyQuickMarkFromDialog(base); // a household of one is just a person
   }
+
+  // Behind a sync, like a single mark — see deferQuickMarkBehindSync_().
+  const deferred = deferQuickMarkBehindSync_('quickMarkHousehold', base, false);
+  if (deferred) return deferred;
 
   const result = withScriptLock(DESK_LOCK_WAIT_MS, () => {
     const messages = [];
@@ -1003,10 +1060,11 @@ function applyQuickMarkForHousehold(args) {
       // session either way (see sessionChanged()).
       namesChanged, addedName, addedNameKey
     };
-  }, {
-    ok: false,
-    message: '⏳ The workbook is mid-update — nothing was marked. Press the button again in a moment.'
-  });
+  }, HOUSEHOLD_BUSY_);
+  if (result === HOUSEHOLD_BUSY_) {
+    const queued = deferQuickMarkBehindSync_('quickMarkHousehold', base, true);
+    if (queued) return queued;
+  }
   // The household path holds the lock itself and calls applyQuickMarkLocked()
   // directly, so it never passes through the report above. Same desk, same
   // optimistic hand-back, same office to tell — and `household` is what tells

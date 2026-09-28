@@ -1802,6 +1802,10 @@ function buildQuickMarkHtml(preloadedIndex) {
           }
           return;
         }
+        // QUEUED BEHIND A SYNC: saved, not refused. The server put it on the
+        // queue the sync writes the moment it lets go (38, 99b), so the line
+        // stays as drawn and only says it is waiting.
+        if (res && res.queued) { queuedLine(line); return; }
         if (res && !res.ok) failLine(line, res.message);
       })
       .withFailureHandler(function () {
@@ -1817,6 +1821,14 @@ function buildQuickMarkHtml(preloadedIndex) {
    * reportOptimisticQuickMarkFailure()), but the person who pressed the button
    * is the one who can put it right while the member is still standing there.
    */
+  /** A mark saved to the queue a running sync writes as soon as it finishes. */
+  function queuedLine(line) {
+    if (line.getAttribute('data-queued')) return;
+    line.setAttribute('data-queued', '1');
+    line.textContent = line.textContent + '  ⏳ goes on the sheet when the sync finishes';
+    line.title = 'A sync was running, so this mark is saved and waiting. Nothing more to do.';
+  }
+
   function failLine(line, message) {
     line.style.textDecoration = 'line-through';
     line.style.opacity = '0.7';

@@ -165,8 +165,55 @@ function clearOptimisticRetryTriggers() {
 
 /** The trigger's entry point: flush, and re-arm if anything is still waiting. */
 function flushOptimisticRetryQueueTrigger() {
+  // A sync holds the workbook: there is nothing to try, and the sync writes
+  // this queue itself as each slice lets go (flushDeskWritesAfterSync). This
+  // tick only keeps a fallback armed in case that slice is killed outright.
+  if (workbookHeldElsewhere()) {
+    armOptimisticRetry();
+    return;
+  }
   const result = flushOptimisticRetryQueue({ waitMs: SYNC_LOCK_WAIT_MS });
   if (result && result.pending > 0) armOptimisticRetry();
+}
+
+/** How long the end of a sync slice may spend writing the desk's queue. */
+const DESK_FLUSH_AFTER_SYNC_BUDGET_MS = 90 * 1000;
+
+/**
+ * THE DESK'S QUEUE, WRITTEN THE MOMENT A SYNC LETS GO.
+ *
+ * Quick Mark queues a mark rather than wait while a sync holds the workbook
+ * (deferQuickMarkBehindSync_, 38). Left to the two-minute retry trigger, the
+ * queue would be tried on a clock that knows nothing about the sync — up to
+ * two minutes late, or, between slices of a long one, into the next slice's
+ * hold. So both syncs call this from the `finally` that releases their lock
+ * (90, 98): the workbook is free at that instant and the marks go straight
+ * in, batch after batch, bounded by DESK_FLUSH_AFTER_SYNC_BUDGET_MS so a
+ * thousand queued marks cannot eat the slice's own execution. The door's
+ * check-in queue (63) goes with it. Anything left keeps its trigger.
+ *
+ * Never throws: it runs inside a sync's `finally`.
+ */
+function flushDeskWritesAfterSync() {
+  try {
+    const stopAt = Date.now() + DESK_FLUSH_AFTER_SYNC_BUDGET_MS;
+    let result = { pending: 0 };
+    do {
+      result = flushOptimisticRetryQueue({ waitMs: DESK_LOCK_WAIT_MS }) || { pending: 0 };
+      if (!result.ok || result.busy || !(result.applied > 0)) break;
+    } while (result.pending > 0 && Date.now() < stopAt);
+    if (result.applied > 0 || result.pending > 0) {
+      log(`flushDeskWritesAfterSync: desk queue after the sync — ${result.pending || 0} still waiting.`);
+    }
+    if (result.pending > 0) armOptimisticRetry();
+  } catch (err) {
+    log(`ℹ️ Could not write the desk's queued marks after the sync (${err}) — the retry trigger will.`);
+  }
+  try {
+    flushCheckInQueue({ waitMs: DESK_LOCK_WAIT_MS });
+  } catch (err) {
+    log(`ℹ️ Could not flush the door's queue after the sync (${err}).`);
+  }
 }
 
 /**
