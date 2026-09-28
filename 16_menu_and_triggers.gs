@@ -206,6 +206,9 @@ function buildAppMenu(ui, includeAdmin) {
       // one lists what it found and merges only what somebody ticks. See
       // section 85.
       .addItem('\ud83d\udd0e Review Duplicate Registrations\u2026', menuFn_('showDuplicateRegistrationsDialog'))
+      // Every registrant row of one or more programs, guests included, editable
+      // in place and removable in bulk — the ghost-guest cleanup. See 99v.
+      .addItem('\ud83d\udcdd Review & Edit Registrations\u2026', menuFn_('showRegistrationReviewDialog'))
       .addSeparator()
       // THE OTHER PEOPLE IN THE BUILDING. A volunteer is not a registrant \u2014
       // they are working, not attending, and a good many of them are not at

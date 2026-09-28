@@ -214,6 +214,7 @@ function menu_showCheckInPageDialog() { recordMenuUsage_('showCheckInPageDialog'
 function menu_showColumnWidthDialog() { recordMenuUsage_('showColumnWidthDialog'); return showColumnWidthDialog(); }
 function menu_showDeleteRegistrationsDialog() { recordMenuUsage_('showDeleteRegistrationsDialog'); return showDeleteRegistrationsDialog(); }
 function menu_showDuplicateRegistrationsDialog() { recordMenuUsage_('showDuplicateRegistrationsDialog'); return showDuplicateRegistrationsDialog(); }
+function menu_showRegistrationReviewDialog() { recordMenuUsage_('showRegistrationReviewDialog'); return showRegistrationReviewDialog(); }
 function menu_showEventTagInspectorDialog() { recordMenuUsage_('showEventTagInspectorDialog'); return showEventTagInspectorDialog(); }
 function menu_showFixOneFormDialog() { recordMenuUsage_('showFixOneFormDialog'); return showFixOneFormDialog(); }
 function menu_showForkedFormsDialog() { recordMenuUsage_('showForkedFormsDialog'); return showForkedFormsDialog(); }

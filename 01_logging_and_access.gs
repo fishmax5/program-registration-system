@@ -67,6 +67,8 @@ const ADMIN_GATED_ACTIONS = [
   // carried onto the row that stays (section 83), but a row is still gone
   // afterwards and nothing in this workbook puts it back.
   'Collapse Duplicate Registrations',
+  // Edits registrant rows and removes them in bulk (99v).
+  'Edit Registrations',
   // Structural: tabs merged away, the whole workbook imported from scratch.
   'Merge Legacy Tabs',
   'Import Everything (First Run)',
