@@ -36,6 +36,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.applyQuickMarkFromDialog = applyQuickMarkFromDialog;
+this.doorSignIn = doorSignIn;
 this.flushDeskWritesAfterSync = flushDeskWritesAfterSync;
 this.flushOptimisticRetryQueueTrigger = flushOptimisticRetryQueueTrigger;
 this.KEY = WORKBOOK_LOCK_LEASE_PROP_KEY;
@@ -109,6 +110,43 @@ calls.length = 0;
 sandbox.flushOptimisticRetryQueueTrigger();
 check('the trigger does not wait on a lock a sync holds', calls, ['arm']);
 free();
+
+// --- The door app ----------------------------------------------------------
+// Same rule for the tablet: it has already said "Signed in", so behind a sync
+// each person is queued at once — one entry each, since the retry signs in one.
+let pinOk = true;
+sandbox.__stub('walkInSignIn', raw => {
+  const a = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!pinOk) return { ok: false, needsPin: true };
+  calls.push(`door-write:${a.name}`);
+  return { ok: true, lines: ['ok'] };
+});
+sandbox.__stub('checkInPinAccepted', () => pinOk);
+const queued = [];
+sandbox.__stub('queueOptimisticRetry', (kind, args) => {
+  calls.push(`queue:${kind}:${args.name}`); queued.push(args); return true;
+});
+const doorPayload = JSON.stringify({ name: 'Joan', location: 'Narberth', pin: '1', recurring: 'month',
+  party: [{ name: 'Sam' }] });
+
+syncHolds();
+calls.length = 0;
+res = sandbox.doorSignIn(doorPayload);
+check('a door sign-in behind a sync queues each person without writing',
+  [res.ok, res.queued, calls], [true, true, ['queue:doorSignIn:Joan', 'queue:doorSignIn:Sam']]);
+check('the queued entries carry no party, and the companion no recurring booking',
+  [queued[0].party.length, queued[1].recurring, queued[1].location], [0, 'none', 'Narberth']);
+
+pinOk = false;
+calls.length = 0;
+res = sandbox.doorSignIn(doorPayload);
+check('a wrong PIN is never queued — the tablet is told now', [!!res.needsPin, calls], [true, []]);
+pinOk = true;
+
+free();
+calls.length = 0;
+res = sandbox.doorSignIn(doorPayload);
+check('a free workbook signs the door in at once', [!!res.queued, calls], [false, ['door-write:Joan', 'door-write:Sam']]);
 
 if (failures) {
   console.log(`\n${failures} failure(s)`);

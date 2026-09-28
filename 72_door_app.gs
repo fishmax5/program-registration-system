@@ -134,6 +134,8 @@ function doorDay(payload) {
  */
 function doorSignIn(payload) {
   const args = parseCheckInPayload(payload);
+  const deferred = deferDoorSignInBehindSync_(args);
+  if (deferred) return deferred;
   const res = doorSignInOne(payload);
   if (res && res.needsPin) return res;
 
@@ -151,14 +153,7 @@ function doorSignIn(payload) {
   const party = Array.isArray(args.party) ? args.party.slice(0, DOOR_PARTY_MAX) : [];
   const lines = (res && res.lines) ? res.lines.slice() : [];
   party.forEach(companion => {
-    const one = Object.assign({}, companion, {
-      location: args.location, dateKey: args.dateKey, pin: args.pin,
-      // A companion is never the one who answers the membership question or
-      // sets up a recurring booking — those were asked of the person at the
-      // desk, about themselves.
-      recurring: 'none', member: ''
-    });
-    const got = doorSignInOne(one);
+    const got = doorSignInOne(doorCompanionArgs_(args, companion));
     if (got && got.lines) got.lines.forEach(line => lines.push(line));
     else if (got && got.message) lines.push(`${companion.name || 'Someone'}: ${got.message}`);
   });
@@ -172,6 +167,60 @@ function doorSignIn(payload) {
  * somewhere upstream, and the door is not where that should be discovered.
  */
 const DOOR_PARTY_MAX = 8;
+
+/** One companion's sign-in, built from the person who tapped Confirm. */
+function doorCompanionArgs_(args, companion) {
+  return Object.assign({}, companion, {
+    location: args.location, dateKey: args.dateKey, pin: args.pin,
+    // A companion is never the one who answers the membership question or
+    // sets up a recurring booking — those were asked of the person at the
+    // desk, about themselves.
+    recurring: 'none', member: ''
+  });
+}
+
+/**
+ * A DOOR SIGN-IN THAT WAITS FOR THE SYNC INSTEAD OF COMPETING WITH IT — the
+ * door's half of what deferQuickMarkBehindSync_() (38) does for the desk.
+ *
+ * The tablet has already said "Signed in" and moved on (send(), 73), so while
+ * a sync holds the workbook there is nobody waiting on this call, and trying
+ * the lock first only spends DESK_LOCK_WAIT_MS per mark before the refusal
+ * queues it anyway (reportDoorSignInFailure). So it is queued FIRST, on 99b's
+ * queue, ONE ENTRY PER PERSON — the retry runs walkInSignIn(), which signs in
+ * one person and knows nothing of a party — and written by the sync itself as
+ * each slice lets go (flushDeskWritesAfterSync, 99b).
+ *
+ * The PIN is checked here, before anything is queued: a stale PIN fails every
+ * sign-in after it, the tablet has to be told NOW (needsPin), and a queued
+ * entry carrying a bad PIN would only fail its retries and mail the office.
+ *
+ * Returns the queued answer, or null when the caller should write now — the
+ * workbook is free, or the queue could not be written (then the ordinary
+ * path, its lock wait and its mail are the right answer). A companion whose
+ * entry could not be queued is signed in the ordinary way rather than lost.
+ */
+function deferDoorSignInBehindSync_(args) {
+  if (!args || !checkInPinAccepted(args.pin)) return null;
+  if (!workbookHeldElsewhere()) return null;
+  const why = 'Queued behind a sync that was holding the workbook.';
+  if (!queueOptimisticRetry('doorSignIn', Object.assign({}, args, { party: [] }), why)) return null;
+  const name = String(args.name || '').trim();
+  const lines = [`⏳ Saved${name ? ` for ${name}` : ''} — a sync is running, so it goes onto the sheet the ` +
+    'moment the sync lets go.'];
+  const party = Array.isArray(args.party) ? args.party.slice(0, DOOR_PARTY_MAX) : [];
+  party.forEach(companion => {
+    const one = doorCompanionArgs_(args, companion);
+    if (queueOptimisticRetry('doorSignIn', one, why)) {
+      lines.push(`⏳ Saved for ${String(one.name || '').trim() || 'a companion'} too.`);
+      return;
+    }
+    const got = doorSignInOne(one);
+    if (got && got.lines) got.lines.forEach(line => lines.push(line));
+    else if (got && got.message) lines.push(`${one.name || 'Someone'}: ${got.message}`);
+  });
+  return { ok: true, queued: true, name, message: lines[0], lines };
+}
 
 /** One person, signed in and reported — the body doorSignIn() had before it took a party. */
 function doorSignInOne(payload) {
