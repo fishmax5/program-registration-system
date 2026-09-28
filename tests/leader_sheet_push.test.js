@@ -94,6 +94,8 @@ this.MEMORY_TAB_DATA_ROW = MEMORY_TAB_DATA_ROW;
 this.MEMORY_TAB_BANNER_ROW = MEMORY_TAB_BANNER_ROW;
 this.getIndexMap = getIndexMap;
 this.writeProgramLeaderSheetTab = writeProgramLeaderSheetTab;
+this.writeProgramLeaderWaitlistTab = writeProgramLeaderWaitlistTab;
+this.buildLeaderWaitlistRows = buildLeaderWaitlistRows;
 this.pushProgramLeaderSheets = pushProgramLeaderSheets;
 this.computeLeaderSheetFingerprint = computeLeaderSheetFingerprint;
 this.LEADER_SHEET_EMPTY_ROSTER_TEXT = LEADER_SHEET_EMPTY_ROSTER_TEXT;
@@ -366,6 +368,31 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   const empty = makeCountingSheet(emptyGrid, 'Sign_Up_Sheet');
   checkWriteBeforeClear('empty registrant sheet', empty, emptyGrid,
     () => sandbox.writeProgramLeaderSheetTab(empty, entry, []));
+}
+
+// ---------------------------------------------------------------------------
+// THE WAITLIST TAB is held to the same rule: one person per row, drawn over
+// whatever was there without a clear(), and the empty line likewise.
+// ---------------------------------------------------------------------------
+{
+  const entry = { title: 'Chair Yoga', location: 'Ashbridge' };
+  const people = sandbox.buildLeaderWaitlistRows([], [
+    { name: 'Joan Smith', phone: '555-1', email: '', partySize: 1, addedOn: new RealDate(2026, 8, 1), notes: '' },
+    { name: 'Bob Lee', phone: '', email: 'b@x.org', partySize: 2, addedOn: new RealDate(2026, 8, 2), notes: 'am' }
+  ]);
+  assert.strictEqual(people.length, 2);
+  const file = name => {
+    const grid = [];
+    const sheet = makeCountingSheet(grid, name);
+    return { grid, sheet, file: { getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet] } };
+  };
+  const full = file('Waitlist');
+  checkWriteBeforeClear('waitlist tab', full.sheet, full.grid,
+    () => sandbox.writeProgramLeaderWaitlistTab(full.file, entry, people),
+    { expectRows: people.map(r => r.slice(0, 2)) });
+  const none = file('Waitlist');
+  checkWriteBeforeClear('empty waitlist tab', none.sheet, none.grid,
+    () => sandbox.writeProgramLeaderWaitlistTab(none.file, entry, []));
 }
 
 console.log('✅ leader_sheet_push.test.js passed');

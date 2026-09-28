@@ -171,6 +171,10 @@ function buildQuickMarkHtml(preloadedIndex) {
   const needPresets = JSON.stringify(REGULAR_NEED_PRESETS);
   const needFrequencies = JSON.stringify(REGULAR_NEED_FREQUENCIES);
   const needWeekdays = JSON.stringify(REGULAR_NEED_WEEKDAYS);
+  // What a lunch-only session's title starts with, so the "any date" program
+  // list below can leave lunch out — lunch has no waiting list (`99z`).
+  const lunchPrefixes = JSON.stringify([LUNCH_ONLY_LABEL_PREFIX, LEGACY_LUNCH_ONLY_PROGRAM_LABEL])
+    .replace(/<\//g, '<\\/');
   // The lists themselves, when there is a stored copy — see
   // showQuickMarkDialog(). JSON.stringify twice over: once to make the data,
   // once to make it a STRING LITERAL that cannot break out of the <script>
@@ -244,7 +248,8 @@ function buildQuickMarkHtml(preloadedIndex) {
   each.<br>
   <b>Full?</b> Tick <b>Add to waitlist</b> instead of registering them. It works on somebody already
   on the list as well — that gives their seat and their lunch back — and staff take them off the
-  waitlist on the Registrants tab when a place comes free.<br>
+  waitlist on the Registrants tab when a place comes free. Waiting for <i>any</i> date of a program
+  rather than this one? Use <b>⏳ Waiting list for a program — any date</b> below the Mark button.<br>
   <b>More than one meal?</b> Ticking <b>Lunch</b> opens boxes for how many they ate here and how many
   they took home; ticking <b>Sign up for lunch</b> opens one for how many meals to order.<br>
   <b>Something already on the list is wrong?</b> Pick the person and use <b>Change this
@@ -353,6 +358,41 @@ function buildQuickMarkHtml(preloadedIndex) {
 </fieldset>
 
 <button id="go" onclick="submit()" disabled>Mark</button>
+
+<!-- THE WAITING LIST WITHOUT A DATE. "Put me down for Chair Yoga whenever
+     there is room" names a program and no session, and the Mark box above
+     is built around a session. So this is its own small form, closed until
+     asked for, and it writes to the Program_Waitlist tab ONLY — nothing on
+     All_Registrants, no seat, no meal, no count (see 99z). It uses the
+     location from step 1. -->
+<p style="margin:10px 0 0 0">
+  <a href="#" onclick="toggleAnyDate(); return false;">⏳ Waiting list for a program — any date…</a>
+</p>
+<fieldset id="anyDateBox" style="display:none">
+  <legend>Waiting list — any date</legend>
+  <p class="hint" style="margin:0 0 6px 0">
+    For somebody who wants a place in a program whenever there is room, with no particular date in
+    mind. Uses the location in step 1. No seat is held and no meal is ordered; they are listed on the
+    Program_Waitlist tab now, and on the program registrant sheet's Waitlist tab after the next sync.
+  </p>
+  <label class="field" for="adProgram">Program</label>
+  <select id="adProgram" onchange="refreshAnyDate()" disabled></select>
+  <label class="field" for="adName">Name</label>
+  <input type="text" id="adName" list="adMembers" placeholder="Type or pick their name"
+         autocomplete="off" oninput="refreshAnyDate()">
+  <datalist id="adMembers"></datalist>
+  <label class="field" for="adPhone">Phone <span class="note">— optional; taken from the member roll if blank</span></label>
+  <input type="text" id="adPhone" autocomplete="off">
+  <label class="field" for="adEmail">Email <span class="note">— optional</span></label>
+  <input type="text" id="adEmail" autocomplete="off">
+  <div class="meals">
+    <label class="num">How many people <input type="number" id="adSize" min="1" max="20" step="1" value="1"></label>
+  </div>
+  <label class="field" for="adNote">Note <span class="note">— optional, e.g. "mornings only"</span></label>
+  <input type="text" id="adNote" autocomplete="off">
+  <button id="adGo" onclick="submitAnyDate()" disabled>Add to the waiting list</button>
+  <div id="adStatus" style="min-height:16px;margin-top:8px;font-weight:bold"></div>
+</fieldset>
 
 <!-- EVERYTHING THAT IS NOT A MARK. Shown only once a person who is actually on
      this session's list has been picked, because every action in it changes a
@@ -473,6 +513,109 @@ function buildQuickMarkHtml(preloadedIndex) {
     google.script.run.showVolunteerHoursDialog();
   }
 
+  // --- the waiting list without a date (99z) ---------------------------------
+  var LUNCH_PREFIXES = ${lunchPrefixes};
+
+  function isLunchTitle(title) {
+    var t = String(title || '');
+    return LUNCH_PREFIXES.some(function (p) { return t === p || t.indexOf(p) === 0; });
+  }
+
+  function toggleAnyDate() {
+    var box = el('anyDateBox');
+    var show = box.style.display === 'none';
+    box.style.display = show ? 'block' : 'none';
+    if (!show) return;
+    drawAnyDatePrograms();
+    // Whoever is picked above is the likeliest person to be asking.
+    var picked = el('name').disabled ? '' : chosenName();
+    if (picked && !el('adName').value.trim()) el('adName').value = picked;
+    refreshAnyDate();
+  }
+
+  // One entry per PROGRAM at the chosen location, out of the sessions the
+  // dialog already holds — no round trip. Appointment programs and lunch are
+  // left out: neither has a waiting list.
+  function drawAnyDatePrograms() {
+    var sel = el('adProgram');
+    if (!sel || el('anyDateBox').style.display === 'none') return;
+    var loc = el('location').value;
+    var keep = sel.value;
+    if (!INDEX || !loc) {
+      sel.innerHTML = '';
+      var o = document.createElement('option');
+      o.value = '';
+      o.textContent = loc ? '— loading… —' : '— choose a location in step 1 —';
+      sel.appendChild(o);
+      sel.disabled = true;
+      refreshAnyDate();
+      return;
+    }
+    var seen = {};
+    var opts = [];
+    INDEX.sessions.forEach(function (s) {
+      if (s.location !== loc || s.byAppointment || !s.title || isLunchTitle(s.title)) return;
+      var k = String(s.title).toLowerCase();
+      if (seen[k]) return;
+      seen[k] = s.title;
+      opts.push({ value: s.title, label: s.title });
+    });
+    opts.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    fill(sel, opts, opts.length ? '— choose a program —' : '— no programs found at ' + loc + ' —');
+    if (keep && seen[keep.toLowerCase()]) sel.value = seen[keep.toLowerCase()];
+    var dl = el('adMembers');
+    if (dl && !dl.childNodes.length && INDEX.members) {
+      INDEX.members.forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = m.name;
+        dl.appendChild(opt);
+      });
+    }
+    refreshAnyDate();
+  }
+
+  function refreshAnyDate() {
+    var go = el('adGo');
+    if (!go) return;
+    go.disabled = !(el('location').value && el('adProgram').value && el('adName').value.trim());
+  }
+
+  function adSay(msg, cls) {
+    var s = el('adStatus');
+    s.textContent = msg;
+    s.className = cls || '';
+  }
+
+  // NOT optimistic, unlike Mark: this is rare, and "already on the list" is an
+  // answer the desk needs to see before the person walks away.
+  function submitAnyDate() {
+    var payload = {
+      location: el('location').value,
+      title: el('adProgram').value,
+      name: el('adName').value.trim(),
+      phone: el('adPhone').value.trim(),
+      email: el('adEmail').value.trim(),
+      partySize: el('adSize').value,
+      note: el('adNote').value.trim()
+    };
+    el('adGo').disabled = true;
+    adSay('Adding ' + payload.name + '…', 'busy');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        adSay((res && res.message) || 'Done.', res && res.ok ? 'ok' : 'err');
+        if (res && res.ok) {
+          ['adName', 'adPhone', 'adEmail', 'adNote'].forEach(function (id) { el(id).value = ''; });
+          el('adSize').value = '1';
+        }
+        refreshAnyDate();
+      })
+      .withFailureHandler(function (err) {
+        adSay('⚠️ ' + ((err && err.message) || 'The workbook did not answer — nothing was added.'), 'err');
+        refreshAnyDate();
+      })
+      .addProgramWaitlistEntryFromDialog(payload);
+  }
+
   function el(id) { return document.getElementById(id); }
   function say(msg, cls) { var s = el('status'); s.textContent = msg; s.className = cls || ''; }
 
@@ -574,6 +717,7 @@ function buildQuickMarkHtml(preloadedIndex) {
 
   function locationChanged() {
     var loc = el('location').value;
+    drawAnyDatePrograms();
     el('name').disabled = true;
     el('name').innerHTML = '<option value="">— choose a session first —</option>';
     showWalkIn(false);

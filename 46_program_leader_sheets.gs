@@ -277,6 +277,244 @@ defineLazyGlobal_('LEADER_SHEET_WAITLIST_BG', () => PALETTE.LOC_PEACH);
 defineLazyGlobal_('LEADER_SHEET_WAITLIST_INK', () => PALETTE.SIGNAL_ORANGE);
 
 
+// --- the Waitlist tab ---------------------------------------------------------
+
+/**
+ * WHO IS WAITING, ON A TAB OF ITS OWN, ONE LINE PER PERSON.
+ *
+ * The class list is for counting chairs, and a waitlisted person is the one
+ * line on it where the answer is no — so a row whose Program_Status is
+ * 'Waitlisted' now leaves Sign_Up_Sheet altogether and is listed here instead,
+ * once per PERSON with every date they are waiting for condensed into one
+ * `Dates` cell ("Oct 6, 13, 20 · Nov 3"). Beside them, the people on the
+ * workbook's Program_Waitlist tab (`99z`) — waiting for ANY date of this
+ * program, which no per-session roster could show at all.
+ *
+ * READ-ONLY, AND NEVER READ BACK. pullProgramLeaderSheetEdits() reads
+ * Sign_Up_Sheet and nothing else, so nothing typed here can move a
+ * registration; the whole tab is protected with a warning like the derived
+ * columns next door. Taking somebody off the waitlist is the office's job
+ * (Quick Mark ▸ Change this registration ▸ Put them back on), which is what
+ * the banner note says.
+ *
+ * A PROJECTION, like the tab beside it: moving a waitlisted row here changes
+ * nothing on All_Registrants, and a leader tick already on that row stays on
+ * it exactly as it was.
+ *
+ * Only UPCOMING dates (today on): a date that has gone is not something
+ * anybody is still waiting for.
+ */
+const LEADER_WAITLIST_TAB_NAME = 'Waitlist';
+const LEADER_WAITLIST_HEADERS = ['Name', 'Phone', 'Email', 'Party_Size', 'Dates', 'Added', 'Notes'];
+const LEADER_WAITLIST_EMPTY_TEXT = 'Nobody is on the waiting list.';
+
+/** Is this built roster line WAITLISTED by the workbook (not merely ticked a moment ago)? */
+function isLeaderSheetStatusWaitlisted_(row, sheetMap) {
+  return String(row[sheetMap['Program_Status']] || '').trim() === 'Waitlisted';
+}
+
+/**
+ * Splits one program's built rows into the class list and the waiting list.
+ *
+ * On Program_Status ALONE, deliberately not on the Waitlisted tick too: a row
+ * a leader has just ticked is read back off Sign_Up_Sheet by the next pull,
+ * so it has to still BE on Sign_Up_Sheet until the sync has applied the tick
+ * and the status says so.
+ */
+function splitLeaderSheetRows(rows) {
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
+  const roster = [];
+  const waitlisted = [];
+  (rows || []).forEach(row => {
+    (isLeaderSheetStatusWaitlisted_(row, sheetMap) ? waitlisted : roster).push(row);
+  });
+  return { roster, waitlisted };
+}
+
+/**
+ * "Oct 6, 13, 20 · Nov 3" — a person's dates, one month per clause, the year
+ * named only when the list crosses one. Duplicates (two sittings on one day)
+ * are one date.
+ */
+function condenseLeaderWaitlistDates(dates) {
+  const byKey = {};
+  (dates || []).forEach(d => {
+    const date = coerceDate(d);
+    if (date) byKey[formatDateKey(date)] = date;
+  });
+  const sorted = Object.keys(byKey).sort().map(k => byKey[k]);
+  if (sorted.length === 0) return '';
+  const tz = Session.getScriptTimeZone();
+  const years = {};
+  sorted.forEach(d => { years[Utilities.formatDate(d, tz, 'yyyy')] = true; });
+  const showYear = Object.keys(years).length > 1;
+  const clauses = [];
+  let currentMonth = null;
+  sorted.forEach(d => {
+    const month = Utilities.formatDate(d, tz, showYear ? 'MMM yyyy' : 'MMM');
+    const day = Utilities.formatDate(d, tz, 'd');
+    if (!currentMonth || currentMonth.month !== month) {
+      currentMonth = { month, days: [] };
+      clauses.push(currentMonth);
+    }
+    currentMonth.days.push(day);
+  });
+  return clauses.map(c => {
+    const head = showYear ? c.month.split(' ')[0] : c.month;
+    const tail = showYear ? ` ${c.month.split(' ')[1]}` : '';
+    return `${head} ${c.days.join(', ')}${tail}`;
+  }).join(' · ');
+}
+
+/**
+ * The Waitlist tab's rows: one per PERSON, matched on the name alone (the
+ * same key the roster's Row_Key normalizes), from this program's waitlisted
+ * roster lines plus its any-date entries on Program_Waitlist.
+ *
+ * Order is the order a leader would ring round in: somebody waiting for the
+ * soonest date first, then the any-date people in the order they asked.
+ */
+function buildLeaderWaitlistRows(waitlistedRows, anyDateEntries) {
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
+  const outMap = getIndexMap(LEADER_WAITLIST_HEADERS);
+  const todayKey = formatDateKey(new Date());
+  const people = {};
+  const order = [];
+  const personFor = name => {
+    const key = normalizeNameKey(name);
+    if (!key) return null;
+    if (!people[key]) {
+      people[key] = { name: String(name).trim(), phone: '', email: '', size: 0,
+        dates: [], anyDate: false, added: null, notes: [] };
+      order.push(key);
+    }
+    return people[key];
+  };
+
+  (waitlistedRows || []).forEach(row => {
+    const date = coerceDate(row[sheetMap['Event_Date']]);
+    if (!date || formatDateKey(date) < todayKey) return;
+    const p = personFor(row[sheetMap['Name']]);
+    if (!p) return;
+    p.phone = p.phone || String(row[sheetMap['Phone']] || '').trim();
+    p.email = p.email || String(row[sheetMap['Email']] || '').trim();
+    p.size = Math.max(p.size, parseInt(row[sheetMap['Party_Size']], 10) || 1);
+    p.dates.push(date);
+    const note = String(row[sheetMap['Leader_Notes']] || '').trim();
+    if (note && p.notes.indexOf(note) === -1) p.notes.push(note);
+  });
+
+  (anyDateEntries || []).forEach(entry => {
+    const p = personFor(entry.name);
+    if (!p) return;
+    p.anyDate = true;
+    p.phone = p.phone || entry.phone || '';
+    p.email = p.email || entry.email || '';
+    p.size = Math.max(p.size, parseInt(entry.partySize, 10) || 1);
+    const added = coerceDate(entry.addedOn);
+    if (added && (!p.added || added < p.added)) p.added = added;
+    if (entry.notes && p.notes.indexOf(entry.notes) === -1) p.notes.push(entry.notes);
+  });
+
+  const firstDate = p => p.dates.reduce((min, d) => (!min || d < min ? d : min), null);
+  order.sort((a, b) => {
+    const pa = people[a];
+    const pb = people[b];
+    const da = firstDate(pa);
+    const db = firstDate(pb);
+    if (da && db && da.getTime() !== db.getTime()) return da - db;
+    if (da && !db) return -1;
+    if (!da && db) return 1;
+    const aa = pa.added ? pa.added.getTime() : Infinity;
+    const ab = pb.added ? pb.added.getTime() : Infinity;
+    if (aa !== ab) return aa - ab;
+    return a.localeCompare(b);
+  });
+
+  return order.map(key => {
+    const p = people[key];
+    const dated = condenseLeaderWaitlistDates(p.dates);
+    const out = new Array(LEADER_WAITLIST_HEADERS.length).fill('');
+    out[outMap['Name']] = p.name;
+    out[outMap['Phone']] = p.phone;
+    out[outMap['Email']] = p.email;
+    out[outMap['Party_Size']] = p.size || 1;
+    out[outMap['Dates']] = p.anyDate
+      ? (dated ? `${PROGRAM_WAITLIST_ANY_DATE_LABEL} (also: ${dated})` : PROGRAM_WAITLIST_ANY_DATE_LABEL)
+      : dated;
+    out[outMap['Added']] = p.added || '';
+    out[outMap['Notes']] = p.notes.join(' | ');
+    return out;
+  });
+}
+
+/**
+ * Draws the Waitlist tab of one program registrant sheet. Same rows as the
+ * roster tab (banner 1, header 2, data 3), written before its formatting is
+ * cleared for the same reason (99u), and protected whole with a warning.
+ */
+function writeProgramLeaderWaitlistTab(file, entry, waitRows) {
+  const sheet = getOrCreateSheet(file, LEADER_WAITLIST_TAB_NAME);
+  const headers = LEADER_WAITLIST_HEADERS;
+  const numCols = headers.length;
+  const map = getIndexMap(headers);
+  const rows = waitRows || [];
+  const bannerText = `⏳ Waiting list — ${entry.title || 'Program'} — ${entry.location || ''}`;
+
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  writeTabValuesBeforeRender_(sheet, [
+    { row: MEMORY_TAB_BANNER_ROW, values: [[bannerText]] },
+    { row: MEMORY_TAB_HEADER_ROW, values: [headers.slice()] },
+    { row: MEMORY_TAB_DATA_ROW, values: rows.length === 0 ? [[LEADER_WAITLIST_EMPTY_TEXT]] : rows }
+  ]);
+  sheet.clearFormats();
+
+  writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, bannerText, {
+    note: `Refreshed with the class list. One line per person; "Dates" lists every date they are ` +
+      `waiting for, and "${PROGRAM_WAITLIST_ANY_DATE_LABEL}" means they will take whichever date comes ` +
+      `free. Nobody here holds a seat or a meal.\n\nThis tab is filled in by itself — to put somebody ` +
+      `on the class, ask the office.`
+  });
+  writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
+
+  if (rows.length === 0) {
+    sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
+      .setValue(LEADER_WAITLIST_EMPTY_TEXT)
+      .setFontStyle('italic')
+      .setFontColor(TYPO.MUTED.color);
+  } else {
+    const data = sheet.getRange(MEMORY_TAB_DATA_ROW, 1, rows.length, numCols);
+    data.setValues(rows);
+    data.setBackgrounds(rows.map((r, i) =>
+      new Array(numCols).fill(i % 2 === 0 ? PALETTE.PAPER : PALETTE.STRIPE)));
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Party_Size'] + 1, rows.length, 1).setNumberFormat('0');
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Added'] + 1, rows.length, 1).setNumberFormat(DATE_DISPLAY_FORMAT);
+    sheet.getRange(MEMORY_TAB_DATA_ROW, map['Dates'] + 1, rows.length, 1)
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    protectDerivedColumns(sheet, headers, headers,
+      [{ start: MEMORY_TAB_DATA_ROW, count: rows.length }]);
+  }
+  freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
+  autosizeColumns(sheet, { minCols: numCols, force: true });
+}
+
+/**
+ * Everything one program's sheet is drawn from: the class list, the waiting
+ * list, and the rows the waiting list was folded from. The ONE place the
+ * split happens, so the push, the menu's create and the fingerprint cannot
+ * disagree about which rows went where.
+ */
+function leaderSheetContentFor(entry, rows) {
+  const split = splitLeaderSheetRows(rows);
+  const anyDate = programWaitlistEntriesFor(entry && entry.title, entry && entry.location);
+  return {
+    roster: split.roster,
+    waitlist: buildLeaderWaitlistRows(split.waitlisted, anyDate),
+    anyDate
+  };
+}
+
+
 // --- the registry -----------------------------------------------------------
 
 let __leaderSheetRegistryCache = null;
@@ -553,7 +791,10 @@ function applyLeaderFlagCheckboxes_(name, ticks) {
  * reach only the sheets whose rosters happened to move afterwards.
  */
 // v2: the Answers column.
-const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v2';
+// v3: waitlisted people moved to the Waitlist tab. The bump is the migration —
+// every existing sheet's fingerprint stops matching, so the next sync redraws
+// each one once and gives it the new tab.
+const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v3';
 
 /**
  * WHAT THIS SHEET WOULD BE WRITTEN WITH, as one short string.
@@ -574,8 +815,12 @@ const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v2';
  * escape hatch is the menu item, which passes { force: true }.
  */
 function computeLeaderSheetFingerprint(entry, rows) {
+  // The any-date entries (`99z`) are in it too: somebody added on Quick Mark
+  // is a Waitlist tab that has to be redrawn, with no registrant row moving.
+  const anyDate = programWaitlistEntriesFor(entry && entry.title, entry && entry.location)
+    .map(e => [e.name, e.phone, e.email, e.partySize, e.addedOn ? formatDateKey(e.addedOn) : '', e.notes]);
   return computeFormLabelFingerprint(rows || [],
-    [String((entry && entry.title) || ''), String((entry && entry.location) || '')],
+    [String((entry && entry.title) || ''), String((entry && entry.location) || ''), anyDate],
     LEADER_SHEET_TEMPLATE_KEY);
 }
 
@@ -668,8 +913,11 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // this is the migration for every sheet already in that state, and it
       // runs itself on the next sync rather than waiting for somebody to press
       // something. See leaderSheetTabReadsEmpty_().
+      const content = leaderSheetContentFor(entry, rows);
       const fingerprintAgrees = !force && entry.pushedFingerprint === fingerprint && entry.accessOpened;
-      const contradicted = fingerprintAgrees && rows.length > 0 && leaderSheetTabReadsEmpty_(tab);
+      // Against the CLASS LIST, not every row: a program whose only people are
+      // waiting shows the placeholder on Sign_Up_Sheet truthfully.
+      const contradicted = fingerprintAgrees && content.roster.length > 0 && leaderSheetTabReadsEmpty_(tab);
       if (contradicted) {
         log(`⚠️ Program registrant sheet for ${programKey}: the stored fingerprint claims ` +
           `${rows.length} row(s) but the sheet reads "nobody has signed up yet" — rewriting it.`);
@@ -683,8 +931,18 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         unchanged++;
         return;
       }
-      writeProgramLeaderSheetTab(tab, entry, rows);
-      if (entry.pushedFingerprint !== fingerprint) {
+      writeProgramLeaderSheetTab(tab, entry, content.roster);
+      // Its own guard: the class list has landed, and a Waitlist tab that will
+      // not draw must not undo that. The fingerprint is then NOT stored, so the
+      // next sync tries the whole sheet again.
+      let waitlistWritten = true;
+      try {
+        writeProgramLeaderWaitlistTab(file, entry, content.waitlist);
+      } catch (err) {
+        waitlistWritten = false;
+        log(`⚠️ Could not draw the Waitlist tab on the program registrant sheet for "${entry.title}" (${err}).`);
+      }
+      if (waitlistWritten && entry.pushedFingerprint !== fingerprint) {
         saveProgramLeaderSheetRegistryEntry(programKey,
           Object.assign({}, entry, { pushedFingerprint: fingerprint }));
       }
@@ -1098,9 +1356,10 @@ function leaderSheetBannerNote() {
     // taken back — which is exactly why it has to be said in the same
     // breath as Dropped, or a leader will use the permanent one to mean
     // the reversible one. See applyLeaderWaitlistTicks().
-    `Ticking Waitlisted moves that person off the class list and onto the waitlist — their seat ` +
-    `and their lunch go back too, and the row turns peach so you can see at a glance who is ` +
-    `waiting. Untick it to put them back on, which works whenever the class has room for them.`;
+    `Ticking Waitlisted moves that person off the class list and onto the Waitlist tab at the next ` +
+    `sync — their seat and their lunch go back too. Until then the row is peach. Everybody waiting ` +
+    `is listed on the Waitlist tab, one line each with their dates; to put somebody back on the ` +
+    `class, ask the office.`;
 }
 
 function writeProgramLeaderSheetTab(sheet, entry, rows) {
@@ -1638,7 +1897,9 @@ function createProgramLeaderSheet(programValue) {
 
   const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
   const writtenRows = byProgram[programKey] || [];
-  writeProgramLeaderSheetTab(tab, entry, writtenRows);
+  const content = leaderSheetContentFor(entry, writtenRows);
+  writeProgramLeaderSheetTab(tab, entry, content.roster);
+  writeProgramLeaderWaitlistTab(file, entry, content.waitlist);
   // THE INVARIANT: NOBODY WRITES THIS TAB WITHOUT RECORDING WHAT THEY WROTE.
   //
   // This function is the project's second writer of the roster tab, and it

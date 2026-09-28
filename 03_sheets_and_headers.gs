@@ -90,7 +90,15 @@ const SHEET_NAMES = {
   // PLACE, so "Joan cancelled" is the absence of a word she used to have and
   // there is no second copy of any of it; this tab is that second copy, and
   // the thing a lost row can be recovered from. See 99k_registration_ledger.gs.
-  REGISTRATION_LEDGER: 'Registration_Ledger'
+  REGISTRATION_LEDGER: 'Registration_Ledger',
+  // A waiting list for a PROGRAM, not for a date — "ring me when there is room
+  // in Chair Yoga", said by somebody with no particular Tuesday in mind. It is
+  // a tab of its own rather than Waitlisted rows on All_Registrants because
+  // every row there hangs off one session's Event_ID, and writing one per
+  // upcoming date would put a dozen invented registrations into the counts,
+  // the ledger and the leader alerts. Staff-owned: Quick Mark appends, nothing
+  // rewrites it. See 99z_program_waitlist.gs.
+  PROGRAM_WAITLIST: 'Program_Waitlist'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -1001,6 +1009,13 @@ defineLazyGlobal_('HEADERS', () => ({
     'Entry_ID', 'Entry_At', 'Occurred_At', 'Kind', 'Registration_ID',
     'Event_ID', 'Name', 'Person_Type', 'Party_ID',
     'Source', 'Actor', 'Payload', 'Note'
+  ],
+  // One row per person per PROGRAM (title × building) waiting for any date of
+  // it. Status 'Waiting' (or blank) is on the list; 'Placed' and 'Removed' are
+  // kept as the record rather than deleted. See 99z_program_waitlist.gs.
+  Program_Waitlist: [
+    'Program', 'Location', 'Name', 'Phone', 'Email', 'Party_Size',
+    'Status', 'Added_On', 'Added_By', 'Notes'
   ]
 }));
 

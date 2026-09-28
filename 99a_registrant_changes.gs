@@ -848,6 +848,12 @@ function restoreRegistrantChange(ss, sheet, rows, map, target, party, args) {
         : 'Put back on the list at the desk after a cancellation.' });
     if (memberStatus === 'Waitlisted') {
       if (!stampRegistrantRowActive(member, map, stamp)) return;
+      // A leader's Waitlisted tick left standing would re-waitlist them on the
+      // next sync (applyLeaderWaitlistTicks, `71`) — and since a waitlisted
+      // person now sits on the sheet's Waitlist tab rather than the class
+      // list, the leader has no tick in front of them to clear. The office
+      // putting them back on is the later word; the tick goes with it.
+      if (map['Waitlisted'] !== undefined) member[map['Waitlisted']] = false;
     } else if (!stampRegistrantRowUncancelled(member, map, stamp)) {
       return;
     }

@@ -94,6 +94,10 @@ function diagnoseLeaderSheetRosters() {
         location: entry.location || '',
         fileId: entry.fileId || '',
         rosterRows: rows.length,
+        // The rows that land on Sign_Up_Sheet — waitlisted people are on the
+        // sheet's Waitlist tab (`46`), so a program whose only people are
+        // waiting shows the empty-roster line truthfully.
+        classListRows: splitLeaderSheetRows(rows).roster.length,
         sessionsInWindow: 0,
         stranded: 0,
         fingerprintMatches: false,
@@ -239,7 +243,7 @@ function describeLeaderSheetRosters(diagnosis) {
   // printed even though the push now repairs it unprompted, because somebody
   // reading this is looking at the empty sheet NOW and deserves to be told
   // which of the two things they are looking at is wrong.
-  const lying = data.findings.filter(f => f.rosterRows > 0 && f.tabReadsEmpty);
+  const lying = data.findings.filter(f => (f.classListRows === undefined ? f.rosterRows : f.classListRows) > 0 && f.tabReadsEmpty);
   if (lying.length > 0) {
     lines.push(`⚠️ SHEETS SHOWING AN EMPTY ROSTER THEY SHOULD NOT (${lying.length}) — the roster exists ` +
       'in this workbook and the sheet is showing the leader "nobody has signed up yet":');
@@ -329,7 +333,7 @@ function describeLeaderSheetRosters(diagnosis) {
     filled.forEach(f => {
       lines.push(`• ${f.title || f.programKey}${f.location ? ` — ${f.location}` : ''}: ` +
         `${f.rosterRows} row(s) across ${f.sessionsInWindow} session(s)` +
-        (f.tabReadsEmpty
+        (f.tabReadsEmpty && f.classListRows !== 0
           ? ' — ⚠️ but the sheet itself is showing an empty roster (see the top of this report).'
           : f.fingerprintMatches ? ' — already written, the next push will skip it.' : ' — due to be written.') +
         (f.openError ? ` ⚠️ but the sheet could not be opened: ${f.openError}` : ''));
