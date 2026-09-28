@@ -464,7 +464,14 @@ function refreshProgramSettings(ss, sessionRows) {
   // still a legal answer.
   applyMemoryTabValidation(sheet, headers, outRows.length, {
     checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
-    openLists: { Other_Reminders: OTHER_REMINDER_SUGGESTIONS }
+    // Event is SUGGESTING, like Program on Program_Leaders: every program the
+    // calendar has produced, so a row typed on the spare line (a program the
+    // sync has not reached yet) is picked rather than spelled — a misspelled
+    // Event is a row no session ever reads its ticks from.
+    openLists: {
+      Other_Reminders: OTHER_REMINDER_SUGGESTIONS,
+      Event: Object.keys(programs).map(k => programs[k].title).filter(uniqueStrings).sort()
+    }
   });
   // AFTER the validation, never before: applyMemoryTabValidation() puts a
   // checkbox on every row in the band, headings included, and this is what
