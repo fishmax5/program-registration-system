@@ -204,7 +204,7 @@ function removeOrphanedSessionRows() {
   // about to replace wholesale. Taken here rather than through withScriptLock()
   // so the busy branch can SAY it is busy — that helper's onBusy is a value,
   // and a value cannot log only when the lock was refused.
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('removeOrphanedSessionRows: another sync is already running — skipping.');
     toastIfPossible('A sync is already running — try again in a moment.');
@@ -263,7 +263,7 @@ function removeOrphanedSessionRowsLocked_(ss) {
   // The ordinary render, handed the survivors. skipTriage because this sweep
   // has already decided what goes, and a calendar read here could only take
   // out MORE rows than the human just approved.
-  renderProgramDashboard(true, { sessionRows: found.keep, skipTriage: true });
+  renderProgramDashboard(true, { sessionRows: found.keep, skipTriage: true, allowShrink: true }); // confirmed; see 99x
 
   // Only forms that still have sessions on them. A form whose every row was on
   // the retired calendar belongs to that calendar too, and pushing it an empty

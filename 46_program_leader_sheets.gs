@@ -585,9 +585,25 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0) return 0;
 
+  // NO SESSIONS, NO PUSH. Every roster is a join against the session table,
+  // so an empty one makes every sheet "Nobody has signed up yet" at once —
+  // which is what three runs did to ~33 sheets on 2026-09-25 after the table
+  // was emptied under them (99w, 99x). An empty session table beside a
+  // non-empty Registrants tab is never the truth about who is coming; leave
+  // every sheet holding the last roster it was given.
+  if ((!sessionRows || sessionRows.length === 0) && registrantRows && registrantRows.length > 0) {
+    const why = `the session table came back empty while the Registrants tab holds ${registrantRows.length} ` +
+      `row(s), so there was nothing to match a roster against. No program registrant sheet was rewritten; ` +
+      `each still shows its last roster.`;
+    log(`⛔ Program registrant sheets: ${why}`);
+    noteForAdmin('Program registrant sheets that were left alone', why);
+    return 0;
+  }
+
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
   let pushed = 0;
   let unchanged = 0;
+  let keptStranded = 0;
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
@@ -616,6 +632,17 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
             `"${entry.title}" (${entry.location}) — the Registrants tab holds ${stranded.total} row(s) ` +
             `for this program, but none of them reached the leader's sheet, so it says nobody has ` +
             `signed up. ` + describeStrandedRepair_(stranded));
+        }
+        // NOT WRITTEN when EVERY one of those rows missed a session: that is
+        // the program's sessions being absent from the table, not the program
+        // having nobody on it, and an empty roster over the leader's last
+        // good one is the worse of the two answers. The sheet keeps what it
+        // had until the sessions are back. (A row that met a session that
+        // day and still missed is `46`'s Event_ID drift, which the empty
+        // write has always been right about reporting.)
+        if (stranded.total > 0 && stranded.withSession === 0) {
+          keptStranded++;
+          return;
         }
       }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
@@ -694,6 +721,10 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   if (pushed > 0 || unchanged > 0) {
     log(`Program registrant sheets: rewrote ${pushed} shared sheet(s)` +
       (unchanged > 0 ? `, left ${unchanged} unchanged.` : '.'));
+  }
+  if (keptStranded > 0) {
+    log(`Program registrant sheets: kept the last roster on ${keptStranded} sheet(s) whose registrants ` +
+      `matched no session on the table, rather than writing them empty.`);
   }
   return pushed;
 }
@@ -1923,7 +1954,7 @@ function refreshProgramLeaderSheetsNow() {
   // The same lock syncRegistrations() takes: this reads the whole Registrants
   // tab, changes rows in memory and writes it all back, which is exactly the
   // shape that loses data when two runs overlap.
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     toastIfPossible('A sync is already running — try again in a moment.');
     return;

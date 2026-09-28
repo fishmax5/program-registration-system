@@ -260,7 +260,7 @@ function deleteRegistrationsForSessions(eventIds, options) {
   const wanted = new Set((eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
   if (wanted.size === 0) return '⚠️ No sessions were selected.';
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     return '⚠️ A sync is running right now — try again in a moment.';
   }

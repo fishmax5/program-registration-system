@@ -171,7 +171,7 @@ function removeDuplicateSessionRows() {
   // halfway through would be appending rows to a table about to be replaced.
   // Taken here rather than through withScriptLock() so the busy branch can SAY
   // it is busy.
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('removeDuplicateSessionRows: another sync is already running — skipping.');
     toastIfPossible('A sync is already running — try again in a moment.');
@@ -212,7 +212,7 @@ function removeDuplicateSessionRowsLocked_(ss) {
     return 0;
   }
 
-  renderProgramDashboard(true, { sessionRows: found.keep, skipTriage: true });
+  renderProgramDashboard(true, { sessionRows: found.keep, skipTriage: true, allowShrink: true }); // confirmed; see 99x
 
   // The counts on the surviving rows were never merged (see
   // mergeDuplicateSessionRows_), so they are recomputed here from the

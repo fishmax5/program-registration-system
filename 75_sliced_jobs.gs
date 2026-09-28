@@ -107,6 +107,7 @@ function getSlicedJobState(propKey, label) {
 
 function saveSlicedJobState(propKey, state) {
   PropertiesService.getScriptProperties().setProperty(propKey, JSON.stringify(state));
+  renewWorkbookLease(); // progress is activity; see 99w
 }
 
 function clearSlicedJobState(propKey) {

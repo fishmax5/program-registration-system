@@ -141,7 +141,7 @@ function loadWeekendEvents(eventIds, startKey, endKey) {
   if (wanted.size === 0) return '⚠️ Nothing was ticked — no dates were loaded.';
   if (isBootstrapActive()) return `⚠️ ${bootstrapBusyMessage()}`;
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) return '⚠️ A sync is already running — try again in a moment.';
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();

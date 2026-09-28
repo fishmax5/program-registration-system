@@ -232,7 +232,7 @@ function runBootstrapSlice() {
     // workbook to a sync would leave a coherent picture. That is also why
     // isDeskWorkBlocked() names this job and not the others.
     around: slice => {
-      const lock = LockService.getScriptLock();
+      const lock = workbookLock();
       if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
         log('Bootstrap slice: another execution holds the lock — the next slice will retry.');
         return null; // the watchdog armed above brings the next slice

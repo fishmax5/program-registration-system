@@ -407,7 +407,7 @@ function collapseDuplicateRegistrationGroups(groupKeys, mealMode) {
   const wanted = new Set((groupKeys || []).map(k => String(k || '').trim()).filter(Boolean));
   if (wanted.size === 0) return '⚠️ No duplicates were selected.';
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     return '⚠️ A sync is running right now — try again in a moment.';
   }

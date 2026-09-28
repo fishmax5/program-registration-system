@@ -155,7 +155,7 @@ const DESK_LOCK_WAIT_MS = 3 * 1000;
  * four and a half minutes at a stretch.
  */
 function withScriptLock(waitMs, fn, onBusy) {
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(waitMs)) return onBusy === undefined ? null : onBusy;
   try {
     return fn();

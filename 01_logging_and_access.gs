@@ -7,6 +7,10 @@ const ENABLE_LOGGING = true;
 /** Central logger — no-op when ENABLE_LOGGING is false. */
 function log(msg) {
   if (ENABLE_LOGGING) console.log(msg);
+  // The heartbeat of the workbook lock (99w): any run holding it and doing
+  // work is logging, so this is what keeps its lease from lapsing. A no-op
+  // without the lock, and throttled to one property write a minute with it.
+  try { renewWorkbookLease(); } catch (err) { /* never costs a log line */ }
 }
 
 

@@ -87,7 +87,7 @@ function removeMarkedRegistrants() {
 
   // The same lock the session-wide delete takes: a sync running underneath a
   // re-render is how half a tab goes missing.
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     toastIfPossible('⚠️ A sync is running right now — try again in a moment.');
     return;

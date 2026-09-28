@@ -89,8 +89,9 @@ const CALENDAR_SYNC_STATE_PROP_KEY = 'CALENDAR_SYNC_STATE_V1';
 const CALENDAR_SYNC_RESUME_DELAY_MS = 60 * 1000;
 
 /**
- * Watchdog: armed BEFORE a slice starts, so a slice killed by the execution
- * ceiling still leaves exactly one successor. Generous against the budget,
+ * Watchdog MARGIN: armed BEFORE a slice starts, this long AFTER the slice's
+ * budget, so a slice killed by the execution ceiling still leaves exactly one
+ * successor. Generous against the budget,
  * because the budget is only checked between groups and the group that
  * overruns it is the one that got the run killed.
  */
@@ -161,7 +162,10 @@ function runCalendarSyncSlice(options) {
     resumeHandler: CALENDAR_SYNC_RESUME_HANDLER,
     budgetMs: getSyncSliceBudgetMs(),
     resumeDelayMs: CALENDAR_SYNC_RESUME_DELAY_MS,
-    watchdogDelayMs: CALENDAR_SYNC_WATCHDOG_DELAY_MS,
+    // PAST THE BUDGET, not a fixed ten minutes: the budget is Config's
+    // Sync_Minutes_Per_Run (25 by default), and a watchdog that fires inside a
+    // slice still running is a second slice started on top of it.
+    watchdogDelayMs: getSyncSliceBudgetMs() + CALENDAR_SYNC_WATCHDOG_DELAY_MS,
     maxSlices: CALENDAR_SYNC_MAX_SLICES,
     maxStalledSlices: CALENDAR_SYNC_MAX_STALLED_SLICES,
     // A calendar sync meets an event or a form it cannot read most weeks. One
@@ -176,7 +180,7 @@ function runCalendarSyncSlice(options) {
     // the slice — the watchdog armed above brings the next one, where the old
     // code simply gave up until tomorrow.
     around: run => {
-      const lock = LockService.getScriptLock();
+      const lock = workbookLock('Calendar sync'); // 99w: the raw lock lapses at ~6 minutes
       if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
         log('syncCalendars: another sync is already running — this slice will be retried.');
         toastIfPossible('Another sync is already running — try again in a moment.');

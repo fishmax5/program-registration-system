@@ -155,7 +155,7 @@ function resumeLedgerBackfill() {
     // same reason — the skip has to be distinguishable from a slice that ran
     // and did nothing, or the stall counter ends a job that was only waiting.
     around: run => {
-      const lock = LockService.getScriptLock();
+      const lock = workbookLock();
       if (!lock.tryLock(DESK_LOCK_WAIT_MS)) {
         log('Ledger backfill: the workbook is busy — this slice will be retried.');
         return null;

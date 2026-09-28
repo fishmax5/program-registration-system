@@ -151,7 +151,7 @@ function destroyAndRebuildAllForms() {
     return startFormRebuildSweep(plan);
   }
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     toastIfPossible('A sync is already running — try again in a moment.');
     return null;

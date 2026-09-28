@@ -74,7 +74,7 @@ function processCalendarDeltaForCalendar(calendarId) {
     log(`processCalendarDeltaForCalendar: a large-setup import or forms-rebuild sweep is in progress — skipping (it is editing these events itself).`);
     return;
   }
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('processCalendarDeltaForCalendar: another sync is already running — skipping this run.');
     return;

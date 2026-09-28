@@ -93,8 +93,10 @@ const REGISTRATION_SYNC_RESUME_DELAY_MS = 60 * 1000;
 
 /**
  * The successor armed at the HEAD of every slice, in case this one is killed
- * outright. Deliberately longer than any budget plus the resume delay, so the
- * ordinary hand-off replaces it rather than racing it.
+ * outright: this long AFTER the slice's budget (it is added to
+ * getSyncSliceBudgetMs() where the job is built), so the ordinary hand-off
+ * replaces it rather than racing it. It used to be the whole delay, which was
+ * shorter than the budget it was meant to outlast.
  */
 const REGISTRATION_SYNC_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
 
@@ -349,6 +351,7 @@ function buildRegistrationSyncContext(plan, deadline) {
     // error, from a second account meeting a protected range or a file it does
     // not own; unguarded, a single one ended the whole sync.
     step: (label, fn) => {
+      renewWorkbookLease(); // a step can be long; see 99w
       try {
         return fn();
       } catch (err) {
@@ -408,7 +411,12 @@ function runRegistrationSyncSlice(options) {
     resumeHandler: REGISTRATION_SYNC_RESUME_HANDLER,
     budgetMs: getSyncSliceBudgetMs(),
     resumeDelayMs: REGISTRATION_SYNC_RESUME_DELAY_MS,
-    watchdogDelayMs: REGISTRATION_SYNC_WATCHDOG_DELAY_MS,
+    // PAST THE BUDGET. This was a flat five minutes against a 25-minute
+    // budget, so every long slice had its own successor fire ON TOP of it at
+    // minute five — which on 2026-09-25 was resumeRegistrationSync (M0TZTM)
+    // starting while syncRegistrations (oHmUKQ) was still importing, and
+    // getting in once the script lock had lapsed (see 99w).
+    watchdogDelayMs: getSyncSliceBudgetMs() + REGISTRATION_SYNC_WATCHDOG_DELAY_MS,
     maxSlices: REGISTRATION_SYNC_MAX_SLICES,
     maxStalledSlices: REGISTRATION_SYNC_MAX_STALLED_SLICES,
     // A sync meets a form it cannot read most weeks; one bad slice is not a
@@ -423,7 +431,10 @@ function runRegistrationSyncSlice(options) {
     // slice — the watchdog armed above this is what brings the next one, which
     // is new: the unsliced sync simply gave up for an hour.
     around: run => {
-      const lock = LockService.getScriptLock();
+      // workbookLock (99w), not the raw script lock: the raw one lapses about
+      // six minutes into a hold, and a slice works for up to 25. That lapse is
+      // what let two of these run at once on 2026-09-25.
+      const lock = workbookLock('Registration sync');
       if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
         log('syncRegistrations: another sync is already running — this slice will be retried.');
         toastIfPossible('Another sync is already running — try again in a moment.');

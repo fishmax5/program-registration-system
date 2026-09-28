@@ -393,7 +393,7 @@ function runOneDoctorFix(registrySheet, code) {
     if (plan.length === 0) {
       return 'None of the lost forms has a session still to come, so there was nothing to rebuild.';
     }
-    const lock = LockService.getScriptLock();
+    const lock = workbookLock();
     if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) return 'A sync is running — try the rebuild again in a moment.';
     try {
       const result = plan.length > FORM_REBUILD_SLICE_THRESHOLD
@@ -407,7 +407,7 @@ function runOneDoctorFix(registrySheet, code) {
   }
 
   if (code === DOCTOR_FIXES.EVENTS) {
-    const lock = LockService.getScriptLock();
+    const lock = workbookLock();
     if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) return 'A sync is running — try this again in a moment.';
     try {
       const stats = rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());

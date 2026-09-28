@@ -437,7 +437,7 @@ function offerToRebuildLostForms(registrySheet, goneRefs, result) {
     return;
   }
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     toastIfPossible('A sync is already running — try the rebuild again in a moment.');
     return;

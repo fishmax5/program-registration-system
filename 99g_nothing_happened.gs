@@ -155,6 +155,21 @@ function collectWorkbookRefusals() {
     });
   });
 
+  // 2b. THE WORKBOOK LOCK'S LEASE (99w). A run holding it makes every other
+  //     writer wait and then decline; a run cancelled in the editor leaves it
+  //     behind until it lapses. Said here because "another sync is already
+  //     running" is otherwise a toast about something nobody can see.
+  guardRefusalRead_(found, 'the workbook lock', () => {
+    const held = describeWorkbookLease();
+    if (!held) return;
+    found.push({
+      title: 'Another run is holding the workbook',
+      detail: `${held} Syncs, repairs and desk writes decline while it does.`,
+      fix: 'Usually nothing — wait for it to finish. If that run was cancelled or killed, ' +
+        '🔧 Admin ▸ 🧹 Clear a Stuck Background Job releases the hold.'
+    });
+  });
+
   // 3. THE SECOND KILL SWITCH, which stops something different and is worth
   //    saying because "why did nobody get an email?" arrives in the same
   //    conversation as "why did nothing happen?".
@@ -263,6 +278,18 @@ function clearStuckBackgroundJobs() {
       log(`⚠️ Could not read ${job.label}'s state (${err}).`);
     }
   });
+
+  // A LEASE LEFT BY A RUN THAT IS GONE (99w). Only offered once it has gone
+  // quiet for a few minutes: a live one belongs to a run that is working.
+  let staleLease = false;
+  try {
+    const lease = readWorkbookLease();
+    staleLease = !!(lease && Number(lease.expiresAt) > Date.now() &&
+      Date.now() - Number(lease.renewedAt || 0) > 3 * 60 * 1000);
+  } catch (err) { /* nothing to offer */ }
+  if (staleLease && clearWorkbookLease()) {
+    log('clearStuckBackgroundJobs: released a workbook lock left by a run that went quiet.');
+  }
 
   const ui = tryGetUi_();
   if (inFlight.length === 0) {

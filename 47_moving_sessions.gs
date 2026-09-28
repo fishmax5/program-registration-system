@@ -214,7 +214,7 @@ function repointSessionsToForm(eventIds, target) {
   const chosenRows = allRows.filter(row => wanted.has(String(row[map['Event_ID']] || '').trim()));
   if (chosenRows.length === 0) return '⚠️ Those sessions are no longer on the dashboard — try Sync Cal and reopen this.';
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) return '⚠️ A sync is already running — try again in a moment.';
   try {
     const mode = String((target && target.mode) || 'new');

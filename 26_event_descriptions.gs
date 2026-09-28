@@ -324,7 +324,7 @@ function rewriteEventRegistrationLinks() {
   // The same lock syncCalendars() takes. Both edit calendar descriptions and
   // both manage the calendar-edit triggers; overlapping them would have one
   // restore the triggers while the other is still writing.
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('rewriteEventRegistrationLinks: a sync is already running — skipping this run.');
     toastIfPossible('A sync is already running — try again in a moment.');

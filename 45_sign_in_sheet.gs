@@ -508,7 +508,7 @@ function autoCreateTodaysSignInSheets() {
     return;
   }
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     log('autoCreateTodaysSignInSheets: another sync is already running — skipping this run.');
     return;

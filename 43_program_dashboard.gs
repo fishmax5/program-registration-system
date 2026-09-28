@@ -35,6 +35,10 @@ function renderProgramDashboard(force, options) {
   const map = getIndexMap(headers);
 
   let sessionRows = options.sessionRows || getSectionedRows(sheet, headers, 'Event_ID');
+  // BEFORE TRIAGE AND BEFORE THE WRITE: a read that came back a fraction of
+  // what the table last held is a read of a tab somebody else is mid-way
+  // through rewriting, and nothing below should act on it. See 99x.
+  guardSessionTableShrink(sessionRows.length, options);
 
   const triageResult = options.skipTriage
     ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
@@ -70,7 +74,9 @@ function renderProgramDashboard(force, options) {
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
 
+  guardSessionTableShrink(sessionRows.length, options); // after triage, too (99x)
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
+  recordSessionTableCount(sessionRows.length);
 
   // THE MONTH VIEW IS DRAWN FROM THE ROWS WE ARE HOLDING, not from a second
   // read of the tab we have just written — see 78_program_month_dashboard.gs.

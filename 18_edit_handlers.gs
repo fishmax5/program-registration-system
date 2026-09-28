@@ -798,7 +798,7 @@ function onProgramFlagEditInstallable(e) {
     // The sync holds this lock while it reads every calendar and rewrites the
     // table — and it drains the queue itself as its first act, so there is
     // nothing here worth waiting for it to finish.
-    const lock = LockService.getScriptLock();
+    const lock = workbookLock();
     if (!lock.tryLock(2000)) {
       log('onProgramFlagEditInstallable: a sync is running and will deliver the queued change itself.');
       return;
@@ -1672,7 +1672,7 @@ function linkProgramAcrossLocations() {
     return null;
   }
 
-  const lock = LockService.getScriptLock();
+  const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
     toastIfPossible('A sync is already running — try again in a moment.');
     return null;
