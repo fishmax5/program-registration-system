@@ -84,6 +84,15 @@ const LEDGER_VERIFY_COLUMNS = [
   'Attended', 'Lunch_Served', 'Party_ID'
 ];
 
+/**
+ * The columns of LEDGER_VERIFY_COLUMNS that are TICK BOXES, where an unticked
+ * box and a blank cell mean the same thing. The tab writes `false` into a
+ * checkbox column it has drawn and the fold leaves a field no entry ever set
+ * blank, so without this every registration nobody marked is a disagreement.
+ * Only these: a blank Program_Status or Meals_Ordered is a real difference.
+ */
+const LEDGER_VERIFY_CHECKBOX_COLUMNS = ['Attended', 'Lunch_Served'];
+
 /** How many findings of each kind one run names before it says "and N more". */
 const LEDGER_VERIFY_MAX_LISTED = 25;
 
@@ -194,7 +203,13 @@ function describeLedgerVerifyRow_(row, map) {
   const personType = String(row[map['Person_Type']] || '').trim() || 'Registrant';
   const event = String(row[map['Event']] || '').trim();
   const location = String(row[map['Location']] || '').trim();
-  const date = coerceDate(row[map['Event_Date']]);
+  // A folded row carries its date as the Payload's 'yyyy-MM-dd' string, and
+  // `new Date('2026-09-16')` is UTC midnight — the evening before, in TIMEZONE.
+  // parseDateKey reads it as the local date it names.
+  const rawDate = row[map['Event_Date']];
+  const date = typeof rawDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())
+    ? parseDateKey(rawDate.trim())
+    : coerceDate(rawDate);
   return {
     name: name,
     where: `${event || 'an untitled session'}${date ? `, ${formatDateLabel(date)}` : ''}` +
@@ -221,6 +236,8 @@ function compareLedgerVerifyRows_(tabRow, foldRow, map) {
     const mine = ledgerVerifyValue_(tabRow[map[header]]);
     const theirs = ledgerVerifyValue_(foldRow[map[header]]);
     if (mine === theirs) return;
+    if (LEDGER_VERIFY_CHECKBOX_COLUMNS.indexOf(header) !== -1 &&
+        (mine === '' || mine === 'false') && (theirs === '' || theirs === 'false')) return;
     differences.push(`${header}: the tab says ${ledgerVerifySay_(mine)}, the ledger says ${ledgerVerifySay_(theirs)}`);
   });
   return differences;
