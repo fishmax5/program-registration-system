@@ -53,16 +53,14 @@
 // and the server is asked again only when somebody pulls to refresh. See
 // 87_public_program_calendar_html.gs for what the browser does with it.
 //
-// WHY IT IS CACHED. Unlike the door pages there is no upper bound on who has
-// this link: a flyer, a newsletter, a website. The read itself is one pass
-// over one tab, but a hundred people opening it in one morning is a hundred
-// passes, so the built snapshot is kept in CacheService for
-// PUBLIC_CALENDAR_CACHE_SECONDS and everybody in that window is served the
-// same one. Five minutes is chosen against what actually changes: seats.
-// A session that fills is stale on somebody's screen for at most five minutes
-// and the FORM is the thing that refuses them, not this page — the page has
-// never been the authority on whether there is a seat, and does not claim to
-// be.
+// WHY IT IS BUILT AHEAD. Unlike the door pages there is no upper bound on who
+// has this link: a flyer, a newsletter, a website. So nobody's page view
+// reads the tab: the snapshot is built by a trigger every few minutes and at
+// the end of every calendar sync, stored in the script cache with a Drive
+// file behind it, and every view is served the stored one (99y). What that
+// staleness costs is seats, and the FORM is the thing that refuses a booking,
+// not this page — the page has never been the authority on whether there is
+// a seat, and does not claim to be.
 // ============================================================================
 
 /** What lunch is called on a page a stranger reads. See buildPublicSessionRow(). */
@@ -89,24 +87,11 @@ const PUBLIC_CALENDAR_INTRO =
   'buildings. Pick a program below and tap a date to open its sign-up form. Would you ' +
   'rather sign up by phone, or have a question about a program? Please call us.';
 
-/** How long a built snapshot is served to everybody who asks. See the banner. */
-const PUBLIC_CALENDAR_CACHE_SECONDS = 300;
-
-/**
- * The cache key. THE DATE IS IN IT on purpose: the snapshot's first day is
- * "today", so a snapshot built at 11pm is wrong at midnight in a way no TTL
- * catches — it would go on offering yesterday as the first day for another
- * five minutes. A key that changes with the day cannot do that.
- */
-function publicCalendarCacheKey() {
-  return `PUBLIC_CALENDAR_V1|${formatDateKey(new Date())}`;
-}
-
 /**
  * THE CALL THE PAGE MAKES — and the one buildPublicCalendarHtml() inlines.
  *
- * Payload: { fresh } — anything truthy skips the cache, which is what the
- * page's Refresh control sends. Everything else is ignored: this endpoint is
+ * Payload: { fresh } — anything truthy asks for a rebuild (rate-limited in
+ * 99y), which is what the page's Refresh control sends. Everything else is ignored: this endpoint is
  * reachable by anyone with the link, so it takes no location, no PIN and no
  * identity, and there is nothing in it to get wrong.
  *
@@ -119,38 +104,10 @@ function publicCalendarCacheKey() {
 function publicProgramCalendar(payload) {
   const args = (payload && typeof payload === 'string') ? safeParsePublicPayload_(payload)
     : (payload || {});
-  const cache = args.fresh ? null : tryGetScriptCache();
-  const key = publicCalendarCacheKey();
-  if (cache) {
-    try {
-      const hit = cache.get(key);
-      if (hit) return JSON.parse(hit);
-    } catch (err) {
-      log(`Public calendar cache read failed (${err}) — building it instead.`);
-    }
-  }
-  let snapshot;
-  try {
-    snapshot = buildPublicProgramCalendar();
-  } catch (err) {
-    log(`publicProgramCalendar could not read the sessions: ${err}`);
-    return {
-      ok: false,
-      message: 'We could not read the program calendar just now. Please try again in a ' +
-        'few minutes, or call the office.'
-    };
-  }
-  if (cache) {
-    try {
-      cache.put(key, JSON.stringify(snapshot), PUBLIC_CALENDAR_CACHE_SECONDS);
-    } catch (err) {
-      // A snapshot too large for one cache entry, most likely. Serving it
-      // uncached is slower and completely correct, so this is a note, not a
-      // failure.
-      log(`Public calendar snapshot was not cached (${err}).`);
-    }
-  }
-  return snapshot;
+  // BUILT AHEAD, NOT HERE (99y). A trigger and the end of every calendar
+  // sync build the snapshot and store it; this reads what was stored and
+  // builds live only when nothing usable is — once, storing the result.
+  return getScheduleSnapshot_(!!args.fresh);
 }
 
 /** google.script.run hands strings; a payload that will not parse is an empty one. */
@@ -488,30 +445,36 @@ function publicCalendarEmbedUrl(options) {
 /**
  * THE WHOLE THING SOMEBODY PASTES INTO THEIR WEBSITE, as one string.
  *
- * An <iframe> and eleven lines of listener. The listener is what stops the
- * inner scrollbar, and it is written to be safe in a page it knows nothing
- * about: it answers only messages from THIS frame's own window (`event.source
- * !== frame.contentWindow` is the check that matters — an origin string is not
- * available to compare against reliably across Google's two web-app hostnames),
- * only messages carrying this file's own type, and it only ever sets a height.
+ * A placeholder, an <iframe> and a short listener. The listener answers only
+ * messages carrying this file's own type AND this frame's mode, and only from
+ * a googleusercontent.com origin — it cannot check event.source any more,
+ * because the page posts from a frame NESTED inside the one the website made
+ * (see publicEmbedHeightScript in 91). All it ever does is set a height.
  *
- * The `height` on the iframe itself is the FALLBACK, not the plan: a visitor
- * whose browser drops the message, or a site whose CSP blocks the inline
- * script, gets a 900px calendar that scrolls inside itself — which is what a
- * Google Calendar embed does on its best day.
+ * The iframe is NOT lazy-loaded (the calendar should start loading with the
+ * page), starts collapsed behind a "Loading schedule…" line, and is given
+ * PUBLIC_EMBED_FALLBACK_HEIGHT_PX if no height arrives within
+ * PUBLIC_EMBED_FALLBACK_AFTER_MS — a site whose CSP blocks the script, or a
+ * browser that drops the message, still gets a calendar that scrolls inside
+ * itself rather than none.
  */
 function publicCalendarEmbedSnippet(options) {
   return publicEmbedSnippetFor_(publicCalendarEmbedUrl(options), {
     id: 'program-calendar',
-    title: 'Programs and sign-ups'
+    title: 'Programs and sign-ups',
+    mode: 'public'
   });
 }
+
+/** What the snippet falls back to when no height message ever arrives. */
+const PUBLIC_EMBED_FALLBACK_HEIGHT_PX = 1150;
+const PUBLIC_EMBED_FALLBACK_AFTER_MS = 10000;
 
 /**
  * THE SNIPPET, FOR EITHER PUBLIC PAGE. The calendar and the regular-programs
  * page are embedded the same way and report their height with the same
- * message, so the eleven lines are written once — and given their own frame
- * `id`, because a website that embeds BOTH would otherwise have two listeners
+ * message, so the listener is written once — and given their own frame
+ * `id` and `mode`, because a website that embeds BOTH would otherwise have two listeners
  * resizing one frame and one page that never grows.
  */
 function publicEmbedSnippetFor_(url, options) {
@@ -519,20 +482,33 @@ function publicEmbedSnippetFor_(url, options) {
   const opts = options || {};
   const id = String(opts.id || 'program-calendar');
   const title = String(opts.title || 'Programs and sign-ups');
+  const mode = String(opts.mode || 'public');
   return [
+    `<div id="${id}-loading" style="padding:32px 0;text-align:center;opacity:.7">Loading schedule\u2026</div>`,
     `<iframe id="${id}" src="${url}"`,
-    `        title="${title}" loading="lazy"`,
-    '        style="width:100%;height:900px;border:0;display:block"></iframe>',
+    `        title="${title}"`,
+    '        style="width:100%;height:0;border:0;display:block"></iframe>',
     '<script>',
     '(function () {',
     `  var frame = document.getElementById(${JSON.stringify(id)});`,
+    `  var loading = document.getElementById(${JSON.stringify(id + '-loading')});`,
+    '  var sized = false;',
+    '  function ready(height) {',
+    '    if (!frame) return;',
+    '    frame.style.height = Math.ceil(height) + "px";',
+    '    if (loading && loading.parentNode) loading.parentNode.removeChild(loading);',
+    '  }',
     '  window.addEventListener("message", function (event) {',
-    '    if (!frame || event.source !== frame.contentWindow) return;',
+    '    if (!/\\.googleusercontent\\.com$/.test(String(event.origin || ""))) return;',
     '    var data = event.data;',
     `    if (!data || data.type !== ${JSON.stringify(PUBLIC_CALENDAR_EMBED_MESSAGE)}) return;`,
+    `    if (data.mode !== ${JSON.stringify(mode)}) return;`,
     '    var height = Number(data.height);',
-    '    if (height > 0) frame.style.height = Math.ceil(height) + "px";',
+    '    if (height > 0) { sized = true; ready(height); }',
     '  });',
+    '  setTimeout(function () {',
+    `    if (!sized) ready(${PUBLIC_EMBED_FALLBACK_HEIGHT_PX});`,
+    `  }, ${PUBLIC_EMBED_FALLBACK_AFTER_MS});`,
     '}());',
     '</script>'
   ].join('\n');

@@ -72,6 +72,9 @@ function publicRegularPrograms(payload) {
     ok: true,
     intro: snapshot.intro,
     generatedAt: snapshot.generatedAt,
+    // What the page compares to decide whether a background re-read changed
+    // anything (99y) — the fold is of the same snapshot, so it is the same stamp.
+    builtAt: snapshot.builtAt,
     todayKey: snapshot.todayKey,
     horizonKey: snapshot.horizonKey,
     // The buildings that have a WEEKLY program in them, which is not every

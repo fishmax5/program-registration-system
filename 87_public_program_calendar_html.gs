@@ -623,11 +623,13 @@ ${embed ? '' : `  <header>
           if (force) { DATA = res || DATA; draw(); }
           return;
         }
+        // THE SNAPSHOT IS BUILT AHEAD (99y), so the answer is usually the
+        // one already on screen. Redraw only when it is not — a redraw under
+        // somebody's finger for nothing is the thing to avoid.
+        if (DATA && DATA.builtAt && res.builtAt === DATA.builtAt) return;
         DATA = res;
         SESSIONS = res.sessions || [];
-        drawIntro();
-        drawLocations();
-        draw();
+        redrawKeepingPlace(function () { drawIntro(); drawLocations(); draw(); });
       })
       .withFailureHandler(function () {
         // A failed background read changes nothing on screen: what is drawn
@@ -635,7 +637,7 @@ ${embed ? '' : `  <header>
         // working calendar would be the page's own worst moment.
         button.textContent = 'Refresh';
       })
-      .publicProgramCalendar(JSON.stringify({ fresh: !!force }));
+      .getScheduleSnapshot(JSON.stringify({ mode: 'public', fresh: !!force }));
   }
 
   // --------------------------------------------------------------------
@@ -645,43 +647,22 @@ ${embed ? '' : `  <header>
   // as a scrollbar INSIDE the frame — which on a phone is the gesture where
   // somebody scrolls the calendar when they meant to scroll the website and
   // decides the site is broken. So the page measures itself after every draw
-  // and posts the number out; the eleven-line listener in the snippet (see
-  // publicCalendarEmbedSnippet) grows the frame to match. A tile expanded to
-  // show the rest of its dates is exactly the case that needs it.
+  // and posts the number out to the WEBSITE (window.top — see
+  // publicEmbedHeightScript in 91 for why not window.parent); the listener in
+  // the snippet (publicCalendarEmbedSnippet) grows the frame to match.
   //
   // The target origin is '*' on purpose: the host is somebody else's website
   // and this page is not told its address. What is published to it is a
-  // number of pixels — there is nothing in this message anybody may not see —
-  // and the listener's own check is that the message came from ITS frame.
+  // number of pixels and a mode — nothing anybody may not see.
   // --------------------------------------------------------------------
-  var lastHeight = 0;
-  function postHeight() {
-    if (!EMBED.embed || window.parent === window) return;
-    var height = Math.max(
-      document.documentElement ? document.documentElement.scrollHeight : 0,
-      document.body ? document.body.scrollHeight : 0);
-    if (!height || Math.abs(height - lastHeight) < 2) return;
-    lastHeight = height;
-    try {
-      window.parent.postMessage({ type: EMBED.message, height: height }, '*');
-    } catch (err) { /* a host that will not be spoken to keeps its 900px */ }
-  }
+${publicEmbedHeightScript('public')}
 
   drawIntro();
   drawLocations();
   draw();
-  postHeight();
-  if (EMBED.embed) {
-    // Fonts land after the first paint and change every tile's height by a
-    // pixel or two; a tile opened or a filter tapped changes it by hundreds.
-    window.addEventListener('load', postHeight);
-    window.addEventListener('resize', postHeight);
-    if (window.ResizeObserver && document.body) {
-      new window.ResizeObserver(postHeight).observe(document.body);
-    } else {
-      window.setInterval(postHeight, 1000);
-    }
-  }
+  // On load, on every draw (draw() calls postHeight), and whenever the
+  // content itself changes size — a tile expanded, a font settled.
+  watchHeight();
   window.setTimeout(function () { refresh(false); }, 400);
 </script>
 `;

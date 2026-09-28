@@ -520,8 +520,13 @@ const DEFAULT_AUTOMATION_ENABLED = true;
  */
 const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange', 'autoCreateTodaysSignInSheets'];
 
-/** Every trigger writeTriggers() maintains — the automation ones plus the edit handler. */
-const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(['onProgramFlagEditInstallable']);
+/**
+ * Every trigger writeTriggers() maintains — the automation ones plus the edit
+ * handler, plus the public schedule rebuild (99y), which is read-only and so
+ * is neither governed by the kill switch nor paused by a bootstrap import.
+ */
+const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(
+  ['onProgramFlagEditInstallable', 'refreshPublicScheduleSnapshot']);
 
 /**
  * Cross-execution cache TTL for the kill-switch read. onCalendarChange can

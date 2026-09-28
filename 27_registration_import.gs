@@ -28,6 +28,7 @@ function syncRegistrations() {
   // runs before this sync touches the tab, so the copy is of what the sync
   // found. Both never throw. See 99j.
   ensureRegistrantSnapshotTrigger_();
+  ensurePublicSnapshotTrigger_();
   snapshotRegistrantsIfDue_();
 
   // THE DOOR'S QUEUE GOES IN FIRST, before this run takes the lock and starts

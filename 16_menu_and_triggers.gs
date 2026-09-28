@@ -711,6 +711,10 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('snapshotRegistrantsDaily', () =>
     ScriptApp.newTrigger('snapshotRegistrantsDaily')
       .timeBased().everyDays(1).atHour(3).create());
+  // THE PUBLIC PAGES' SNAPSHOT, built ahead of anybody asking (99y). The two
+  // embedded pages on the website read what this stores rather than the
+  // session tab, which is what makes them open instantly. Read-only.
+  removed += resetTriggersForHandler(PUBLIC_SNAPSHOT_TRIGGER_HANDLER, createPublicSnapshotTrigger_);
   // The one trigger here that is not a schedule. An installable onEdit is the
   // only execution in this project that sees a cell edit AND is allowed to
   // write to a calendar, which is what makes ticking Club / No_Registration a

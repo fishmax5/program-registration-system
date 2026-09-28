@@ -476,9 +476,20 @@ ok('...and the embed spells its range the way the printed links do',
 ok('the snippet is an iframe on that address',
   snippet.indexOf('<iframe') !== -1 && snippet.indexOf(sandbox.publicCalendarEmbedUrl({})) !== -1);
 ok('...with a fallback height, for a host that never hears the message',
-  snippet.indexOf('height:900px') !== -1);
-ok('...and a listener that answers only its own frame',
-  snippet.indexOf('event.source !== frame.contentWindow') !== -1);
+  snippet.indexOf('ready(1150)') !== -1);
+ok('...a loading line until the first height arrives, and no lazy loading',
+  snippet.indexOf('Loading schedule') !== -1 && snippet.indexOf('loading="lazy"') === -1);
+ok('...and a listener that answers only its own mode, from a googleusercontent frame',
+  snippet.indexOf('data.mode !== "public"') !== -1
+  && snippet.indexOf('googleusercontent') !== -1
+  && snippet.indexOf('event.source') === -1);
+ok('the page posts its height to the website (window.top), tagged with its mode',
+  embedHtml.indexOf('window.top.postMessage') !== -1
+  && embedHtml.indexOf('window.parent.postMessage') === -1
+  && embedHtml.indexOf('var HEIGHT_MODE = "public"') !== -1);
+ok('the background re-read goes through getScheduleSnapshot and skips an unchanged builtAt',
+  embedHtml.indexOf('.getScheduleSnapshot(') !== -1
+  && embedHtml.indexOf('res.builtAt === DATA.builtAt') !== -1);
 // Named as a literal rather than read off the constant, because the whole
 // point of it is that the listener is pasted into somebody else's website and
 // goes on running there: changing the string is changing a contract with pages

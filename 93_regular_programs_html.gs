@@ -416,48 +416,28 @@ ${embed ? '' : `  <header>
           if (force) { DATA = res || DATA; draw(); }
           return;
         }
+        // Built ahead (99y): redraw only when the snapshot actually moved.
+        if (DATA && DATA.builtAt && res.builtAt === DATA.builtAt) return;
         DATA = res;
         PROGRAMS = res.programs || [];
-        drawLocations();
-        draw();
+        redrawKeepingPlace(function () { drawLocations(); draw(); });
       })
       .withFailureHandler(function () {
         // What is drawn is real, it is just a few minutes old; an error
         // banner over a working page would be its own worst moment.
         button.textContent = 'Refresh';
       })
-      .publicRegularPrograms(JSON.stringify({ fresh: !!force }));
+      .getScheduleSnapshot(JSON.stringify({ mode: 'regular', fresh: !!force }));
   }
 
-  // The frame's height — the whole of what an embed says to its host. See the
-  // long note in the calendar page: an iframe's height is fixed and this
-  // page's is not, and the two disagree as a scrollbar inside the frame.
-  var lastHeight = 0;
-  function postHeight() {
-    if (!EMBED.embed || window.parent === window) return;
-    var height = Math.max(
-      document.documentElement ? document.documentElement.scrollHeight : 0,
-      document.body ? document.body.scrollHeight : 0);
-    if (!height || Math.abs(height - lastHeight) < 2) return;
-    lastHeight = height;
-    try {
-      window.parent.postMessage({ type: EMBED.message, height: height }, '*');
-    } catch (err) { /* a host that will not be spoken to keeps its 900px */ }
-  }
+  // The frame's height — the whole of what an embed says to its host. See
+  // publicEmbedHeightScript (91): posted to window.top, tagged 'regular'.
+${publicEmbedHeightScript('regular')}
 
   drawIntro();
   drawLocations();
   draw();
-  postHeight();
-  if (EMBED.embed) {
-    window.addEventListener('load', postHeight);
-    window.addEventListener('resize', postHeight);
-    if (window.ResizeObserver && document.body) {
-      new window.ResizeObserver(postHeight).observe(document.body);
-    } else {
-      window.setInterval(postHeight, 1000);
-    }
-  }
+  watchHeight();
   window.setTimeout(function () { refresh(false); }, 400);
 </script>
 `;

@@ -422,6 +422,83 @@ function publicEmbedSkinStyles(embed) {
 }
 
 /**
+ * THE FRAME'S HEIGHT, POSTED TO THE WEBSITE — the one script both public
+ * pages share, inlined into each with its own `mode`.
+ *
+ * TO window.top, NOT window.parent. HtmlService serves the page inside a
+ * sandboxed googleusercontent frame, inside Google's own script.google.com
+ * wrapper, inside the website's <iframe>: window.parent is Google's wrapper,
+ * which ignores the message, so for as long as this posted to the parent the
+ * website never heard a height and had to force a fixed one. The website is
+ * window.top. The message carries `mode` so a page embedding both public
+ * pages can tell which frame a height belongs to — the listener can no
+ * longer match on event.source, because the sender is the NESTED frame, not
+ * the one the website created.
+ *
+ * MEASURED OFF .wrap, not document.documentElement.scrollHeight: inside a
+ * frame the document is never shorter than the frame, so a page that got
+ * SHORTER (a filter narrowed it) would go on reporting the old, taller
+ * height forever. Debounced to one message per PUBLIC_EMBED_HEIGHT_DEBOUNCE_MS,
+ * because a ResizeObserver fires on every pixel of a font settling.
+ *
+ * Expects `EMBED` ({ embed, message }) to be defined by the page.
+ */
+function publicEmbedHeightScript(mode) {
+  return `
+  var HEIGHT_MODE = ${JSON.stringify(String(mode || ''))};
+  var lastHeight = 0;
+  var heightTimer = null;
+  function measureHeight() {
+    var wrap = document.querySelector('.wrap');
+    if (wrap) {
+      var rect = wrap.getBoundingClientRect();
+      return Math.ceil(rect.bottom + (window.pageYOffset || 0));
+    }
+    return document.documentElement ? document.documentElement.scrollHeight : 0;
+  }
+  function sendHeight() {
+    heightTimer = null;
+    if (!EMBED.embed || window.top === window) return;
+    var height = measureHeight();
+    if (!height || Math.abs(height - lastHeight) < 2) return;
+    lastHeight = height;
+    try {
+      window.top.postMessage({ type: EMBED.message, mode: HEIGHT_MODE, height: height }, '*');
+    } catch (err) { /* a host that will not be spoken to keeps its fixed height */ }
+  }
+  function postHeight() {
+    if (heightTimer) window.clearTimeout(heightTimer);
+    heightTimer = window.setTimeout(sendHeight, ${PUBLIC_EMBED_HEIGHT_DEBOUNCE_MS});
+  }
+  function watchHeight() {
+    if (!EMBED.embed) return;
+    sendHeight();
+    window.addEventListener('load', postHeight);
+    window.addEventListener('resize', postHeight);
+    var wrap = document.querySelector('.wrap');
+    if (window.ResizeObserver && wrap) {
+      new window.ResizeObserver(postHeight).observe(wrap);
+    } else {
+      window.setInterval(postHeight, 1000);
+    }
+  }
+  /**
+   * A background re-read that brought something new: redraw it without
+   * moving anybody. The filters, the search box and the building live in
+   * the page's view state and the input itself, so a redraw keeps them; the scroll is put back
+   * by hand because replacing the list can move it.
+   */
+  function redrawKeepingPlace(redraw) {
+    var x = window.pageXOffset || 0, y = window.pageYOffset || 0;
+    redraw();
+    try { window.scrollTo(x, y); } catch (err) { /* nothing to restore */ }
+  }`;
+}
+
+/** How long the height report waits for things to settle. */
+const PUBLIC_EMBED_HEIGHT_DEBOUNCE_MS = 100;
+
+/**
  * THE REGULAR-PROGRAMS PAGE'S OWN EMBED ADDRESS AND SNIPPET — the calendar's,
  * with this page's mode on it and its own frame id, so a website that embeds
  * both grows two frames rather than one.
@@ -437,6 +514,7 @@ function publicRegularEmbedUrl(options) {
 function publicRegularEmbedSnippet(options) {
   return publicEmbedSnippetFor_(publicRegularEmbedUrl(options), {
     id: 'regular-programs',
-    title: 'Weekly programs'
+    title: 'Weekly programs',
+    mode: 'regular'
   });
 }

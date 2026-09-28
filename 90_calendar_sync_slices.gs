@@ -272,6 +272,10 @@ function finishCalendarSync_(state, problem) {
     toastIfPossible(headline);
   }
   flushAdminDigest('Calendar sync');
+  // The public pages read a snapshot built ahead (99y); the sync may have
+  // added dates or links, so they get this sync's picture now rather than at
+  // the next trigger.
+  refreshPublicScheduleSnapshotAfterSync_();
   return { finished: !problem, problem: problem || null, slices: slices };
 }
 
