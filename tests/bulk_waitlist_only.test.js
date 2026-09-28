@@ -273,10 +273,12 @@ const logged = re => sandbox.__logs.some(l => re.test(l));
   const realLock = sandbox.LockService.getScriptLock;
   sandbox.LockService.getScriptLock = () => ({ tryLock: () => false, releaseLock: () => {} });
   const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  ok('a busy workbook is written anyway, and says a sync was running',
+    /1 date\(s\) reopened/.test(msg) && /A sync was running/.test(msg), msg);
+  ok('...and that is logged too', logged(/A sync was running/), JSON.stringify(sandbox.__logs));
+  // Put the tick back so the next case starts from the same state.
+  sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: true }]);
   sandbox.LockService.getScriptLock = realLock;
-  ok('a busy workbook says a sync is running, and nothing was changed',
-    /A sync is running/.test(msg) && /nothing was changed/.test(msg), msg);
-  ok('...and that is logged too', logged(/A sync is running/), JSON.stringify(sandbox.__logs));
 }
 {
   // A tab whose header row predates the column: the dialog lists dates from

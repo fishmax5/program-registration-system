@@ -354,9 +354,17 @@ function applyBulkWaitlistOnly(programKey, picks) {
   const result = withScriptLock(BULK_WAITLIST_LOCK_WAIT_MS,
     () => applyBulkWaitlistOnlyLocked_(programKey, wanted), null);
   if (result === null) {
-    return bulkWaitlistSay_(programKey, '⚠️ A sync is running and held the workbook for more than ' +
-      `${Math.round(BULK_WAITLIST_LOCK_WAIT_MS / 1000)} seconds — nothing was changed. ` +
-      'Press Apply again in a minute; your ticks are still here.');
+    // FORCED, NOT REFUSED (user's decision, 2026-09-28). A sliced sync can
+    // hold this lock for most of an hour, and "press Apply again" never
+    // worked on a busy day. So after the wait the write goes ahead WITHOUT the
+    // lock. The tick is a cell AND a queued calendar tag
+    // (recordPendingProgramFlag); if the running sync flushes a stale copy of
+    // the column over the cell, the queued tag still reaches the calendar and
+    // the next sync reads the tick back from there.
+    const forced = applyBulkWaitlistOnlyLocked_(programKey, wanted);
+    return bulkWaitlistSay_(programKey, forced + ' (A sync was running, so this was applied without ' +
+      'waiting for it. If a date looks unticked when that sync finishes, the next sync puts it back ' +
+      'once the calendar has the tag.)');
   }
   return result;
 }
