@@ -226,6 +226,9 @@ function buildAppMenu(ui, includeAdmin) {
       // for the same reason as the item above \u2014 it lists every row by name
       // before anything is written, and it only ever adds. See 99p.
       .addItem('\u267b\ufe0f Restore Registrants from a Copy\u2026', menuFn_('showRestoreRegistrantsFromCopyDialog'))
+      // The same, read out of Registration_Ledger instead of a version-history
+      // copy \u2014 no copy to make and no minute to guess. See 99v.
+      .addItem('\ud83d\udcd2 Restore Registrants from the Ledger\u2026', menuFn_('showRestoreRegistrantsFromLedgerDialog'))
       .addSeparator()
       // The three halves of one job, adjacent: hand a sheet out, keep it
       // current, and tell the leader what moved on it. The last two both ride

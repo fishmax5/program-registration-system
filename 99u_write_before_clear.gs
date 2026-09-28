@@ -41,7 +41,8 @@
  * and the tab's current used range, blanks everywhere else. Returns true when
  * the values landed, false when it fell back to clearing the contents.
  */
-function writeTabValuesBeforeRender_(sheet, blocks) {
+function writeTabValuesBeforeRender_(sheet, blocks, options) {
+  options = options || {};
   try {
     const grid = composeTabValueGrid_(blocks);
     const height = Math.max(grid.length, sheet.getLastRow());
@@ -67,6 +68,16 @@ function writeTabValuesBeforeRender_(sheet, blocks) {
     sheet.getRange(1, 1, height, width).setValues(padded);
     return true;
   } catch (err) {
+    // A GUARDED TAB IS NEVER CLEARED ON THIS PATH. Clear-then-redraw is the
+    // shape that can leave All_Registrants empty if the redraw is then killed,
+    // and an empty registrants tab is how the 2026-09-25 loss became permanent.
+    // Refusing leaves the tab exactly as it was; the caller's step fails and
+    // the next run tries again.
+    if (options.noClearFallback) {
+      log(`🛑 Could not write "${safeSheetName_(sheet)}" before redrawing it (${err}) — ` +
+        `left untouched rather than cleared.`);
+      throw new Error(`Could not rewrite ${safeSheetName_(sheet)} (${err}). Nothing was cleared.`);
+    }
     log(`ℹ️ Could not write "${safeSheetName_(sheet)}" before redrawing it (${err}) — clearing it first instead.`);
     sheet.clearContents();
     return false;
