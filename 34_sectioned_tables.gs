@@ -652,7 +652,8 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
   const tableStart = opts.startRow || 1;
   writeTabValuesBeforeRender_(sheet,
-    [sectionedTableValueBlock_(tableStart, headers, upcoming, past, opts)]);
+    [sectionedTableValueBlock_(tableStart, headers, upcoming, past, opts)],
+    { noClearFallback: !!opts.guardMarker });
   sheet.clearFormats();
   // Row visibility is a sheet-level property that survives clear(), exactly
   // like column visibility below — so last render's hidden old-month range

@@ -100,8 +100,14 @@ function guardRegistrantRowLoss_(sheet, headers, markerHeaderName, newRows) {
     return;
   }
 
-  // A tab being built for the first time, or one somebody has just emptied on
-  // purpose. There is nothing to protect.
+  // AN EMPTY TAB IS NOT A NEW TAB. The 2026-09-25 loss went through exactly
+  // this gap: something left All_Registrants empty, and the next render — the
+  // sync rebuilding only the every-date and club rows — compared its short
+  // array against zero, found nothing to protect, and made the loss permanent.
+  // So an empty tab is judged against the last count a render actually wrote
+  // (REGISTRANT_TAB_LAST_COUNT_PROP_KEY). Only a tab that has never been drawn
+  // — no count stored — is "nothing to protect".
+  if (existing === 0) existing = lastRenderedRegistrantCount_();
   if (existing === 0) return;
 
   const lost = existing - incoming;
@@ -139,6 +145,28 @@ function guardRegistrantRowLoss_(sheet, headers, markerHeaderName, newRows) {
   throw new Error(
     `Refused to rewrite ${sheet.getName()}: it would have removed ${scale}. ` +
     `Nothing was deleted; the office has been emailed.`);
+}
+
+/** The row count the last registrant render wrote — the baseline for an empty tab. */
+const REGISTRANT_TAB_LAST_COUNT_PROP_KEY = 'REGISTRANT_TAB_LAST_COUNT_V1';
+
+function lastRenderedRegistrantCount_() {
+  try {
+    const n = Number(PropertiesService.getScriptProperties().getProperty(REGISTRANT_TAB_LAST_COUNT_PROP_KEY));
+    return isFinite(n) && n > 0 ? n : 0;
+  } catch (err) {
+    return 0;
+  }
+}
+
+/** Called by renderRegistrantsSheet() once a render has landed. Never throws. */
+function recordRenderedRegistrantCount_(count) {
+  try {
+    PropertiesService.getScriptProperties()
+      .setProperty(REGISTRANT_TAB_LAST_COUNT_PROP_KEY, String(Math.max(0, count || 0)));
+  } catch (err) {
+    log(`ℹ️ Could not record the registrant row count (${err}).`);
+  }
 }
 
 /**
@@ -188,8 +216,72 @@ function snapshotRegistrantsDaily() {
     log('ℹ️ No registrants tab to snapshot.');
     return;
   }
-  snapshotRegistrantTab_(sheet, 'daily');
+  if (snapshotRegistrantTab_(sheet, 'daily')) markDailySnapshotTaken_();
   pruneRegistrantSnapshots_();
+}
+
+// ---------------------------------------------------------------------------
+// MAKING SURE THE NIGHTLY COPY HAPPENS.
+//
+// The 3am trigger is created by writeTriggers() (16) and nothing else — so a
+// workbook whose triggers were last rebuilt before this file shipped never got
+// one, and between Sep 22 and Sep 28 2026 the snapshot folder held one manual
+// copy and nothing else, which is exactly the week somebody needed yesterday's.
+// Two belts: the hourly sync installs the trigger if the account running it
+// can see none (ensureRegistrantSnapshotTrigger_), and takes the day's copy
+// itself if it is past 3am and nobody has (snapshotRegistrantsIfDue_) — which
+// covers a trigger owned by another account, a failed trigger run, and a
+// workbook where the trigger cannot be created at all.
+// ---------------------------------------------------------------------------
+
+const REGISTRANT_DAILY_SNAPSHOT_PROP_KEY = 'REGISTRANT_DAILY_SNAPSHOT_V1';
+const REGISTRANT_DAILY_SNAPSHOT_HOUR = 3;
+
+function markDailySnapshotTaken_() {
+  try {
+    PropertiesService.getScriptProperties().setProperty(
+      REGISTRANT_DAILY_SNAPSHOT_PROP_KEY, formatDateKey(new Date()));
+  } catch (err) { /* the next hourly check takes another; harmless */ }
+}
+
+/** The hourly sync's belt: today's copy, if it is past 3am and there is none. Never throws. */
+function snapshotRegistrantsIfDue_() {
+  try {
+    const now = new Date();
+    const hour = Number(Utilities.formatDate(now, TIMEZONE, 'H'));
+    if (hour < REGISTRANT_DAILY_SNAPSHOT_HOUR) return false;
+    const last = PropertiesService.getScriptProperties().getProperty(REGISTRANT_DAILY_SNAPSHOT_PROP_KEY);
+    if (last === formatDateKey(now)) return false;
+    log('The nightly registrant snapshot has not run today — taking it now.');
+    snapshotRegistrantsDaily();
+    return true;
+  } catch (err) {
+    log(`⚠️ Could not check the daily registrant snapshot (${err}).`);
+    return false;
+  }
+}
+
+/**
+ * Installs the 3am trigger if the running account has none. Only from the
+ * trigger owner (or on an unclaimed workbook), for the reason
+ * requireTriggerOwnership() (16) gives: a second account's copy is one nobody
+ * else can see or remove. Never throws.
+ */
+function ensureRegistrantSnapshotTrigger_() {
+  try {
+    const exists = ScriptApp.getProjectTriggers()
+      .some(t => t.getHandlerFunction() === 'snapshotRegistrantsDaily');
+    if (exists) return false;
+    const owner = getTriggerOwner();
+    if (owner && owner !== getCurrentUserEmail()) return false;
+    ScriptApp.newTrigger('snapshotRegistrantsDaily')
+      .timeBased().everyDays(1).atHour(REGISTRANT_DAILY_SNAPSHOT_HOUR).create();
+    log('Installed the missing 3am registrant snapshot trigger.');
+    return true;
+  } catch (err) {
+    log(`⚠️ Could not install the registrant snapshot trigger (${err}).`);
+    return false;
+  }
 }
 
 /** The menu's "save one now", for somebody about to do something alarming. */

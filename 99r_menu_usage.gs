@@ -231,6 +231,7 @@ function menu_showQuickMarkDialog() { recordMenuUsage_('showQuickMarkDialog'); r
 function menu_showReimportFormDialog() { recordMenuUsage_('showReimportFormDialog'); return showReimportFormDialog(); }
 function menu_showRepointSessionsDialog() { recordMenuUsage_('showRepointSessionsDialog'); return showRepointSessionsDialog(); }
 function menu_showRestoreRegistrantsFromCopyDialog() { recordMenuUsage_('showRestoreRegistrantsFromCopyDialog'); return showRestoreRegistrantsFromCopyDialog(); }
+function menu_showRestoreRegistrantsFromLedgerDialog() { recordMenuUsage_('showRestoreRegistrantsFromLedgerDialog'); return showRestoreRegistrantsFromLedgerDialog(); }
 function menu_showSignInSheetDialog() { recordMenuUsage_('showSignInSheetDialog'); return showSignInSheetDialog(); }
 function menu_showTimeBlockDialog() { recordMenuUsage_('showTimeBlockDialog'); return showTimeBlockDialog(); }
 function menu_showTriggerStatus() { recordMenuUsage_('showTriggerStatus'); return showTriggerStatus(); }

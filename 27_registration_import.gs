@@ -23,6 +23,13 @@ function syncRegistrations() {
     return;
   }
 
+  // THE DAY'S SECOND COPY, BEFORE ANYTHING WRITES. The 3am trigger is the
+  // primary; this is what makes a missing or failed one cost nothing — and it
+  // runs before this sync touches the tab, so the copy is of what the sync
+  // found. Both never throw. See 99j.
+  ensureRegistrantSnapshotTrigger_();
+  snapshotRegistrantsIfDue_();
+
   // THE DOOR'S QUEUE GOES IN FIRST, before this run takes the lock and starts
   // rewriting the rows those marks land on. Queued marks are applied by row
   // match, not row number, so ordering is not a correctness question — but a

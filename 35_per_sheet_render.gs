@@ -12,7 +12,7 @@ function renderRegistrantsSheet(force, allRows) {
   // Same derived pair as the session table, keyed off this row's own program
   // and day — see 69_generated_file_links.gs.
   stampGeneratedFileLinks(rows, getIndexMap(headers), { titleColumn: 'Event' });
-  return renderFlatDateSheet(sheet, headers, rows, {
+  const result = renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',
     // "10:00 AM" is words, not a time value — see stampTextColumns().
@@ -24,6 +24,10 @@ function renderRegistrantsSheet(force, allRows) {
     force,
     afterWrite: applyRegistrantsFormatting
   });
+  // Reached only once the render landed: the baseline the shrink guard judges
+  // an EMPTY tab against (99j), so an emptied tab cannot pass as a new one.
+  recordRenderedRegistrantCount_(rows.length);
+  return result;
 }
 
 /**
