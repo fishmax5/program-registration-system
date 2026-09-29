@@ -69,6 +69,9 @@ function check(name, actual, expected) {
 
 const today = new Date();
 const monthsOut = (offset, day) => new Date(today.getFullYear(), today.getMonth() + offset, day || 10, 12, 0);
+// A fixed day of THIS month ("the 28th") is in the past for the last days of
+// every month, so a date that has to be upcoming is counted from today.
+const daysOut = offset => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12, 0);
 
 // --- the window --------------------------------------------------------------
 {
@@ -195,8 +198,8 @@ function row(date, opts) {
   sandbox.chooseAdoptedAssistanceForms(state, {
     [key]: [
       { formId: 'FORM-LAST-MONTH', date: monthsOut(-1) },
-      { formId: 'FORM-NEXT', date: monthsOut(0, 28) },
-      { formId: 'FORM-AFTER', date: monthsOut(1) }
+      { formId: 'FORM-NEXT', date: daysOut(1) },
+      { formId: 'FORM-AFTER', date: daysOut(35) }
     ]
   });
   check('the form the next session is on is the one that survives',
@@ -220,7 +223,7 @@ function row(date, opts) {
   const key = `cal::Computer Help::${sandbox.ASSISTANCE_FORM_SPAN}`;
   const state = { groupFormMap: {}, splitAssistancePrograms: new Set() };
   sandbox.chooseAdoptedAssistanceForms(state, {
-    [key]: [{ formId: 'FORM-ONE', date: monthsOut(0, 20) }, { formId: 'FORM-ONE', date: monthsOut(2) }]
+    [key]: [{ formId: 'FORM-ONE', date: daysOut(1) }, { formId: 'FORM-ONE', date: monthsOut(2) }]
   });
   check('a program already on one form is not asked to move',
     [state.groupFormMap[key], state.splitAssistancePrograms.has(key)], ['FORM-ONE', false]);
