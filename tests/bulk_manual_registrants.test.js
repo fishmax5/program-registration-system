@@ -87,4 +87,50 @@ assert.deepStrictEqual(keys('picked'), ['2026-09-22'], 'a date the program does 
 
 // 5. Nothing from the workbook is interpolated into the dialog.
 assert.ok(!/\$\{/.test(run('buildBulkRegistrantsHtml()')));
+
+// 6. Columns: guessed from a header, from shape without one, and the mapping obeyed.
+let cols = JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('Participant,Tel,Notes\\nJane Smith,610-555-0100,x'))`));
+assert.deepStrictEqual(cols.fields, ['name', 'phone', ''], 'a header line is read; an unknown heading is ignored');
+assert.strictEqual(cols.hasHeader, true);
+cols = JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('jane@x.org,Jane,Smith,610 555 0100\\nbob@x.org,Bob,Kaplan,'))`));
+assert.deepStrictEqual(cols.fields, ['email', 'first', 'last', 'phone'], 'two single-word columns are First and Last');
+assert.strictEqual(cols.hasHeader, false);
+cols = JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('Jane Smith,Monday group\\nBob Kaplan,Tuesday group'))`));
+assert.deepStrictEqual(cols.fields, ['name', ''], 'one Name column; a second text column is left for the person to map');
+people = JSON.parse(run(`JSON.stringify(peopleFromBulkRecords(
+  [['Last','First','Mid','Phone'], ['Smith','Jane','Marie','610'], ['Kaplan','Bob','','']],
+  ['last', 'first', 'first', ''], true))`));
+assert.strictEqual(people[0].name, 'Jane Marie Smith', 'a name part mapped twice is joined');
+assert.strictEqual(people[0].phone, '', 'an ignored column is ignored');
+assert.strictEqual(people[0].line, 2, 'row numbers count the header line');
+assert.strictEqual(people[1].name, 'Bob Kaplan');
+
+// 7. Already registered: live rows on this program only, by person and date; standing places too.
+const already = JSON.parse(run(`(() => {
+  const rm = getIndexMap(HEADERS.All_Registrants);
+  const reg = (name, date, loc, title, status, type) => { const r = new Array(HEADERS.All_Registrants.length).fill('');
+    r[rm['Name']] = name; r[rm['Event_Date']] = new Date(date + 'T10:00:00'); r[rm['Location']] = loc;
+    r[rm['Event']] = title; r[rm['Program_Status']] = status || 'Active'; r[rm['Person_Type']] = type || ''; return r; };
+  const cm = getIndexMap(HEADERS.Club_Members);
+  const club = (name, title, loc, active) => { const r = new Array(HEADERS.Club_Members.length).fill('');
+    r[cm['Name']] = name; r[cm['Club']] = title; r[cm['Location']] = loc; r[cm['Active']] = active; return r; };
+  const program = { title: 'Yoga', location: 'A', sessions: [{ dateKey: '2026-09-15' }, { dateKey: '2026-09-22' }] };
+  const lookup = buildBulkRegistrantAlreadyIndex_(program, [
+    reg('Jane Smith', '2026-09-15', 'A', 'Yoga'),
+    reg('Jane Smith', '2026-09-22', 'A', 'Yoga', 'Waitlisted'),
+    reg('Bob Kaplan', '2026-09-15', 'A', 'Yoga', 'Cancelled'),
+    reg('Ann Novak', '2026-09-15', 'B', 'Yoga'),
+    reg('Ann Novak', '2026-09-15', 'A', 'Bingo'),
+    reg('Mary Lee', '2026-09-15', 'A', 'Yoga', 'Active', 'Guest')
+  ], rm, [club('Robert Kaplan', 'Yoga', 'A', true), club('Mary Lee', 'Yoga', 'A', false)], cm);
+  return JSON.stringify(['jane smith', 'Bob Kaplan', 'Ann Novak', 'Mary Lee', 'Robert Kaplan'].map(lookup));
+})()`));
+assert.deepStrictEqual(already[0].alreadyOn, { '2026-09-15': 'Active', '2026-09-22': 'Waitlisted' });
+assert.deepStrictEqual(already[1].alreadyOn, {}, 'a cancelled row is not a registration');
+assert.deepStrictEqual(already[2].alreadyOn, {}, 'another building or another program is not this one');
+assert.deepStrictEqual(already[3].alreadyOn, {}, 'a guest row is somebody else');
+assert.strictEqual(already[3].standing, false, 'an inactive membership is not a standing place');
+assert.strictEqual(already[4].standing, true);
+assert.strictEqual(already[0].nameKey, already[0].nameKey && run(`duplicateRegistrationNameKey('Jane Smith')`));
+
 console.log('bulk_manual_registrants: all passed');
