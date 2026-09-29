@@ -385,12 +385,20 @@ function cancelUpcomingClubRegistrations(args) {
 
     const stamp = `Cancelled on ${formatDateLabel(new Date())}: taken off the ${club || 'club'} list.`;
     targets.forEach(row => {
+      // THE LEDGER FIRST, composed while the row still says what it is being
+      // cancelled from — the same order 71's cancelRegistrantRows() keeps. This
+      // was the one cancellation door that wrote the four cells and told the
+      // ledger nothing, so the replay kept every one of these people Active.
+      const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.CANCELLED, { reason: stamp },
+        { source: LEDGER_SOURCES.CLUB, note: `Taken off the ${club || 'club'} list.` });
       row[map['Program_Status']] = 'Cancelled';
       row[map['Lunch_Status']] = 'Cancelled';
       row[map['Manual_Override']] = 'Manually Edited';
       const notes = String(row[map['Admin_Notes']] || '').trim();
       row[map['Admin_Notes']] = notes ? `${notes} | ${stamp}` : stamp;
+      appendLedgerEntry(entry);
     });
+    flushLedger();
 
     renderRegistrantsSheet(false, rows);
     try {

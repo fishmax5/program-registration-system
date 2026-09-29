@@ -561,6 +561,12 @@ function buildRegistrantRow(args) {
       // every edited response as a fold disagreement for ever.
       const payloadAfter = ledgerPayloadFromRow(existingRow, map);
       if (JSON.stringify(payloadAfter) === payloadBefore) return null;
+      // WHICH COLUMNS MOVED, in the note: if this entry ever appears every sync
+      // again, the columns named here are the ones something else keeps
+      // reverting between runs.
+      const before = JSON.parse(payloadBefore);
+      const movedColumns = Object.keys(Object.assign({}, before, payloadAfter))
+        .filter(k => String(before[k] === undefined ? '' : before[k]) !== String(payloadAfter[k] === undefined ? '' : payloadAfter[k]));
       recordImportLedgerEntries([makeLedgerEntry({
         kind: LEDGER_KINDS.CORRECTED,
         source: args.ledgerSource || LEDGER_SOURCES.IMPORT,
@@ -571,7 +577,7 @@ function buildRegistrantRow(args) {
         personType: existingRow[map['Person_Type']],
         partyId: partyId || '',
         payload: payloadAfter,
-        note: 'The same response was submitted again through its edit link.'
+        note: `The same response was re-read and changed: ${movedColumns.join(', ')}.`
       })]);
       return null; // nothing new to append — the existing row was updated in place
     }

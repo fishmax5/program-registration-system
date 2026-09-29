@@ -81,7 +81,7 @@
 const LEDGER_VERIFY_COLUMNS = [
   'Event_Date', 'Location', 'Event', 'Name', 'Person_Type',
   'Program_Status', 'Lunch_Status', 'Lunch_Type', 'Meals_Ordered',
-  'Attended', 'Lunch_Served', 'Party_ID'
+  'Attended', 'Lunch_Served'
 ];
 
 /**

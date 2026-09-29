@@ -693,11 +693,26 @@ function pullProgramLeaderSheetEdits(registrantRows) {
     const rowKey = leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
     const edit = edits[rowKey];
     if (!edit) return;
+    const changedHeaders = [];
     LEADER_OWNED_COLUMNS.forEach((name, i) => {
       if (!edit.changed[i] || map[name] === undefined) return;
       row[map[name]] = edit.values[i];
+      changedHeaders.push(name);
       applied++;
     });
+    // A leader's tick is a change to a registration like any other, and this
+    // merge was the one writer of the tab that never told the ledger (Attended
+    // in particular). One `corrected` per row, carrying only the ticks that
+    // moved. Guarded whole: a ledger that will not write must not lose the
+    // leader's edit, which the next pull would otherwise find already applied.
+    if (!changedHeaders.length) return;
+    try {
+      const entry = ledgerEntryForCorrection_(row, map, ledgerColumnsPayload_(row, map, changedHeaders),
+        { source: LEDGER_SOURCES.LEADER_SHEET, note: 'Ticked or typed on the program registrant sheet.' });
+      if (entry) appendLedgerEntry(entry);
+    } catch (err) {
+      log(`⚠️ A leader's edit was merged but could not be recorded in the ledger (${err}).`);
+    }
   });
 
   if (applied > 0) log(`Program registrant sheets: merged ${applied} leader-edited cell(s) back into the Registrants tab.`);

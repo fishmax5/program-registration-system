@@ -492,6 +492,19 @@ function renameRegistrantRows(ss, renames, idMap) {
   rows.forEach(row => {
     const oldId = String(row[map['Event_ID']] || '').trim();
     if (!idMap[oldId]) return;
+    // The id is resolved BEFORE Event_ID moves: it is looked up by the old
+    // key, and a row the ledger has never heard of is minted under it. A
+    // `corrected`, not a `moved` — the fold clears a row's marks when a `moved`
+    // changes its session, and a renamed program is the same day.
+    try {
+      const entry = ledgerEntryForCorrection_(row, map,
+        { Event_ID: idMap[oldId], Event: titleByOldId[oldId] },
+        { source: LEDGER_SOURCES.MIGRATION, eventId: idMap[oldId],
+          note: `The program was renamed to "${titleByOldId[oldId]}".` });
+      if (entry) appendLedgerEntry(entry);
+    } catch (err) {
+      log(`⚠️ A renamed registration could not be recorded in the ledger (${err}).`);
+    }
     row[map['Event_ID']] = idMap[oldId];
     row[map['Event']] = titleByOldId[oldId];
     changed++;
