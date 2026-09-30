@@ -130,6 +130,13 @@ const REGISTRATION_SYNC_STALE_MS = 2 * 60 * 60 * 1000;
 // function declaration, so this table declares nothing that has to exist at
 // load time. See the banner at the top of CLAUDE.md for why that matters.
 // ============================================================================
+/**
+ * What a tail step returns when it ran out of budget part-way through and has
+ * more of the SAME step to do: it stays at the head of the tail instead of
+ * being dropped, and the slice hands on.
+ */
+const REGISTRATION_SYNC_STEP_AGAIN = 'again';
+
 const REGISTRATION_SYNC_TAIL_STEPS = [
   {
     id: 'counts',
@@ -201,7 +208,18 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     // hourly pass that just imported into them.
     id: 'leader_sheets_push',
     label: 'refreshing the program registrant sheets',
-    run: ctx => pushProgramLeaderSheets(ctx.sessionRows(), ctx.settledRows())
+    //
+    // The one step that can outlast a slice by itself (a template bump makes
+    // every sheet a rewrite — 2026-09-30 ran nineteen silent minutes into the
+    // ceiling), so it takes the slice's deadline and answers AGAIN when it
+    // stopped part-way: the step stays at the head of the tail and the
+    // follow-up run carries on, skipping every sheet already fingerprinted.
+    run: ctx => {
+      const progress = {};
+      pushProgramLeaderSheets(ctx.sessionRows(), ctx.settledRows(),
+        { deadline: ctx.deadline, progress });
+      return progress.remaining > 0 ? REGISTRATION_SYNC_STEP_AGAIN : undefined;
+    }
   },
   {
     // AFTER the push, deliberately. The alert links to the shared sheet and
@@ -565,7 +583,15 @@ function runRegistrationSyncPhases_(ctx) {
     }
     const id = ctx.state.tail[0];
     const step = registrationSyncTailStep(id);
-    if (step) sync.step(step.label, () => step.run(sync));
+    const outcome = step ? sync.step(step.label, () => step.run(sync)) : undefined;
+    if (outcome === REGISTRATION_SYNC_STEP_AGAIN) {
+      // Part-done, not done: kept at the head for the follow-up run.
+      ctx.state.problems = (ctx.state.problems || []).concat(sync.problems.splice(0));
+      processed++;
+      log(`Registration sync: "${step.label}" ran out of budget part-way — handing the rest to a follow-up run.`);
+      ctx.save();
+      return { processed, remaining: ctx.state.tail.length };
+    }
     // Dropped whether it ran, failed or is an id this version no longer knows:
     // a step that threw is not retried inside the same window, exactly as it
     // was not before this file existed.

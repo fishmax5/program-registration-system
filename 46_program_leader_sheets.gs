@@ -538,6 +538,24 @@ function saveProgramLeaderSheetRegistryEntry(programKey, entry) {
   __leaderSheetRegistryDirty = true;
 }
 
+/**
+ * Writes the registry to Script Properties now, rather than waiting for
+ * flushPersistentRegistries(). For the push loop, whose progress has to
+ * survive an execution killed at its ceiling — which reaches no flush at all.
+ * One property write, and only when something is actually owed.
+ */
+function flushProgramLeaderSheetRegistry_() {
+  if (!__leaderSheetRegistryDirty || !__leaderSheetRegistryCache) return;
+  try {
+    PropertiesService.getScriptProperties().setProperty(LEADER_SHEET_REGISTRY_PROP_KEY,
+      JSON.stringify(__leaderSheetRegistryCache));
+    __leaderSheetRegistryDirty = false;
+  } catch (err) {
+    // Left dirty: flushPersistentRegistries() tries again at the end.
+    log(`⚠️ Could not save the program registrant sheet registry mid-run (${err}).`);
+  }
+}
+
 function removeProgramLeaderSheetRegistryEntry(programKey) {
   const registry = getProgramLeaderSheetRegistry();
   if (registry[programKey] === undefined) return;
@@ -841,6 +859,21 @@ function computeLeaderSheetFingerprint(entry, rows) {
 
 function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   const force = !!(options && options.force);
+  // A DEADLINE, BECAUSE THIS IS THE ONE STEP OF THE SYNC THAT CAN OUTLAST A
+  // WHOLE EXECUTION ON ITS OWN. Every sheet is a foreign spreadsheet and a
+  // rewrite is ~180 round trips against it; a template bump (v3, the Waitlist
+  // tab) makes EVERY sheet a rewrite at once. On 2026-09-30 this loop ran
+  // from 9:01 to Apps Script's ceiling at 9:20 without a line in the log — and
+  // because the fingerprints it had stored were only in memory, the kill lost
+  // all of them, so the next hour started the same rewrite from the top and
+  // would have died in the same place, every hour. So: stop between sheets
+  // when the caller's budget is spent (the sync hands the rest to a follow-up
+  // run), and write each sheet's fingerprint to Script Properties as soon as
+  // it has landed rather than at the end. `options.progress.remaining` is how
+  // the caller learns there is more to do.
+  const deadline = (options && options.deadline) || Infinity;
+  const progress = (options && options.progress) || {};
+  progress.remaining = 0;
   const registry = getProgramLeaderSheetRegistry();
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0) return 0;
@@ -864,7 +897,26 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   let pushed = 0;
   let unchanged = 0;
   let keptStranded = 0;
-  programKeys.forEach(programKey => {
+  let visited = 0;
+  for (let i = 0; i < programKeys.length; i++) {
+    // At least one sheet per call, so a follow-up run that starts late still
+    // moves forward rather than handing on for ever.
+    if (visited > 0 && Date.now() >= deadline) {
+      progress.remaining = programKeys.length - i;
+      log(`Program registrant sheets: budget spent with ${progress.remaining} sheet(s) still to check — ` +
+        `a follow-up run carries on from there.`);
+      break;
+    }
+    visited++;
+    const programKey = programKeys[i];
+    pushOneProgramLeaderSheet_(programKey);
+  }
+
+  function pushOneProgramLeaderSheet_(programKey) {
+    // Each sheet is a real stretch of work; keep the workbook lease alive
+    // (99w — it lapses ten minutes after its holder goes quiet, and this loop
+    // used to log nothing until it finished).
+    renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
     try {
@@ -960,6 +1012,9 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       if (waitlistWritten && entry.pushedFingerprint !== fingerprint) {
         saveProgramLeaderSheetRegistryEntry(programKey,
           Object.assign({}, entry, { pushedFingerprint: fingerprint }));
+        // NOW, not at the end of the sync: a run killed at its ceiling reaches
+        // no flush, and a fingerprint lost is a sheet rewritten again next hour.
+        flushProgramLeaderSheetRegistry_();
       }
       // No re-store on the repair path: the fingerprint it would write is the
       // one already stored — that agreement is what made this a repair. Said
@@ -979,6 +1034,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
           // stale `entry` would each drop the other's field.
           saveProgramLeaderSheetRegistryEntry(programKey,
             Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
+          flushProgramLeaderSheetRegistry_();
         }
       }
     } catch (err) {
@@ -990,7 +1046,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       noteForAdmin('Program registrant sheets that could not be refreshed',
         describeLeaderSheetAccessFailure(entry, programKey, err));
     }
-  });
+  }
   if (pushed > 0 || unchanged > 0) {
     log(`Program registrant sheets: rewrote ${pushed} shared sheet(s)` +
       (unchanged > 0 ? `, left ${unchanged} unchanged.` : '.'));
