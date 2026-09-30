@@ -663,7 +663,13 @@ function registerOneBulkPerson_(program, picked, person) {
     let done = 0;
     let already = 0;
     let refused = '';
-    sessions.forEach(session => {
+    // ONE WRITE PER PERSON, not one per date. Each date is still Quick Mark's
+    // Register — the same checks, the same row, the same ledger entry — but a
+    // new row is HELD until the person's last date and then all of them go on
+    // the tab together (withRegistrantAddBatch_, 38), where each used to be a
+    // redraw of the whole Registrants tab: twenty people on eight dates was a
+    // hundred and sixty of them.
+    withRegistrantAddBatch_(() => sessions.forEach(session => {
       const res = applyQuickMarkLocked({
         location: program.location,
         session: session.value,
@@ -683,7 +689,7 @@ function registerOneBulkPerson_(program, picked, person) {
       if (res.ok && /already registered/i.test(String(res.message || ''))) already++;
       else if (res.ok) done++;
       else if (!refused) refused = res.message || '';
-    });
+    }));
     // Inside the lock, per person: the desk write buffers its ledger entries
     // (99k), and an entry buffered and never flushed is the loss the ledger
     // exists to prevent. One flush per person, not per date.

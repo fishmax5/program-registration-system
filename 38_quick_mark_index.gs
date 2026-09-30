@@ -1198,10 +1198,19 @@ function applyQuickMarkLocked(args) {
   const todayKey = formatDateKey(new Date());
   const candidates = [];
 
+  // THE GRID getSectionZones() HAS JUST READ, not a second and third read of
+  // the same rows. Finding the zones already fetched the whole tab (96); each
+  // zone used to be fetched again on top of it, which on a year of
+  // registrations was two more reads of the whole tab per mark — and, in a
+  // bulk registration, per person per DATE. The row found here is also what
+  // the marks below are computed from, so nothing reads it a third time.
+  const grid = readSheetGrid(sheet, false);
   zones.forEach(zone => {
     const count = zone.dataEnd - zone.dataStart + 1;
     if (count < 1) return;
-    const values = sheet.getRange(zone.dataStart, 1, count, numCols).getValues();
+    const values = grid
+      ? grid.values.slice(zone.dataStart - 1, zone.dataEnd)
+      : sheet.getRange(zone.dataStart, 1, count, numCols).getValues();
     values.forEach((row, i) => {
       if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
       if (location && String(row[map['Location']] || '').trim() !== location) return;
@@ -1217,7 +1226,8 @@ function applyQuickMarkLocked(args) {
       // a dated choice follows one line up, one level finer.
       if (bookedTime && rowSlot !== bookedTime) return;
       candidates.push({
-        sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '', slot: rowSlot
+        sheetRow: zone.dataStart + i, date: d, dateKey: d ? formatDateKey(d) : '', slot: rowSlot,
+        values: row
       });
     });
   });
@@ -1265,8 +1275,7 @@ function applyQuickMarkLocked(args) {
   const signupSession = signup
     ? {
       date: target.date,
-      location: location ||
-        String(sheet.getRange(target.sheetRow, map['Location'] + 1).getValue() || '').trim()
+      location: location || String(target.values[map['Location']] || '').trim()
     }
     : null;
   if (signup && (!signupSession.date || !isLunchOfferedOn(signupSession.date, signupSession.location))) {
@@ -1372,70 +1381,68 @@ function applyQuickMarkLocked(args) {
   // held — so what has to go on the record is the number the row ends up
   // carrying, not the number somebody typed. Reading it back is also the only
   // answer that cannot drift from what actually landed.
-  const touched = [];
-  if (attended) {
-    sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(true);
-    touched.push('Attended');
-  }
+  // EVERY CELL THIS MARK SETS, decided first and written together. It used to
+  // be a setValue() per cell with a getValue() before each count and before
+  // the override — up to a dozen round trips for one tick box — when the row
+  // was already in hand from the search above. Now the new values are worked
+  // out against that row and land as one write per run of adjacent columns
+  // (writeRegistrantRowPatch_), which for the commonest press, Attended, is two.
+  const current = target.values || [];
+  const patch = {};
+  if (attended) patch['Attended'] = true;
   // Signing an existing registration up for lunch changes only the two lunch
   // columns. Attended is deliberately left exactly as it is: whether they were
   // here is a separate fact from whether they want feeding, and a sign-up made
   // days ahead knows nothing about it either way.
   if (signup) {
-    if (map['Lunch_Status'] !== undefined) {
-      sheet.getRange(target.sheetRow, map['Lunch_Status'] + 1).setValue('Needed');
-      touched.push('Lunch_Status');
-    }
-    if (map['Lunch_Type'] !== undefined) {
-      sheet.getRange(target.sheetRow, map['Lunch_Type'] + 1).setValue(resolveWalkInLunchType(signupSession));
-      touched.push('Lunch_Type');
-    }
+    if (map['Lunch_Status'] !== undefined) patch['Lunch_Status'] = 'Needed';
+    if (map['Lunch_Type'] !== undefined) patch['Lunch_Type'] = resolveWalkInLunchType(signupSession);
     // Only ever WRITTEN UP, never down to a blank: one is the default the
     // dialog sends when nobody touched the box, and a desk signing somebody up
     // for the meal they already have four of must not quietly cancel three.
-    if (map['Meals_Ordered'] !== undefined && mealsOrdered > 1) {
-      sheet.getRange(target.sheetRow, map['Meals_Ordered'] + 1).setValue(mealsOrdered);
-      touched.push('Meals_Ordered');
-    }
+    if (map['Meals_Ordered'] !== undefined && mealsOrdered > 1) patch['Meals_Ordered'] = mealsOrdered;
   }
+  let mealCountsWritten = false;
   if (lunch) {
-    sheet.getRange(target.sheetRow, map['Lunch_Served'] + 1).setValue(true);
-    touched.push('Lunch_Served');
+    patch['Lunch_Served'] = true;
     // Lunch without Attended is the take-out case, and saying so has to be
     // able to UNDO an earlier mistaken attendance mark — otherwise the one
     // correction staff actually need is the one thing they cannot make here.
-    if (!attended) {
-      sheet.getRange(target.sheetRow, map['Attended'] + 1).setValue(false);
-      touched.push('Attended');
-    }
+    if (!attended) patch['Attended'] = false;
     // The counts are ADDED to whatever the row already holds, not set over it.
     // A person comes back for a second meal an hour later, and the desk marks
     // the second handover the same way it marked the first; overwriting would
     // make the later, smaller number erase the earlier one.
-    if (addQuickMarkMealCounts(sheet, map, target.sheetRow, { ateHere, tookHome, inFridge })) {
-      touched.push('Day1_Dined_In', 'Day1_Taken_Out', 'Meals_In_Fridge');
-    }
+    mealCountsWritten = addQuickMarkMealCountsToPatch_(patch, map, current, { ateHere, tookHome, inFridge });
   }
 
   // Hand-marking is a manual edit — say so, the same as any other.
   if (map['Manual_Override'] !== undefined) {
-    const overrideCell = sheet.getRange(target.sheetRow, map['Manual_Override'] + 1);
-    const current = String(overrideCell.getValue() || '').trim();
-    if (current === 'Auto-Synced' || current === '') {
-      overrideCell.setValue('Manually Edited');
-      touched.push('Manual_Override');
-    }
+    const override = String(current[map['Manual_Override']] || '').trim();
+    if (override === 'Auto-Synced' || override === '') patch['Manual_Override'] = 'Manually Edited';
   }
-  // Everything above wrote cells on the Registrants tab, one at a time. Drop
-  // the cached read of it before anything below looks at the roster again.
+  writeRegistrantRowPatch_(sheet, map, target.sheetRow, patch);
+  // The ledger's list, in the order it has always been built in: the columns
+  // this press set, with the three meal counts named together whenever any of
+  // them moved.
+  const touched = ['Attended', 'Lunch_Status', 'Lunch_Type', 'Meals_Ordered', 'Lunch_Served']
+    .filter(header => Object.prototype.hasOwnProperty.call(patch, header))
+    .concat(mealCountsWritten ? ['Day1_Dined_In', 'Day1_Taken_Out', 'Meals_In_Fridge'] : [])
+    .concat(patch['Manual_Override'] !== undefined ? ['Manual_Override'] : []);
+  // Everything above wrote cells on the Registrants tab. Drop the cached read
+  // of it before anything below looks at the roster again.
   invalidateSectionedRowsCache(sheet);
   // AND THE SECOND COPY OF WHAT WAS JUST MARKED. One entry per press, carrying
   // the columns that moved and no others — a household press (see
   // applyQuickMarkForHousehold) is several people and therefore several
   // entries, because a household is a convenience at the desk and not one
-  // registration.
+  // registration. The row it records is the one just written — the row found
+  // above with this press's values laid over it — rather than a read of it
+  // back off the tab.
+  const markedRow = current.slice();
+  Object.keys(patch).forEach(header => { markedRow[map[header]] = patch[header]; });
   appendQuickMarkCorrection_(sheet, map, target, ledgerSource, touched,
-    `Marked at the desk: ${describeQuickMark(attended, lunch, signup)}.`);
+    `Marked at the desk: ${describeQuickMark(attended, lunch, signup)}.`, current.length ? markedRow : null);
 
   // ALREADY REGISTERED. A tick on Register for somebody who has a row for this
   // session is not an error and not a second registration — it is somebody at
@@ -1618,11 +1625,11 @@ function quickMarkCount(value) {
  * lock is taken here or anywhere else the ledger is appended to — LockService
  * locks are not reentrant and 99b's banner is on exactly that failure.
  */
-function appendQuickMarkCorrection_(sheet, map, target, source, columns, note) {
+function appendQuickMarkCorrection_(sheet, map, target, source, columns, note, knownRow) {
   const wanted = (columns || []).filter((h, i, all) => map[h] !== undefined && all.indexOf(h) === i);
   if (!wanted.length) return 0;
-  let row;
-  try {
+  let row = knownRow || null;
+  if (!row) try {
     row = sheet.getRange(target.sheetRow, 1, 1, HEADERS.All_Registrants.length).getValues()[0];
   } catch (err) {
     log(`⚠️ Quick Mark: could not read the row back to record it in the ledger (${err}).`);
@@ -1654,6 +1661,60 @@ function addQuickMarkMealCounts(sheet, map, sheetRow, counts) {
     written += entry.amount;
   });
   return written;
+}
+
+/**
+ * addQuickMarkMealCounts(), against a row already in hand instead of the
+ * sheet: the same three columns, the same legacy-checkbox rule, the counts
+ * ADDED to what `current` holds — but staged into `patch` for one write
+ * rather than read and written a cell at a time. True when any count moved.
+ */
+function addQuickMarkMealCountsToPatch_(patch, map, current, counts) {
+  let written = false;
+  [
+    { header: 'Day1_Dined_In', amount: counts.ateHere },
+    { header: 'Day1_Taken_Out', amount: counts.tookHome },
+    { header: 'Meals_In_Fridge', amount: counts.inFridge }
+  ].forEach(entry => {
+    if (!(entry.amount > 0) || map[entry.header] === undefined) return;
+    const was = current[map[entry.header]];
+    const existing = isLegacyFridgeCheckbox(was) ? 0 : (Number(was) || 0);
+    patch[entry.header] = existing + entry.amount;
+    written = true;
+  });
+  return written;
+}
+
+/**
+ * Writes { header: value } onto one registrant row as ONE setValues() per run
+ * of adjacent columns — Attended and Lunch_Served sit side by side, so the
+ * commonest press is a single call — never touching a column the patch does
+ * not name, because the columns between (the two link cells, Form_Source)
+ * carry formulas a value write would flatten into dead text.
+ *
+ * A run that is refused falls back to its cells one at a time, which is what
+ * this replaced: an old value in the same run that a strict dropdown would
+ * reject is not a reason to lose the tick beside it.
+ */
+function writeRegistrantRowPatch_(sheet, map, sheetRow, patch) {
+  const cols = Object.keys(patch || {})
+    .filter(header => map[header] !== undefined)
+    .map(header => ({ col: map[header] + 1, value: patch[header] }))
+    .sort((a, b) => a.col - b.col);
+  const runs = [];
+  cols.forEach(cell => {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1].col === cell.col - 1) last.push(cell);
+    else runs.push([cell]);
+  });
+  runs.forEach(run => {
+    try {
+      sheet.getRange(sheetRow, run[0].col, 1, run.length).setValues([run.map(cell => cell.value)]);
+    } catch (err) {
+      run.forEach(cell => sheet.getRange(sheetRow, cell.col).setValue(cell.value));
+    }
+  });
+  return runs.length;
 }
 
 /**
@@ -1879,7 +1940,7 @@ function addQuickMarkWalkIn(sheet, args) {
   // read them off anything else. See stampRegularNeedsOnRow(), which does the
   // same for a row that already existed; here the cell is being written for
   // the first time, so it is one string rather than an edit.
-  const walkInNeeds = regularNeedsFor(readRegularNeedRows(), {
+  const walkInNeeds = regularNeedsFor(readRegularNeedRowsForAdd_(), {
     name, location: session.location, title: session.title, date: session.date
   }).filter(need => need.autoNote !== false);
   row[map['Admin_Notes']] = [
@@ -1897,6 +1958,18 @@ function addQuickMarkWalkIn(sheet, args) {
   // Somebody standing at the desk outranks a past deletion of the same person
   // on the same session — lift the tombstone rather than leave the next sync
   // arguing with the row just typed in. See section 5c.
+  // ALREADY ADDED IN THIS BATCH. A bulk registration's rows are not on the tab
+  // until the batch closes, so the search at the top of applyQuickMarkLocked()
+  // cannot find a row this batch has already made — without this, a list that
+  // names somebody twice would put them on the session twice.
+  const batchKey = `${session.eventId}|${normalizeNameKey(name)}|${personType}`;
+  if (__registrantAddBatch && __registrantAddBatch.keys[batchKey]) {
+    return {
+      ok: true, namesChanged: false,
+      message: `✅ ${name} is already registered for ${program} on ${dateLabel} — nothing to add.`
+    };
+  }
+
   clearRegistrantTombstones(registrantTombstoneKey(session.eventId, name, personType));
 
   // THE LEDGER FIRST, THEN THE TAB (§2). A walk-in is where the absence of a
@@ -1932,15 +2005,19 @@ function addQuickMarkWalkIn(sheet, args) {
   }
   appendLedgerEntries(walkInEntries);
 
-  const existing = getSectionedRows(sheet, headers, 'Event_ID');
-  existing.push(row);
-  renderRegistrantsSheet(false, existing);
-
-  // Same rule as the existing-row path above: a sign-up is a meal that now has
-  // to be ordered, so the dashboard and the roster are rebuilt now rather than
-  // at the next hourly sync. Rebuilt from `existing`, which already carries
-  // the row just added, so no re-read is needed.
-  if (signup) updateMasterLunchDashboard(existing);
+  // ONE NEW ROW IS ONE INSERTED ROW, not a redraw of the whole tab — see
+  // addRegistrantRowsToTab_(), which also rebuilds the lunch dashboard for a
+  // sign-up (same rule as the existing-row path above: a meal that now has to
+  // be ordered). Inside a batch (a bulk registration, withRegistrantAddBatch_)
+  // the row waits for the batch to close and goes in with the others.
+  if (__registrantAddBatch) {
+    __registrantAddBatch.sheet = sheet;
+    __registrantAddBatch.rows.push(row);
+    __registrantAddBatch.keys[batchKey] = true;
+    if (signup) __registrantAddBatch.signup = true;
+  } else {
+    addRegistrantRowsToTab_(sheet, [row], { signup });
+  }
 
   const standingNote = standing ? addStandingListMember(session, name, { standingLunch }) : '';
   const message = (waitlist
@@ -1956,12 +2033,15 @@ function addQuickMarkWalkIn(sheet, args) {
     (walkInNeeds.length ? ` Noted: ${walkInNeeds.map(describeRegularNeed).join('; ')}.` : '');
   toastIfPossible(message);
   log(`addQuickMarkWalkIn: ${message}`);
-  // A row that did not exist a moment ago is a name and possibly a whole
-  // session that the stored lists do not have. The open dialog patches its own
-  // copy (namesChanged, below); the STORED copy is dropped so the next dialog
-  // to open — this person's, or the next volunteer's — rebuilds rather than
-  // being handed a list with the walk-in missing from it.
-  invalidateQuickMarkIndexCache();
+  // A row that did not exist a moment ago is a name the stored lists do not
+  // have. The open dialog patches its own copy (namesChanged, below), and the
+  // STORED copy is now patched the same way (patchStoredQuickMarkIndex_)
+  // rather than dropped — dropping it made the next dialog to open, this
+  // person's or the next volunteer's, wait the twenty seconds a rebuild costs.
+  // It is still dropped when the patch cannot be made (a session the stored
+  // copy has never heard of, or nothing stored at all). Inside a batch, once,
+  // when the batch closes.
+  if (!__registrantAddBatch) noteRegistrantRowsAdded_([row]);
   // The name list for this session has a new entry on it now. The normalized
   // key travels with it so the dialog can add the name to the list it is
   // already holding, under the same identity rule this file uses everywhere,
@@ -1973,6 +2053,255 @@ function addQuickMarkWalkIn(sheet, args) {
     // just filled.
     bookedTime: slot ? slot.startLabel : ''
   };
+}
+
+// ----------------------------------------------------------------------------
+// ADDING A ROW WITHOUT REDRAWING THE TAB
+// ----------------------------------------------------------------------------
+//
+// A walk-in, a desk registration and every date of a bulk registration each
+// used to end in renderRegistrantsSheet(): read the whole tab, add one row,
+// rewrite and reformat all of it. On a year of registrations that is a read
+// of forty-odd thousand cells and seventy to a hundred and eighty round trips
+// (tools/render_bench.js) — to add ONE row. A bulk list of twenty people on
+// eight dates was a hundred and sixty of them, which is what made it slow.
+//
+// So a new row is INSERTED where the render would have put it — the Upcoming
+// section is sorted by date, and the row goes after the last row on or before
+// its date — takes its formatting and dropdowns from the row beside it, and
+// costs about five calls. What it does not get until the next full render (the
+// hourly sync) is cosmetic: its zebra stripe and month tint are its
+// neighbour's, and its two generated-file link cells are blank.
+//
+// It declines, and the caller redraws exactly as before, whenever the shape is
+// not the ordinary one: a row dated before today (the Past section, where old
+// months are hidden), an empty Upcoming section (no row to take a format
+// from), a header row that is not HEADERS.All_Registrants in order, or more
+// rows at once than REGISTRANT_INSERT_MAX_ROWS.
+
+/** Past this many rows in one go, one redraw is cheaper than the inserts. */
+const REGISTRANT_INSERT_MAX_ROWS = 40;
+
+/**
+ * The open batch, or null. See withRegistrantAddBatch_(). A plain `let`,
+ * null at load, so file order cannot matter.
+ */
+let __registrantAddBatch = null;
+
+/**
+ * Runs `fn` with new registrant rows HELD rather than written, then writes all
+ * of them at once — for a caller adding many rows in one execution (a bulk
+ * registration: one person on eight dates is eight rows and should be one
+ * write, not eight). Nested calls join the outer batch. The rows are written
+ * in a `finally`, because every one of them already has its ledger entry
+ * buffered; a batch that threw half way still puts on the tab the rows it
+ * had made, exactly as the one-at-a-time version would have.
+ */
+function withRegistrantAddBatch_(fn) {
+  if (__registrantAddBatch) return fn();
+  __registrantAddBatch = { sheet: null, rows: [], keys: {}, signup: false, needs: null };
+  let batch;
+  try {
+    return fn();
+  } finally {
+    batch = __registrantAddBatch;
+    __registrantAddBatch = null;
+    if (batch && batch.rows.length && batch.sheet) {
+      addRegistrantRowsToTab_(batch.sheet, batch.rows, { signup: batch.signup });
+      noteRegistrantRowsAdded_(batch.rows);
+    }
+  }
+}
+
+/** Regular_Needs, read once per batch instead of once per row. */
+function readRegularNeedRowsForAdd_() {
+  const batch = __registrantAddBatch;
+  if (!batch) return readRegularNeedRows();
+  if (!batch.needs) batch.needs = readRegularNeedRows();
+  return batch.needs;
+}
+
+/**
+ * Puts `rows` (HEADERS.All_Registrants order) on the Registrants tab: inserted
+ * in place where it can (insertRegistrantRowsInPlace_), the whole tab redrawn
+ * for whatever could not be. `opts.signup` rebuilds the lunch dashboard after,
+ * because a sign-up is a meal somebody now has to order.
+ */
+function addRegistrantRowsToTab_(sheet, rows, opts) {
+  opts = opts || {};
+  const landed = insertRegistrantRowsInPlace_(sheet, rows);
+  const rest = rows.filter(row => landed.indexOf(row) === -1);
+  let existing = null;
+  if (rest.length) {
+    existing = getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID');
+    rest.forEach(row => existing.push(row));
+    renderRegistrantsSheet(false, existing);
+  }
+  if (opts.signup) {
+    updateMasterLunchDashboard(existing || getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID'));
+  }
+}
+
+/**
+ * Inserts `rows` into the Upcoming section in date order. Returns the rows
+ * that are now on the tab — all of them, or none when the shape is not one
+ * this handles (see the banner above), or the ones that landed before
+ * something failed. Never throws: the caller redraws the rest.
+ *
+ * ONE ROW DATED BEFORE TODAY DECLINES THE WHOLE SET: that row needs a redraw
+ * anyway, and the others ride in it rather than being inserted first and
+ * rewritten a moment later.
+ */
+function insertRegistrantRowsInPlace_(sheet, rows) {
+  const landed = [];
+  if (!sheet || !rows || !rows.length || rows.length > REGISTRANT_INSERT_MAX_ROWS) return landed;
+  const headers = HEADERS.All_Registrants;
+  const numCols = headers.length;
+  const dateIdx = headers.indexOf('Event_Date');
+  const todayKey = formatDateKey(new Date());
+
+  const incoming = rows.map(row => ({ row, date: coerceDate(row[dateIdx]) }));
+  if (incoming.some(item => !item.date || formatDateKey(item.date) < todayKey)) return landed;
+
+  let zone, grid;
+  try {
+    zone = getSectionZones(sheet, 'Event_ID')[0];
+    grid = readSheetGrid(sheet, false);
+  } catch (err) {
+    return landed;
+  }
+  if (!zone || !grid || zone.dataEnd < zone.dataStart) return landed;
+  const headerLine = grid.values[zone.headerRow - 1] || [];
+  if (!headers.every((header, i) => normalizeHeaderText(headerLine[i]) === header)) return landed;
+
+  // Where each row goes, against the tab as it stands: after the last row
+  // dated on or before it, so a walk-in lands among its own day.
+  const dates = grid.values.slice(zone.dataStart - 1, zone.dataEnd).map(line => coerceDate(line[dateIdx]));
+  const groups = {};
+  incoming.forEach(item => {
+    let at = 0;
+    dates.forEach((d, i) => { if (d && d.getTime() <= item.date.getTime()) at = i + 1; });
+    (groups[at] = groups[at] || []).push(item);
+  });
+  // Bottom up, so an insert never moves a position still to be used.
+  const positions = Object.keys(groups).map(Number).sort((a, b) => b - a);
+  const textCol = headers.indexOf('Event_Time') + 1;
+
+  positions.forEach(at => {
+    const group = groups[at].sort((a, b) => a.date - b.date);
+    const n = group.length;
+    const first = zone.dataStart + at;
+    let inserted = false;
+    try {
+      if (at === 0) sheet.insertRowsBefore(zone.dataStart, n);
+      else sheet.insertRowsAfter(zone.dataStart + at - 1, n);
+      inserted = true;
+      const target = sheet.getRange(first, 1, n, numCols);
+      // Nothing inherited from the neighbour may refuse the values: the render
+      // writes values before validations for the same reason.
+      target.clearDataValidations();
+      // Text BEFORE the value, or "10:00 AM" becomes a time dated 1899 — see
+      // stampTextColumns().
+      if (textCol > 0) sheet.getRange(first, textCol, n, 1).setNumberFormat('@');
+      target.setValues(group.map(item => item.row));
+    } catch (err) {
+      log(`ℹ️ Could not insert ${n} registrant row(s) in place (${err}) — redrawing the tab instead.`);
+      if (inserted) {
+        try { sheet.deleteRows(first, n); } catch (e) { /* blank rows; the redraw drops them */ }
+      }
+      invalidateSectionedRowsCache(sheet);
+      return;
+    }
+    group.forEach(item => landed.push(item.row));
+    // The look of the row beside it — number formats, colours, the dropdowns
+    // and tick boxes. Cosmetic from here on: a failure leaves a correct row
+    // that the next render dresses properly.
+    try {
+      const source = at === 0 ? first + n : first - 1;
+      sheet.getRange(source, 1, 1, numCols)
+        .copyTo(sheet.getRange(first, 1, n, numCols), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+      setDataRowHeights(sheet, first, n);
+    } catch (err) {
+      log(`ℹ️ Inserted ${n} registrant row(s) but could not copy the formatting beside them (${err}).`);
+    }
+  });
+  invalidateSectionedRowsCache(sheet);
+  return landed;
+}
+
+/**
+ * The stored Quick Mark lists, told about rows just added — patched when
+ * possible, dropped when not — and the door's rosters dropped as they always
+ * were (they rebuild on their own, from the same rows).
+ */
+function noteRegistrantRowsAdded_(rows) {
+  let patched = false;
+  try {
+    patched = patchStoredQuickMarkIndex_(rows);
+  } catch (err) {
+    log(`ℹ️ Could not patch the stored Quick Mark lists (${err}) — dropping them instead.`);
+  }
+  if (patched) clearCheckInStore();
+  else invalidateQuickMarkIndexCache();
+}
+
+/**
+ * Adds `rows` to the STORED Quick Mark index (cache and hidden tab) the way
+ * buildQuickMarkIndex() would have: each name into its session's bucket (and
+ * the program's undated bucket), a booked appointment time off the free list,
+ * a new name onto the member list. True when every row found its session;
+ * false — change nothing — when there is no stored index or a row names a
+ * session the stored copy does not have, and the caller drops it instead.
+ */
+function patchStoredQuickMarkIndex_(rows) {
+  const index = readCachedQuickMarkIndex() || readSheetQuickMarkIndex();
+  if (!index || !index.namesBySession || !Array.isArray(index.members)) return false;
+  delete index.fromCache;
+  delete index.fromSheet;
+  const map = getIndexMap(HEADERS.All_Registrants);
+  const sep = QUICK_MARK_SESSION_KEY_SEPARATOR;
+
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    const name = String(row[map['Name']] || '').trim();
+    if (!name) continue;
+    const location = String(row[map['Location']] || '').trim();
+    const titleKey = quickMarkTitleKey(row[map['Event']]);
+    const d = coerceDate(row[map['Event_Date']]);
+    const dateKey = d ? formatDateKey(d) : '';
+    const nameKey = normalizeNameKey(name);
+    const slot = map['Event_Time'] === undefined ? '' : appointmentStartLabelOf(row[map['Event_Time']]);
+    const status = String(row[map['Program_Status']] || '').trim() || 'Active';
+
+    const sessions = index.sessions.filter(s => s.location === location &&
+      quickMarkTitleKey(s.title) === titleKey && (s.dateKey === dateKey || !s.dateKey));
+    if (!sessions.some(s => s.dateKey === dateKey)) return false;
+    sessions.forEach(s => {
+      const bucket = index.namesBySession[`${s.location}${sep}${s.value}`];
+      if (bucket && !bucket.keys.some((k, i) => k === nameKey && bucket.times[i] === slot) &&
+        bucket.names.length < QUICK_MARK_MAX_DROPDOWN_ITEMS) {
+        bucket.names.push(name);
+        bucket.keys.push(nameKey);
+        bucket.times.push(slot);
+        bucket.statuses.push(status);
+      }
+      if (slot && Array.isArray(s.times)) s.times = s.times.filter(t => t.value !== slot);
+    });
+
+    if (!index.members.some(m => m.key === nameKey)) {
+      const member = {
+        name, key: nameKey,
+        search: memberSearchNames(name, '').join(' ').toLowerCase(),
+        household: []
+      };
+      const at = index.members.findIndex(m => m.name.localeCompare(name) > 0);
+      if (at === -1) index.members.push(member);
+      else index.members.splice(at, 0, member);
+    }
+  }
+  writeCachedQuickMarkIndex(index);
+  writeSheetQuickMarkIndex(index);
+  return true;
 }
 
 /**
