@@ -561,6 +561,14 @@ function buildRegistrantRow(args) {
       // every edited response as a fold disagreement for ever.
       const payloadAfter = ledgerPayloadFromRow(existingRow, map);
       if (JSON.stringify(payloadAfter) === payloadBefore) return null;
+      // AND WHEN THE LEDGER ALREADY SAYS SO. The tab row moving is not the
+      // same as the registration moving: something between syncs puts a
+      // column on the tab back the way it was, this branch sets it again, and
+      // the check above saw a change every hour — ~2,400 identical
+      // `corrected / all-dates` entries a day after the Sep 28 fix (measured
+      // by reportLedgerGrowth, 99za). The ledger is the record, so ask it.
+      const registrationIdForCorrection = ledgerIdForRegistrantRow(existingRow, map);
+      if (ledgerAlreadyRecords(registrationIdForCorrection, payloadAfter)) return null;
       // WHICH COLUMNS MOVED, in the note: if this entry ever appears every sync
       // again, the columns named here are the ones something else keeps
       // reverting between runs.
@@ -571,7 +579,7 @@ function buildRegistrantRow(args) {
         kind: LEDGER_KINDS.CORRECTED,
         source: args.ledgerSource || LEDGER_SOURCES.IMPORT,
         occurredAt: submittedAt,
-        registrationId: ledgerIdForRegistrantRow(existingRow, map),
+        registrationId: registrationIdForCorrection,
         eventId: existingRow[map['Event_ID']],
         name: existingRow[map['Name']],
         personType: existingRow[map['Person_Type']],

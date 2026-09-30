@@ -779,6 +779,39 @@ function ledgerFoldNow() {
   return __ledgerFold;
 }
 
+/**
+ * Does the ledger already hold every field of this Payload for this
+ * registration? True when replaying a `corrected` entry carrying it would
+ * change nothing (the definition 99za's report measures), including when the
+ * registration is dead — the replay ignores anything appended after that.
+ *
+ * For a writer that runs every sync over standing state (29's re-read branch),
+ * where "the tab row moved" is not evidence the registration did: a column the
+ * tab keeps reverting between runs would otherwise be recorded again every
+ * hour. Values are compared as a Payload carries them (ledgerCellValue_), with
+ * their types, because that is what the fold would assign.
+ *
+ * Reads the memoized fold, so it costs one ledger read per execution at most.
+ * A ledger that cannot be read answers false: when in doubt, append.
+ */
+function ledgerAlreadyRecords(registrationId, payload) {
+  if (!registrationId || !payload) return false;
+  let state;
+  try {
+    state = ledgerFoldNow().states[registrationId];
+  } catch (err) {
+    return false;
+  }
+  if (!state) return false;
+  if (state.dead) return true;
+  const map = getIndexMap(HEADERS.All_Registrants);
+  return Object.keys(payload).every(key => {
+    if (LEDGER_PAYLOAD_RESERVED_KEYS.indexOf(key) !== -1) return true;
+    if (map[key] === undefined) return false;
+    return ledgerCellValue_(state.row[map[key]]) === ledgerCellValue_(payload[key]);
+  });
+}
+
 /** Drops the memo. Called by flushLedger(), and by any caller that has written the tab. */
 function invalidateLedgerFold() {
   __ledgerFold = null;
