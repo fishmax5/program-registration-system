@@ -366,7 +366,51 @@ function applyBulkWaitlistOnly(programKey, picks) {
       'waiting for it. If a date looks unticked when that sync finishes, the next sync puts it back ' +
       'once the calendar has the tag.)');
   }
-  return result;
+  return result + deliverBulkWaitlistToCalendar_(programKey);
+}
+
+/**
+ * DELIVERS THE QUEUE, because nothing else will until the next sync.
+ *
+ * An edit reaches the calendar through the installable onEdit trigger
+ * (onProgramFlagEditInstallable, 18), which drains the queue seconds after the
+ * tick. A SCRIPT'S OWN setValues() never fires onEdit — so this dialog queued
+ * the tag, logged "closed to new registrations", and the calendar heard
+ * nothing for up to an hour, during which the dialog's own answer was the only
+ * place the change existed. This call runs with full authorization (a
+ * google.script.run from a dialog), so it drains the queue itself, the same
+ * way the installable trigger does.
+ *
+ * Only on the path that HELD the lock: when Apply was forced past a running
+ * sync, draining here would race that sync's own reads and row-deletes on the
+ * queue tab, and the entry is safer left for the next sync to deliver.
+ * Never throws — the sheet is already written, and a calendar that could not
+ * be reached leaves the entry queued for the next sync, which is said.
+ */
+function deliverBulkWaitlistToCalendar_(programKey) {
+  let outcome = null;
+  try {
+    outcome = withScriptLock(BULK_WAITLIST_LOCK_WAIT_MS, () => {
+      try {
+        return applyPendingProgramFlags();
+      } finally {
+        flushAdminDigest('Program flag change');
+      }
+    }, null);
+  } catch (err) {
+    log(`applyBulkWaitlistOnly: ${programKey} — calendar delivery failed (${err}); still queued for the next sync.`);
+    return ' ⚠️ The calendar could not be updated just now — the next sync will do it.';
+  }
+  if (outcome === null) {
+    log(`applyBulkWaitlistOnly: ${programKey} — workbook busy; calendar change left queued for the next sync.`);
+    return ' The calendar will be updated by the next sync.';
+  }
+  log(`applyBulkWaitlistOnly: ${programKey} — calendar: ${outcome.applied} delivered, ` +
+    `${outcome.failed} still queued, ${outcome.stampedEvents} event(s) changed.`);
+  if (outcome.failed > 0) {
+    return ` ⚠️ ${outcome.failed} change(s) could not reach the calendar (see the log) and stay queued for the next sync.`;
+  }
+  return ` Calendar updated ✅ (${outcome.stampedEvents} event(s) changed).`;
 }
 
 /**
@@ -477,10 +521,8 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   if (closed > 0) parts.push(`${closed} date(s) closed to new registrations`);
   if (reopened > 0) parts.push(`${reopened} date(s) reopened`);
 
-  const summary = `${parts.join(', ')}. Writing [${flag.tag}] to the calendar — nobody already ` +
-    `registered was moved.`;
+  const summary = `${parts.join(', ')} — nobody already registered was moved.`;
   log(`applyBulkWaitlistOnly: ${programKey} — ${parts.join(', ')}` +
     (alreadyRight > 0 ? `, ${alreadyRight} already right` : '') + '.');
-  toastIfPossible(summary);
   return summary;
 }

@@ -78,6 +78,13 @@ this.__queued = [];
 recordPendingProgramFlag = function (column, calendarId, title, on, dateKey) {
   this.__queued.push({ column, calendarId, title, on, dateKey });
 }.bind(this);
+// A script's own setValues() never fires onEdit, so the dialog has to drain
+// the queue itself. Counted here; the delivery is 18's and tested there.
+this.__drains = 0;
+applyPendingProgramFlags = function () {
+  this.__drains++;
+  return { applied: this.__queued.length, failed: 0, stampedEvents: this.__queued.length };
+}.bind(this);
 `, sandbox, { filename: 'project.gs' });
 
 let failures = 0;
@@ -272,7 +279,10 @@ const logged = re => sandbox.__logs.some(l => re.test(l));
   sandbox.__logs.length = 0;
   const realLock = sandbox.LockService.getScriptLock;
   sandbox.LockService.getScriptLock = () => ({ tryLock: () => false, releaseLock: () => {} });
+  const drainsBefore = sandbox.__drains;
   const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  ok('a forced write past a running sync does not race it for the queue',
+    sandbox.__drains === drainsBefore, String(sandbox.__drains - drainsBefore));
   ok('a busy workbook is written anyway, and says a sync was running',
     /1 date\(s\) reopened/.test(msg) && /A sync was running/.test(msg), msg);
   ok('...and that is logged too', logged(/A sync was running/), JSON.stringify(sandbox.__logs));
