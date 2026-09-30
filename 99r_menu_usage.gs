@@ -221,6 +221,8 @@ function menu_showForkedFormsDialog() { recordMenuUsage_('showForkedFormsDialog'
 function menu_showFormLinkDoctorDialog() { recordMenuUsage_('showFormLinkDoctorDialog'); return showFormLinkDoctorDialog(); }
 function menu_showUnopenableFormsDialog() { recordMenuUsage_('showUnopenableFormsDialog'); return showUnopenableFormsDialog(); }
 function menu_showLedgerVerificationReport() { recordMenuUsage_('showLedgerVerificationReport'); return showLedgerVerificationReport(); }
+function menu_reportLedgerGrowth() { recordMenuUsage_('reportLedgerGrowth'); return reportLedgerGrowth(); }
+function menu_compactRegistrationLedger() { recordMenuUsage_('compactRegistrationLedger'); return compactRegistrationLedger(); }
 function menu_showLunchMenuImportDialog() { recordMenuUsage_('showLunchMenuImportDialog'); return showLunchMenuImportDialog(); }
 function menu_showMemberRollImportDialog() { recordMenuUsage_('showMemberRollImportDialog'); return showMemberRollImportDialog(); }
 function menu_showMenuUsageReport() { recordMenuUsage_('showMenuUsageReport'); return showMenuUsageReport(); }

@@ -466,6 +466,10 @@ function buildAppMenu(ui, includeAdmin) {
         // somebody standing in front of a roster that is missing a name. It
         // folds the ledger and reads the tab and writes nothing at all.
         .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', menuFn_('showLedgerVerificationReport'))
+        // Whether any writer is still appending entries that change nothing,
+        // and which one. Read-only; its action half (the compaction) is behind
+        // the Destructive door below. See 99za.
+        .addItem('\ud83d\udcc8 Is the Ledger Still Growing? (read-only)', menuFn_('reportLedgerGrowth'))
         // The measurement half of the retired-calendar sweep. Its action half
         // is behind the Destructive door below — but this report is the only
         // thing that names WHICH calendar the leftover rows are from, and the
@@ -532,6 +536,10 @@ function buildAppMenu(ui, includeAdmin) {
         // nobody to Triage — the surviving row keeps the Event_ID every
         // registration is attached to. See 99l.
         .addItem('\ud83e\uddf9 Remove Duplicate Session Rows\u2026', menuFn_('removeDuplicateSessionRows'))
+        // Removes only ledger entries that provably change nothing (the replay
+        // is checked identical with and without them) and archives them to
+        // Drive first. Asks first. See 99za.
+        .addItem('\ud83e\uddf9 Compact the Registration Ledger\u2026', menuFn_('compactRegistrationLedger'))
         .addSeparator()
         // THE UNDO FOR THE WHOLE INVITATION CHANNEL. Its sibling in One-Time
         // Jobs takes the OFFICE off; this takes everybody off, which is why it

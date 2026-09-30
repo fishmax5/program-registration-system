@@ -104,7 +104,11 @@ const ADMIN_GATED_ACTIONS = [
   // Repoints a dead form's sessions to another form, or takes its id out of
   // every registry and ledger (99s). The review itself is read-only and open.
   'Swap Unopenable Forms',
-  'Purge Unopenable Forms'
+  'Purge Unopenable Forms',
+  // Removes ledger entries that change nothing (99za). Lossless for the replay
+  // and archived to Drive first, but it rewrites the one append-only record
+  // this workbook has; the growth report beside it is open.
+  'Compact Registration Ledger'
 ];
 
 /** Does this action still ask who is signed in? */
