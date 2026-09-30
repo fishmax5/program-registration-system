@@ -31,6 +31,9 @@ function onEdit(e) {
   try {
     const sheet = e.range.getSheet();
     const name = sheet.getName();
+    // A tick box asks first, on every tab (99zb). Declined, it is already put
+    // back and no handler below may act on it.
+    if (!confirmCheckboxEditOrRevert(e)) return;
     if (name === SHEET_NAMES.REGISTRANT_DASH) {
       handleRegistrantsEdit(e, sheet);
     } else if (name === SHEET_NAMES.LUNCH_DASHBOARD) {
