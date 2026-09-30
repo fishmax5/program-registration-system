@@ -369,6 +369,19 @@ function openSpreadsheetCached(fileId) {
 }
 
 /**
+ * Lets go of one foreign spreadsheet once nothing later in the execution will
+ * ask for it again. The push (46) is the last reader of each program
+ * registrant sheet in a sync, and without this every one of ~90 documents it
+ * opened stayed referenced until the execution ended — on the run that died
+ * with Apps Script's uncatchable "error code INTERNAL" eight minutes into the
+ * push (2026-09-30 11:39), the one thing this cache could do about memory.
+ */
+function forgetSpreadsheetCached(fileId) {
+  const id = String(fileId || '').trim();
+  if (id) delete __spreadsheetHandleCache[id];
+}
+
+/**
  * One CalendarApp.getEvents() per calendar per execution, keyed on the sync
  * window so a differently-scoped call still re-fetches. Returns
  * { calendarId: [CalendarEvent...] | null }, where null means the calendar

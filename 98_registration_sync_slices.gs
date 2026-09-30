@@ -574,6 +574,8 @@ function runRegistrationSyncPhases_(ctx) {
     }
   }
 
+  recoverRegistrationSyncStepDeath_(ctx.state);
+
   while (ctx.state.tail.length > 0) {
     if (Date.now() >= ctx.deadline) {
       log(`Registration sync: budget spent with ${ctx.state.tail.length} step(s) to go — ` +
@@ -583,7 +585,20 @@ function runRegistrationSyncPhases_(ctx) {
     }
     const id = ctx.state.tail[0];
     const step = registrationSyncTailStep(id);
+    // A START LINE PER STEP, and the step's id on the plan while it runs. Most
+    // steps log nothing on success, so the 2026-09-30 11:39 death came eight
+    // and a half silent minutes after the memory tabs with four candidates for
+    // what was running. The line says it now; the marker says it to the NEXT
+    // run when this one is killed before it can say anything else.
+    if (step) {
+      log(`Registration sync: step ${registrationSyncTailIds().indexOf(id) + 1}/` +
+        `${REGISTRATION_SYNC_TAIL_STEPS.length} — ${step.label}…`);
+    }
+    ctx.state.stepInFlight = { id, at: new Date().toISOString() };
+    ctx.save();
     const outcome = step ? sync.step(step.label, () => step.run(sync)) : undefined;
+    delete ctx.state.stepInFlight;
+    if (ctx.state.stepDeaths) delete ctx.state.stepDeaths[id];
     if (outcome === REGISTRATION_SYNC_STEP_AGAIN) {
       // Part-done, not done: kept at the head for the follow-up run.
       ctx.state.problems = (ctx.state.problems || []).concat(sync.problems.splice(0));
@@ -603,6 +618,46 @@ function runRegistrationSyncPhases_(ctx) {
 
   ctx.state.importedRows = ctx.state.importedRows || 0;
   return { finished: true, processed };
+}
+
+/**
+ * How many slices in a row one tail step may kill outright before the window
+ * gives up on it. One death is retried — Apps Script's "error code INTERNAL"
+ * is often a one-off, and the push (46) resumes from its stored fingerprints —
+ * but a step that takes the execution down twice would otherwise do it on
+ * every hand-off until the plan went stale, and nothing after it would run.
+ */
+const REGISTRATION_SYNC_MAX_STEP_DEATHS = 2;
+
+/**
+ * A plan still carrying `stepInFlight` when a slice starts is a plan whose
+ * last slice DIED inside that step: sync.step() catches anything thrown and
+ * the marker is removed as soon as the step returns, so only an abort of the
+ * execution itself — the ceiling, or an uncatchable INTERNAL — leaves it. Say
+ * which step it was; at REGISTRATION_SYNC_MAX_STEP_DEATHS drop it from this
+ * window the way a step that threw is dropped, so the steps after it run.
+ */
+function recoverRegistrationSyncStepDeath_(plan) {
+  const dead = plan && plan.stepInFlight;
+  if (!dead || !dead.id) return;
+  delete plan.stepInFlight;
+  plan.stepDeaths = plan.stepDeaths || {};
+  const deaths = (plan.stepDeaths[dead.id] || 0) + 1;
+  plan.stepDeaths[dead.id] = deaths;
+  const step = registrationSyncTailStep(dead.id);
+  const label = step ? step.label : dead.id;
+  if (deaths >= REGISTRATION_SYNC_MAX_STEP_DEATHS && plan.tail && plan.tail[0] === dead.id) {
+    plan.tail.shift();
+    delete plan.stepDeaths[dead.id];
+    const problem = `${label} — the run stopped outright during this step ${deaths} time(s) in a row ` +
+      `(last started ${dead.at}), so this sync skipped it; the next hourly sync tries it again.`;
+    plan.problems = (plan.problems || []).concat(label);
+    log(`⚠️ Registration sync: ${problem}`);
+    noteForAdmin('Parts of the sync that could not run', problem);
+    return;
+  }
+  log(`⚠️ Registration sync: the previous run died while ${label} (started ${dead.at}) — ` +
+    `trying it again (${deaths}/${REGISTRATION_SYNC_MAX_STEP_DEATHS}).`);
 }
 
 /**
