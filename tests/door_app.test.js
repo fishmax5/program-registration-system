@@ -106,12 +106,16 @@ try { new vm.Script(inner); } catch (err) { parses = false; }
 ok('the page script parses as JavaScript', parses);
 ok('the setup screen asks for a building and a day',
   /Which building\?/.test(page) && /Which day\?/.test(page));
-ok('the walk-in box is on the name screen, not behind a tap of its own',
-  /New here, or not registered\?/.test(page));
+ok('there is no walk-in button — a name nobody knows just carries on',
+  !/Sign in as a walk-in/.test(page) && /'Continue as "' \+ typed/.test(page));
+ok('the confirmation covers the screen rather than a strip at the bottom',
+  /id="done"/.test(page) && /You\\'re signed in!/.test(page) && /showDone\(name, partyNames/.test(page));
 ok('the walk-in form asks for either contact detail',
   /An email or a phone number/.test(page));
 ok('the recurring choices are offered', /rest of this month/i.test(page) && /club list/i.test(page));
 ok('and the membership question is asked', /Are you a member\?/.test(page));
+ok('with a note that membership is dues and not required',
+  /paying annual dues to New Horizons/.test(page) && /not required to take part/.test(page));
 // THE APPLICATION ITSELF IS GONE. It was a screen of the office's own form
 // drawn on the tablet; what is left is the question and one note filed for the
 // office. A page that still called doorMembershipForm() would be a screen

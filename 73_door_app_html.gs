@@ -41,8 +41,10 @@
 // under them the people who came to those same programs in the last two months
 // and have not registered for today (DAY.past, built by foldPastRegistrants()
 // in section 16h) — a weekly class has the same eight people in it every week
-// and half of them have never filled in a form; then the search box, with the
-// walk-in sign-up inside it. Staff can get past the question entirely with
+// and half of them have never filled in a form; then the search box. There is
+// no walk-in button any more: somebody who types a name the member roll does
+// not know is offered "Continue as <name>" and carried to the details screen,
+// and nothing on screen calls them a walk-in. Staff can get past the question entirely with
 // "Show everyone here today", for the person who cannot work out which class
 // is theirs.
 //
@@ -52,7 +54,14 @@
 // with a queue behind you, and "not a member yet" is now one note filed for the
 // office (recordMembershipHandoff(), 72_door_app.gs). The question itself is
 // still asked on the walk-in screen — it is the only place anybody ever asks
-// it.
+// it, with a note beside it saying what membership IS (dues to New Horizons)
+// and that it is not required to take part.
+//
+// AND A SIGN-IN ENDS ON A SCREEN, NOT A STRIP. The page goes straight back to
+// the first question for the next person, and the old confirmation was a bar
+// along the bottom that people never saw — they were left looking at an empty
+// question wondering whether it had worked. showDone() covers the whole screen
+// in green with their name for a few seconds, or until somebody taps it.
 // ============================================================================
 
 /**
@@ -115,13 +124,25 @@ function buildDoorAppHtml(options) {
   button.card.here .meta { color: #188038; }
   button.card.pick { border-color: #1A73E8; border-width: 2px; background: #F1F7FE; }
 
-  /* THE WALK-IN BOX. Immediately under the names and never behind a tap of
-     its own: the person it is for is the one who does not find themselves on
-     the list, and asking them to go looking for a second screen is how they
-     end up asking a volunteer instead. */
-  .walkin { margin-top: 20px; background: #fff; border: 2px solid #1A73E8; border-radius: 12px;
-            padding: 16px; }
-  .walkin h2 { margin: 0 0 6px 0; }
+  /* THE MEMBERSHIP NOTE — said before the question, so nobody answers "not
+     yet" thinking it means they cannot come in. */
+  .note { background: #F1F7FE; border: 1px solid #C6DAFC; color: #174EA6; border-radius: 10px;
+          padding: 12px 14px; font-size: 15px; line-height: 1.45; margin: 4px 0 10px 0; }
+
+  /* THE CONFIRMATION. It covers the whole screen, because the page goes
+     straight back to the first question for the next person and a strip at the
+     bottom was gone before anybody looked down at it — people were left
+     wondering whether they had been signed in at all. Tap anywhere to close. */
+  #done { position: fixed; inset: 0; z-index: 60; background: #188038; color: #fff;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          text-align: center; padding: 24px; cursor: pointer; }
+  #done .tick { width: 120px; height: 120px; border-radius: 50%; background: #fff; color: #188038;
+                font-size: 76px; line-height: 120px; font-weight: 700; margin-bottom: 22px; }
+  #done .big { font-size: 38px; font-weight: 700; margin: 0 0 10px 0; }
+  #done .name { font-size: 26px; margin: 0 0 8px 0; line-height: 1.3; }
+  #done .more { font-size: 18px; margin: 6px 0 0 0; max-width: 560px; line-height: 1.45; opacity: .95; }
+  #done .tapnext { margin-top: 34px; font-size: 16px; opacity: .85; border: 1px solid rgba(255,255,255,.6);
+                   border-radius: 999px; padding: 10px 22px; }
 
   ul.list { list-style: none; margin: 0; padding: 0; }
   li.item { background: #fff; border: 1px solid #E8EAED; border-radius: 10px; margin-bottom: 8px; }
@@ -189,6 +210,7 @@ function buildDoorAppHtml(options) {
 
 <main id="app" class="hide"></main>
 <div id="status"></div>
+<div id="done" class="hide" onclick="closeDone()"></div>
 <div id="okb" class="hide"></div>
 
 <script>
@@ -579,7 +601,7 @@ function buildDoorAppHtml(options) {
       'Everything signed in here is recorded against that date.');
   }
 
-  // SCREEN 3 — everybody expected, A–Z, and the walk-in box under them.
+  // SCREEN 3 — everybody expected, A–Z, and a box to type your name under them.
   function drawNames(main) {
     if (DAY.dateKey !== OPTS.todayKey) main.appendChild(offDayBanner());
 
@@ -604,7 +626,7 @@ function buildDoorAppHtml(options) {
     } else {
       main.appendChild(el('p', 'hint',
         'Nobody is signed up for ' + whatIsShowing() + '. ' +
-        'Look below, or sign in as a walk-in.'));
+        'Type your name below.'));
     }
 
     // SECTION 2 — THE REGULARS. Somebody who has been to these same programs
@@ -612,7 +634,7 @@ function buildDoorAppHtml(options) {
     // nobody registers for, the member who always just turns up. Tapping one
     // is the same personal screen as anybody else's, already ticked for what
     // this tablet is for — which is what it takes the place of, a volunteer
-    // typing a name they have known for years into the walk-in box every week.
+    // typing a name they have known for years into the search box every week.
     var past = (DAY.past || []).filter(pastIsSelected).sort(function (a, b) {
       var d = sortKey(a.name).localeCompare(sortKey(b.name));
       return d || a.name.localeCompare(b.name);
@@ -625,13 +647,18 @@ function buildDoorAppHtml(options) {
       drawNameGrid(main, past.map(pastPerson));
     }
 
-    // The regular who did not register this time: found on the member roll and
-    // opened on the same personal screen as anybody on the list.
+    // NOT ON THE LIST? TYPE YOUR NAME. This is the whole of what used to be the
+    // walk-in box: somebody on the member roll is found and opened on the same
+    // personal screen as anybody on the list, and somebody who is not is simply
+    // carried on with the name they typed (drawSearchResults()). The word
+    // "walk-in" is never said to them — it is our word for them, not theirs,
+    // and a separate button for it read as a second, harder way in.
     main.appendChild(el('h2', '', 'Not seeing your name?'));
+    main.appendChild(el('p', 'hint', 'Type your name here.'));
     var box = document.createElement('input');
     box.type = 'text';
     box.id = 'search';
-    box.placeholder = 'Search for your name';
+    box.placeholder = 'Your name';
     box.autocomplete = 'off';
     box.oninput = drawSearchResults;
     main.appendChild(box);
@@ -642,17 +669,8 @@ function buildDoorAppHtml(options) {
     if (!(DAY.members || []).length) {
       main.appendChild(el('p', 'hint',
         'The member directory is empty — run "Update Everything Now" in the workbook to build it. ' +
-        'Anybody can still sign in as a walk-in below.'));
+        'Anybody can still type their name above to sign in.'));
     }
-
-    // THE WALK-IN BOX — always on screen, never behind a tap of its own.
-    var walk = el('div', 'walkin', '');
-    walk.appendChild(el('h2', '', 'New here, or not registered?'));
-    walk.appendChild(el('p', 'hint',
-      'Sign in as a walk-in: pick what you are here for, and tell us who you are. ' +
-      'It takes a minute.'));
-    walk.appendChild(button('big', 'Sign in as a walk-in', function () { startWalkIn(''); }));
-    main.appendChild(walk);
     main.appendChild(footer());
   }
 
@@ -754,18 +772,23 @@ function buildDoorAppHtml(options) {
       var hay = m.search || m.name.toLowerCase();
       return hay.indexOf(needle) !== -1;
     }).slice(0, 24);
-    if (!hits.length) {
-      box.appendChild(el('p', 'hint', 'No member matches "' + typed + '".'));
-      // ONE TAP INTO THE WALK-IN FORM, NAME ALREADY IN IT. The old path made
-      // someone who typed a name and got no match scroll to the walk-in box,
-      // tap it, and retype the name they had just typed — WALKIN.name was
-      // reset to '' on that tap regardless of what was in the search box.
-      // Carrying the typed text straight into WALKIN here is what removes that.
-      box.appendChild(button('big', 'Sign in as a walk-in: ' + typed, function () {
-        startWalkIn(typed);
-      }));
-      return;
-    }
+    // THE TYPED NAME IS ALWAYS AN ANSWER. Anybody the roll knows is offered
+    // as a card; and whether or not anybody matched, the name as typed is
+    // offered too, carried straight into the details screen so nobody types it
+    // twice. Offered even beside matches, because "Mary Cohen" matching
+    // "Mary Cohen-Stein" is not the same person. A name that matches nobody is
+    // a walk-in, and that is all it takes — nothing on screen calls it one.
+    var hint = el('p', 'hint', hits.length
+      ? 'Tap your name — or, if it is not here, continue as you typed it.'
+      : 'Not on our list yet — that is fine. Tap below to carry on.');
+    hint.style.gridColumn = '1 / -1';
+    box.appendChild(hint);
+    var asTyped = button('big', 'Continue as "' + typed + '"', function () {
+      startWalkIn(typed);
+    });
+    asTyped.style.gridColumn = '1 / -1';
+    asTyped.style.marginTop = '0';
+    if (!hits.length) { box.appendChild(asTyped); return; }
     hits.forEach(function (m) {
       var person = null;
       (DAY.people || []).forEach(function (p) { if (p.key === m.key) person = p; });
@@ -773,6 +796,7 @@ function buildDoorAppHtml(options) {
         name: m.name, key: m.key, registered: [], attended: [], lunchRegistered: false, here: false
       }));
     });
+    box.appendChild(asTyped);
   }
 
   function personCard(p) {
@@ -952,7 +976,7 @@ function buildDoorAppHtml(options) {
     lunchList.appendChild(lunchItem(false));
     main.appendChild(lunchList);
 
-    main.appendChild(el('h2', '', 'Who are you?'));
+    main.appendChild(el('h2', '', 'How can we reach you?'));
     main.appendChild(el('p', 'hint',
       'An email or a phone number — whichever you have. We need one of them so the office ' +
       'can follow up.'));
@@ -974,6 +998,12 @@ function buildDoorAppHtml(options) {
     main.appendChild(rec);
 
     main.appendChild(el('h2', '', 'Are you a member?'));
+    // WHAT "MEMBER" MEANS, before the question — asked cold, "not yet" reads as
+    // "then I cannot come in", and somebody who has paid nothing ticks "yes"
+    // because they have been coming for years.
+    main.appendChild(el('div', 'note',
+      'Membership means paying annual dues to New Horizons. It is not required to take part — ' +
+      'everyone is welcome at our programs either way.'));
     var mem = el('ul', 'list', '');
     mem.appendChild(radioItem('member', 'yes', 'Yes, I am a member',
       'You are added to today\\'s list and nothing else changes.',
@@ -1248,18 +1278,21 @@ function buildDoorAppHtml(options) {
     STEP = 'events';
     draw();
     window.scrollTo(0, 0);
-    // THE ONE THING A NON-MEMBER IS TOLD, and it is a promise about somebody
-    // else's day rather than a form to fill in: the office has their name and
-    // their number and will send them an application.
-    say('✅ Signed in — ' + name +
-      (partyNames.length ? ' with ' + partyNames.join(', ') : '') +
-      (notAMember ? '. The office will send you a membership application.' : ''), 'ok');
+    // THE CONFIRMATION COVERS THE SCREEN (showDone()). The page underneath is
+    // already the next person's first question; this is what tells the last
+    // person it worked. THE ONE THING A NON-MEMBER IS TOLD is a promise about
+    // somebody else's day rather than a form to fill in: the office has their
+    // name and their number and will send them an application.
+    hideStatus();
+    showDone(name, partyNames,
+      notAMember ? 'The office will send you information about membership.' : '');
 
     google.script.run
       .withSuccessHandler(function (res) {
         if (res && res.needsPin) {
           try { window.localStorage.removeItem('checkInPin'); } catch (err) { /* ignore */ }
           pin = '';
+          closeDone();
           STEP = 'events';
           draw();
           say(res.message || 'Wrong PIN — ask a staff member to sign back in.', 'err');
@@ -1360,6 +1393,31 @@ function buildDoorAppHtml(options) {
   function hideStatus() {
     var box = document.getElementById('status');
     box.className = '';
+  }
+
+  // THE FULL-SCREEN "YOU'RE SIGNED IN". Up for DONE_MS, or until somebody taps
+  // it — the next person in the queue can tap straight through. Built with
+  // textContent like everything else here, because the name is whatever was
+  // typed into the box.
+  var DONE_MS = 5000;
+  var doneTimer = null;
+  function showDone(name, partyNames, extra) {
+    var box = document.getElementById('done');
+    box.innerHTML = '';
+    box.appendChild(el('div', 'tick', '✓'));
+    box.appendChild(el('p', 'big', 'You\\'re signed in!'));
+    box.appendChild(el('p', 'name', name +
+      (partyNames && partyNames.length ? ' with ' + partyNames.join(', ') : '')));
+    if (extra) box.appendChild(el('p', 'more', extra));
+    box.appendChild(el('div', 'tapnext', 'Tap anywhere for the next person'));
+    box.classList.remove('hide');
+    if (doneTimer) window.clearTimeout(doneTimer);
+    doneTimer = window.setTimeout(closeDone, DONE_MS);
+  }
+
+  function closeDone() {
+    if (doneTimer) { window.clearTimeout(doneTimer); doneTimer = null; }
+    document.getElementById('done').classList.add('hide');
   }
 
   function esc(value) {
