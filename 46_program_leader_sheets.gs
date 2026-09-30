@@ -857,6 +857,102 @@ function computeLeaderSheetFingerprint(entry, rows) {
     LEADER_SHEET_TEMPLATE_KEY);
 }
 
+// ============================================================================
+// WHICH SHEET WAS THE PUSH ON WHEN THE EXECUTION DIED?
+//
+// 2026-09-30 11:39: the hourly sync ended in "We're sorry, the JavaScript
+// engine reported an unexpected error. Error code INTERNAL." eight and a half
+// minutes after its last log line. That error is not an exception: no catch in
+// this project saw it (the per-sheet catch below, the sync's step guard and
+// the sliced runner's catch would each have logged a ⚠️ line, and none did),
+// so it is an abort of the execution itself — the same kind of death as the
+// ceiling, only sooner. Nothing in the log said which sheet it was on, and the
+// push would have walked straight back into the same sheet on the next run.
+//
+// So each sheet is named in Script Properties BEFORE the push touches it, and
+// the name is overwritten by the next sheet's (one write a sheet, and one to
+// clear it at the end). A marker still standing when a push begins is a sheet
+// an execution died on. It is reported by name, counted, and sent to the back
+// of the queue so every other sheet is served first; at
+// LEADER_SHEET_PUSH_MAX_CRASHES in a row it is left out until the count is a
+// day old, so one bad spreadsheet cannot take the whole hourly sync with it.
+// A clean rewrite of that sheet wipes its count.
+// ============================================================================
+const LEADER_SHEET_PUSH_IN_FLIGHT_PROP_KEY = 'LEADER_SHEET_PUSH_IN_FLIGHT_V1';
+const LEADER_SHEET_PUSH_MAX_CRASHES = 2;
+const LEADER_SHEET_PUSH_CRASH_MEMORY_MS = 24 * 60 * 60 * 1000;
+
+/** `{ current, crashes: { programKey: { count, lastAt } } }` — never throws. */
+function readLeaderSheetPushState_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(LEADER_SHEET_PUSH_IN_FLIGHT_PROP_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') {
+      return { current: parsed.current || null, crashes: parsed.crashes || {} };
+    }
+  } catch (err) {
+    log(`ℹ️ The registrant sheet push's crash marker was unreadable (${err}) — starting clean.`);
+  }
+  return { current: null, crashes: {} };
+}
+
+/** Guarded: a marker that will not write costs the diagnosis, never the push. */
+function writeLeaderSheetPushState_(state) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (!state.current && Object.keys(state.crashes || {}).length === 0) {
+      props.deleteProperty(LEADER_SHEET_PUSH_IN_FLIGHT_PROP_KEY);
+    } else {
+      props.setProperty(LEADER_SHEET_PUSH_IN_FLIGHT_PROP_KEY, JSON.stringify(state));
+    }
+  } catch (err) {
+    log(`ℹ️ Could not record which registrant sheet the push is on (${err}).`);
+  }
+}
+
+/** How many runs in a row this sheet has killed; a count a day old is forgotten. */
+function leaderSheetPushCrashCount_(state, programKey) {
+  const c = state && state.crashes && state.crashes[programKey];
+  if (!c) return 0;
+  const age = Date.now() - new Date(c.lastAt || 0).getTime();
+  return age > LEADER_SHEET_PUSH_CRASH_MEMORY_MS ? 0 : (c.count || 0);
+}
+
+/**
+ * Read at the head of every push: turns a marker the last execution left
+ * behind into a named, counted report. Returns the state the push carries on.
+ */
+function recoverLeaderSheetPushCrash_(registry) {
+  const state = readLeaderSheetPushState_();
+  // Counts a day old go, so a sheet left out yesterday is tried again today.
+  Object.keys(state.crashes).forEach(key => {
+    if (leaderSheetPushCrashCount_(state, key) === 0) delete state.crashes[key];
+  });
+  const dead = state.current;
+  if (dead && dead.programKey) {
+    const count = leaderSheetPushCrashCount_(state, dead.programKey) + 1;
+    state.crashes[dead.programKey] = { count, lastAt: new Date().toISOString() };
+    const name = `"${dead.title || dead.programKey}"${dead.location ? ` (${dead.location})` : ''}`;
+    const link = dead.fileId ? ` https://docs.google.com/spreadsheets/d/${dead.fileId}/edit` : '';
+    const next = count >= LEADER_SHEET_PUSH_MAX_CRASHES
+      ? `That is ${count} in a row, so it is left out of the push until tomorrow and every other ` +
+        `sheet is kept up to date without it.`
+      : `It goes to the back of the queue this time, so the other sheets are written first.`;
+    log(`⚠️ Program registrant sheets: an earlier run died while on the sheet for ${name} ` +
+      `(started ${dead.at}). ${next}`);
+    noteForAdmin('Program registrant sheets that stopped the sync',
+      `${name} — a sync stopped outright while refreshing this program's shared sheet ` +
+      `(Apps Script ended the run without an error this workbook could catch). ${next} ` +
+      `If it keeps happening, open the file and look for something unusual — a very large tab, ` +
+      `thousands of rows or columns typed far below the roster, or a tab added by hand.${link}`);
+    // Only ever about a sheet still registered.
+    if (registry && !registry[dead.programKey]) delete state.crashes[dead.programKey];
+  }
+  state.current = null;
+  writeLeaderSheetPushState_(state);
+  return state;
+}
+
 function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   const force = !!(options && options.force);
   // A DEADLINE, BECAUSE THIS IS THE ONE STEP OF THE SYNC THAT CAN OUTLAST A
@@ -894,31 +990,54 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   }
 
   const byProgram = buildLeaderSheetRowsByProgram(sessionRows, registrantRows);
+
+  // A SHEET THAT KILLED THE LAST RUN GOES LAST, AND ONE THAT KILLED TWO IS
+  // LEFT OUT FOR THE DAY. See LEADER_SHEET_PUSH_IN_FLIGHT_PROP_KEY: the marker
+  // written before each sheet is still there only if an execution died on it.
+  const pushState = recoverLeaderSheetPushCrash_(registry);
+  const suspect = key => leaderSheetPushCrashCount_(pushState, key) > 0;
+  const order = programKeys.filter(k => !suspect(k)).concat(programKeys.filter(suspect));
+  log(`Program registrant sheets: checking ${order.length} sheet(s).`);
+
   let pushed = 0;
   let unchanged = 0;
   let keptStranded = 0;
+  let quarantined = 0;
   let visited = 0;
-  for (let i = 0; i < programKeys.length; i++) {
+  for (let i = 0; i < order.length; i++) {
     // At least one sheet per call, so a follow-up run that starts late still
     // moves forward rather than handing on for ever.
     if (visited > 0 && Date.now() >= deadline) {
-      progress.remaining = programKeys.length - i;
+      progress.remaining = order.length - i;
       log(`Program registrant sheets: budget spent with ${progress.remaining} sheet(s) still to check — ` +
         `a follow-up run carries on from there.`);
       break;
     }
+    const programKey = order[i];
+    if (leaderSheetPushCrashCount_(pushState, programKey) >= LEADER_SHEET_PUSH_MAX_CRASHES) {
+      quarantined++;
+      continue;
+    }
     visited++;
-    const programKey = programKeys[i];
-    pushOneProgramLeaderSheet_(programKey);
+    pushOneProgramLeaderSheet_(programKey, i + 1, order.length);
   }
+  // Every sheet reached came back: nothing is in flight any more.
+  pushState.current = null;
+  writeLeaderSheetPushState_(pushState);
 
-  function pushOneProgramLeaderSheet_(programKey) {
+  function pushOneProgramLeaderSheet_(programKey, position, total) {
     // Each sheet is a real stretch of work; keep the workbook lease alive
     // (99w — it lapses ten minutes after its holder goes quiet, and this loop
     // used to log nothing until it finished).
     renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    // Written BEFORE the file is touched, and overwritten by the next sheet's:
+    // one property write per sheet. Only an execution that died on this sheet
+    // leaves it standing for the next run to find.
+    pushState.current = { programKey, title: entry.title || '', location: entry.location || '',
+      fileId: entry.fileId, at: new Date().toISOString() };
+    writeLeaderSheetPushState_(pushState);
     try {
       const rows = byProgram[programKey] || [];
       // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
@@ -998,6 +1117,11 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         unchanged++;
         return;
       }
+      // One line per REWRITE (the skip path stays quiet), so a silent gap in
+      // the log is never again unattributable: the last of these names the
+      // sheet the run was on.
+      log(`Program registrant sheets: rewriting ${position}/${total} — "${entry.title}" ` +
+        `(${entry.location}), ${content.roster.length} on the list, ${content.waitlist.length} waiting.`);
       writeProgramLeaderSheetTab(tab, entry, content.roster);
       // Its own guard: the class list has landed, and a Waitlist tab that will
       // not draw must not undo that. The fingerprint is then NOT stored, so the
@@ -1020,6 +1144,9 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // one already stored — that agreement is what made this a repair. Said
       // here rather than left to be rediscovered from the condition above.
       pushed++;
+      // A clean rewrite clears any count against this sheet; the write that
+      // carries it is the next sheet's marker (or the one after the loop).
+      if (pushState.crashes && pushState.crashes[programKey]) delete pushState.crashes[programKey];
       // ONCE PER SHEET, EVER — not once per hour. Any sheet made before
       // ensureProgramLeaderSheetAccess() existed was shared with its creator and
       // nobody else, which is what stopped this whole round trip working when
@@ -1045,11 +1172,20 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       log(`⚠️ Could not refresh the program registrant sheet for "${entry.title}" (${err}).`);
       noteForAdmin('Program registrant sheets that could not be refreshed',
         describeLeaderSheetAccessFailure(entry, programKey, err));
+    } finally {
+      // The push is the last reader of this file in the execution (the pull
+      // ran at the head of the sync); holding ninety of them to the end is
+      // memory this run has no use for. See forgetSpreadsheetCached() (08).
+      forgetSpreadsheetCached(entry.fileId);
     }
   }
   if (pushed > 0 || unchanged > 0) {
     log(`Program registrant sheets: rewrote ${pushed} shared sheet(s)` +
       (unchanged > 0 ? `, left ${unchanged} unchanged.` : '.'));
+  }
+  if (quarantined > 0) {
+    log(`⚠️ Program registrant sheets: left out ${quarantined} sheet(s) that stopped the sync ` +
+      `${LEADER_SHEET_PUSH_MAX_CRASHES} time(s) in a row — they are tried again tomorrow.`);
   }
   if (keptStranded > 0) {
     log(`Program registrant sheets: kept the last roster on ${keptStranded} sheet(s) whose registrants ` +
