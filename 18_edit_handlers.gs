@@ -793,7 +793,7 @@ function onProgramFlagEditInstallable(e) {
     // runs, but only if something is already queued (a retry of an earlier
     // failure), and it costs one read of a two-column tab.
     if (editTouchesProgramFlagColumn(e, sheet)) {
-      Utilities.sleep(1200);
+      waitForFreshPendingFlag_();
     } else if (readPendingProgramFlags().length === 0) {
       return;
     }
@@ -821,6 +821,15 @@ function onProgramFlagEditInstallable(e) {
     }
     if (result.applied === 0 && result.failed === 0) return;
 
+    // A DATE CLOSED OR REOPENED BY HAND is more than a calendar tag: the row's
+    // Status and the form's date label say so too, and until now both waited
+    // for the next sync — so the tick went in, the calendar heard, and the
+    // dashboard and the form went on reading "Open" for up to an hour (99m).
+    if (result.sessions && result.sessions.length > 0) {
+      withScriptLock(SYNC_LOCK_WAIT_MS,
+        () => followThroughClosedSessions_(result.sessions, 'Waitlist Only tick'), null);
+    }
+
     toastIfPossible(result.failed === 0
       ? `Calendar updated ✅ — ${result.stampedEvents} event(s) across ${result.applied} program(s). ` +
         `The forms follow on the next Sync Cal.`
@@ -829,6 +838,38 @@ function onProgramFlagEditInstallable(e) {
   } catch (err) {
     log(`onProgramFlagEditInstallable error: ${err}`);
   }
+}
+
+/**
+ * WAITS FOR THE TICK TO BE QUEUED, however long the person takes to say yes.
+ *
+ * Both triggers start from the same edit. The simple onEdit writes the queue
+ * entry; this one delivers it. That used to be a fixed 1.2-second head start,
+ * which was enough until every tick box began asking "Tick this box?" first
+ * (99zb) — the simple trigger now sits on that question until somebody
+ * answers, so this trigger woke to an empty queue, delivered nothing and
+ * returned, and a date closed by hand reached the calendar only at the next
+ * calendar sync (or never, if that sync's reconcile read the untagged event
+ * first). So it polls for an entry recorded around the time of this edit, up
+ * to PENDING_FLAG_WAIT_MS — inside the simple trigger's own 30-second limit
+ * plus slack — and then drains whatever is there, which is the old behaviour.
+ */
+const PENDING_FLAG_WAIT_MS = 45 * 1000;
+const PENDING_FLAG_POLL_MS = 1500;
+
+function waitForFreshPendingFlag_() {
+  const since = Date.now() - 15 * 1000;
+  const deadline = Date.now() + PENDING_FLAG_WAIT_MS;
+  Utilities.sleep(1200);
+  while (Date.now() < deadline) {
+    try {
+      if (readPendingProgramFlags().some(entry => entry.recordedAt >= since)) return true;
+    } catch (err) {
+      return false;
+    }
+    Utilities.sleep(PENDING_FLAG_POLL_MS);
+  }
+  return false;
 }
 
 /**
@@ -859,7 +900,10 @@ function editTouchesProgramFlagColumn(e, sheet) {
  * again later, not a reason to drop somebody's instruction.
  */
 function applyPendingProgramFlags() {
-  const result = { applied: 0, failed: 0, stampedEvents: 0 };
+  // `sessions` names every per-SESSION entry this drain handled (delivered or
+  // still queued), so a caller can bring the row's Status and its form's date
+  // label into line with the sheet — which is what they are read from.
+  const result = { applied: 0, failed: 0, stampedEvents: 0, sessions: [] };
   const entries = readPendingProgramFlags();
   if (entries.length === 0) return result;
 
@@ -890,6 +934,9 @@ function drainPendingProgramFlags(entries, result) {
         `this tag belongs to one session. Tick the box again on the row you meant.`);
       delivered.push(entry);
       return;
+    }
+    if (flag.perSession && result.sessions) {
+      result.sessions.push({ calendarId: entry.calendarId, title: entry.title, dateKey: entry.dateKey });
     }
     const outcome = flag.perSession
       ? stampSessionFlagOnCalendarEvent(entry.title, entry.calendarId, entry.dateKey, flag, entry.on)
@@ -978,6 +1025,7 @@ function readPendingProgramFlags() {
       title: String(row[2] || '').trim(),
       on: isTruthyCheckbox(row[3]),
       dateKey: String(row[5] || '').trim(),
+      recordedAt: row[4] instanceof Date ? row[4].getTime() : (Date.parse(row[4]) || 0),
       row: i + 2
     }))
     .filter(entry => entry.column);

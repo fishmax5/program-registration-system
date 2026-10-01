@@ -319,5 +319,101 @@ const logged = re => sandbox.__logs.some(l => re.test(l));
     /1 date\(s\) reopened/.test(msg) && sandbox.__queued.length === 1, msg);
 }
 
+// --- the rest of a closed date: Status, the form, and the calendar ----------
+//
+// The reported fault (2026-10-01): closing a date left no "🔴 Waitlist Only"
+// on the session table, no tag on the calendar and the form still offering
+// the date as open. Status and the form label now follow at once, and a busy
+// workbook no longer means the calendar waits for a sync that may be a day off.
+vm.runInContext(`
+this.__stamped = [];
+stampSessionFlagOnCalendarEvent = function (title, calendarId, dateKey, flag, on) {
+  this.__stamped.push({ title, calendarId, dateKey, on });
+  return { ok: true, stamped: 1 };
+}.bind(this);
+withCalendarChangeTriggersPaused = function (reason, work) { return work(); };
+this.__relabelled = [];
+refreshOneFormDateLabels = function (formId) {
+  this.__relabelled.push(formId);
+  return { failed: false, written: true, lunchDates: 0 };
+}.bind(this);
+this.__readPendingStub = null;
+`, sandbox);
+{
+  const formCol = col('Form_ID');
+  grid[3][formCol] = 'FORM-YOGA';
+  grid[5][formCol] = 'FORM-YOGA';
+  sandbox.invalidateSectionedRowsCache(sheet);
+  // Start from rows 3 and 5 open.
+  sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [
+    { eventId: yoga.sessions[0].eventId, on: false },
+    { eventId: yoga.sessions[2].eventId, on: false }
+  ]);
+  grid[3][col('Active_Count')] = 5;
+  sandbox.__relabelled.length = 0;
+  sandbox.__queued.length = 0;
+  sandbox.invalidateSectionedRowsCache(sheet);
+
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [
+    { eventId: yoga.sessions[0].eventId, on: true }
+  ]);
+  const read = sheet.getRange(1, 1, grid.length, HEADERS.length).getValues();
+  ok('a closed date reads 🔴 Waitlist Only on the session table at once',
+    read[3][col('Status')] === '🔴 Waitlist Only' && read[3][col('Remaining_Seats')] === 0,
+    JSON.stringify([read[3][col('Status')], read[3][col('Remaining_Seats')]]));
+  ok('a date that was not touched keeps its status', read[5][col('Status')] === '🟢 Open', read[5][col('Status')]);
+  ok('the form behind the closed date is relabelled at once',
+    sandbox.__relabelled.join(',') === 'FORM-YOGA', JSON.stringify(sandbox.__relabelled));
+  ok('the answer says the form was updated', /Form updated/.test(msg), msg);
+
+  sandbox.invalidateSectionedRowsCache(sheet);
+  sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[0].eventId, on: false }]);
+  const back = sheet.getRange(1, 1, grid.length, HEADERS.length).getValues();
+  ok('a reopened date is recounted from its own row (12 seats, 5 taken)',
+    back[3][col('Status')] === '🟢 Open' && back[3][col('Remaining_Seats')] === 7,
+    JSON.stringify([back[3][col('Status')], back[3][col('Remaining_Seats')]]));
+}
+{
+  // Past a running sync: the calendar is written directly, not left for a drain.
+  sandbox.__stamped.length = 0;
+  const realLock = sandbox.LockService.getScriptLock;
+  sandbox.LockService.getScriptLock = () => ({ tryLock: () => false, releaseLock: () => {} });
+  sandbox.invalidateSectionedRowsCache(sheet);
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[2].eventId, on: true }]);
+  sandbox.LockService.getScriptLock = realLock;
+  ok('a forced write still tells the calendar, directly',
+    sandbox.__stamped.length === 1 && sandbox.__stamped[0].dateKey === '2026-09-29' && sandbox.__stamped[0].on === true,
+    JSON.stringify(sandbox.__stamped));
+  ok('...and says so', /Calendar updated/.test(msg), msg);
+  const read = sheet.getRange(1, 1, grid.length, HEADERS.length).getValues();
+  ok('...and the status follows on the forced path too', read[5][col('Status')] === '🔴 Waitlist Only',
+    read[5][col('Status')]);
+}
+{
+  // Already ticked on the sheet, never delivered: Apply re-sends rather than
+  // answering "Nothing to do".
+  sandbox.__queued.length = 0;
+  sandbox.__relabelled.length = 0;
+  sandbox.invalidateSectionedRowsCache(sheet);
+  const drains = sandbox.__drains;
+  const msg = sandbox.applyBulkWaitlistOnly(`${CAL}|Chair Yoga`, [{ eventId: yoga.sessions[2].eventId, on: true }]);
+  ok('an already-ticked date is re-sent to the calendar and the form',
+    /re-sent 1 closed/.test(msg) && sandbox.__queued.length === 1 && sandbox.__drains === drains + 1 &&
+    sandbox.__relabelled.length === 1, msg + ' ' + JSON.stringify(sandbox.__queued));
+}
+{
+  // The installable trigger waits for the queue entry the confirmation delays.
+  let calls = 0;
+  const realRead = vm.runInContext('readPendingProgramFlags', sandbox);
+  vm.runInContext('this.__realRead = readPendingProgramFlags;', sandbox);
+  sandbox.__fake = () => (++calls < 4 ? [] : [{ column: 'Waitlist_Only', recordedAt: Date.now() }]);
+  vm.runInContext('readPendingProgramFlags = function () { return this.__fake(); }.bind(this);', sandbox);
+  const found = vm.runInContext('waitForFreshPendingFlag_()', sandbox);
+  vm.runInContext('readPendingProgramFlags = this.__realRead;', sandbox);
+  ok('the calendar trigger keeps waiting until the tick is queued', found === true && calls === 4,
+    `${found} after ${calls} reads`);
+  void realRead;
+}
+
 console.log(failures === 0 ? '\nAll bulk waitlist tests passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

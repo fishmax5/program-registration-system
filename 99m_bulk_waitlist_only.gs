@@ -351,8 +351,9 @@ function applyBulkWaitlistOnly(programKey, picks) {
   // Waits longer than a sync slice's own lock wait: a person is looking at a
   // "Working…" line, and a sliced sync holds this lock for minutes at a time.
   // Ten seconds was short enough that on a busy hour this button did nothing.
+  const out = { changed: [] };
   const result = withScriptLock(BULK_WAITLIST_LOCK_WAIT_MS,
-    () => applyBulkWaitlistOnlyLocked_(programKey, wanted), null);
+    () => applyBulkWaitlistOnlyLocked_(programKey, wanted, out), null);
   if (result === null) {
     // FORCED, NOT REFUSED (user's decision, 2026-09-28). A sliced sync can
     // hold this lock for most of an hour, and "press Apply again" never
@@ -361,12 +362,174 @@ function applyBulkWaitlistOnly(programKey, picks) {
     // (recordPendingProgramFlag); if the running sync flushes a stale copy of
     // the column over the cell, the queued tag still reaches the calendar and
     // the next sync reads the tick back from there.
-    const forced = applyBulkWaitlistOnlyLocked_(programKey, wanted);
-    return bulkWaitlistSay_(programKey, forced + ' (A sync was running, so this was applied without ' +
-      'waiting for it. If a date looks unticked when that sync finishes, the next sync puts it back ' +
-      'once the calendar has the tag.)');
+    const forced = applyBulkWaitlistOnlyLocked_(programKey, wanted, out);
+    if (out.changed.length === 0) return forced;
+    // The calendar is told DIRECTLY here rather than through the queue drain:
+    // a calendar write needs no workbook lock, and leaving it for "the next
+    // sync" was the half of this that never arrived — the running sync had
+    // already drained the queue, and the next one to drain it is the calendar
+    // sync, which may be a day away. The queue entries stay where they are, so
+    // a running reconcile still leaves these rows alone and the next drain
+    // finds the calendar already agreeing and clears them.
+    const calendar = stampBulkWaitlistOnCalendarDirect_(programKey, out.changed);
+    const follow = bulkWaitlistFollowThrough_(programKey, out.changed);
+    return bulkWaitlistSay_(programKey, forced + calendar + follow + ' (A sync was running, so this was ' +
+      'applied without waiting for it. If a date looks unticked when that sync finishes, the next sync ' +
+      'reads it back from the calendar.)');
   }
-  return result + deliverBulkWaitlistToCalendar_(programKey);
+  if (out.changed.length === 0) return result;
+  return result + deliverBulkWaitlistToCalendar_(programKey) + bulkWaitlistFollowThrough_(programKey, out.changed);
+}
+
+/**
+ * The calendar half, without the queue and without the lock — for the forced
+ * path only. Same per-event write the drain makes (stampSessionFlagOnCalendarEvent,
+ * 18), inside the same quiet window so a description edit does not fire a
+ * calendar-change sync per event. Never throws.
+ */
+function stampBulkWaitlistOnCalendarDirect_(programKey, changed) {
+  const flag = getSessionFlagByColumn('Waitlist_Only');
+  let stamped = 0;
+  let failed = 0;
+  try {
+    withCalendarChangeTriggersPaused('Close Sessions to New Registrations', () => {
+      changed.forEach(c => {
+        if (!c.dateKey) return;
+        const outcome = stampSessionFlagOnCalendarEvent(c.title, c.calendarId, c.dateKey, flag, c.on);
+        if (outcome && outcome.ok) stamped += outcome.stamped || 0;
+        else failed++;
+      });
+    });
+  } catch (err) {
+    log(`applyBulkWaitlistOnly: ${programKey} — direct calendar write failed (${err}); still queued.`);
+    return ' ⚠️ The calendar could not be updated just now — the next sync will do it.';
+  }
+  log(`applyBulkWaitlistOnly: ${programKey} — calendar (direct): ${stamped} event(s) changed, ${failed} not reached.`);
+  if (failed > 0) {
+    return ` ⚠️ ${failed} date(s) could not be found on the calendar (see the log) and stay queued for the next sync.`;
+  }
+  return ` Calendar updated ✅ (${stamped} event(s) changed).`;
+}
+
+/** Status, seats and the form's date labels for the dates just changed — see followThroughClosedSessions_(). */
+function bulkWaitlistFollowThrough_(programKey, changed) {
+  const sessions = changed.filter(c => c.dateKey)
+    .map(c => ({ calendarId: c.calendarId, title: c.title, dateKey: c.dateKey }));
+  const outcome = followThroughClosedSessions_(sessions, 'Close Sessions to New Registrations');
+  log(`applyBulkWaitlistOnly: ${programKey} — ${outcome.statusRows} status cell(s) updated, ` +
+    `${outcome.formsWritten} form(s) relabelled, ${outcome.formsFailed} form(s) could not be opened.`);
+  if (outcome.formsFailed > 0) {
+    return ` ⚠️ ${outcome.formsFailed} form(s) could not be opened to relabel the date — the hourly sync will retry.`;
+  }
+  return outcome.formIds > 0 ? ' Form updated ✅.' : '';
+}
+
+/**
+ * THE REST OF A CLOSED DATE, NOW RATHER THAN NEXT HOUR.
+ *
+ * A Waitlist_Only tick changes three things somebody looks at: the calendar
+ * tag (the queue's job), the session row's Status / Remaining_Seats (the
+ * recount's, 30), and the date's label on the form (the hourly form check's,
+ * 31). The last two used to wait for the registration sync — and on a day the
+ * sync was busy or behind, the person who ticked the box saw no "🔴 Waitlist
+ * Only" on the dashboard and a form still offering the date as open, and
+ * reasonably concluded that closing had not worked.
+ *
+ * `sessions` is [{ calendarId, title, dateKey }]. Status is set from the
+ * row's OWN Waitlist_Only cell, so this follows the sheet whichever way the
+ * tick went; a reopened date gets the same arithmetic the recount uses, from
+ * the Active_Count already on the row. Every form those rows name is
+ * relabelled through refreshOneFormDateLabels() (11), whose capacity hint
+ * reads Waitlist_Only directly. Never throws: the tick has landed either way,
+ * and the hourly sync remains the backstop for anything that did not.
+ *
+ * Returns { statusRows, formIds, formsWritten, formsFailed }.
+ */
+function followThroughClosedSessions_(sessions, context) {
+  const out = { statusRows: 0, formIds: 0, formsWritten: 0, formsFailed: 0 };
+  if (!sessions || sessions.length === 0) return out;
+  const keys = {};
+  sessions.forEach(s => { keys[`${s.calendarId}|${s.title}|${s.dateKey}`] = true; });
+
+  let sheet = null;
+  const formIds = {};
+  try {
+    sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (!sheet) return out;
+    invalidateSectionedRowsCache(sheet);
+    const model = loadSessionGrid(sheet);
+    if (!model || !model.map['Waitlist_Only'] || !model.map['Status']) return out;
+    const valueGrid = readSheetGrid(sheet, true).values;
+    const valueAt = (zone, r, header) => {
+      const col = model.map[header];
+      const line = valueGrid[zone.start - 1 + r];
+      return col && line ? line[col - 1] : '';
+    };
+
+    model.zones.forEach(zone => {
+      const flags = sessionGridColumn(model, zone, 'Waitlist_Only');
+      const status = sessionGridColumn(model, zone, 'Status');
+      const remaining = sessionGridColumn(model, zone, 'Remaining_Seats');
+      const caps = sessionGridColumn(model, zone, 'Max_Capacity');
+      const active = sessionGridColumn(model, zone, 'Active_Count');
+      if (!flags || !status) return;
+      let statusDirty = false;
+      let remainingDirty = false;
+      for (let r = 0; r < zone.count; r++) {
+        const date = coerceDate(valueAt(zone, r, 'Event_Date'));
+        if (!date) continue;
+        const key = `${String(valueAt(zone, r, 'Calendar_Source') || '').trim()}|` +
+          `${String(valueAt(zone, r, 'Clean_Title') || '').trim()}|${formatDateKey(date)}`;
+        if (!keys[key]) continue;
+        const formId = String(valueAt(zone, r, 'Form_ID') || '').trim();
+        if (formId) formIds[formId] = true;
+
+        let nextStatus;
+        let nextRemaining;
+        if (isWaitlistOnlyColumnValue(flags[r])) {
+          nextStatus = WAITLIST_ONLY_STATUS;
+          nextRemaining = 0;
+        } else {
+          const rawCap = caps ? caps[r] : '';
+          const uncapped = rawCap === '--' || rawCap === '' || Number(rawCap) <= 0;
+          const count = Number(active ? active[r] : 0) || 0;
+          nextStatus = uncapped ? '🟢 Unlimited' : computeStatus(count, Number(rawCap));
+          nextRemaining = uncapped ? '' : Math.max(Number(rawCap) - count, 0);
+        }
+        if (status[r] !== nextStatus) { status[r] = nextStatus; statusDirty = true; out.statusRows++; }
+        if (remaining && remaining[r] !== nextRemaining) { remaining[r] = nextRemaining; remainingDirty = true; }
+      }
+      if (statusDirty) markSessionGridColumn(model, zone, 'Status');
+      if (remainingDirty) markSessionGridColumn(model, zone, 'Remaining_Seats');
+    });
+    flushSessionGrid(model, true);
+  } catch (err) {
+    log(`followThroughClosedSessions_ (${context}): status update failed — ${err}. The next sync recounts it.`);
+  }
+
+  const ids = Object.keys(formIds);
+  out.formIds = ids.length;
+  if (!sheet || ids.length === 0) return out;
+  try {
+    const headers = HEADERS.All_Program_Sessions;
+    const map = getIndexMap(headers);
+    invalidateSectionedRowsCache(sheet);
+    const rows = getSectionedRows(sheet, headers, 'Event_ID');
+    ids.forEach(formId => {
+      try {
+        const outcome = refreshOneFormDateLabels(formId, rows, map, context);
+        if (outcome && outcome.failed) out.formsFailed++;
+        else if (outcome && outcome.written) out.formsWritten++;
+      } catch (err) {
+        out.formsFailed++;
+        log(`followThroughClosedSessions_ (${context}): form ${formId} — ${err}`);
+      }
+    });
+    flushPersistentRegistries();
+  } catch (err) {
+    log(`followThroughClosedSessions_ (${context}): form relabel failed — ${err}. The hourly form check retries.`);
+  }
+  return out;
 }
 
 /**
@@ -424,7 +587,7 @@ function bulkWaitlistSay_(programKey, message) {
 }
 
 /** The write itself, under the lock. */
-function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
+function applyBulkWaitlistOnlyLocked_(programKey, wanted, out) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   const say = message => bulkWaitlistSay_(programKey, message);
@@ -461,6 +624,7 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   };
 
   const changed = [];
+  const same = [];
   let alreadyRight = 0;
   let otherProgram = 0;
 
@@ -485,7 +649,12 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
       if (`${calendarId}|${title}` !== programKey) { otherProgram++; continue; }
 
       const on = wanted[eventId];
-      if (isWaitlistOnlyColumnValue(flags[r]) === on) { alreadyRight++; continue; }
+      if (isWaitlistOnlyColumnValue(flags[r]) === on) {
+        alreadyRight++;
+        const sameDate = coerceDate(dates[r]);
+        if (sameDate) same.push({ title, calendarId, on, date: sameDate, dateKey: formatDateKey(sameDate) });
+        continue;
+      }
 
       flags[r] = on ? WAITLIST_ONLY_COLUMN_VALUE : false;
       dirty = true;
@@ -497,6 +666,20 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   });
 
   if (changed.length === 0) {
+    // ALREADY RIGHT ON THE SHEET IS NOT ALREADY RIGHT EVERYWHERE. A tick made
+    // by hand whose calendar delivery never ran (the confirmation in 99zb
+    // used to outlast the installable trigger's wait) sits on the sheet with
+    // no tag behind it, and "Nothing to do" left it that way however often
+    // somebody pressed Apply. So the CLOSED dates among them are re-sent:
+    // queued, delivered and followed through. Idempotent — a calendar that
+    // already carries the tag is not written to, nor is a form already right.
+    const closedSame = same.filter(c => c.on);
+    if (closedSame.length > 0) {
+      closedSame.forEach(c => recordPendingProgramFlag(flag.column, c.calendarId, c.title, true, c.dateKey));
+      if (out) out.changed = closedSame;
+      return say(`All ${alreadyRight} date(s) were already ticked — re-sent ${closedSame.length} closed ` +
+        'date(s) to the calendar and the form.');
+    }
     if (alreadyRight > 0) return say(`Nothing to do — all ${alreadyRight} date(s) already say what you asked for.`);
     if (otherProgram > 0) {
       return say(`⚠️ ${otherProgram} of those date(s) are on the session table under a different program ` +
@@ -506,6 +689,7 @@ function applyBulkWaitlistOnlyLocked_(programKey, wanted) {
   }
 
   flushSessionGrid(model, true);
+  if (out) out.changed = changed;
 
   // The cell is only half of a tick. The calendar is told through the same
   // queue an edit uses — one entry per DATE, which is what keeps "the 14th is
