@@ -62,6 +62,25 @@
 // along the bottom that people never saw — they were left looking at an empty
 // question wondering whether it had worked. showDone() covers the whole screen
 // in green with their name for a few seconds, or until somebody taps it.
+//
+// NOTHING MAY COVER A BUTTON WHILE SOMEBODY IS TYPING. The people typing here
+// are seniors on a touchscreen, and a button hidden under a keyboard or under
+// the browser's own "suggestions" dropdown is, to them, a button that is not
+// there. Three things hold that line. (1) Every text box is born through
+// noSuggest(): autocomplete/autocorrect off, spellcheck off, and a name the
+// browser has never seen, which is what stops Chrome offering last week's
+// visitor's name in a dropdown over the results. The page's own results are
+// IN FLOW directly under the box (never an overlay), with "Continue as …"
+// FIRST, so it is the thing right under a thumb rather than twenty-four cards
+// down. (2) The viewport meta asks for interactive-widget=resizes-content
+// (60), so the keyboard shrinks the page instead of sliding over it. (3) The
+// KEYBOARD FIT block in the script reads window.visualViewport (resize and
+// scroll) and keeps the focused box and the action under it inside what is
+// still visible above the system keyboard AND the touch keyboard below, and
+// re-docks the fixed status strip and the touch keyboard to the top of the
+// system keyboard (visualViewport.height + offsetTop) rather than leaving them
+// under it. Without visualViewport, focus falls back to scrollIntoView().
+// tests/door_app_keyboard.test.js.
 // ============================================================================
 
 /**
@@ -109,6 +128,11 @@ function buildDoorAppHtml(options) {
   input[type=text], input[type=tel], input[type=email], input[type=date], select {
     width: 100%; padding: 13px; font-size: 16px; border: 1px solid #DADCE0;
     border-radius: 8px; background: #fff; }
+  /* A focused box scrolled "to the top" lands under the sticky header rather
+     than behind it. */
+  input, select { scroll-margin-top: 84px; scroll-margin-bottom: 16px; }
+  /* The search's own results: IN FLOW, under the box. Never an overlay. */
+  #results { position: static; }
   label.field { display: block; font-weight: 600; margin: 12px 0 5px 0; font-size: 14px; color: #5F6368; }
 
   /* THE NAME LIST. Letter headings and a dense grid, because the whole point
@@ -171,7 +195,7 @@ function buildDoorAppHtml(options) {
   .foot { margin-top: 26px; font-size: 13px; color: #5F6368; line-height: 1.6; }
 
   #status { position: fixed; left: 0; right: 0; bottom: 0; padding: 13px 16px; background: #202124;
-            color: #fff; font-size: 14px; line-height: 1.45; transform: translateY(120%);
+            z-index: 55; color: #fff; font-size: 14px; line-height: 1.45; transform: translateY(120%);
             transition: transform .18s ease; }
   #status.show { transform: translateY(0); }
   #status.err { background: #C5221F; }
@@ -192,6 +216,9 @@ function buildDoorAppHtml(options) {
   #okb button.space { max-width: 360px; flex: 6 1 0; }
   #okb button.on { background: #333; color: #fff; }
   body.okb-open { padding-bottom: 300px; }
+  /* While a keyboard is up: room to scroll the last box clear of it. */
+  body.kb-up { padding-bottom: 50vh; }
+  body.okb-open.kb-up { padding-bottom: calc(50vh + 300px); }
 </style>
 
 <header>
@@ -204,7 +231,9 @@ function buildDoorAppHtml(options) {
 
 <div id="pinbox" class="hide" style="padding:24px 16px;max-width:360px;margin:0 auto;">
   <h2>Enter the desk PIN</h2>
-  <input type="tel" id="pin" inputmode="numeric" autocomplete="off" placeholder="PIN">
+  <input type="tel" id="pin" name="door-pin-x7q" inputmode="numeric" autocomplete="off" autocorrect="off"
+         autocapitalize="off" spellcheck="false" enterkeyhint="go" placeholder="PIN"
+         onkeydown="if (event.key === 'Enter') savePin()">
   <button class="big" onclick="savePin()">Continue</button>
 </div>
 
@@ -425,6 +454,7 @@ function buildDoorAppHtml(options) {
     var date = document.createElement('input');
     date.type = 'date';
     date.id = 'setupdate';
+    date.setAttribute('autocomplete', 'off');
     date.value = chosenDay;
     wrap.appendChild(date);
     main.appendChild(wrap);
@@ -659,7 +689,8 @@ function buildDoorAppHtml(options) {
     box.type = 'text';
     box.id = 'search';
     box.placeholder = 'Your name';
-    box.autocomplete = 'off';
+    noSuggest(box, 'words');
+    box.setAttribute('enterkeyhint', 'search');
     box.oninput = drawSearchResults;
     main.appendChild(box);
     var results = el('div', 'cards', '');
@@ -779,16 +810,24 @@ function buildDoorAppHtml(options) {
     // "Mary Cohen-Stein" is not the same person. A name that matches nobody is
     // a walk-in, and that is all it takes — nothing on screen calls it one.
     var hint = el('p', 'hint', hits.length
-      ? 'Tap your name — or, if it is not here, continue as you typed it.'
-      : 'Not on our list yet — that is fine. Tap below to carry on.');
+      ? 'Is this you? Tap your name.'
+      : 'Not on our list yet — that is fine. Tap the button above to carry on.');
     hint.style.gridColumn = '1 / -1';
-    box.appendChild(hint);
-    var asTyped = button('big', 'Continue as "' + typed + '"', function () {
-      startWalkIn(typed);
-    });
+    // "CONTINUE AS …" IS FIRST, directly under the box. It used to come after
+    // up to twenty-four cards, which on a tablet with its keyboard up is
+    // somewhere under the keyboard — a button nobody can see. Big and blue when
+    // nobody matched (it is the only answer); a plain full-width button when
+    // there are names below it, worded so that tapping your own card is still
+    // the obvious thing to do.
+    var asTyped = button(hits.length ? 'plain' : 'big',
+      hits.length ? 'Not listed below? Continue as "' + typed + '"' : 'Continue as "' + typed + '"',
+      function () { startWalkIn(typed); });
+    asTyped.id = 'astyped';
     asTyped.style.gridColumn = '1 / -1';
     asTyped.style.marginTop = '0';
-    if (!hits.length) { box.appendChild(asTyped); return; }
+    asTyped.style.minHeight = '56px';
+    box.appendChild(asTyped);
+    box.appendChild(hint);
     hits.forEach(function (m) {
       var person = null;
       (DAY.people || []).forEach(function (p) { if (p.key === m.key) person = p; });
@@ -796,7 +835,9 @@ function buildDoorAppHtml(options) {
         name: m.name, key: m.key, registered: [], attended: [], lunchRegistered: false, here: false
       }));
     });
-    box.appendChild(asTyped);
+    // Every keystroke redraws this box; keep the box and the button under it
+    // in view above whatever keyboard is up.
+    keepInView(document.getElementById('search'), asTyped);
   }
 
   function personCard(p) {
@@ -976,14 +1017,6 @@ function buildDoorAppHtml(options) {
     lunchList.appendChild(lunchItem(false));
     main.appendChild(lunchList);
 
-    main.appendChild(el('h2', '', 'How can we reach you?'));
-    main.appendChild(el('p', 'hint',
-      'An email or a phone number — whichever you have. We need one of them so the office ' +
-      'can follow up.'));
-    main.appendChild(field('newname', 'Your name', 'text', WALKIN.name));
-    main.appendChild(field('newemail', 'Email', 'email', WALKIN.email));
-    main.appendChild(field('newphone', 'Phone', 'tel', WALKIN.phone));
-
     main.appendChild(el('h2', '', 'Coming back?'));
     var rec = el('ul', 'list', '');
     rec.appendChild(radioItem('recurring', 'none', 'Just today',
@@ -1014,6 +1047,17 @@ function buildDoorAppHtml(options) {
       MEMBER === 'no', function (v) { MEMBER = v; }));
     main.appendChild(mem);
 
+    // THE TYPING COMES LAST, DIRECTLY ABOVE "Sign in". These are the only boxes
+    // on this screen that bring a keyboard up, and with them here the button
+    // they lead to is the next thing under the last box rather than three
+    // sections further down, behind the keyboard.
+    main.appendChild(el('h2', '', 'How can we reach you?'));
+    main.appendChild(el('p', 'hint',
+      'An email or a phone number — whichever you have. We need one of them so the office ' +
+      'can follow up.'));
+    main.appendChild(field('newname', 'Your name', 'text', WALKIN.name));
+    main.appendChild(field('newemail', 'Email', 'email', WALKIN.email));
+    main.appendChild(field('newphone', 'Phone', 'tel', WALKIN.phone));
     var go = button('big', 'Sign in', submitWalkIn);
     go.id = 'go';
     go.disabled = busy;
@@ -1352,10 +1396,45 @@ function buildDoorAppHtml(options) {
     var l = el('label', 'field', label);
     l.setAttribute('for', id);
     var i = document.createElement('input');
-    i.type = type; i.id = id; i.value = value || ''; i.autocomplete = 'off';
+    i.type = type; i.id = id; i.value = value || '';
+    noSuggest(i, type === 'text' ? 'words' : 'off');
+    if (type === 'tel') i.setAttribute('inputmode', 'tel');
+    i.setAttribute('enterkeyhint', 'next');
+    // ENTER MOVES ON: to the next box, or off the last one — which takes the
+    // keyboard down and shows the questions and the Sign in button below.
+    i.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var boxes = Array.prototype.slice.call(document.querySelectorAll('#app input[type=text], #app input[type=email], #app input[type=tel]'));
+      var at = boxes.indexOf(i);
+      if (at >= 0 && at < boxes.length - 1) boxes[at + 1].focus();
+      else i.blur();
+    });
     wrap.appendChild(l);
     wrap.appendChild(i);
     return wrap;
+  }
+
+  /**
+   * NO BROWSER SUGGESTIONS, EVER. The browser's own autofill dropdown opens
+   * over whatever is under the box — on the search, that is "Continue as …"
+   * and the names — and on a shared tablet it offers whoever typed last. The
+   * name attribute is one the browser has never seen (it keys its memory on
+   * it); autocomplete/autocorrect/spellcheck off take the rest away.
+   * autocapitalize is 'words' for a name and 'off' for an email or phone.
+   */
+  var NO_SUGGEST_SEQ = 0;
+  function noSuggest(input, capitalize) {
+    NO_SUGGEST_SEQ += 1;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('autocapitalize', capitalize || 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('name', 'door-' + (input.id || 'f') + '-' + NO_SUGGEST_SEQ + '-' +
+      Math.random().toString(36).slice(2, 8));
+    input.setAttribute('data-lpignore', 'true');
+    input.setAttribute('data-form-type', 'other');
+    return input;
   }
 
   function call(fn, payload, done) {
@@ -1470,6 +1549,7 @@ function buildDoorAppHtml(options) {
     KB_TARGET = null;
     document.getElementById('okb').className = 'hide';
     document.body.classList.remove('okb-open');
+    if (typeof fitSoon === 'function') fitSoon();
   }
 
   function drawKeyboard() {
@@ -1497,6 +1577,7 @@ function buildDoorAppHtml(options) {
     box.appendChild(last);
     box.className = '';
     document.body.classList.add('okb-open');
+    if (typeof fitSoon === 'function') fitSoon();
   }
 
   function kbKey(label, cls, fn) {
@@ -1536,6 +1617,133 @@ function buildDoorAppHtml(options) {
     try { t.setSelectionRange(a, a); } catch (err) { /* email boxes refuse */ }
     t.dispatchEvent(new Event('input', { bubbles: true }));
   }
+
+  // KEYBOARD FIT. A tablet keyboard takes half the screen, and on most tablet
+  // browsers it slides OVER the page rather than shrinking it — so the button
+  // under the box somebody is typing into is, for as long as they type, a
+  // button that is not there. window.visualViewport is the part of the page
+  // that can still be seen; this keeps the focused box and its action button
+  // (actionFor()) inside it, above the touch keyboard too when that is on, and
+  // re-docks the two fixed bottom strips — #status and #okb — to the top of
+  // the system keyboard (visualViewport.height + offsetTop) instead of leaving
+  // them underneath it. The viewport meta's interactive-widget=resizes-content
+  // (60) asks the browsers that support it to shrink the page instead, in which
+  // case the inset below is simply 0 and only the scrolling does anything.
+  // No visualViewport: focus falls back to scrollIntoView().
+  var VV = window.visualViewport || null;
+  var FIT_FOCUS = null;
+  var FIT_FRAME = 0;
+
+  function isTypingBox(node) {
+    if (!node || node.tagName !== 'INPUT') return false;
+    var t = (node.type || 'text').toLowerCase();
+    return t === 'text' || t === 'search' || t === 'tel' || t === 'email' || t === 'password' || t === 'number';
+  }
+
+  /** The button that finishes what this box is for — kept in view with it. */
+  function actionFor(input) {
+    if (!input) return null;
+    if (input.id === 'pin') return document.querySelector('#pinbox button.big');
+    if (input.id === 'search') return document.getElementById('astyped') || document.getElementById('results');
+    return document.getElementById('go');
+  }
+
+  /** The bottom of what can be seen, in the page's own (client) coordinates. */
+  function keyboardTopY() {
+    return VV ? VV.offsetTop + VV.height : window.innerHeight;
+  }
+
+  function visibleBottom() {
+    var bottom = keyboardTopY();
+    var okb = document.getElementById('okb');
+    if (okb && !okb.classList.contains('hide')) {
+      var r = okb.getBoundingClientRect();
+      if (r.height) bottom = Math.min(bottom, r.top);
+    }
+    return bottom;
+  }
+
+  function visibleTop() {
+    var top = VV ? VV.offsetTop : 0;
+    var header = document.querySelector('header');
+    if (header) {
+      var h = header.getBoundingClientRect();
+      if (h.bottom > top) top = h.bottom;
+    }
+    return top;
+  }
+
+  /**
+   * SCROLL SO THE BOX — AND, IF BOTH FIT, ITS BUTTON — ARE ON SCREEN. The box
+   * always wins: if the two will not fit together the box is what is shown,
+   * because a person who cannot see what they are typing stops typing.
+   */
+  function keepInView(input, action) {
+    if (!input || !document.body.contains(input)) return;
+    var top = visibleTop() + 8;
+    var bottom = visibleBottom() - 8;
+    var r = input.getBoundingClientRect();
+    var lo = r.top;
+    var hi = r.bottom;
+    if (action && action !== input && document.body.contains(action)) {
+      var a = action.getBoundingClientRect();
+      if (a.height && Math.max(hi, a.bottom) - Math.min(lo, a.top) <= bottom - top) {
+        lo = Math.min(lo, a.top);
+        hi = Math.max(hi, a.bottom);
+      }
+    }
+    var dy = 0;
+    if (hi > bottom) dy = hi - bottom;
+    if (lo - dy < top) dy = lo - top;
+    if (Math.abs(dy) > 1) window.scrollBy(0, dy);
+  }
+
+  /** Re-dock the fixed strips to the top of the system keyboard. */
+  function fitToKeyboard() {
+    var inset = VV ? Math.max(0, Math.round(window.innerHeight - keyboardTopY())) : 0;
+    var okb = document.getElementById('okb');
+    var status = document.getElementById('status');
+    okb.style.bottom = inset + 'px';
+    var okbHeight = okb.classList.contains('hide') ? 0 : okb.getBoundingClientRect().height;
+    status.style.bottom = Math.round(inset + okbHeight) + 'px';
+    // Room to scroll the last box on a short screen up above the keyboard.
+    var typing = isTypingBox(document.activeElement);
+    document.body.classList.toggle('kb-up', typing || inset > 80);
+  }
+
+  function fitSoon() {
+    if (FIT_FRAME) return;
+    var later = window.requestAnimationFrame || function (fn) { return window.setTimeout(fn, 16); };
+    FIT_FRAME = later(function () {
+      FIT_FRAME = 0;
+      fitToKeyboard();
+      if (FIT_FOCUS && document.activeElement === FIT_FOCUS) keepInView(FIT_FOCUS, actionFor(FIT_FOCUS));
+    });
+  }
+
+  if (VV) {
+    VV.addEventListener('resize', fitSoon);
+    VV.addEventListener('scroll', fitSoon);
+  }
+  window.addEventListener('resize', fitSoon);
+
+  document.addEventListener('focusin', function (e) {
+    if (!isTypingBox(e.target)) return;
+    FIT_FOCUS = e.target;
+    if (!VV) {
+      try { e.target.scrollIntoView({ block: 'center' }); } catch (err) { e.target.scrollIntoView(); }
+    }
+    fitSoon();
+    // The keyboard animates in over a few hundred milliseconds, and not every
+    // browser reports each step: fit once more after it has settled.
+    window.setTimeout(fitSoon, 350);
+  });
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () {
+      if (!isTypingBox(document.activeElement)) FIT_FOCUS = null;
+      fitSoon();
+    }, 0);
+  });
 
   start();
 </script>

@@ -131,10 +131,11 @@ ok('every page says which one it is in the tab',
   served({ mode: 'session' }).title === 'Check In' &&
   served({ mode: 'walkin' }).title === 'Sign In' &&
   served({}).title === 'Sign In');
-// The tablet case is the entire point of the page, on every route.
+// The tablet case is the entire point of the page, on every route — and the
+// keyboard SHRINKS the page rather than covering its buttons (73's KEYBOARD FIT).
 ok('every page carries the viewport meta tag',
   ROUTED.every(([params]) => served(params).metaTags
-    .indexOf('viewport=width=device-width, initial-scale=1') !== -1));
+    .indexOf('viewport=width=device-width, initial-scale=1, interactive-widget=resizes-content') !== -1));
 
 // ---------------------------------------------------------------------------
 // 3. The links and the router read the same table.
