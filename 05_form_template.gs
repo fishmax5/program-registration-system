@@ -727,12 +727,14 @@ function getOrCreateTemplateForm() {
 
   // FILED, not left where FormApp.create() dropped it. Every other file this
   // system makes goes into a folder of its own kind; the template is one of a
-  // kind, so it sits in the system folder itself beside the workbook. Without
-  // this it stayed in My Drive root — which is exactly the mess `82` exists
-  // to stop, and the template was the most conspicuous piece of it.
-  const systemRoot = getSystemRootFolder();
-  if (systemRoot) {
-    moveDriveFileInto(DriveApp.getFileById(form.getId()), systemRoot, 'the form template');
+  // kind, so it sits loose in `<anchor>/System` (`82`'s 82b) — buried, because
+  // nobody but makeCopy() ever opens it, and a form titled "do not edit or
+  // delete" at the top of a shared drive is an invitation to do both. Without
+  // this it stayed in My Drive root — exactly the mess `82` exists to stop.
+  // No System (no anchor, or Drive refused) falls back to the anchor itself.
+  const systemHome = getSystemOnlyFolder() || getSystemRootFolder();
+  if (systemHome) {
+    moveDriveFileInto(DriveApp.getFileById(form.getId()), systemHome, 'the form template');
   }
 
   props.setProperty(TEMPLATE_FORM_PROP_KEY, form.getId());

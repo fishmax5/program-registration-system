@@ -1380,5 +1380,7 @@ function getOrCreateSignInSheetDocFolder() {
  * workbook that never printed a single PDF.
  */
 function getOrCreateSignInSheetFolder() {
-  return getOrCreateSystemFolder(SIGN_IN_SHEET_FOLDER_NAME);
+  // System-only (`82`'s 82b): an archive nothing writes to any more. The LIVE
+  // documents' folder above stays at the top level — the desk prints from it.
+  return getOrCreateSystemFolder(SIGN_IN_SHEET_FOLDER_NAME, null, { systemOnly: true });
 }

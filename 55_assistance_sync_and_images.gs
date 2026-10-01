@@ -1146,7 +1146,9 @@ const FORM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
  * than the Drive-wide search and root-level create it used to do.
  */
 function getOrCreateFormImageFolder() {
-  return getOrCreateSystemFolder(FORM_IMAGE_FOLDER_NAME);
+  // System-only (`82`'s 82b): the builder uploads here and the form carries a
+  // COPY of the bytes (`54`), so nobody needs to browse to the originals.
+  return getOrCreateSystemFolder(FORM_IMAGE_FOLDER_NAME, null, { systemOnly: true });
 }
 
 /**

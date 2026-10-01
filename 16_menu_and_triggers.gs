@@ -410,8 +410,9 @@ function buildAppMenu(ui, includeAdmin) {
         // The same kind of job one tab over: every folder lookup used to create
         // at My Drive ROOT, so a year of forms, leader sheets and sign-in
         // documents can be sitting loose there. This files them under the
-        // folder the workbook lives in. It moves files; it changes no link and
-        // deletes nothing. See section 82.
+        // folder the workbook lives in, and buries what only the code reads
+        // (forms, snapshots, archives, templates) in its System subfolder.
+        // It moves files; it changes no link and deletes nothing. See 82/82b.
         .addItem('\ud83d\uddc2\ufe0f Organize Generated Files', menuFn_('organizeGeneratedFiles'))
         // For a workbook upgraded from the version that put the office on every
         // event's guest list: it takes those addresses back off the upcoming
