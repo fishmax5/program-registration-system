@@ -228,7 +228,11 @@ function collectGeneratedArtifactTargets() {
   // everything inside it, now and in the future, which is a bigger promise
   // than any single file here makes.
   guarded('this system\'s folders', () => {
+    // `System` (`82`'s 82b) is peeked at, never created here: a sharing sweep
+    // is not the place to make a folder, and one that does not exist yet has
+    // nothing in it to open up.
     [getSystemRootFolder(),
+      getSystemOnlyFolder(false),
       getOrCreateFormsFolder(),
       getOrCreateSignInSheetDocFolder(),
       getOrCreateSignInSheetFolder(),

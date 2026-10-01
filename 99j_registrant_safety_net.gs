@@ -72,6 +72,15 @@ const REGISTRANT_SNAPSHOT_FOLDER_NAME = 'Registrant Snapshots';
 const REGISTRANT_SNAPSHOT_KEEP_DAYS = 90;
 
 /**
+ * Where the snapshots go: `<anchor>/System/Registrant Snapshots` (`82`'s 82b).
+ * System-only — a person reaches for one of these after a loss, by name, and
+ * nobody browses a folder of nightly CSVs on an ordinary day.
+ */
+function getOrCreateRegistrantSnapshotFolder() {
+  return getOrCreateSystemFolder(REGISTRANT_SNAPSHOT_FOLDER_NAME, null, { systemOnly: true });
+}
+
+/**
  * Consulted by renderFlatDateSheet() immediately before its clear(), and only
  * for a tab whose caller asked for it (`opts.guardMarker`) — which today is
  * All_Registrants and nothing else. Triage and Lunch_Schedule are projections
@@ -190,7 +199,7 @@ function snapshotRegistrantTab_(sheet, reason) {
 
     const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd_HHmm');
     const name = `All_Registrants ${stamp} (${reason || 'snapshot'}).csv`;
-    const folder = getOrCreateSystemFolder(REGISTRANT_SNAPSHOT_FOLDER_NAME);
+    const folder = getOrCreateRegistrantSnapshotFolder();
     if (!folder) return '';
     folder.createFile(name, csv, MimeType.CSV);
     log(`Saved a registrant snapshot: ${name} (${values.length - 1} row(s)).`);
@@ -306,7 +315,7 @@ function snapshotRegistrantsNow() {
  */
 function pruneRegistrantSnapshots_() {
   try {
-    const folder = getOrCreateSystemFolder(REGISTRANT_SNAPSHOT_FOLDER_NAME);
+    const folder = getOrCreateRegistrantSnapshotFolder();
     if (!folder) return;
     const cutoff = new Date().getTime() - REGISTRANT_SNAPSHOT_KEEP_DAYS * 24 * 60 * 60 * 1000;
     const files = folder.getFiles();

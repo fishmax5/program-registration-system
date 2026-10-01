@@ -729,7 +729,9 @@ function getOrCreateFormsFolder() {
       log(`⚠️ FORMS_FOLDER_ID "${FORMS_FOLDER_ID}" could not be opened (${err}) — falling back to a by-name lookup.`);
     }
   }
-  return getOrCreateSystemFolder(FORMS_FOLDER_NAME);
+  // System-only (`82`'s 82b): staff reach a form through the links on the
+  // dashboards, never by browsing a folder of a hundred generated copies.
+  return getOrCreateSystemFolder(FORMS_FOLDER_NAME, null, { systemOnly: true });
 }
 
 

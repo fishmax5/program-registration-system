@@ -54,6 +54,14 @@
 /** The Drive folder the dropped entries are archived into. */
 const LEDGER_ARCHIVE_FOLDER_NAME = 'Ledger Archive';
 
+/**
+ * `<anchor>/System/Ledger Archive` (`82`'s 82b). System-only: an archive read
+ * after the fact, by name, if ever.
+ */
+function getOrCreateLedgerArchiveFolder() {
+  return getOrCreateSystemFolder(LEDGER_ARCHIVE_FOLDER_NAME, null, { systemOnly: true });
+}
+
 /** How many days back the growth report tabulates, newest first. */
 const LEDGER_GROWTH_REPORT_DAYS = 14;
 
@@ -363,7 +371,7 @@ function archiveCompactedLedgerRows_(headerRow, rows) {
     }).join(',')).join('\n');
     const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd_HHmm');
     const name = `${SHEET_NAMES.REGISTRATION_LEDGER} compacted ${stamp} (${rows.length} entries).csv`;
-    const folder = getOrCreateSystemFolder(LEDGER_ARCHIVE_FOLDER_NAME);
+    const folder = getOrCreateLedgerArchiveFolder();
     if (!folder) return '';
     folder.createFile(name, csv, MimeType.CSV);
     return name;
