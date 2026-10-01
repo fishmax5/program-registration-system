@@ -468,8 +468,8 @@ function makeHyperlinkFormula(url, label) {
  * The URL back out of one of those, or '' for anything that is not one.
  *
  * The link columns on the session table hold `=HYPERLINK(...)` formulas, and
- * a cell that collapses three of them into one run of rich text needs the
- * URLs rather than the formulas. A bare URL is accepted too, because a row
+ * a cell that re-labels one (Master_Program_Dashboard's link columns, 78)
+ * needs the URL rather than the formula. A bare URL is accepted too, because a row
  * written by hand or by an older version of this workbook holds one — and a
  * cell holding words (NO_REGISTRATION_LINK_LABEL, say) yields nothing, which
  * is the caller's cue to print it as plain text.

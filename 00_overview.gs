@@ -25,14 +25,15 @@
  *      Tue 9:30 AM - 11:30 AM · September 2026 - June 2027 · 38 sessions",
  *      with the per-month breakdown and any week the run skips in a note) and
  *      lunch collapsed to one row per location.
- *      FIFTEEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN — at a
+ *      EIGHTEEN COLUMNS A PERSON READS — at a
  *      twelfth of the row count. The rule is the schedule cell's, applied to
  *      the whole tab: THE FACT GOES IN THE CELL AND THE FOLLOW-UP QUESTION
  *      GOES IN A CELL NOTE. Seats is the four counting columns as one
  *      sentence ("12 / 20 · 60% · 2 waiting", or "12 · unlimited"), summed
  *      over THIS MONTH AND NEXT rather than over the program's whole life;
- *      Links is the form, its editor and the two generated sheets as one cell
- *      of rich text with a live link per word; and the three PROGRAM FLAGS —
+ *      the form, its editor and the two generated sheets are four link
+ *      columns, one link each (Register_Link, Edit_Form_Link, Roster_Link,
+ *      Sign_In_Link); and the three PROGRAM FLAGS —
  *      Club, No Registration, Personalized Assistance — are tick boxes here
  *      rather than twelve identical copies of themselves on the session table.
  *      Next_Date leads the row and carries the month tint; Last_Date closes

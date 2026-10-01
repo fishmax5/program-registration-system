@@ -61,13 +61,14 @@
 //     full read of a several-hundred-row tab on every sync would be paying,
 //     every hour, for something nobody has looked at since Tuesday.
 //
-// FIFTEEN COLUMNS A PERSON READS, WHERE THERE WERE SEVENTEEN — at a twelfth of
-// the row count. The rule describeProgramMonthSchedule() was written under
-// became the rule for the whole tab: THE FACT GOES IN THE CELL, THE FOLLOW-UP
-// QUESTION GOES IN A CELL NOTE. Type_Tag stands alone; Seats is the four
-// counting columns as one sentence with its working in the note; Links is four
-// link columns as one cell of rich text; Leader_Source is a yellow wash and a
-// note. The three program FLAGS went the other way — from words in a joined
+// EIGHTEEN COLUMNS A PERSON READS — at a twelfth of the row count. The rule
+// describeProgramMonthSchedule() was written under became the rule for the
+// whole tab: THE FACT GOES IN THE CELL, THE FOLLOW-UP QUESTION GOES IN A CELL
+// NOTE. Type_Tag stands alone; Seats is the four counting columns as one
+// sentence with its working in the note; Leader_Source is a yellow wash and a
+// note. The links went the OTHER way: they were one cell of rich text with a
+// live link per word, and are four columns again, one link each (see
+// PROGRAM_MONTH_LINK_PARTS for why). The three program FLAGS went the other way — from words in a joined
 // cell to real tick boxes, because a person on this row is as likely to want
 // to change one as to read it.
 // ============================================================================
@@ -109,27 +110,36 @@ const PROGRAM_MONTH_STATUS_ORDER = ['🔴 Waitlist Only', '🟡 Almost Full', '�
 const PROGRAM_MONTH_JOINER = ' · ';
 
 /**
- * The links a program has, in the order they are wanted, with the
- * word each one is printed as.
+ * The links a program has, in the order they are wanted: the session-table
+ * column each is read off (`header`), the column on THIS tab it is written to
+ * (`column`), and the short words the link is printed as (`label`).
  *
- * ONE CELL OF RICH TEXT, not three columns. They were three columns three
- * words wide that nobody ever sorted, filtered or read — only clicked — and
- * they pushed Status and the seat counts off the side of a screen to do it.
- * The header they are read off is the session table's; the label is what a
- * person sees.
+ * ONE LINK PER CELL, AND THAT IS A REVERSAL. These were one cell of rich text
+ * — "Register · Edit form · Roster · Sign-in" with a live link per word — on
+ * the argument that nobody sorts or filters a link column, they only click
+ * it. The clicking is exactly what went wrong: four links in one cell are four
+ * small targets packed edge to edge, and the link a hover offers is whichever
+ * word the pointer happens to be over, read off a tablet at the desk. A cell
+ * with one link opens the one thing its header names, and a column is found
+ * by its header rather than by reading along a sentence for the right word.
+ * It also means each cell is an ordinary =HYPERLINK() formula like every
+ * other link in this workbook (the Sessions cell beside it, the session
+ * table's own link columns), written with the row in the one setValues() the
+ * sectioned writer makes — rather than by a second, rich-text pass after it
+ * that could fail on its own and leave the words unlinked.
+ *
+ * Registrant_Sheet_Link and Sign_In_Sheet_Link are what 69 stamps on the
+ * session rows. This tab used to ask for 'Leader_Sheet_Link', which is the OLD
+ * spelling of the first of those: it survives in LEGACY_HEADER_ALIASES for
+ * reading a sheet, but HEADERS.All_Program_Sessions is keyed by the new name,
+ * so getIndexMap() had nothing under it and the column was blank on every row
+ * of every workbook. Keep `header` on the session table's spelling.
  */
 const PROGRAM_MONTH_LINK_PARTS = [
-  { header: 'Form_Response_Link', label: 'Register' },
-  { header: 'Edit_Form_Link', label: 'Edit form' },
-  // Registrant_Sheet_Link and Sign_In_Sheet_Link are what 69 stamps on the
-  // session rows. The month tab used to ask for 'Leader_Sheet_Link', which is
-  // the OLD spelling of the first of those: it survives in
-  // LEGACY_HEADER_ALIASES for reading a sheet, but HEADERS.All_Program_Sessions
-  // is keyed by the new name, so getIndexMap() had nothing under it and the
-  // column was blank on every row of every workbook. Collapsing the block into
-  // one cell is what made that visible.
-  { header: 'Registrant_Sheet_Link', label: 'Roster' },
-  { header: 'Sign_In_Sheet_Link', label: 'Sign-in' }
+  { header: 'Form_Response_Link', column: 'Register_Link', label: 'Register' },
+  { header: 'Edit_Form_Link', column: 'Edit_Form_Link', label: 'Edit form' },
+  { header: 'Registrant_Sheet_Link', column: 'Roster_Link', label: 'Roster' },
+  { header: 'Sign_In_Sheet_Link', column: 'Sign_In_Link', label: 'Sign-in sheet' }
 ];
 
 /**
@@ -631,32 +641,29 @@ function describeProgramMonthSeats(counts) {
 }
 
 /**
- * THE THREE LINKS AS ONE CELL — [{ label, url }], in the order they are
- * wanted, skipping the ones this group has not got.
+ * ONE LINK CELL — what a column of PROGRAM_MONTH_LINK_PARTS holds for this
+ * program, given the value off the session row.
  *
- * A link cell that holds words rather than a link (NO_REGISTRATION_LINK_LABEL,
- * on a [No Registration] program) comes back as a part with no url, so the
- * words are still printed. Losing them would turn "this program deliberately
- * takes no registrations" into an empty cell, which reads as a broken one.
+ *   a link (a =HYPERLINK() formula or a bare URL)  -> =HYPERLINK(url, label),
+ *       re-labelled with the short word, because the session table's own
+ *       words ("View Live Form", "Edit Form Settings") are written for a
+ *       column of one link among dozens and read as noise four abreast;
+ *   words (NO_REGISTRATION_LINK_LABEL, on a [No Registration] program)
+ *       -> the words, unlinked. Losing them would turn "this program
+ *       deliberately takes no registrations" into an empty cell, which reads
+ *       as a broken one;
+ *   blank -> blank.
+ *
+ * A formula the parser did not recognize is printed as nothing rather than as
+ * itself: written back with the row it would be a formula again, and one that
+ * errors — #ERROR! on a front page is worse than a gap the next render fills.
  */
-function programMonthLinkParts(firstNonBlank) {
-  const parts = [];
-  PROGRAM_MONTH_LINK_PARTS.forEach(part => {
-    const raw = firstNonBlank(part.header);
-    const text = String(raw === null || raw === undefined ? '' : raw).trim();
-    if (!text) return;
-    const url = hyperlinkFormulaUrl(text);
-    // A formula the parser did not recognize is printed as its own label
-    // rather than as a formula: a cell reading =HYPERLINK(...) in the middle
-    // of a sentence is worse than the words it was standing for.
-    parts.push(url ? { label: part.label, url } : { label: text, url: '' });
-  });
-  return parts;
-}
-
-/** The plain-text fallback the rich-text pass writes over — and what is left if it fails. */
-function describeProgramMonthLinks(parts) {
-  return parts.map(p => p.label).join(PROGRAM_MONTH_JOINER);
+function programMonthLinkCell(part, raw) {
+  const text = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (!text) return '';
+  const url = hyperlinkFormulaUrl(text);
+  if (url) return makeHyperlinkFormula(url, part.label);
+  return text.charAt(0) === '=' ? '' : text;
 }
 
 /** The group's worst status, or '' when no session on it says anything. */
@@ -771,7 +778,7 @@ function programMonthNumber(value) {
  * Program_Settings the invitation and reminder passes already make. Omitted,
  * Room and Notify come back blank, for the same reason.
  *
- * Returns { rows, notes, links, matched }. All three side-channels are keyed
+ * Returns { rows, notes, matched }. Both side-channels are keyed
  * by the row ARRAY (not its index), because the rows are about to be split
  * into Upcoming and Past and sorted, and an index into the list handed back
  * here would be an index into a list that no longer exists by the time they
@@ -779,9 +786,6 @@ function programMonthNumber(value) {
  *
  *   notes    the cell notes — a schedule's outliers and skipped weeks, a
  *            seat count's working.
- *   links    [{ label, url }] per row, for the one cell of rich text the
- *            three link columns became. The row itself carries the plain
- *            words, so a workbook where the rich-text pass fails still reads.
  *   matched  the rows whose Leader came off an unconfirmed Title_Match
  *            proposal. This is what Leader_Source used to be a whole column
  *            for; it is a wash and a note now, so it travels beside the rows
@@ -815,7 +819,6 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
 
   const rows = [];
   const notes = [];
-  const links = [];
   const matched = [];
   order.forEach(key => {
     const group = groups[key];
@@ -892,7 +895,6 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
       sessions: counted.length,
       window: window.label
     });
-    const linkParts = programMonthLinkParts(firstNonBlank);
     const nextDate = nextSessionDate(sessions, window.today);
 
     const out = new Array(headers.length).fill('');
@@ -915,7 +917,12 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     out[map['Schedule']] = scheduleCell;
     out[map['Sessions']] = sessionsCell;
     out[map['Seats']] = seats.text;
-    out[map['Links']] = describeProgramMonthLinks(linkParts);
+    // ONE COLUMN PER LINK, each the most recent non-blank value off the
+    // program's sessions — see PROGRAM_MONTH_LINK_PARTS.
+    PROGRAM_MONTH_LINK_PARTS.forEach(part => {
+      if (map[part.column] === undefined) return;
+      out[map[part.column]] = programMonthLinkCell(part, firstNonBlank(part.header));
+    });
     out[map['Status']] = isLunch ? '' : worstProgramMonthStatus(sessions, sessionMap);
     // Lunch has no leader row and never will — it is not a program (see the
     // note above), and a blank here is the true answer rather than a gap.
@@ -938,14 +945,13 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     out[map['Group_Key']] = key;
 
     rows.push(out);
-    if (linkParts.length > 0) links.push({ row: out, parts: linkParts });
     if (leader.source === PROGRAM_MONTH_LEADER_SOURCE_MATCHED) matched.push(out);
     if (!isLunch && schedule.note) notes.push({ row: out, header: 'Schedule', text: schedule.note });
     if (!isLunch && seats.note) notes.push({ row: out, header: 'Seats', text: seats.note });
     if (!isLunch && settings.note) notes.push({ row: out, header: 'Notify', text: settings.note });
   });
 
-  return { rows, notes, links, matched };
+  return { rows, notes, matched };
 }
 
 
@@ -1111,7 +1117,6 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
   sheet.setConditionalFormatRules(rules);
 
   writeProgramMonthNotes(sheet, map, built.notes, running, finished, result);
-  writeProgramMonthLinkCells(sheet, map, built.links, running, finished, result);
   washMatchedProgramMonthLeaders(sheet, map, built.matched, running, finished, result);
 
   // EVERY column BUT THE FOUR A PERSON MAY TOUCH, because every other column
@@ -1139,7 +1144,7 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
 /**
  * WHICH SHEET ROW ONE OF THESE ROW ARRAYS LANDED ON, or 0.
  *
- * Every per-row pass after the write — the notes, the link cells, the
+ * Every per-row pass after the write — the notes and the
  * unconfirmed-leader wash — needs the same answer, and none of them can hold
  * an index: the rows were split into Upcoming and Past and sorted between
  * being built and being written. The row ARRAY is the identity that survives
@@ -1242,83 +1247,6 @@ function writeProgramMonthNotes(sheet, map, notes, upcoming, past, result) {
       }
     });
   });
-}
-
-/**
- * THE THREE LINKS AS ONE CELL YOU CAN CLICK THREE PLACES IN.
- *
- * A cell holds ONE =HYPERLINK() formula, which is why three links were three
- * columns. Rich text holds a link per RUN, so "Register · Edit form · Roster"
- * is one cell with three live words in it — and the two columns that bought
- * back go to Seats and Status, which people actually read.
- *
- * The plain words are already on the sheet (the row carries them), so this is
- * a pass that adds links to text rather than one that writes the text. A
- * workbook where it throws — an older Apps Script runtime, a protected range —
- * keeps a cell that says the right words and does not link them, which is a
- * cosmetic loss and not a broken tab. Caught per row for that reason, and
- * logged once rather than per row.
- */
-function writeProgramMonthLinkCells(sheet, map, links, upcoming, past, result) {
-  if (!links || links.length === 0) return;
-  if (map['Links'] === undefined) return;
-  const column = map['Links'] + 1;
-  const zones = [
-    { start: result.upcomingDataStart, rows: upcoming || [] },
-    { start: result.pastDataStart, rows: past || [] }
-  ];
-  let failed = 0;
-
-  // ONE CALL PER ZONE, for the same reason the notes beside it are. A rich text
-  // value has a plural setter, and the only thing standing between a column of
-  // them and one write is that the rows WITHOUT a link still need a value: the
-  // plain words already in the cell, which the caller is holding in the row
-  // array it just wrote. So the plane is built from those and the linked ones
-  // are patched into it.
-  const byRow = {};
-  links.forEach(entry => {
-    const row = programMonthRowPosition(entry.row, upcoming, past, result);
-    if (row) byRow[row] = entry;
-  });
-
-  zones.forEach(zone => {
-    if (zone.rows.length === 0) return;
-    const plane = [];
-    for (let i = 0; i < zone.rows.length; i++) {
-      const rowNumber = zone.start + i;
-      const entry = byRow[rowNumber];
-      try {
-        if (!entry) {
-          plane.push([SpreadsheetApp.newRichTextValue()
-            .setText(String(zone.rows[i][map['Links']] === undefined ? '' : zone.rows[i][map['Links']]))
-            .build()]);
-          continue;
-        }
-        const text = describeProgramMonthLinks(entry.parts);
-        const builder = SpreadsheetApp.newRichTextValue().setText(text);
-        let at = 0;
-        entry.parts.forEach((part, i2) => {
-          if (i2 > 0) at += PROGRAM_MONTH_JOINER.length;
-          const end = at + part.label.length;
-          if (part.url) builder.setLinkUrl(at, end, part.url);
-          at = end;
-        });
-        plane.push([builder.build()]);
-      } catch (err) {
-        failed++;
-        plane.push([SpreadsheetApp.newRichTextValue().setText('').build()]);
-      }
-    }
-    try {
-      sheet.getRange(zone.start, column, plane.length, 1).setRichTextValues(plane);
-    } catch (err) {
-      failed += plane.length;
-    }
-  });
-
-  if (failed > 0) {
-    log(`\u2139\ufe0f ${failed} ${SHEET_NAMES.PROGRAM_MONTH} link cell(s) were left as plain words.`);
-  }
 }
 
 // ============================================================================

@@ -99,7 +99,8 @@ this.describeProgramMonthSchedule = describeProgramMonthSchedule;
 this.worstProgramMonthStatus = worstProgramMonthStatus;
 this.programMonthSessionsCell = programMonthSessionsCell;
 this.detectProgramMonthRecurrence = detectProgramMonthRecurrence;
-this.programMonthLinkParts = programMonthLinkParts;
+this.programMonthLinkCell = programMonthLinkCell;
+this.PROGRAM_MONTH_LINK_PARTS = PROGRAM_MONTH_LINK_PARTS;
 this.hyperlinkFormulaUrl = hyperlinkFormulaUrl;
 this.NO_REGISTRATION_LINK_LABEL = NO_REGISTRATION_LINK_LABEL;
 this.SHEET_NAMES = SHEET_NAMES;
@@ -407,22 +408,42 @@ const build = (rows, link, leaders, settings) =>
     '3 sessions · times vary');
 }
 
-// --- THE THREE LINK COLUMNS AS ONE CELL -------------------------------------
+// --- ONE LINK PER COLUMN -----------------------------------------------------
 //
-// A cell holds one =HYPERLINK() formula, which is why three links were three
-// columns three words wide that nobody ever sorted or read — only clicked. One
-// cell of rich text holds a link per run.
+// The four links were one cell of rich text with a live link per word, and are
+// four columns again — one =HYPERLINK() each, re-labelled with a short word,
+// written with the row rather than by a second pass after it.
 {
   const withLinks = session({ at: [2026, 8, 1, 9, 30], formId: 'F_L' });
   withLinks[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/live","View Live Form")';
   withLinks[sessionMap['Registrant_Sheet_Link']] = 'https://docs.example/roster';
   const built = build([withLinks]);
-  check('the words are on the sheet, in the order they are wanted',
-    cell(built.rows[0], 'Links'), 'Register · Roster');
-  check('and the URLs travel beside them for the rich-text pass',
-    built.links[0].parts,
-    [{ label: 'Register', url: 'https://forms.example/live' },
-     { label: 'Roster', url: 'https://docs.example/roster' }]);
+  check('each link lands in its own column, as one HYPERLINK with a short word',
+    [cell(built.rows[0], 'Register_Link'), cell(built.rows[0], 'Roster_Link')],
+    ['=HYPERLINK("https://forms.example/live","Register")',
+     '=HYPERLINK("https://docs.example/roster","Roster")']);
+  check('...and a link the program has not got is a blank cell, not a dangling word',
+    [cell(built.rows[0], 'Edit_Form_Link'), cell(built.rows[0], 'Sign_In_Link')], ['', '']);
+  check('the combined Links column is gone',
+    sandbox.HEADERS.Master_Program_Dashboard.indexOf('Links'), -1);
+  check('no side-channel is handed back for a rich-text pass', built.links, undefined);
+  check('every link column is a column of the tab',
+    sandbox.PROGRAM_MONTH_LINK_PARTS.map(p => sandbox.HEADERS.Master_Program_Dashboard.indexOf(p.column) !== -1),
+    [true, true, true, true]);
+}
+// The MOST RECENT non-blank link wins, per column — a Regular program has a
+// form per month and the one worth handing out is this month's.
+{
+  const older = session({ at: [2026, 8, 1, 9, 30], formId: 'F_OLD' });
+  older[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/sep","View Live Form")';
+  older[sessionMap['Sign_In_Sheet_Link']] = '=HYPERLINK("https://docs.example/signin","Sign-in sheet")';
+  const newer = session({ at: [2026, 8, 8, 9, 30], formId: 'F_OLD' });
+  newer[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/oct","View Live Form")';
+  const built = build([older, newer]);
+  check('the newest session\u2019s link wins, and an older one fills a column the newest left blank',
+    [cell(built.rows[0], 'Register_Link'), cell(built.rows[0], 'Sign_In_Link')],
+    ['=HYPERLINK("https://forms.example/oct","Register")',
+     '=HYPERLINK("https://docs.example/signin","Sign-in sheet")']);
 }
 // A link cell holding WORDS rather than a link keeps its words: losing them
 // would turn "this program deliberately takes no registrations" into an empty
@@ -432,9 +453,10 @@ const build = (rows, link, leaders, settings) =>
   blocked[sessionMap['Form_Response_Link']] = sandbox.NO_REGISTRATION_LINK_LABEL;
   const built = build([blocked]);
   check('a link column holding words prints the words, unlinked',
-    [cell(built.rows[0], 'Links'), built.links[0].parts[0].url],
-    [sandbox.NO_REGISTRATION_LINK_LABEL, '']);
+    cell(built.rows[0], 'Register_Link'), sandbox.NO_REGISTRATION_LINK_LABEL);
 }
+check('a formula the parser cannot read is a blank, never a broken formula',
+  sandbox.programMonthLinkCell({ label: 'Register' }, '=HYPERLINK(A1,"x")'), '');
 check('a URL is read back out of a HYPERLINK formula',
   sandbox.hyperlinkFormulaUrl('=HYPERLINK("https://x.test/a","Go")'), 'https://x.test/a');
 check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— no registration —'), '');

@@ -288,7 +288,8 @@ defineLazyGlobal_('HEADERS', () => ({
    * section is ordered by: a program that finished in June sits above one that
    * finished in 2019.
    *
-   * FIFTEEN COLUMNS A PERSON READS, and two behind them. It was nineteen at
+   * EIGHTEEN COLUMNS A PERSON READS, and three behind them (Room, hidden
+   * until somebody keeps rooms, and the two keys). It was nineteen at
    * twelve times the row count. The rule describeProgramMonthSchedule() was
    * written under became the rule for the whole tab: THE FACT GOES IN THE
    * CELL AND THE FOLLOW-UP QUESTION GOES IN A CELL NOTE.
@@ -312,11 +313,19 @@ defineLazyGlobal_('HEADERS', () => ({
    *             would read as a capacity somebody could book against. The
    *             window is stated in the column note, and the Sessions
    *             drill-through is where history lives.
-   *   Links     Form_Response_Link, Edit_Form_Link, Registrant_Sheet_Link and
-   *             Sign_In_Sheet_Link, in one cell of rich text with a live link
-   *             per word — the CURRENT ones, off the program's most recent
-   *             session, because a Regular program has a form per month and
-   *             the one worth handing out is this month's.
+   *   Register_Link, Edit_Form_Link, Roster_Link, Sign_In_Link
+   *             the session rows' Form_Response_Link, Edit_Form_Link,
+   *             Registrant_Sheet_Link and Sign_In_Sheet_Link, ONE LINK PER
+   *             CELL, each a =HYPERLINK() with a short word on it ("Register",
+   *             "Edit form", "Roster", "Sign-in sheet") — the CURRENT ones, off
+   *             the program's most recent session, because a Regular program
+   *             has a form per month and the one worth handing out is this
+   *             month's. They were one 'Links' cell of rich text with a live
+   *             link per word; four small targets in one cell is four chances
+   *             to open the wrong thing, so the fact-in-the-cell rule now gives
+   *             each link a cell of its own (PROGRAM_MONTH_LINK_PARTS, 78).
+   *             No alias carries 'Links' across: nothing reads this tab, and
+   *             the next render redraws it whole.
    *
    * THE THREE PROGRAM FLAGS LIVE HERE — Club, No_Registration and
    * Personalized_Assistance, as real tick boxes on the row of the thing they
@@ -353,7 +362,8 @@ defineLazyGlobal_('HEADERS', () => ({
   Master_Program_Dashboard: [
     'Next_Date', 'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify', 'Links', 'Status', 'Last_Date',
+    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
+    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
