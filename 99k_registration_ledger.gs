@@ -113,6 +113,10 @@ const LEDGER_SOURCES = Object.freeze({
   CHANGE_PANEL: 'change-panel',
   DEDUPE: 'dedupe',
   REMOVE_SWEEP: 'remove-sweep',
+  // The Admin "Delete Registrations" dialog (48): whole SESSIONS removed at
+  // once — a test run, a duplicate import. Its own word rather than
+  // `remove-sweep`, because that one means a single row somebody marked.
+  DELETE_SESSIONS: 'delete-sessions',
   MIGRATION: 'migration',
   // A row read back out of an older copy of the workbook (99p). Not
   // `migration`: that word means "was already on the tab when the ledger

@@ -325,6 +325,10 @@ function applyQueuedOptimisticWrite(entry) {
       // members one at a time through the locked writer rather than calling
       // back into a function that would try to take a lock this already has.
       return applyQueuedHouseholdQuickMark(args);
+    case 'deleteRegistrations':
+      // A deletion from the Delete Registrations dialog that arrived while a
+      // sync held the workbook (48). Lock held, like Quick Mark's body.
+      return applyQueuedDeleteRegistrations(args);
     case 'doorSignIn':
       // Called WITHOUT the script lock held — walkInSignIn() takes it for
       // itself, one mark at a time, through applyQuickMarkFromDialog(). See
@@ -369,7 +373,10 @@ function applyQueuedHouseholdQuickMark(base) {
 function reportExhaustedOptimisticRetry(entry, message, tries) {
   try {
     const args = entry.args || {};
-    const what = entry.kind === 'doorSignIn' ? 'A door app sign-in' : 'A mark made at the desk';
+    const what = entry.kind === 'doorSignIn' ? 'A door app sign-in'
+      : entry.kind === 'deleteRegistrations' ? `A queued deletion of ${(args.eventIds || []).length} session(s)` +
+        ` (${(args.eventIds || []).join(', ')})`
+      : 'A mark made at the desk';
     log(`⚠️ Giving up on a queued ${entry.kind} after ${tries} attempt(s): ${message}`);
     notifyAdminUrgent(`Still could not save: ${args.name || '(no name)'}`,
       `${what} was shown as done and then refused, and has been retried ` +

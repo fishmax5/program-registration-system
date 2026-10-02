@@ -36,6 +36,22 @@
 // deleting a response is the one part of this that cannot be undone from
 // inside this workbook.
 //
+// THE LEDGER (99k) IS TOLD FIRST. One `removed` entry per deleted row —
+// `removed`, not `cancelled`: these rows are a mistake, not somebody who
+// stopped coming — appended and FLUSHED before the tombstones and the render.
+// Without it the verifier (99n) would report every deleted row as "in the
+// fold, not on the tab", which is the bucket that means a real loss, and once
+// the tab is drawn from the ledger (phase 4) the deletion would be undone.
+//
+// AND A SYNC THAT HOLDS THE WORKBOOK QUEUES IT RATHER THAN REFUSING. A sync
+// slice holds the workbook for up to twenty-five minutes, and "try again in a
+// moment" sent somebody back to retype DELETE for half an hour. The deletion
+// is put on the desk's retry queue (99b) as kind `deleteRegistrations` — after
+// every check that needs the person (admin, confirm word) has passed — and is
+// carried out the moment the sync lets go (flushDeskWritesAfterSync). It
+// re-reads the tab when it runs, so it deletes what those sessions hold THEN,
+// and the outcome is filed for the office digest because nobody is watching.
+//
 // WHAT IT WILL NOT DO: stop a club from re-booking somebody. Membership lives
 // on Club_Members and applyClubRosterCatchup() re-books active members into
 // upcoming sessions on every sync, so deleting a club member's row for a
@@ -260,15 +276,65 @@ function deleteRegistrationsForSessions(eventIds, options) {
   const wanted = new Set((eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
   if (wanted.size === 0) return '⚠️ No sessions were selected.';
 
+  const alsoDeleteResponses = !!options.alsoDeleteResponses;
+  // Behind a sync: queue at once rather than wait on a lock it will hold for
+  // minutes. See the section comment.
+  if (workbookHeldElsewhere()) {
+    return queueDeleteRegistrationsBehindSync_(wanted, alsoDeleteResponses);
+  }
   const lock = workbookLock();
   if (!lock.tryLock(SYNC_LOCK_WAIT_MS)) {
-    return '⚠️ A sync is running right now — try again in a moment.';
+    return queueDeleteRegistrationsBehindSync_(wanted, alsoDeleteResponses);
   }
   try {
-    return deleteRegistrationsForSessionsInternal(wanted, !!options.alsoDeleteResponses);
+    return deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses);
   } finally {
     lock.releaseLock();
   }
+}
+
+/** The retry-queue kind a deferred deletion is stored under (99b). */
+const DELETE_REGISTRATIONS_QUEUE_KIND = 'deleteRegistrations';
+
+/**
+ * Puts the deletion on the desk's queue to run when the sync lets go. Every
+ * check that needs the person has already passed; what is stored is only the
+ * Event_IDs, the response tick and who asked.
+ */
+function queueDeleteRegistrationsBehindSync_(wanted, alsoDeleteResponses) {
+  const eventIds = Array.from(wanted);
+  const queued = queueOptimisticRetry(DELETE_REGISTRATIONS_QUEUE_KIND, {
+    eventIds,
+    alsoDeleteResponses: !!alsoDeleteResponses,
+    requestedBy: getCurrentUserEmail()
+  }, 'Queued behind a sync that was holding the workbook.');
+  if (!queued) {
+    return '⚠️ A sync is running right now and the deletion could not be queued — try again in a moment.';
+  }
+  return `⏳ A sync is running, so the deletion of ${eventIds.length} session(s) is queued and will be carried ` +
+    'out the moment the sync finishes. You can close this window. The result goes in the office\'s daily digest.';
+}
+
+/**
+ * A queued deletion, carried out. Called by the retry queue (99b) WITH the
+ * workbook lock already held. The admin check and the typed confirmation were
+ * made when it was queued — the trigger running this is not the person who
+ * asked, and asking it would refuse every queued deletion.
+ */
+function applyQueuedDeleteRegistrations(args) {
+  const a = args || {};
+  const wanted = new Set((a.eventIds || []).map(id => String(id || '').trim()).filter(Boolean));
+  if (wanted.size === 0) return { ok: true, message: 'Nothing to delete.' };
+  const message = deleteRegistrationsForSessionsInternal(wanted, !!a.alsoDeleteResponses);
+  // Every answer is final: "nothing left to delete" is not worth retrying,
+  // and a thrown error is caught by the queue and retried there.
+  try {
+    spoolOfficeNote('Registrations deleted',
+      `Queued deletion${a.requestedBy ? ` requested by ${a.requestedBy}` : ''}, run after the sync: ${message}`);
+  } catch (err) {
+    log(`ℹ️ Could not file the queued deletion for the digest (${err}).`);
+  }
+  return { ok: true, message };
 }
 
 function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
@@ -288,7 +354,18 @@ function deleteRegistrationsForSessionsInternal(wanted, alsoDeleteResponses) {
   });
   if (doomedRows.length === 0) return '⚠️ Those sessions have no registrations to delete.';
 
-  // BEFORE anything is written: record that these were deleted deliberately.
+  // THE LEDGER FIRST (99k's rule: append, then do what you do now), and
+  // flushed here rather than left to the end of the execution — a deletion
+  // the tab shows and the ledger never heard of is exactly what the verifier
+  // reports as a lost registration.
+  appendRemovalLedgerEntries_(doomedRows, map, {
+    source: LEDGER_SOURCES.DELETE_SESSIONS,
+    note: 'Deleted with its session(s) from the Delete Registrations dialog' +
+      (alsoDeleteResponses ? ' (form responses deleted too).' : '. The form response was left in place.')
+  });
+  flushLedger();
+
+  // Then record that these were deleted deliberately.
   // Without this the rows come straight back — the all-dates registry and the
   // club roster both re-book from standing state, and the form responses are
   // still there to be re-imported. See section 5c.

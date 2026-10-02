@@ -219,18 +219,19 @@ function removeMarkedRegistrantsInternal(marked) {
  * execution covers a sweep of three duplicates as readily as one of thirty,
  * and no new lock is taken (LockService locks are not reentrant — 99b).
  */
-function appendRemovalLedgerEntries_(rows, map) {
+function appendRemovalLedgerEntries_(rows, map, opts) {
+  const o = opts || {};
   let recorded = 0;
   (rows || []).forEach(row => {
     appendLedgerEntry(makeLedgerEntry({
       kind: LEDGER_KINDS.REMOVED,
-      source: LEDGER_SOURCES.REMOVE_SWEEP,
+      source: o.source || LEDGER_SOURCES.REMOVE_SWEEP,
       registrationId: ledgerIdForRegistrantRow(row, map),
       eventId: row[map['Event_ID']],
       name: row[map['Name']],
       personType: row[map['Person_Type']],
       partyId: map['Party_ID'] === undefined ? '' : row[map['Party_ID']],
-      note: `Marked "${REGISTRANT_REMOVE_OVERRIDE_OPTION}" and swept. The form response was left in place.`
+      note: o.note || `Marked "${REGISTRANT_REMOVE_OVERRIDE_OPTION}" and swept. The form response was left in place.`
     }));
     recorded++;
   });
