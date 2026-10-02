@@ -276,7 +276,11 @@ function doGet(e) {
     .setTitle(route.title)
     // The tablet case is the entire point, so say so to the browser rather
     // than serving a page that renders at desktop width and needs pinching.
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    // interactive-widget=resizes-content asks the browser to SHRINK the page
+    // when the on-screen keyboard opens rather than slide the keyboard over
+    // it, so the button under the box being typed into stays on screen (see
+    // the KEYBOARD FIT block in 73_door_app_html.gs for browsers that ignore it).
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, interactive-widget=resizes-content');
 
   // DELIBERATELY NOT setXFrameOptionsMode(ALLOWALL). Apps Script refuses
   // framing by default, and for every page below this line that default is

@@ -11,7 +11,7 @@
 // silently keeps last week's contents.
 //
 // So this test draws the tab. It asserts almost nothing about the drawing: the
-// point is that the pass RUNS, with notes, links and a matched-leader wash all
+// point is that the pass RUNS, with notes, link columns and a matched-leader wash all
 // present, because that is the half a unit test of the row builder cannot see.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
@@ -168,7 +168,9 @@ function programRow(fields) {
 const running = programRow({
   Program: 'Chair Yoga', Location: 'Main', Group_Key: 'program::chair yoga::main',
   Next_Date: new Date(2026, 9, 6), Last_Date: new Date(2026, 11, 15), Status: 'Active',
-  Schedule: 'Weekly · Tue 10:00 AM', Seats: '8 of 12', Leader: 'A Leader'
+  Schedule: 'Weekly · Tue 10:00 AM', Seats: '8 of 12', Leader: 'A Leader',
+  Register_Link: '=HYPERLINK("https://example.test/register","Register")',
+  Roster_Link: '=HYPERLINK("https://example.test/roster","Roster")'
 });
 const finished = programRow({
   Program: 'Winter Chorus', Location: 'Annex', Group_Key: 'program::winter chorus::annex',
@@ -181,13 +183,6 @@ const built = {
     { row: running, header: 'Schedule', text: 'skipped the week of Nov 24' },
     { row: finished, header: 'Seats', text: 'summed over this month and next' }
   ],
-  links: [{
-    row: running,
-    parts: [
-      { label: 'Register', url: 'https://example.test/register' },
-      { label: 'Roster', url: 'https://example.test/roster' }
-    ]
-  }],
   matched: [running]
 };
 
@@ -215,12 +210,13 @@ check('both program rows were written',
 // no longer existed, and each is silent on a row it cannot place — so "it ran"
 // is only true if each actually landed on a row.
 check('the cell notes landed', sheet.calls.notes.length >= built.notes.length, true);
-check('the link cell landed', sheet.calls.richText.length, 1);
-// The row it landed on is the row that HAS links, not merely some row in the
-// column — which is the thing a whole-column write could get wrong and a
-// cell-at-a-time write could not.
-check('...on the row that has them',
-  sheet.calls.richText.length === 1 && sheet.calls.richText[0].col === map['Links'] + 1, true);
+// THE LINKS ARE COLUMNS OF THE ROW NOW, one =HYPERLINK() each, written with
+// the row in the sectioned writer's setValues(). There is no rich-text pass
+// left to land or to fail on its own.
+check('no rich-text pass runs', sheet.calls.richText.length, 0);
+check('the link formula went out with its row',
+  written.some(r => r[map['Register_Link']] === '=HYPERLINK("https://example.test/register","Register")'),
+  true);
 check('the unconfirmed leader was washed', sheet.calls.backgrounds, 1);
 
 // AND AGAIN WITH THE METRICS BLOCK ABOVE IT, which is what pushes every row

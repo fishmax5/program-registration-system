@@ -1,10 +1,16 @@
 // ============================================================================
 // 82. WHERE THE FILES THIS SYSTEM MAKES ACTUALLY LIVE
 //
-// Numbered last for the usual reason: it is behavior plus its own two
-// constants, nothing else derives from them, and everything it calls is a
-// hoisted function declaration — so whatever order the project's files come
-// in, it is there when `04`, `05`, `45`, `46` and `55` call into it.
+// Numbered last for the usual reason: it is behavior plus its own handful of
+// self-contained constants (STRAY_FILE_PATTERNS, the one that reads other
+// files' names, is lazy), nothing else derives from them, and everything it
+// calls is a hoisted function declaration — so whatever order the project's
+// files come in, it is there when `04`, `05`, `45`, `46`, `55`, `89`, `99j`,
+// `99y` and `99za` call into it.
+//
+// Two shelves under the anchor — what staff open, and a buried `System`
+// folder for everything only this code reads — are section 82b, below the
+// anchor itself.
 //
 // THE BUG THIS FILE EXISTS TO FIX. Every folder this project keeps things in
 // was found the same way:
@@ -99,6 +105,140 @@ function getSystemRootFolder() {
   }
 }
 
+// ----------------------------------------------------------------------------
+// 82b. TWO SHELVES UNDER THE ANCHOR: WHAT STAFF OPEN, AND `System`
+//
+// The anchor fixed WHERE this system's folders live. It did not fix how many
+// of them a person sees: on the setup this was written for, the anchor is a
+// shared drive's ROOT (the workbook sits at the top of the drive), so every
+// folder below — the rosters leaders open and the sign-in Docs printed at the
+// desk, but also a hundred-odd generated forms, nightly CSV snapshots, a
+// ledger archive, a JSON cache and five copies of the form template — sat side
+// by side at the top of the drive everybody in the office browses.
+//
+// So there are two shelves now:
+//
+//   <anchor>/                        what staff open: the workbook, the
+//     Program Registrant Sheets      program registrant sheets (`46`) and
+//     Sign-In Sheets                 the live sign-in Docs (`45`)
+//     System/                        everything only this code reads —
+//       Program Registration Forms   the forms (`04`), the retired PDFs
+//       Printed Sign-In Sheets       (`45`), the form images (`55`), the
+//       Form Images                  registrant snapshots (`99j`), the
+//       Registrant Snapshots         public schedule's JSON (`99y`), the
+//       Public Schedule Snapshot     ledger archive (`99za`) and the form
+//       Ledger Archive               template (`05`)
+//
+// A caller picks the shelf by passing `{ systemOnly: true }`; nothing else
+// about a lookup changes. Which shelf a folder belongs on is a property of the
+// folder's PURPOSE, so it is stated by the file that owns the folder, in the
+// getter beside its own name constant, rather than in a list here that would
+// have to be kept in step with eight other files.
+//
+// `System` IS ONLY EVER LOOKED FOR INSIDE THE ANCHOR — never Drive-wide.
+// Every other folder name here is specific enough to adopt on sight; "System"
+// is about the most generic folder name there is, and adopting somebody's own
+// "System" folder from elsewhere in Drive would bury this project's files in
+// a stranger's folder.
+//
+// NEVER FIGHT A FOLDER THAT HAS BEEN PUT AWAY. The adoption path finds a
+// folder Drive-wide and MOVES it home. Before `System` existed, home was
+// always the anchor and anything found elsewhere was by definition stray. Now
+// a folder can legitimately sit in either of two places, and a lookup that
+// dragged it from one to the other whenever its first read missed would be
+// two callers (or two versions of this code) playing tug of war with a folder
+// full of live links, once an hour. So:
+//
+//   * a system-only folder found at the anchor's top level is moved INTO
+//     `System` — the upgrade path, one move, once;
+//   * a staff-facing folder found inside `System` is USED WHERE IT IS —
+//     somebody put it there, and every link in it works either way;
+//   * a Drive-wide hit already sitting in the anchor or in `System` is used
+//     where it is, never moved between the two.
+//
+// What this cannot stop is OLDER deployed code, which knows nothing of
+// `System`: its first lookup misses a folder moved in there and its Drive-wide
+// fallback moves it straight back to the anchor. That is why nothing is moved
+// into `System` by hand before this version is deployed — after which the
+// Admin sweep below (organizeGeneratedFiles) does it.
+// ----------------------------------------------------------------------------
+
+/** The buried subfolder's name. Looked up inside the anchor only — see above. */
+const SYSTEM_SUBFOLDER_NAME = 'System';
+
+/**
+ * The memo key `System` is kept under. Not the bare name: a caller asking
+ * getOrCreateSystemFolder() for a folder that happened to be called "System"
+ * must not be handed this one out of the memo.
+ */
+const SYSTEM_SUBFOLDER_CACHE_KEY = '\u0000system-subfolder';
+
+/**
+ * The one folder out of an iterator, chosen the same way by every execution.
+ *
+ * Two executions that both miss a folder and both create it leave TWO of them
+ * — which has happened here: two "Public Schedule Snapshot" folders made 0.7s
+ * apart. Taking whichever Drive happens to list first then lets different runs
+ * file into different twins. The EARLIEST created is a choice every run makes
+ * identically, so the twins stop diverging the moment they exist. A folder
+ * that cannot say when it was made sorts last rather than throwing.
+ */
+function pickSystemFolder_(iterator) {
+  let best = null;
+  let bestTime = Infinity;
+  while (iterator && iterator.hasNext()) {
+    const folder = iterator.next();
+    let time = Infinity;
+    try {
+      const created = typeof folder.getDateCreated === 'function' ? folder.getDateCreated() : null;
+      if (created && typeof created.getTime === 'function') time = created.getTime();
+    } catch (err) {
+      time = Infinity;
+    }
+    if (!best || time < bestTime) { best = folder; bestTime = time; }
+  }
+  return best;
+}
+
+/** The id of `item`'s first parent, or '' — one read, never throws. */
+function driveParentIdOf_(item) {
+  try {
+    const parents = item.getParents();
+    return parents.hasNext() ? parents.next().getId() : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+/**
+ * `<anchor>/System`, found — or, unless `create` is false, created.
+ *
+ * Null when there is no anchor (the old behaviour then applies everywhere,
+ * exactly as getSystemRootFolder() promises), and null rather than a throw
+ * when Drive refuses: a folder that cannot be buried is filed at the anchor's
+ * top level instead, which is untidy and nothing worse.
+ */
+function getSystemOnlyFolder(create) {
+  if (__systemFolderCache[SYSTEM_SUBFOLDER_CACHE_KEY]) {
+    return __systemFolderCache[SYSTEM_SUBFOLDER_CACHE_KEY];
+  }
+  try {
+    const root = getSystemRootFolder();
+    if (!root) return null;
+    let folder = pickSystemFolder_(root.getFoldersByName(SYSTEM_SUBFOLDER_NAME));
+    if (!folder) {
+      if (create === false) return null;
+      folder = root.createFolder(SYSTEM_SUBFOLDER_NAME);
+      log(`Created Drive folder "${SYSTEM_SUBFOLDER_NAME}" in "${root.getName()}" for the files only this system reads.`);
+    }
+    __systemFolderCache[SYSTEM_SUBFOLDER_CACHE_KEY] = folder;
+    return folder;
+  } catch (err) {
+    log(`ℹ️ The "${SYSTEM_SUBFOLDER_NAME}" folder could not be found or made (${err}) — filing at the top level instead.`);
+    return null;
+  }
+}
+
 /**
  * Find-or-create one of this system's folders, under the anchor.
  *
@@ -106,31 +246,49 @@ function getSystemRootFolder() {
  * Sign-Up Sheets"): found anywhere, they are renamed and adopted rather than
  * left behind full of live files.
  *
+ * `options.systemOnly` files the folder in `<anchor>/System` instead of at the
+ * anchor's top level — see 82b above for which folders say so and why.
+ *
  * Order matters and is the whole point:
- *   1. inside the anchor, by name — the steady state, one Drive call;
- *   2. anywhere in Drive, by name or a legacy name — the upgrade path, moved
- *      home;
- *   3. created, inside the anchor.
+ *   1. on its own shelf, by name — the steady state, one Drive call;
+ *   2. on the OTHER shelf, by name — a system-only folder still at the top
+ *      level is moved into System, once; a staff folder somebody put into
+ *      System is left where it is;
+ *   3. anywhere in Drive, by name or a legacy name — the upgrade path, moved
+ *      home unless it is already on one of the two shelves;
+ *   4. created, on its own shelf.
  */
-function getOrCreateSystemFolder(name, legacyNames) {
+function getOrCreateSystemFolder(name, legacyNames, options) {
   if (__systemFolderCache[name]) return __systemFolderCache[name];
+  const systemOnly = !!(options && options.systemOnly);
 
   const root = getSystemRootFolder();
+  // Only a system-only lookup may CREATE System; a staff lookup only peeks, so
+  // a workbook that never makes a system-only file never grows an empty
+  // folder called System.
+  const sys = root ? getSystemOnlyFolder(systemOnly) : null;
+  const home = (systemOnly && sys) ? sys : root;
+  const remember = folder => { __systemFolderCache[name] = folder; return folder; };
 
-  if (root) {
-    const inside = root.getFoldersByName(name);
-    if (inside.hasNext()) {
-      const found = inside.next();
-      __systemFolderCache[name] = found;
-      return found;
+  if (home) {
+    const found = pickSystemFolder_(home.getFoldersByName(name));
+    if (found) return remember(found);
+  }
+
+  const other = (home && sys) ? (home === sys ? root : sys) : null;
+  if (other) {
+    const found = pickSystemFolder_(other.getFoldersByName(name));
+    if (found) {
+      if (systemOnly) moveDriveFileInto(found, sys, `the "${name}" folder`);
+      return remember(found);
     }
   }
 
+  const shelves = [root, sys].filter(Boolean).map(folder => folder.getId());
   const candidates = [name].concat(legacyNames || []);
   for (let i = 0; i < candidates.length; i++) {
-    const stray = DriveApp.getFoldersByName(candidates[i]);
-    if (!stray.hasNext()) continue;
-    const folder = stray.next();
+    const folder = pickSystemFolder_(DriveApp.getFoldersByName(candidates[i]));
+    if (!folder) continue;
     if (candidates[i] !== name) {
       try {
         folder.setName(name);
@@ -142,15 +300,17 @@ function getOrCreateSystemFolder(name, legacyNames) {
         log(`ℹ️ Could not rename "${candidates[i]}" (${err}) — filing new files there anyway.`);
       }
     }
-    if (root) moveDriveFileInto(folder, root, `the "${name}" folder`);
-    __systemFolderCache[name] = folder;
-    return folder;
+    // Already on a shelf: used where it is. Moving it between the anchor and
+    // System from here is exactly the tug of war 82b rules out.
+    if (home && shelves.indexOf(driveParentIdOf_(folder)) < 0) {
+      moveDriveFileInto(folder, home, `the "${name}" folder`);
+    }
+    return remember(folder);
   }
 
-  const created = root ? root.createFolder(name) : DriveApp.createFolder(name);
-  log(`Created Drive folder "${name}"${root ? ` in "${root.getName()}"` : ' in My Drive'}.`);
-  __systemFolderCache[name] = created;
-  return created;
+  const created = home ? home.createFolder(name) : DriveApp.createFolder(name);
+  log(`Created Drive folder "${name}"${home ? ` in "${home.getName()}"` : ' in My Drive'}.`);
+  return remember(created);
 }
 
 /**
@@ -232,40 +392,56 @@ function driveFileIsIn(file, folder) {
 // already made went, and it is the reason this file was written rather than a
 // five-line change to five lookups.
 //
-// TWO PASSES, deliberately in this order:
+// FOUR PASSES, deliberately in this order:
+//
+//   0. THE FOLDERS. Every folder this system keeps is looked up through its
+//      own getter, which adopts it onto the right shelf on the way past (82b):
+//      a system-only folder still at the anchor's top level goes into
+//      `System`. Then any TWIN of a system-only folder left at the top level —
+//      the same name, made by two executions racing — is moved into `System`
+//      too, beside the one in use. Twins are never merged and never trashed:
+//      which of the two a stored id points into is not something a sweep can
+//      safely decide, and a folder moved is a folder whose links still work.
 //
 //   1. BY REGISTRY. Every file this system tracks by id — the forms in the
 //      form registry (`06`), the leader sheets (`46`), the sign-in documents
-//      (`69`), the template form (`05`) — is opened and filed. This pass
-//      cannot pick up a file the system did not make, because it only ever
-//      looks at ids the system wrote down itself.
+//      (`69`), the template form (`05`), the public schedule's JSON (`99y`) —
+//      is opened and filed. This pass cannot pick up a file the system did
+//      not make, because it only ever looks at ids the system wrote down.
 //
-//   2. BY NAME, ACROSS MY DRIVE ROOT ONLY. A workbook that has been running
-//      since before a registry existed has files nothing has a record of, and
-//      the only thing left that identifies them is the name this system gave
-//      them. So the root is walked once and anything matching one of the
-//      patterns below is filed.
+//   2. BY NAME, ACROSS TWO FOLDERS ONLY: My Drive root and the anchor's own
+//      top level. A workbook that has been running since before a registry
+//      existed has files nothing has a record of, and the only thing left
+//      that identifies them is the name this system gave them — four spare
+//      copies of the form template at the top of a shared drive, for one.
+//      So those two folders are walked once and anything matching one of the
+//      patterns below is filed. Nothing deeper is walked: a file somebody has
+//      already put inside a folder of their own was put there on purpose.
 //
 //      THIS PASS CAN BE WRONG, and the shape of the patterns is the defense:
-//      each is anchored, carries the em-dash or the date this system writes,
-//      and is checked against the file's MIME TYPE as well — a text note
-//      called "Sign-Up Sheet — Chair Yoga (Main)" is not moved, because the
-//      pattern that would match it only applies to Sheets. It is still a
-//      judgment call, which is why the sweep LOGS every move by name and why
-//      moving a file changes no link: an over-eager match costs somebody one
-//      drag back, not a lost file.
+//      each is anchored, carries the em-dash, the date or the exact file name
+//      this system writes, and is checked against the file's MIME TYPE as
+//      well — a text note called "Sign-Up Sheet — Chair Yoga (Main)" is not
+//      moved, because the pattern that would match it only applies to Sheets,
+//      and "Copy of Registrant Sheet — …" is not moved because the pattern is
+//      anchored at the start. It is still a judgment call, which is why the
+//      sweep LOGS every move by name and why moving a file changes no link: an
+//      over-eager match costs somebody one drag back, not a lost file.
 //
-// It is idempotent and cheap to re-run: a file already in the right folder is
-// one parent read and no write. It lives on the Admin menu rather than the
-// hourly sync because it walks the whole of My Drive root, which is a big
-// read to do every hour for an answer that stops changing after the first
-// run.
+// It never trashes, renames (beyond the legacy folder rename the getters have
+// always done) or reshares anything. It is idempotent and cheap to re-run: a
+// file already in the right folder is one parent read and no write. It lives
+// on the Admin menu rather than the hourly sync because it walks the whole of
+// My Drive root, which is a big read to do every hour for an answer that
+// stops changing after the first run.
 // ----------------------------------------------------------------------------
 
 /**
  * The by-name patterns, each with the folder it files into and the MIME type
  * it insists on. Order does not matter — the first match wins and no name
- * this system writes matches two of these.
+ * this system writes matches two of these. `folder` is a folder NAME, looked
+ * up in the map organizeGeneratedFiles() builds; SYSTEM_SUBFOLDER_NAME there
+ * means `<anchor>/System` itself.
  *
  * A lazy global: every one of these folder names is another file's constant,
  * and this array reads them at what would otherwise be load time. See
@@ -273,18 +449,30 @@ function driveFileIsIn(file, folder) {
  */
 defineLazyGlobal_('STRAY_FILE_PATTERNS', () => [
   {
-    // The form template (`05`). Named once, never renamed, one of a kind.
+    // The form template (`05`). Named once, never renamed — but this setup has
+    // made five of them over its life, and only one is the live template.
+    // All of them are system-only; the spares are filed beside the live one
+    // rather than judged, because which is live is a Script Property, not a
+    // name.
     re: /^TEMPLATE — Registration Form Base/i,
     mime: MimeType.GOOGLE_FORMS,
-    folder: null,          // null = the anchor itself, not a subfolder
-    what: 'the form template'
+    folder: SYSTEM_SUBFOLDER_NAME,
+    what: 'a form template'
   },
   {
-    // A program leader's shared roster (`46`).
+    // A program leader's shared roster (`46`), under its current name …
+    re: /^Registrant Sheet — .+ \(.+\)$/,
+    mime: MimeType.GOOGLE_SHEETS,
+    folder: LEADER_SHEET_FOLDER_NAME,
+    what: 'a program registrant sheet'
+  },
+  {
+    // … and under the name it had before `46` renamed them, which a sheet
+    // nobody has pushed since still carries.
     re: /^Sign-Up Sheet — .+ \(.+\)$/,
     mime: MimeType.GOOGLE_SHEETS,
     folder: LEADER_SHEET_FOLDER_NAME,
-    what: 'a program leader sheet'
+    what: 'a program registrant sheet'
   },
   {
     // A live sign-in document (`45`) — same name shape the retired PDFs used,
@@ -301,11 +489,93 @@ defineLazyGlobal_('STRAY_FILE_PATTERNS', () => [
     mime: 'application/pdf',
     folder: SIGN_IN_SHEET_FOLDER_NAME,
     what: 'a printed sign-in sheet'
+  },
+  {
+    // A registrant snapshot (`99j`): "All_Registrants 2026-10-01_0355 (daily).csv".
+    re: new RegExp(`^${escapeDriveNameForRegExp_(SHEET_NAMES.REGISTRANT_DASH)} \\d{4}-\\d{2}-\\d{2}_\\d{4} \\(.+\\)\\.csv$`),
+    mime: MimeType.CSV,
+    folder: REGISTRANT_SNAPSHOT_FOLDER_NAME,
+    what: 'a registrant snapshot'
+  },
+  {
+    // A ledger compaction archive (`99za`):
+    // "Registration_Ledger compacted 2026-09-30_1112 (42 entries).csv".
+    re: new RegExp(`^${escapeDriveNameForRegExp_(SHEET_NAMES.REGISTRATION_LEDGER)} compacted \\d{4}-\\d{2}-\\d{2}_\\d{4} \\(.+\\)\\.csv$`),
+    mime: MimeType.CSV,
+    folder: LEDGER_ARCHIVE_FOLDER_NAME,
+    what: 'a ledger archive'
+  },
+  {
+    // The public schedule's Drive fallback (`99y`) — one fixed file name.
+    re: new RegExp(`^${escapeDriveNameForRegExp_(PUBLIC_SNAPSHOT_FILE_NAME)}$`),
+    mime: 'application/json',
+    folder: PUBLIC_SNAPSHOT_FOLDER_NAME,
+    what: 'the public schedule snapshot'
   }
 ]);
 
-/** How many root files the sweep will look at before it stops and says so. */
+/** A file or folder name, made safe to drop into a RegExp literally. */
+function escapeDriveNameForRegExp_(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** How many loose files the sweep will look at before it stops and says so. */
 const STRAY_SWEEP_MAX_FILES = 3000;
+
+/**
+ * Every folder this system keeps, keyed by name, each fetched through its
+ * owner's getter — so each is adopted onto the shelf its owner declared on the
+ * way past — plus `System` itself under SYSTEM_SUBFOLDER_NAME.
+ *
+ * One list, read by the sweep. A folder added to this project without a line
+ * here is still created on the right shelf by its own getter; it is only the
+ * one-time tidy that would not visit it.
+ */
+function collectSystemFolders_() {
+  const folders = {};
+  const add = getter => {
+    const folder = getter();
+    if (folder) folders[folder.getName()] = folder;
+  };
+  // Staff-facing first, so their lookups only PEEK at System (82b).
+  add(getOrCreateProgramLeaderSheetFolder);
+  add(getOrCreateSignInSheetDocFolder);
+  // System-only.
+  add(getOrCreateFormsFolder);
+  add(getOrCreateSignInSheetFolder);
+  add(getOrCreateFormImageFolder);
+  add(getOrCreateRegistrantSnapshotFolder);
+  add(getOrCreatePublicScheduleSnapshotFolder);
+  add(getOrCreateLedgerArchiveFolder);
+  const sys = getSystemOnlyFolder(true);
+  if (sys) folders[SYSTEM_SUBFOLDER_NAME] = sys;
+  return folders;
+}
+
+/**
+ * Pass 0's second half: a folder left at the anchor's top level with the same
+ * name as a system-only folder now in System is a twin from two racing
+ * executions. Moved into System beside its sibling — not merged, not trashed
+ * (see the banner). Returns the lines to report.
+ */
+function buryTwinSystemFolders_(root, sys, folders) {
+  const moved = [];
+  if (!root || !sys) return moved;
+  Object.keys(folders).forEach(name => {
+    const folder = folders[name];
+    if (name === SYSTEM_SUBFOLDER_NAME) return;
+    if (driveParentIdOf_(folder) !== sys.getId()) return;   // a staff folder
+    const twins = root.getFoldersByName(name);
+    while (twins.hasNext()) {
+      const twin = twins.next();
+      if (twin.getId() === folder.getId()) continue;
+      if (moveDriveFileInto(twin, sys, `a second "${name}" folder`)) {
+        moved.push(`${name} (a second copy) → ${SYSTEM_SUBFOLDER_NAME}`);
+      }
+    }
+  });
+  return moved;
+}
 
 /**
  * Admin menu: file every generated document where it now belongs.
@@ -330,15 +600,24 @@ function organizeGeneratedFiles() {
   const moved = [];
   const notes = [];
 
-  // Pass 0: make sure every folder exists and is under the anchor. Each
-  // lookup adopts a stray folder of that name on its way past, so this is
-  // most of the tidying on a typical workbook.
-  const folders = {};
-  folders[FORMS_FOLDER_NAME] = getOrCreateFormsFolder();
-  folders[SIGN_IN_DOC_FOLDER_NAME] = getOrCreateSignInSheetDocFolder();
-  folders[SIGN_IN_SHEET_FOLDER_NAME] = getOrCreateSignInSheetFolder();
-  folders[LEADER_SHEET_FOLDER_NAME] = getOrCreateProgramLeaderSheetFolder();
-  folders[FORM_IMAGE_FOLDER_NAME] = getOrCreateFormImageFolder();
+  // Pass 0: the folders onto their shelves, then the twins. The memo is
+  // dropped first so every getter really looks, rather than handing back a
+  // folder found earlier in this execution before anything was moved.
+  clearSystemFolderCache();
+  const before = {};
+  const sysBefore = getSystemOnlyFolder(false);
+  [root, sysBefore].filter(Boolean).forEach(shelf => {
+    const it = shelf.getFolders();
+    while (it.hasNext()) { const f = it.next(); before[f.getId()] = driveParentIdOf_(f); }
+  });
+  const folders = collectSystemFolders_();
+  const sys = folders[SYSTEM_SUBFOLDER_NAME] || null;
+  Object.keys(folders).forEach(name => {
+    const folder = folders[name];
+    const was = before[folder.getId()];
+    if (was && was !== driveParentIdOf_(folder)) moved.push(`${name} (folder) → ${SYSTEM_SUBFOLDER_NAME}`);
+  });
+  buryTwinSystemFolders_(root, sys, folders).forEach(line => moved.push(line));
 
   const fileInto = (fileId, folder, what) => {
     if (!fileId || !folder) return;
@@ -363,8 +642,10 @@ function organizeGeneratedFiles() {
     fileInto(registry[key], folders[FORMS_FOLDER_NAME], `registration form for ${key}`);
   });
 
-  const templateId = PropertiesService.getScriptProperties().getProperty(TEMPLATE_FORM_PROP_KEY);
-  fileInto(templateId, root, 'the form template');
+  const props = PropertiesService.getScriptProperties();
+  fileInto(props.getProperty(TEMPLATE_FORM_PROP_KEY), sys || root, 'the form template');
+  fileInto(props.getProperty(PUBLIC_SNAPSHOT_FILE_PROP_KEY),
+    folders[PUBLIC_SNAPSHOT_FOLDER_NAME], 'the public schedule snapshot');
 
   const leaderRegistry = getProgramLeaderSheetRegistry();
   Object.keys(leaderRegistry).forEach(key => {
@@ -382,41 +663,50 @@ function organizeGeneratedFiles() {
     fileInto(entry && entry.fileId, target, `sign-in sheet for ${key}`);
   });
 
-  // Pass 2: My Drive root, by name and MIME type. See the banner above for
-  // why this pass is bounded, anchored and logged.
+  // Pass 2: My Drive root and the anchor's top level, by name and MIME type.
+  // See the banner above for why this pass is bounded, anchored and logged.
+  const loose = [{ label: 'My Drive', get: () => DriveApp.getRootFolder() }];
+  loose.push({ label: `"${root.getName()}"`, get: () => root });
+  const walked = {};
   let looked = 0;
   let hitCap = false;
-  try {
-    const files = DriveApp.getRootFolder().getFiles();
-    while (files.hasNext()) {
-      if (looked++ >= STRAY_SWEEP_MAX_FILES) { hitCap = true; break; }
-      const file = files.next();
-      const name = String(file.getName() || '').trim();
-      let mime = '';
-      try { mime = file.getMimeType(); } catch (err) { mime = ''; }
+  loose.forEach(place => {
+    if (hitCap) return;
+    try {
+      const folder = place.get();
+      if (!folder || walked[folder.getId()]) return;
+      walked[folder.getId()] = true;
+      const files = folder.getFiles();
+      while (files.hasNext()) {
+        if (looked++ >= STRAY_SWEEP_MAX_FILES) { hitCap = true; break; }
+        const file = files.next();
+        const name = String(file.getName() || '').trim();
+        let mime = '';
+        try { mime = file.getMimeType(); } catch (err) { mime = ''; }
 
-      for (let i = 0; i < STRAY_FILE_PATTERNS.length; i++) {
-        const spec = STRAY_FILE_PATTERNS[i];
-        if (spec.mime !== mime) continue;
-        if (!spec.re.test(name)) continue;
-        const target = spec.folder ? folders[spec.folder] : root;
-        if (!driveFileIsIn(file, target) && moveDriveFileInto(file, target, `${spec.what} "${name}"`)) {
-          moved.push(`${name} → ${target.getName()}`);
+        for (let i = 0; i < STRAY_FILE_PATTERNS.length; i++) {
+          const spec = STRAY_FILE_PATTERNS[i];
+          if (spec.mime !== mime) continue;
+          if (!spec.re.test(name)) continue;
+          const target = folders[spec.folder] || root;
+          if (!driveFileIsIn(file, target) && moveDriveFileInto(file, target, `${spec.what} "${name}"`)) {
+            moved.push(`${name} → ${target.getName()}`);
+          }
+          break;
         }
-        break;
       }
+    } catch (err) {
+      notes.push(`${place.label} could not be searched for loose files (${err}). Everything with a link in the workbook was still filed.`);
     }
-  } catch (err) {
-    notes.push(`My Drive could not be searched for loose files (${err}). Everything with a link in the workbook was still filed.`);
-  }
+  });
   if (hitCap) {
-    notes.push(`Stopped after looking at ${STRAY_SWEEP_MAX_FILES} files in My Drive. Run this again to carry on.`);
+    notes.push(`Stopped after looking at ${STRAY_SWEEP_MAX_FILES} loose files. Run this again to carry on.`);
   }
 
   moved.forEach(line => log(`Organize: ${line}`));
 
   const summary = moved.length
-    ? `Moved ${moved.length} file${moved.length === 1 ? '' : 's'} into "${root.getName()}":\n\n` +
+    ? `Moved ${moved.length} item${moved.length === 1 ? '' : 's'} under "${root.getName()}":\n\n` +
       moved.slice(0, 40).join('\n') +
       (moved.length > 40 ? `\n\n…and ${moved.length - 40} more (all of them are in the log).` : '')
     : `Nothing to move — every file this system has made is already filed under "${root.getName()}".`;

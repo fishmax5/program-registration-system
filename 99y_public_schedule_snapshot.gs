@@ -65,6 +65,14 @@ const PUBLIC_SNAPSHOT_FOLDER_NAME = 'Public Schedule Snapshot';
 const PUBLIC_SNAPSHOT_FILE_NAME = 'public-schedule-snapshot.json';
 
 /**
+ * `<anchor>/System/Public Schedule Snapshot` (`82`'s 82b). System-only: the
+ * file is a cache the pages read by id, and nobody opens it by hand.
+ */
+function getOrCreatePublicScheduleSnapshotFolder() {
+  return getOrCreateSystemFolder(PUBLIC_SNAPSHOT_FOLDER_NAME, null, { systemOnly: true });
+}
+
+/**
  * A Refresh press rebuilds live only if what is stored is older than this.
  * The page is anonymous and on a public website: without a floor, Refresh is
  * a button anybody can hold down to make the workbook read its session tab.
@@ -167,7 +175,7 @@ function writeSnapshotToDrive_(json) {
         // Trashed or unreachable — make a new one below.
       }
     }
-    const folder = getOrCreateSystemFolder(PUBLIC_SNAPSHOT_FOLDER_NAME);
+    const folder = getOrCreatePublicScheduleSnapshotFolder();
     const file = folder
       ? folder.createFile(PUBLIC_SNAPSHOT_FILE_NAME, json, 'application/json')
       : DriveApp.createFile(PUBLIC_SNAPSHOT_FILE_NAME, json, 'application/json');

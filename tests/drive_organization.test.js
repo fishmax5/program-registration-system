@@ -37,10 +37,15 @@ function makeDrive() {
 
   function folder(name, parentId) {
     const id = `f${++next}`;
+    const born = next;
     const self = {
       id, name, parentId, isFolder: true,
       getId: () => id,
       getName: () => self.name,
+      // Creation order is the id order — what pickSystemFolder_() sorts on.
+      getDateCreated: () => new Date(2026, 0, 1, 0, 0, born),
+      getFolders: () => iter(Object.keys(byId).map(k => byId[k])
+        .filter(f => f.isFolder && f.parentId === self.id)),
       setName: n => { self.name = n; return self; },
       getParents: () => iter(self.parentId ? [byId[self.parentId]] : []),
       getFoldersByName: n => iter(Object.keys(byId)
@@ -121,7 +126,8 @@ function load(drive, workbookParentId) {
     MimeType: {
       GOOGLE_FORMS: 'application/vnd.google-apps.form',
       GOOGLE_SHEETS: 'application/vnd.google-apps.spreadsheet',
-      GOOGLE_DOCS: 'application/vnd.google-apps.document'
+      GOOGLE_DOCS: 'application/vnd.google-apps.document',
+      CSV: 'text/csv'
     },
     CalendarApp: {}, HtmlService: {}, LockService: {}, ScriptApp: {},
     MailApp: {}, DocumentApp: {}, UrlFetchApp: {}, Calendar: {}, CacheService: {}
@@ -136,7 +142,12 @@ this.driveFileIsIn = driveFileIsIn;
 this.STRAY_FILE_PATTERNS = STRAY_FILE_PATTERNS;
 this.LEADER_SHEET_FOLDER_NAME = LEADER_SHEET_FOLDER_NAME;
 this.LEGACY_LEADER_SHEET_FOLDER_NAMES = LEGACY_LEADER_SHEET_FOLDER_NAMES;
+this.getSystemOnlyFolder = getSystemOnlyFolder;
+this.SYSTEM_SUBFOLDER_NAME = SYSTEM_SUBFOLDER_NAME;
+this.TEMPLATE_FORM_PROP_KEY = TEMPLATE_FORM_PROP_KEY;
+this.PUBLIC_SNAPSHOT_FILE_PROP_KEY = PUBLIC_SNAPSHOT_FILE_PROP_KEY;
 `, sandbox, { filename: 'program.gs' });
+  sandbox.__props = props;
   return sandbox;
 }
 
@@ -222,14 +233,25 @@ this.LEGACY_LEADER_SHEET_FOLDER_NAMES = LEGACY_LEADER_SHEET_FOLDER_NAMES;
 
   const match = (name, mime) => {
     const hit = s.STRAY_FILE_PATTERNS.filter(p => p.mime === mime && p.re.test(name))[0];
-    return hit ? (hit.folder || '(the system folder)') : null;
+    return hit ? hit.folder : null;
   };
 
-  check('the template form is recognized',
-    match('TEMPLATE — Registration Form Base (do not edit or delete)', FORMS),
-    '(the system folder)');
-  check('a leader sheet is recognized',
+  check('the template form is recognized, and buried in System',
+    match('TEMPLATE — Registration Form Base (do not edit or delete)', FORMS), 'System');
+  check('a leader sheet under its old name is recognized',
     match('Sign-Up Sheet — Chair Yoga (Narberth)', SHEETS), s.LEADER_SHEET_FOLDER_NAME);
+  check('a leader sheet under its current name is recognized',
+    match('Registrant Sheet — Chair Yoga (Narberth)', SHEETS), s.LEADER_SHEET_FOLDER_NAME);
+  check("somebody's own COPY of a registrant sheet is left alone",
+    match('Copy of Registrant Sheet — Advanced Stitch Club (Ashbridge)', SHEETS), null);
+  check('a registrant snapshot CSV is recognized',
+    match('All_Registrants 2026-10-01_0355 (daily).csv', 'text/csv'), 'Registrant Snapshots');
+  check('a ledger archive CSV is recognized',
+    match('Registration_Ledger compacted 2026-09-30_1112 (42 entries).csv', 'text/csv'), 'Ledger Archive');
+  check('the public schedule JSON is recognized',
+    match('public-schedule-snapshot.json', 'application/json'), 'Public Schedule Snapshot');
+  check('a CSV somebody exported by hand is left alone',
+    match('All_Registrants export for Jane.csv', 'text/csv'), null);
   check('a live sign-in document is recognized',
     match('Sign-In 2026-03-04 Narberth', DOCS), 'Sign-In Sheets');
   check('a retired sign-in PDF is recognized',
@@ -279,6 +301,188 @@ this.LEGACY_LEADER_SHEET_FOLDER_NAMES = LEGACY_LEADER_SHEET_FOLDER_NAMES;
   catch (err) { threw = true; }
   check('a Drive that refuses both calls does not throw', threw, false);
   check('...it reports the failure instead', moved, false);
+}
+
+// ---------------------------------------------------------------------------
+// 7. TWO SHELVES (82b). A system-only folder lives in <anchor>/System; a
+//    staff-facing one stays at the anchor's top level; and a lookup never
+//    drags a folder from one shelf to the other except the one way the
+//    upgrade needs (top level → System, for a system-only folder).
+// ---------------------------------------------------------------------------
+const SYS = { systemOnly: true };
+{
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const s = load(drive, home.getId());
+
+  const staff = s.getOrCreateSystemFolder('Sign-In Sheets');
+  check('a staff folder is created at the top level', staff.parentId, home.getId());
+  check('...and a staff lookup does not create an empty System folder',
+    s.getSystemOnlyFolder(false), null);
+
+  const made = s.getOrCreateSystemFolder('Registrant Snapshots', null, SYS);
+  const sys = s.getSystemOnlyFolder(false);
+  check('a system-only lookup creates System inside the anchor',
+    !!sys && sys.parentId, home.getId());
+  check('...named System', sys.getName(), 'System');
+  check('...and creates the folder inside System', made.parentId, sys.getId());
+
+  s.clearSystemFolderCache();
+  check('a second system-only lookup finds the same folder',
+    s.getOrCreateSystemFolder('Registrant Snapshots', null, SYS).getId(), made.getId());
+}
+
+{
+  // The upgrade path: a system-only folder at the anchor's top level, full of
+  // files with live links, is MOVED into System — same id, not a new one.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const old = drive.folder('Program Registration Forms', home.getId());
+  const form = drive.file('Chair Yoga - October 2026', old.getId(), 'application/vnd.google-apps.form');
+  const s = load(drive, home.getId());
+
+  const got = s.getOrCreateSystemFolder('Program Registration Forms', null, SYS);
+  const sys = s.getSystemOnlyFolder(false);
+  check('a top-level system-only folder is adopted, not duplicated', got.getId(), old.getId());
+  check('...moved into System', got.parentId, sys.getId());
+  check('...with its files still inside it', form.parentId, old.getId());
+  check('...and no second folder of that name anywhere',
+    Object.keys(drive.byId).filter(k => drive.byId[k].isFolder &&
+      drive.byId[k].name === 'Program Registration Forms').length, 1);
+}
+
+{
+  // NEVER FIGHT: a staff folder somebody has put inside System is used where
+  // it is. The Drive-wide fallback would otherwise find it and drag it out.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const sys = drive.folder('System', home.getId());
+  const tucked = drive.folder('Sign-In Sheets', sys.getId());
+  const s = load(drive, home.getId());
+
+  const got = s.getOrCreateSystemFolder('Sign-In Sheets');
+  check('a staff folder found in System is the one returned', got.getId(), tucked.getId());
+  check('...and it is left in System, not moved back', got.parentId, sys.getId());
+}
+
+{
+  // NEVER FIGHT, the other half: a legacy-named folder already on a shelf is
+  // renamed in place and not moved between the anchor and System.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const sys = drive.folder('System', home.getId());
+  const s = load(drive, home.getId());
+  const old = drive.folder(s.LEGACY_LEADER_SHEET_FOLDER_NAMES[1], sys.getId());
+
+  const got = s.getOrCreateSystemFolder(s.LEADER_SHEET_FOLDER_NAME, s.LEGACY_LEADER_SHEET_FOLDER_NAMES);
+  check('a legacy folder already in System is adopted', got.getId(), old.getId());
+  check('...renamed', got.getName(), s.LEADER_SHEET_FOLDER_NAME);
+  check('...and left where it is', got.parentId, sys.getId());
+}
+
+{
+  // A system-only folder loose elsewhere in Drive goes into System.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const stray = drive.folder('Ledger Archive', drive.root.getId());
+  const s = load(drive, home.getId());
+  const got = s.getOrCreateSystemFolder('Ledger Archive', null, SYS);
+  check('a stray system-only folder is adopted', got.getId(), stray.getId());
+  check('...into System', got.parentId, s.getSystemOnlyFolder(false).getId());
+}
+
+{
+  // "System" is far too generic to adopt Drive-wide.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const theirs = drive.folder('System', drive.root.getId());
+  const s = load(drive, home.getId());
+  const sys = s.getSystemOnlyFolder();
+  check("somebody else's System folder is never adopted", sys.getId() !== theirs.getId(), true);
+  check('...ours is made inside the anchor', sys.parentId, home.getId());
+  check('...and theirs is not moved', theirs.parentId, drive.root.getId());
+}
+
+{
+  // Twins from racing executions: every run picks the EARLIEST, so they stop
+  // diverging.
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const first = drive.folder('Public Schedule Snapshot', home.getId());
+  drive.folder('Public Schedule Snapshot', home.getId());
+  const s = load(drive, home.getId());
+  check('of two twins, the earlier-created is chosen',
+    s.getOrCreateSystemFolder('Public Schedule Snapshot').getId(), first.getId());
+}
+
+{
+  // No anchor: a system-only lookup still returns a working folder.
+  const drive = makeDrive();
+  const s = load(drive, null);
+  check('no anchor means no System', s.getSystemOnlyFolder(), null);
+  const made = s.getOrCreateSystemFolder('Ledger Archive', null, SYS);
+  check('...and a system-only folder is still returned', !!made && made.getName(), 'Ledger Archive');
+}
+
+// ---------------------------------------------------------------------------
+// 8. THE SWEEP. Folders onto their shelves, twins buried beside them, the
+//    registered and the loose files filed — and nothing a person made moved.
+// ---------------------------------------------------------------------------
+{
+  const drive = makeDrive();
+  const home = drive.folder('Event Drive', drive.root.getId());
+  const s = load(drive, home.getId());
+  const FORMS = 'application/vnd.google-apps.form';
+  const SHEETS = 'application/vnd.google-apps.spreadsheet';
+
+  const formsFolder = drive.folder('Program Registration Forms', home.getId());
+  const snaps = drive.folder('Registrant Snapshots', home.getId());
+  const pubA = drive.folder('Public Schedule Snapshot', home.getId());
+  const pubB = drive.folder('Public Schedule Snapshot', home.getId());
+  const rosters = drive.folder('Program Registrant Sheets', home.getId());
+  const signIns = drive.folder('Sign-In Sheets', home.getId());
+  const mine = drive.folder('Notes', home.getId());
+
+  const liveTemplate = drive.file('TEMPLATE — Registration Form Base (do not edit or delete)', home.getId(), FORMS);
+  const spareTemplate = drive.file('TEMPLATE — Registration Form Base (do not edit or delete)', home.getId(), FORMS);
+  const json = drive.file('public-schedule-snapshot.json', pubA.getId(), 'application/json');
+  const looseRoster = drive.file('Registrant Sheet — Chair Yoga (Narberth)', drive.root.getId(), SHEETS);
+  const copy = drive.file('Copy of Registrant Sheet — Chair Yoga (Narberth)', drive.root.getId(), SHEETS);
+  const looseCsv = drive.file('All_Registrants 2026-10-01_0355 (daily).csv', home.getId(), 'text/csv');
+  const workbookTwin = drive.file('Budget 2026', home.getId(), SHEETS);
+
+  s.__props[s.TEMPLATE_FORM_PROP_KEY] = liveTemplate.getId();
+  s.__props[s.PUBLIC_SNAPSHOT_FILE_PROP_KEY] = json.getId();
+  let alerted = '';
+  s.requireAuthorizedAdmin = () => true;
+  s.getPersistentFormRegistry = () => ({});
+  s.getProgramLeaderSheetRegistry = () => ({});
+  s.getSignInSheetRegistry = () => ({});
+  s.SpreadsheetApp.getUi = () => ({ alert: (t, m) => { alerted = m; }, ButtonSet: { OK: 'OK' } });
+
+  s.organizeGeneratedFiles();
+  const sys = s.getSystemOnlyFolder(false);
+
+  check('the sweep makes System inside the anchor', !!sys && sys.parentId, home.getId());
+  check('the forms folder is buried', formsFolder.parentId, sys.getId());
+  check('the snapshots folder is buried', snaps.parentId, sys.getId());
+  check('the public snapshot folder in use is buried', pubA.parentId, sys.getId());
+  check('...and its twin is buried beside it, not left at the top', pubB.parentId, sys.getId());
+  check('...with the live JSON still inside the one it was in', json.parentId, pubA.getId());
+  check('the registrant sheets folder stays at the top level', rosters.parentId, home.getId());
+  check('the sign-in sheets folder stays at the top level', signIns.parentId, home.getId());
+  check("a staff member's own folder is untouched", mine.parentId, home.getId());
+  check('the live template is filed in System', liveTemplate.parentId, sys.getId());
+  check('a spare template at the top level is filed in System too', spareTemplate.parentId, sys.getId());
+  check('a loose roster in My Drive goes to the registrant sheets folder', looseRoster.parentId, rosters.getId());
+  check("somebody's copy of a roster stays where they put it", copy.parentId, drive.root.getId());
+  check('a loose snapshot CSV at the top level goes to the snapshots folder', looseCsv.parentId, snaps.getId());
+  check('an unrelated spreadsheet is not moved', workbookTwin.parentId, home.getId());
+  check('the summary says something was moved', /^Moved \d+ item/.test(alerted), true);
+
+  // Idempotent: a second run moves nothing.
+  s.organizeGeneratedFiles();
+  check('a second sweep has nothing to move', /^Nothing to move/.test(alerted), true);
 }
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll drive organization checks passed.');

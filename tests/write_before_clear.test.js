@@ -142,7 +142,7 @@ function noMismatchLogged(label) {
     Next_Date: new RealDate(2026, 9, 6), Last_Date: new RealDate(2026, 11, 15), Status: 'Active' });
   const finished = rowOf(headers, { Program: 'Winter Chorus', Location: 'Annex', Group_Key: 'program::winter chorus::annex',
     Last_Date: new RealDate(2026, 2, 3), Status: 'Completed' });
-  const built = () => ({ rows: [running.slice(), finished.slice()], notes: [], links: [], matched: [] });
+  const built = () => ({ rows: [running.slice(), finished.slice()], notes: [], matched: [] });
   const month = label => ({ label, sessions: 1, registrations: 2, participants: 2, newPeople: 1,
     returningPct: 50, perSession: 2, attendedPct: 100 });
   [null, {
