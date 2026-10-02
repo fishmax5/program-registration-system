@@ -307,12 +307,12 @@ function queueDeleteRegistrationsBehindSync_(wanted, alsoDeleteResponses) {
     eventIds,
     alsoDeleteResponses: !!alsoDeleteResponses,
     requestedBy: getCurrentUserEmail()
-  }, 'Queued behind a sync that was holding the workbook.');
+  }, `Queued behind ${workbookHolderPhrase_()}.`);
   if (!queued) {
     return '⚠️ A sync is running right now and the deletion could not be queued — try again in a moment.';
   }
-  return `⏳ A sync is running, so the deletion of ${eventIds.length} session(s) is queued and will be carried ` +
-    'out the moment the sync finishes. You can close this window. The result goes in the office\'s daily digest.';
+  return `⏳ The workbook is busy (${workbookHolderPhrase_()}), so the deletion of ${eventIds.length} session(s) ` +
+    'is queued and will be carried out the moment it finishes. You can close this window. The result goes in the office\'s daily digest.';
 }
 
 /**

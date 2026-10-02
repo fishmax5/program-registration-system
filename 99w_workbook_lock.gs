@@ -227,6 +227,27 @@ function workbookHeldElsewhere() {
   }
 }
 
+/**
+ * Who has the workbook, in words: "another run (Sync Registrations, since
+ * 3:12 PM)". A message that says "a sync" when the holder was a retry flush
+ * or a menu repair sends somebody looking for a sync that is not there.
+ * Never throws.
+ */
+function workbookHolderPhrase_() {
+  try {
+    const lease = readWorkbookLease();
+    if (!lease || !lease.owner) return 'another run';
+    const label = String(lease.label || '').trim() || 'an unnamed run';
+    let since = '';
+    try {
+      since = Utilities.formatDate(new Date(Number(lease.since)), TIMEZONE, 'h:mm a');
+    } catch (err) { since = ''; }
+    return `another run (${label}${since ? `, since ${since}` : ''})`;
+  } catch (err) {
+    return 'another run';
+  }
+}
+
 /** True while this execution holds the workbook lock. */
 function holdsWorkbookLock() {
   return workbookLockDepth_ > 0;

@@ -291,10 +291,22 @@ function clearStuckBackgroundJobs() {
     log('clearStuckBackgroundJobs: released a workbook lock left by a run that went quiet.');
   }
 
+  // A LIVE lease is a run that is working right now — not stuck, so not
+  // cleared, but said: "nothing to clear" while a retry flush or a repair is
+  // holding the workbook reads as "nothing is running", and it is.
+  let liveHolder = '';
+  try {
+    if (!staleLease && workbookHeldElsewhere()) liveHolder = workbookHolderPhrase_();
+  } catch (err) { /* nothing to say */ }
+
   const ui = tryGetUi_();
   if (inFlight.length === 0) {
-    const message = 'No background job is in flight, so there is nothing to clear. If a menu item is ' +
-      'still doing nothing, run "Why did nothing happen?" beside this one.';
+    const message = (staleLease
+      ? 'Released a workbook lock left by a run that had gone quiet. No background job is in flight.'
+      : 'No background job is in flight, so there is nothing to clear.') +
+      (liveHolder ? ` The workbook is held right now by ${liveHolder}, which is still working — wait for it ` +
+        'to finish rather than clearing it.' : '') +
+      ' If a menu item is still doing nothing, run "Why did nothing happen?" beside this one.';
     if (ui) ui.alert('Nothing to clear', message, ui.ButtonSet.OK);
     log(`clearStuckBackgroundJobs: ${message}`);
     return;

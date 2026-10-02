@@ -153,9 +153,12 @@ const DESK_LOCK_WAIT_MS = 3 * 1000;
  * unavailable "half the time". Wrapping one unit of work at a time lets a
  * background sweep YIELD between forms instead of owning the workbook for
  * four and a half minutes at a stretch.
+ *
+ * `label` names the holder in the workbook lease (99w), which is what lets
+ * "Why did nothing happen?" and a queued write say WHO had the workbook.
  */
-function withScriptLock(waitMs, fn, onBusy) {
-  const lock = workbookLock();
+function withScriptLock(waitMs, fn, onBusy, label) {
+  const lock = workbookLock(label);
   if (!lock.tryLock(waitMs)) return onBusy === undefined ? null : onBusy;
   try {
     return fn();

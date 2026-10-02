@@ -162,5 +162,36 @@ check('...and saying it needs entering by hand',
 check('...while the page list still has its own copy',
   sandbox.readCheckInList('CHECK_IN_PROBLEMS_V1').length, 1);
 
+// TWO FLUSHES SIDE BY SIDE NEVER APPLY ONE ENTRY TWICE (2026-10-02). The
+// five-minute pass and the retry trigger overlapped on a queued deletion; the
+// later one had read the queue before waiting out the earlier one's lock and
+// would have applied the same batch again — a meal counted twice for a Quick
+// Mark. A flush now CLAIMS its batch before applying it.
+reset();
+sandbox.queueOptimisticRetry('quickMark', { name: 'Ann Lee', session: 'S1' }, 'busy');
+let nested = null;
+sandbox.__quickMarkResult = () => {
+  // A second flush starts while the first is mid-apply.
+  if (nested === null) nested = sandbox.flushOptimisticRetryQueue({ waitMs: 0 });
+  return { ok: true };
+};
+const outer = sandbox.flushOptimisticRetryQueue({ waitMs: 0 });
+check('the overlapping flush applies nothing', nested && nested.applied, 0);
+check('...and leaves the claimed entry alone', nested && nested.claimedElsewhere, true);
+check('the entry is written exactly once', quickMarkCalls.length, 1);
+check('...by the flush that claimed it', outer.applied, 1);
+check('...and is gone from the queue afterwards', queued().length, 0);
+
+// A busy lock lifts the claim, so the next flush can take the entry.
+reset();
+sandbox.__quickMarkResult = () => quickMarkResults.shift() || { ok: false, message: 'still busy' };
+sandbox.queueOptimisticRetry('quickMark', { name: 'Ann Lee', session: 'S1' }, 'busy');
+lockHeld = true;
+sandbox.flushOptimisticRetryQueue({ waitMs: 0 });
+check('a busy flush leaves no claim behind', queued()[0].claimedUntil === undefined, true);
+lockHeld = false;
+quickMarkResults = [{ ok: true }];
+check('...so the next flush writes it', sandbox.flushOptimisticRetryQueue({ waitMs: 0 }).applied, 1);
+
 console.log(failures === 0 ? '\nAll optimistic-retry checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -86,6 +86,24 @@ const OPTIMISTIC_RETRY_MAX = 200;
 /** How many are applied under one lock hold. */
 const OPTIMISTIC_RETRY_BATCH = 25;
 
+/**
+ * How long a flush's CLAIM on its batch stands before another flush may take
+ * the same entries.
+ *
+ * Three runs can flush this queue — the one-off retry trigger, the door's
+ * five-minute pass (63) and the end of a sync slice — and on 2026-10-02 two of
+ * them overlapped on a queued deletion: the later one read the queue, waited
+ * out the lock the earlier one held, and would then have applied the same
+ * batch a second time. For a deletion that is a no-op; for a Quick Mark it is
+ * a meal counted twice, and for a door sign-in (applied WITHOUT the lock) it
+ * is a second walk-in row. So a flush stamps the entries it takes under the
+ * queue lock before it applies any of them, and every other flush skips a
+ * stamped entry. Longer than any execution can live, so a claim only outlasts
+ * its run when that run was killed — and then it is tried again rather than
+ * lost.
+ */
+const OPTIMISTIC_RETRY_CLAIM_MS = 31 * 60 * 1000;
+
 /** The one-off trigger's handler. Named once so arming and clearing agree. */
 const OPTIMISTIC_RETRY_HANDLER = 'flushOptimisticRetryQueueTrigger';
 
@@ -231,11 +249,35 @@ function flushDeskWritesAfterSync() {
 function flushOptimisticRetryQueue(options) {
   const opts = options || {};
   try {
-    const queue = readCheckInList(OPTIMISTIC_RETRY_PROP_KEY);
-    if (!queue.length) return { ok: true, applied: 0, pending: 0 };
-    if (isDeskWorkBlocked()) return { ok: false, applied: 0, pending: queue.length };
+    const queued = readCheckInList(OPTIMISTIC_RETRY_PROP_KEY);
+    if (!queued.length) return { ok: true, applied: 0, pending: 0 };
+    if (isDeskWorkBlocked()) return { ok: false, applied: 0, pending: queued.length };
 
-    const batch = queue.slice(0, OPTIMISTIC_RETRY_BATCH);
+    // CLAIM BEFORE APPLYING (see OPTIMISTIC_RETRY_CLAIM_MS). The batch is
+    // chosen and stamped under the queue lock, from a fresh read, so two
+    // flushes running side by side never hold the same entry.
+    const claimToken = `${new Date().getTime()}-${Math.floor(Math.random() * 1e9)}`;
+    const claim = withCheckInQueueLock(() => {
+      const now = new Date().getTime();
+      const queue = readCheckInList(OPTIMISTIC_RETRY_PROP_KEY);
+      const free = queue.filter(entry => !(Number(entry.claimedUntil) > now));
+      const taken = free.slice(0, OPTIMISTIC_RETRY_BATCH);
+      if (!taken.length) return { batch: [], total: queue.length };
+      const ids = {};
+      taken.forEach(entry => { ids[entry.id] = true; });
+      queue.forEach(entry => {
+        if (!ids[entry.id]) return;
+        entry.claimedUntil = now + OPTIMISTIC_RETRY_CLAIM_MS;
+        entry.claimedBy = claimToken;
+      });
+      if (!writeCheckInList(OPTIMISTIC_RETRY_PROP_KEY, queue, OPTIMISTIC_RETRY_MAX)) return null;
+      return { batch: taken, total: queue.length };
+    });
+    if (!claim) return { ok: false, applied: 0, pending: queued.length, busy: true };
+    // Everything left is in another flush's hands; it re-arms if it needs to.
+    if (!claim.batch.length) return { ok: true, applied: 0, pending: claim.total, claimedElsewhere: true };
+
+    const batch = claim.batch;
     const waitMs = opts.waitMs === undefined ? DESK_LOCK_WAIT_MS : opts.waitMs;
 
     // TWO GROUPS, AND THE SPLIT IS NOT COSMETIC. LockService locks are not
@@ -257,12 +299,15 @@ function flushOptimisticRetryQueue(options) {
         } catch (err) {
           return { entry, result: { ok: false, message: String(err) } };
         }
-      }), null);
+      }), null, 'Optimistic retry queue');
       // BUSY IS NOT A TRY. The lock could not be taken, so nothing was
       // attempted and nothing should be counted against an entry's allowance —
       // otherwise a long sync burns the whole retry budget without ever having
-      // run a mark. Everything stays queued exactly as it was.
-      if (got === null) return { ok: false, applied: 0, pending: queue.length, busy: true };
+      // run a mark. Everything stays queued exactly as it was, unclaimed.
+      if (got === null) {
+        releaseOptimisticRetryClaims_(claimToken, {}, {});
+        return { ok: false, applied: 0, pending: claim.total, busy: true };
+      }
       outcomes = outcomes.concat(got);
     }
     unheld.forEach(entry => {
@@ -294,24 +339,35 @@ function flushOptimisticRetryQueue(options) {
       retry[outcome.entry.id] = tries;
     });
 
-    const remaining = withCheckInQueueLock(() => {
-      // Re-read inside the lock: something can have been queued while the
-      // batch was being applied, and rewriting from a stale copy would drop it.
-      const kept = readCheckInList(OPTIMISTIC_RETRY_PROP_KEY)
-        .filter(entry => !done[entry.id])
-        .map(entry => {
-          if (retry[entry.id] !== undefined) entry.tries = retry[entry.id];
-          return entry;
-        });
-      writeCheckInList(OPTIMISTIC_RETRY_PROP_KEY, kept, OPTIMISTIC_RETRY_MAX);
-      return kept.length;
-    });
-
-    return { ok: true, applied, pending: remaining === null ? queue.length : remaining };
+    const remaining = releaseOptimisticRetryClaims_(claimToken, done, retry);
+    return { ok: true, applied, pending: remaining === null ? claim.total : remaining };
   } catch (err) {
     log(`ℹ️ Could not flush the optimistic-retry queue (${err}) — its entries stay queued.`);
     return { ok: false, applied: 0, pending: 0 };
   }
+}
+
+/**
+ * Settles this flush's claim: drops what is done, counts the tries, and lifts
+ * the stamp off everything else it took. Re-read inside the lock, because
+ * something can have been queued while the batch was being applied and
+ * rewriting from a stale copy would drop it. Returns what is left, or null
+ * when the queue lock could not be had (the claim then lapses on its own).
+ */
+function releaseOptimisticRetryClaims_(claimToken, done, retry) {
+  return withCheckInQueueLock(() => {
+    const kept = readCheckInList(OPTIMISTIC_RETRY_PROP_KEY)
+      .filter(entry => !done[entry.id])
+      .map(entry => {
+        if (entry.claimedBy !== claimToken) return entry;
+        if (retry[entry.id] !== undefined) entry.tries = retry[entry.id];
+        delete entry.claimedUntil;
+        delete entry.claimedBy;
+        return entry;
+      });
+    writeCheckInList(OPTIMISTIC_RETRY_PROP_KEY, kept, OPTIMISTIC_RETRY_MAX);
+    return kept.length;
+  });
 }
 
 /** One queued write, re-applied. Called with the script lock already held. */
