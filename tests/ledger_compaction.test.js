@@ -58,7 +58,7 @@ this.setupCompaction = function (sheet, folder, confirm) {
   getOrCreateSystemFolder = function () { return folder; };
   spoolOfficeNote = function () {};
   toastIfPossible = function () {};
-  explainRefusal = function () {};
+  explainRefusal = function (msg) { this.lastRefusal = msg; }.bind(this);
 };
 `, sandbox, { filename: 'program.gs' });
 
@@ -206,6 +206,16 @@ check('declining the confirmation writes and archives nothing',
 sheet = fakeSheet(all);
 setupCompaction(sheet, { createFile: () => { throw new Error('quota'); } }, true);
 check('an archive that cannot be written stops the compaction', [compactRegistrationLedger(), sheet.written], [0, null]);
+check('and the refusal says why', /quota/.test(sandbox.lastRefusal), true);
+
+created.length = 0;
+sheet = fakeSheet(all);
+setupCompaction(sheet, folder, true);
+vm.runInContext('ledgerArchivePartMaxChars_ = function () { return 1; };', sandbox); // every row its own part
+check('an archive too big for one file is split into parts, each with the header',
+  [compactRegistrationLedger() > 0, created.length, created.every(c => c.csv.split('\n').length === 2),
+    /part 1 of /.test(created[0].name)],
+  [true, reAnalysis.redundant.size, true, true]);
 
 if (failures) {
   console.log(`\n${failures} failure(s)`);

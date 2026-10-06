@@ -134,3 +134,50 @@ assert.strictEqual(already[4].standing, true);
 assert.strictEqual(already[0].nameKey, already[0].nameKey && run(`duplicateRegistrationNameKey('Jane Smith')`));
 
 console.log('bulk_manual_registrants: all passed');
+
+// 9. An Excel file: the first VISIBLE sheet, shared + inline strings, gaps kept,
+//    a number read as its digits, a comma kept inside its cell.
+{
+  const parts = {
+    'xl/workbook.xml': '<workbook xmlns:r="x"><sheets>' +
+      '<sheet name="Old" sheetId="1" state="hidden" r:id="rId1"/>' +
+      '<sheet name="Sign-ups" sheetId="2" r:id="rId2"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships>' +
+      '<Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/>' +
+      '<Relationship Id="rId2" Type="ws" Target="/xl/worksheets/sheet2.xml"/></Relationships>',
+    'xl/sharedStrings.xml': '<sst><si><t>Name</t></si><si><t>Phone</t></si><si><t>Email</t></si>' +
+      '<si><r><t>Smith, </t></r><r><t xml:space="preserve">Jane</t></r><rPh><t>X</t></rPh></si>' +
+      '<si><t>O&apos;Brien &amp; Co</t></si></sst>',
+    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>WRONG</t></is></c></row></sheetData></worksheet>',
+    'xl/worksheets/sheet2.xml': '<worksheet><sheetData>' +
+      '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>' +
+      '<row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2"><v>6105550100</v></c><c r="C2" t="inlineStr"><is><t>jane@x.org</t></is></c></row>' +
+      '<row r="3" spans="1:3"/>' +
+      '<row r="4"><c r="A4" t="s"><v>4</v></c><c r="C4" t="inlineStr"><is><t>ob@x.org</t></is></c></row>' +
+      '</sheetData></worksheet>'
+  };
+  sandbox.__xlsxParts = parts;
+  sandbox.Utilities.base64Decode = () => [1];
+  sandbox.Utilities.newBlob = () => ({});
+  sandbox.Utilities.unzip = () => Object.keys(sandbox.__xlsxParts).map(name => ({
+    getName: () => name, getDataAsString: () => sandbox.__xlsxParts[name]
+  }));
+  const res = JSON.parse(run(`JSON.stringify(readBulkRegistrantXlsx('AAAA'))`));
+  assert.strictEqual(res.sheetName, 'Sign-ups', 'the hidden sheet is skipped');
+  assert.strictEqual(res.hasHeader, true);
+  assert.deepStrictEqual(res.fields, ['name', 'phone', 'email']);
+  assert.deepStrictEqual(res.records[1], ['Smith, Jane', '6105550100', 'jane@x.org'], 'rich text joined, phonetic dropped, comma kept');
+  assert.deepStrictEqual(res.records[2], ["O'Brien & Co", '', 'ob@x.org'], 'entities decoded and the skipped column kept');
+  assert.strictEqual(res.records.length, 3, 'an empty row is dropped');
+  const ppl = JSON.parse(run(`JSON.stringify(peopleFromBulkRecords(${JSON.stringify(res.records)}, ${JSON.stringify(res.fields)}, true))`));
+  assert.strictEqual(ppl[0].name, 'Jane Smith');
+
+  // A one-column sheet of "Last, First" stays one column.
+  parts['xl/worksheets/sheet2.xml'] = '<worksheet><sheetData><row><c t="s"><v>3</v></c></row></sheetData></worksheet>';
+  const one = JSON.parse(run(`JSON.stringify(readBulkRegistrantXlsx('AAAA'))`));
+  assert.deepStrictEqual(one.records, [['Smith, Jane']]);
+
+  sandbox.Utilities.unzip = () => { throw new Error('not a zip'); };
+  assert.throws(() => run(`readBulkRegistrantXlsx('AAAA')`), /could not be opened as an Excel workbook/);
+}
+console.log('bulk xlsx: ok');
