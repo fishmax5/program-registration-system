@@ -58,6 +58,7 @@ this.updateMasterLunchDashboard = updateMasterLunchDashboard;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.dropNotServingRowsReal = dropNotServingRows;
+this.getSectionedRows = getSectionedRows;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -234,6 +235,28 @@ check('the same row carrying a typed order STAYS',
   dropRows([notServingRow('Auto-Synced', 30)]).length, 1);
 check('and so does a hand-edited one, as before',
   dropRows([notServingRow('Manually Edited', '')]).length, 1);
+
+// (c) A number typed BETWEEN two renders in one execution. A sync slice runs
+//     for up to twenty-five minutes and redraws this tab more than once, and
+//     the per-execution grid cache was dropped when the CODE wrote the tab but
+//     not when a person did — so the second render read the copy taken before
+//     the number existed and wrote a blank over it (2026-10-05).
+sandbox.isExplicitlyNotServing = () => false;
+sandbox.getSectionZones = () => [];
+{
+  const live = [existingRow('Auto-Synced')];
+  live[0][dashMap['Actual_Ordered']] = '';
+  sandbox.getOrCreateSheet = (ss, name) => ({ __name: name, getName: () => name });
+  sandbox.readAllSectionedRows = () => live.map(r => r.slice());
+  sandbox.writeMasterLunchDashboardSheet = (sheet, plan, headers, rows) => { written = rows; };
+  // Something earlier in the run reads the tab and leaves it cached.
+  sandbox.getSectionedRows(sandbox.getOrCreateSheet(null, 'Master_Lunch_Dashboard'), dashHeaders, 'Standard_Buffer');
+  // Caroline types the order.
+  live[0][dashMap['Actual_Ordered']] = 42;
+  sandbox.updateMasterLunchDashboard(null);
+  check('a number typed after the tab was cached survives the next render',
+    written[0][dashMap['Actual_Ordered']], 42);
+}
 
 console.log(failures === 0 ? '\nAll lunch-demand checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

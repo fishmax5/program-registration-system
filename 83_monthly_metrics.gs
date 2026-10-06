@@ -123,7 +123,54 @@ function collectMetricsSourceRows(ss) {
     // The volunteer visits, parsed once for the whole capture rather than per
     // month (99e). A workbook with no volunteer tab reads as an empty list,
     // which is what makes the three columns below zero rather than absent.
-    volunteerVisits: readVolunteerVisits()
+    volunteerVisits: readVolunteerVisits(),
+    // The kitchen's own record, typed into Actual_Ordered day by day. Read
+    // fresh (no execution cache) for the reason 44's read is: it is the one
+    // column a person types and nothing recomputes.
+    lunchDashboardRows: (() => {
+      const sheet = ss.getSheetByName(SHEET_NAMES.LUNCH_DASHBOARD);
+      return sheet
+        ? readAllSectionedRowValues(sheet, HEADERS.Master_Lunch_Dashboard, 'Standard_Buffer') : [];
+    })(),
+    lunchDashboardMap: getIndexMap(HEADERS.Master_Lunch_Dashboard)
+  };
+}
+
+/**
+ * What the kitchen was asked for in one month: Actual_Ordered summed over
+ * every date x building row of Master_Lunch_Dashboard dated in it.
+ *
+ * ONLY TYPED CELLS COUNT. A blank Actual_Ordered is "nobody has written the
+ * order down yet", not zero meals, so it adds nothing and is not a day — and
+ * Total_to_Order is never used in its place, because that is the plan and an
+ * invoice is checked against what actually happened. `days` is how many rows
+ * did carry a number, which is what tells somebody comparing against the
+ * caterer whether the total is complete. Both are '' when no day in the month
+ * has one, so a month before this column was kept reads as unrecorded rather
+ * than as a month of no lunches.
+ */
+function kitchenOrdersForMonth(monthKey, rows, map) {
+  let total = 0;
+  let days = 0;
+  const byLocation = {};
+  (rows || []).forEach(row => {
+    const when = coerceDate(row[map['Event_Date']]);
+    if (!when || formatMonthKey(when) !== monthKey) return;
+    const raw = row[map['Actual_Ordered']];
+    if (raw === '' || raw === null || raw === undefined) return;
+    const n = Number(raw);
+    if (!isFinite(n)) return;
+    total += n;
+    days++;
+    const location = String(row[map['Location']] || '').trim() || '(no building)';
+    byLocation[location] = (byLocation[location] || 0) + n;
+  });
+  if (days === 0) return { total: '', days: '', byLocation: '' };
+  return {
+    total: total,
+    days: days,
+    byLocation: Object.keys(byLocation).sort()
+      .map(loc => `${loc} ${byLocation[loc]}`).join(' · ')
   };
 }
 
@@ -146,6 +193,9 @@ function metricsMonthsPresent(source) {
   // is still a month this centre ran, and the hours are the part it is
   // credited for.
   (source.volunteerVisits || []).forEach(visit => { months[visit.monthKey] = true; });
+  if (source.lunchDashboardMap) {
+    (source.lunchDashboardRows || []).forEach(row => note(row, source.lunchDashboardMap));
+  }
   return Object.keys(months).sort().reverse();
 }
 
@@ -305,9 +355,10 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
   });
 
   const volunteers = volunteerMetricsForMonth(monthKey, source.volunteerVisits || []);
+  const kitchen = kitchenOrdersForMonth(monthKey, source.lunchDashboardRows, source.lunchDashboardMap || {});
 
   if (sessions === 0 && lunchSessions === 0 && registrations === 0 &&
-      waitlisted === 0 && cancellations === 0 && volunteers.visits === 0) {
+      waitlisted === 0 && cancellations === 0 && volunteers.visits === 0 && kitchen.days === '') {
     return null; // nothing left to count — see the banner above
   }
 
@@ -355,6 +406,9 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
     Volunteers: volunteers.volunteers,
     Volunteer_Visits: volunteers.visits,
     Volunteer_Hours: volunteers.hours,
+    Kitchen_Ordered: kitchen.total,
+    Kitchen_Order_Days: kitchen.days,
+    Kitchen_Ordered_By_Location: kitchen.byLocation,
     Captured_On: new Date(),
     Notes: ''
   };
@@ -473,6 +527,8 @@ function metricsYearOverYearIndicators() {
       note: 'Sessions tagged [Club] — the standing-roster half of the program mix.' },
     { header: 'Meals_Ordered', label: 'Meals ordered', kind: 'sum',
       note: 'Meals registrants asked for, counted off the registrations rather than off the kitchen order.' },
+    { header: 'Kitchen_Ordered', label: 'Lunches ordered from the kitchen', kind: 'sum',
+      note: 'Actual_Ordered on Master_Lunch_Dashboard, added up — what the caterer was asked for, and the number to check an invoice against. Only days somebody typed a number count; Kitchen_Order_Days on the month-by-month table says how many that was.' },
     { header: 'Meals_Served', label: 'Meals served', kind: 'sum',
       note: 'People handed their food (a Lunch_Served tick). How much each took is Meals consumed.' },
     { header: 'Lunch_Only_Signups', label: 'Lunch-only sign-ups', kind: 'sum',
@@ -656,7 +712,7 @@ function writeMetricsSheet(sheet, rows, now) {
     ['Sessions', 'Programs', 'Locations', 'Club_Sessions', 'Assistance_Sessions', 'Drop_In_Sessions',
       'Lunch_Sessions', 'Registrations', 'Participants', 'New_People', 'Guests', 'Waitlisted',
       'Cancellations', 'Attended', 'Empty_Seats', 'Meals_Ordered', 'Meals_Served', 'Meals_Consumed',
-      'Lunch_Only_Signups'].forEach(header => format(header, '0'));
+      'Lunch_Only_Signups', 'Kitchen_Ordered', 'Kitchen_Order_Days'].forEach(header => format(header, '0'));
     format('Avg_Per_Session', '0.0');
     format('Attendance_Rate', '0%');
     format('Seats_Filled_Rate', '0%');

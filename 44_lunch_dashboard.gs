@@ -629,6 +629,19 @@ function updateMasterLunchDashboard(registrantRows) {
   const plan = getDashboardRowPlan(signUpRows.length);
   const rollup = buildDashboardRollup(registrantRows);
 
+  // A FRESH READ, NEVER THE EXECUTION'S CACHED ONE. readSheetGrid() (96)
+  // keeps one copy of a tab per execution, and a sync slice is an execution
+  // that runs for up to twenty-five minutes and renders this tab more than
+  // once (the lunch step, then the club step, the leader-sheet pull and the
+  // sign-in sheet's lookup all read or redraw it). The cache is dropped when
+  // THIS code writes the tab — but not when a PERSON does, so a number typed
+  // into Actual_Ordered between one render and the next was read back from
+  // the copy taken before it existed and written over with a blank: "the
+  // sheet keeps erasing the numbers on the next update" (2026-10-05). The
+  // hand-entry columns are the one thing here nothing can recompute, so this
+  // read always goes to the sheet. It is one getValues() on a small tab.
+  invalidateSectionedRowsCache(sheet);
+
   // 'Standard_Buffer' is unique to the Full Schedule headers (not present
   // on TODAY_LUNCH_HEADERS), so it safely finds only the schedule's own
   // header rows and not the Today block's.
