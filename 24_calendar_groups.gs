@@ -50,11 +50,16 @@ function processCalendarGroup(registrySheet, item, existingState) {
     }
   }
 
+  // The dates somebody moved to an outside registration page (99ze) stay on
+  // the calendar and in this group — their rows and descriptions are still
+  // this system's — but are never offered on the Google Form as well.
+  const formGroup = groupWithoutExternalSessions(group);
+
   let formInfo;
   let formCreated = false;
   if (existingFormId) {
     try {
-      formInfo = refreshFormForNewDates(existingFormId, group, configInfo);
+      formInfo = refreshFormForNewDates(existingFormId, formGroup, configInfo);
       log(`Reused form for ${describeGroup(group)} — added ${newSessions.length} new date(s) to ` +
         `${describeFormLink(formInfo.formId)}.`);
     } catch (err) {
@@ -62,7 +67,7 @@ function processCalendarGroup(registrySheet, item, existingState) {
       return handleUnreachableGroupForm(registrySheet, group, newSessions, existingState, existingFormId, err);
     }
   } else {
-    formInfo = createRegistrationForm(group, configInfo);
+    formInfo = createRegistrationForm(formGroup, configInfo);
     formCreated = true;
     log(`Created form for ${describeGroup(group)} — ${describeFormLink(formInfo.formId)}, ` +
       `${newSessions.length} date(s)` +

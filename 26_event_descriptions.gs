@@ -416,7 +416,13 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
         stats.linksRemoved += stripped.removed;
 
         let updated = stripped.text;
-        if (showLinks && shouldMarkNotYetOpen(startTime)) {
+        const externalUrl = showLinks
+          ? externalRegistrationUrlForEvent(calendarId, parsed.cleanTitle, startTime) : '';
+        if (externalUrl) {
+          // Registered for on an outside site (99ze) — its link, horizon or not.
+          updated = prependRegistrationLine(stripped.text,
+            buildExternalRegistrationLinkLine(parsed.cleanTitle, externalUrl));
+        } else if (showLinks && shouldMarkNotYetOpen(startTime)) {
           // Past the horizon: the notice replaces the link, and no form has to
           // be opened to write it. Not counted against noForm — there being no
           // form yet is irrelevant when nothing would be linked either way.
@@ -895,6 +901,14 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Edit_Form_Link']] = formInfo && formInfo.editUrl
       ? makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings') : '';
     row[map['Form_ID']] = formInfo ? formInfo.formId : '';
+    // A date recorded as registering on an outside site (99ze) — a row being
+    // re-written after it went missing — keeps that, not the group's form.
+    const externalUrl = formInfo ? externalRegistrationUrlForEventId(eventId) : '';
+    if (externalUrl) {
+      row[map['Form_Response_Link']] = makeHyperlinkFormula(externalUrl, EXTERNAL_REGISTRATION_LINK_LABEL);
+      row[map['Edit_Form_Link']] = '';
+      row[map['Form_ID']] = '';
+    }
     row[map['Calendar_Synced?']] = true;
     row[map['Event_ID']] = eventId;
     row[map['Calendar_Source']] = session.calendarId;
@@ -1163,9 +1177,21 @@ function backInjectCalendarDescriptions(group, formInfo) {
 
   const linkLine = buildRegistrationLinkLine(group, formInfo);
   let notYetOpenCount = 0;
+  const calendarIdOfEvent = new Map((group.sessions || []).map(s => [s.event, s.calendarId]));
 
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
+
+    // REGISTERED FOR ELSEWHERE (99ze): the outside link, whatever the horizon
+    // says — the outside site decides when it opens, not this workbook.
+    const externalUrl = externalRegistrationUrlForEvent(calendarIdOfEvent.get(ev), group.cleanTitle,
+      ev.getStartTime());
+    if (externalUrl) {
+      const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text,
+        buildExternalRegistrationLinkLine(group.cleanTitle, externalUrl));
+      if (updated !== existing) ev.setDescription(updated);
+      return;
+    }
 
     // BEYOND THE HORIZON: the event exists, the form exists, but registration
     // has not opened for this date yet — so the description says so in words

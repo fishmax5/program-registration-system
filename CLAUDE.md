@@ -133,7 +133,7 @@ Line counts are a rough guide to what you are about to load.
 
 | File | | What is in it |
 |---|--:|---|
-| `47_moving_sessions.gs` | 513 | Combine forms, or just repoint a link. |
+| `47_moving_sessions.gs` | 550 | Combine forms, or just repoint a link — onto a Google Form, or (pasting any other web address, e.g. an Amilia page) onto an outside registration site (`99ze`). Moving a session back onto a form undoes the outside link. |
 | `48_deleting_registrations.gs` | 470 | `showDeleteRegistrationsDialog`. Each deleted row gets a `removed` ledger entry (source `delete-sessions`, `99k`), flushed before the tombstones and the render. While a sync holds the workbook the deletion is queued on `99b`'s retry queue (kind `deleteRegistrations`, after the admin and confirm-word checks) and run the moment the sync lets go; the result goes in the office digest. `tests/delete_registrations_ledger_queue.test.js`. |
 | `49_form_rebuild.gs` | 798 | Destroy and rebuild forms — the Admin-menu last resort, sliced across executions. |
 | `50_deleted_form_recovery.gs` | 455 | A form that was deleted out of the Drive folder. |
@@ -991,3 +991,11 @@ Numbered after `99zc` for the usual reason. Behavior only; its two constants sta
 | File | | What is in it |
 |---|--:|---|
 | `99zd_script_properties_usage.gs` | 150 | **One store of ~500KB, shared by the whole project, and a full one fails in whichever writer runs next** — with an error naming the victim, not the cause. `summarizeScriptProperties()` (pure) groups every key into its STORE (`…::<date>::<n>` and `…_<n>` chunks fold onto one line, a `_V1` is kept), sizes each in characters of key plus value, largest first, plus the five largest single keys; `SCRIPT_PROPERTY_STORE_NOTES` says what the stores that grow ARE. 🔧 Admin ▸ 📄 Reports ▸ **What is filling Script Properties?** (`reportScriptPropertiesUsage`, one `getProperties()`, read-only, ungated) shows it, and says so when the office digest spool is the culprit. It changes nothing: a store that grows gets its own cap, and the first was `88`'s. `tests/script_properties_usage.test.js`. |
+
+### Registration on somebody else's site (99ze)
+
+Numbered after `99zd` for the usual reason. Behavior plus three self-contained constants; everything it reaches for it reads at CALL time.
+
+| File | | What is in it |
+|---|--:|---|
+| `99ze_external_registration_links.gs` | 224 | **A session can register on an outside page (Amilia, a partner's site) instead of a Google Form** — set ONLY per session, by pasting that address into Move Sessions' "paste a form URL" box (`47`); nothing the calendar adds later inherits it. The row's `Form_ID` and `Edit_Form_Link` go blank and `Form_Response_Link` becomes `=HYPERLINK(url, "Register (outside site)")`. A blank `Form_ID` is also what a row waiting for its form looks like, so the decision is stored (`EXTERNAL_REGISTRATION_LINKS_V1`, `{url: ["<Event_ID>|<date>"]}`, past dates pruned after 60 days) and every pass that would otherwise put the program's form back asks `externalRegistrationUrlForEventId()` first: the link repair and the forked-forms choice (`32`), the `[No Registration]` restore and the horizon notices (`23`), new rows and both description writers (`26`), and the form's own date list (`24`, `groupWithoutExternalSessions` — the date is never offered on the Google Form too). The calendar line carries `#form=external` so `stripAllRegistrationLines()` takes it back off. Nothing is imported for these sessions: the outside site holds that roster. Undone by moving the session back onto a form (`writeFormIdOntoSessions` forgets it). `tests/external_registration_links.test.js`. |

@@ -637,8 +637,12 @@ function reconcileRegistrationHorizonNotices(groups, existingState) {
     // A [No Registration] program has no registration to be early for, and
     // applyNoRegistrationEffects() has already stripped its descriptions bare.
     if (group.noRegistration) return;
+    const calendarIdOfEvent = new Map((group.sessions || []).map(s => [s.event, s.calendarId]));
 
     (group.events || []).forEach(ev => {
+      // Registered for on an outside site (99ze): the outside site decides
+      // when it opens, and its link is written by the two passes that own links.
+      if (externalRegistrationUrlForEvent(calendarIdOfEvent.get(ev), group.cleanTitle, ev.getStartTime())) return;
       const existing = ev.getDescription() || '';
       const stripped = stripAllRegistrationLines(existing);
       const notYetOpen = shouldMarkNotYetOpen(ev.getStartTime());
@@ -871,6 +875,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
     const sources = sessionGridColumn(model, zone, 'Calendar_Source');
     const titles = sessionGridColumn(model, zone, 'Clean_Title');
     const formIds = sessionGridColumn(model, zone, 'Form_ID');
+    const eventIds = sessionGridColumn(model, zone, 'Event_ID');
     // THE ROW'S OWN SPAN, for the form fallback below. A form belongs to one
     // month of a Regular program, so restoring a link from a program-level
     // lookup would hand every month of it whichever month's form was written
@@ -913,6 +918,15 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
       }
 
       if (!isBlocked) continue; // already showing its own links
+      const eventIdForRow = eventIds ? String(eventIds[r] || '').trim() : '';
+      const externalUrl = eventIdForRow ? externalRegistrationUrlForEventId(eventIdForRow) : '';
+      if (externalUrl) {
+        // Registered for on an outside site (99ze) before the tag went on.
+        view[r] = makeHyperlinkFormula(externalUrl, EXTERNAL_REGISTRATION_LINK_LABEL);
+        touchedView = true;
+        changed++;
+        continue;
+      }
       const rowFormId = formIds ? String(formIds[r] || '').trim() : '';
       // The row's own form first — it is the only per-ROW fact here, so a row
       // that kept its Form_ID through the tag needs no lookup at all. The

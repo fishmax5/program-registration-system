@@ -221,6 +221,10 @@ function planDashboardLinkRepair(registrySheet) {
       // A row whose links were deliberately taken away by [No Registration]
       // is not misaligned — it is saying what it is meant to say.
       if (id.link === NO_REGISTRATION_LINK_LABEL) { stats.blocked++; continue; }
+      // Nor is a row registered for on an outside site (99ze): it has no form
+      // on purpose, and "repairing" it would hand the program's Google Form
+      // back to a session somebody deliberately moved off it.
+      if (externalRegistrationUrlForEventId(id.eventId)) { stats.blocked++; continue; }
 
       if (!id.aligned) { stats.misaligned++; continue; }
 
@@ -430,7 +434,7 @@ function repairDashboardLinks() {
   const { plan, stats } = planDashboardLinkRepair(registrySheet);
   log(`Repair Dashboard Links: scanned ${stats.scanned} row(s) — ${stats.willFix} to fix, ` +
     `${stats.alreadyRight} already right, ${stats.misaligned} with a broken Event_ID, ` +
-    `${stats.blocked} marked "${NO_REGISTRATION_LINK_LABEL}", ${stats.noForm} with no form to point at ` +
+    `${stats.blocked} marked "${NO_REGISTRATION_LINK_LABEL}" or registered on an outside site, ${stats.noForm} with no form to point at ` +
     `(${stats.formsOpened} form(s) opened).`);
 
   if (stats.willFix === 0) {
@@ -513,7 +517,7 @@ function checkDashboardAlignment() {
     `${stats.alreadyRight} link(s) already correct.`,
     `${stats.willFix} link(s) point at the wrong form, or at none — "Repair Dashboard Links" fixes these ` +
       `without reading a calendar.`,
-    `${stats.blocked} row(s) deliberately say "${NO_REGISTRATION_LINK_LABEL}" and are left alone.`,
+    `${stats.blocked} row(s) deliberately say "${NO_REGISTRATION_LINK_LABEL}" or register on an outside site, and are left alone.`,
     `${stats.noForm} row(s) have no form in the registry to point at.`,
     ``,
     `${stats.misaligned} row(s) FAIL the self-check: their Event_ID does not match the date, title and ` +
@@ -1646,7 +1650,9 @@ function resolveForkedProgramNow(programKey, formId) {
     const date = coerceDate(row[map['Event_Date']]);
     if (!date || formatDateKey(date) < todayKey) return;
     const eventId = String(row[map['Event_ID']] || '').trim();
-    if (eventId) wanted.add(eventId);
+    // A session somebody moved to an outside registration page (99ze) is not
+    // one of the two twins — it books through neither.
+    if (eventId && !externalRegistrationUrlForEventId(eventId)) wanted.add(eventId);
   });
   if (wanted.size === 0) return `⚠️ "${programTitle}" has no upcoming session to repoint.`;
 

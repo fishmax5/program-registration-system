@@ -155,7 +155,7 @@ function buildRepointSessionsHtml(sessions, forms) {
 <fieldset>
   <legend><label><input type="radio" name="mode" value="existing"> Move onto an existing form</label></legend>
   <select id="existingForm">${noForms}${formTags}</select>
-  <input type="text" id="formRef" placeholder="…or paste a form URL or ID to use instead">
+  <input type="text" id="formRef" placeholder="…or paste a form URL or ID — or an outside registration link (e.g. Amilia)">
 </fieldset>
 
 <button id="go" onclick="submit()">Move sessions</button>
@@ -170,7 +170,7 @@ function buildRepointSessionsHtml(sessions, forms) {
       title: document.getElementById('newTitle').value,
       formRef: document.getElementById('formRef').value || document.getElementById('existingForm').value
     };
-    if (mode === 'existing' && !payload.formRef) { say('Pick an existing form, or paste its URL.', 'err'); return; }
+    if (mode === 'existing' && !payload.formRef) { say('Pick an existing form, or paste its URL or an outside registration link.', 'err'); return; }
     document.getElementById('go').disabled = true;
     say('Working… this can take a moment.', '');
     google.script.run
@@ -223,7 +223,14 @@ function repointSessionsToForm(eventIds, target) {
 
     if (mode === 'existing') {
       formId = extractFormId(target.formRef);
-      if (!formId) return '⚠️ That does not look like a form URL or ID.';
+      // NOT A FORM: an outside registration page (Amilia, a partner's site).
+      // These sessions then carry that link and no form at all — see 99ze.
+      const externalUrl = formId ? '' : normalizeExternalRegistrationUrl(target.formRef);
+      if (externalUrl) return repointSessionsToExternalLink_(registrySheet, wanted, externalUrl, chosenRows, map);
+      if (!formId) {
+        return '⚠️ That does not look like a form URL or ID, or a web address. Paste a Google Form ' +
+          'edit link, or a full https:// link to the outside registration page.';
+      }
       try {
         openFormCached(formId);
       } catch (err) {
@@ -261,6 +268,43 @@ function repointSessionsToForm(eventIds, target) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * The outside-registration half of repointSessionsToForm(), inside its lock:
+ * the rows, the store that keeps them that way (99ze), and the calendar
+ * descriptions. No form is opened, relabelled or created — the dates simply
+ * drop off their old form's list the next time its labels are rebuilt from
+ * the rows, because a row with no Form_ID belongs to no form.
+ */
+function repointSessionsToExternalLink_(registrySheet, wanted, url, chosenRows, map) {
+  // The forms these sessions are leaving, read BEFORE the rows are rewritten:
+  // each still lists their dates until its labels are rebuilt from the rows.
+  const leftForms = dedupePreservingOrder(chosenRows
+    .map(row => String(row[map['Form_ID']] || '').trim()).filter(Boolean));
+
+  const moved = writeExternalLinkOntoSessions(registrySheet, wanted, url);
+  if (moved === 0) return '⚠️ Nothing was moved — those sessions already point at that link.';
+  SpreadsheetApp.flush(); // the refresh below re-reads these rows
+
+  const refreshedRows = getSectionedRows(registrySheet, HEADERS.All_Program_Sessions, 'Event_ID');
+  leftForms.forEach(formId => {
+    try {
+      refreshOneFormDateLabels(formId, refreshedRows, map, 'sessions moved to an outside registration link');
+    } catch (err) {
+      log(`ℹ️ Could not take the moved dates off form ${formId} (${err}) — the next sync will.`);
+    }
+  });
+  flushPersistentRegistries();
+
+  rewriteEventRegistrationLinksInternal(registrySheet, shouldShowLinkInDescription());
+  flushAdminDigest('Move sessions to an outside registration link');
+
+  const summary = `✅ ${moved} session(s) now register on ${url}. Their dashboard link and calendar ` +
+    `description point there, and they are off their Google Form. To undo, move them back onto a form here.`;
+  log(`repointSessionsToForm: ${summary}`);
+  toastIfPossible(summary);
+  return summary;
 }
 
 /**
@@ -351,6 +395,9 @@ function writeFormIdOntoSessions(registrySheet, wanted, formId) {
     }
   });
 
+  // A session on a form is no longer registered for on an outside site —
+  // which is how an outside link (99ze) is undone: move it back onto a form.
+  forgetExternalRegistrationLinks(Array.from(wanted));
   return moved;
 }
 
