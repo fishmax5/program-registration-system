@@ -1,5 +1,5 @@
 // ============================================================================
-// 99zc. WHAT IS FILLING SCRIPT PROPERTIES?
+// 99zd. WHAT IS FILLING SCRIPT PROPERTIES?
 // ============================================================================
 //
 // Script Properties is ONE store of about 500KB that this whole project
@@ -20,9 +20,10 @@
 // (`88`'s OFFICE_DIGEST_MAX_SPOOL_CHARS), which kept every unsent day while
 // the digest had nowhere to go.
 //
-// ------------------------------------------------------ WHY IT IS NUMBERED 99zc
+// ------------------------------------------------------ WHY IT IS NUMBERED 99zd
 //
-// After `99zb` for the usual reason — never renumber. Behavior only; its two
+// After `99zc` (the sign-in app's menu took that prefix on main first) for
+// the usual reason — never renumber. Behavior only; its two
 // constants stand alone, and everything it reaches for (`log`,
 // `toastIfPossible`) is a hoisted function.
 // ============================================================================

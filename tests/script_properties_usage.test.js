@@ -1,4 +1,4 @@
-// WHAT IS FILLING SCRIPT PROPERTIES (section 99zc) and the cap on the store
+// WHAT IS FILLING SCRIPT PROPERTIES (section 99zd) and the cap on the store
 // that filled it (the office digest spool, section 88).
 //
 //   THE REPORT GROUPS BY STORE: a chunked store's keys fold onto one line, a

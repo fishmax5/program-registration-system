@@ -92,16 +92,22 @@ function collectMenuItemLabels_() {
     return m;
   }
   let root = null;
-  buildAppMenu({ createMenu: stubMenu }, true);
   const out = {};
-  (function walk(menu, path) {
+  function walk(menu, path) {
     menu.entries.forEach(e => {
       if (e.sub) return walk(e.sub, path.concat(e.sub.name));
       const action = String(e.fn).indexOf(MENU_WRAPPER_PREFIX) === 0
         ? String(e.fn).slice(MENU_WRAPPER_PREFIX.length) : String(e.fn);
       out[action] = path.concat(e.label).join(' ▸ ');
     });
-  })(root || { entries: [] }, []);
+  }
+  buildAppMenu({ createMenu: stubMenu }, true);
+  walk(root || { entries: [] }, []);
+  // The separate Sign-In App menu (99zc), labelled with its own name since it
+  // sits beside the main menu rather than inside it.
+  root = null;
+  buildSignInAppMenu({ createMenu: stubMenu });
+  if (root) walk(root, [root.name]);
   return out;
 }
 
@@ -210,6 +216,7 @@ function menu_showAssistanceScheduleDialog() { recordMenuUsage_('showAssistanceS
 function menu_showBulkRegistrantsDialog() { recordMenuUsage_('showBulkRegistrantsDialog'); return showBulkRegistrantsDialog(); }
 function menu_showBulkWaitlistOnlyDialog() { recordMenuUsage_('showBulkWaitlistOnlyDialog'); return showBulkWaitlistOnlyDialog(); }
 function menu_showCalendarInviteDialog() { recordMenuUsage_('showCalendarInviteDialog'); return showCalendarInviteDialog(); }
+function menu_openSignInApp() { recordMenuUsage_('openSignInApp'); return openSignInApp(); }
 function menu_showCheckInPageDialog() { recordMenuUsage_('showCheckInPageDialog'); return showCheckInPageDialog(); }
 function menu_showColumnWidthDialog() { recordMenuUsage_('showColumnWidthDialog'); return showColumnWidthDialog(); }
 function menu_showDeleteRegistrationsDialog() { recordMenuUsage_('showDeleteRegistrationsDialog'); return showDeleteRegistrationsDialog(); }

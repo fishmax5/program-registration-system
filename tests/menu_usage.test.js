@@ -106,6 +106,32 @@ check('report uses the menu label', report.indexOf('Log Volunteer Hours') >= 0, 
 check('report lists never-pressed items', /Never pressed \(\d+\)/.test(report), true);
 check('report labels carry their submenu path', report.indexOf('Admin ▸') >= 0, true);
 
+// --- The separate Sign-In App menu. -----------------------------------------
+{
+  const names = [];
+  let root = null;
+  function menu(name) {
+    const m = { name, items: [], subs: [] };
+    m.addItem = (label, fn) => { names.push(fn); m.items.push(label); return m; };
+    m.addSeparator = () => m;
+    m.addSubMenu = child => { m.subs.push(child); return m; };
+    m.addToUi = () => { root = m; };
+    return m;
+  }
+  sandbox.buildSignInAppMenu({ createMenu: menu });
+  check('sign-in app menu is its own top-level menu', !!root && root.name !== full.root.name, true);
+  check('sign-in app menu opens the app through a wrapper', names, ['menu_openSignInApp']);
+  check('the wrapper exists and calls the action',
+    typeof sandbox.menu_openSignInApp === 'function' && typeof sandbox.openSignInApp === 'function', true);
+  check('usage report labels the sign-in app item',
+    sandbox.describeMenuUsage().indexOf('Sign-In App ▸') >= 0, true);
+  const page = sandbox.buildSignInAppLauncherHtml('https://x.test/exec?a=1&b=</script>',
+    [{ location: "St. John's <Hall>", url: 'https://x.test/exec?location=St' }]);
+  check('launcher calls window.open', page.indexOf('window.open(') >= 0, true);
+  check('launcher cannot be ended by the URL', page.indexOf('b=</script>') < 0, true);
+  check('launcher escapes a building name', page.indexOf('&lt;Hall&gt;') >= 0 && page.indexOf('<Hall>') < 0, true);
+}
+
 // --- Tracking never costs the click. ----------------------------------------
 props[sandbox.MENU_USAGE_PROP_KEY] = '{not json';
 sandbox.menu_showVolunteerHoursDialog();

@@ -10,7 +10,7 @@
 //
 // So: pick the PROGRAM first (the same reason 99m picks it first — every date
 // offered is then that one program's, and a name can never land on the class
-// beside it in date order), paste the list or open a CSV file, say which
+// beside it in date order), paste the list or open a CSV or Excel file, say which
 // column is which, and REVIEW what the workbook made of it before anything is
 // written.
 //
@@ -230,6 +230,165 @@ function peopleFromBulkRecords(records, fields, hasHeader) {
     people.push({ name: full, phone: p.phone, email: p.email, line: i + 1 + (hasHeader ? 1 : 0) });
   });
   return people;
+}
+
+// ---- An Excel file, read as it is rather than "save it as CSV first".
+//
+// An .xlsx is a zip of XML parts, and Apps Script can open a zip
+// (Utilities.unzip) — so the dialog sends the file's bytes here and gets back
+// the FIRST VISIBLE SHEET as the same text a paste would have been, which then
+// goes through readBulkRegistrantColumns like any other list. Nothing about
+// the mapping or the review changes, and the text lands in the paste box, so
+// what the workbook read is on screen to be checked and edited.
+//
+// Read with a few regular expressions rather than XmlService: the four parts
+// that matter (the workbook's sheet list, its relationships, the shared
+// strings, one sheet) are flat and machine-written, and a pure reader over
+// strings is a reader the tests can run. Values are what Excel STORED — a
+// phone typed as a number reads back as its digits, a date as its serial
+// number, which for a list of names, phones and emails is no loss. The old
+// binary .xls is not a zip and is refused by name in the dialog.
+
+/** Bytes of an .xlsx (base64, from the dialog) → { text, sheetName, ...readBulkRegistrantColumns(text) }. */
+function readBulkRegistrantXlsx(base64) {
+  let entries;
+  try {
+    const bytes = Utilities.base64Decode(String(base64 || ''));
+    entries = Utilities.unzip(Utilities.newBlob(bytes, 'application/zip', 'list.xlsx'));
+  } catch (e) {
+    throw new Error('That file could not be opened as an Excel workbook (.xlsx). Save it as CSV and open that instead.');
+  }
+  const parts = {};
+  (entries || []).forEach(b => {
+    const name = String(b.getName() || '').replace(/^\/+/, '');
+    if (/\.(xml|rels)$/i.test(name)) parts[name] = b.getDataAsString('UTF-8');
+  });
+  const sheet = bulkXlsxFirstSheet_(parts);
+  if (!sheet) throw new Error('No sheet found in that Excel file.');
+  const text = bulkRowsToTabText_(sheet.rows);
+  return Object.assign({ text, sheetName: sheet.name }, readBulkRegistrantColumns(text));
+}
+
+/** The first visible sheet of an unzipped .xlsx ({ path: xml }) as { name, rows: [[string]] }, or null. */
+function bulkXlsxFirstSheet_(parts) {
+  const workbook = parts['xl/workbook.xml'];
+  if (!workbook) return null;
+  const rels = {};
+  bulkXmlTags_(parts['xl/_rels/workbook.xml.rels'] || '', 'Relationship').forEach(a => {
+    if (a.Id) rels[a.Id] = a.Target || '';
+  });
+  const sheets = bulkXmlTags_(workbook, 'sheet');
+  const pick = sheets.find(a => !a.state || a.state === 'visible') || sheets[0];
+  if (!pick) return null;
+  const relId = pick['r:id'] || Object.keys(pick).filter(k => /:id$/.test(k)).map(k => pick[k])[0];
+  let target = String(rels[relId] || 'worksheets/sheet1.xml');
+  target = target.charAt(0) === '/' ? target.slice(1) : `xl/${target}`;
+  const xml = parts[target];
+  if (xml === undefined) return null;
+  return { name: pick.name || '', rows: bulkXlsxSheetRows_(xml, bulkXlsxSharedStrings_(parts['xl/sharedStrings.xml'] || '')) };
+}
+
+/** Every <prefix:tag …> opening tag's attributes, entity-decoded. */
+function bulkXmlTags_(xml, tag) {
+  const out = [];
+  const re = new RegExp(`<(?:[\\w-]+:)?${tag}\\b([^>]*)>`, 'g');
+  let m;
+  while ((m = re.exec(String(xml || '')))) out.push(bulkXmlAttrs_(m[1]));
+  return out;
+}
+
+function bulkXmlAttrs_(text) {
+  const attrs = {};
+  const re = /([\w:-]+)\s*=\s*("([^"]*)"|'([^']*)')/g;
+  let m;
+  while ((m = re.exec(String(text || '')))) attrs[m[1]] = bulkXmlDecode_(m[3] !== undefined ? m[3] : m[4]);
+  return attrs;
+}
+
+/** XML entities, then Excel's own _xHHHH_ escapes for control characters. */
+function bulkXmlDecode_(text) {
+  return String(text || '')
+    .replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-f]+);/gi, (all, e) => {
+      const k = e.toLowerCase();
+      if (k === 'lt') return '<';
+      if (k === 'gt') return '>';
+      if (k === 'amp') return '&';
+      if (k === 'quot') return '"';
+      if (k === 'apos') return "'";
+      const code = k.charAt(1) === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
+      return isFinite(code) ? String.fromCodePoint(code) : all;
+    })
+    .replace(/_x([0-9a-f]{4})_/gi, (all, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/** The text of every <t> in a fragment, joined — a rich-text cell is several runs. Phonetic hints dropped. */
+function bulkXlsxText_(fragment) {
+  const src = String(fragment || '').replace(/<(?:[\w-]+:)?rPh\b[\s\S]*?<\/(?:[\w-]+:)?rPh>/g, '');
+  let text = '';
+  const re = /<(?:[\w-]+:)?t\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?t>)/g;
+  let m;
+  while ((m = re.exec(src))) text += bulkXmlDecode_(m[1] || '');
+  return text;
+}
+
+function bulkXlsxSharedStrings_(xml) {
+  const out = [];
+  const re = /<(?:[\w-]+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?si>)/g;
+  let m;
+  while ((m = re.exec(String(xml || '')))) out.push(bulkXlsxText_(m[1] || ''));
+  return out;
+}
+
+/** "AB12" → 27 (zero-based column), or -1. */
+function bulkXlsxColumnIndex_(ref) {
+  const letters = (String(ref || '').match(/^[A-Z]+/i) || [''])[0].toUpperCase();
+  if (!letters) return -1;
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return n - 1;
+}
+
+/** One sheet's XML as rows of strings, gaps kept where a cell reference skips a column. */
+function bulkXlsxSheetRows_(xml, shared) {
+  const rows = [];
+  const rowRe = /<(?:[\w-]+:)?row\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?row>)/g;
+  const cellRe = /<(?:[\w-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?c>)/g;
+  const valueRe = /<(?:[\w-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?v>/;
+  let rm;
+  while ((rm = rowRe.exec(String(xml || '')))) {
+    const row = [];
+    const body = rm[1] || '';
+    let cm;
+    cellRe.lastIndex = 0;
+    while ((cm = cellRe.exec(body))) {
+      const attrs = bulkXmlAttrs_(cm[1]);
+      const inner = cm[2] || '';
+      const vm = inner.match(valueRe);
+      const raw = vm ? bulkXmlDecode_(vm[1]) : '';
+      let value;
+      if (attrs.t === 's') value = shared[parseInt(raw, 10)] || '';
+      else if (attrs.t === 'inlineStr') value = bulkXlsxText_(inner);
+      else if (attrs.t === 'b') value = raw === '1' ? 'TRUE' : (raw === '0' ? 'FALSE' : raw);
+      else value = raw;
+      const col = bulkXlsxColumnIndex_(attrs.r);
+      const at = col >= 0 ? col : row.length;
+      while (row.length < at) row.push('');
+      row[at] = value;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Rows as tab-separated text parseCsvText (11) reads back cell for cell. */
+function bulkRowsToTabText_(rows) {
+  return (rows || [])
+    .map(r => r.map(cell => {
+      const v = String(cell === null || cell === undefined ? '' : cell);
+      return /[\t\n\r",]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    }).join('\t'))
+    .filter(line => line.replace(/\t/g, '').trim() !== '')
+    .join('\n');
 }
 
 /**
@@ -892,9 +1051,9 @@ function buildBulkRegistrantsHtml() {
 </div>
 <div id="dates" style="margin-top:6px"></div>
 <h3>2. The list</h3>
-<p class="hint">Open a CSV file, or paste the list — one person per line, straight out of a spreadsheet
-or typed as <code>Name, Phone, Email</code>. (An Excel file: File → Save As → CSV first.)</p>
-<input type="file" id="file" accept=".csv,.tsv,.txt,text/csv,text/plain">
+<p class="hint">Open an Excel (.xlsx) or CSV file, or paste the list — one person per line, straight out of a spreadsheet
+or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
+<input type="file" id="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
 <textarea id="csv" style="margin-top:6px" placeholder="…or paste here"></textarea>
 <div style="margin-top:8px"><button id="read" onclick="readColumns()">Read the columns</button></div>
 <div id="mapping" style="display:none">
@@ -1002,15 +1161,48 @@ you can close this window and open it again to see how far it has got.</p>
   $('file').addEventListener('change', function () {
     var f = this.files && this.files[0];
     if (!f) return;
-    if (/[.]xlsx?$/i.test(f.name)) {
-      say('That is an Excel file — save it as CSV first (File → Save As → CSV), then open that.', 'err');
+    if (/[.]xls$/i.test(f.name)) {
+      say('That is an old-style Excel file (.xls) — save it as .xlsx or CSV first, then open that.', 'err');
       return;
     }
+    if (/[.]xls[xm]$/i.test(f.name)) { readExcel(f); return; }
     var reader = new FileReader();
     reader.onload = function () { $('csv').value = String(reader.result || ''); readColumns(); };
     reader.onerror = function () { say('Could not read that file.', 'err'); };
     reader.readAsText(f);
   });
+
+  // An .xlsx is a zip, and the browser has no reader for it — the server does
+  // (readBulkRegistrantXlsx), and hands the first sheet back as pasted text.
+  function readExcel(f) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result || '').split(',')[1] || '';
+      $('read').disabled = true;
+      say('Reading the Excel file…');
+      google.script.run.withSuccessHandler(function (res) {
+        $('read').disabled = false;
+        $('csv').value = (res && res.text) || '';
+        showColumns(res, res && res.sheetName ? ' (sheet "' + res.sheetName + '")' : '');
+      }).withFailureHandler(function (err) {
+        $('read').disabled = false;
+        say('Failed: ' + err.message, 'err');
+      }).readBulkRegistrantXlsx(b64);
+    };
+    reader.onerror = function () { say('Could not read that file.', 'err'); };
+    reader.readAsDataURL(f);
+  }
+
+  function showColumns(res, from) {
+    if (!res || !res.records || !res.records.length) { say('No rows found in that.', 'err'); return; }
+    RAW = res;
+    $('hasHeader').checked = !!res.hasHeader;
+    drawColumns();
+    $('mapping').style.display = '';
+    $('reviewBox').style.display = 'none';
+    PEOPLE = []; ROWS = [];
+    say(res.records.length + ' row(s), ' + res.columns + ' column(s)' + (from || '') + '. Check the headings, then press Check.');
+  }
 
   function readColumns() {
     var text = $('csv').value;
@@ -1019,14 +1211,7 @@ you can close this window and open it again to see how far it has got.</p>
     say('Reading…');
     google.script.run.withSuccessHandler(function (res) {
       $('read').disabled = false;
-      if (!res || !res.records || !res.records.length) { say('No rows found in that.', 'err'); return; }
-      RAW = res;
-      $('hasHeader').checked = !!res.hasHeader;
-      drawColumns();
-      $('mapping').style.display = '';
-      $('reviewBox').style.display = 'none';
-      PEOPLE = []; ROWS = [];
-      say(res.records.length + ' row(s), ' + res.columns + ' column(s). Check the headings, then press Check.');
+      showColumns(res, '');
     }).withFailureHandler(function (err) {
       $('read').disabled = false;
       say('Failed: ' + err.message, 'err');

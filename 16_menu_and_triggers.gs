@@ -59,7 +59,15 @@ function onOpen() {
   } catch (err) {
     log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
   }
-  buildAppMenu(SpreadsheetApp.getUi(), true);
+  const ui = SpreadsheetApp.getUi();
+  buildAppMenu(ui, true);
+  // A second, separate menu holding only the door's sign-in app (99zc).
+  // Guarded so it can never cost anybody the main menu above.
+  try {
+    buildSignInAppMenu(ui);
+  } catch (err) {
+    log(`ℹ️ Could not add the Sign-In App menu (${err}).`);
+  }
 }
 
 /**
@@ -507,7 +515,7 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('\ud83d\udce8 Send the Office Digest Now', menuFn_('sendOfficeDigestNow'))
         // Which stores are holding the 500KB the whole project shares — a full
         // store fails in whichever writer runs next, not in the one that
-        // filled it. Read-only and ungated. See 99zc.
+        // filled it. Read-only and ungated. See 99zd.
         .addItem('\ud83d\uddc4\ufe0f What is filling Script Properties? (read-only)', menuFn_('reportScriptPropertiesUsage'))
         .addSeparator()
         // Which of everything above (and on the rest of this menu) anybody
