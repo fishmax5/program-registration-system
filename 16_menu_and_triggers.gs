@@ -505,6 +505,10 @@ function buildAppMenu(ui, includeAdmin) {
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.
         .addItem('\ud83d\udce8 Send the Office Digest Now', menuFn_('sendOfficeDigestNow'))
+        // Which stores are holding the 500KB the whole project shares — a full
+        // store fails in whichever writer runs next, not in the one that
+        // filled it. Read-only and ungated. See 99zc.
+        .addItem('\ud83d\uddc4\ufe0f What is filling Script Properties? (read-only)', menuFn_('reportScriptPropertiesUsage'))
         .addSeparator()
         // Which of everything above (and on the rest of this menu) anybody
         // actually presses — the evidence the next reorganization should start

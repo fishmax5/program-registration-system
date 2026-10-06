@@ -90,6 +90,19 @@ const OFFICE_DIGEST_MAX_CHUNK_CHARS = 8000;
  */
 const OFFICE_DIGEST_MAX_CHUNKS_PER_DAY = 12;
 
+/**
+ * THE CEILING ON THE WHOLE SPOOL, every day together, in characters of key
+ * plus value. The per-day cap above bounds one day; it says nothing about a
+ * digest that is NOT GOING OUT — no addresses on Config's table, a send that
+ * keeps failing — and then every day is kept for the next pass, which never
+ * comes, and fourteen full days is more than twice the 500KB the whole project
+ * shares. That is what filled Script Properties, and a full store does not
+ * fail here: it fails in every OTHER writer, the sync clock and the form
+ * registry among them. So past this the OLDEST days are dropped unsent, the
+ * dates go to the log, and today's spool says so once.
+ */
+const OFFICE_DIGEST_MAX_SPOOL_CHARS = 120000;
+
 /** How far back the 10am pass looks for a day nobody sent. */
 const OFFICE_DIGEST_MAX_DAYS_SWEPT = 14;
 
@@ -105,6 +118,9 @@ const OFFICE_DIGEST_MAX_BODY_LINES = 600;
  */
 let __officeDigestSpool = null;
 
+/** The ceiling is checked once per execution, on the first note spooled. */
+let __officeDigestBudgetChecked = false;
+
 /**
  * Forgets the day held in memory, so the next note re-reads it from the store.
  *
@@ -114,6 +130,7 @@ let __officeDigestSpool = null;
  */
 function resetOfficeDigestSpoolCache() {
   __officeDigestSpool = null;
+  __officeDigestBudgetChecked = false;
 }
 
 /** yyyy-MM-dd in TIMEZONE — the key a day's chunks are filed under. */
@@ -188,6 +205,44 @@ function writeOfficeDigestChunk_(dateKey, index, entries) {
 }
 
 /**
+ * Holds the whole spool under OFFICE_DIGEST_MAX_SPOOL_CHARS by dropping the
+ * OLDEST closed days, never today. Returns the dateKeys it dropped.
+ *
+ * One getKeys() and one read per spooled chunk, once per execution — the
+ * price of not letting an unsent digest take the rest of the project's
+ * storage with it. Never throws.
+ */
+function enforceOfficeDigestSpoolBudget_(todayKey) {
+  const dropped = [];
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const sizeByDay = {};
+    let total = 0;
+    props.getKeys().forEach(key => {
+      if (key.indexOf(OFFICE_DIGEST_SPOOL_PROP_PREFIX) !== 0) return;
+      const dateKey = key.slice(OFFICE_DIGEST_SPOOL_PROP_PREFIX.length).split('::')[0];
+      const size = key.length + String(props.getProperty(key) || '').length;
+      sizeByDay[dateKey] = (sizeByDay[dateKey] || 0) + size;
+      total += size;
+    });
+    const closedDays = Object.keys(sizeByDay).filter(k => k !== todayKey).sort();
+    while (total > OFFICE_DIGEST_MAX_SPOOL_CHARS && closedDays.length > 0) {
+      const dateKey = closedDays.shift();
+      deleteOfficeDigestDay_(dateKey);
+      total -= sizeByDay[dateKey];
+      dropped.push(dateKey);
+    }
+    if (dropped.length > 0) {
+      log(`⚠️ Dropped ${dropped.length} unsent office digest day(s) (${dropped.join(', ')}) — ` +
+        `the spool was over ${OFFICE_DIGEST_MAX_SPOOL_CHARS} characters of Script Properties.`);
+    }
+  } catch (err) {
+    log(`⚠️ Could not check the office digest spool's size (${err}).`);
+  }
+  return dropped;
+}
+
+/**
  * ONE LINE FOR THE OFFICE, TOMORROW MORNING.
  *
  * `section` is the heading it files under and `message` the line itself. The
@@ -208,7 +263,19 @@ function spoolOfficeNote(section, message) {
     const now = new Date();
     const dateKey = officeDigestDateKey_(now);
     const stamp = Utilities.formatDate(now, TIMEZONE, 'HH:mm');
+    let dropped = [];
+    if (!__officeDigestBudgetChecked) {
+      __officeDigestBudgetChecked = true;
+      dropped = enforceOfficeDigestSpoolBudget_(dateKey);
+    }
     const spool = loadOfficeDigestSpool_(dateKey);
+    if (dropped.length > 0) {
+      // Worded without the dates so a second execution's drop coalesces onto
+      // this line rather than adding one; the log has the dates.
+      spoolOfficeNote('Office digest',
+        'Earlier days of these notes were dropped unsent because they were filling Script Properties. ' +
+        'The digest has not been going out — check Config\'s Admin Notification Emails table.');
+    }
 
     // Coalesce against everything already spooled today, wherever it sits: the
     // repeat is a count on the first entry, so the digest says "since 05:04"
@@ -271,9 +338,18 @@ function readOfficeDigestDay(dateKey) {
 function deleteOfficeDigestDay_(dateKey) {
   try {
     const props = PropertiesService.getScriptProperties();
+    // Every chunk the day HAS, not every chunk the cap allows today: a chunk
+    // past a since-lowered cap is still 8KB of somebody's 500.
+    const dayPrefix = `${OFFICE_DIGEST_SPOOL_PROP_PREFIX}${dateKey}::`;
+    let keys = [];
+    try {
+      keys = props.getKeys().filter(key => key.indexOf(dayPrefix) === 0);
+    } catch (err) { /* fall back to the indices below */ }
     for (let i = 0; i < OFFICE_DIGEST_MAX_CHUNKS_PER_DAY; i++) {
-      props.deleteProperty(officeDigestChunkKey_(dateKey, i));
+      const key = officeDigestChunkKey_(dateKey, i);
+      if (keys.indexOf(key) === -1) keys.push(key);
     }
+    keys.forEach(key => props.deleteProperty(key));
     if (__officeDigestSpool && __officeDigestSpool.key === dateKey) __officeDigestSpool = null;
   } catch (err) {
     log(`⚠️ Could not clear the office digest spool for ${dateKey} (${err}).`);

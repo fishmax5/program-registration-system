@@ -225,6 +225,7 @@ function menu_reportLedgerGrowth() { recordMenuUsage_('reportLedgerGrowth'); ret
 function menu_compactRegistrationLedger() { recordMenuUsage_('compactRegistrationLedger'); return compactRegistrationLedger(); }
 function menu_showLunchMenuImportDialog() { recordMenuUsage_('showLunchMenuImportDialog'); return showLunchMenuImportDialog(); }
 function menu_showMemberRollImportDialog() { recordMenuUsage_('showMemberRollImportDialog'); return showMemberRollImportDialog(); }
+function menu_reportScriptPropertiesUsage() { recordMenuUsage_('reportScriptPropertiesUsage'); return reportScriptPropertiesUsage(); }
 function menu_showMenuUsageReport() { recordMenuUsage_('showMenuUsageReport'); return showMenuUsageReport(); }
 function menu_showProgramLeaderSheetDialog() { recordMenuUsage_('showProgramLeaderSheetDialog'); return showProgramLeaderSheetDialog(); }
 function menu_showProgramReviewDialog() { recordMenuUsage_('showProgramReviewDialog'); return showProgramReviewDialog(); }
