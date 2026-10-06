@@ -546,6 +546,9 @@ function invalidateSectionedRowsCache(sheetOrName) {
   // keeps the twenty-six call sites below from needing to know there are two
   // caches — there is one list of writers, and it is already correct.
   invalidateSheetGridCache(sheetOrName);
+  // A WRITE HAPPENED, and outside the registration sync that is news to its
+  // dashboards (99zg). One property write per execution at most.
+  bumpWorkbookChangeGeneration_();
   const sheetName = !sheetOrName ? null
     : typeof sheetOrName === 'string' ? sheetOrName
     : typeof sheetOrName.getName === 'function' ? sheetOrName.getName()

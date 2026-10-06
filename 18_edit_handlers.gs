@@ -34,6 +34,9 @@ function onEdit(e) {
     // A tick box asks first, on every tab (99zb). Declined, it is already put
     // back and no handler below may act on it.
     if (!confirmCheckboxEditOrRevert(e)) return;
+    // Any edit anywhere is something the hourly sync's dashboards may be
+    // drawn from (99zg) — Config, a staff column, a lunch menu.
+    bumpWorkbookChangeGeneration_();
     if (name === SHEET_NAMES.REGISTRANT_DASH) {
       handleRegistrantsEdit(e, sheet);
     } else if (name === SHEET_NAMES.LUNCH_DASHBOARD) {

@@ -662,10 +662,14 @@ function pullProgramLeaderSheetEdits(registrantRows) {
 
   const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const edits = {}; // rowKey -> { values: [...], changed: [bool...] }
+  // ONE Drive listing says which sheets nobody has touched since they were
+  // last read; those are not opened (99zf).
+  const pullPlan = planLeaderSheetPull_();
 
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    if (pullPlan.untouched(entry.fileId)) return;
     let rows;
     try {
       // The push at the end of the same sync opens this file too — see
@@ -677,6 +681,7 @@ function pullProgramLeaderSheetEdits(registrantRows) {
         return;
       }
       rows = readSimpleTable(tab, LEADER_SHEET_HEADERS);
+      pullPlan.read(entry.fileId);
     } catch (err) {
       // Deleted, trashed, or unreachable. NOT unregistered automatically: a
       // permission blip would otherwise silently detach a live sheet and the
@@ -701,6 +706,8 @@ function pullProgramLeaderSheetEdits(registrantRows) {
       edits[rowKey] = { values: current, changed };
     });
   });
+
+  pullPlan.save();
 
   const editedKeys = Object.keys(edits);
   if (editedKeys.length === 0) return 0;
@@ -1032,12 +1039,6 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
-    // Written BEFORE the file is touched, and overwritten by the next sheet's:
-    // one property write per sheet. Only an execution that died on this sheet
-    // leaves it standing for the next run to find.
-    pushState.current = { programKey, title: entry.title || '', location: entry.location || '',
-      fileId: entry.fileId, at: new Date().toISOString() };
-    writeLeaderSheetPushState_(pushState);
     try {
       const rows = byProgram[programKey] || [];
       // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
@@ -1077,9 +1078,24 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         }
       }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
-      // The file is opened either way: the pull at the head of this sync
-      // already paid for it (openSpreadsheetCached), and the banner's "Refreshed
-      // …" line has to stay true even on an hour when nothing moved.
+      // NOT OPENED AT ALL when the pull found nobody had touched the file
+      // since it was last read and the roster it would write is the one it
+      // already holds (99zf) — which is most sheets, most hours. Once a day
+      // the pull reads every sheet, so the contradiction check below still
+      // reaches each of them.
+      if (!force && entry.pushedFingerprint === fingerprint && entry.accessOpened &&
+          leaderSheetUntouchedThisRun_(entry.fileId)) {
+        unchanged++;
+        return;
+      }
+      // Written BEFORE the file is touched, and overwritten by the next sheet's:
+      // one property write per sheet. Only an execution that died on this sheet
+      // leaves it standing for the next run to find.
+      pushState.current = { programKey, title: entry.title || '', location: entry.location || '',
+        fileId: entry.fileId, at: new Date().toISOString() };
+      writeLeaderSheetPushState_(pushState);
+      // Usually already open: the pull at the head of this sync paid for it
+      // (openSpreadsheetCached).
       const file = openSpreadsheetCached(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
       // THE FINGERPRINT IS A CLAIM, AND THIS IS WHERE IT IS CHECKED.
@@ -1112,8 +1128,12 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
           `as already written, and the shared sheet was showing the leader an empty roster instead. It has ` +
           `been rewritten. Nothing needs doing; the sheet is correct from now on.`);
       }
+      // NO RESTAMP. The banner's note used to be rewritten here every hour to
+      // say "Refreshed …", and that write was a modification of the file — so
+      // Drive reported every sheet as touched every hour and 99zf could never
+      // leave one unopened. The note now says when the roster was last
+      // UPDATED, which an unchanged hour leaves true.
       if (fingerprintAgrees && !contradicted) {
-        stampLeaderSheetRefreshed(tab);
         unchanged++;
         return;
       }
@@ -1192,23 +1212,6 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       `matched no session on the table, rather than writing them empty.`);
   }
   return pushed;
-}
-
-/**
- * The one cell a sheet nobody's roster moved still gets: the banner's note,
- * which says when this was last looked at.
- *
- * A leader opens the sheet to find out whether the list in front of them is
- * current, and "Refreshed three days ago" on a list that is right today is the
- * wrong answer to the only question they asked. One call, against the two
- * hundred a full redraw costs.
- */
-function stampLeaderSheetRefreshed(sheet) {
-  try {
-    sheet.getRange(MEMORY_TAB_BANNER_ROW, 1).setNote(leaderSheetBannerNote());
-  } catch (err) {
-    log(`ℹ️ Could not restamp the refresh time on a program registrant sheet (${err}).`);
-  }
 }
 
 /**
@@ -1540,16 +1543,16 @@ function leaderSheetSessionBandLabel(group) {
 /**
  * The banner note, and everything a program leader is told by it.
  *
- * ITS OWN FUNCTION because it is now written from two places: the full redraw
- * below, and stampLeaderSheetRefreshed(), which is all a sheet gets on an hour
- * when nobody's roster moved. Both have to say the same thing, and the one
- * thing that differs between one hour and the next is the time at the top of
- * it — which is exactly why the stamp is not in the fingerprint.
+ * Written by the full redraw only. It used to be restamped on every hour when
+ * nobody's roster moved, too, and that restamp was a modification of the file
+ * that made every sheet look touched to 99zf's Drive check — so the note says
+ * when the roster was last UPDATED, which an unchanged hour leaves true. The
+ * time is still not in the fingerprint, or no two hours would match.
  */
 function leaderSheetBannerNote() {
   const stamp = Utilities.formatDate(new Date(),
     Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
-  return `Refreshed ${stamp}.\n\nEach class has its own blue band. Tick the yellow columns; ` +
+  return `Last updated ${stamp}. This sheet is checked every hour and rewritten whenever the roster changes.\n\nEach class has its own blue band. Tick the yellow columns; ` +
     `everything else fills in by itself.\n\n` +
     // SAID OUT LOUD, because it is the one tick with a consequence outside
     // this sheet. A leader who thinks Dropped is a private note will use it

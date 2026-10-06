@@ -162,23 +162,43 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     // Reports back whether its triage pass MOVED registrant rows off the tab.
     // When it did, every step below has to re-read rather than reuse the array
     // this run built — see ctx.reusableRows().
-    id: 'program_dashboard',
-    label: 'rebuilding the program dashboard',
+    //
+    // TRIAGE ONCE A DAY, and the redraw only when something it is drawn from
+    // moved (99zg). Triage reads every program calendar to find deleted
+    // events; the calendar sync and every calendar-change trigger already do
+    // that, so the hourly pass only does it when nothing has today — and on
+    // that pass the redraw is never skipped, because triage lives inside it.
     run: ctx => {
-      const result = renderProgramDashboard(false, { registrantRows: ctx.registrantRows() }) ||
-        { registrantsMoved: false };
-      if (result.registrantsMoved) ctx.noteRegistrantsMoved();
+      const triageDue = dailyStepDue_('triage');
+      const draw = () => {
+        const result = renderProgramDashboard(false,
+          { registrantRows: ctx.registrantRows(), skipTriage: !triageDue }) || { registrantsMoved: false };
+        if (result.registrantsMoved) ctx.noteRegistrantsMoved();
+      };
+      if (triageDue) {
+        // Hashed BEFORE the draw, as every later hour will hash it: the draw
+        // drops the cached session rows, and a hash of the re-read would never
+        // match what the next hour computes up front.
+        const fingerprint = tailRenderFingerprint_('program_dashboard', [ctx.sessionRows(), ctx.registrantRows()]);
+        draw();
+        recordTailRender_('program_dashboard', fingerprint);
+        return undefined;
+      }
+      return runTailRenderUnlessUnchanged_('program_dashboard',
+        [ctx.sessionRows(), ctx.registrantRows()], draw);
     }
   },
   {
     id: 'lunch_dashboard',
     label: 'rebuilding the lunch dashboard',
-    run: ctx => updateMasterLunchDashboard(ctx.reusableRows())
+    run: ctx => runTailRenderUnlessUnchanged_('lunch_dashboard', [ctx.reusableRows()],
+      () => updateMasterLunchDashboard(ctx.reusableRows()))
   },
   {
     id: 'memory_tabs',
     label: 'refreshing the memory tabs',
-    run: ctx => refreshMemoryTabs(ctx.reusableRows(), null)
+    run: ctx => runTailRenderUnlessUnchanged_('memory_tabs', [ctx.sessionRows(), ctx.reusableRows()],
+      () => refreshMemoryTabs(ctx.reusableRows(), null))
   },
   {
     id: 'club_tab',
@@ -261,7 +281,15 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     // nothing else.
     id: 'ledger_verify',
     label: 'checking the registration ledger against the Registrants tab',
-    run: () => reportLedgerVerification()
+    //
+    // ONCE A DAY (99zg): what it files goes out in the NEXT day's 10am digest,
+    // so twenty-four folds of a growing ledger said what one does.
+    run: () => {
+      if (!dailyStepDue_('ledger_verify')) return undefined;
+      reportLedgerVerification();
+      recordDailyStepRun_('ledger_verify');
+      return undefined;
+    }
   }
 ];
 
@@ -560,6 +588,20 @@ function resumeRegistrationSync() {
  * window is done, `{ processed, remaining }` when there is more to do.
  */
 function runRegistrationSyncPhases_(ctx) {
+  // This sync's own writes are its OUTPUTS, not news: left unsuppressed they
+  // would move the change generation every hour and no dashboard would ever
+  // be skipped (99zg). Put back on the way out, because the unsliced entry
+  // point runs inside other jobs whose own writes still count.
+  const wasSuppressed = __workbookChangeSuppressed;
+  suppressWorkbookChangeGeneration_(true);
+  try {
+    return runRegistrationSyncPhasesInner_(ctx);
+  } finally {
+    suppressWorkbookChangeGeneration_(wasSuppressed);
+  }
+}
+
+function runRegistrationSyncPhasesInner_(ctx) {
   const sync = buildRegistrationSyncContext(ctx.state, ctx.deadline);
   let processed = 0;
 

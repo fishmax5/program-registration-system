@@ -2,7 +2,8 @@
 // 6b. PER-SHEET RENDER WRAPPERS  (Registrants / Triage / Lunch_Schedule)
 // ============================================================================
 
-function renderRegistrantsSheet(force, allRows) {
+function renderRegistrantsSheet(force, allRows, options) {
+  options = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH);
   const headers = HEADERS.All_Registrants;
@@ -12,6 +13,15 @@ function renderRegistrantsSheet(force, allRows) {
   // Same derived pair as the session table, keyed off this row's own program
   // and day — see 69_generated_file_links.gs.
   stampGeneratedFileLinks(rows, getIndexMap(headers), { titleColumn: 'Event' });
+  // WHAT THIS RENDER WOULD WRITE, hashed with today (99zg). Recorded by every
+  // full render, whoever called it; consulted only by a caller that asks — the
+  // hourly sync, whose rows were read off this tab this same run, so a tab
+  // changed since the last render cannot hash the same.
+  const fingerprint = registrantRenderFingerprint_(rows);
+  if (options.skipIfUnchanged && !force && registrantRenderUnchanged_(fingerprint)) {
+    log(`${SHEET_NAMES.REGISTRANT_DASH}: nothing to change — left as it is.`);
+    return { skipped: true };
+  }
   const result = renderFlatDateSheet(sheet, headers, rows, {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',
@@ -27,6 +37,7 @@ function renderRegistrantsSheet(force, allRows) {
   // Reached only once the render landed: the baseline the shrink guard judges
   // an EMPTY tab against (99j), so an emptied tab cannot pass as a new one.
   recordRenderedRegistrantCount_(rows.length);
+  recordRegistrantRenderFingerprint_(fingerprint);
   return result;
 }
 

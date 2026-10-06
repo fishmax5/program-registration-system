@@ -43,6 +43,10 @@ function renderProgramDashboard(force, options) {
   const triageResult = options.skipTriage
     ? { rows: sessionRows, affectedFormIds: new Set(), registrantsMoved: false }
     : triageDeletedSessions(sessionRows, map, registrantsSheet);
+  // What lets the hourly registration sync leave triage to whoever has done
+  // it today (99zg) — the calendar sync, a calendar-change trigger, or the
+  // first registration sync of the day.
+  if (!options.skipTriage) recordDailyStepRun_('triage');
   sessionRows = triageResult.rows;
 
   sessionRows.forEach(row => {
