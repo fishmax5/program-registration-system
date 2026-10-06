@@ -419,7 +419,7 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
         const externalUrl = showLinks
           ? externalRegistrationUrlForEvent(calendarId, parsed.cleanTitle, startTime) : '';
         if (externalUrl) {
-          // Registered for on an outside site (99ze) — its link, horizon or not.
+          // Registered for on an outside site (99zh) — its link, horizon or not.
           updated = prependRegistrationLine(stripped.text,
             buildExternalRegistrationLinkLine(parsed.cleanTitle, externalUrl));
         } else if (showLinks && shouldMarkNotYetOpen(startTime)) {
@@ -901,7 +901,7 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     row[map['Edit_Form_Link']] = formInfo && formInfo.editUrl
       ? makeHyperlinkFormula(formInfo.editUrl, 'Edit Form Settings') : '';
     row[map['Form_ID']] = formInfo ? formInfo.formId : '';
-    // A date recorded as registering on an outside site (99ze) — a row being
+    // A date recorded as registering on an outside site (99zh) — a row being
     // re-written after it went missing — keeps that, not the group's form.
     const externalUrl = formInfo ? externalRegistrationUrlForEventId(eventId) : '';
     if (externalUrl) {
@@ -1182,7 +1182,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
   group.events.forEach(ev => {
     const existing = ev.getDescription() || '';
 
-    // REGISTERED FOR ELSEWHERE (99ze): the outside link, whatever the horizon
+    // REGISTERED FOR ELSEWHERE (99zh): the outside link, whatever the horizon
     // says — the outside site decides when it opens, not this workbook.
     const externalUrl = externalRegistrationUrlForEvent(calendarIdOfEvent.get(ev), group.cleanTitle,
       ev.getStartTime());

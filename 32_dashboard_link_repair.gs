@@ -221,7 +221,7 @@ function planDashboardLinkRepair(registrySheet) {
       // A row whose links were deliberately taken away by [No Registration]
       // is not misaligned — it is saying what it is meant to say.
       if (id.link === NO_REGISTRATION_LINK_LABEL) { stats.blocked++; continue; }
-      // Nor is a row registered for on an outside site (99ze): it has no form
+      // Nor is a row registered for on an outside site (99zh): it has no form
       // on purpose, and "repairing" it would hand the program's Google Form
       // back to a session somebody deliberately moved off it.
       if (externalRegistrationUrlForEventId(id.eventId)) { stats.blocked++; continue; }
@@ -1650,7 +1650,7 @@ function resolveForkedProgramNow(programKey, formId) {
     const date = coerceDate(row[map['Event_Date']]);
     if (!date || formatDateKey(date) < todayKey) return;
     const eventId = String(row[map['Event_ID']] || '').trim();
-    // A session somebody moved to an outside registration page (99ze) is not
+    // A session somebody moved to an outside registration page (99zh) is not
     // one of the two twins — it books through neither.
     if (eventId && !externalRegistrationUrlForEventId(eventId)) wanted.add(eventId);
   });

@@ -224,7 +224,7 @@ function repointSessionsToForm(eventIds, target) {
     if (mode === 'existing') {
       formId = extractFormId(target.formRef);
       // NOT A FORM: an outside registration page (Amilia, a partner's site).
-      // These sessions then carry that link and no form at all — see 99ze.
+      // These sessions then carry that link and no form at all — see 99zh.
       const externalUrl = formId ? '' : normalizeExternalRegistrationUrl(target.formRef);
       if (externalUrl) return repointSessionsToExternalLink_(registrySheet, wanted, externalUrl, chosenRows, map);
       if (!formId) {
@@ -272,7 +272,7 @@ function repointSessionsToForm(eventIds, target) {
 
 /**
  * The outside-registration half of repointSessionsToForm(), inside its lock:
- * the rows, the store that keeps them that way (99ze), and the calendar
+ * the rows, the store that keeps them that way (99zh), and the calendar
  * descriptions. No form is opened, relabelled or created — the dates simply
  * drop off their old form's list the next time its labels are rebuilt from
  * the rows, because a row with no Form_ID belongs to no form.
@@ -396,7 +396,7 @@ function writeFormIdOntoSessions(registrySheet, wanted, formId) {
   });
 
   // A session on a form is no longer registered for on an outside site —
-  // which is how an outside link (99ze) is undone: move it back onto a form.
+  // which is how an outside link (99zh) is undone: move it back onto a form.
   forgetExternalRegistrationLinks(Array.from(wanted));
   return moved;
 }

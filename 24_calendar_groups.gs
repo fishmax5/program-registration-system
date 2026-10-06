@@ -50,7 +50,7 @@ function processCalendarGroup(registrySheet, item, existingState) {
     }
   }
 
-  // The dates somebody moved to an outside registration page (99ze) stay on
+  // The dates somebody moved to an outside registration page (99zh) stay on
   // the calendar and in this group — their rows and descriptions are still
   // this system's — but are never offered on the Google Form as well.
   const formGroup = groupWithoutExternalSessions(group);

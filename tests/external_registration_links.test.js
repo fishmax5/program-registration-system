@@ -1,4 +1,4 @@
-// REGISTRATION ON SOMEBODY ELSE'S SITE (99ze_external_registration_links.gs).
+// REGISTRATION ON SOMEBODY ELSE'S SITE (99zh_external_registration_links.gs).
 //
 // Pins: what counts as an outside address (an Amilia link with no scheme, yes;
 // a Google Form, no; free text, no), the store's round trip and its undo, that

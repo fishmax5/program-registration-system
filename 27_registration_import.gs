@@ -87,8 +87,12 @@ function runRegistrationImportPhase(sync) {
   // be reading a session table that the previous slice's own writes have
   // already changed, which is how a form gets read twice and another not at
   // all.
+  //
+  // Less the forms whose programs ENDED a week or more ago (99ze): closed, and
+  // read once more after closing, they cannot be holding a response — and
+  // they were most of this list on a workbook that has run for a year.
   if (!plan.pendingFormIds) {
-    plan.pendingFormIds = getDistinctFormIds(registrySheet);
+    plan.pendingFormIds = withoutEndedForms(getDistinctFormIds(registrySheet), lastSync);
     plan.formsRead = 0;
   }
 
@@ -306,10 +310,23 @@ function runRegistrationImportPhase(sync) {
     // hour. That is the bargain §2 asks for — better to re-read a form than to
     // take a registration that leaves no record.
     appendLedgerEntries(takeImportLedgerEntries());
-    renderRegistrantsSheet(false, combinedRegistrantRows);
+    //
+    // SKIPPED WHEN IT WOULD WRITE WHAT IS THERE (99zg) — which is most hours.
+    // These rows were read off the tab this run, so anything changed since the
+    // last render (a hand edit, a desk patch, an import) makes them hash
+    // differently and the tab is drawn as before.
+    renderRegistrantsSheet(false, combinedRegistrantRows, { skipIfUnchanged: true });
     return true;
   }) === true;
   if (registrantsWritten) sync.setRegistrantRows(combinedRegistrantRows);
+
+  // AFTER THE WRITE, and only once the whole window is in: a form is never
+  // closed with a response on it this sync has not put on the tab. See 99ze
+  // for the one further read a closed form is still owed.
+  if (allFormsRead && registrantsWritten) {
+    sync.step('closing forms whose programs have ended', () =>
+      closeEndedForms(sessionRows, { deadline: sync.deadline }));
+  }
 
   plan.importedRows = (plan.importedRows || 0) + newRows.length;
   plan.problems = (plan.problems || []).concat(sync.problems.splice(0));

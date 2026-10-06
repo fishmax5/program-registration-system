@@ -640,7 +640,7 @@ function reconcileRegistrationHorizonNotices(groups, existingState) {
     const calendarIdOfEvent = new Map((group.sessions || []).map(s => [s.event, s.calendarId]));
 
     (group.events || []).forEach(ev => {
-      // Registered for on an outside site (99ze): the outside site decides
+      // Registered for on an outside site (99zh): the outside site decides
       // when it opens, and its link is written by the two passes that own links.
       if (externalRegistrationUrlForEvent(calendarIdOfEvent.get(ev), group.cleanTitle, ev.getStartTime())) return;
       const existing = ev.getDescription() || '';
@@ -921,7 +921,7 @@ function updateRegistrationLinkCells(registrySheet, groups, formIdByProgram) {
       const eventIdForRow = eventIds ? String(eventIds[r] || '').trim() : '';
       const externalUrl = eventIdForRow ? externalRegistrationUrlForEventId(eventIdForRow) : '';
       if (externalUrl) {
-        // Registered for on an outside site (99ze) before the tag went on.
+        // Registered for on an outside site (99zh) before the tag went on.
         view[r] = makeHyperlinkFormula(externalUrl, EXTERNAL_REGISTRATION_LINK_LABEL);
         touchedView = true;
         changed++;

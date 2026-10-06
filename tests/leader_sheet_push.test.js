@@ -104,6 +104,7 @@ this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
 this.__stubRowsByProgram = function (fn) { buildLeaderSheetRowsByProgram = fn; };
 this.__stubAccess = function (fn) { ensureProgramLeaderSheetAccess = fn; };
 this.__clearSpreadsheetHandles = function () { __spreadsheetHandleCache = {}; };
+this.__markUntouched = function (ids) { __leaderSheetsUntouched = ids; };
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -204,7 +205,7 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
 }
 
 // ---------------------------------------------------------------------------
-// 3. THE FINGERPRINT: AN HOUR WITH NO CHANGE COSTS ONE CALL
+// 3. THE FINGERPRINT: AN HOUR WITH NO CHANGE COSTS AT MOST ONE CALL
 // ---------------------------------------------------------------------------
 {
   const rows = rosterRows(12, 4);
@@ -228,13 +229,14 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(entry.accessOpened, true,
     'the sharing repair and the fingerprint both survive on the entry — neither Object.assign drops the other');
 
+  const notesBefore = callsNamed(sheet, 'setNote').length;
   const before = roundTrips(sheet.stats);
   const second = sandbox.pushProgramLeaderSheets([], []);
   const cost = roundTrips(sheet.stats) - before;
   assert.strictEqual(second, 0, 'the second push wrote nothing');
-  assert.ok(cost <= 2, `an unchanged roster costs the refresh stamp and no more, was ${cost}`);
-  assert.ok(callsNamed(sheet, 'setNote').length >= 1,
-    'the banner still says when it was last looked at');
+  assert.ok(cost <= 1, `an unchanged roster costs at most the contradiction check, was ${cost}`);
+  assert.strictEqual(callsNamed(sheet, 'setNote').length, notesBefore,
+    'and no restamp — that write made every sheet look touched to the Drive check (99zf)');
 
   // One more person: the fingerprint moves and the sheet is rewritten.
   const grown = rows.concat(rosterRows(1, 1));
@@ -393,6 +395,43 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   const none = file('Waitlist');
   checkWriteBeforeClear('empty waitlist tab', none.sheet, none.grid,
     () => sandbox.writeProgramLeaderWaitlistTab(none.file, entry, []));
+}
+
+// ---------------------------------------------------------------------------
+// 6. A SHEET NOBODY TOUCHED, WITH A ROSTER THAT DID NOT MOVE, IS NOT OPENED
+//
+// The pull (99zf) asked Drive and left the file unread; the push then has no
+// reason to open it either — no restamp, no in-flight marker. A roster that
+// DID move is still written, and a forced push still opens everything.
+// ---------------------------------------------------------------------------
+{
+  const KEY = 'chair yoga|ashbridge';
+  const ENTRY = { fileId: 'FU', title: 'Chair Yoga', location: 'Ashbridge' };
+  const rows = rosterRows(2, 2);
+  let opened = 0;
+  const sheet = makeCountingSheet([], 'Sign_Up_Sheet');
+  sandbox.__clearSpreadsheetHandles();
+  sandbox.SpreadsheetApp.openById = () => {
+    opened++;
+    return { getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet] };
+  };
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [KEY]: rows }));
+  sandbox.__setRegistry({
+    [KEY]: Object.assign({}, ENTRY, {
+      accessOpened: true, pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, rows)
+    })
+  });
+  sandbox.__markUntouched({ FU: true });
+
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'nothing written');
+  assert.strictEqual(opened, 0, 'and the file was never opened');
+
+  sandbox.__stubRowsByProgram(() => ({ [KEY]: rows.concat(rosterRows(1, 1)) }));
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1, 'a roster that moved is still written');
+  assert.strictEqual(opened, 1);
+
+  sandbox.__markUntouched(null);
 }
 
 console.log('✅ leader_sheet_push.test.js passed');
