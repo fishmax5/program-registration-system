@@ -965,7 +965,16 @@ defineLazyGlobal_('HEADERS', () => ({
     // The volunteer side of the same month, counted off Volunteer_Hours
     // (99e). Stored like everything else here, so a year whose visit rows have
     // been tidied away still reports the hours that were worked.
-    'Volunteers', 'Volunteer_Visits', 'Volunteer_Hours'
+    'Volunteers', 'Volunteer_Visits', 'Volunteer_Hours',
+    // What the KITCHEN was actually asked for, summed off Actual_Ordered on
+    // Master_Lunch_Dashboard — the number an invoice is checked against.
+    // Meals_Ordered above is what registrants asked for, which is a different
+    // question. Kitchen_Order_Days is how many date x building rows carry a
+    // typed number, so a month with gaps reads as incomplete rather than low;
+    // Kitchen_Ordered_By_Location splits the total per building, because the
+    // caterer invoices each one. Appended last: a column the stored tab does
+    // not have yet reads back blank (34) and the next capture writes it out.
+    'Kitchen_Ordered', 'Kitchen_Order_Days', 'Kitchen_Ordered_By_Location'
   ],
   /**
    * Volunteer_Hours — ONE ROW PER VISIT, which is the grain the year-end

@@ -55,6 +55,7 @@ this.buildYearOverYearSummary = buildYearOverYearSummary;
 this.metricsShiftMonthKey = metricsShiftMonthKey;
 this.metricsMonthLabel = metricsMonthLabel;
 this.HEADERS = HEADERS;
+this.kitchenOrdersForMonth = kitchenOrdersForMonth;
 this.getIndexMap = getIndexMap;
 `, sandbox, { filename: 'program.gs' });
 
@@ -273,6 +274,41 @@ check('a missing month lowers the coverage count, not the average',
     sparseSummary.indicators.filter(i => i.label === 'Attendance rate')[0].current], [11, 75]);
 check('and its counts simply are not there', 
   sparseSummary.indicators.filter(i => i.label === 'Sessions held')[0].current, 110);
+
+// --- Lunches ordered from the kitchen ---------------------------------------
+// Summed off Actual_Ordered on the lunch dashboard: the number an invoice is
+// checked against. A blank cell is "not written down yet", never zero.
+{
+  const lunchHeaders = sandbox.HEADERS.Master_Lunch_Dashboard;
+  const lMap = sandbox.getIndexMap(lunchHeaders);
+  const lunchRow = (y, m, d, location, ordered, plan) => {
+    const row = new Array(lunchHeaders.length).fill('');
+    row[lMap['Event_Date']] = new Date(y, m - 1, d);
+    row[lMap['Location']] = location;
+    row[lMap['Actual_Ordered']] = ordered;
+    row[lMap['Total_to_Order']] = plan || 99;
+    return row;
+  };
+  const rows = [
+    lunchRow(2026, 9, 1, 'Narberth', 20),
+    lunchRow(2026, 9, 2, 'Narberth', '18'),
+    lunchRow(2026, 9, 2, 'Ashbridge', 7),
+    lunchRow(2026, 9, 3, 'Narberth', ''),      // not typed: no day, no meals, and NOT the plan
+    lunchRow(2026, 10, 1, 'Narberth', 25)      // another month
+  ];
+  const sept = sandbox.kitchenOrdersForMonth('2026-09', rows, lMap);
+  check('kitchen orders sum the typed numbers only', [sept.total, sept.days], [45, 3]);
+  check('and split them by building', sept.byLocation, 'Ashbridge 7 · Narberth 38');
+  const empty = sandbox.kitchenOrdersForMonth('2026-08', rows, lMap);
+  check('a month with nothing typed is blank, not zero', [empty.total, empty.days], ['', '']);
+
+  const withKitchen = Object.assign({}, source, { lunchDashboardRows: rows, lunchDashboardMap: lMap });
+  const septMetrics = sandbox.computeMonthlyMetrics('2026-09', withKitchen, firstMonths, NOW);
+  check('the month row carries the kitchen total',
+    [septMetrics.Kitchen_Ordered, septMetrics.Kitchen_Order_Days], [45, 3]);
+  check('a month known only from the lunch dashboard is still listed',
+    sandbox.metricsMonthsPresent(withKitchen).indexOf('2026-10') !== -1, true);
+}
 
 console.log(failures === 0 ? '\nAll monthly metrics checks passed.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
