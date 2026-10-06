@@ -975,3 +975,11 @@ Numbered after `99za` for the usual reason. Behavior plus two self-contained con
 | File | | What is in it |
 |---|--:|---|
 | `99zb_checkbox_confirm.gs` | 120 | **Every single-cell check-box click, on every tab, asks first** (`confirmCheckboxEditOrRevert`, called at the top of `onEdit` before any per-tab handler). YES keeps it; NO (or closing the dialog) puts the box back and no handler runs; CANCEL keeps it and silences the question for 5 minutes for that user (`CacheService.getUserCache()`, TTL `CHECKBOX_CONFIRM_SNOOZE_SECONDS`) — Google's alert has fixed buttons, so the message spells out what each means. Not asked: multi-cell edits (paste, fill-down), cells without check-box validation, no UI. Never throws — a broken confirmation lets the edit through. Leader sheets are separate files and have no `onEdit`. `tests/checkbox_confirm.test.js`. |
+
+### The sign-in app on its own menu (99zc)
+
+Behavior plus one self-contained constant; `16`'s `onOpen` reaches it through a hoisted function declaration, guarded so it cannot cost the main menu.
+
+| File | | What is in it |
+|---|--:|---|
+| `99zc_sign_in_app_menu.gs` | 100 | **📱 Sign-In App** — a second top-level menu, separate from the main one, with one item: **Open the Sign-In App** (`openSignInApp`, wrapped as `menu_openSignInApp` in `99r`). A menu cannot navigate, so it opens a small modeless dialog that calls `window.open()` on the door app's address (`checkInPageUrl`) and closes itself; if the browser blocks the tab it stays up with the link as a button and one link per building (`?location=`). An undeployed workbook falls through to the Door Pages dialog (`61`), which explains how to deploy. `99r`'s usage report walks this menu too. `tests/menu_usage.test.js`. |

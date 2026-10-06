@@ -59,7 +59,15 @@ function onOpen() {
   } catch (err) {
     log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
   }
-  buildAppMenu(SpreadsheetApp.getUi(), true);
+  const ui = SpreadsheetApp.getUi();
+  buildAppMenu(ui, true);
+  // A second, separate menu holding only the door's sign-in app (99zc).
+  // Guarded so it can never cost anybody the main menu above.
+  try {
+    buildSignInAppMenu(ui);
+  } catch (err) {
+    log(`ℹ️ Could not add the Sign-In App menu (${err}).`);
+  }
 }
 
 /**
