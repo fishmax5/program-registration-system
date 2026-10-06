@@ -359,25 +359,65 @@ function reportLedgerGrowth() {
 
 // --- the compaction -----------------------------------------------------------
 
-/** The dropped rows, whole, as a CSV in Drive. Returns the file name, or '' when it could not be written. */
+/**
+ * Characters per archive file. `DriveApp.createFile(name, text)` refuses
+ * content over 10MB, and a ledger that had been growing by thousands of
+ * redundant entries a day produced one CSV well past that — so every
+ * compaction that mattered most was refused. A character can be up to three
+ * bytes in UTF-8 (names, accented titles), so a part stays under 3M chars.
+ */
+const LEDGER_ARCHIVE_PART_MAX_CHARS = 3000000;
+
+/** The part size, as a function so a test can shrink it. */
+function ledgerArchivePartMaxChars_() {
+  return LEDGER_ARCHIVE_PART_MAX_CHARS;
+}
+
+/**
+ * The dropped rows, whole, as CSV in Drive — split into numbered parts when
+ * one file would be too large, each part carrying the header. Returns
+ * `{ name }` (the file, or the first and last part) on success, or
+ * `{ error }` saying why not, so the refusal can tell somebody what to fix
+ * rather than only that something failed.
+ */
 function archiveCompactedLedgerRows_(headerRow, rows) {
   try {
-    const csv = [headerRow].concat(rows).map(row => row.map(cell => {
+    const toLine = row => row.map(cell => {
       let text = cell === null || cell === undefined ? '' : cell;
       if (Object.prototype.toString.call(text) === '[object Date]') {
-        text = Utilities.formatDate(text, TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss");
+        text = isNaN(text.getTime()) ? '' : Utilities.formatDate(text, TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss");
       }
       return `"${String(text).replace(/"/g, '""')}"`;
-    }).join(',')).join('\n');
-    const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd_HHmm');
-    const name = `${SHEET_NAMES.REGISTRATION_LEDGER} compacted ${stamp} (${rows.length} entries).csv`;
+    }).join(',');
+    const header = toLine(headerRow);
+    const parts = [];
+    let lines = [];
+    let size = header.length;
+    rows.forEach(row => {
+      const line = toLine(row);
+      if (lines.length && size + line.length + 1 > ledgerArchivePartMaxChars_()) {
+        parts.push(lines);
+        lines = [];
+        size = header.length;
+      }
+      lines.push(line);
+      size += line.length + 1;
+    });
+    if (lines.length) parts.push(lines);
+
     const folder = getOrCreateLedgerArchiveFolder();
-    if (!folder) return '';
-    folder.createFile(name, csv, MimeType.CSV);
-    return name;
+    if (!folder) return { error: `the "${LEDGER_ARCHIVE_FOLDER_NAME}" Drive folder could not be found or created` };
+    const stamp = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd_HHmm');
+    const base = `${SHEET_NAMES.REGISTRATION_LEDGER} compacted ${stamp} (${rows.length} entries)`;
+    const names = parts.map((partLines, i) => {
+      const name = parts.length > 1 ? `${base} part ${i + 1} of ${parts.length}.csv` : `${base}.csv`;
+      folder.createFile(name, [header].concat(partLines).join('\n'), MimeType.CSV);
+      return name;
+    });
+    return { name: names.length > 1 ? `${names[0]} … ${names[names.length - 1]}` : names[0] };
   } catch (err) {
     log(`⚠️ Ledger compaction: could not archive the dropped entries (${err}).`);
-    return '';
+    return { error: String(err && err.message || err) };
   }
 }
 
@@ -453,13 +493,15 @@ function compactRegistrationLedgerLocked_() {
     return 0;
   }
 
-  const archived = droppedItems.length
+  const archive = droppedItems.length
     ? archiveCompactedLedgerRows_(read.values[0], droppedItems.map(item => read.values[item.row]))
-    : '(none needed)';
-  if (!archived) {
-    explainRefusal('The ledger was not compacted: the entries it would remove could not be saved to Drive first.');
+    : { name: '(none needed)' };
+  if (!archive.name) {
+    explainRefusal('The ledger was not compacted: the entries it would remove could not be saved to Drive first ' +
+      `(${archive.error || 'unknown error'}). Nothing was changed.`);
     return 0;
   }
+  const archived = archive.name;
 
   const sheet = read.sheet;
   if (sheet.getLastRow() !== read.values.length) {
