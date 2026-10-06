@@ -100,6 +100,48 @@ function onOpen() {
  * people can see), and answering NO stops here rather than going on to import
  * — a declined confirmation means "not now", not "skip that bit".
  */
+/**
+ * Refresh My Permissions — clears the CURRENT user's authorization for this
+ * script, so the next thing they press asks for every permission afresh.
+ *
+ * Why it exists: Apps Script asks for permissions once, for the scopes the
+ * code needed THEN. When the code later reaches for a new service (Drive's
+ * advanced API, a Calendar read, sending mail), an account that authorized
+ * an older version is refused with an error naming the call that failed, not
+ * the missing grant — and nothing on the menu could make Google ask again.
+ * `ScriptApp.invalidateAuth()` is that missing step.
+ *
+ * What it does NOT do: touch anybody else's grant, or the triggers. Triggers
+ * run as whoever installed them; if that is the person pressing this, the
+ * hourly runs fail until they re-authorize, which is why the alert says to
+ * press something straight away. The alert is shown BEFORE the grant is
+ * dropped, because after it the UI calls themselves may need authorization.
+ */
+function refreshMyPermissions() {
+  const ui = SpreadsheetApp.getUi();
+  const answer = ui.alert(
+    'Refresh My Permissions',
+    'This clears the permissions YOU have given this workbook\'s script, so ' +
+    'Google asks for all of them again.\n\n' +
+    'Afterwards, press any item on the menu (for example "Update Everything ' +
+    'Now") and follow Google\'s prompts: choose your account, then Allow. If ' +
+    'Google warns the app is unverified, choose Advanced \u2192 Go to the project.\n\n' +
+    'Do this straight away: if your account owns the hourly triggers they ' +
+    'will fail until you have allowed the permissions again.\n\nContinue?',
+    ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) return;
+  try {
+    ScriptApp.invalidateAuth();
+    log('refreshMyPermissions: authorization cleared for the current user.');
+  } catch (e) {
+    ui.alert('Refresh My Permissions',
+      'Google would not clear the permissions: ' + (e && e.message ? e.message : e) +
+      '\n\nYou can remove them by hand at myaccount.google.com/permissions ' +
+      '(find this project, Remove access), then press any menu item to be asked again.',
+      ui.ButtonSet.OK);
+  }
+}
+
 function syncEverythingNow() {
   const before = getLastSyncTime();
   syncCalendars();
@@ -306,6 +348,12 @@ function buildAppMenu(ui, includeAdmin) {
       .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
       .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog')))
     .addSubMenu(ui.createMenu('\u2699\ufe0f Settings & Fixes')
+      // FIRST, because it is what somebody reaches for when every other item
+      // here answers "Authorization is required" or "you do not have
+      // permission" — usually after the code gained a scope the account never
+      // granted. See refreshMyPermissions().
+      .addItem('\ud83d\udd11 Refresh My Permissions', menuFn_('refreshMyPermissions'))
+      .addSeparator()
       // The two halves of "Update Everything Now", for the times one of them
       // is what you actually want. Diagnostic rather than daily, which is why
       // they are here and not at the top.

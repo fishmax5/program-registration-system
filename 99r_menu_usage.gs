@@ -180,6 +180,7 @@ function menu_rebuildAssistanceFormsNow() { recordMenuUsage_('rebuildAssistanceF
 function menu_rebuildLayoutFromSheet() { recordMenuUsage_('rebuildLayoutFromSheet'); return rebuildLayoutFromSheet(); }
 function menu_rebuildQuickMarkListsNow() { recordMenuUsage_('rebuildQuickMarkListsNow'); return rebuildQuickMarkListsNow(); }
 function menu_refreshLunchSignUpForms() { recordMenuUsage_('refreshLunchSignUpForms'); return refreshLunchSignUpForms(); }
+function menu_refreshMyPermissions() { recordMenuUsage_('refreshMyPermissions'); return refreshMyPermissions(); }
 function menu_refreshMetricsTabNow() { recordMenuUsage_('refreshMetricsTabNow'); return refreshMetricsTabNow(); }
 function menu_refreshProgramLeaderSheetsNow() { recordMenuUsage_('refreshProgramLeaderSheetsNow'); return refreshProgramLeaderSheetsNow(); }
 function menu_releaseMyTriggers() { recordMenuUsage_('releaseMyTriggers'); return releaseMyTriggers(); }
