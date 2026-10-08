@@ -472,6 +472,12 @@ function buildQuickMarkHtml(preloadedIndex) {
       week belongs in <b>a regular need</b> above instead.</p>
   </div>
 
+  <div id="cancelFields" style="display:none">
+    <label class="tick"><input type="checkbox" id="cancelLater" onchange="refreshChangeButton()">
+      Also cancel <b>every later date</b> of this program they are booked on
+      <span class="note">— same program, same building, this date onwards</span></label>
+  </div>
+
   <div id="reasonFields" style="display:none">
     <label class="field" for="changeReason">Reason (optional)</label>
     <input type="text" id="changeReason" placeholder="Goes in the row's notes, for whoever asks later"
@@ -1583,6 +1589,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     el('newEmail').value = '';
     el('changeNote').value = '';
     el('changeReason').value = '';
+    el('cancelLater').checked = false;
     sayChange('', '');
     changeWhatChanged();
   }
@@ -1594,6 +1601,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     el('lunchFields').style.display = what === 'lunch' ? 'block' : 'none';
     el('contactFields').style.display = what === 'contact' ? 'block' : 'none';
     el('noteFields').style.display = what === 'note' ? 'block' : 'none';
+    el('cancelFields').style.display = what === 'cancel' ? 'block' : 'none';
     // The reason box rides with the three changes somebody asks about six
     // weeks later — "why is this seat empty?" is the question the stamp exists
     // to answer (see cancellationStamp()).
@@ -1686,7 +1694,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     if (what === 'note') ready = !!el('changeNote').value.trim();
     el('changeGo').disabled = !ready;
     el('changeGo').textContent = what === 'remove' ? 'Remove this row'
-      : (what === 'cancel' ? 'Cancel this registration'
+      : (what === 'cancel' ? (el('cancelLater').checked ? 'Cancel this and every later date' : 'Cancel this registration')
         : (what === 'move' ? 'Move them' : 'Apply change'));
   }
 
@@ -1714,7 +1722,8 @@ function buildQuickMarkHtml(preloadedIndex) {
       mealsOrdered: countIn('newMealsOrdered', 1),
       phone: el('newPhone').value,
       email: el('newEmail').value,
-      note: el('changeNote').value
+      note: el('changeNote').value,
+      laterDates: what === 'cancel' && el('cancelLater').checked
     };
   }
 
@@ -1731,7 +1740,12 @@ function buildQuickMarkHtml(preloadedIndex) {
     // has to be the browser's. Removing a row asks again from the server as
     // well, because that answer decides a deletion and the dialog's copy of
     // who is on what can be minutes old.
-    if (what === 'cancel' &&
+    if (what === 'cancel' && el('cancelLater').checked &&
+      !window.confirm('Cancel ' + name + ' on ' + where + ' AND every later date of this program they are booked on?\\n\\n' +
+        'Their seats and lunches go back straight away. Earlier dates are left alone.')) {
+      return;
+    }
+    if (what === 'cancel' && !el('cancelLater').checked &&
       !window.confirm('Cancel ' + name + '\\'s place on ' + where + '?\\n\\n' +
         'Their seat and their lunch go back straight away. "Put them back on" is how it is undone.')) {
       return;

@@ -124,6 +124,8 @@ function collectMetricsSourceRows(ss) {
     // month (99e). A workbook with no volunteer tab reads as an empty list,
     // which is what makes the three columns below zero rather than absent.
     volunteerVisits: readVolunteerVisits(),
+    // The private sessions (99zi), parsed once like the volunteer visits.
+    privateSessions: readPrivateSessions(),
     // The kitchen's own record, typed into Actual_Ordered day by day. Read
     // fresh (no execution cache) for the reason 44's read is: it is the one
     // column a person types and nothing recomputes.
@@ -355,6 +357,7 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
   });
 
   const volunteers = volunteerMetricsForMonth(monthKey, source.volunteerVisits || []);
+  const privateSessions = privateSessionMetricsForMonth(monthKey, source.privateSessions || []);
   const kitchen = kitchenOrdersForMonth(monthKey, source.lunchDashboardRows, source.lunchDashboardMap || {});
 
   if (sessions === 0 && lunchSessions === 0 && registrations === 0 &&
@@ -409,6 +412,9 @@ function computeMonthlyMetrics(monthKey, source, firstMonthByPerson, now) {
     Kitchen_Ordered: kitchen.total,
     Kitchen_Order_Days: kitchen.days,
     Kitchen_Ordered_By_Location: kitchen.byLocation,
+    Private_Sessions: privateSessions.sessions,
+    Private_Session_People: privateSessions.people,
+    Private_Session_Hours: privateSessions.hours,
     Captured_On: new Date(),
     Notes: ''
   };

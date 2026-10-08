@@ -84,6 +84,10 @@ const SHEET_NAMES = {
   // reported on annually, which is why it is a tab of its own rather than a
   // Person_Type on All_Registrants. See 99e_volunteer_hours.gs.
   VOLUNTEER_HOURS: 'Volunteer_Hours',
+  // Appointments that are deliberately NOT on any calendar — private
+  // counselling, weekend help — counted for the stats and published nowhere.
+  // One row per person helped per session. See 99zi_private_sessions.gs.
+  PRIVATE_SESSIONS: 'Private_Sessions',
   // The append-only record of what happened to every registration — one row
   // per EVENT (registered, cancelled, moved, corrected), never edited, never
   // removed. All_Registrants is one row per person per session MUTATED IN
@@ -974,7 +978,11 @@ defineLazyGlobal_('HEADERS', () => ({
     // Kitchen_Ordered_By_Location splits the total per building, because the
     // caterer invoices each one. Appended last: a column the stored tab does
     // not have yet reads back blank (34) and the next capture writes it out.
-    'Kitchen_Ordered', 'Kitchen_Order_Days', 'Kitchen_Ordered_By_Location'
+    'Kitchen_Ordered', 'Kitchen_Order_Days', 'Kitchen_Ordered_By_Location',
+    // The private sessions of the same month (99zi): sessions and people once
+    // each, hours per session. Appended last for the reason the kitchen
+    // columns were.
+    'Private_Sessions', 'Private_Session_People', 'Private_Session_Hours'
   ],
   /**
    * Volunteer_Hours — ONE ROW PER VISIT, which is the grain the year-end
@@ -996,6 +1004,16 @@ defineLazyGlobal_('HEADERS', () => ({
     'Date', 'Name', 'Role', 'Program', 'Location',
     'Arrived', 'Departed', 'Hours',
     'Logged_By', 'Logged_On', 'Staff_Notes', 'Entry_ID'
+  ],
+  /**
+   * Private_Sessions — ONE ROW PER PERSON HELPED PER SESSION, for the
+   * appointments that are never on a calendar (99zi). Rows of one session
+   * share a Session_ID, so sessions and people are each counted once.
+   */
+  Private_Sessions: [
+    'Date', 'Program', 'Helper', 'Attendee', 'Location',
+    'Start', 'End', 'Hours',
+    'Logged_By', 'Logged_On', 'Staff_Notes', 'Session_ID', 'Entry_ID'
   ],
   /**
    * Registration_Ledger — ONE ROW PER EVENT, appended and never touched again.
@@ -1046,6 +1064,11 @@ defineLazyGlobal_('HEADERS', () => ({
 const VOLUNTEER_HOURS_STAFF_COLUMNS = [
   'Date', 'Name', 'Role', 'Program', 'Location',
   'Arrived', 'Departed', 'Hours', 'Staff_Notes'
+];
+
+/** Private_Sessions is entirely staff-authored; the two ids are hidden. */
+const PRIVATE_SESSIONS_STAFF_COLUMNS = [
+  'Date', 'Program', 'Helper', 'Attendee', 'Location', 'Start', 'End', 'Hours', 'Staff_Notes'
 ];
 
 /** Assistance_Requests columns the importer must never overwrite — the staff's own follow-up. */

@@ -247,6 +247,9 @@ function menu_showSignInSheetDialog() { recordMenuUsage_('showSignInSheetDialog'
 function menu_showTimeBlockDialog() { recordMenuUsage_('showTimeBlockDialog'); return showTimeBlockDialog(); }
 function menu_showTriggerStatus() { recordMenuUsage_('showTriggerStatus'); return showTriggerStatus(); }
 function menu_showVolunteerHoursDialog() { recordMenuUsage_('showVolunteerHoursDialog'); return showVolunteerHoursDialog(); }
+function menu_showPrivateSessionDialog() { recordMenuUsage_('showPrivateSessionDialog'); return showPrivateSessionDialog(); }
+function menu_openPrivateSessionsTab() { recordMenuUsage_('openPrivateSessionsTab'); return openPrivateSessionsTab(); }
+function menu_reportPrivateSessions() { recordMenuUsage_('reportPrivateSessions'); return reportPrivateSessions(); }
 function menu_showWeekendEventLoaderDialog() { recordMenuUsage_('showWeekendEventLoaderDialog'); return showWeekendEventLoaderDialog(); }
 function menu_snapshotRegistrantsNow() { recordMenuUsage_('snapshotRegistrantsNow'); return snapshotRegistrantsNow(); }
 function menu_syncCalendars() { recordMenuUsage_('syncCalendars'); return syncCalendars(); }

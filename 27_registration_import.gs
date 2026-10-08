@@ -11,7 +11,8 @@ function setLastSyncTime(date) {
   PropertiesService.getScriptProperties().setProperty(LAST_SYNC_PROP_KEY, date.toISOString());
 }
 
-function syncRegistrations() {
+function syncRegistrations(e) {
+  if (!registrationSyncDueFromTrigger_(e)) return;
   if (!automationGateAllows('Sync Registrations')) return;
   recordHandlerRun('syncRegistrations');
 
@@ -456,3 +457,54 @@ function normalizeNameKey(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+
+
+// ---------------------------------------------------------------------------
+// Every three hours, not every hour
+// ---------------------------------------------------------------------------
+
+/**
+ * EVERY THREE HOURS (October 2026). A sync that imports nobody still opens
+ * forms, reads tabs and holds the workbook, and the desk felt it: Quick Mark
+ * and the Registrants tab were "in the middle of an update" for a good part of
+ * every hour. A registration taking up to three hours to reach the tab is fine
+ * for sessions booked days ahead; anybody who needs it sooner presses
+ * "Sync Registrations only", which is never held back.
+ *
+ * The trigger still fires hourly, because `everyHours()` accepts 1, 2, 4, 6, 8
+ * or 12 and nothing between — and keeping it hourly is also what lets an
+ * installed trigger pick this up with no migration. A trigger run passes an
+ * event object; a menu press and the four internal callers do not.
+ */
+const REGISTRATION_SYNC_EVERY_HOURS = 3;
+
+/** When the last TRIGGER-started sync began, in ms. Versioned like every stored value. */
+const REGISTRATION_SYNC_LAST_TIMED_PROP_KEY = 'REGISTRATION_SYNC_LAST_TIMED_V1';
+
+/**
+ * Ten minutes of slack, because an hourly trigger drifts by minutes within its
+ * hour: without it a run at 12:58 after one at 10:02 would wait for 13:58.
+ */
+const REGISTRATION_SYNC_INTERVAL_SLACK_MS = 10 * 60 * 1000;
+
+/**
+ * Should this call import? Always for a call that is not a timed trigger.
+ * For a timed one, only once the interval is up — and it claims the slot as
+ * it answers yes, so the next two hourly firings stand down. Never throws:
+ * a property that cannot be read means run, which is what the hourly
+ * schedule always did.
+ */
+function registrationSyncDueFromTrigger_(e, nowMs) {
+  if (!e || !e.triggerUid) return true;
+  const now = nowMs || Date.now();
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const last = Number(props.getProperty(REGISTRATION_SYNC_LAST_TIMED_PROP_KEY)) || 0;
+    const interval = REGISTRATION_SYNC_EVERY_HOURS * 3600 * 1000 - REGISTRATION_SYNC_INTERVAL_SLACK_MS;
+    if (last && now - last < interval && now >= last) return false;
+    props.setProperty(REGISTRATION_SYNC_LAST_TIMED_PROP_KEY, String(now));
+    return true;
+  } catch (err) {
+    return true;
+  }
+}

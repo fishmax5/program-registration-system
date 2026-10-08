@@ -212,6 +212,9 @@ function buildAppMenu(ui, includeAdmin) {
     // A volunteer is not a registrant — see 99e and the note under Rosters &
     // Sharing, where the tab itself still opens from.
     .addItem('\ud83e\udd1d Log Volunteer Hours\u2026', menuFn_('showVolunteerHoursDialog'))
+    // An appointment that is never on the calendar — private counselling,
+    // weekend help — recorded for the stats and published nowhere. See 99zi.
+    .addItem('\ud83d\udd12 Log a Private Session\u2026', menuFn_('showPrivateSessionDialog'))
     // WRITES a question (and says which forms it would reach before it does);
     // "Update Program Questions on Forms" under Programs & Forms sends
     // whatever the tab currently says.
@@ -265,6 +268,7 @@ function buildAppMenu(ui, includeAdmin) {
       // either building \u2014 so their hours are a tab of their own. Filed here
       // because it is roster work: who was here and what they did. See 99e.
       .addItem('\ud83e\udd1d Open the Volunteer Hours Tab', menuFn_('openVolunteerHoursTab'))
+      .addItem('\ud83d\udd12 Open the Private Sessions Tab', menuFn_('openPrivateSessionsTab'))
       // THE ONE-ROW DELETE, beside the roll tools because it is the same job
       // at the other tab: a duplicate found while reading down a list. Mark
       // the rows on All_Registrants (Manual_Override → "Remove This Row"),
@@ -557,6 +561,8 @@ function buildAppMenu(ui, includeAdmin) {
         // The year's volunteer hours, by person \u2014 the figure the centre is
         // credited on. Read-only and ungated like the four above it. See 99e.
         .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', menuFn_('reportVolunteerHours'))
+        // Off-calendar appointments by program and month. See 99zi.
+        .addItem('\ud83d\udd12 Private Sessions (read-only report)', menuFn_('reportPrivateSessions'))
         // Sends, so not read-only — but it is the digest's own item and this
         // is where somebody looks for it. It sends what is waiting NOW,
         // including today so far, and does not disturb tomorrow's 10am send.
@@ -743,6 +749,9 @@ function writeTriggers(force, takingOwnership) {
   // not raced against it. See autoCreateTodaysSignInSheets() (45).
   removed += resetTriggersForHandler('autoCreateTodaysSignInSheets', () =>
     ScriptApp.newTrigger('autoCreateTodaysSignInSheets').timeBased().everyDays(1).atHour(6).create());
+  // Fires hourly but IMPORTS every REGISTRATION_SYNC_EVERY_HOURS — see
+  // registrationSyncDueFromTrigger_() in 27. everyHours() takes 1, 2, 4, 6, 8
+  // or 12 and nothing else, so three hours cannot be a trigger of its own.
   removed += resetTriggersForHandler('syncRegistrations', () =>
     ScriptApp.newTrigger('syncRegistrations').timeBased().everyHours(1).create());
   // THE DOOR'S QUEUE, drained every five minutes. Check-in marks are written
@@ -807,7 +816,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly, 1 monthly metrics, 1 check-in flush, ` +
+    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly (imports every ${REGISTRATION_SYNC_EVERY_HOURS} hours), 1 monthly metrics, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);

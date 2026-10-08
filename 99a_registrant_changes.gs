@@ -152,7 +152,7 @@ function applyRegistrantChangeLocked(args) {
     case REGISTRANT_CHANGE_ACTIONS.MOVE:
       return moveRegistrantChange(ss, sheet, rows, map, target, party, args);
     case REGISTRANT_CHANGE_ACTIONS.CANCEL:
-      return cancelRegistrantChange(target, map, args);
+      return cancelRegistrantChange(target, map, args, rows);
     case REGISTRANT_CHANGE_ACTIONS.RESTORE:
       return restoreRegistrantChange(ss, sheet, rows, map, target, party, args);
     case REGISTRANT_CHANGE_ACTIONS.WAITLIST:
@@ -747,7 +747,7 @@ function clearRegistrantMarksOnRow(row, map, options) {
  * avoids for the same reason. It does its own read, render and recount off the
  * rows it reads, which is why nothing above it here is reused.
  */
-function cancelRegistrantChange(target, map, args) {
+function cancelRegistrantChange(target, map, args, rows) {
   const row = target.row;
   const name = String(row[map['Name']] || '').trim();
   const eventId = String(row[map['Event_ID']] || '').trim();
@@ -757,10 +757,14 @@ function cancelRegistrantChange(target, map, args) {
     return { ok: false, message: `⚠️ ${name} is already ${status.toLowerCase()} on ${where} — nothing was changed.` };
   }
 
+  const later = args.laterDates ? laterSessionsOfProgram(rows || [], map, row) : null;
+  const eventIds = later ? later.eventIds : [eventId];
+  const nameKey = normalizeNameKey(name);
+
   const result = cancelRegistrantRowsLocked(
-    (candidate, candidateMap) => matchesCancellationParty(candidate, candidateMap, {
-      eventId, nameKey: normalizeNameKey(name)
-    }),
+    (candidate, candidateMap) => eventIds.some(id => matchesCancellationParty(candidate, candidateMap, {
+      eventId: id, nameKey
+    })),
     Object.assign({ name, emptyMessage: `That booking was already cancelled.` },
       registrantChangeStampOptions(args)));
 
@@ -768,10 +772,74 @@ function cancelRegistrantChange(target, map, args) {
     return { ok: false, message: `⚠️ ${result.message}` };
   }
   invalidateQuickMarkIndexCache();
-  const said = `✅ ${name} cancelled for ${where}. Their seat and their lunch have gone back.`;
+  const dates = later ? later.eventIds.length : 1;
+  const club = later && hasActiveClubPlace_(name, row, map)
+    ? ` They also have a standing place on ${SHEET_NAMES.CLUB_MEMBERS} — untick Active there, or the next sync books them again.`
+    : '';
+  const said = later && dates > 1
+    ? `✅ ${name} cancelled for ${dates} dates of ${String(row[map['Event']] || 'this program').trim()} from ${where} on. ` +
+      `Their seats and lunches have gone back.${club}`
+    : `✅ ${name} cancelled for ${where}. Their seat and their lunch have gone back.${club}`;
   toastIfPossible(said);
   log(`applyRegistrantChangeFromDialog: ${said}`);
   return { ok: true, message: said, listsChanged: true };
+}
+
+/**
+ * "AND EVERY LATER DATE" — Colette leaving Art in Nature for T'ai Chi was one
+ * press per date, eight of them, each a full redraw of the tab (October 2026).
+ *
+ * The same program is the same Event title at the same building, matched the
+ * way cancelUpcomingClubRegistrations() (41) matches a club: an Event_ID is a
+ * hash of calendar, title and date, so nothing about "the same program" can be
+ * read back out of it. Only this person's rows count (their guests ride along
+ * through matchesCancellationParty()), only from the picked date onwards —
+ * a date already past is a record of what happened — and only rows still live.
+ * The picked row is always included, so the answer is never empty.
+ */
+function laterSessionsOfProgram(rows, map, pickedRow) {
+  const nameKey = normalizeNameKey(pickedRow[map['Name']]);
+  const programKey = computeClubKey(pickedRow[map['Event']], pickedRow[map['Location']], false);
+  const pickedDate = coerceDate(pickedRow[map['Event_Date']]);
+  const fromKey = pickedDate ? formatDateKey(pickedDate) : '';
+  const ids = [String(pickedRow[map['Event_ID']] || '').trim()];
+  rows.forEach(row => {
+    if (row === pickedRow) return;
+    if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
+    const status = String(row[map['Program_Status']] || '').trim();
+    if (CANCELLATION_TERMINAL_STATUSES.indexOf(status) !== -1) return;
+    if (computeClubKey(row[map['Event']], row[map['Location']], false) !== programKey) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date || !fromKey || formatDateKey(date) < fromKey) return;
+    const id = String(row[map['Event_ID']] || '').trim();
+    if (id && ids.indexOf(id) === -1) ids.push(id);
+  });
+  return { eventIds: ids.filter(Boolean) };
+}
+
+/**
+ * Does this person hold an ACTIVE standing place for this program? Said rather
+ * than undone: ending a membership is its own decision (41 asks about it), and
+ * a desk cancelling "the rest of October" may not mean "for ever". Never throws.
+ */
+function hasActiveClubPlace_(name, row, map) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.CLUB_MEMBERS);
+    if (!sheet) return false;
+    const clubMap = getIndexMap(HEADERS.Club_Members);
+    const nameKey = normalizeNameKey(name);
+    const local = computeClubKey(row[map['Event']], row[map['Location']], false);
+    const shared = computeClubKey(row[map['Event']], row[map['Location']], true);
+    return readClubMemberRows(sheet).some(member => {
+      if (normalizeNameKey(member[clubMap['Name']]) !== nameKey) return false;
+      const key = String(member[clubMap['Club_Key']] || '').trim();
+      if (key !== local && key !== shared) return false;
+      const active = member[clubMap['Active']];
+      return active === true || String(active).toUpperCase() === 'TRUE';
+    });
+  } catch (err) {
+    return false;
+  }
 }
 
 /**
