@@ -152,7 +152,7 @@ function volunteerSelfLog(payload) {
   if (!name) return { ok: false, message: 'Type your name first — nothing was recorded.' };
   const email = String(args.email || '').trim();
 
-  const date = coerceDate(args.date);
+  const date = coerceVolunteerVisitDate(args.date);
   if (!date) {
     return { ok: false, message: 'That date could not be read — nothing was recorded.' };
   }

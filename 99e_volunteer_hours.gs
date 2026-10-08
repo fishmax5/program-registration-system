@@ -323,6 +323,19 @@ function openVolunteerHoursTab() {
 // ---------------------------------------------------------------------------
 
 /**
+ * The visit's date, read as a CALENDAR day. Both forms that log a visit send
+ * the date box's value, a bare 'yyyy-MM-dd' — and `new Date('2026-09-01')`
+ * (which is all `coerceDate()` does with a string) is UTC midnight, i.e. the
+ * evening of August 31st in this workbook's timezone. A visit logged for the
+ * 1st was recorded against the 31st. `parseDateKey()` builds local midnight.
+ */
+function coerceVolunteerVisitDate(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return parseDateKey(text);
+  return coerceDate(value);
+}
+
+/**
  * Called from the dialog (and from the Quick Mark panel, which opens it). One
  * visit onto the tab, under the desk lock like every other optimistic-looking
  * write in this project — the tab is rewritten whole, so a sync writing its
@@ -335,7 +348,7 @@ function logVolunteerVisit(payload) {
   const visit = payload || {};
   const name = String(visit.name || '').trim();
   if (!name) return '⚠️ Type who the volunteer is first.';
-  const date = coerceDate(visit.date) || new Date();
+  const date = coerceVolunteerVisitDate(visit.date) || new Date();
   const hours = volunteerVisitHours(visit.arrived, visit.departed, visit.hours);
   if (!hours) {
     return '⚠️ No hours to record — fill in both times, or type the number of hours.';

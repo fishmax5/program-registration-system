@@ -34,6 +34,7 @@ vm.runInContext(src + `
 ;this.parseVolunteerClockTime = parseVolunteerClockTime;
 this.formatVolunteerClockTime = formatVolunteerClockTime;
 this.volunteerVisitHours = volunteerVisitHours;
+this.coerceVolunteerVisitDate = coerceVolunteerVisitDate;
 this.describeVolunteerHoursProblem = describeVolunteerHoursProblem;
 this.parseVolunteerHourRow = parseVolunteerHourRow;
 this.volunteerMetricsForMonth = volunteerMetricsForMonth;
@@ -121,6 +122,15 @@ check('a month counts people once and visits every time',
   volunteerMetricsForMonth('2026-09', visits), { volunteers: 2, visits: 3, hours: 6.5 });
 check('a month with nobody in it is zero, not absent',
   volunteerMetricsForMonth('2026-07', visits), { volunteers: 0, visits: 0, hours: 0 });
+
+// --- The date box --------------------------------------------------------
+// The dialog sends 'yyyy-MM-dd'. Read as UTC that is the day before in
+// Eastern time: a visit logged for Sep 1 was recorded on Aug 31.
+const picked = sandbox.coerceVolunteerVisitDate('2026-09-01');
+check('a picked date is that calendar day, not the day before',
+  [picked.getFullYear(), picked.getMonth(), picked.getDate()], [2026, 8, 1]);
+const asDate = new Date(2026, 8, 1);
+check('a Date passes through untouched', sandbox.coerceVolunteerVisitDate(asDate), asDate);
 
 // --- The page -------------------------------------------------------------
 const html = buildVolunteerHoursHtml({
