@@ -31,6 +31,7 @@ function syncRegistrations(e) {
   ensureRegistrantSnapshotTrigger_();
   ensurePublicSnapshotTrigger_();
   snapshotRegistrantsIfDue_();
+  applySystemTabVisibilityIfDue_(); // once a day; never throws. See 99zp.
 
   // THE DOOR'S QUEUE GOES IN FIRST, before this run takes the lock and starts
   // rewriting the rows those marks land on. Queued marks are applied by row

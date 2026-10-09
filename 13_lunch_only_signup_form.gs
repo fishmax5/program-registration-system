@@ -681,6 +681,13 @@ function tabColorsByName() {
 
 function reorderTabs(ss) {
   const colors = tabColorsByName();
+  // MOVING A TAB MEANS ACTIVATING IT, AND ACTIVATING A HIDDEN TAB SHOWS IT. So
+  // every tab hidden before this walk — the back room (99zp) and anything
+  // staff hid themselves — is remembered here and hidden again after it.
+  const wasHidden = [];
+  try {
+    ss.getSheets().forEach(sheet => { if (sheet.isSheetHidden()) wasHidden.push(sheet.getName()); });
+  } catch (err) { /* a stub or a viewer — nothing to remember */ }
   let position = 0;
   resolveTabOrder().forEach(name => {
     const sheet = ss.getSheetByName(name);
@@ -695,6 +702,26 @@ function reorderTabs(ss) {
       sheet.setTabColor(colors[name]);
     } catch (err) {
       log(`Could not colour the "${name}" tab (${err}).`);
+    }
+  });
+  restoreHiddenTabsAfterReorder_(ss, wasHidden);
+  applySystemTabVisibility();
+}
+
+/** Step onto the first visible tab, then hide again what was hidden before reorderTabs() walked it. */
+function restoreHiddenTabsAfterReorder_(ss, names) {
+  if (!names || !names.length) return;
+  const hiddenSet = new Set(names);
+  try {
+    const firstVisible = ss.getSheets().filter(sheet => !hiddenSet.has(sheet.getName()))[0];
+    if (firstVisible) ss.setActiveSheet(firstVisible);
+  } catch (err) { /* nothing to step onto */ }
+  names.forEach(name => {
+    try {
+      const sheet = ss.getSheetByName(name);
+      if (sheet && !sheet.isSheetHidden()) sheet.hideSheet();
+    } catch (err) {
+      log(`Could not hide the "${name}" tab again after reordering (${err}).`);
     }
   });
 }

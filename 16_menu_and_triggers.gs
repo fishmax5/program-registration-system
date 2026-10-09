@@ -497,7 +497,9 @@ function buildAppMenu(ui, includeAdmin) {
       .addSubMenu(ui.createMenu('\ud83c\udfa8 Appearance')
         .addItem('\ud83d\udccf Column Widths\u2026', menuFn_('showColumnWidthDialog'))
         .addItem('\ud83d\uddc2\ufe0f Save This Tab Order', menuFn_('saveCurrentTabOrder'))
-        .addItem('Reset to the Built-In Tab Order', menuFn_('clearSavedTabOrder')))
+        .addItem('Reset to the Built-In Tab Order', menuFn_('clearSavedTabOrder'))
+        // The back room (99zp): shows the machine-owned tabs for two hours, or hides them now.
+        .addItem('\ud83d\uddc4\ufe0f Show / Hide System Tabs', menuFn_('toggleSystemTabVisibility')))
       .addSubMenu(ui.createMenu('\u23f0 Triggers')
         .addItem('Trigger Status', menuFn_('showTriggerStatus'))
         .addItem('Check Triggers', menuFn_('writeTriggers'))

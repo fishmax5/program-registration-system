@@ -99,6 +99,13 @@ const CONFIG_LAYOUT = {
     title: '🧪 Notification Test Mode',
     startCol: 40,
     headers: ['Divert_Mail_To_Admin']
+  },
+  // Fresh columns once more, same rule. Whether the machine-owned tabs are
+  // hidden and warning-protected — see 99zp_system_tabs.gs.
+  SYSTEM_TABS: {
+    title: '🗄️ Hide System Tabs',
+    startCol: 42,
+    headers: ['Hide_System_Tabs']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -111,7 +118,7 @@ const CONFIG_LAYOUT = {
 // (Months_Ahead) and grew into it. Nothing reads this — it is the record of
 // which columns are blank, and a record that says a live cell is blank is
 // worse than no record.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the
