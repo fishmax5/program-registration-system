@@ -242,7 +242,7 @@ function getFormDescriptionState() {
   if (__formDescriptionStateCache) return __formDescriptionStateCache;
   try {
     __formDescriptionStateCache = JSON.parse(
-      PropertiesService.getScriptProperties().getProperty(FORM_DESCRIPTION_STATE_PROP_KEY) || '{}');
+      readDocumentStoreProperty(FORM_DESCRIPTION_STATE_PROP_KEY) || '{}');
   } catch (err) {
     __formDescriptionStateCache = {};
   }
@@ -252,7 +252,7 @@ function getFormDescriptionState() {
 function saveFormDescriptionState_(all) {
   __formDescriptionStateCache = all;
   try {
-    PropertiesService.getScriptProperties().setProperty(FORM_DESCRIPTION_STATE_PROP_KEY, JSON.stringify(all));
+    writeDocumentStoreProperty(FORM_DESCRIPTION_STATE_PROP_KEY, JSON.stringify(all));
   } catch (err) {
     // A state that will not save costs a redundant compare next hour, never a
     // wrong description: the write itself is still guarded by comparing text.

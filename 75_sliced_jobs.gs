@@ -106,6 +106,10 @@ function getSlicedJobState(propKey, label) {
 }
 
 function saveSlicedJobState(propKey, state) {
+  // The first property write of every long job, so the place to make room:
+  // the per-form stores leave Script Properties here, once per execution, and
+  // a store that filled up on them no longer refuses this plan (99zj).
+  moveStoresToDocumentProperties();
   PropertiesService.getScriptProperties().setProperty(propKey, JSON.stringify(state));
   renewWorkbookLease(); // progress is activity; see 99w
 }

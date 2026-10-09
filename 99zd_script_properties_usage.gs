@@ -124,6 +124,18 @@ function reportScriptPropertiesUsage() {
   } catch (err) {
     text = `Script Properties could not be read (${err}).`;
   }
+  // The per-form stores live in the workbook's Document Properties now (99zj),
+  // which has a quota of its own — shown below so a full one is as visible.
+  try {
+    const doc = documentStoreProps_();
+    if (doc) {
+      const docText = describeScriptPropertiesUsage(summarizeScriptProperties(doc.getProperties()));
+      text += '\n\n— Document Properties (the per-form stores, 99zj) —\n' +
+        docText.replace(/^Script Properties holds/, 'Document Properties holds');
+    }
+  } catch (err) {
+    text += `\n\nDocument Properties could not be read (${err}).`;
+  }
   log(`reportScriptPropertiesUsage:\n${text}`);
   try {
     SpreadsheetApp.getUi().alert('What is filling Script Properties?', text, SpreadsheetApp.getUi().ButtonSet.OK);

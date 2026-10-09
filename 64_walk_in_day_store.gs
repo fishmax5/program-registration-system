@@ -177,7 +177,7 @@ function rememberWalkInDay(day) {
   }
 }
 
-/** Stores the blob in the cache and in Script Properties. */
+/** Stores the blob in the cache and in Document Properties (Script Properties where there are none — 99zj). */
 function writeWalkInDayStore(store) {
   const packed = packCachedText(JSON.stringify(store));
   const cache = tryGetScriptCache();
@@ -204,8 +204,11 @@ function writeWalkInDayStore(store) {
   // The durable half. A cache entry expires in six hours and is dropped by a
   // redeploy, and the first tablet of the morning is exactly the one that
   // would find it gone — which is the boot this whole section is about.
+  // Kept in the workbook's Document Properties since 99zj: at 70KB it was the
+  // third-largest thing in Script Properties the day that store filled up.
+  moveStoresToDocumentProperties();
   writeChunkedScriptProperty(WALK_IN_DAY_STORE_PROP_KEY, packed,
-    CHECK_IN_STORE_PROP_CHUNK_CHARS, CHECK_IN_STORE_MAX_PROP_CHUNKS);
+    CHECK_IN_STORE_PROP_CHUNK_CHARS, CHECK_IN_STORE_MAX_PROP_CHUNKS, walkInDayStoreProps_());
 }
 
 /**
@@ -255,7 +258,7 @@ function readCachedWalkInDayStore() {
 
 function readPropertyWalkInDayStore() {
   try {
-    const packed = readChunkedScriptProperty(WALK_IN_DAY_STORE_PROP_KEY);
+    const packed = readChunkedScriptProperty(WALK_IN_DAY_STORE_PROP_KEY, walkInDayStoreProps_());
     if (!packed) return null;
     const store = JSON.parse(unpackCachedText(packed));
     if (!isCurrentWalkInDayStore(store)) return null;
@@ -269,7 +272,7 @@ function readPropertyWalkInDayStore() {
 
 /** Drops the stored day. Called on a date rollover and on a schema change. */
 function clearWalkInDayStore() {
-  clearChunkedScriptProperty(WALK_IN_DAY_STORE_PROP_KEY);
+  clearChunkedScriptProperty(WALK_IN_DAY_STORE_PROP_KEY, walkInDayStoreProps_());
   const cache = tryGetScriptCache();
   if (!cache) return;
   try {

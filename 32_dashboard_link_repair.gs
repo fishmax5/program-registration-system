@@ -701,7 +701,7 @@ function recheckAllRegistrationForms() {
   const registrySheet = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
   if (!registrySheet) return 0;
 
-  PropertiesService.getScriptProperties().deleteProperty(FORM_TEMPLATE_VERSION_PROP_KEY);
+  deleteDocumentStoreProperty(FORM_TEMPLATE_VERSION_PROP_KEY);
   __formTemplateVersionCache = null;
   __formTemplateVersionDirty = false;
 

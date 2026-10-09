@@ -92,7 +92,9 @@ function unopenableFormStores_() {
 /** One store's parsed contents, or null when it is absent or unreadable. */
 function readFormIdStore_(propKey) {
   try {
-    const raw = PropertiesService.getScriptProperties().getProperty(propKey);
+    const raw = documentPropertyStoreKeys_().indexOf(propKey) >= 0
+      ? readDocumentStoreProperty(propKey)
+      : PropertiesService.getScriptProperties().getProperty(propKey);
     const parsed = raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch (err) {
@@ -411,8 +413,15 @@ function purgeUnopenableForms(requests) {
 
     stores.forEach(store => {
       if (!store.dirty) return;
-      if (Object.keys(store.data).length === 0) props.deleteProperty(store.propKey);
-      else props.setProperty(store.propKey, JSON.stringify(store.data));
+      const inDocument = documentPropertyStoreKeys_().indexOf(store.propKey) >= 0;
+      if (Object.keys(store.data).length === 0) {
+        if (inDocument) deleteDocumentStoreProperty(store.propKey);
+        else props.deleteProperty(store.propKey);
+      } else if (inDocument) {
+        writeDocumentStoreProperty(store.propKey, JSON.stringify(store.data));
+      } else {
+        props.setProperty(store.propKey, JSON.stringify(store.data));
+      }
     });
     dropFormIdStoreCaches_();
     lines.forEach(l => log(`🗑️ Unopenable forms (purge): ${l}`));
