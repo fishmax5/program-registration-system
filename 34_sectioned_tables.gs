@@ -491,11 +491,8 @@ function reportArchivableMonths() {
     `  TOTAL: ${grandTotal} row(s), ${grandOld} in collapsed months, ~${grandCells} cells.\n${verdict}`;
 
   log(report);
-  try {
-    SpreadsheetApp.getUi().alert('Old Months', report, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible(`${grandTotal} history row(s), ${grandOld} in collapsed months — see the log.`);
-  }
+  presentReport_('Old Months', report,
+    `${grandTotal} history row(s), ${grandOld} in collapsed months — see the log.`);
   return { totalRows: grandTotal, oldRows: grandOld, cells: grandCells };
 }
 

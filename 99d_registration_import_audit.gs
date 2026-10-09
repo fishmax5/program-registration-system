@@ -760,7 +760,7 @@ function describeRegistrationAudit_(finding) {
 }
 
 /**
- * Menu entry: 🔧 Admin ▸ 📄 Reports ▸ "Find Missing Registrations (read-only report)".
+ * Health panel (99zm) ▸ "Find Missing Registrations".
  *
  * Ungated like the other two reports there, and for the same reason: it only
  * looks. The person who noticed the missing name is the person who should be
@@ -772,20 +772,13 @@ function reportMissingRegistrations() {
   const report = describeRegistrationAudit_(finding);
   log(report);
 
-  try {
-    const ui = SpreadsheetApp.getUi();
-    // A <pre> in a modal rather than ui.alert(): the useful output here is a
-    // list of names somebody needs to COPY, and an alert is neither scrollable
-    // nor selectable. Escaped, per the standing rule about anything served to
-    // a browser — a member named O'Brien must not end the page.
-    const html = HtmlService.createHtmlOutput(
-      `<div style="font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:12px">` +
-      `<pre style="white-space:pre-wrap;word-break:break-word;margin:0">${escapeHtmlForDialog(report)}</pre>` +
-      `</div>`)
-      .setWidth(720).setHeight(560);
-    ui.showModalDialog(html, 'Missing Registrations (read-only)');
-  } catch (err) {
-    toastIfPossible(`${(finding && finding.missingPeople.length) || 0} missing registration(s) — see the log.`);
-  }
+  // A <pre> in a modal rather than ui.alert(): the useful output here is a
+  // list of names somebody needs to COPY, and an alert is neither scrollable
+  // nor selectable. Escaped, per the standing rule about anything served to
+  // a browser — a member named O'Brien must not end the page. (In the Health
+  // panel the text lands in a <pre> of its own.)
+  presentReport_('Missing Registrations (read-only)', report,
+    `${(finding && finding.missingPeople.length) || 0} missing registration(s) — see the log.`,
+    { modal: { width: 720, height: 560 } });
   return finding;
 }

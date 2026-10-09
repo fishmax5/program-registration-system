@@ -377,14 +377,10 @@ function showLedgerVerificationReport() {
   const body = lines.length
     ? lines.join('\n')
     : `The ledger and ${SHEET_NAMES.REGISTRANT_DASH} agree on all ${result.checked} live registration(s).`;
-  try {
-    const checkpointLine = result.checkpoint && typeof describeLedgerCheckpointValidation_ === 'function'
-      ? `\n\n${describeLedgerCheckpointValidation_(result.checkpoint)}` : '';
-    SpreadsheetApp.getUi().alert('Registration ledger vs the Registrants tab',
-      `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.\n\n${body}${checkpointLine}`,
-      SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    log(`Ledger verification (no UI available): ${body}`);
-  }
+  const checkpointLine = result.checkpoint && typeof describeLedgerCheckpointValidation_ === 'function'
+    ? `\n\n${describeLedgerCheckpointValidation_(result.checkpoint)}` : '';
+  const text = `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.\n\n${body}${checkpointLine}`;
+  log(`Ledger verification: ${body}`);
+  presentReport_('Registration ledger vs the Registrants tab', text);
   return result;
 }

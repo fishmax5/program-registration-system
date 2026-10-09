@@ -414,12 +414,12 @@ function renameLeaderSheetRegistryKeys(renames) {
       if (registry[newKey]) {
         log(`⚠️ "${rename.newTitle}" (${location}) already has a program registrant sheet, so the entry ` +
           `for "${rename.oldTitle}" was left alone rather than overwriting it. Two sheets now name one ` +
-          `program — 🔧 Admin ▸ 📄 Reports ▸ Why Is A Roster Sheet Empty? reports the pair.`);
+          `program — 🩺 Health Panel ▸ Why is a roster sheet empty? reports the pair.`);
         noteForAdmin('Programs renamed on the calendar',
           `"${rename.oldTitle}" (${location}) was renamed to "${rename.newTitle}", which ALREADY has a ` +
           `program registrant sheet of its own. Both sheets have been left exactly as they are — one of ` +
           `them is the link your program leader is holding and nothing here can tell which. ` +
-          `Run 🔧 Admin ▸ 📄 Reports ▸ Why Is A Roster Sheet Empty? to see both, then share the right one.`);
+          `Run 🩺 Health Panel ▸ Why is a roster sheet empty? to see both, then share the right one.`);
         return;
       }
       entry.title = rename.newTitle;

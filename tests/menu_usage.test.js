@@ -5,8 +5,10 @@
 // Script answers that with "Script function not found", on the item somebody
 // pressed. Pinned here:
 //
-//   THE MENU BUILDS, with and without Admin, and EVERY item it names is a
-//   function that exists and calls an action that exists.
+//   THE MENUS BUILD for every role, and EVERY item they name is a function
+//   that exists and calls an action that exists. Nothing on the pre-R4 menu
+//   became unreachable, and the role table resolves a blank account to the
+//   FULL menu.
 //
 //   A CLICK COUNTS: one increment and a last-used stamp per press, keyed by
 //   the action, and the report lists most-pressed first and the never-pressed
@@ -47,26 +49,36 @@ function check(label, got, expected) {
   else console.log(`ok   ${label}`);
 }
 
-// --- The menu builds, and every item resolves. ------------------------------
-function buildWith(includeAdmin) {
+// --- The menus build, and every item resolves. -----------------------------
+// R4: three top-level menus chosen by role (99zma). `build(role)` records every
+// root that reaches addToUi, by name.
+function build(includeAdmin, role) {
   const names = [];
-  let root = null;
+  const roots = [];
   function menu(name) {
-    const m = { name, items: [], subs: [] };
-    m.addItem = (label, fn) => { names.push(fn); m.items.push(label); return m; };
+    const m = { name, items: [], subs: [], fns: [] };
+    m.addItem = (label, fn) => { names.push(fn); m.items.push(label); m.fns.push(fn); return m; };
     m.addSeparator = () => m;
     m.addSubMenu = child => { m.subs.push(child); return m; };
-    m.addToUi = () => { root = m; };
+    m.addToUi = () => { roots.push(m); };
     return m;
   }
-  sandbox.buildAppMenu({ createMenu: menu }, includeAdmin);
-  return { names, root };
+  sandbox.buildAppMenu({ createMenu: menu }, includeAdmin, role);
+  return { names, roots, byName: n => roots.find(r => r.name === n) };
 }
-const full = buildWith(true);
-const lean = buildWith(false);
-check('menu attaches to the UI', !!full.root, true);
-check('admin menu has many items', full.names.length > 80, true);
+const full = build(true);
+const lean = build(false);
+const unknown = build(false, 'unknown');
+const DESK = vm.runInContext('DESK_MENU_NAME', sandbox);
+const COORD = vm.runInContext('COORDINATOR_MENU_NAME', sandbox);
+const ADMIN = vm.runInContext('ADMIN_MENU_NAME', sandbox);
+check('admin gets Desk, Coordinator, Admin in that order', full.roots.map(r => r.name), [DESK, COORD, ADMIN]);
+check('non-admin gets Desk and Coordinator only', lean.roots.map(r => r.name), [DESK, COORD]);
+check('an unidentified viewer gets Admin too', unknown.roots.map(r => r.name), [DESK, COORD, ADMIN]);
+check('every role together still offers many items', full.names.length > 80, true);
 check('non-admin menu offers the sign-in escape hatch', lean.names.includes('menu_showAdminMenu'), true);
+check('admin menu does not', full.names.includes('menu_showAdminMenu'), false);
+check('unidentified viewer does not need it', unknown.names.includes('menu_showAdminMenu'), false);
 
 const bad = [];
 full.names.concat(lean.names).forEach(fn => {
@@ -79,12 +91,214 @@ full.names.concat(lean.names).forEach(fn => {
 check('every menu item names an existing wrapper around an existing action', bad, []);
 check('the bootstrap wrapper matches BOOTSTRAP_ENTRY_NAME', full.names.includes('menu_' + sandbox.BOOTSTRAP_ENTRY_NAME), true);
 
-// The weekly jobs are at the top level, not in a submenu.
-const top = full.root.items;
-['Quick Mark', 'Add Registrants in Bulk', 'Log Volunteer Hours', 'Build a Form Question',
- 'Update Everything Now', 'Why did nothing happen'].forEach(word =>
-  check(`top level carries "${word}"`, top.some(l => l.indexOf(word) >= 0), true));
-check('each action appears on the menu once', new Set(full.names).size, full.names.length);
+// The Desk menu is the serving day, at its top level, unnested.
+const desk = full.byName(DESK);
+check('desk has no submenus', desk.subs.length, 0);
+['Quick Mark', 'Add Registrants in Bulk', 'Log Volunteer Hours', 'Log a Private Session', 'Sign-In Sheet',
+ 'Open the Sign-In App', 'Update Everything Now', 'Why did nothing happen'].forEach(word =>
+  check(`desk carries "${word}"`, desk.items.some(l => l.indexOf(word) >= 0), true));
+check('the Health panel is at the top of Coordinator', full.byName(COORD).fns[0], 'menu_showHealthPanel');
+// One item is deliberately on two menus: the Health panel (Coordinator, and
+// Admin ▸ Reports where the reports used to be). Everything else is on one.
+const dupes = full.names.filter((n, i) => full.names.indexOf(n) !== i);
+check('each action appears on the menus once (bar the Health panel)', dupes, ['menu_showHealthPanel']);
+
+// --- NOTHING BECAME UNREACHABLE. --------------------------------------------
+// Every action on the menu before R4 (taken from collectMenuItemLabels_() on
+// the base branch), and the escape hatch. Each must be reachable by SOME role:
+// on a menu that role is built, on the separate Sign-In App menu, or as a
+// Health panel check.
+const BEFORE_R4 = [
+  'showQuickMarkDialog',
+  'showBulkRegistrantsDialog',
+  'showVolunteerHoursDialog',
+  'showPrivateSessionDialog',
+  'showQuestionBuilderDialog',
+  'syncEverythingNow',
+  'reportWhyNothingHappened',
+  'showLunchMenuImportDialog',
+  'pushLunchMenuToForms',
+  'refreshLunchSignUpForms',
+  'openRegularNeedsTab',
+  'showMemberRollImportDialog',
+  'dedupeMemberRollNow',
+  'showDuplicateRegistrationsDialog',
+  'showRegistrationReviewDialog',
+  'openVolunteerHoursTab',
+  'openPrivateSessionsTab',
+  'removeMarkedRegistrants',
+  'showRestoreRegistrantsFromCopyDialog',
+  'showRestoreRegistrantsFromLedgerDialog',
+  'showProgramLeaderSheetDialog',
+  'refreshProgramLeaderSheetsNow',
+  'sendProgramLeaderRosterAlertsNow',
+  'sendProgramLeaderDayDigestsNow',
+  'showAssistanceScheduleDialog',
+  'showCalendarInviteDialog',
+  'sendRegistrantRemindersNow',
+  'showProgramReviewDialog',
+  'pushProgramQuestionsToForms',
+  'showFixOneFormDialog',
+  'applyProgramTagChangesToCalendar',
+  'showBulkWaitlistOnlyDialog',
+  'showAssistanceReviewDialog',
+  'showTimeBlockDialog',
+  'rebuildAssistanceFormsNow',
+  'linkProgramAcrossLocations',
+  'showRepointSessionsDialog',
+  'showSignInSheetDialog',
+  'showCheckInPageDialog',
+  'refreshMyPermissions',
+  'syncCalendars',
+  'syncRegistrations',
+  'rebuildQuickMarkListsNow',
+  'renderProgramMonthSheetNow',
+  'flushCheckInQueueNow',
+  'refreshMetricsTabNow',
+  'snapshotRegistrantsNow',
+  'showAllPastRows',
+  'resizeAllSheets',
+  'rebuildLayoutFromSheet',
+  'rewriteEventRegistrationLinks',
+  'openUpAllFormSharing',
+  'openUpAllGeneratedFileSharing',
+  'showEventTagInspectorDialog',
+  'showWeekendEventLoaderDialog',
+  'showFormLinkDoctorDialog',
+  'showUnopenableFormsDialog',
+  'repairDashboardLinks',
+  'showForkedFormsDialog',
+  'repairFormRoutingNow',
+  'showReimportFormDialog',
+  'backfillSignInSheetRegistry',
+  'organizeGeneratedFiles',
+  'removeAdminGuestsFromCalendarEvents',
+  'backfillLedgerFromTab',
+  'bootstrapCalendars',
+  'showColumnWidthDialog',
+  'saveCurrentTabOrder',
+  'clearSavedTabOrder',
+  'showTriggerStatus',
+  'writeTriggers',
+  'clearStuckBackgroundJobs',
+  'takeOverTriggerOwnership',
+  'releaseMyTriggers',
+  'previewLegacyTabMerge',
+  'reportLeaderSheetRosters',
+  'showLedgerVerificationReport',
+  'reportLedgerGrowth',
+  'reportOrphanedSessionRows',
+  'reportDuplicateSessionRows',
+  'reportArchivableMonths',
+  'reportUnimportedForms',
+  'reportMissingRegistrations',
+  'reportOrphanedProgramQuestions',
+  'reportVolunteerHours',
+  'reportPrivateSessions',
+  'sendOfficeDigestNow',
+  'reportScriptPropertiesUsage',
+  'showMenuUsageReport',
+  'resetMenuUsage',
+  'rebuildAllFormsInPlace',
+  'destroyAndRebuildAllForms',
+  'showDeleteRegistrationsDialog',
+  'removeOrphanedSessionRows',
+  'removeDuplicateSessionRows',
+  'compactRegistrationLedger',
+  'removeAllCalendarInvitesFromEvents',
+  'resetRemoveAllCalendarInvitesSweep',
+  'openSignInApp',
+  'showAdminMenu'
+];
+const signInMenu = (() => {
+  const names = [];
+  sandbox.buildSignInAppMenu({ createMenu: () => {
+    const m = { addItem: (l, fn) => { names.push(fn); return m; }, addSeparator: () => m,
+      addSubMenu: () => m, addToUi: () => {} };
+    return m;
+  } });
+  return names;
+})();
+const reachable = new Set();
+['admin', 'staff', 'unknown'].forEach(role => {
+  build(role !== 'staff', role).names.forEach(fn => reachable.add(fn.slice(5)));
+});
+signInMenu.forEach(fn => reachable.add(fn.slice(5)));
+const healthActions = vm.runInContext('HEALTH_CHECKS.map(c => c.action)', sandbox);
+healthActions.forEach(a => reachable.add(a));
+check('every pre-R4 menu action is still reachable by some role', BEFORE_R4.filter(a => !reachable.has(a)), []);
+check('every pre-R4 action still exists', BEFORE_R4.filter(a => typeof sandbox[a] !== 'function'), []);
+const staffReach = new Set(build(false, 'staff').names.map(fn => fn.slice(5)).concat(healthActions, signInMenu.map(f => f.slice(5))));
+check('a non-admin still reaches the Doctor, unopenable forms and the stuck-job hatch',
+  ['showFormLinkDoctorDialog', 'showUnopenableFormsDialog', 'clearStuckBackgroundJobs'].filter(a => !staffReach.has(a)), []);
+check('every Health check names an existing action', healthActions.filter(a => typeof sandbox[a] !== 'function'), []);
+const reportsOnMenu = ['reportVolunteerHours', 'showTriggerStatus', 'reportMissingRegistrations', 'showMenuUsageReport']
+  .filter(a => full.names.includes('menu_' + a));
+check('the read-only reports left the menu for the panel', reportsOnMenu, []);
+
+// --- THE ROLE TABLE. ---------------------------------------------------------
+const role = (email, admins) => sandbox.menuRoleForEmail(email, admins);
+check('blank address is unknown, never staff', role('', ['a@x.org']), 'unknown');
+check('admin address is admin (case-insensitive)', role(' A@X.org ', ['a@x.org']), 'admin');
+check('anyone else is staff', role('b@x.org', ['a@x.org']), 'staff');
+check('menusForRole(staff)', sandbox.menusForRole('staff').map(r => r.menu), ['desk', 'coordinator']);
+check('menusForRole(unknown) includes admin', sandbox.menusForRole('unknown').map(r => r.menu), ['desk', 'coordinator', 'admin']);
+check('a role nobody wrote down is treated as unknown', sandbox.menusForRole(undefined).map(r => r.menu), ['desk', 'coordinator', 'admin']);
+{
+  const saved = { Session: sandbox.Session, list: sandbox.listAuthorizedAdminEmails, cfg: sandbox.getAllAdminNotificationEmails };
+  const setViewer = (active, effective) => {
+    sandbox.Session = {
+      getScriptTimeZone: () => 'America/New_York',
+      getActiveUser: () => { if (active instanceof Error) throw active; return { getEmail: () => active }; },
+      getEffectiveUser: () => { if (effective instanceof Error) throw effective; return { getEmail: () => effective }; }
+    };
+  };
+  sandbox.listAuthorizedAdminEmails = () => ['owner@x.org'];
+  sandbox.getAllAdminNotificationEmails = () => ['office@x.org'];
+  setViewer('', '');
+  check('onOpen-style blank account resolves to unknown', sandbox.resolveMenuRole(), 'unknown');
+  setViewer(new Error('no scope'), new Error('no scope'));
+  check('Session throwing resolves to unknown', sandbox.resolveMenuRole(), 'unknown');
+  setViewer('owner@x.org', '');
+  check('the hardcoded/owner list is admin', sandbox.resolveMenuRole(), 'admin');
+  setViewer('', 'office@x.org');
+  check('falls back to the effective user; a Config admin address is admin', sandbox.resolveMenuRole(), 'admin');
+  setViewer('desk@x.org', 'desk@x.org');
+  check('anybody else is staff', sandbox.resolveMenuRole(), 'staff');
+  sandbox.getAllAdminNotificationEmails = () => { throw new Error('Config mid-rebuild'); };
+  setViewer('owner@x.org', '');
+  check('Config unreadable costs only its own half', sandbox.resolveMenuRole(), 'admin');
+  sandbox.listAuthorizedAdminEmails = () => { throw new Error('boom'); };
+  setViewer('desk@x.org', '');
+  check('no admin list at all still resolves (staff, not a throw)', sandbox.resolveMenuRole(), 'staff');
+
+  // onOpen builds by role.
+  sandbox.listAuthorizedAdminEmails = () => ['owner@x.org'];
+  sandbox.getAllAdminNotificationEmails = () => [];
+  const openWith = () => {
+    const roots = [];
+    const ui = { createMenu: name => {
+      const m = { addItem: () => m, addSeparator: () => m, addSubMenu: () => m, addToUi: () => roots.push(name) };
+      return m;
+    } };
+    const prev = sandbox.SpreadsheetApp;
+    sandbox.SpreadsheetApp = { getActiveSpreadsheet: () => null, getUi: () => ui };
+    sandbox.migrateLegacySheetNames = () => {};
+    try { sandbox.onOpen(); } finally { sandbox.SpreadsheetApp = prev; }
+    return roots;
+  };
+  setViewer('', '');
+  check('onOpen, account invisible: Admin is built', openWith().indexOf(ADMIN) >= 0, true);
+  setViewer('desk@x.org', '');
+  check('onOpen, identified non-admin: no Admin menu', openWith().indexOf(ADMIN) >= 0, false);
+  setViewer('owner@x.org', '');
+  check('onOpen, admin: Admin is built', openWith().indexOf(ADMIN) >= 0, true);
+  check('onOpen still adds the Sign-In App menu', openWith().indexOf(vm.runInContext('SIGN_IN_APP_MENU_NAME', sandbox)) >= 0, true);
+
+  sandbox.Session = saved.Session;
+  sandbox.listAuthorizedAdminEmails = saved.list;
+  sandbox.getAllAdminNotificationEmails = saved.cfg;
+}
 
 // --- A click counts. --------------------------------------------------------
 let ran = 0;
@@ -104,7 +318,8 @@ check('report lists the most-pressed first',
   report.indexOf('2 × ') >= 0 && report.indexOf('2 × ') < report.indexOf('1 × '), true);
 check('report uses the menu label', report.indexOf('Log Volunteer Hours') >= 0, true);
 check('report lists never-pressed items', /Never pressed \(\d+\)/.test(report), true);
-check('report labels carry their submenu path', report.indexOf('Admin ▸') >= 0, true);
+check('report labels carry their menu path', report.indexOf('Admin ▸') >= 0, true);
+check('a report that moved to the panel is labelled under the panel', report.indexOf('🩺 Health ▸') >= 0, true);
 
 // --- The separate Sign-In App menu. -----------------------------------------
 {
@@ -119,12 +334,12 @@ check('report labels carry their submenu path', report.indexOf('Admin ▸') >= 0
     return m;
   }
   sandbox.buildSignInAppMenu({ createMenu: menu });
-  check('sign-in app menu is its own top-level menu', !!root && root.name !== full.root.name, true);
+  check('sign-in app menu is its own top-level menu', !!root && full.roots.every(r => r.name !== root.name), true);
   check('sign-in app menu opens the app through a wrapper', names, ['menu_openSignInApp']);
   check('the wrapper exists and calls the action',
     typeof sandbox.menu_openSignInApp === 'function' && typeof sandbox.openSignInApp === 'function', true);
   check('usage report labels the sign-in app item',
-    sandbox.describeMenuUsage().indexOf('Sign-In App ▸') >= 0, true);
+    sandbox.describeMenuUsage().indexOf('Open the Sign-In App') >= 0, true);
   const page = sandbox.buildSignInAppLauncherHtml('https://x.test/exec?a=1&b=</script>',
     [{ location: "St. John's <Hall>", url: 'https://x.test/exec?location=St' }]);
   check('launcher calls window.open', page.indexOf('window.open(') >= 0, true);

@@ -13,8 +13,8 @@
 // WHY. The menu has been reorganized three times on a guess about how often
 // each item is pressed ("a serving day at the top, once-a-year behind Admin").
 // The guess is the whole rule, and nothing measured it. This does: every menu
-// click adds one to a counter and stamps a last-used time, and 🔧 Admin ▸ 📄
-// Reports ▸ Menu Usage lists them, most-pressed first, with the items nobody
+// click adds one to a counter and stamps a last-used time, and the Health
+// panel's Menu Usage check (99zm) lists them, most-pressed first, with the items nobody
 // has pressed at all underneath — which is the list the next reorganization
 // should start from.
 //
@@ -83,31 +83,40 @@ function recordMenuUsage_(actionName) {
  * listed.
  */
 function collectMenuItemLabels_() {
+  const roots = [];
   function stubMenu(name) {
     const m = { name: name, entries: [] };
     m.addItem = (label, fn) => { m.entries.push({ label: label, fn: fn }); return m; };
     m.addSeparator = () => m;
     m.addSubMenu = child => { m.entries.push({ sub: child }); return m; };
-    m.addToUi = () => { root = m; };
+    m.addToUi = () => { roots.push(m); };
     return m;
   }
-  let root = null;
   const out = {};
   function walk(menu, path) {
     menu.entries.forEach(e => {
       if (e.sub) return walk(e.sub, path.concat(e.sub.name));
       const action = String(e.fn).indexOf(MENU_WRAPPER_PREFIX) === 0
         ? String(e.fn).slice(MENU_WRAPPER_PREFIX.length) : String(e.fn);
-      out[action] = path.concat(e.label).join(' ▸ ');
+      // First home wins: an item on two menus (the Health panel is on
+      // Coordinator and under Admin ▸ Reports) is listed where most people see it.
+      if (!out[action]) out[action] = path.concat(e.label).join(' ▸ ');
     });
   }
-  buildAppMenu({ createMenu: stubMenu }, true);
-  walk(root || { entries: [] }, []);
-  // The separate Sign-In App menu (99zc), labelled with its own name since it
-  // sits beside the main menu rather than inside it.
-  root = null;
+  // EVERY menu any role can get (R4: Desk, Coordinator, Admin — the role table
+  // is 99zma), each labelled with its own name since each is now top-level.
+  buildAppMenu({ createMenu: stubMenu }, true, 'unknown');
+  // The separate Sign-In App menu (99zc), likewise.
   buildSignInAppMenu({ createMenu: stubMenu });
-  if (root) walk(root, [root.name]);
+  roots.forEach(root => walk(root, [root.name]));
+  // The read-only reports that moved off the menu into the Health panel (99zm)
+  // are still counted under their own action names — so they are listed under
+  // the panel rather than reported as an unlabelled key or as "never pressed".
+  try {
+    HEALTH_CHECKS.forEach(check => {
+      if (!out[check.action]) out[check.action] = `🩺 Health ▸ ${check.title}`;
+    });
+  } catch (err) { /* the panel is optional to this report */ }
   return out;
 }
 
@@ -132,15 +141,11 @@ function describeMenuUsage() {
   return lines.join('\n');
 }
 
-/** MENU ACTION — Admin ▸ Reports ▸ Menu Usage. Read-only, ungated. */
+/** HEALTH PANEL (99zm) ▸ Menu Usage. Read-only, ungated. */
 function showMenuUsageReport() {
   const text = describeMenuUsage();
   log(`showMenuUsageReport:\n${text}`);
-  try {
-    SpreadsheetApp.getUi().alert('Menu Usage', text, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible('See the log — the menu usage is written there.');
-  }
+  presentReport_('Menu Usage', text, 'See the log — the menu usage is written there.');
 }
 
 /** MENU ACTION — start the counts over. Asks first; ungated (it is only counts). */
@@ -226,6 +231,7 @@ function menu_showRegistrationReviewDialog() { recordMenuUsage_('showRegistratio
 function menu_showEventTagInspectorDialog() { recordMenuUsage_('showEventTagInspectorDialog'); return showEventTagInspectorDialog(); }
 function menu_showFixOneFormDialog() { recordMenuUsage_('showFixOneFormDialog'); return showFixOneFormDialog(); }
 function menu_showForkedFormsDialog() { recordMenuUsage_('showForkedFormsDialog'); return showForkedFormsDialog(); }
+function menu_showHealthPanel() { recordMenuUsage_('showHealthPanel'); return showHealthPanel(); }
 function menu_showFormLinkDoctorDialog() { recordMenuUsage_('showFormLinkDoctorDialog'); return showFormLinkDoctorDialog(); }
 function menu_showUnopenableFormsDialog() { recordMenuUsage_('showUnopenableFormsDialog'); return showUnopenableFormsDialog(); }
 function menu_showLedgerVerificationReport() { recordMenuUsage_('showLedgerVerificationReport'); return showLedgerVerificationReport(); }

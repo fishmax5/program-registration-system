@@ -164,14 +164,9 @@ function reportOrphanedSessionRows() {
   const report = `${describeOrphanedSessionRows(found)}\n\nCalendars this workbook DOES read:\n${configured}`;
 
   log(report);
-  try {
-    const ui = SpreadsheetApp.getUi();
-    ui.alert('Leftover Calendar Rows', report + (found.orphans.length > 0
-      ? '\n\nNothing was changed. "🧹 Remove Leftover Calendar Rows…" is what removes them.'
-      : ''), ui.ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible(`${found.orphans.length} leftover row(s) from retired calendar(s) — see the log.`);
-  }
+  presentReport_('Leftover Calendar Rows', report + (found.orphans.length > 0
+    ? '\n\nNothing was changed. "🧹 Remove Leftover Calendar Rows…" is what removes them.'
+    : ''), `${found.orphans.length} leftover row(s) from retired calendar(s) — see the log.`);
   return found;
 }
 

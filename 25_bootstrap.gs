@@ -456,6 +456,9 @@ function cancelBootstrapCalendars() {
 
 /** Toasts when there's a UI to toast into (a trigger run has none) — never worth throwing over. */
 function toastIfPossible(message) {
+  // Inside the Health panel (99zm) a report's toast is part of its answer,
+  // handed back to the panel rather than flashed in a corner.
+  try { if (captureReportToast_(message)) return; } catch (err) { /* never costs the toast */ }
   try {
     SpreadsheetApp.getActiveSpreadsheet().toast(message, 'Calendar & Form Manager', 8);
   } catch (err) {

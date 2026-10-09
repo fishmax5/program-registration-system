@@ -465,7 +465,7 @@ function volunteerMetricsForMonth(monthKey, visits) {
 }
 
 /**
- * MENU ENTRY (Admin ▸ Reports). Read-only, and ungated like the reports beside
+ * HEALTH PANEL (99zm) ▸ Volunteer Hours. Read-only, and ungated like the reports beside
  * it: the person who has to answer to Judy for the year's hours is the person
  * who should be able to press it.
  */
@@ -473,13 +473,11 @@ function reportVolunteerHours() {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth() - VOLUNTEER_REPORT_DEFAULT_MONTHS + 1, 1);
   const summary = summarizeVolunteerHours(formatDateKey(from), formatDateKey(now));
-  const ui = SpreadsheetApp.getUi();
 
   if (summary.totalVisits === 0) {
-    ui.alert('Volunteer Hours',
+    presentReport_('Volunteer Hours',
       `Nothing recorded between ${formatDateLabel(from)} and ${formatDateLabel(now)}.\n\n` +
-      'Rosters & Sharing ▸ Log Volunteer Hours… is where a visit goes on.',
-      ui.ButtonSet.OK);
+      'Desk ▸ Log Volunteer Hours… is where a visit goes on.');
     return;
   }
 
@@ -488,12 +486,11 @@ function reportVolunteerHours() {
     (person.offSiteHours > 0 ? ` (${person.offSiteHours} away from the centre)` : '') +
     (person.programs.length ? `\n    ${person.programs.join(', ')}` : '')).join('\n');
 
-  ui.alert('Volunteer Hours',
+  presentReport_('Volunteer Hours',
     `${formatDateLabel(from)} – ${formatDateLabel(now)}\n\n` +
     `${summary.totalHours} hour(s), ${summary.totalVisits} visit(s), ` +
     `${summary.people.length} volunteer(s).\n\n${people}` +
-    (summary.people.length > 30 ? `\n… and ${summary.people.length - 30} more on the tab.` : ''),
-    ui.ButtonSet.OK);
+    (summary.people.length > 30 ? `\n… and ${summary.people.length - 30} more on the tab.` : ''));
 }
 
 // ---------------------------------------------------------------------------

@@ -219,11 +219,8 @@ function showTriggerStatus() {
 
   const report = lines.join('\n');
   log(`Trigger status:\n${report}`);
-  try {
-    SpreadsheetApp.getUi().alert('Trigger Status', report, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    // No UI (editor run) — the log above is the output.
-  }
+  // No UI (editor run) — the log above is the output.
+  presentReport_('Trigger Status', report);
 }
 
 /**

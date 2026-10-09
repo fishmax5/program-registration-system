@@ -142,16 +142,11 @@ function reportDuplicateSessionRows() {
 
   const report = describeDuplicateSessionRows(found);
   log(report);
-  try {
-    const ui = SpreadsheetApp.getUi();
-    ui.alert('Duplicate Session Rows', report + (found.drop.length > 0
-      ? '\n\nNothing was changed. "🧹 Remove Duplicate Session Rows…" is what removes them.\n\n' +
-        'Registrations are not affected: the row that stays keeps the same Event_ID, so everyone ' +
-        'signed up for these sessions stays signed up for them.'
-      : ''), ui.ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible(`${found.drop.length} duplicate session row(s) — see the log.`);
-  }
+  presentReport_('Duplicate Session Rows', report + (found.drop.length > 0
+    ? '\n\nNothing was changed. "🧹 Remove Duplicate Session Rows…" is what removes them.\n\n' +
+      'Registrations are not affected: the row that stays keeps the same Event_ID, so everyone ' +
+      'signed up for these sessions stays signed up for them.'
+    : ''), `${found.drop.length} duplicate session row(s) — see the log.`);
   return found;
 }
 

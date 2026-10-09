@@ -344,7 +344,7 @@ function describeLeaderSheetRosters(diagnosis) {
   return lines.join('\n');
 }
 
-/** MENU ACTION — 🔧 Admin ▸ 📄 Reports ▸ "Why is a roster sheet empty?". Read-only. */
+/** HEALTH PANEL (99zm) ▸ "Why is a roster sheet empty?". Read-only. */
 function reportLeaderSheetRosters() {
   let text;
   try {
@@ -353,10 +353,5 @@ function reportLeaderSheetRosters() {
     text = `The roster check could not run: ${err}`;
   }
   log(`reportLeaderSheetRosters:\n${text}`);
-  try {
-    const ui = SpreadsheetApp.getUi();
-    ui.alert('Program registrant sheets', text, ui.ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible('See the log — the roster check wrote its answer there.');
-  }
+  presentReport_('Program registrant sheets', text, 'See the log — the roster check wrote its answer there.');
 }

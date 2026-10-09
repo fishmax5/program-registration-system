@@ -200,13 +200,19 @@ function previewLegacyTabMerge() {
     toastIfPossible('No leftover tabs found — nothing to merge.');
     return [];
   }
-  log(`previewLegacyTabMerge: ${found.length} tab(s) look like legacy data:`);
-  found.forEach(f => {
-    log(`  • "${f.name}" -> ${f.target.sheetName} ` +
-      `(header row ${f.headerRow}, ${f.rowCount} data row(s), ` +
-      `${f.matched} matching column(s), ${Math.round(f.score * 100)}% of its columns recognized)`);
-  });
-  toastIfPossible(`${found.length} leftover tab(s) found — see the log, then run mergeLegacyTabs().`);
+  const lines = found.map(f => `  • "${f.name}" -> ${f.target.sheetName} ` +
+    `(header row ${f.headerRow}, ${f.rowCount} data row(s), ` +
+    `${f.matched} matching column(s), ${Math.round(f.score * 100)}% of its columns recognized)`);
+  log(`previewLegacyTabMerge: ${found.length} tab(s) look like legacy data:\n${lines.join('\n')}`);
+  // In the Health panel (99zm) the list itself is the answer; on its own the
+  // report stays the toast it always was, with the detail in the log.
+  if (reportCaptureOpen_()) {
+    presentReport_('Leftover Tabs', `${found.length} tab(s) look like data from an older layout:\n` +
+      `${lines.join('\n')}\n\nNothing was changed. mergeLegacyTabs(), run from the Apps Script editor by ` +
+      `an admin, folds them in and deletes them.`);
+  } else {
+    toastIfPossible(`${found.length} leftover tab(s) found — see the log, then run mergeLegacyTabs().`);
+  }
   return found;
 }
 
