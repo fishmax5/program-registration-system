@@ -53,6 +53,9 @@ function onEdit(e) {
       handleClubMembersEdit(e, sheet);
     } else if (name === SHEET_NAMES.MEMBER_ROLL) {
       handleMemberRollEdit(e, sheet);
+    } else if (name === SHEET_NAMES.REGISTRATION_LEDGER) {
+      // A hand edit above the checkpoint's covered row (99zq) sets it aside.
+      noteLedgerTabEditForCheckpoint_(e);
     }
   } catch (err) {
     // Say something. A silent catch here is how "I typed it and nothing

@@ -102,7 +102,12 @@ const SHEET_NAMES = {
   // upcoming date would put a dozen invented registrations into the counts,
   // the ledger and the leader alerts. Staff-owned: Quick Mark appends, nothing
   // rewrites it. See 99z_program_waitlist.gs.
-  PROGRAM_WAITLIST: 'Program_Waitlist'
+  PROGRAM_WAITLIST: 'Program_Waitlist',
+  // The registration ledger's fold, written down nightly with the ledger row
+  // it covers through, so a fold reads only the rows after it. A derived
+  // cache: deleting it sends every reader back to the full fold and loses
+  // nothing. Hidden; machine-written. See 99zq_ledger_checkpoint.gs.
+  LEDGER_CHECKPOINT: 'Ledger_Checkpoint'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';

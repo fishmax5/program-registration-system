@@ -526,6 +526,9 @@ function compactRegistrationLedgerLocked_() {
       log(`ℹ️ Ledger compaction: the ${spare} emptied row(s) could not be deleted (${err}) — they are blank and harmless.`);
     }
   }
+  // The rows moved, so the checkpoint's covered row means nothing now (99zq).
+  // Its anchor check would catch that too; this says so at once.
+  invalidateLedgerCheckpoint('the ledger was compacted');
   invalidateLedgerFold();
 
   const summary = `Ledger compacted: ${droppedItems.length} redundant entr(ies) removed` +

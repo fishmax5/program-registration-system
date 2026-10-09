@@ -193,8 +193,22 @@ function verifyLedgerAgainstTab() {
     missingFromTab: missingFromTab,
     disagreeing: disagreeing,
     problems: folded.problems || [],
-    skipped: skipped
+    skipped: skipped,
+    // Checkpoint + tail against a full replay (99zq), for the validation
+    // period before the fast path is trusted. Its own read, its own gate;
+    // a difference is filed for the digest by 99zq itself, so a clean run
+    // here still files nothing.
+    checkpoint: ledgerVerifyCheckpoint_()
   };
+}
+
+/** validateLedgerCheckpoint(), guarded — a cache check must never cost the verifier its answer. */
+function ledgerVerifyCheckpoint_() {
+  try {
+    return typeof validateLedgerCheckpoint === 'function' ? validateLedgerCheckpoint() : null;
+  } catch (err) {
+    return null;
+  }
 }
 
 /** "Joan Meier (Registrant) — Chair Yoga, Wed, Sep 16 (Ashbridge)", for a line somebody reads. */
@@ -364,8 +378,10 @@ function showLedgerVerificationReport() {
     ? lines.join('\n')
     : `The ledger and ${SHEET_NAMES.REGISTRANT_DASH} agree on all ${result.checked} live registration(s).`;
   try {
+    const checkpointLine = result.checkpoint && typeof describeLedgerCheckpointValidation_ === 'function'
+      ? `\n\n${describeLedgerCheckpointValidation_(result.checkpoint)}` : '';
     SpreadsheetApp.getUi().alert('Registration ledger vs the Registrants tab',
-      `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.\n\n${body}`,
+      `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.\n\n${body}${checkpointLine}`,
       SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (err) {
     log(`Ledger verification (no UI available): ${body}`);
