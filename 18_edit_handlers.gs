@@ -31,8 +31,8 @@ function onEdit(e) {
   try {
     const sheet = e.range.getSheet();
     const name = sheet.getName();
-    // A tick box asks first, on every tab (99zb). Declined, it is already put
-    // back and no handler below may act on it.
+    // A consequential tick box asks first (99zb's allow-list). Declined, it is
+    // already put back and no handler below may act on it.
     if (!confirmCheckboxEditOrRevert(e)) return;
     // Any edit anywhere is something the hourly sync's dashboards may be
     // drawn from (99zg) — Config, a staff column, a lunch menu.
@@ -853,7 +853,9 @@ function onProgramFlagEditInstallable(e) {
  * answers, so this trigger woke to an empty queue, delivered nothing and
  * returned, and a date closed by hand reached the calendar only at the next
  * calendar sync (or never, if that sync's reconcile read the untagged event
- * first). So it polls for an entry recorded around the time of this edit, up
+ * first). Since R3 99zb asks only for an allow-list of columns, but every
+ * column that queues an entry (the program flags and Waitlist_Only) is ON that
+ * list, so the wait is still needed. So it polls for an entry recorded around the time of this edit, up
  * to PENDING_FLAG_WAIT_MS — inside the simple trigger's own 30-second limit
  * plus slack — and then drains whatever is there, which is the old behaviour.
  */
