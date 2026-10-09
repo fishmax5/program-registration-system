@@ -139,6 +139,11 @@ const pages = [
   ['the restore-from-a-copy dialog', () => sandbox.buildRestoreFromCopyHtml()],
   // Add Registrants in Bulk (99q): column mapping, review and a polled progress panel.
   ['the bulk registrants dialog', () => sandbox.buildBulkRegistrantsHtml()],
+  // The staff console (99zo): its own shell, and a panel as its iframe gets
+  // it — the bridge shim prepended to a page that is itself unchanged.
+  ['the staff console', () => sandbox.buildStaffConsoleHtml()],
+  ['a staff console panel (bridge + bulk registrants)',
+    () => sandbox.staffConsoleWrapPanelHtml_(sandbox.buildBulkRegistrantsHtml())],
   ['the cancel page', () => sandbox.buildCancelPageHtml({
     formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
   })]

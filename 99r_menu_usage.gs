@@ -239,6 +239,7 @@ function menu_showProgramLeaderSheetDialog() { recordMenuUsage_('showProgramLead
 function menu_showProgramReviewDialog() { recordMenuUsage_('showProgramReviewDialog'); return showProgramReviewDialog(); }
 function menu_showQuestionBuilderDialog() { recordMenuUsage_('showQuestionBuilderDialog'); return showQuestionBuilderDialog(); }
 function menu_showQuickMarkDialog() { recordMenuUsage_('showQuickMarkDialog'); return showQuickMarkDialog(); }
+function menu_openStaffConsole() { recordMenuUsage_('openStaffConsole'); return openStaffConsole(); }
 function menu_showReimportFormDialog() { recordMenuUsage_('showReimportFormDialog'); return showReimportFormDialog(); }
 function menu_showRepointSessionsDialog() { recordMenuUsage_('showRepointSessionsDialog'); return showRepointSessionsDialog(); }
 function menu_showRestoreRegistrantsFromCopyDialog() { recordMenuUsage_('showRestoreRegistrantsFromCopyDialog'); return showRestoreRegistrantsFromCopyDialog(); }
