@@ -688,6 +688,9 @@ function createRegistrationForm(group, configInfo) {
   // fatal: an unshared form still works for the people filling it in. See
   // openUpFileToAnyoneWithLink().
   openUpFileToAnyoneWithLink(form.getId(), `registration form "${formTitle}"`);
+  // LINKED AT BIRTH to the shared responses spreadsheet when instant import is
+  // on (99zj), so its first registration is noticed in a minute. Never throws.
+  linkNewFormToSharedResponses(form);
 
   // EVERYTHING PAST THE COPY IS GUARDED, and the copy is thrown away if any of
   // it fails. A half-configured form is not a usable registration form, and

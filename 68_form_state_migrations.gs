@@ -128,6 +128,20 @@ const FORM_STATE_MIGRATIONS = [
     // which reads the titles off the form and returns 0 without a write when
     // there is nothing of the old shape on it.
     apply: (form, context) => convertFormToMealTotals(form, context)
+  },
+  {
+    // NOT A TEMPLATE CHANGE (version 0): every live form also sends its
+    // responses to the one shared spreadsheet the instant import listens on
+    // (99zj). Targets nothing while that feature is off, so this sweep opens
+    // no form for it until somebody turns it on. Idempotent — a form already
+    // linked there writes nothing; a form linked to somebody ELSE'S
+    // spreadsheet is reported, never re-pointed. A rollover clears this id
+    // from the ledger so the sweep re-points every form.
+    id: 'response_destination_r1',
+    title: 'Send responses to the shared spreadsheet (instant import)',
+    version: 0,
+    targets: context => responseDestinationMigrationTargets_(context),
+    apply: form => linkFormToSharedResponses(form)
   }
 ];
 

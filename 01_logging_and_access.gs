@@ -108,7 +108,11 @@ const ADMIN_GATED_ACTIONS = [
   // Removes ledger entries that change nothing (99za). Lossless for the replay
   // and archived to Drive first, but it rewrites the one append-only record
   // this workbook has; the growth report beside it is open.
-  'Compact Registration Ledger'
+  'Compact Registration Ledger',
+  // Create and remove the instant import's submit trigger (99zj) — trigger
+  // work, gated for the reason writeTriggers() is.
+  'Instant Registration Import',
+  'New Responses Spreadsheet'
 ];
 
 /** Does this action still ask who is signed in? */
