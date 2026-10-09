@@ -177,6 +177,20 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     }
   },
   {
+    id: 'leader-roster',
+    mode: LEADER_ROSTER_MODE,
+    title: 'Class Roster',
+    // A PROGRAM LEADER'S OWN ROSTER (99zn), opened from the link in their
+    // email. Only with a ?t= — a bare ?mode=roster is still the staff roster
+    // below, which is why this comes first. No PIN: the token IS the gate,
+    // and a leader at home has no staff code. It writes, so it keeps the
+    // default framing refusal like everything else in this table.
+    match: params => doorRequestedMode_(params) === LEADER_ROSTER_MODE
+      && !!String((params && params.t) || '').trim(),
+    build: params => buildLeaderRosterPageHtml(leaderRosterData(String(params.t || '').trim()),
+      String(params.t || '').trim())
+  },
+  {
     id: 'session',
     mode: 'session',
     title: 'Check In',

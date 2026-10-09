@@ -464,6 +464,9 @@ function refreshProgramSettings(ss, sessionRows) {
   // still a legal answer.
   applyMemoryTabValidation(sheet, headers, outRows.length, {
     checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
+    // Where the leader's roster lives (99zn). Closed: a misspelling would read
+    // as Sheet, which is safe and silent — the dropdown is what stops it.
+    lists: { Roster_Delivery: ROSTER_DELIVERY_OPTIONS },
     // Event is SUGGESTING, like Program on Program_Leaders: every program the
     // calendar has produced, so a row typed on the spare line (a program the
     // sync has not reached yet) is picked rather than spelled — a misspelled

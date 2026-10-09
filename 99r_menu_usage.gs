@@ -257,5 +257,6 @@ function menu_syncEverythingNow() { recordMenuUsage_('syncEverythingNow'); retur
 function menu_syncRegistrations() { recordMenuUsage_('syncRegistrations'); return syncRegistrations(); }
 function menu_takeOverTriggerOwnership() { recordMenuUsage_('takeOverTriggerOwnership'); return takeOverTriggerOwnership(); }
 function menu_writeTriggers() { recordMenuUsage_('writeTriggers'); return writeTriggers(); }
+function menu_showLeaderRosterPagesDialog() { recordMenuUsage_('showLeaderRosterPagesDialog'); return showLeaderRosterPagesDialog(); }
 // BOOTSTRAP_ENTRY_NAME ('25') names this one; the test checks they agree.
 function menu_bootstrapCalendars() { recordMenuUsage_('bootstrapCalendars'); return bootstrapCalendars(); }

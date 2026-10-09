@@ -139,6 +139,24 @@ const pages = [
   ['the restore-from-a-copy dialog', () => sandbox.buildRestoreFromCopyHtml()],
   // Add Registrants in Bulk (99q): column mapping, review and a polled progress panel.
   ['the bulk registrants dialog', () => sandbox.buildBulkRegistrantsHtml()],
+  // The leader's web roster page (99zn/99zna) — a live roster, a refusal, and
+  // the staff dialog that hands its links out.
+  ['the leader roster page', () => sandbox.buildLeaderRosterPageHtml({
+    ok: true, title: "Women's </script> Group", location: 'Narberth', writable: true, reason: '',
+    refreshed: 'Oct 1, 9:00 AM',
+    sessions: [{ label: 'Thu Oct 1 · 9:30 AM · 2 signed up', dateKey: '2026-10-01', past: false, rows: [{
+      key: 'EV1||o brien', date: 'Oct 1', time: '9:30 AM', name: "Mary O'Brien </script>", party: '2',
+      phone: '610-555-0142', email: 'm@x.org', status: 'Active', Contacted: true, Confirmed: false,
+      Waitlisted: false, Dropped: false, notes: 'Uses a "walker"', answers: 'Q: A' }] }],
+    waitlist: [{ name: 'Ann', phone: '', email: '', party: '1', dates: 'Oct 8', added: '', notes: '' }]
+  }, 'a'.repeat(64))],
+  ['the leader roster page, refused', () => sandbox.buildLeaderRosterPageHtml(
+    { ok: false, message: 'This roster link is not valid any more.' }, '')],
+  ['the leader roster pages dialog', () => sandbox.buildLeaderRosterPagesDialogHtml({
+    staffKey: 'b'.repeat(64),
+    programs: [{ key: 'k', title: "Women's </script> Group", location: 'Narberth', delivery: 'Web',
+      hasSheet: true, move: '', url: 'https://script.google.com/macros/s/X/exec?mode=roster&t=a' }]
+  })],
   ['the cancel page', () => sandbox.buildCancelPageHtml({
     formId: '1FAIpQLSc_test', programLabel: "Women's </script> Group — Narberth"
   })]
