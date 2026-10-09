@@ -775,8 +775,8 @@ function writeMetricsSummaryTable(sheet, startRow, periodLabels, indicators, not
  */
 function refreshMetricsTabNow() {
   const result = captureMonthlyMetrics();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.METRICS);
-  if (sheet) sheet.activate();
+  // Hidden with the rest of the back room (99zp): show, then activate.
+  openSystemTab_(SHEET_NAMES.METRICS);
   toastIfPossible(result.captured > 0
     ? `Metrics updated — ${result.captured} month(s) recounted ✅`
     : 'Metrics tab redrawn. Nothing to recount: this workbook has no sessions or registrations yet.');

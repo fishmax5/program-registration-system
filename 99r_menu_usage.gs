@@ -255,6 +255,7 @@ function menu_snapshotRegistrantsNow() { recordMenuUsage_('snapshotRegistrantsNo
 function menu_syncCalendars() { recordMenuUsage_('syncCalendars'); return syncCalendars(); }
 function menu_syncEverythingNow() { recordMenuUsage_('syncEverythingNow'); return syncEverythingNow(); }
 function menu_syncRegistrations() { recordMenuUsage_('syncRegistrations'); return syncRegistrations(); }
+function menu_toggleSystemTabVisibility() { recordMenuUsage_('toggleSystemTabVisibility'); return toggleSystemTabVisibility(); }
 function menu_takeOverTriggerOwnership() { recordMenuUsage_('takeOverTriggerOwnership'); return takeOverTriggerOwnership(); }
 function menu_writeTriggers() { recordMenuUsage_('writeTriggers'); return writeTriggers(); }
 // BOOTSTRAP_ENTRY_NAME ('25') names this one; the test checks they agree.
