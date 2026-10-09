@@ -805,7 +805,10 @@ defineLazyGlobal_('HEADERS', () => ({
     'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
     'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
     'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-    'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'
+    'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes',
+    // LAST, per 34's projection rule: Sheet / Both / Web — where this
+    // program's leader roster lives (99zn). Blank reads as Sheet.
+    'Roster_Delivery'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
@@ -1118,7 +1121,7 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'U
  */
 const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes'];
+  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Roster_Delivery'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

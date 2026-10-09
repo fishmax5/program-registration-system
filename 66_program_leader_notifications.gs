@@ -514,7 +514,8 @@ function buildLeaderAlertBody(leader, programs) {
 
     lines.push('');
     if (program.url) {
-      lines.push(`  Your sign-up sheet: ${program.url}`);
+      lines.push(`  ${program.urlLabel || 'Your sign-up sheet'}: ${program.url}`);
+      if (program.alsoUrl) lines.push(`  Also on the web: ${program.alsoUrl}`);
       lines.push('');
     }
   });
@@ -617,11 +618,16 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       // the title the leader sees on the file the email links to, and the two
       // disagreeing would read as two different classes.
       const entry = registry[program.key] || {};
+      // The sheet, the web roster page, or both — whichever the program's
+      // Roster_Delivery says is the roster now (99zn).
+      const link = leaderRosterEmailLink(program.key, entry);
       programs.push({
         key: program.key,
         title: entry.title || program.title,
         location: entry.location || program.location,
-        url: entry.fileId ? `https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '',
+        url: link.url,
+        urlLabel: link.label,
+        alsoUrl: link.alsoUrl,
         changes
       });
     });
@@ -892,7 +898,8 @@ function buildLeaderDigestBody(leader, sessions) {
     }
     lines.push('');
     if (session.url) {
-      lines.push(`  Your sign-up sheet: ${session.url}`);
+      lines.push(`  ${session.urlLabel || 'Your sign-up sheet'}: ${session.url}`);
+      if (session.alsoUrl) lines.push(`  Also on the web: ${session.alsoUrl}`);
       lines.push('');
     }
   });
@@ -1039,10 +1046,11 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
         const sentFor = ledger[s.eventId] || {};
         if (sentFor[leader.email.toLowerCase()]) return;
         const entry = registry[program.key] || {};
+        const link = leaderRosterEmailLink(program.key, entry);
         sessions.push({
           eventId: s.eventId, date: s.date, dateKey: s.dateKey,
           title: entry.title || program.title, location: entry.location || program.location,
-          url: entry.fileId ? `https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '',
+          url: link.url, urlLabel: link.label, alsoUrl: link.alsoUrl,
           roster: rosterByEvent[s.eventId] || []
         });
       });

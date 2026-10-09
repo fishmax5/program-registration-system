@@ -660,7 +660,6 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   const programKeys = Object.keys(registry);
   if (programKeys.length === 0 || !registrantRows || registrantRows.length === 0) return 0;
 
-  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const edits = {}; // rowKey -> { values: [...], changed: [bool...] }
   // ONE Drive listing says which sheets nobody has touched since they were
   // last read; those are not opened (99zf).
@@ -669,6 +668,10 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    // A sheet whose program moved to the web roster page and whose last ticks
+    // have already been read is frozen (protected) and never read again —
+    // the page is the one source of truth now (99zn).
+    if (leaderRosterSheetRetired(programKey)) return;
     if (pullPlan.untouched(entry.fileId)) return;
     let rows;
     try {
@@ -693,18 +696,7 @@ function pullProgramLeaderSheetEdits(registrantRows) {
       return;
     }
 
-    rows.forEach(row => {
-      const rowKey = String(row[sheetMap['Row_Key']] || '').trim();
-      if (!rowKey) return;
-      const snapshot = decodeLeaderSnapshot(row[sheetMap['Pushed_Snapshot']]);
-      if (!snapshot) return;
-      const current = readLeaderValues(row, sheetMap);
-      const changed = current.map((value, i) => value !== snapshot[i]);
-      if (changed.indexOf(true) === -1) return;
-      // Two sheets claiming the same row key would mean the same session was
-      // shared twice; last one read wins, which is as good an answer as any.
-      edits[rowKey] = { values: current, changed };
-    });
+    collectLeaderSheetEdits_(rows, edits);
   });
 
   pullPlan.save();
@@ -744,6 +736,30 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   return applied;
 }
 
+
+/**
+ * The pull's per-cell rule, on rows already read off one sheet: a row whose
+ * five leader values differ from its Pushed_Snapshot is an edit, and only the
+ * cells that differ are marked changed. Rows with no Row_Key or no readable
+ * snapshot (bands, hand-pasted lines) are skipped. One copy of the rule, shared
+ * by the hourly pull and the web-roster cutover's final read (99zn).
+ */
+function collectLeaderSheetEdits_(rows, edits) {
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
+  (rows || []).forEach(row => {
+    const rowKey = String(row[sheetMap['Row_Key']] || '').trim();
+    if (!rowKey) return;
+    const snapshot = decodeLeaderSnapshot(row[sheetMap['Pushed_Snapshot']]);
+    if (!snapshot) return;
+    const current = readLeaderValues(row, sheetMap);
+    const changed = current.map((value, i) => value !== snapshot[i]);
+    if (changed.indexOf(true) === -1) return;
+    // Two sheets claiming the same row key would mean the same session was
+    // shared twice; last one read wins, which is as good an answer as any.
+    edits[rowKey] = { values: current, changed };
+  });
+  return edits;
+}
 
 /**
  * What to say when a program registrant sheet cannot be opened — and, when the reason
@@ -1039,6 +1055,10 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    // A program delivered on the web roster page (99zn): its sheet is cut
+    // over (frozen after one last read) rather than rewritten, and one that
+    // came back from the page is un-frozen here so the write below redraws it.
+    if (leaderRosterHandlesSheet_(programKey, entry)) return;
     try {
       const rows = byProgram[programKey] || [];
       // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
@@ -2307,6 +2327,7 @@ function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
     if (dateKey < todayKey || dateKey > horizonKey) return;
     const key = leaderProgramKey(title, location);
     if (registry[key] && registry[key].fileId) return; // already has one, for the life of the program
+    if (rosterDeliveryFor(key) === ROSTER_DELIVERY.WEB) return; // its roster is the web page (99zn)
     if (!wanted[key] || dateKey < wanted[key].dateKey) {
       wanted[key] = { title, location, dateKey };
     }
@@ -2348,6 +2369,7 @@ function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
   leaders.forEach(leader => leader.programs.forEach(program => {
     if (registry[program.key] && registry[program.key].fileId) return; // already has one
     if (!known[program.key]) return; // not a program this workbook recognizes
+    if (rosterDeliveryFor(program.key) === ROSTER_DELIVERY.WEB) return; // the web page (99zn)
     missing[program.key] = program;
   }));
 

@@ -156,13 +156,28 @@ ok('mode: walk-in is handed back unchanged — no route claims it',
 ok('a location and a mode travel together',
   sandbox.checkInPageUrl({ location: 'Narberth', mode: 'session' }) ===
     `${BASE}?location=Narberth&mode=session`);
+// THE LEADER ROSTER PAGE (99zn) shares the word 'roster' with the staff
+// roster: with a ?t= it is the leader's page, without one it is still the
+// staff page every existing bookmark expects.
+sandbox.buildLeaderRosterPageHtml = (view, token) => `PAGE:leaderRoster t=${token}`;
+sandbox.leaderRosterData = () => ({ ok: false });
+ok('?mode=roster&t= is the leader roster page',
+  served({ mode: 'roster', t: 'abc' }).html === 'PAGE:leaderRoster t=abc');
+ok('a bare ?mode=roster is still the staff roster',
+  served({ mode: 'roster' }).html.indexOf('PAGE:roster') === 0);
+ok('the leader roster page keeps the default framing refusal',
+  served({ mode: 'roster', t: 'abc' }).xFrame === '');
+
 // Every ?mode= the table can produce has to route back to the route that
 // produced it — that is the drift this table exists to prevent.
 sandbox.DOOR_ROUTES.forEach(route => {
   if (!route.mode) return;
   const url = sandbox.checkInPageUrl({ mode: route.id });
   const mode = url.split('mode=')[1];
-  const params = route.id === 'cancel' ? { mode, form: 'F' } : { mode };
+  // The two routes that need more than a mode: the cancel page its form,
+  // the leader roster page (99zn) its token.
+  const params = route.id === 'cancel' ? { mode, form: 'F' }
+    : route.id === 'leader-roster' ? { mode, t: 'a'.repeat(64) } : { mode };
   let matched = '';
   sandbox.DOOR_ROUTES.forEach(r => { if (!matched && r.match(params)) matched = r.id; });
   ok(`the URL for "${route.id}" routes back to "${route.id}"`, matched === route.id);

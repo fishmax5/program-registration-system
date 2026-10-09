@@ -334,8 +334,13 @@ function checkInCancel(payload) {
  * UPCOMING ONLY. A leader tidying up last month's sheet is recording history,
  * not cancelling anything, and a past session's seat is not a seat.
  */
-function applyLeaderDropsAsCancellations(registrantRows) {
+function applyLeaderDropsAsCancellations(registrantRows, ledgerOpts) {
   if (!registrantRows || registrantRows.length === 0) return 0;
+  // WHICH DOOR THE TICK CAME THROUGH. The hourly sync calls this with nothing
+  // and means the shared sheet; the web roster page (99zn) calls it on the one
+  // row a leader just ticked and says so — same stamp, same kind, its own
+  // Source, because "where did this come from" is read rather than inferred.
+  const lo = ledgerOpts || {};
   const map = getIndexMap(HEADERS.All_Registrants);
   if (map['Dropped'] === undefined) return 0;
   const todayKey = formatDateKey(new Date());
@@ -364,8 +369,9 @@ function applyLeaderDropsAsCancellations(registrantRows) {
     // at some point since the last sync is a time nobody knows, and blank
     // means "the same as Entry_At" rather than a guess dressed as a fact.
     const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.CANCELLED, opts, {
-      source: LEDGER_SOURCES.LEADER_SHEET,
-      note: 'Dropped was ticked on the shared program registrant sheet; the tick was read back on this sync.'
+      source: lo.ledgerSource || LEDGER_SOURCES.LEADER_SHEET,
+      note: lo.note ||
+        'Dropped was ticked on the shared program registrant sheet; the tick was read back on this sync.'
     });
     if (!stampRegistrantRowCancelled(row, map, opts)) return;
     appendLedgerEntry(entry);
@@ -1011,8 +1017,15 @@ function buildWaitlistSeatIndex(registrantRows, map, sessionRows) {
  * UPCOMING ONLY, and stamped in place on the rows the caller is about to
  * write — both for the reasons applyLeaderDropsAsCancellations() gives.
  */
-function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
+function applyLeaderWaitlistTicks(registrantRows, sessionRows, ledgerOpts) {
   if (!registrantRows || registrantRows.length === 0) return 0;
+  // See applyLeaderDropsAsCancellations() for `ledgerSource` / `note`. `only`
+  // is the web roster page's (99zn): the seat index is still built from EVERY
+  // row — a promotion has to see the whole session to know there is a seat —
+  // but only the rows named are acted on, because the page writes one row back
+  // and must not decide anybody else's tick in passing.
+  const lo = ledgerOpts || {};
+  const only = Array.isArray(lo.only) ? lo.only : null;
   const map = getIndexMap(HEADERS.All_Registrants);
   if (map['Waitlisted'] === undefined) return 0;
   const todayKey = formatDateKey(new Date());
@@ -1022,6 +1035,7 @@ function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
   let restored = 0;
   let refused = 0;
   registrantRows.forEach(row => {
+    if (only && only.indexOf(row) === -1) return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date || formatDateKey(date) < todayKey) return;
     // A leader who ticks Waitlisted AND Dropped on the same row has said the
@@ -1031,8 +1045,8 @@ function applyLeaderWaitlistTicks(registrantRows, sessionRows) {
     const opts = { source: WAITLIST_SOURCES.LEADER, reason: String(row[map['Leader_Notes']] || '') };
 
     const leaderSheet = {
-      source: LEDGER_SOURCES.LEADER_SHEET,
-      note: 'The tick was read back off the shared program registrant sheet on this sync.'
+      source: lo.ledgerSource || LEDGER_SOURCES.LEADER_SHEET,
+      note: lo.note || 'The tick was read back off the shared program registrant sheet on this sync.'
     };
 
     if (isCheckedTrue(row[map['Waitlisted']])) {

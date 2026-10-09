@@ -338,6 +338,8 @@ function buildCoordinatorMenu_(ui, title, role) {
       // wait an hour.
       .addItem('Share a Program Registrant Sheet\u2026', menuFn_('showProgramLeaderSheetDialog'))
       .addItem('Refresh Program Registrant Sheets Now', menuFn_('refreshProgramLeaderSheetsNow'))
+      // The page that replaces the sheet, per program (99zn).
+      .addItem('Leader Roster Pages\u2026', menuFn_('showLeaderRosterPagesDialog'))
       .addItem('Send Roster Change Alerts Now', menuFn_('sendProgramLeaderRosterAlertsNow'))
       // The countdown-channel twin of the item above — see Notify_Timing on
       // Program_Leaders for which leaders are on which.

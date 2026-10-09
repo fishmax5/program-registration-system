@@ -385,6 +385,11 @@ function applyQueuedOptimisticWrite(entry) {
       // A deletion from the Delete Registrations dialog that arrived while a
       // sync held the workbook (48). Lock held, like Quick Mark's body.
       return applyQueuedDeleteRegistrations(args);
+    case 'leaderRosterMark':
+      // A tick on a leader's web roster page (99zn) that arrived while a sync
+      // held the workbook. Lock held, like Quick Mark's body. Carries the
+      // program key, never the page's token.
+      return applyLeaderRosterEditLocked_(args);
     case 'doorSignIn':
       // Called WITHOUT the script lock held — walkInSignIn() takes it for
       // itself, one mark at a time, through applyQuickMarkFromDialog(). See
@@ -430,6 +435,7 @@ function reportExhaustedOptimisticRetry(entry, message, tries) {
   try {
     const args = entry.args || {};
     const what = entry.kind === 'doorSignIn' ? 'A door app sign-in'
+      : entry.kind === 'leaderRosterMark' ? `A tick on the web roster page for ${args.programTitle || 'a program'}`
       : entry.kind === 'deleteRegistrations' ? `A queued deletion of ${(args.eventIds || []).length} session(s)` +
         ` (${(args.eventIds || []).join(', ')})`
       : 'A mark made at the desk';

@@ -122,7 +122,11 @@ const LEDGER_SOURCES = Object.freeze({
   // `migration`: that word means "was already on the tab when the ledger
   // started", and a restored row is the opposite — it was NOT on the tab, and
   // somebody decided it should be.
-  RESTORE: 'restore-from-copy'
+  RESTORE: 'restore-from-copy',
+  // A tick on the leader's web roster page (99zn). Not `leader-sheet`: the
+  // two are told apart for the transition, when a program's ticks move from
+  // one to the other and "which one did this come through" is the question.
+  LEADER_PAGE: 'leader-page'
 });
 
 /** Every source, for validation. */

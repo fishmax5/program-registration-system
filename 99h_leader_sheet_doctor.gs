@@ -228,6 +228,10 @@ function describeLeaderSheetRosters(diagnosis) {
     `and ${t.registrantRows} registrant row(s), over ${t.windowFrom} → ${t.windowTo}.`,
     ''
   ];
+  // Programs whose roster is the web page now (99zn): their sheets are frozen
+  // on purpose, so a stale fingerprint or an old roster there is not a fault.
+  // Names only — never the page's link, since this report goes to the log.
+  leaderRosterDoctorLines_(data.findings).forEach(line => lines.push(line));
 
   const empty = data.findings.filter(f => f.rosterRows === 0);
   const filled = data.findings.filter(f => f.rosterRows > 0);
