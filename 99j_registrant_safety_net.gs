@@ -227,6 +227,14 @@ function snapshotRegistrantsDaily() {
   }
   if (snapshotRegistrantTab_(sheet, 'daily')) markDailySnapshotTaken_();
   pruneRegistrantSnapshots_();
+  // Then the registration ledger's checkpoint (99zq), on this trigger rather
+  // than one of its own. Guarded twice over: it never throws, and nothing it
+  // does may cost the snapshot above.
+  try {
+    if (typeof refreshLedgerCheckpointNightly === 'function') refreshLedgerCheckpointNightly();
+  } catch (err) {
+    log(`⚠️ Ledger checkpoint skipped: ${err}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -484,11 +484,35 @@ function readLedgerEntries() {
  * the replay the same day it reaches the desk.
  */
 function foldRegistrationLedger(entries) {
+  return finishLedgerFold_(foldLedgerEntriesInto_(newLedgerFoldContext_(), sortLedgerEntries_(entries)));
+}
+
+/**
+ * THE FOLD, IN THREE PIECES — so a fold can be STOPPED and CARRIED ON.
+ *
+ * foldRegistrationLedger() above is exactly these three in a row, and every
+ * caller and test still calls it. The split exists for the checkpoint
+ * (99zq_ledger_checkpoint.gs): a context is everything the replay has
+ * accumulated, a checkpoint is a context written down, and carrying a fold on
+ * from one is foldLedgerEntriesInto_() with the entries after it. That is equal
+ * to the full fold only when the entries after it all SORT after it — which is
+ * 99zq's to check, not this function's.
+ *
+ * The context is { states, order, problems }: per-id state, the order ids were
+ * first registered in (which is the order rows come out), and the problems so
+ * far. Entries handed to foldLedgerEntriesInto_() must already be in replay
+ * order (sortLedgerEntries_).
+ */
+function newLedgerFoldContext_() {
+  return { states: {}, order: [], problems: [] };
+}
+
+function foldLedgerEntriesInto_(ctx, sortedEntries) {
   const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
-  const states = {};
-  const order = [];
-  const problems = [];
+  const states = ctx.states;
+  const order = ctx.order;
+  const problems = ctx.problems;
 
   const note = (entry, reason) => problems.push({
     entryId: (entry && entry.entryId) || '',
@@ -497,7 +521,7 @@ function foldRegistrationLedger(entries) {
     reason: reason
   });
 
-  sortLedgerEntries_(entries).forEach(entry => {
+  (sortedEntries || []).forEach(entry => {
     if (LEDGER_ENTRY_KINDS.indexOf(entry.kind) === -1) {
       note(entry, `"${entry.kind}" is not a kind this replay knows.`);
       return;
@@ -573,9 +597,16 @@ function foldRegistrationLedger(entries) {
     }
   });
 
+  return ctx;
+}
+
+/** The context as foldRegistrationLedger() has always returned it: { rows, states, index, problems }. */
+function finishLedgerFold_(ctx) {
+  const map = getIndexMap(HEADERS.All_Registrants);
+  const states = ctx.states;
   const rows = [];
   const index = {};
-  order.forEach(id => {
+  ctx.order.forEach(id => {
     const state = states[id];
     if (!state || state.dead) return;
     // Written onto the row when the column exists, and silently skipped when it
@@ -586,7 +617,7 @@ function foldRegistrationLedger(entries) {
     index[ledgerRegistrationKey_(state.row, map)] = id;
   });
 
-  return { rows: rows, states: states, index: index, problems: problems };
+  return { rows: rows, states: states, index: index, problems: ctx.problems };
 }
 
 /**
@@ -779,7 +810,16 @@ let __ledgerMintedIds = {};
  * appended is part of the answer to the next question.
  */
 function ledgerFoldNow() {
-  if (!__ledgerFold) __ledgerFold = foldRegistrationLedger(readLedgerEntries());
+  if (!__ledgerFold) {
+    // The checkpoint (99zq) answers first when its gate is open, and answers
+    // null — read the whole ledger, exactly as before — whenever it cannot
+    // prove it would give the full fold's answer.
+    let fast = null;
+    if (typeof foldLedgerFromCheckpointIfAllowed_ === 'function') {
+      try { fast = foldLedgerFromCheckpointIfAllowed_(); } catch (err) { fast = null; }
+    }
+    __ledgerFold = fast || foldRegistrationLedger(readLedgerEntries());
+  }
   return __ledgerFold;
 }
 
