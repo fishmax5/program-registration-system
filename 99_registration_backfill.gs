@@ -392,11 +392,8 @@ function reportUnimportedForms() {
 
   const report = lines.join('\n');
   log(`reportUnimportedForms:\n${report}`);
-  try {
-    SpreadsheetApp.getUi().alert('Forms Nothing Is Importing', report, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    // No UI (editor or trigger run) — the log above is the output.
-  }
+  // No UI (editor or trigger run) — the log above is the output.
+  presentReport_('Forms Nothing Is Importing', report);
 }
 
 // ---------------------------------------------------------------------------

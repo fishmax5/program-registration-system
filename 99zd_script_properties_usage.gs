@@ -125,10 +125,7 @@ function reportScriptPropertiesUsage() {
     text = `Script Properties could not be read (${err}).`;
   }
   log(`reportScriptPropertiesUsage:\n${text}`);
-  try {
-    SpreadsheetApp.getUi().alert('What is filling Script Properties?', text, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible('See the log — the Script Properties report is written there.');
-  }
+  presentReport_('What is filling Script Properties?', text,
+    'See the log — the Script Properties report is written there.');
   return text;
 }

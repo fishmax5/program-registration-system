@@ -244,12 +244,8 @@ function describeWorkbookRefusals(refusals) {
 function reportWhyNothingHappened() {
   const text = describeWorkbookRefusals();
   log(`reportWhyNothingHappened:\n${text}`);
-  try {
-    SpreadsheetApp.getUi().alert('Why did nothing happen?', text, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (err) {
-    // No UI (the editor, or a trigger). The log line above is the answer.
-    toastIfPossible('See the log — the reasons are written there.');
-  }
+  // No UI (the editor, or a trigger): the log line above is the answer.
+  presentReport_('Why did nothing happen?', text, 'See the log — the reasons are written there.');
 }
 
 // ---------------------------------------------------------------------------

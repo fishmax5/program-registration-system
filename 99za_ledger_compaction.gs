@@ -332,7 +332,7 @@ function readLedgerForCompaction_() {
 }
 
 /**
- * 🔧 Admin ▸ 📄 Reports ▸ Is the Ledger Still Growing? — read-only, ungated.
+ * Health panel (99zm) ▸ Is the Ledger Still Growing? — read-only, ungated.
  */
 function reportLedgerGrowth() {
   flushLedger();
@@ -347,12 +347,8 @@ function reportLedgerGrowth() {
     body = describeLedgerGrowth(summary, analysis).join('\n');
   }
   log(`Ledger growth report:\n${body}`);
-  try {
-    const ui = SpreadsheetApp.getUi();
-    ui.alert('Is the registration ledger still growing?', body, ui.ButtonSet.OK);
-  } catch (err) {
-    // No UI (a trigger or the editor): the log line above is the answer.
-  }
+  // No UI (a trigger or the editor): the log line above is the answer.
+  presentReport_('Is the registration ledger still growing?', body);
   return summary;
 }
 

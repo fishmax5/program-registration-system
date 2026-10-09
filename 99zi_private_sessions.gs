@@ -126,7 +126,7 @@ function writePrivateSessionsTab(rows) {
       'rows with the same Session_ID.\n\n' +
       'Hours are worked out from Start and End, or typed when there were no times.\n\n' +
       'Nothing here is published anywhere: not on the calendar, a form or the public page. It is counted ' +
-      'on the Metrics tab and in Admin ▸ Reports ▸ Private Sessions.',
+      'on the Metrics tab and in the Health panel ▸ Private Sessions.',
     staffColumns: PRIVATE_SESSIONS_STAFF_COLUMNS,
     dateColumns: ['Date', 'Logged_On']
   });
@@ -268,16 +268,15 @@ function privateSessionMetricsForMonth(monthKey, entries) {
   return summarizePrivateSessions((entries || []).filter(entry => entry.monthKey === monthKey));
 }
 
-/** MENU ENTRY (Admin ▸ Reports). Read-only and ungated, like the volunteer report beside it. */
+/** HEALTH PANEL (99zm) ▸ Private Sessions. Read-only and ungated, like the volunteer report beside it. */
 function reportPrivateSessions() {
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth() - PRIVATE_SESSIONS_REPORT_MONTHS + 1, 1);
   const fromKey = formatDateKey(from);
   const entries = readPrivateSessions().filter(entry => entry.dateKey >= fromKey);
-  const ui = SpreadsheetApp.getUi();
   if (!entries.length) {
-    ui.alert('Private Sessions', `Nothing recorded since ${formatDateLabel(from)}.\n\n` +
-      'Log a Private Session… on the main menu is where one goes on.', ui.ButtonSet.OK);
+    presentReport_('Private Sessions', `Nothing recorded since ${formatDateLabel(from)}.\n\n` +
+      'Desk ▸ Log a Private Session… is where one goes on.');
     return;
   }
   const total = summarizePrivateSessions(entries);
@@ -295,11 +294,10 @@ function reportPrivateSessions() {
     return `• ${month} — ${s.sessions} session(s), ${s.people} person(s), ${s.hours} hour(s)`;
   }).join('\n');
 
-  ui.alert('Private Sessions',
+  presentReport_('Private Sessions',
     `${formatDateLabel(from)} – ${formatDateLabel(now)}\n\n` +
     `${total.sessions} session(s), ${total.people} different person(s), ${total.hours} hour(s).\n\n` +
-    `By program:\n${programLines}\n\nBy month:\n${monthLines}`,
-    ui.ButtonSet.OK);
+    `By program:\n${programLines}\n\nBy month:\n${monthLines}`);
 }
 
 /** MENU ENTRY: open the tab, building it the first time. */

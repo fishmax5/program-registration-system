@@ -645,7 +645,7 @@
  *       AND the triggers.
  *    4. Fill in the Lunch_Schedule tab (now one row per date PER LOCATION)
  *       and Config's Meal Buffer Amounts + Order Ahead Time.
- *    5. Reload the sheet to see the "🗓️ Calendar & Form Manager" menu.
+ *    5. Reload the sheet to see the 🛎️ Desk, 📋 Coordinator and (for admins) 🔧 Admin menus.
  *    6. FIRST IMPORT: use "Import Everything (First Run)" in that menu
  *       (bootstrapCalendars()), NOT "Sync Cal". The first import has to
  *       build a form for every program on every calendar, which is far more

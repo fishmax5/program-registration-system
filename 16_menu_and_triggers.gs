@@ -52,6 +52,14 @@
  * hiding it from an account onOpen could not identify — a simple trigger
  * frequently cannot — was how a genuine admin ended up with no Admin menu at
  * all. The destructive items inside still refuse; the repairs no longer do.
+ *
+ * R4 (October 2026): THREE MENUS, CHOSEN BY ROLE. The one menu had grown to 99
+ * items. It is now 🛎️ Desk (the serving day), 📋 Coordinator (the jobs done
+ * by name) and 🔧 Admin (the old submenu, promoted), and MENU_ROLE_TABLE in
+ * 99zma says who gets which. Admin is built for the admin list and for any
+ * viewer onOpen cannot identify — the second half is what keeps the failure
+ * described above from coming back. The read-only reports moved into the
+ * Health panel (99zm). docs/transitions/R4_menus_health.md maps every item.
  */
 function onOpen() {
   try {
@@ -60,7 +68,10 @@ function onOpen() {
     log(`ℹ️ Could not check for legacy tab names on open (${err}).`);
   }
   const ui = SpreadsheetApp.getUi();
-  buildAppMenu(ui, true);
+  // THE ROLE DECIDES THE MENUS (99zma). A viewer onOpen cannot identify is
+  // `unknown`, which gets Admin too — see the R4 note in the banner above.
+  const role = resolveMenuRole();
+  buildAppMenu(ui, menuRoleSees(role, 'admin'), role);
   // A second, separate menu holding only the door's sign-in app (99zc).
   // Guarded so it can never cost anybody the main menu above.
   try {
@@ -153,7 +164,7 @@ function syncEverythingNow() {
   log(`syncEverythingNow: calendar + registrations pass finished (last import before this run: ${before}).`);
 }
 
-function buildAppMenu(ui, includeAdmin) {
+function buildAppMenu(ui, includeAdmin, role) {
   // GROUPED BY THE JOB SOMEBODY CAME HERE TO DO, not by what the code does,
   // and now nested one level deeper where a submenu had itself grown too long
   // to scan.
@@ -193,9 +204,28 @@ function buildAppMenu(ui, includeAdmin) {
   // EVERY ITEM NAMES menuFn_('action'), never the action itself: that is the
   // thin `menu_<action>` wrapper in 99r, which counts the click and then calls
   // the action. A new item needs its wrapper there, and
-  // tests/menu_usage.test.js fails until it has one.
-  const menu = ui.createMenu(APP_MENU_NAME)
-    // --- A SERVING DAY. The whole of ordinary use, at the top, unnested. ---
+  //
+  // THREE MENUS NOW, NOT ONE (R4). Which of them a viewer gets is the role
+  // table in 99zma, MENU_ROLE_TABLE — not an `if` in here. `includeAdmin`
+  // is kept for the callers that only know yes/no; `role`, when given, wins.
+  // A role the table keeps Admin from gets the sign-in check item instead.
+  // To add an item (the R6 console's "Open the Staff Console", say): add it
+  // to the builder below that owns its job, add its wrapper in 99r, and
+  // tests/menu_usage.test.js tells you if anything is left unreachable.
+  const resolved = role || (includeAdmin ? MENU_ROLES.ADMIN : MENU_ROLES.STAFF);
+  const builders = {
+    buildDeskMenu_: buildDeskMenu_,
+    buildCoordinatorMenu_: buildCoordinatorMenu_,
+    buildAdminMenu_: buildAdminMenu_
+  };
+  menusForRole(resolved).forEach(row => {
+    builders[row.builder](ui, row.title, resolved).addToUi();
+  });
+}
+
+/** 🛎️ Desk — a serving day. Everyone. */
+function buildDeskMenu_(ui, title) {
+  return ui.createMenu(title)
     .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', menuFn_('showQuickMarkDialog'))
     .addSeparator()
     // --- THE WEEKLY JOBS, promoted out of their submenus. Each of these was
@@ -215,10 +245,12 @@ function buildAppMenu(ui, includeAdmin) {
     // An appointment that is never on the calendar — private counselling,
     // weekend help — recorded for the stats and published nowhere. See 99zi.
     .addItem('\ud83d\udd12 Log a Private Session\u2026', menuFn_('showPrivateSessionDialog'))
-    // WRITES a question (and says which forms it would reach before it does);
-    // "Update Program Questions on Forms" under Programs & Forms sends
-    // whatever the tab currently says.
-    .addItem('\u2795 Build a Form Question\u2026', menuFn_('showQuestionBuilderDialog'))
+    .addSeparator()
+    // THE DOOR, from the desk's side: the printed sheet for today, and the
+    // sign-in app on the laptop. Both were a submenu deep under Sign-In &
+    // Door; the app also keeps its own toolbar menu (99zc).
+    .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
+    .addItem('\ud83d\udeaa Open the Sign-In App', menuFn_('openSignInApp'))
     .addSeparator()
     // ONE ITEM, NOT TWO. "Sync Cal" and "Sync Registrations" are a distinction
     // between two halves of one machine, and nobody outside this file should
@@ -232,7 +264,20 @@ function buildAppMenu(ui, includeAdmin) {
     // every one of those refusals used to be a toast nobody saw, which reads
     // as "the menu does nothing and gives no error". Ungated and read-only, so
     // it answers on exactly the workbook where nothing else will. See 99g.
-    .addItem('\u2753 Why did nothing happen?', menuFn_('reportWhyNothingHappened'))
+    .addItem('\u2753 Why did nothing happen?', menuFn_('reportWhyNothingHappened'));
+}
+
+/**
+ * 📋 Coordinator — the jobs somebody does by name: lunch, rosters, programs
+ * and forms, the door's setup, settings. Everyone, because none of it was
+ * ever gated; the split is about finding things, not about permission.
+ */
+function buildCoordinatorMenu_(ui, title, role) {
+  const menu = ui.createMenu(title)
+    // EVERY READ-ONLY CHECK, ONE SIDEBAR (99zm). Nothing runs until its own
+    // button is pressed. Top of this menu because it is where "what is wrong"
+    // is answered, for everyone — admins included.
+    .addItem('\ud83e\ude7a Health Panel\u2026', menuFn_('showHealthPanel'))
     .addSeparator()
     .addSubMenu(ui.createMenu('\ud83c\udf71 Lunch')
       .addItem('Add Menu Items (paste/upload CSV)\u2026', menuFn_('showLunchMenuImportDialog'))
@@ -307,6 +352,12 @@ function buildAppMenu(ui, includeAdmin) {
       // this is how somebody finds out which. See section 14.
       .addItem('\ud83d\udd0d Review Programs, Then Update Once\u2026', menuFn_('showProgramReviewDialog'))
       .addSeparator()
+      // WEEKLY, so it was at the top of the one menu; on Coordinator it sits
+      // with the other form work, directly above the item that sends what it
+      // writes. It WRITES a question (and says which forms it would reach
+      // before it does); "Update Program Questions on Forms" sends whatever
+      // the tab currently says.
+      .addItem('\u2795 Build a Form Question\u2026', menuFn_('showQuestionBuilderDialog'))
       .addItem('Update Program Questions on Forms', menuFn_('pushProgramQuestionsToForms'))
       .addSeparator()
       // The single-form repair staff actually reach for: one form has gone
@@ -346,11 +397,15 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('Link Program Across Locations\u2026', menuFn_('linkProgramAcrossLocations'))
         .addItem('Move Sessions to Another Form\u2026', menuFn_('showRepointSessionsDialog'))))
     .addSeparator()
-    // The printed sheet and the tablet at the door: set up once and rarely
-    // pressed after (menu usage, 99r), so they sit below the everyday groups.
+    // The door's SETUP: the links and PIN, and the queue the tablets write
+    // through. The two things pressed on the day — today's sheet and the app
+    // itself — are on the Desk menu.
     .addSubMenu(ui.createMenu('\ud83d\udeaa Sign-In & Door')
-      .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
-      .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog')))
+      .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog'))
+      // The check-in page queues its marks and a trigger writes them; this is
+      // the "write them NOW" for somebody standing over the tab wondering
+      // where this morning's ticks are. See flushCheckInQueue().
+      .addItem('Write Queued Check-Ins Now', menuFn_('flushCheckInQueueNow')))
     .addSubMenu(ui.createMenu('\u2699\ufe0f Settings & Fixes')
       // FIRST, because it is what somebody reaches for when every other item
       // here answers "Authorization is required" or "you do not have
@@ -371,10 +426,6 @@ function buildAppMenu(ui, includeAdmin) {
       // somebody who deleted the tab, or who wants it caught up without
       // waiting for the next sync. See 78_program_month_dashboard.gs.
       .addItem('Rebuild the Program Month View', menuFn_('renderProgramMonthSheetNow'))
-      // The check-in page queues its marks and a trigger writes them; this is
-      // the "write them NOW" for somebody standing over the tab wondering
-      // where this morning's ticks are. See flushCheckInQueue().
-      .addItem('Write Queued Check-Ins Now', menuFn_('flushCheckInQueueNow'))
       .addSeparator()
       // The Metrics tab writes itself on the 2nd of every month. This is for
       // the other order — somebody looking at the year-over-year block today
@@ -387,9 +438,21 @@ function buildAppMenu(ui, includeAdmin) {
       .addSeparator()
       .addItem('Show All Past Rows', menuFn_('showAllPastRows'))
       .addItem('Resize All Sheets', menuFn_('resizeAllSheets')));
+  if (!menuRoleSees(role, 'admin')) {
+    // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
+    // execution contexts cannot resolve the signed-in account at all — and
+    // getCurrentUserEmail() deliberately fails closed, so a genuine admin
+    // can open the workbook and find no Admin submenu. Clicking a menu ITEM
+    // always runs fully authorized, so this re-checks and rebuilds. A
+    // non-admin who clicks it just gets told no.
+    menu.addSeparator().addItem('\ud83d\udd27 Admin Tools (sign-in check)\u2026', menuFn_('showAdminMenu'));
+  }
+  return menu;
+}
 
-  if (includeAdmin) {
-    menu.addSeparator().addSubMenu(ui.createMenu('\ud83d\udd27 Admin')
+/** 🔧 Admin — once a year or once ever. Built per MENU_ROLE_TABLE (99zma). */
+function buildAdminMenu_(ui, title) {
+  return ui.createMenu(title)
       // THE FOUR THAT ARE SAFE TO PRESS, at the top of the submenu. Each one
       // repairs something in place and none of them can lose data.
       .addItem('\ud83e\uddf1 Rebuild Layout (no calendar sync)', menuFn_('rebuildLayoutFromSheet'))
@@ -499,7 +562,8 @@ function buildAppMenu(ui, includeAdmin) {
         .addItem('\ud83d\uddc2\ufe0f Save This Tab Order', menuFn_('saveCurrentTabOrder'))
         .addItem('Reset to the Built-In Tab Order', menuFn_('clearSavedTabOrder')))
       .addSubMenu(ui.createMenu('\u23f0 Triggers')
-        .addItem('Trigger Status', menuFn_('showTriggerStatus'))
+        // Trigger Status moved into the Health panel (99zm) with the other
+        // read-only checks; the four below all WRITE.
         .addItem('Check Triggers', menuFn_('writeTriggers'))
         // THE ESCAPE HATCH, OUT OF THE EDITOR. A multi-execution job whose run
         // was killed part-way leaves its state in flight, and everything gated
@@ -511,72 +575,19 @@ function buildAppMenu(ui, includeAdmin) {
         .addSeparator()
         .addItem('Take Over Trigger Ownership', menuFn_('takeOverTriggerOwnership'))
         .addItem('Release My Triggers', menuFn_('releaseMyTriggers')))
-      // REPORTS ONLY, now that the first-run import moved to One-Time Jobs
-      // above — which is what lets the label promise that nothing in here
-      // writes anything.
+      // THE READ-ONLY REPORTS MOVED INTO THE HEALTH PANEL (99zm), every one
+      // of them, each run on demand from its own button — fifteen alerts in a
+      // submenu became fifteen sections of one sidebar. What stays here is
+      // what WRITES: the digest SENDS, the reset forgets. The panel is listed
+      // first so somebody who still looks for "Reports" here finds them; it is
+      // the one item deliberately on two menus (Coordinator has it too).
       .addSubMenu(ui.createMenu('\ud83d\udcc4 Reports')
-        // Both READ-ONLY, and named so. They measure; they change nothing.
-        .addItem('Find Leftover Tabs (read-only report)', menuFn_('previewLegacyTabMerge'))
-        // "Nobody has signed up yet" is what a program registrant sheet says
-        // about a class nobody booked AND about one whose rows never reached
-        // it. This is which of the two, per sheet, and what to do about each.
-        // See 99h.
-        .addItem('\ud83d\udd0e Why is a roster sheet empty? (read-only)', menuFn_('reportLeaderSheetRosters'))
-        // The registration ledger's own check (99p), run on every sync and
-        // filed for the 10am digest — this is the same answer on demand, for
-        // somebody standing in front of a roster that is missing a name. It
-        // folds the ledger and reads the tab and writes nothing at all.
-        .addItem('\ud83d\udcd2 Check the Registration Ledger (read-only)', menuFn_('showLedgerVerificationReport'))
-        // Whether any writer is still appending entries that change nothing,
-        // and which one. Read-only; its action half (the compaction) is behind
-        // the Destructive door below. See 99za.
-        .addItem('\ud83d\udcc8 Is the Ledger Still Growing? (read-only)', menuFn_('reportLedgerGrowth'))
-        // The measurement half of the retired-calendar sweep. Its action half
-        // is behind the Destructive door below — but this report is the only
-        // thing that names WHICH calendar the leftover rows are from, and the
-        // calendar ID is the whole question, so it is read first. See 84.
-        .addItem('Find Leftover Calendar Rows (read-only report)', menuFn_('reportOrphanedSessionRows'))
-        // Its sibling fault: not a row from a calendar that left, but two rows
-        // for one date under one Event_ID — which everything downstream reads
-        // as one session, so the second row's counts are stale forever. See 99l.
-        .addItem('Find Duplicate Session Rows (read-only report)', menuFn_('reportDuplicateSessionRows'))
-        .addItem('Archive Old Months (report)', menuFn_('reportArchivableMonths'))
-        // The check nothing else in the project makes: a form holding
-        // responses that NO session row names, which is to say a form nobody
-        // is importing. It is silent by construction — the import walks the
-        // Form_ID column, so a form missing from it is not read and not
-        // missed. See 99.
-        .addItem('Find Forms Nothing Is Importing (read-only report)', menuFn_('reportUnimportedForms'))
-        // The question one level in from that one: a form IS being read, and a
-        // response on it still never became a row. Read-only like the three
-        // above it, and ungated for the same reason — the person who noticed
-        // the missing name is the person who should be able to press it.
-        // See 99d.
-        .addItem('Find Missing Registrations (read-only report)', menuFn_('reportMissingRegistrations'))
-        // The same silence one tab over: a question aimed at a program title
-        // nothing answers to is a question that appears on no form at all,
-        // and the tab shows it ticked Active either way. Suggests, never
-        // re-binds — see findUnmatchedProgramQuestionRows() (53).
-        .addItem('Find Questions Aimed At Nothing (read-only report)', menuFn_('reportOrphanedProgramQuestions'))
-        // The year's volunteer hours, by person \u2014 the figure the centre is
-        // credited on. Read-only and ungated like the four above it. See 99e.
-        .addItem('\ud83e\udd1d Volunteer Hours (read-only report)', menuFn_('reportVolunteerHours'))
-        // Off-calendar appointments by program and month. See 99zi.
-        .addItem('\ud83d\udd12 Private Sessions (read-only report)', menuFn_('reportPrivateSessions'))
-        // Sends, so not read-only — but it is the digest's own item and this
-        // is where somebody looks for it. It sends what is waiting NOW,
-        // including today so far, and does not disturb tomorrow's 10am send.
-        .addItem('\ud83d\udce8 Send the Office Digest Now', menuFn_('sendOfficeDigestNow'))
-        // Which stores are holding the 500KB the whole project shares — a full
-        // store fails in whichever writer runs next, not in the one that
-        // filled it. Read-only and ungated. See 99zd.
-        .addItem('\ud83d\uddc4\ufe0f What is filling Script Properties? (read-only)', menuFn_('reportScriptPropertiesUsage'))
+        .addItem('\ud83e\ude7a Health Panel (every read-only report)\u2026', menuFn_('showHealthPanel'))
         .addSeparator()
-        // Which of everything above (and on the rest of this menu) anybody
-        // actually presses — the evidence the next reorganization should start
-        // from. Read-only and ungated like the reports beside it; the reset
-        // asks first. See 99r.
-        .addItem('\ud83d\udcca Menu Usage (read-only report)', menuFn_('showMenuUsageReport'))
+        // Sends, so not read-only. It sends what is waiting NOW, including
+        // today so far, and does not disturb tomorrow's 10am send.
+        .addItem('\ud83d\udce8 Send the Office Digest Now', menuFn_('sendOfficeDigestNow'))
+        // The report itself is Health ▸ Menu Usage (99r). The reset asks first.
         .addItem('Reset Menu Usage Counts\u2026', menuFn_('resetMenuUsage')))
       .addSeparator()
       // EVERYTHING IRREVERSIBLE, BEHIND ONE DOOR THAT SAYS SO. These used to
@@ -613,18 +624,7 @@ function buildAppMenu(ui, includeAdmin) {
         // is behind this door instead. It asks first and it is re-runnable.
         // See section 5d.
         .addItem('\ud83d\udcc5 Remove ALL Calendar Invitations\u2026', menuFn_('removeAllCalendarInvitesFromEvents'))
-        .addItem('\u21a9\ufe0f Start the Invitation Removal Over', menuFn_('resetRemoveAllCalendarInvitesSweep'))));
-  } else {
-    // The escape hatch. onOpen() runs as a SIMPLE trigger, which in some
-    // execution contexts cannot resolve the signed-in account at all — and
-    // getCurrentUserEmail() deliberately fails closed, so a genuine admin
-    // can open the workbook and find no Admin submenu. Clicking a menu ITEM
-    // always runs fully authorized, so this re-checks and rebuilds. A
-    // non-admin who clicks it just gets told no.
-    menu.addSeparator().addItem('\ud83d\udd27 Admin Tools (sign-in check)\u2026', menuFn_('showAdminMenu'));
-  }
-
-  menu.addToUi();
+        .addItem('\u21a9\ufe0f Start the Invitation Removal Over', menuFn_('resetRemoveAllCalendarInvitesSweep')));
 }
 
 /**
@@ -648,18 +648,37 @@ function openRegularNeedsTab() {
   toastIfPossible('🔔 Regular Needs — one row per standing fact. Quick Mark reads it as names are picked.');
 }
 
-const APP_MENU_NAME = '🗓️ Calendar & Form Manager';
+// APP_MENU_NAME, and the three menu names it now stands for, live with the
+// role table in 99zma.
 
 /**
- * Re-checks the current account with full authorization and, if it's an
- * admin, rebuilds the menu WITH the Admin submenu. Google replaces a menu of
- * the same name, so this swaps the menu in place rather than adding a second.
- * The rebuild lasts until the next reload.
+ * "🔧 Admin Tools (sign-in check)…" — on Coordinator for a viewer the role
+ * table (99zma) keeps Admin from. onOpen() is a SIMPLE trigger and often
+ * cannot see the account; a menu CLICK always runs fully authorized, so this
+ * resolves the role again and, for an admin (or an account that still cannot
+ * be identified — never hide repair tools from the one person who can run
+ * them), rebuilds every menu WITH Admin. Google replaces a menu of the same
+ * name, so nothing is doubled; the rebuild lasts until the next reload.
+ *
+ * Anybody else is told who the admins are and where the reports and the
+ * Form & Link Doctor are for them: the Health panel.
  */
 function showAdminMenu() {
-  if (!requireAuthorizedAdmin('Admin Tools')) return;
-  buildAppMenu(SpreadsheetApp.getUi(), true);
-  toastIfPossible(`Admin tools added to the "${APP_MENU_NAME}" menu ✅`);
+  const role = resolveMenuRole();
+  if (!menuRoleSees(role, 'admin')) {
+    const message = `The ${ADMIN_MENU_NAME} menu is for: ${menuAdminEmails_().join(', ') || '(nobody listed)'}. ` +
+      `You are signed in as ${menuViewerEmail_()}.\n\n` +
+      `Every read-only report, the Form & Link Doctor and "Clear a Stuck Background Job" are on ` +
+      `${COORDINATOR_MENU_NAME} \u25b8 Health Panel for everyone. An address added to Config's ` +
+      `Admin Notification Emails table sees the Admin menu from its next reload.`;
+    log(`showAdminMenu: ${message}`);
+    const ui = tryGetUi_();
+    if (ui) ui.alert('Admin Tools', message, ui.ButtonSet.OK);
+    else toastIfPossible(message);
+    return;
+  }
+  buildAppMenu(SpreadsheetApp.getUi(), true, role);
+  toastIfPossible(`The "${ADMIN_MENU_NAME}" menu is on the toolbar now \u2705`);
 }
 
 /**

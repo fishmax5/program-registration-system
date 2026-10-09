@@ -669,11 +669,7 @@ function reportOrphanedProgramQuestions() {
   const found = findUnmatchedProgramQuestionRows(null, null);
   const report = describeUnmatchedProgramQuestions(found);
   log(report);
-  try {
-    const ui = SpreadsheetApp.getUi();
-    ui.alert('Questions Aimed At Nothing', report, ui.ButtonSet.OK);
-  } catch (err) {
-    toastIfPossible(`${found.unmatched.length} question row(s) name a program nothing is running — see the log.`);
-  }
+  presentReport_('Questions Aimed At Nothing', report,
+    `${found.unmatched.length} question row(s) name a program nothing is running — see the log.`);
   return found;
 }
