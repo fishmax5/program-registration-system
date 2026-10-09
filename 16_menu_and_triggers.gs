@@ -227,6 +227,9 @@ function buildAppMenu(ui, includeAdmin, role) {
 function buildDeskMenu_(ui, title) {
   return ui.createMenu(title)
     .addItem('\u26a1 Quick Mark Attendance / Lunch\u2026', menuFn_('showQuickMarkDialog'))
+    // Quick Mark and four other desk jobs in one window that stays open (99zo).
+    // Additive: every item below still opens its own dialog.
+    .addItem('\ud83d\uddc2\ufe0f Open the Staff Console', menuFn_('openStaffConsole'))
     .addSeparator()
     // --- THE WEEKLY JOBS, promoted out of their submenus. Each of these was
     // one click too deep for how often it is pressed: a leader's list on the
