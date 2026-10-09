@@ -109,7 +109,7 @@ const ADMIN_GATED_ACTIONS = [
   // and archived to Drive first, but it rewrites the one append-only record
   // this workbook has; the growth report beside it is open.
   'Compact Registration Ledger',
-  // Create and remove the instant import's submit trigger (99zj) — trigger
+  // Create and remove the instant import's submit trigger (99zr) — trigger
   // work, gated for the reason writeTriggers() is.
   'Instant Registration Import',
   'New Responses Spreadsheet'

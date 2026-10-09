@@ -52,7 +52,7 @@ let __formStateMigrationLedger = null;
 /** The ledger, read once per execution. */
 function getFormStateMigrationLedger() {
   if (__formStateMigrationLedger) return __formStateMigrationLedger;
-  const raw = PropertiesService.getScriptProperties().getProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY);
+  const raw = readDocumentStoreProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY);
   try {
     __formStateMigrationLedger = raw ? JSON.parse(raw) : {};
   } catch (err) {
@@ -79,14 +79,13 @@ function hasFormStateMigrationRun(formId, migrationId) {
 /** Persists the ledger. Called once, after a sweep, not per form. */
 function flushFormStateMigrationLedger() {
   if (!__formStateMigrationLedger) return;
-  PropertiesService.getScriptProperties()
-    .setProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY, JSON.stringify(__formStateMigrationLedger));
+  writeDocumentStoreProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY, JSON.stringify(__formStateMigrationLedger));
 }
 
 /** Forgets every record, so the next sweep re-runs every migration on every form. */
 function clearFormStateMigrationLedger() {
   __formStateMigrationLedger = {};
-  PropertiesService.getScriptProperties().deleteProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY);
+  deleteDocumentStoreProperty(FORM_STATE_MIGRATION_LEDGER_PROP_KEY);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +131,7 @@ const FORM_STATE_MIGRATIONS = [
   {
     // NOT A TEMPLATE CHANGE (version 0): every live form also sends its
     // responses to the one shared spreadsheet the instant import listens on
-    // (99zj). Targets nothing while that feature is off, so this sweep opens
+    // (99zr). Targets nothing while that feature is off, so this sweep opens
     // no form for it until somebody turns it on. Idempotent — a form already
     // linked there writes nothing; a form linked to somebody ELSE'S
     // spreadsheet is reported, never re-pointed. A rollover clears this id

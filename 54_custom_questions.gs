@@ -13,14 +13,14 @@ const CUSTOM_QUESTIONS_PROP_KEY = 'CUSTOM_FORM_QUESTIONS_V1';
 
 function getAppliedCustomQuestions() {
   try {
-    return JSON.parse(PropertiesService.getScriptProperties().getProperty(CUSTOM_QUESTIONS_PROP_KEY) || '{}');
+    return JSON.parse(readDocumentStoreProperty(CUSTOM_QUESTIONS_PROP_KEY) || '{}');
   } catch (err) {
     return {};
   }
 }
 
 function saveAppliedCustomQuestions(all) {
-  PropertiesService.getScriptProperties().setProperty(CUSTOM_QUESTIONS_PROP_KEY, JSON.stringify(all || {}));
+  writeDocumentStoreProperty(CUSTOM_QUESTIONS_PROP_KEY, JSON.stringify(all || {}));
 }
 
 /** Forgets what we applied to one form — called when a rebuild has just deleted every item on it. */

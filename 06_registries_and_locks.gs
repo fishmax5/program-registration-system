@@ -48,7 +48,7 @@ const ALL_DATES_REGISTRY_PROP_KEY = 'ALL_DATES_REGISTRANTS_V1';
 
 function getAllDatesRegistry() {
   if (__allDatesRegistryCache) return __allDatesRegistryCache;
-  const raw = PropertiesService.getScriptProperties().getProperty(ALL_DATES_REGISTRY_PROP_KEY);
+  const raw = readDocumentStoreProperty(ALL_DATES_REGISTRY_PROP_KEY);
   __allDatesRegistryCache = raw ? JSON.parse(raw) : {};
   return __allDatesRegistryCache;
 }
@@ -77,7 +77,7 @@ let __formTemplateVersionDirty = false;
 
 function getFormTemplateVersions() {
   if (__formTemplateVersionCache) return __formTemplateVersionCache;
-  const raw = PropertiesService.getScriptProperties().getProperty(FORM_TEMPLATE_VERSION_PROP_KEY);
+  const raw = readDocumentStoreProperty(FORM_TEMPLATE_VERSION_PROP_KEY);
   __formTemplateVersionCache = raw ? JSON.parse(raw) : {};
   return __formTemplateVersionCache;
 }
@@ -97,11 +97,11 @@ function flushPersistentRegistries() {
     __formRegistryDirty = false;
   }
   if (__allDatesRegistryDirty && __allDatesRegistryCache) {
-    props.setProperty(ALL_DATES_REGISTRY_PROP_KEY, JSON.stringify(__allDatesRegistryCache));
+    writeDocumentStoreProperty(ALL_DATES_REGISTRY_PROP_KEY, JSON.stringify(__allDatesRegistryCache));
     __allDatesRegistryDirty = false;
   }
   if (__formLabelFingerprintDirty && __formLabelFingerprintCache) {
-    props.setProperty(FORM_LABEL_FINGERPRINT_PROP_KEY, JSON.stringify(__formLabelFingerprintCache));
+    writeDocumentStoreProperty(FORM_LABEL_FINGERPRINT_PROP_KEY, JSON.stringify(__formLabelFingerprintCache));
     __formLabelFingerprintDirty = false;
   }
   if (__leaderSheetRegistryDirty && __leaderSheetRegistryCache) {
@@ -113,7 +113,7 @@ function flushPersistentRegistries() {
     __signInSheetRegistryDirty = false;
   }
   if (__formTemplateVersionDirty && __formTemplateVersionCache) {
-    props.setProperty(FORM_TEMPLATE_VERSION_PROP_KEY, JSON.stringify(__formTemplateVersionCache));
+    writeDocumentStoreProperty(FORM_TEMPLATE_VERSION_PROP_KEY, JSON.stringify(__formTemplateVersionCache));
     __formTemplateVersionDirty = false;
   }
 

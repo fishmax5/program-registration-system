@@ -1,5 +1,5 @@
 // ============================================================================
-// THE INSTANT IMPORT (99zj): A SIGNAL, NEVER A SECOND INTERPRETER, AND NEVER
+// THE INSTANT IMPORT (99zr): A SIGNAL, NEVER A SECOND INTERPRETER, AND NEVER
 // A REASON TO SKIP SOMETHING IT CANNOT VOUCH FOR.
 //
 // Pins:

@@ -689,7 +689,7 @@ function createRegistrationForm(group, configInfo) {
   // openUpFileToAnyoneWithLink().
   openUpFileToAnyoneWithLink(form.getId(), `registration form "${formTitle}"`);
   // LINKED AT BIRTH to the shared responses spreadsheet when instant import is
-  // on (99zj), so its first registration is noticed in a minute. Never throws.
+  // on (99zr), so its first registration is noticed in a minute. Never throws.
   linkNewFormToSharedResponses(form);
 
   // EVERYTHING PAST THE COPY IS GUARDED, and the copy is thrown away if any of

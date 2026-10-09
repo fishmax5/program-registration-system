@@ -23,7 +23,7 @@ let __formLabelFingerprintDirty = false;
 
 function getFormLabelFingerprints() {
   if (__formLabelFingerprintCache) return __formLabelFingerprintCache;
-  const raw = PropertiesService.getScriptProperties().getProperty(FORM_LABEL_FINGERPRINT_PROP_KEY);
+  const raw = readDocumentStoreProperty(FORM_LABEL_FINGERPRINT_PROP_KEY);
   __formLabelFingerprintCache = raw ? JSON.parse(raw) : {};
   return __formLabelFingerprintCache;
 }

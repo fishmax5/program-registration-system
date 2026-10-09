@@ -1,6 +1,6 @@
 # R1 — Event-driven import through one shared response spreadsheet
 
-Item #1 of `docs/RESTRUCTURING_PROPOSALS.md`. Code: `99zj_shared_response_sheet.gs`,
+Item #1 of `docs/RESTRUCTURING_PROPOSALS.md`. Code: `99zr_shared_response_sheet.gs`,
 plus small hooks in `27`, `26`, `47`, `68`, `16`, `99r`, `01`.
 
 **Deploying the code changes nothing.** Every new behaviour is behind one switch

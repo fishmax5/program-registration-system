@@ -12,7 +12,7 @@ function setLastSyncTime(date) {
 }
 
 function syncRegistrations(e) {
-  // The instant import's safety net (99zj): a submission queued with nothing
+  // The instant import's safety net (99zr): a submission queued with nothing
   // armed to import it is armed again, every hour, whether or not this hour
   // imports. One property read when the feature is off.
   if (e && e.triggerUid) kickInstantImportIfOwed_();
@@ -99,7 +99,7 @@ function runRegistrationImportPhase(sync) {
   // they were most of this list on a workbook that has run for a year.
   //
   // Less, too, the forms linked to the shared responses spreadsheet whose tab
-  // has not grown since the last window (99zj) — a no-op unless that feature
+  // has not grown since the last window (99zr) — a no-op unless that feature
   // is on, and never a skip of anything it cannot vouch for. An instant import
   // (`plan.eventImport`) arrives with its list already made: the forms its
   // submit trigger queued.
@@ -161,7 +161,7 @@ function runRegistrationImportPhase(sync) {
     // LAST_FORM_SYNC_TIME unadvanced so the next run did the same thing again.
     // A form that cannot be read is one form's problem; it must not be the
     // workbook's.
-    // WHEN THIS FORM'S READ BEGAN, for the instant import (99zj): a queued
+    // WHEN THIS FORM'S READ BEGAN, for the instant import (99zr): a queued
     // submission is only taken off its queue if it was queued before this.
     if (plan.readStartedAt) plan.readStartedAt[formId] = Date.now();
     try {
@@ -181,7 +181,7 @@ function runRegistrationImportPhase(sync) {
       }
     } catch (err) {
       log(`⚠️ Could not read form ${formId}: ${err}`);
-      // No baseline is recorded for a form that was not read (99zj), so the
+      // No baseline is recorded for a form that was not read (99zr), so the
       // next window reads it again whatever its response tab says.
       plan.unreadFormIds = (plan.unreadFormIds || []).concat([formId]);
       // WHICH PROGRAMS HAVE JUST STOPPED IMPORTING, and whether this workbook's
@@ -266,7 +266,7 @@ function runRegistrationImportPhase(sync) {
   // Both take this slice's deadline: they open forms one at a time and defer
   // the rest, which is exactly what a budget is for.
   //
-  // NOT on an instant import (99zj): it read a handful of forms, and these
+  // NOT on an instant import (99zr): it read a handful of forms, and these
   // two passes are the scheduled sync's to run once the whole window is in.
   if (allFormsRead && !plan.eventImport) {
     sync.step('repairing forms in place', () =>
@@ -361,7 +361,7 @@ function runRegistrationImportPhase(sync) {
   // run has to read the same responses again, which is the whole point of a
   // sync clock.
   //
-  // AN INSTANT IMPORT NEVER MOVES IT (99zj). It read some forms from the
+  // AN INSTANT IMPORT NEVER MOVES IT (99zr). It read some forms from the
   // current clock; the periodic window still reads them, so a response can be
   // read twice (a patch in place) and never skipped.
   if (plan.eventImport) {
@@ -369,7 +369,7 @@ function runRegistrationImportPhase(sync) {
   } else if (allFormsRead && registrantsWritten) {
     setLastSyncTime(new Date(plan.windowOpenedAt));
     // The response-tab row counts this window saw at its opening become the
-    // baseline the next window compares against (99zj; a no-op when off).
+    // baseline the next window compares against (99zr; a no-op when off).
     commitSharedResponseBaseline_(plan);
     // THE SAME CONDITION, and for the same reason: a re-import has landed on
     // the tab only when the whole window is in and the write went through, so
