@@ -1572,15 +1572,24 @@ function leaderSheetBannerNote() {
     `class, ask the office.`;
 }
 
+/**
+ * THE ONE WRITER, TWO WAYS OF PAINTING IT (`99zk`). The Sheets API path sends
+ * this sheet's formatting as two batchUpdates instead of ~190 calls; it returns
+ * false when it is switched off, unavailable or failed, and the sheet is then
+ * painted exactly as it always was. Both paint the same sheet —
+ * tests/sheets_batch_golden.test.js compares them cell for cell.
+ */
 function writeProgramLeaderSheetTab(sheet, entry, rows) {
-  const headers = LEADER_SHEET_HEADERS;
-  const numCols = headers.length;
-  const map = getIndexMap(headers);
+  if (writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows)) return;
+  writeProgramLeaderSheetTabLegacy_(sheet, entry, rows);
+}
 
-  // The grid to write, and — built in the same pass — where the bands landed
-  // and which stretches of it are registrants. Everything after this works off
-  // those three, so the layout is decided exactly once — and decided BEFORE
-  // the sheet is touched, because it is also what the early write lands.
+/**
+ * The grid to write, and — built in the same pass — where the bands landed and
+ * which stretches of it are registrants. Shared by both painters so the layout
+ * is decided in exactly one place.
+ */
+function leaderSheetGridLayout_(rows, map, numCols) {
   const grid = [];
   const bandRowNumbers = [];
   const runs = [];
@@ -1593,8 +1602,25 @@ function writeProgramLeaderSheetTab(sheet, entry, rows) {
     runs.push({ start: MEMORY_TAB_DATA_ROW + grid.length, count: group.rows.length });
     group.rows.forEach(row => grid.push(row));
   });
+  return { grid, bandRowNumbers, runs };
+}
 
-  const bannerText = `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`;
+/** The sheet's top line: the program and where it runs. */
+function leaderSheetBannerText_(entry) {
+  return `👩‍🏫 ${entry.title || 'Program'} — ${entry.location || ''}`;
+}
+
+function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
+  const headers = LEADER_SHEET_HEADERS;
+  const numCols = headers.length;
+  const map = getIndexMap(headers);
+
+  // Everything after this works off the layout, so it is decided exactly once
+  // — and decided BEFORE the sheet is touched, because it is also what the
+  // early write lands.
+  const { grid, bandRowNumbers, runs } = leaderSheetGridLayout_(rows, map, numCols);
+
+  const bannerText = leaderSheetBannerText_(entry);
 
   // WRITE BEFORE CLEARING. This is somebody else's live roster: a run killed
   // between a clear() and the rows' write left a leader holding a link to an

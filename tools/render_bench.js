@@ -27,6 +27,7 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..');
 const { readSource } = require(path.join(ROOT, 'tests', 'helpers', 'source'));
 const { makeCountingSheet, roundTrips } = require(path.join(ROOT, 'tests', 'helpers', 'counting_sheet'));
+const { makeValidationBuilder } = require(path.join(ROOT, 'tests', 'helpers', 'painting_sheet'));
 
 const NOW = new Date(2026, 8, 9, 9, 0, 0); // Wed 9 Sep 2026
 const RealDate = Date;
@@ -80,7 +81,8 @@ const sandbox = {
     getActive: () => null,
     getUi: () => { throw new Error('no ui'); },
     flush: () => {},
-    newDataValidation: () => builder(),
+    // Readable rules, so the Sheets API path (99zk) can translate them.
+    newDataValidation: () => makeValidationBuilder(),
     newConditionalFormatRule: () => builder(),
     WrapStrategy: { CLIP: 'CLIP', OVERFLOW: 'OVERFLOW', WRAP: 'WRAP' },
     ProtectionType: { RANGE: 'RANGE', SHEET: 'SHEET' },
@@ -109,6 +111,8 @@ this.partitionByDate = partitionByDate;
 this.formatDateKey = formatDateKey;
 this.applyColumnVisibility = applyColumnVisibility;
 this.collapseOldPastMonths = collapseOldPastMonths;
+this.invalidateAutosizeMemo = invalidateAutosizeMemo;
+this.resetSheetsBatchFailures_ = resetSheetsBatchFailures_;
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -274,5 +278,88 @@ function runLeaderSheet() {
   console.log('   see computeLeaderSheetFingerprint in 46_program_leader_sheets.gs)');
 }
 
+// ============================================================================
+// THE SAME TWO WRITES THROUGH THE SHEETS API (99zk)
+//
+// A Sheets advanced-service stub that COUNTS: each batchUpdate and each get is
+// one round trip, whatever it carries, and is added to the SpreadsheetApp
+// calls the path still makes (values, the early write, a few reads). The
+// stub paints nothing — tests/sheets_batch_golden.test.js is what proves the
+// paint is identical; this only measures what it costs.
+// ============================================================================
+function countingSheetsService() {
+  const stats = { batchUpdate: 0, get: 0, requests: 0, bytes: 0 };
+  return {
+    stats,
+    Spreadsheets: {
+      batchUpdate(resource) {
+        stats.batchUpdate++;
+        stats.requests += resource.requests.length;
+        stats.bytes += JSON.stringify(resource).length;
+        return { replies: [] };
+      },
+      get(id, opts) {
+        stats.get++;
+        const cols = 40;
+        return { sheets: [{ properties: { sheetId: opts.__sheetId }, protectedRanges: [],
+          data: [{ columnMetadata: new Array(cols).fill(0).map(() => ({ pixelSize: 100 })) }] }] };
+      }
+    }
+  };
+}
+
+function withApi(sheet, fn) {
+  const service = countingSheetsService();
+  const realGet = service.Spreadsheets.get;
+  service.Spreadsheets.get = (id, opts) => {
+    const res = realGet(id, Object.assign({ __sheetId: sheet.getSheetId() }, opts));
+    res.sheets[0].properties.sheetId = sheet.getSheetId();
+    return res;
+  };
+  sandbox.Sheets = service;
+  sandbox.resetSheetsBatchFailures_();
+  let d;
+  try { d = measure(fn, sheet); } finally { delete sandbox.Sheets; }
+  d.api = service.stats.batchUpdate + service.stats.get;
+  d.trips += d.api;
+  return { d, stats: service.stats };
+}
+
+function runViaApi() {
+  console.log('\nTHE SAME WRITES THROUGH THE SHEETS API (99zk)');
+  console.log('  write                                  round trips  (of which API)  batchUpdates  KB sent');
+  console.log('  ' + '-'.repeat(86));
+  const apiLine = (name, r) => console.log(`  ${name.padEnd(38)}${String(r.d.trips).padStart(11)}` +
+    `${String(r.d.api).padStart(16)}${String(r.stats.batchUpdate).padStart(14)}` +
+    `${String(Math.round(r.stats.bytes / 1024)).padStart(9)}`);
+
+  const rows = buildRegistrantRows(26, 13);
+  const sheet = freshSheet('All_Registrants');
+  apiLine('Registrants, first (empty tab)', withApi(sheet, () => render(sheet, rows)));
+  apiLine('Registrants, second (same geometry)', withApi(sheet, () => render(sheet, rows)));
+
+  const headers = sandbox.LEADER_SHEET_HEADERS;
+  const map = sandbox.getIndexMap(headers);
+  const lrows = [];
+  for (let w = 0; w < 52; w++) {
+    for (let n = 0; n < 4; n++) {
+      const row = new Array(headers.length).fill('');
+      row[map['Event_Date']] = new RealDate(2026, 0, 6 + w * 7, 10, 0);
+      row[map['Event_Time']] = '10:00 AM – 11:30 AM';
+      row[map['Name']] = `Person ${w}-${n}`;
+      row[map['Party_Size']] = 1;
+      row[map['Program_Status']] = 'Active';
+      row[map['Event_ID']] = `evt|Chair Yoga|${w}`;
+      lrows.push(row);
+    }
+  }
+  const lsheet = freshSheet('Sign_Up_Sheet');
+  const entry = { title: 'Chair Yoga', location: 'Ashbridge', fileId: 'leader-1' };
+  apiLine('Leader sheet (a year, 52 bands)', withApi(lsheet, () => sandbox.writeProgramLeaderSheetTab(lsheet, entry, lrows)));
+  console.log('  ' + '-'.repeat(86));
+  console.log('  (a batchUpdate or get is counted as ONE round trip, like any other call)');
+}
+
 run();
 runLeaderSheet();
+runViaApi();

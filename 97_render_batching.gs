@@ -359,8 +359,27 @@ function applyBoundedColumnFormat(sheet, colIndex, startRow, numRows, spec) {
   if (has('numberFormat')) range.setNumberFormat(spec.numberFormat);
 }
 
-/** Writes everything a scope staged. One call per plane per band. */
+/**
+ * Writes everything a scope staged — as ONE Sheets API batchUpdate when that
+ * is available (`99zk`), and otherwise one call per plane per band, exactly as
+ * before. The API path is all-or-nothing, so a refusal leaves nothing half
+ * applied for the old path to paint over.
+ */
 function flushRenderBatch_(scope) {
+  if (!flushRenderBatchViaSheetsApi_(scope)) flushRenderBatchLegacy_(scope);
+
+  // THE HEADER ROWS ONLY REACHED THE TAB JUST NOW, and every sectioned read
+  // finds its sub-tables by them. writeSectionHeader() drops this tab's cached
+  // grid when it STAGES, which is the right moment for everything it was
+  // guarding against — except a read that happens between the staging and this
+  // flush, which would cache a picture of the tab with no header rows in it
+  // and go on serving it afterwards. So it is dropped again here, where the
+  // words are actually on the sheet.
+  invalidateSectionedRowsCache(scope.sheet);
+}
+
+/** The per-plane flush: one call per plane per band. */
+function flushRenderBatchLegacy_(scope) {
   const sheet = scope.sheet;
 
   scope.headers.forEach(header => {
@@ -402,13 +421,4 @@ function flushRenderBatch_(scope) {
         `of "${sheet.getName()}" in one pass (${err}).`);
     }
   });
-
-  // THE HEADER ROWS ONLY REACHED THE TAB JUST NOW, and every sectioned read
-  // finds its sub-tables by them. writeSectionHeader() drops this tab's cached
-  // grid when it STAGES, which is the right moment for everything it was
-  // guarding against — except a read that happens between the staging and this
-  // flush, which would cache a picture of the tab with no header rows in it
-  // and go on serving it afterwards. So it is dropped again here, where the
-  // words are actually on the sheet.
-  invalidateSectionedRowsCache(sheet);
 }
