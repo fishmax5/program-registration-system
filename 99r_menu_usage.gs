@@ -259,3 +259,5 @@ function menu_takeOverTriggerOwnership() { recordMenuUsage_('takeOverTriggerOwne
 function menu_writeTriggers() { recordMenuUsage_('writeTriggers'); return writeTriggers(); }
 // BOOTSTRAP_ENTRY_NAME ('25') names this one; the test checks they agree.
 function menu_bootstrapCalendars() { recordMenuUsage_('bootstrapCalendars'); return bootstrapCalendars(); }
+function menu_showInstantImportSetup() { recordMenuUsage_('showInstantImportSetup'); return showInstantImportSetup(); }
+function menu_startNewResponsesSpreadsheet() { recordMenuUsage_('startNewResponsesSpreadsheet'); return startNewResponsesSpreadsheet(); }

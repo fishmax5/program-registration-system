@@ -485,6 +485,8 @@ function createFormFromSpec(spec, formTitle, context) {
   // The same opening-up createRegistrationForm() does, for the same reason:
   // whoever syncs this workbook is routinely not whoever made the form.
   openUpFileToAnyoneWithLink(form.getId(), `registration form "${formTitle}"`);
+  // And linked at birth, as createRegistrationForm() does (99zj). Never throws.
+  linkNewFormToSharedResponses(form);
 
   try {
     withFormRetry(`configuring "${formTitle}"`, () => configureFormFromSpec(form, spec, sessions, formTitle, context));

@@ -447,6 +447,10 @@ function buildAppMenu(ui, includeAdmin) {
       // called repairFormRoutingNow() because the first such repair was the
       // page routing; renaming it would strand the trigger that resumes it.
       .addItem('\ud83e\udded Fix Forms In Place (no rebuild)', menuFn_('repairFormRoutingNow'))
+      // Registrations on the tab in minutes rather than hours, and the yearly
+      // rollover of the spreadsheet it listens on. Off until turned on (99zj).
+      .addItem('\u26a1 Instant Registration Import\u2026', menuFn_('showInstantImportSetup'))
+      .addItem('\u26a1 Start a New Responses Spreadsheet\u2026', menuFn_('startNewResponsesSpreadsheet'))
       // BESIDE THE DOCTOR, because it is the other half of the same repair.
       // The Doctor puts a session row's Form_ID back on the form its link
       // opens; this reads what that form collected while the two disagreed,
@@ -806,6 +810,9 @@ function writeTriggers(force, takingOwnership) {
   // Built here, while there is authorization to spare, so the simple onEdit
   // that needs it never has to create a tab mid-edit.
   getPendingFlagSheet(true);
+
+  // THE INSTANT IMPORT'S SUBMIT TRIGGER, only while that switch is on (99zj).
+  removed += writeSharedResponseTriggerIfOn_();
 
   const calendarResult = writeCalendarChangeTriggers(true); // the bootstrap check above already ran
   removed += calendarResult.removed;
