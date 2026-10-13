@@ -261,6 +261,7 @@ function applyMemberNameCorrection(oldName, newName) {
   // Every list built off these tabs is now a spelling out of date.
   invalidateQuickMarkIndexCache();
   invalidateWalkInMembersMemo();
+  invalidateKnownMembersMemo();
   invalidateHouseholdIndexMemo();
   log(`✏️ "${from}" is now "${to}" — ${changed} cell(s) rewritten.`);
   return changed;

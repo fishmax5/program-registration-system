@@ -38,6 +38,82 @@
 // ADDITIVE. Every menu item and dialog this hosts still works on its own;
 // removing the console is deleting this file, its menu line and its 99r
 // wrapper. It stores nothing.
+//
+// ---------------------------------------------------------------------------
+// WHAT OPENING IT USED TO COST, AND THE THREE THINGS THAT PAY IT
+// ---------------------------------------------------------------------------
+//
+// A google.script.run is not a function call: it is a whole Apps Script
+// EXECUTION, spun up, authorized and torn down, and on this workbook that is
+// a second or two before the server has read anything. Opening the console
+// spent two of them end to end — one for the document, then one for the desk's
+// page — and the person watched the second one with "Opening Quick Mark…" on
+// screen. Every other panel then cost one more, every time it was first
+// opened, from a cold start, with somebody waiting at a desk. The console was
+// built to remove the per-job dialog and kept the per-job round trip.
+//
+//   1. THE DESK'S PAGE TRAVELS WITH THE DOCUMENT (staffConsoleInlinePanels_()).
+//      The console already runs on the server to build its own chrome, and the
+//      page it is certain to need is the one it opens with — so that page is
+//      built in the SAME execution and handed over inside the document, which
+//      is the bargain 36 already makes with Quick Mark's lists and 87 with the
+//      public calendar's. The console then paints with Quick Mark already
+//      interactive and asks the server nothing at all.
+//
+//      A PAGE WITH NO WORKBOOK DATA IN IT IS FREE TO CARRY, and two of the six
+//      are exactly that: Add Registrants in Bulk fetches everything it draws
+//      (99q's own banner), and the Health panel's check list is a constant
+//      (99zm). They are marked `static`, carried beside the desk's page, and
+//      cannot go stale because there is nothing in them to be stale. They are
+//      also given the room FIRST, which reads backwards and is not: a static
+//      page that will not fit has no smaller version and costs a whole round
+//      trip, while the desk's page has one and costs a round trip for data it
+//      already knows how to ask for. See staffConsoleInlinePanels_().
+//
+//      AND THE CEILING IS THE SAME ONE 99g IS ABOUT. A document too big does
+//      not fail loudly: the execution completes, the banner clears and NO
+//      DIALOG APPEARS. So the inlined pages are measured as they will be
+//      encoded and stop at STAFF_CONSOLE_INLINE_MAX_CHARS; a page that will
+//      not fit falls back to its `buildLite` (Quick Mark's own "fetch your own
+//      lists" page, 86K against a stored index that can be 400K) and, failing
+//      that, is not carried at all — and the client fetches it exactly as it
+//      does today. Which is also why the whole step is guarded WHOLE: this
+//      runs before the dialog exists, and nothing that runs there may be able
+//      to stop it appearing (showQuickMarkDialog()'s banner, on the same risk).
+//
+//   2. THE REST ARE PREFETCHED WHILE NOBODY IS WAITING (staffConsolePanels()).
+//      The three pages left — volunteer hours, a private session, closing a
+//      run of dates — read staff tabs, so they cannot ride along for free. But
+//      the console is up, the desk is reading its first screen, and the server
+//      is idle: one batched execution builds all three and the client keeps
+//      them, so the first open of each is a paint rather than a round trip.
+//      Batched because the cost being removed is the EXECUTION, not the work:
+//      three panels in one execution is one spin-up, and the member roll is
+//      read once for the two pages that want it (collectKnownMembers()'s memo).
+//
+//      THE DESK COMES FIRST, ALWAYS. The prefetch waits out
+//      STAFF_CONSOLE_PREFETCH_IDLE_MS of quiet, stands down whenever a panel
+//      has a call in flight, and never retries more than
+//      STAFF_CONSOLE_PREFETCH_MAX_ROUNDS times — a mark pressed at the desk
+//      must not queue behind a page nobody has asked for. It is also budgeted
+//      server-side and hands back what it did not reach, like every other
+//      sliced thing here.
+//
+//      A PREFETCHED PAGE IS KEPT FOR STAFF_CONSOLE_PREFETCH_TTL_MS and no
+//      longer. These pages carry a roll of names and a list of recent visits,
+//      and showing a twenty-minute-old copy of either without saying so is the
+//      one thing a cache here must not do; past the TTL the panel is fetched
+//      live. ↻ Reload always fetches live and throws the carried copy away.
+//
+//   3. WHAT THE CONSOLE CAN ANSWER ITSELF, IT DOES. The Health tab used to
+//      spend a round trip asking whether R4's panel exists in this version
+//      before it could draw anything. That is a `typeof` on the server, so it
+//      is resolved while the document is built and travels with it.
+//
+// The net: opening the console is ONE execution and no waiting page, and the
+// first open of any panel after it is free. Nothing about a panel's own calls
+// changed — a Mark is still one google.script.run, issued when the page
+// issues it.
 // ============================================================================
 
 /**
@@ -46,6 +122,16 @@
  * `gate` answers a refusal sentence or '' — the same refusal the menu item
  * would have put in an alert, shown in the panel instead (the console is
  * already in front of the person; an alert on top of it is a second window).
+ *
+ * Three optional fields, all about what may be carried rather than fetched:
+ *   `static`    the page holds NO workbook data, so it is cheap to build and
+ *               can never be stale — inlined with the document, kept for the
+ *               life of the window.
+ *   `buildLite` a smaller page with the same behavior, for when the full one
+ *               will not fit the inline ceiling. Quick Mark's is its own
+ *               fetch-your-own-lists page, which is what a workbook with no
+ *               stored index has always been handed.
+ *   `prefetch`  false for a panel that must never be built except on request.
  */
 const STAFF_CONSOLE_PANELS = {
   quickMark: {
@@ -62,12 +148,18 @@ const STAFF_CONSOLE_PANELS = {
         log(`⚠️ Staff Console: could not inline the Quick Mark lists (${err}) — the page will fetch them.`);
         return buildQuickMarkHtml(null);
       }
-    }
+    },
+    // The page as a workbook with no stored lists has always been handed it:
+    // every dropdown drawn from CALENDAR_MAP at once, the lists fetched on
+    // load. 86K rather than up to half a megabyte, and the paint is immediate.
+    buildLite: () => buildQuickMarkHtml(null)
   },
   bulkRegistrants: {
     tab: 'people',
     title: 'Add Registrants in Bulk',
     blurb: 'Paste a list or open a CSV / Excel file onto one program.',
+    // "Nothing from the workbook is interpolated here" — 99q's own banner.
+    static: true,
     gate: () => '',
     build: () => buildBulkRegistrantsHtml()
   },
@@ -108,6 +200,9 @@ const STAFF_CONSOLE_PANELS = {
     blurb: 'Everything that is blocking, failing or growing, in one place.',
     // R4's panel. Embedded only when it ships a builder; a show function alone
     // opens its own dialog (staffConsoleOpenHealthPanel), which replaces this one.
+    // Static because nothing in it runs on open — the check list is a constant
+    // and every answer arrives on a button press (99zm's own rule).
+    static: true,
     gate: () => (typeof buildHealthPanelHtml === 'function' ? '' :
       'The Health panel is not part of this version yet.'),
     // R4's builder takes the check list; without it the panel draws no checks.
@@ -125,6 +220,14 @@ const STAFF_CONSOLE_TABS = [
 ];
 
 /**
+ * The panel the console opens with — named once, so the page that travels
+ * with the document and the page the script opens cannot come apart. Inlining
+ * one and opening another would be a round trip nobody could see the reason
+ * for.
+ */
+const STAFF_CONSOLE_OPENS_WITH = 'quickMark';
+
+/**
  * A page calling one of these opens the matching panel IN the console.
  * Without it, Quick Mark's "Log volunteer hours" link (and any other page
  * opening a sibling) would open a modal that REPLACES the console.
@@ -139,6 +242,54 @@ const STAFF_CONSOLE_SHOW_INTERCEPTS = {
 
 const STAFF_CONSOLE_WIDTH = 1000;
 const STAFF_CONSOLE_HEIGHT = 760;
+
+/**
+ * How many characters of ENCODED page may travel inside the console's own
+ * document, across every panel inlined.
+ *
+ * Not a Google-documented limit, and the same kind of working ceiling as
+ * QUICK_MARK_INLINE_INDEX_MAX_CHARS (36): a dialog whose document grows too
+ * big does not fail — the execution completes and no dialog appears, which
+ * from the desk is indistinguishable from the menu item being broken.
+ *
+ * SET BELOW WHAT IS KNOWN TO WORK RATHER THAN AT IT. Quick Mark's own modal
+ * ships up to its 400K of lists inside a page of its own, so a document of
+ * roughly half a megabyte is proven on this workbook — and that is the
+ * argument for stopping short of it here, not for matching it: what is bought
+ * by going higher is ONE round trip on the workbooks with the biggest lists,
+ * and what is risked is the one failure in this project that says nothing at
+ * all. Under the ceiling, Quick Mark's lists ride along and the console asks
+ * the server nothing; over it, the desk still paints at once and the page
+ * fetches its own lists, which is one round trip — the same one the console
+ * spent on every open before any of this, and spent while the screen was
+ * empty rather than while somebody was already reaching for a dropdown.
+ *
+ * Measured on the page AS ENCODED (staffConsoleInlineJson_()), because that
+ * is what the document actually carries.
+ */
+const STAFF_CONSOLE_INLINE_MAX_CHARS = 450000;
+
+/** How long one batched prefetch execution may build for before it stops tidily. */
+const STAFF_CONSOLE_PREFETCH_BUDGET_MS = 20000;
+
+/** And how much it may hand back, so a prefetch cannot become a megabyte nobody asked for. */
+const STAFF_CONSOLE_PREFETCH_MAX_CHARS = 600000;
+
+/** Quiet, in the console, before a prefetch is allowed to spend an execution. */
+const STAFF_CONSOLE_PREFETCH_IDLE_MS = 2500;
+
+/**
+ * How long a prefetched page may be kept. These pages carry a roll of names
+ * and a list of recent visits; past this they are fetched live instead. A
+ * `static` page has nothing in it to go stale and is exempt.
+ */
+const STAFF_CONSOLE_PREFETCH_TTL_MS = 10 * 60 * 1000;
+
+/** Batched prefetch rounds, at most — the budget hands work back, and it must not loop. */
+const STAFF_CONSOLE_PREFETCH_MAX_ROUNDS = 3;
+
+/** A build slower than this is worth a line in the log: it is what somebody waited for. */
+const STAFF_CONSOLE_SLOW_BUILD_MS = 3000;
 
 /**
  * Prepended to every panel's page. Plain JS in a template literal with no
@@ -211,12 +362,30 @@ function openStaffConsole() {
   SpreadsheetApp.getUi().showModelessDialog(html, 'Staff Console');
 }
 
+// ---------------------------------------------------------------------------
+// 99zo-a. Building one panel
+// ---------------------------------------------------------------------------
+
 /**
  * One panel's page, wrapped for its iframe — or why it cannot open. Never
  * throws: a throw here is a red line in the console the person can retry,
  * and an answer is better than that.
  */
 function staffConsolePanel(id) {
+  return staffConsoleBuildPanel_(id, {});
+}
+
+/**
+ * The one builder every route into a panel goes through — the client's fetch,
+ * the batched prefetch and the pages carried with the document — so a refusal
+ * reads the same and is logged the same however the page was asked for.
+ *
+ * `opts.lite` asks for the panel's smaller page instead, and answers a refusal
+ * when it has none: the inline step wants to know whether a page will fit, not
+ * to be handed the big one again.
+ */
+function staffConsoleBuildPanel_(id, opts) {
+  const options = opts || {};
   const panel = Object.prototype.hasOwnProperty.call(STAFF_CONSOLE_PANELS, id) ?
     STAFF_CONSOLE_PANELS[id] : null;
   if (!panel) return { ok: false, id: String(id), message: `There is no console panel called "${id}".` };
@@ -226,7 +395,15 @@ function staffConsolePanel(id) {
       log(`ℹ️ Staff Console: ${panel.title} declined — ${refusal}`);
       return { ok: false, id, title: panel.title, message: refusal };
     }
-    const built = panel.build();
+    if (options.lite && typeof panel.buildLite !== 'function') {
+      return { ok: false, id, title: panel.title, message: `${panel.title} has no smaller page.` };
+    }
+    const started = Date.now();
+    const built = options.lite ? panel.buildLite() : panel.build();
+    const took = Date.now() - started;
+    if (took >= STAFF_CONSOLE_SLOW_BUILD_MS) {
+      log(`ℹ️ Staff Console: ${panel.title} took ${(took / 1000).toFixed(1)}s to build.`);
+    }
     if (built && typeof built === 'object' && built.refusal) {
       log(`ℹ️ Staff Console: ${panel.title} declined — ${built.refusal}`);
       return { ok: false, id, title: panel.title, message: built.refusal };
@@ -237,6 +414,94 @@ function staffConsolePanel(id) {
     return { ok: false, id, title: panel.title,
       message: `${panel.title} could not be opened: ${(err && err.message) || err}` };
   }
+}
+
+/**
+ * Several panels in ONE execution, for the client's idle prefetch.
+ *
+ * Batched because the cost being removed is the EXECUTION rather than the work:
+ * three pages built together is one spin-up instead of three, and the two that
+ * want the member roll read it once between them (collectKnownMembers()). It
+ * is budgeted and hands back what it did not reach, like every other sliced
+ * thing in this project, and a panel that REFUSES is simply left out — a
+ * refusal has a reason that may not hold ten minutes from now, and the client
+ * asking live is how the person is told the live one.
+ */
+function staffConsolePanels(ids) {
+  const wanted = Array.isArray(ids) ? ids : [];
+  const deadline = Date.now() + STAFF_CONSOLE_PREFETCH_BUDGET_MS;
+  const panels = {};
+  const notBuilt = [];
+  let chars = 0;
+  wanted.forEach(id => {
+    // Judged BEFORE the budget: a name no panel answers to must not come back
+    // as work left over, or the client would ask for it again for ever.
+    if (!Object.prototype.hasOwnProperty.call(STAFF_CONSOLE_PANELS, id)) return;
+    if (STAFF_CONSOLE_PANELS[id].prefetch === false) return;
+    if (Date.now() >= deadline || chars >= STAFF_CONSOLE_PREFETCH_MAX_CHARS) {
+      notBuilt.push(String(id));
+      return;
+    }
+    const res = staffConsoleBuildPanel_(id, {});
+    if (!res.ok) return;
+    panels[res.id] = res.html;
+    chars += res.html.length;
+  });
+  return { panels, notBuilt };
+}
+
+/**
+ * The pages that travel INSIDE the console's document, while the ENCODED total
+ * stays inside STAFF_CONSOLE_INLINE_MAX_CHARS: every `static` page (no
+ * workbook data in it, so free to build and unable to go stale), then the one
+ * the console opens with.
+ *
+ * THAT ORDER, AND IT IS NOT THE OBVIOUS ONE. The page somebody is about to
+ * look at is the opening one, so it reads as the thing to carry first — but it
+ * is also the only one with somewhere to fall back to. A `static` page that
+ * does not fit costs a whole round trip the first time its tab is opened and
+ * has no smaller version to offer; the opening page, over the ceiling, hands
+ * over its `buildLite` and fetches the rest of itself, which is one round trip
+ * for data the page already knows how to ask for. So the pages with no
+ * fallback are given the room first, and the one with a fallback takes what is
+ * left. The statics are a few tens of thousands of characters between them, so
+ * this only ever decides the boundary case.
+ *
+ * Returns { id: wrappedHtml }. A panel left out is one the client fetches
+ * exactly as it did before any of this existed, which is what makes every
+ * refusal and every ceiling here a slower open rather than a broken one.
+ */
+function staffConsoleInlinePanels_() {
+  const out = {};
+  let budget = STAFF_CONSOLE_INLINE_MAX_CHARS;
+  const order = Object.keys(STAFF_CONSOLE_PANELS)
+    .filter(id => id !== STAFF_CONSOLE_OPENS_WITH && STAFF_CONSOLE_PANELS[id].static)
+    .concat([STAFF_CONSOLE_OPENS_WITH]);
+
+  order.forEach(id => {
+    if (budget <= 0) return;
+    // Measured as it will be WRITTEN — the page crosses into the document's
+    // one script block as JSON (staffConsoleInlineJson_()), and a page of
+    // quotes encodes bigger than a page of prose.
+    let res = staffConsoleBuildPanel_(id, {});
+    let encoded = res.ok ? staffConsoleInlineJson_(res.html).length : 0;
+    if (res.ok && encoded > budget && typeof STAFF_CONSOLE_PANELS[id].buildLite === 'function') {
+      log(`ℹ️ Staff Console: ${res.title}'s page is ${encoded} characters — over the ${budget} left ` +
+        `to carry it, so its smaller page goes instead and the page fetches the rest for itself.`);
+      res = staffConsoleBuildPanel_(id, { lite: true });
+      encoded = res.ok ? staffConsoleInlineJson_(res.html).length : 0;
+    }
+    if (!res.ok || encoded > budget) {
+      if (res.ok) {
+        log(`ℹ️ Staff Console: ${res.title}'s page is too big to carry (${encoded} characters) — ` +
+          `the console will fetch it on open.`);
+      }
+      return;
+    }
+    out[id] = res.html;
+    budget -= encoded;
+  });
+  return out;
 }
 
 /**
@@ -252,7 +517,16 @@ function staffConsoleWrapPanelHtml_(pageHtml) {
   return head + trimmed;
 }
 
-/** What the Health tab can offer. Read at request time: R4's functions may or may not exist. */
+// ---------------------------------------------------------------------------
+// 99zo-b. The tabs that are not a panel
+// ---------------------------------------------------------------------------
+
+/**
+ * What the Health tab can offer. Read at request time: R4's functions may or
+ * may not exist. Resolved into the document as well (it is a `typeof`, not a
+ * read), so the Health tab costs no round trip to draw; this stays for the
+ * fallback path and because one answer with one definition is one answer.
+ */
 function staffConsoleHealthInfo() {
   return {
     embeddable: typeof buildHealthPanelHtml === 'function',
@@ -278,21 +552,78 @@ function staffConsoleOpenConfig() {
   return { ok: true, message: 'The Config tab is open behind this window.' };
 }
 
+// ---------------------------------------------------------------------------
+// 99zo-c. The console's own document
+// ---------------------------------------------------------------------------
+
 /** A value for an inline <script>: JSON text inside a JS string, '<' escaped. */
 function staffConsoleScriptJson_(value) {
   return JSON.stringify(JSON.stringify(value)).replace(/</g, '\\u003c');
 }
 
-/** The console's own document. Small on purpose: no workbook data at all. */
+/**
+ * The same job for the one value where the SIZE of the encoding matters: the
+ * pages carried with the document.
+ *
+ * Every other value in this project crosses into a page as
+ * `JSON.parse("<json text>")` — stringified twice, once to make the data and
+ * once to make a string literal that cannot break out of the script block.
+ * That is right for a context or a roster, and wrong for a page: the inner
+ * encoding is already full of escaped quotes and the outer one escapes every
+ * one of them again, so an 86K page costs 93K and a 286K page costs 492K. It
+ * is the DOUBLING that decides whether Quick Mark's lists can ride along or
+ * have to be fetched, which is the round trip this file exists to remove.
+ *
+ * So this emits the JSON ONCE, as the object literal it already is — valid
+ * JavaScript by construction, since JSON is a subset of it — and makes it safe
+ * in the two ways a script block demands:
+ *   • every '<' becomes \u003c, so no '</script>' and no '<!--' can appear in
+ *     it however a program is titled (the same guard, for the same reason, as
+ *     every other page here);
+ *   • U+2028 and U+2029 are escaped, because they are legal inside a JSON
+ *     string and were illegal inside a JavaScript one until ES2019 — a
+ *     character a browser could reject is not worth the bytes it saves.
+ * Nothing else in a JSON string can end a string literal or a script block.
+ */
+function staffConsoleInlineJson_(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+/** The console's own document: its chrome, and the pages it is certain to need. */
 function buildStaffConsoleHtml() {
   const panels = {};
   Object.keys(STAFF_CONSOLE_PANELS).forEach(id => {
     const p = STAFF_CONSOLE_PANELS[id];
-    panels[id] = { tab: p.tab, title: p.title, blurb: p.blurb };
+    panels[id] = { tab: p.tab, title: p.title, blurb: p.blurb,
+      static: !!p.static, prefetch: p.prefetch !== false };
   });
+  // GUARDED WHOLE, because this runs BEFORE the dialog exists. A throw in here
+  // — or an execution that dies in here at the account's ceiling, which comes
+  // with no warning and no exception — is a menu item that does nothing and
+  // says nothing (99g). Carrying no pages costs a round trip per panel, which
+  // is what the console cost before any of this; that is the right failure.
+  let inline = {};
+  let health = { embeddable: false, dialog: false };
+  try {
+    inline = staffConsoleInlinePanels_();
+  } catch (err) {
+    inline = {};
+    log(`⚠️ Staff Console: no page could be carried with the window (${err}) — each will be fetched.`);
+  }
+  try {
+    health = staffConsoleHealthInfo();
+  } catch (err) {
+    health = { embeddable: false, dialog: false };
+  }
   const tabs = staffConsoleScriptJson_(STAFF_CONSOLE_TABS);
   const panelJson = staffConsoleScriptJson_(panels);
   const intercepts = staffConsoleScriptJson_(STAFF_CONSOLE_SHOW_INTERCEPTS);
+  const inlineJson = staffConsoleInlineJson_(inline);
+  const healthJson = staffConsoleScriptJson_(health);
+  const opensWith = staffConsoleScriptJson_(STAFF_CONSOLE_OPENS_WITH);
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
@@ -332,13 +663,34 @@ function buildStaffConsoleHtml() {
   var TABS = JSON.parse(${tabs});
   var PANELS = JSON.parse(${panelJson});
   var INTERCEPTS = JSON.parse(${intercepts});
+  // THE PAGES THAT CAME WITH THIS DOCUMENT. { id: html } — the panel the
+  // console opens with and every page that holds no workbook data. Opening one
+  // of these is a paint, not a round trip. A panel missing from here is one
+  // the server could not carry (its gate refused, or it would not fit the
+  // ceiling) and is fetched exactly as it always was.
+  var INLINE = ${inlineJson};
+  // Whether R4's Health panel exists in this version — a typeof on the server,
+  // answered while this document was built rather than in a round trip of its own.
+  var HEALTH = JSON.parse(${healthJson});
+  var OPENS_WITH = JSON.parse(${opensWith});
+  var PREFETCH_TTL = ${STAFF_CONSOLE_PREFETCH_TTL_MS};
+  var PREFETCH_IDLE = ${STAFF_CONSOLE_PREFETCH_IDLE_MS};
+  var PREFETCH_MAX_ROUNDS = ${STAFF_CONSOLE_PREFETCH_MAX_ROUNDS};
+
   // Which panel each tab is showing (null = its launcher) and every panel
   // ever opened. A panel is HIDDEN on a tab switch, never destroyed, so a
   // half-typed form, Quick Mark's log or a running poll survives the switch.
   var OPEN = {};
   var LOADED = {};
   var CURRENT_TAB = null;
-  var HEALTH = null;
+  // Pages built ahead of being asked for: { id: { html: ..., at: ms } }.
+  var PREFETCH = {};
+  var PREFETCH_ROUNDS = 0;
+  var PREFETCH_TIMER = null;
+  // How many of a panel's own calls are in flight. The prefetch stands down
+  // while this is anything but zero: a mark pressed at the desk must never
+  // queue behind a page nobody has asked for.
+  var INFLIGHT = 0;
 
   // THE ONE ESCAPING HELPER. Everything the console itself draws from the
   // workbook goes through textContent; this is for the rare string of markup.
@@ -397,35 +749,24 @@ function buildStaffConsoleHtml() {
     });
   }
 
+  // No round trip: what this needs to know came with the document.
   function drawHealth(v) {
-    var m = el('div', 'msg busy', 'Checking what the Health tab can show…');
-    v.appendChild(m);
-    google.script.run
-      .withSuccessHandler(function (info) {
-        HEALTH = info || {};
-        v.removeChild(m);
-        if (HEALTH.embeddable) { openPanel('health'); return; }
-        if (HEALTH.dialog) {
-          v.appendChild(el('p', 'hint', 'The Health panel opens in its own window, which closes this one.'));
-          var b = el('button', 'card');
-          b.appendChild(el('b', '', 'Open the Health panel'));
-          b.appendChild(el('span', '', 'Everything that is blocking, failing or growing.'));
-          b.onclick = function () {
-            google.script.run.withFailureHandler(function (err) {
-              v.appendChild(el('div', 'msg err', 'Could not open it: ' + err.message));
-            }).staffConsoleOpenHealthPanel();
-          };
-          v.appendChild(b);
-          return;
-        }
-        v.appendChild(el('div', 'msg', 'The Health panel is not part of this version yet. ' +
-          'Until it is, the reports are under 🔧 Admin ▸ 📄 Reports, and ❓ Why did nothing happen? is on the menu.'));
-      })
-      .withFailureHandler(function (err) {
-        m.className = 'msg err';
-        m.textContent = 'Could not ask the workbook: ' + err.message;
-      })
-      .staffConsoleHealthInfo();
+    if (HEALTH.embeddable) { openPanel('health'); return; }
+    if (HEALTH.dialog) {
+      v.appendChild(el('p', 'hint', 'The Health panel opens in its own window, which closes this one.'));
+      var b = el('button', 'card');
+      b.appendChild(el('b', '', 'Open the Health panel'));
+      b.appendChild(el('span', '', 'Everything that is blocking, failing or growing.'));
+      b.onclick = function () {
+        google.script.run.withFailureHandler(function (err) {
+          v.appendChild(el('div', 'msg err', 'Could not open it: ' + err.message));
+        }).staffConsoleOpenHealthPanel();
+      };
+      v.appendChild(b);
+      return;
+    }
+    v.appendChild(el('div', 'msg', 'The Health panel is not part of this version yet. ' +
+      'Until it is, the reports are under 🔧 Admin ▸ 📄 Reports, and ❓ Why did nothing happen? is on the menu.'));
   }
 
   function drawSettings(v) {
@@ -452,11 +793,15 @@ function buildStaffConsoleHtml() {
 
   function showTab(tabId) {
     CURRENT_TAB = tabId;
+    markTab(tabId);
+    drawLauncher(tabId);
+    render();
+  }
+
+  function markTab(tabId) {
     TABS.forEach(function (t) {
       $('tab-' + t.id).setAttribute('aria-selected', t.id === tabId ? 'true' : 'false');
     });
-    drawLauncher(tabId);
-    render();
   }
 
   // Exactly one thing is visible: the current tab's open panel, or its launcher.
@@ -474,13 +819,11 @@ function buildStaffConsoleHtml() {
     if (!p) return;
     if (CURRENT_TAB !== p.tab) {
       CURRENT_TAB = p.tab;
-      TABS.forEach(function (t) {
-        $('tab-' + t.id).setAttribute('aria-selected', t.id === p.tab ? 'true' : 'false');
-      });
+      markTab(p.tab);
       drawLauncher(p.tab);
     }
     OPEN[p.tab] = id;
-    if (!LOADED[id]) loadPanel(id);
+    if (!LOADED[id]) loadPanel(id, false);
     render();
   }
 
@@ -496,8 +839,11 @@ function buildStaffConsoleHtml() {
     var back = el('button', '', '← ' + (TABS.filter(function (t) { return t.id === p.tab; })[0] || {}).label);
     back.onclick = function () { backToLauncher(p.tab); };
     var reload = el('button', '', '↻ Reload');
-    reload.title = 'Open this page afresh. Anything typed and not yet saved is lost.';
-    reload.onclick = function () { unloadPanel(id); OPEN[p.tab] = id; loadPanel(id); render(); };
+    reload.title = 'Open this page afresh from the workbook. Anything typed and not yet saved is lost.';
+    // FRESH means fresh: a reload throws away the copy that came with the
+    // window or was built ahead, because the whole reason for pressing it is
+    // to pick up something that has changed since.
+    reload.onclick = function () { unloadPanel(id); OPEN[p.tab] = id; loadPanel(id, true); render(); };
     if (panelsOf(p.tab).length > 1) bar.appendChild(back);
     bar.appendChild(el('span', 'title', p.title));
     bar.appendChild(reload);
@@ -508,8 +854,25 @@ function buildStaffConsoleHtml() {
     return { box: box, body: body, frame: null };
   }
 
-  function loadPanel(id) {
+  /** A page already in hand for this panel, or null — and never a stale one. */
+  function carriedPage(id) {
+    if (INLINE[id]) return INLINE[id];
+    var held = PREFETCH[id];
+    if (!held) return null;
+    // A static page has nothing in it to go stale (no workbook data at all);
+    // anything else is kept for PREFETCH_TTL and then asked for again.
+    if (!PANELS[id].static && Date.now() - held.at > PREFETCH_TTL) {
+      delete PREFETCH[id];
+      return null;
+    }
+    return held.html;
+  }
+
+  function loadPanel(id, fresh) {
     var slot = LOADED[id] = makeBox(id);
+    if (fresh) { delete INLINE[id]; delete PREFETCH[id]; }
+    var ready = fresh ? null : carriedPage(id);
+    if (ready) { mountPanel(id, slot, ready); return; }
     google.script.run
       .withSuccessHandler(function (res) {
         if (LOADED[id] !== slot) return;   // reloaded or closed meanwhile
@@ -518,14 +881,7 @@ function buildStaffConsoleHtml() {
           slot.body.textContent = (res && res.message) || 'It could not be opened.';
           return;
         }
-        var f = document.createElement('iframe');
-        f.title = PANELS[id].title;
-        slot.box.removeChild(slot.body);
-        slot.body = null;
-        slot.frame = f;
-        slot.box.appendChild(f);
-        f.srcdoc = res.html;
-        f.addEventListener('load', function () { if (OPEN[PANELS[id].tab] === id && !slot.box.hidden) f.focus(); });
+        mountPanel(id, slot, res.html);
       })
       .withFailureHandler(function (err) {
         if (LOADED[id] !== slot) return;
@@ -536,12 +892,67 @@ function buildStaffConsoleHtml() {
       .staffConsolePanel(id);
   }
 
+  function mountPanel(id, slot, html) {
+    var f = document.createElement('iframe');
+    f.title = PANELS[id].title;
+    if (slot.body) { slot.box.removeChild(slot.body); slot.body = null; }
+    slot.frame = f;
+    slot.box.appendChild(f);
+    f.srcdoc = html;
+    f.addEventListener('load', function () {
+      if (OPEN[PANELS[id].tab] === id && !slot.box.hidden) f.focus();
+    });
+  }
+
   function unloadPanel(id) {
     var slot = LOADED[id];
     if (!slot) return;
     if (slot.box.parentNode) slot.box.parentNode.removeChild(slot.box);
     delete LOADED[id];
   }
+
+  // --- building the rest ahead, while nobody is waiting ---------------------
+
+  function prefetchWanted() {
+    return Object.keys(PANELS).filter(function (id) {
+      return PANELS[id].prefetch && !INLINE[id] && !PREFETCH[id] && !LOADED[id];
+    });
+  }
+
+  function schedulePrefetch() {
+    if (PREFETCH_TIMER || PREFETCH_ROUNDS >= PREFETCH_MAX_ROUNDS) return;
+    if (!prefetchWanted().length) return;
+    PREFETCH_TIMER = setTimeout(runPrefetch, PREFETCH_IDLE);
+  }
+
+  function runPrefetch() {
+    PREFETCH_TIMER = null;
+    // THE DESK COMES FIRST. A panel with a call in flight is somebody waiting
+    // on an answer, and an execution spent on a page nobody has opened is an
+    // execution that answer is behind. Come back when it is quiet.
+    if (INFLIGHT > 0) { schedulePrefetch(); return; }
+    var want = prefetchWanted();
+    if (!want.length) return;
+    PREFETCH_ROUNDS++;
+    google.script.run
+      .withSuccessHandler(function (res) {
+        var got = (res && res.panels) || {};
+        var now = Date.now();
+        Object.keys(got).forEach(function (id) {
+          if (!LOADED[id]) PREFETCH[id] = { html: got[id], at: now };
+        });
+        // Only what the budget could not reach is asked for again; a panel
+        // that REFUSED is deliberately not reported and not retried — the
+        // person opening it is told the live refusal, which may differ.
+        if (res && res.notBuilt && res.notBuilt.length) schedulePrefetch();
+      })
+      // One silent failure and no more: every panel still opens on request,
+      // which is all a workbook without any of this ever did.
+      .withFailureHandler(function () { PREFETCH_ROUNDS = PREFETCH_MAX_ROUNDS; })
+      .staffConsolePanels(want);
+  }
+
+  // --- the bridge, console side --------------------------------------------
 
   function panelForWindow(win) {
     var ids = Object.keys(LOADED);
@@ -564,9 +975,9 @@ function buildStaffConsoleHtml() {
     }
   }
 
-  // THE BRIDGE, CONSOLE SIDE. Only messages from a frame this console made
-  // are honoured, and each becomes one real google.script.run — same
-  // function, same arguments, same order — answered back to that frame.
+  // Only messages from a frame this console made are honoured, and each
+  // becomes one real google.script.run — same function, same arguments, same
+  // order — answered back to that frame.
   function relay(win, d) {
     var fn = String(d.fn || '');
     if (Object.prototype.hasOwnProperty.call(INTERCEPTS, fn)) {
@@ -575,12 +986,16 @@ function buildStaffConsoleHtml() {
       return;
     }
     if (fn === 'openStaffConsole') { reply(win, d.id, true, null); return; }
+    INFLIGHT++;
+    function done() { INFLIGHT--; schedulePrefetch(); }
     var r = google.script.run
-      .withSuccessHandler(function (value) { reply(win, d.id, true, value); })
+      .withSuccessHandler(function (value) { done(); reply(win, d.id, true, value); })
       .withFailureHandler(function (err) {
+        done();
         reply(win, d.id, false, { message: (err && err.message) || String(err), name: err && err.name });
       });
     if (typeof r[fn] !== 'function') {
+      done();
       reply(win, d.id, false, { message: 'The workbook has no function called ' + fn + '.' });
       return;
     }
@@ -598,10 +1013,14 @@ function buildStaffConsoleHtml() {
   });
 
   drawTabs();
-  // The desk is what this window is for, so its one page opens at once —
-  // AFTER the console has painted, as a fetch of its own.
+  // The desk is what this window is for, and its page came with the document,
+  // so it is on screen in this paint rather than after a round trip. Only a
+  // page the server could not carry costs a fetch here.
   showTab('desk');
-  openPanel('quickMark');
+  openPanel(OPENS_WITH);
+  // Then, once it is quiet, the pages that could not ride along are built in
+  // one execution, so the first open of each is a paint too.
+  schedulePrefetch();
 </script>
 </body></html>`;
 }

@@ -542,6 +542,7 @@ function writeMemberRollTab(sheet, rows) {
 
   // Every list built off this tab is now a spelling — or a household — out of date.
   invalidateWalkInMembersMemo();
+  invalidateKnownMembersMemo();
   invalidateHouseholdIndexMemo();
   if (merged.merges.length) invalidateQuickMarkIndexCache();
   return {

@@ -823,21 +823,46 @@ function parseQuickMarkProgramChoice(value) {
   return { title, dateKey, lunchOnly: isLunchOnlyProgramTitle(title) };
 }
 
-/** Every ACTIVE name on Member_Roll — the standing directory, registered or not. */
+/**
+ * Every ACTIVE name on Member_Roll, memoized for the execution.
+ *
+ * WHY A MEMO. `readSimpleTableValues()` is a whole-tab `getValues()` every
+ * call — it does not go through `readSheetGrid()`'s per-execution cache (96) —
+ * and five callers want this same list: Quick Mark's index build, the door's
+ * name list (`74`, through its own memo), the volunteer dialog (`99e`), the
+ * private-session dialog (`99zi`) and the staff console building several of
+ * those pages in ONE execution (`99zo`'s batched prefetch), which is what made
+ * the repeat read worth removing: a console prefetch read the roll twice to
+ * answer the same question twice.
+ *
+ * Cleared by the two things that change the roll inside an execution —
+ * `writeMemberRollTab()` (`79`) and `applyMemberNameCorrection()` (`77`) — the
+ * same pair `invalidateWalkInMembersMemo()` is cleared from, and for the same
+ * reason: a list of names is a list of SPELLINGS, and a correction made this
+ * execution must not be answered with the old one.
+ */
+let knownMembersMemo = null;
+
+function invalidateKnownMembersMemo() {
+  knownMembersMemo = null;
+}
+
 function collectKnownMembers() {
+  if (knownMembersMemo) return knownMembersMemo;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
     const sheet = ss.getSheetByName(SHEET_NAMES.MEMBER_ROLL);
     if (!sheet) return [];
     const headers = HEADERS.Member_Roll;
     const map = getIndexMap(headers);
-    return readSimpleTableValues(sheet, headers)
+    knownMembersMemo = readSimpleTableValues(sheet, headers)
       // A retired member is still ON the roll — that is the point of retiring
       // rather than deleting them — but they are not somebody the desk is
       // offered when it starts typing a name. See memberRollIsRetired().
       .filter(row => !memberRollIsRetired(row, map))
       .map(row => String(row[map['Name']] || '').trim())
       .filter(Boolean);
+    return knownMembersMemo;
   } catch (err) {
     log(`ℹ️ Quick Mark could not read Member_Roll for its name list (${err}).`);
     return [];

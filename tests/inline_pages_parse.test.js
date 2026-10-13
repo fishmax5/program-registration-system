@@ -142,6 +142,22 @@ const pages = [
   // The staff console (99zo): its own shell, and a panel as its iframe gets
   // it — the bridge shim prepended to a page that is itself unchanged.
   ['the staff console', () => sandbox.buildStaffConsoleHtml()],
+  // AND THE SHELL WITH PAGES CARRIED INSIDE IT, which is the normal case and a
+  // different string: those pages cross into the console's one script block as
+  // JSON, and a page whose title ends a script block, or whose markup carries
+  // a line separator, would end the console's own script in the middle —
+  // taking the tab bar, the bridge and every panel with it.
+  ['the staff console carrying its pages', () => {
+    const saved = sandbox.staffConsoleInlinePanels_;
+    sandbox.staffConsoleInlinePanels_ = () => ({
+      quickMark: sandbox.staffConsoleWrapPanelHtml_(
+        '<p>Tai Chi </script><!-- \u2028 "q" \u00e9</p><script>var X = 1;</script>'),
+      bulkRegistrants: sandbox.staffConsoleWrapPanelHtml_(sandbox.buildBulkRegistrantsHtml())
+    });
+    const html = sandbox.buildStaffConsoleHtml();
+    sandbox.staffConsoleInlinePanels_ = saved;
+    return html;
+  }],
   ['a staff console panel (bridge + bulk registrants)',
     () => sandbox.staffConsoleWrapPanelHtml_(sandbox.buildBulkRegistrantsHtml())],
   // The leader's web roster page (99zn/99zna) — a live roster, a refusal, and
