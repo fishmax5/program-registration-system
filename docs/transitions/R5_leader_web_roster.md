@@ -41,8 +41,23 @@ can tick on both and have the two race.
 ## The leader-owned ticks, today
 
 On the sheet (`46`): `Contacted`, `Confirmed`, `Waitlisted`, `Dropped`,
-`Leader_Notes` (`LEADER_OWNED_COLUMNS`, `03`). `Attended` is NOT a leader column
-— it is the desk's (Quick Mark, the door) and is not on the sheet or the page.
+`Leader_Notes` (`LEADER_OWNED_COLUMNS`, `03`) — the five that merge BOTH ways
+against the pushed snapshot.
+
+`Attended` is the desk's column (Quick Mark, the door) and is now on the sheet
+and the page as well, under a different rule: `LEADER_ACK_FLAG_COLUMNS` (`03`),
+ONE WAY. The push writes the desk's current value out; a leader may TICK it and
+an untick does nothing at all, because a stale false from a browser tab left
+open since Tuesday must not erase a mark somebody made in front of the person
+it was about. One statement of the rule, asked by both doors:
+`leaderAckEditApplies_()` (`46`). `LEADER_SHEET_EDITABLE_COLUMNS` is what a
+leader may type (the five plus the ack ticks) and is the snapshot's order, with
+the ack columns APPENDED so an older five-value snapshot is a prefix
+(`decodeLeaderSnapshot`); `LEADER_SHEET_TICK_COLUMNS` is what is drawn as a
+check box. The sheet says so in its banner note and on the column's own header
+cell (`leaderSheetAckColumnNote()`), and the page refuses an untick in words
+rather than silently.
+
 `Answers` is read-only, sync-owned (`Form_Answers`).
 
 - Pull (`pullProgramLeaderSheetEdits`, head of the import in `27`): per cell,

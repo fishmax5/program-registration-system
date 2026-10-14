@@ -98,7 +98,11 @@ function buildLeaderRosterPageHtml(view, token) {
   var TOKEN = BOOT.token;
   var VIEW = BOOT.view;
   var NL = String.fromCharCode(10);
-  var TICKS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
+  var TICKS = ['Contacted', 'Confirmed', 'Attended', 'Waitlisted', 'Dropped'];
+  // The columns a tap may only ever ADD (LEADER_ACK_FLAG_COLUMNS, 03). The
+  // server refuses an untick anyway; refusing it here as well is what keeps
+  // the button from going dark for the second it takes to be told no.
+  var ADD_ONLY = ['Attended'];
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -200,6 +204,11 @@ function buildLeaderRosterPageHtml(view, token) {
 
   function toggle(r, col, button) {
     var value = !r[col];
+    if (!value && ADD_ONLY.indexOf(col) !== -1) {
+      say(col + ' is only ever added here — the front desk marks people in as they arrive, and this ' +
+        'page is never allowed to undo that. Ring the office to take one off.', false);
+      return;
+    }
     if (value && col === 'Dropped' && !confirm('Mark ' + r.name + ' as dropped? This cancels their place on ' +
       r.date + ' and frees the seat. The office can put them back.')) return;
     if (value && col === 'Waitlisted' && !confirm('Move ' + r.name + ' to the waiting list for ' + r.date +
@@ -230,17 +239,19 @@ function buildLeaderRosterPageHtml(view, token) {
   function downloadCsv() {
     if (!VIEW || !VIEW.ok) return;
     var lines = [['Date', 'Time', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status',
-      'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes', 'Answers'].map(csvCell).join(',')];
+      'Contacted', 'Confirmed', 'Attended', 'Waitlisted', 'Dropped',
+      'Leader_Notes', 'Answers'].map(csvCell).join(',')];
     VIEW.sessions.forEach(function (s) {
       s.rows.forEach(function (r) {
         lines.push([r.date, r.time, r.name, r.party, r.phone, r.email, r.status,
-          r.Contacted ? 'Yes' : '', r.Confirmed ? 'Yes' : '', r.Waitlisted ? 'Yes' : '', r.Dropped ? 'Yes' : '',
+          r.Contacted ? 'Yes' : '', r.Confirmed ? 'Yes' : '', r.Attended ? 'Yes' : '',
+          r.Waitlisted ? 'Yes' : '', r.Dropped ? 'Yes' : '',
           r.notes, r.answers].map(csvCell).join(','));
       });
     });
     VIEW.waitlist.forEach(function (p) {
       lines.push(['Waiting list: ' + p.dates, '', p.name, p.party, p.phone, p.email, 'Waiting',
-        '', '', '', '', p.notes, ''].map(csvCell).join(','));
+        '', '', '', '', '', p.notes, ''].map(csvCell).join(','));
     });
     var text = lines.join(NL);
     var name = (VIEW.title || 'roster') + ' — ' + (VIEW.location || '') + '.csv';

@@ -86,12 +86,32 @@ this.HEADERS = HEADERS;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.LEADER_OWNED_COLUMNS = LEADER_OWNED_COLUMNS;
 this.LEADER_FLAG_COLUMNS = LEADER_FLAG_COLUMNS;
+this.LEADER_SHEET_EDITABLE_COLUMNS = LEADER_SHEET_EDITABLE_COLUMNS;
+this.LEADER_SHEET_TICK_COLUMNS = LEADER_SHEET_TICK_COLUMNS;
+this.LEADER_ACK_FLAG_COLUMNS = LEADER_ACK_FLAG_COLUMNS;
+this.LEADER_SHEET_TEMPLATE_KEY = LEADER_SHEET_TEMPLATE_KEY;
+this.leaderSheetAckColumnNote = leaderSheetAckColumnNote;
+this.leaderAckEditApplies_ = leaderAckEditApplies_;
+this.readLeaderValues = readLeaderValues;
+this.decodeLeaderSnapshot = decodeLeaderSnapshot;
+this.encodeLeaderSnapshot = encodeLeaderSnapshot;
+this.buildLeaderSheetRowsByProgram = buildLeaderSheetRowsByProgram;
+this.pullProgramLeaderSheetEdits = pullProgramLeaderSheetEdits;
+// computeLeaderSheetFingerprint() with a template key of our choosing, which
+// is how a v3 fingerprint is spelled now that the constant says v4.
+this.__fingerprintUnder = function (key, entry, rows) {
+  const anyDate = programWaitlistEntriesFor(entry && entry.title, entry && entry.location)
+    .map(e => [e.name, e.phone, e.email, e.partySize, e.addedOn ? formatDateKey(e.addedOn) : '', e.notes]);
+  return computeFormLabelFingerprint(rows || [],
+    [String((entry && entry.title) || ''), String((entry && entry.location) || ''), anyDate], key);
+};
 this.MANUAL_ENTRY_CELL_TINT = MANUAL_ENTRY_CELL_TINT;
 this.LEADER_SHEET_BAND_BG = LEADER_SHEET_BAND_BG;
 this.LEADER_SHEET_WAITLIST_BG = LEADER_SHEET_WAITLIST_BG;
 this.PALETTE = PALETTE;
 this.MEMORY_TAB_DATA_ROW = MEMORY_TAB_DATA_ROW;
 this.MEMORY_TAB_BANNER_ROW = MEMORY_TAB_BANNER_ROW;
+this.MEMORY_TAB_HEADER_ROW = MEMORY_TAB_HEADER_ROW;
 this.getIndexMap = getIndexMap;
 this.writeProgramLeaderSheetTab = writeProgramLeaderSheetTab;
 this.writeProgramLeaderWaitlistTab = writeProgramLeaderWaitlistTab;
@@ -175,16 +195,18 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   // until it was changed (see applyLeaderFlagCheckboxes_ in `46`). The helper
   // now refuses that name, which is what makes this assertion mean something.
   const validations = lists.filter(c => c.name === 'rangeList.insertCheckboxes');
-  assert.strictEqual(validations.length, sandbox.LEADER_FLAG_COLUMNS.length,
+  assert.strictEqual(validations.length, sandbox.LEADER_SHEET_TICK_COLUMNS.length,
     'one checkbox call per tick-box column, whatever the number of sessions');
   validations.forEach(v => assert.strictEqual(v.ranges.length, 3,
     'covering one range per session run'));
 
-  // The manual-entry wash: one call per leader-owned column, three ranges each.
+  // The manual-entry wash: one call per column a leader may type in — the five
+  // they own plus the acknowledgement ticks (Attended) — three ranges each.
   const washes = lists.filter(c => c.name === 'rangeList.setBackground' &&
     c.args[0] === sandbox.MANUAL_ENTRY_CELL_TINT);
-  assert.strictEqual(washes.length, sandbox.LEADER_OWNED_COLUMNS.filter(h => map[h] !== undefined).length,
-    'one wash call per leader-owned column');
+  assert.strictEqual(washes.length,
+    sandbox.LEADER_SHEET_EDITABLE_COLUMNS.filter(h => map[h] !== undefined).length,
+    'one wash call per leader-typed column');
   washes.forEach(w => assert.strictEqual(w.ranges.length, 3, 'covering all three session runs'));
 
   // The rows themselves: a band row, then its people, per session.
@@ -432,6 +454,72 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(opened, 1);
 
   sandbox.__markUntouched(null);
+}
+
+// ---------------------------------------------------------------------------
+// 7. THE Attended COLUMN: WHAT GOES OUT, AND THE BUMP THAT PUTS IT THERE
+//
+// The desk's own mark has to appear on the leader's sheet (or they re-tick
+// nine people who were already marked in at the door), which means it has to
+// be in the fingerprint through the rows — a sheet whose only change is an
+// attendance mark must still be rewritten. And the column is a change to the
+// SHAPE of a live sheet, so the template key is this change's migration: an
+// entry holding a fingerprint from the old key no longer matches and the next
+// push redraws that sheet exactly once.
+// ---------------------------------------------------------------------------
+{
+  const headersNow = sandbox.LEADER_SHEET_HEADERS;
+  assert.ok(headersNow.indexOf('Attended') > headersNow.indexOf('Confirmed') &&
+    headersNow.indexOf('Attended') < headersNow.indexOf('Waitlisted'),
+    'Attended sits with the other leader ticks, not after the machine columns');
+  assert.strictEqual(headersNow[headersNow.length - 1], 'Answers', 'Answers is still last');
+  assert.strictEqual(headersNow.indexOf('Row_Key'), headersNow.length - 3, 'Row_Key stays where it was');
+  assert.strictEqual(headersNow.indexOf('Pushed_Snapshot'), headersNow.length - 2);
+  // The snapshot's order is NOT the display order: appending is what lets an
+  // old five-value snapshot still be read as a prefix (decodeLeaderSnapshot).
+  assert.deepStrictEqual(sandbox.LEADER_SHEET_EDITABLE_COLUMNS,
+    sandbox.LEADER_OWNED_COLUMNS.concat(['Attended']));
+
+  const ENTRY = { title: 'Chair Yoga', location: 'Ashbridge' };
+
+  // The header cell says what the tick does — on both painters, which
+  // tests/sheets_batch_golden.test.js compares note for note.
+  const drawn = makeCountingSheet([], 'Sign_Up_Sheet');
+  sandbox.writeProgramLeaderSheetTab(drawn, ENTRY, rosterRows(2, 2));
+  const note = callsNamed(drawn, 'setNote')
+    .find(c => c.col === map['Attended'] + 1 && c.row === sandbox.MEMORY_TAB_HEADER_ROW);
+  assert.ok(note, 'the Attended header carries a note of its own');
+  assert.ok(/Unticking does nothing/.test(note.args[0]),
+    'and that note is the one-way rule, where a leader will meet it');
+
+  // An attendance mark moves the fingerprint, so the sheet is rewritten.
+  const plain = rosterRows(2, 2);
+  const marked = plain.map(r => r.slice());
+  marked[1][map['Attended']] = true;
+  assert.notStrictEqual(sandbox.computeLeaderSheetFingerprint(ENTRY, marked),
+    sandbox.computeLeaderSheetFingerprint(ENTRY, plain),
+    'a sheet whose only change is an attendance mark is still rewritten');
+
+  // The bump IS the migration: a v3 fingerprint cannot match a v4 push.
+  assert.strictEqual(sandbox.LEADER_SHEET_TEMPLATE_KEY, 'leader-sheet-v4',
+    'the template key was bumped for the new column');
+  const KEY = 'chair yoga|ashbridge';
+  const sheet = makeCountingSheet([], 'Sign_Up_Sheet');
+  sandbox.__clearSpreadsheetHandles();
+  sandbox.SpreadsheetApp.openById = () => ({
+    getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet]
+  });
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [KEY]: plain }));
+  sandbox.__setRegistry({
+    [KEY]: Object.assign({}, ENTRY, { fileId: 'FV3', accessOpened: true,
+      pushedFingerprint: sandbox.__fingerprintUnder('leader-sheet-v3', ENTRY, plain) })
+  });
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1,
+    'every existing sheet is redrawn once by the bump');
+  assert.strictEqual(sandbox.getProgramLeaderSheetRegistry()[KEY].pushedFingerprint,
+    sandbox.computeLeaderSheetFingerprint(ENTRY, plain), 'and stored under the new key');
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'and not again on the next hour');
 }
 
 console.log('✅ leader_sheet_push.test.js passed');
