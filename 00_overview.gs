@@ -36,9 +36,13 @@
  *      Sign_In_Link); and the three PROGRAM FLAGS —
  *      Club, No Registration, Personalized Assistance — are tick boxes here
  *      rather than twelve identical copies of themselves on the session table.
- *      Next_Date leads the row and carries the month tint; Last_Date closes
- *      it; the split is Running / Not currently running rather than Upcoming
- *      / Past, because a class running September to June is neither.
+ *      The row leads with Location and Program — what the thing IS — and the
+ *      programs are listed by NAME in both sections, because a person
+ *      arrives here knowing a program's name and not when it next runs.
+ *      Next_Date sits with Schedule, which asks the same question, and
+ *      carries the month tint; Last_Date closes the row; the split is
+ *      Running / Not currently running rather than Upcoming / Past, because
+ *      a class running September to June is neither.
  *      A [Grouped] run of dates, which has one form and no month of its own,
  *      used to be filed awkwardly under its earliest month; there is no month
  *      to file it under now. It also carries the participation metrics block

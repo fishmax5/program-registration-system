@@ -288,14 +288,24 @@ defineLazyGlobal_('HEADERS', () => ({
    * itself, because a Regular program takes a NEW form every month and
    * keying on it is how the month got into the grain in the first place.
    *
-   * NEXT_DATE LEADS THE ROW AND IS A REAL DATE, for the same reason Event_Date
-   * leads every other date-bearing tab: it is what the sectioned readers and
-   * the month tint are defined against. It is the next session from today, and
-   * it is BLANK for a program that is not currently running — which is the
-   * whole of what the Running / Not currently running split is decided on.
-   * Last_Date is when it last ran (or last will), and is what the second
-   * section is ordered by: a program that finished in June sits above one that
-   * finished in 2019.
+   * THE ROW LEADS WITH WHAT THE PROGRAM IS — Location, then Program. It led
+   * with Next_Date, for the same reason Event_Date leads every other
+   * date-bearing tab, and that reason does not transfer: those tabs are one
+   * row per DATE and are sorted and split by it, so the date IS the row's
+   * place in the list. Here it is one row per PROGRAM, and a date in the lead
+   * column made the tab read as a date-sorted list of sessions — the very
+   * thing this tab exists to collapse. The identity columns lead it now, and
+   * the programs are ordered by name (partitionRunningPrograms, 78).
+   *
+   * NEXT_DATE IS STILL A REAL DATE and still carries the month tint; it has
+   * simply moved to where its question is asked. It sits with Schedule,
+   * because "when does it next run" is the same question as "when does it
+   * run" — immediately BEFORE it rather than after, so Schedule keeps
+   * Sessions (its drill-through to the dates) next to it. It is BLANK for a
+   * program that is not currently running, which is the whole of what the
+   * Running / Not currently running split is decided on. Last_Date is when it
+   * last ran (or last will), and is the column that answers "when did this
+   * stop" now that neither section is ordered by it.
    *
    * EIGHTEEN COLUMNS A PERSON READS, and three behind them (Room, hidden
    * until somebody keeps rooms, and the two keys). It was nineteen at
@@ -369,9 +379,9 @@ defineLazyGlobal_('HEADERS', () => ({
    * scanning.
    */
   Master_Program_Dashboard: [
-    'Next_Date', 'Location', 'Program', 'Leader', 'Type_Tag',
+    'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
+    'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
     'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ],
