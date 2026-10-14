@@ -103,9 +103,18 @@ sandbox.noteForAdmin = () => {};
 sandbox.toastIfPossible = () => {};
 
 let serial = 0;
-function freshSheet(name) {
+/**
+ * `sheetId` is worth pinning when the two sheets of a comparison will be
+ * compared CELL FOR CELL and a cell can name the tab it is on: the sectioned
+ * tabs' banner rows carry an in-sheet `=HYPERLINK("#gid=...")` (34), so two
+ * sheets handed different gids paint two different — and both correct —
+ * formulas. Left to the serial otherwise, so a test that wants two distinct
+ * tabs still gets them.
+ */
+function freshSheet(name, sheetId) {
   serial++;
-  const sheet = makePaintingSheet({ name, sheetId: 100 + serial, fileId: `file-${serial}` });
+  const sheet = makePaintingSheet({
+    name, sheetId: sheetId === undefined ? 100 + serial : sheetId, fileId: `file-${serial}` });
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
     getSheetByName: n => (n === name ? sheet : null), getSheets: () => [sheet], toast: () => {}, getId: () => `file-${serial}`
   });
@@ -287,10 +296,10 @@ function renderRegistrants(sheet, rows) {
 }
 {
   const rows = registrantRows(8, 4);
-  const a = freshSheet('All_Registrants');
+  const a = freshSheet('All_Registrants', 900);
   legacy(() => renderRegistrants(a, rows));
   legacy(() => renderRegistrants(a, rows));
-  const b = freshSheet('All_Registrants');
+  const b = freshSheet('All_Registrants', 900);
   const logStart = logs.length;
   const service = makeSheetsService();
   viaApi(b, () => renderRegistrants(b, rows), service);

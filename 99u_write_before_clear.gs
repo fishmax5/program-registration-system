@@ -106,6 +106,14 @@ function composeTabValueGrid_(blocks) {
  * banner, header, upcoming rows, a spacer, banner, header, past rows. Only the
  * banner TEXT in column 1 — the rest of a banner row is blank, as it is after
  * the render. Returned as one block.
+ *
+ * THE JUMP LINKS ARE DELIBERATELY NOT HERE. Both banner rows carry an in-sheet
+ * link a few columns along (SECTION_JUMP_LINK_COLUMN, 34), and predicting one
+ * would mean knowing the sheet's gid and the Past banner's row in a function
+ * that is pure and given neither. A BLANK is always safe under the rule above —
+ * it is what clear() would have left — so the early write blanks the cell,
+ * which is also what takes a stale link off a tab whose Past section has
+ * emptied; the render then writes the live pair, or clears them again.
  */
 function sectionedTableValueBlock_(startRow, headers, upcoming, past, options) {
   options = options || {};
