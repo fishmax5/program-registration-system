@@ -181,3 +181,198 @@ console.log('bulk_manual_registrants: all passed');
   assert.throws(() => run(`readBulkRegistrantXlsx('AAAA')`), /could not be opened as an Excel workbook/);
 }
 console.log('bulk xlsx: ok');
+
+// ---------------------------------------------------------------------------
+// 10. ATTENDED IS A FACT ABOUT A DAY (99q's banner). The pure rule: a tick
+//     reaches today and anything earlier, and no future date at all.
+// ---------------------------------------------------------------------------
+{
+  const sessions = JSON.stringify([
+    { dateKey: '2026-09-01', dateLabel: 'Sep 1' },   // past
+    { dateKey: '2026-09-09', dateLabel: 'Sep 9' },   // today
+    { dateKey: '2026-09-22', dateLabel: 'Sep 22' },  // still to come
+    { dateLabel: 'no date at all' }
+  ]);
+  const keys = today => JSON.parse(run(`JSON.stringify(bulkRegistrantAttendedDateKeys(${sessions}, '${today}'))`));
+  assert.deepStrictEqual(keys('2026-09-09'), ['2026-09-01', '2026-09-09'],
+    'today and earlier are marked; a future date never is');
+  assert.deepStrictEqual(keys('2026-09-30'), ['2026-09-01', '2026-09-09', '2026-09-22'],
+    'the rule is today-or-earlier, not today alone');
+  assert.deepStrictEqual(keys('2026-08-01'), [], 'nothing has happened yet');
+  assert.deepStrictEqual(keys(''), [],
+    'no stated today means nothing may be marked — never the tablet\'s own guess');
+  assert.deepStrictEqual(JSON.parse(run(`JSON.stringify(bulkRegistrantAttendedDateKeys(null, '2026-09-09'))`)), []);
+}
+
+// 11. The workbook's own today rides out with the programs, which is what lets
+//     the dialog grey a box rather than ask the browser what day it is.
+assert.strictEqual(programs[0].todayKey, '2026-09-09');
+
+// ---------------------------------------------------------------------------
+// 12. THE REVIEW STEP'S TWO ATTENDED CONTROLS, run against a fake DOM.
+//
+//     A string search of the template could not tell a select-all that sets
+//     every row from a checkbox that merely sits near the word, so the
+//     dialog's own script is executed here and its controls pressed: the
+//     header tick sets every row, a row's own tick disagrees with it, and a
+//     row whose chosen dates are all still to come is greyed out and sends
+//     nothing — the same rule the server applies when it writes.
+// ---------------------------------------------------------------------------
+{
+  const html = run('buildBulkRegistrantsHtml()');
+  const open = html.indexOf('<script>');
+  const script = html.substring(open + '<script>'.length, html.indexOf('</script>', open));
+
+  // The column and the header control are on screen at all, and the rule is
+  // said in words where somebody ticking it can read it.
+  assert.ok(/id="attended"/.test(html), 'the list-wide attended control exists');
+  assert.ok(/Attended today/.test(html), 'the review column says which day it is about');
+  assert.ok(/today or earlier/.test(html), 'the screen states the rule');
+
+  let doc = null;
+  class Node {
+    constructor(tag) {
+      this.tagName = String(tag).toUpperCase();
+      this.children = []; this.parentNode = null; this.attrs = {}; this.style = {};
+      this.className = ''; this._text = ''; this.value = ''; this.checked = false;
+      this.disabled = false; this.title = ''; this.dataset = {}; this.listeners = {};
+      this.files = null;
+    }
+    set id(v) { this.attrs.id = v; } get id() { return this.attrs.id || ''; }
+    set type(v) { this.attrs.type = v; } get type() { return this.attrs.type || ''; }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
+    get options() { return this.children.filter(c => c.tagName === 'OPTION'); }
+    appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+    addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
+    fire(t) { (this.listeners[t] || []).forEach(fn => fn.call(this, { type: t })); }
+    walk(fn) { fn(this); this.children.forEach(c => c.walk(fn)); }
+  }
+  const body = new Node('body');
+  ['setup', 'program', 'recurrenceRow', 'recurrence', 'lunch', 'attended', 'dates', 'file', 'csv',
+   'read', 'mapping', 'hasHeader', 'columns', 'check', 'reviewBox', 'review', 'commit', 'progress',
+   'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status']
+    .forEach(id => { const n = new Node('div'); n.id = id; body.appendChild(n); });
+  const all = () => { const out = []; body.walk(n => out.push(n)); return out; };
+  doc = {
+    body,
+    createElement: tag => new Node(tag),
+    createTextNode: text => { const n = new Node('#text'); n._text = String(text); return n; },
+    getElementById: id => all().find(n => n.id === id) || null,
+    // The one selector the page uses: the ticked date boxes.
+    querySelectorAll: sel => {
+      assert.strictEqual(sel, 'input.date:checked', `unexpected selector ${sel}`);
+      return all().filter(n => n.tagName === 'INPUT' && n.className === 'date' && n.checked);
+    },
+    addEventListener: () => {}
+  };
+  // google.script.run, with the two boot calls answered by hand so the page
+  // holds the programs the server would have sent.
+  const PROGRAM = {
+    key: 'A|Yoga', title: 'Yoga', location: 'A', label: 'Yoga — A (2 upcoming)',
+    todayKey: '2026-09-09',
+    sessions: [{ value: 'Yoga · 9/9', dateKey: '2026-09-09', dateLabel: 'Sep 9' },
+               { value: 'Yoga · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22' }]
+  };
+  let started = null;
+  const runner = () => {
+    let onSuccess = null;
+    const api = new Proxy({}, {
+      get: (t, k) => {
+        if (k === 'withSuccessHandler') return fn => { onSuccess = fn; return api; };
+        if (k === 'withFailureHandler') return () => api;
+        if (k === 'bulkRegistrantsStatus') return () => { if (onSuccess) onSuccess({ exists: false }); };
+        if (k === 'listBulkRegistrantPrograms') return () => { if (onSuccess) onSuccess([PROGRAM]); };
+        if (k === 'startBulkRegistrants') return args => { started = args; if (onSuccess) onSuccess({ ok: true, exists: true, active: false, done: true, lines: [] }); };
+        return () => {};
+      }
+    });
+    return api;
+  };
+  const page = {
+    document: doc,
+    google: { script: { get run() { return runner(); } } },
+    confirm: () => true,
+    setInterval: () => 1, clearInterval: () => {},
+    FileReader: function () {}, Number, JSON, Math, Object, Array, String, Date, Set, console,
+    assert
+  };
+  page.window = page;
+  vm.createContext(page);
+  vm.runInContext(script, page, { filename: 'bulk-registrants.js' });
+
+  const $ = id => doc.getElementById(id);
+  // A real <select> opens on its first option, which is "Next date only".
+  $('recurrence').value = 'next';
+  // The programs arrived, so the dialog knows what day the workbook is on.
+  assert.strictEqual(vm.runInContext('TODAY', page), '2026-09-09');
+
+  // Choose the program (which draws its date boxes), then hand the page a
+  // reviewed list the way previewBulkRegistrants would have.
+  $('program').value = 'A|Yoga';
+  $('program').fire('change');
+  const dateBoxes = doc.querySelectorAll('input.date:checked');
+  assert.strictEqual(dateBoxes.length, 2, 'both dates drawn and ticked');
+
+  vm.runInContext(`PEOPLE = [
+    { name: 'Ann Test', line: 1, match: 'new', phone: '', email: '',
+      options: [{ name: 'Ann Test', label: 'Ann Test', nameKey: 'ann|test', alreadyOn: {}, standing: false }] },
+    { name: 'Bob Test', line: 2, match: 'new', phone: '', email: '',
+      options: [{ name: 'Bob Test', label: 'Bob Test', nameKey: 'bob|test', alreadyOn: {}, standing: false }] },
+    { name: 'Cal Test', line: 3, match: 'new', phone: '', email: '',
+      options: [{ name: 'Cal Test', label: 'Cal Test', nameKey: 'cal|test', alreadyOn: {}, standing: false }] }
+  ]; drawReview();`, page);
+  const rows = () => vm.runInContext('ROWS', page);
+  // Arrays made inside the vm context belong to its own realm, so the flags
+  // are copied out before they are compared.
+  const flags = () => Array.from(rows().map(r => !!r.att.checked));
+  assert.strictEqual(rows().length, 3);
+
+  // Nothing is ticked attended until somebody asks for it.
+  assert.deepStrictEqual(flags(), [false, false, false],
+    'attended is never on by default — a row that arrives ticked is a row somebody taps past');
+
+  // (a) THE SELECT-ALL SETS EVERY ROW.
+  $('attended').checked = true;
+  $('attended').fire('change');
+  assert.deepStrictEqual(flags(), [true, true, true],
+    'the header tick sets every row');
+
+  // (b) A PER-ROW TICK DISAGREES WITH IT, and survives every later redraw of
+  //     the notes — the header is a starting point, not an override.
+  rows()[1].att.checked = false;
+  rows()[1].att.fire('change');
+  assert.deepStrictEqual(flags(), [true, false, true],
+    'a row unticked by hand stays unticked');
+  $('recurrence').fire('change');
+  assert.deepStrictEqual(flags(), [true, false, true],
+    'and is not quietly restored by a recalculation');
+
+  // (c) A FUTURE-ONLY ROW CANNOT BE MARKED. Untick today's date and put row 3
+  //     on "the dates ticked below", which leaves it with Sep 22 alone.
+  dateBoxes[0].checked = false;
+  rows()[2].rec.value = 'picked';
+  rows()[2].rec.fire('change');
+  assert.strictEqual(rows()[0].att.disabled, false, 'row 1 is still on today ("next date")');
+  assert.strictEqual(rows()[2].att.disabled, true, 'a row with no date today or earlier is greyed out');
+  assert.strictEqual(rows()[2].att.checked, false, 'and is not shown as something that will happen');
+  assert.ok(/no day to mark/.test(rows()[2].att.title), rows()[2].att.title);
+  assert.ok(/Sep 9/.test(rows()[0].att.title), rows()[0].att.title);
+
+  // (d) WHAT COMMIT SENDS: what each row asked for, and never a flag a greyed
+  //     box would have meant.
+  vm.runInContext('commit()', page);
+  assert.ok(started, 'the list was sent');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(started.people.map(p => [p.name, !!p.attended]))),
+    [['Ann Test', true], ['Bob Test', false], ['Cal Test', false]]);
+
+  // (e) Asked for again, a row whose dates come back into reach is ticked once
+  //     more — the person's answer was remembered, not thrown away.
+  dateBoxes[0].checked = true;
+  rows()[2].rec.fire('change');
+  assert.strictEqual(rows()[2].att.disabled, false);
+  assert.strictEqual(rows()[2].att.checked, true, 'what they asked for is restored, not lost');
+}
+console.log('bulk attended review: ok');

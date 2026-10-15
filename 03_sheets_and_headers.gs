@@ -288,14 +288,24 @@ defineLazyGlobal_('HEADERS', () => ({
    * itself, because a Regular program takes a NEW form every month and
    * keying on it is how the month got into the grain in the first place.
    *
-   * NEXT_DATE LEADS THE ROW AND IS A REAL DATE, for the same reason Event_Date
-   * leads every other date-bearing tab: it is what the sectioned readers and
-   * the month tint are defined against. It is the next session from today, and
-   * it is BLANK for a program that is not currently running — which is the
-   * whole of what the Running / Not currently running split is decided on.
-   * Last_Date is when it last ran (or last will), and is what the second
-   * section is ordered by: a program that finished in June sits above one that
-   * finished in 2019.
+   * THE ROW LEADS WITH WHAT THE PROGRAM IS — Location, then Program. It led
+   * with Next_Date, for the same reason Event_Date leads every other
+   * date-bearing tab, and that reason does not transfer: those tabs are one
+   * row per DATE and are sorted and split by it, so the date IS the row's
+   * place in the list. Here it is one row per PROGRAM, and a date in the lead
+   * column made the tab read as a date-sorted list of sessions — the very
+   * thing this tab exists to collapse. The identity columns lead it now, and
+   * the programs are ordered by name (partitionRunningPrograms, 78).
+   *
+   * NEXT_DATE IS STILL A REAL DATE and still carries the month tint; it has
+   * simply moved to where its question is asked. It sits with Schedule,
+   * because "when does it next run" is the same question as "when does it
+   * run" — immediately BEFORE it rather than after, so Schedule keeps
+   * Sessions (its drill-through to the dates) next to it. It is BLANK for a
+   * program that is not currently running, which is the whole of what the
+   * Running / Not currently running split is decided on. Last_Date is when it
+   * last ran (or last will), and is the column that answers "when did this
+   * stop" now that neither section is ordered by it.
    *
    * EIGHTEEN COLUMNS A PERSON READS, and three behind them (Room, hidden
    * until somebody keeps rooms, and the two keys). It was nineteen at
@@ -369,9 +379,9 @@ defineLazyGlobal_('HEADERS', () => ({
    * scanning.
    */
   Master_Program_Dashboard: [
-    'Next_Date', 'Location', 'Program', 'Leader', 'Type_Tag',
+    'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
+    'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
     'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ],
@@ -1154,6 +1164,11 @@ const CLUB_LUNCH_OPTIONS = ['Yes - Lunch', 'No Lunch'];
  * never disagree about what is leader-owned, which is the kind of drift that
  * turns a merge into data loss.
  *
+ * These five are the ones that merge BOTH WAYS. The shared roster also carries
+ * the acknowledgement ticks below, which do not, and the three lists after
+ * this one are how "leader-owned" and "a leader may type here" stopped being
+ * the same sentence.
+ *
  * Waitlisted is deliberately SEPARATE from Program_Status's own "Waitlisted"
  * value. They answer different questions: Program_Status is what the system
  * decided from Max_Capacity, and this is what the leader decided about a
@@ -1165,6 +1180,57 @@ const LEADER_OWNED_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped',
 
 /** The first four of those are real checkboxes; Leader_Notes is free text. */
 const LEADER_FLAG_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
+
+/**
+ * THE ACKNOWLEDGEMENT TICK, AND THE ONE DIRECTION IT TRAVELS.
+ *
+ * Attended is not a leader's column the way the five above are — it is the
+ * DESK'S column, ticked at the door by Quick Mark (`38`) and by the sign-in
+ * app (`74`), counted by the dashboard's metrics block (`43`) and stored by
+ * the Metrics tab (`83`). But the person who knows who walked into the room is
+ * very often the one standing in it, and until now they had nowhere to say so:
+ * a leader covering a class at Ashbridge could see the roster on their own
+ * sheet and not record a single arrival on it.
+ *
+ * So the roster carries it, and it travels ONE WAY: a tick sets Attended on
+ * the registrant row, and an UNTICK does nothing at all. That asymmetry is
+ * deliberate and is the only thing that makes the column safe to hand out.
+ * The desk is the authority for clearing a mark — Quick Mark's own "I ticked
+ * the wrong Mary" undo (`99a`) is a decision somebody made in front of the
+ * person — and a leader tidying their sheet a week later, or a browser tab
+ * open since Tuesday saving a stale false, must never be able to erase it.
+ * Attendance only ever goes up from here. It is said in the sheet's banner
+ * note and on the column's own header cell, so a leader is told rather than
+ * surprised (leaderSheetAckColumnNote(), `46`).
+ *
+ * Separate from LEADER_FLAG_COLUMNS rather than added to it for the same
+ * reason: those five merge per cell in BOTH directions against the pushed
+ * snapshot, and a sixth with a different rule inside that list is a rule
+ * nobody reading the merge would see.
+ */
+const LEADER_ACK_FLAG_COLUMNS = ['Attended'];
+
+/**
+ * Everything a program leader may type on the shared roster — the five they
+ * own plus the acknowledgement ticks — and THE ORDER THE PUSHED SNAPSHOT IS
+ * WRITTEN IN, which is why the ack columns are appended rather than slotted in
+ * beside the ticks they sit next to on screen.
+ *
+ * The snapshot is a positional JSON array in a hidden cell of somebody else's
+ * spreadsheet (encodeLeaderSnapshot, `46`), and every sheet in Drive is still
+ * holding one written under the old five-column list. Appending means an old
+ * snapshot is a PREFIX of a new one, so decodeLeaderSnapshot() can pad it and
+ * the first pull after this ships still reads a leader's ticks back correctly
+ * — where a reordered list would have made every stored snapshot unreadable
+ * and quietly dropped an hour of somebody's work.
+ *
+ * The DISPLAY order is LEADER_SHEET_HEADERS' business, and there Attended sits
+ * with the other ticks where a leader expects it.
+ */
+const LEADER_SHEET_EDITABLE_COLUMNS = LEADER_OWNED_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
+
+/** Every column on the shared roster drawn as a real checkbox. Leader_Notes is free text. */
+const LEADER_SHEET_TICK_COLUMNS = LEADER_FLAG_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
 
 const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
 

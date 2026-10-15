@@ -31,11 +31,16 @@
 //     words it everywhere else — but the form is no longer the key itself. A
 //     Regular program takes a NEW form every month, and keying on it is
 //     precisely how the month got into the grain.
-//   • THE MONTH LEFT THE ROW. Next_Date leads it (the next session from today,
-//     blank when there is none) and Last_Date closes it. The split is Running
-//     / Not currently running rather than Upcoming / Past, and the second
-//     section is ordered by Last_Date, so a class that finished in June sits
-//     above one that finished in 2019.
+//   • THE MONTH LEFT THE ROW, AND SO DID THE DATE ORDER. Next_Date used to
+//     LEAD the row, which is right on every other date-bearing tab here —
+//     they are one row per date, sorted and split by it, so the date is the
+//     row's place in the list. A row here is a program, and leading it with a
+//     date made the tab read as the date-sorted list of sessions it exists to
+//     collapse. Next_Date now sits with Schedule, which asks the same
+//     question, and the row leads with Location and Program: what the thing
+//     IS. Last_Date still closes it. The split is Running / Not currently
+//     running rather than Upcoming / Past, and both halves are ordered by
+//     NAME — see partitionRunningPrograms().
 //   • THE FIXED-SPAN PROBLEM DISSOLVED. A [Grouped] series takes ONE form for
 //     its whole run (formSpanKey() gives it the literal 'FIXED'), so it had no
 //     month of its own and was filed, awkwardly, under its earliest one — the
@@ -1071,6 +1076,9 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
 
   const result = writeUpcomingPastSections(sheet, row, headers, running, finished, {
     upcomingLabel: '▶️ Running', pastLabel: '⏸️ Not Currently Running',
+    // This tab's split is a STATUS, not a date, so the shared "Jump to Past"
+    // would name a section that is not on it.
+    jumpToPastLabel: '⬇ Jump to Not Currently Running',
     // NOT COLLAPSED. Old-month hiding is defined against a tab of sessions,
     // where two months is hundreds of rows; here the whole history of the
     // place is a couple of dozen, and the point of the tab is that it fits on
@@ -1093,17 +1101,21 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     if (z.count < 1) return;
     // The month tint the sectioned writer applies for itself on every other
     // tab. It keys off a column literally named Event_Date, and this tab's
-    // leading date is Next_Date — so it is applied here rather than by
-    // changing what that shared writer is defined against.
+    // date is Next_Date — so it is applied here rather than by changing what
+    // that shared writer is defined against.
     //
-    // ON NEXT_DATE, WHERE IT USED TO BE ON MONTH_START, and it is doing more
-    // work than it was: at one row per program the tint is what makes "these
-    // four all start again in October" visible without reading a single date.
-    // A program that is not currently running has no Next_Date and takes no
-    // tint, which is the right answer rather than a missing one.
+    // ON NEXT_DATE, WHERE IT USED TO BE ON MONTH_START — and it no longer
+    // draws a BLOCK, because the rows are ordered by name rather than by that
+    // date: "these four all start again in October" used to be four adjacent
+    // rows in one colour and is now four rows in one colour wherever their
+    // names put them. It is kept because the per-row answer is the one it was
+    // always really giving ("this one is not until November"), and reading a
+    // month off a colour is still cheaper than reading a date. A program that
+    // is not currently running has no Next_Date and takes no tint, which is
+    // the right answer rather than a missing one.
     applyMonthColorTint(sheet, map['Next_Date'] + 1, z.start, z.count);
-    // Last_Date is a DAY, and the day is the point of it: the second section
-    // is ordered by how recently a program stopped.
+    // Last_Date is a DAY, and the day is the point of it: it is what answers
+    // "when did this stop" now that neither section is ordered by it.
     sheet.getRange(z.start, map['Last_Date'] + 1, z.count, 1)
       .setNumberFormat(DATE_DISPLAY_FORMAT);
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
@@ -1137,7 +1149,12 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
     [result.upcomingHeaderRow, result.pastHeaderRow]);
   applyColumnVisibility(sheet, headers, PROGRAM_MONTH_HIDDEN_COLUMNS);
   freezeRowsSafely(sheet, result.upcomingHeaderRow);
-  freezeColumnsSafely(sheet, 3); // next date, location, program name
+  // THE IDENTITY COLUMNS, which is now two rather than three: it was "next
+  // date, location, program name", and the date has gone to sit with
+  // Schedule. Leader is deliberately NOT frozen — it is a column somebody
+  // TYPES into, and a frozen column is one the pointer crosses on the way to
+  // everything else.
+  freezeColumnsSafely(sheet, 2); // location, program name
   autosizeColumns(sheet, { force: !!force, minCols: numCols });
 }
 
@@ -1178,13 +1195,34 @@ function programMonthRowPosition(row, upcoming, past, result) {
  * a true record of something this place runs, sitting under a heading that
  * says it is not running today. Two banner-and-header sections rather than the
  * roll's single divider row, because this tab's edit handler finds a row's
- * columns by walking up to the nearest header (handleProgramMonthEdit), and
- * one header for two differently-sorted halves would be one header too few.
+ * columns by walking up to the nearest header (handleProgramMonthEdit): a
+ * section with no header of its own is a section whose Leader cell and whose
+ * three tick boxes resolve to nothing.
  *
- * The second section is ordered by Last_Date, newest first: a class that
- * finished in June is the one somebody is looking for, and the 2019 one is
- * not. The first is ordered by Next_Date, soonest first, and then by name so a
- * day's worth of programs reads alphabetically rather than at random.
+ * BOTH HALVES ARE ORDERED BY NAME, and that is a change in both of them.
+ * Running was ordered by Next_Date, soonest first; the rest by Last_Date,
+ * newest first. Each had a real argument — the soonest thing is the next thing
+ * to worry about, and a class that finished in June is likelier to be wanted
+ * than the 2019 one — and both arguments are about a DATE, on a tab whose
+ * whole point is that a program is not a date. Date order is what made a list
+ * of twenty programs something you read through rather than looked IN: a
+ * person arrives here knowing the name of the program they want ("where is
+ * Chair Yoga?") and nobody arrives knowing when it next runs.
+ *
+ * SO IT IS ALPHABETICAL IN BOTH SECTIONS, not alphabetical above and
+ * date-ordered below. Two orderings on one tab is two ways to look something
+ * up, and the second one is always the one somebody does not know is in force
+ * — the half of this tab a person scans least often is exactly the half they
+ * can least afford to have to learn a rule about. The recency the old order
+ * carried is not lost, only unsorted: Last_Date is a column on the row, and
+ * either section is a plain table with its own header row that Sheets will
+ * sort by any column somebody asks it to.
+ *
+ * TIES BREAK ON LOCATION, which is what keeps a [Shared] program's two
+ * buildings together and in the same order on every render — (Program,
+ * Location) is this tab's identity (it is what Group_Key is built from), so
+ * the comparison is total and no pair of rows is left to the sort's own
+ * stability.
  */
 function partitionRunningPrograms(rows, map) {
   const running = [];
@@ -1193,18 +1231,13 @@ function partitionRunningPrograms(rows, map) {
     if (coerceDate(row[map['Next_Date']])) running.push(row); else finished.push(row);
   });
   const name = row => String(row[map['Program']] || '');
-  running.sort((a, b) => {
-    const at = coerceDate(a[map['Next_Date']]).getTime();
-    const bt = coerceDate(b[map['Next_Date']]).getTime();
-    return at === bt ? name(a).localeCompare(name(b)) : at - bt;
-  });
-  finished.sort((a, b) => {
-    const ad = coerceDate(a[map['Last_Date']]);
-    const bd = coerceDate(b[map['Last_Date']]);
-    const at = ad ? ad.getTime() : 0;
-    const bt = bd ? bd.getTime() : 0;
-    return at === bt ? name(a).localeCompare(name(b)) : bt - at;
-  });
+  const where = row => String(row[map['Location']] || '');
+  const byName = (a, b) => {
+    const titles = name(a).localeCompare(name(b));
+    return titles === 0 ? where(a).localeCompare(where(b)) : titles;
+  };
+  running.sort(byName);
+  finished.sort(byName);
   return { running, finished };
 }
 

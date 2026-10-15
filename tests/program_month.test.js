@@ -116,6 +116,9 @@ this.scanRegistrants = scanRegistrants;
 this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.LUNCH_ONLY_EVENT_ID_PREFIX = LUNCH_ONLY_EVENT_ID_PREFIX;
+this.handleProgramMonthEdit = handleProgramMonthEdit;
+this.handleProgramMonthFlagEdit = handleProgramMonthFlagEdit;
+this.PROGRAM_MONTH_LEADER_COLUMN = PROGRAM_MONTH_LEADER_COLUMN;
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -628,14 +631,97 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     session({ at: [2019, 3, 2, 9, 30], title: 'Stopped In 2019', formId: 'R_O' })
   ]).rows;
   const split = sandbox.partitionRunningPrograms(rows, monthMap);
-  check('running is everything with a session still to come, soonest first',
-    split.running.map(r => cell(r, 'Program')), ['Sooner', 'Later']);
-  // Ordered by Last_Date, newest first: the class that finished in August is
-  // the one somebody is looking for, and the 2019 one is not.
-  check('and the rest are ordered by how recently they stopped',
-    split.finished.map(r => cell(r, 'Program')), ['Stopped In August', 'Stopped In 2019']);
+  // THE SPLIT IS STILL THE SPLIT — what moved is the order WITHIN each half.
+  // Membership of Running is Next_Date being set and nothing else, which is
+  // what this asks: 'Later' runs in October and is running; 'Stopped In
+  // August' has no session to come and is not.
+  check('running is everything with a session still to come',
+    split.running.map(r => cell(r, 'Program')).slice().sort(), ['Later', 'Sooner']);
+  check('and everything else is filed under Not Currently Running',
+    split.finished.map(r => cell(r, 'Program')).slice().sort(),
+    ['Stopped In 2019', 'Stopped In August']);
+  // BY NAME, NOT BY DATE — and 'Later' before 'Sooner' is the whole point:
+  // 'Sooner' runs on the 8th and 'Later' in October, so date order and name
+  // order disagree here on purpose. A person arrives at this tab knowing the
+  // name of the program they want.
+  check('running is ordered by program name, not by when it next runs',
+    split.running.map(r => cell(r, 'Program')), ['Later', 'Sooner']);
+  // ALPHABETICAL IN BOTH SECTIONS, deliberately: two orderings on one tab is
+  // two ways to look something up, and the second is the one nobody knows is
+  // in force. Last_Date is still on the row, so the recency the old order
+  // carried is unsorted rather than lost.
+  check('and so is the rest, rather than by how recently it stopped',
+    split.finished.map(r => cell(r, 'Program')),
+    ['Stopped In 2019', 'Stopped In August'].sort((a, b) => a.localeCompare(b)));
   check('a program that is not running has no Next_Date to tint',
     cell(split.finished[0], 'Next_Date'), '');
+}
+
+// --- THE LOCATION TIEBREAK --------------------------------------------------
+//
+// One title at two buildings on two forms is two rows, and they must sit
+// TOGETHER and in the same order on every render. (Program, Location) is this
+// tab's identity — it is what Group_Key is built from — so the comparison is
+// total and no pair is left to the sort's own stability.
+{
+  const rows = build([
+    session({ at: [2026, 8, 8, 9, 30], title: 'Chair Yoga', formId: 'Y_N', location: 'Narberth' }),
+    session({ at: [2026, 9, 6, 9, 30], title: 'Chair Yoga', formId: 'Y_A', location: 'Ashbridge' }),
+    session({ at: [2026, 8, 9, 9, 30], title: 'Bingo', formId: 'B_N', location: 'Narberth' })
+  ]).rows;
+  const { running } = sandbox.partitionRunningPrograms(rows, monthMap);
+  check('a title at two buildings is two adjacent rows, ordered by Location',
+    running.map(r => `${cell(r, 'Program')} @ ${cell(r, 'Location')}`),
+    ['Bingo @ Narberth', 'Chair Yoga @ Ashbridge', 'Chair Yoga @ Narberth']);
+  // And the same list twice is the same list: a sort whose comparison is total
+  // cannot depend on the order the rows were built in.
+  const reversed = sandbox.partitionRunningPrograms(rows.slice().reverse(), monthMap);
+  check('...and the order does not depend on the order they were built in',
+    reversed.running.map(r => cell(r, 'Group_Key')),
+    running.map(r => cell(r, 'Group_Key')));
+}
+
+// --- THE COLUMN ORDER: IDENTITY FIRST, THE DATE WITH THE SCHEDULE -----------
+//
+// Next_Date used to LEAD the row, which is right on every other date-bearing
+// tab here — they are one row per date, sorted and split by it. A row here is
+// a PROGRAM, and leading it with a date made the tab read as the date-sorted
+// list of sessions it exists to collapse.
+{
+  const headers = sandbox.HEADERS.Master_Program_Dashboard;
+  const at = name => headers.indexOf(name);
+  check('the row leads with what the program IS', headers.slice(0, 2), ['Location', 'Program']);
+  check('and no longer with a date', at('Next_Date') > at('Program'), true);
+  // NEXT TO SCHEDULE, and immediately BEFORE it: "when does it next run" is
+  // the same question as "when does it run", and putting it after Schedule
+  // would split Schedule from Sessions, its drill-through to the dates.
+  check('Next_Date sits with Schedule', headers.slice(at('Next_Date'), at('Next_Date') + 3),
+    ['Next_Date', 'Schedule', 'Sessions']);
+  // The whole list, so a column that moves moves here too.
+  check('the full column order', headers, [
+    'Location', 'Program', 'Leader', 'Type_Tag',
+    'Club', 'No_Registration', 'Personalized_Assistance',
+    'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
+    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Form_ID', 'Group_Key'
+  ]);
+  // NOTHING WAS DROPPED AND NOTHING WAS ADDED. A reorder needs no header
+  // alias — nothing reads this tab and the next render redraws it whole (see
+  // the Links cell in the file's own banner) — but a column quietly LOST in
+  // the reorder would be a cell nobody notices is blank.
+  check('every column the tab had, it still has',
+    headers.slice().sort(), [
+      'Club', 'Edit_Form_Link', 'Form_ID', 'Group_Key', 'Last_Date', 'Leader', 'Location',
+      'Next_Date', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
+      'Register_Link', 'Room', 'Roster_Link', 'Schedule', 'Seats', 'Sessions',
+      'Sign_In_Link', 'Status', 'Type_Tag'
+    ].sort());
+  check('...and no column twice', headers.length, new Set(headers).size);
+  // The link columns are still columns of this tab — the one place the row
+  // builder writes through a table of its own (PROGRAM_MONTH_LINK_PARTS).
+  check('and every link part still names one of them',
+    sandbox.PROGRAM_MONTH_LINK_PARTS.map(part => headers.indexOf(part.column) !== -1),
+    [true, true, true, true]);
 }
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------
@@ -863,6 +949,111 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   check('a row somebody typed a note on does not',
     sandbox.isTitleMatchedLeaderRow('Jane covers this while Sam is away.'), false);
   check('and neither does a blank one', sandbox.isTitleMatchedLeaderRow(''), false);
+}
+
+// --- THE EDIT HANDLERS FIND THEIR COLUMN BY HEADER --------------------------
+//
+// THIS IS WHAT MAKES THE REORDER SAFE, and it is the one thing a reorder could
+// break silently. The tab is derived and read-only, so moving a column costs
+// nothing to read — but the four cells a person may TOUCH are windows that
+// write somewhere else (Leader onto Program_Leaders, the three flags onto the
+// session rows and the calendar), and a handler that found its column by
+// POSITION would, after this change, answer a tick of Club by writing
+// No_Registration: accepted on screen, wrong on the calendar, and undone by
+// the next render with no trace.
+//
+// So the pin is stated against the OLD positions. Leader was the 4th column
+// and is now the 3rd; Club was the 6th and is now the 5th. An edit on the old
+// column number must resolve to whatever lives there NOW.
+{
+  const headers = sandbox.HEADERS.Master_Program_Dashboard;
+  // Row 1 a banner, row 2 the header row, row 3 one program.
+  const grid = [
+    new Array(headers.length).fill(''),
+    headers.slice(),
+    headers.map(h => {
+      if (h === 'Group_Key') return 'program::chair yoga::narberth';
+      if (h === 'Program') return 'Chair Yoga';
+      if (h === 'Location') return 'Narberth';
+      if (h === 'Leader') return '';
+      if (h === 'Club') return true;
+      if (h === 'No_Registration') return true;
+      return '';
+    })
+  ];
+  const sheet = {
+    getName: () => sandbox.SHEET_NAMES.PROGRAM_MONTH,
+    getRange: (row, col) => ({ getValue: () => grid[row - 1][col - 1] })
+  };
+  // The two readers every header lookup on this tab goes through, fed the grid
+  // above rather than a spreadsheet.
+  sandbox.readSheetGrid = () => ({ values: grid, lastRow: grid.length });
+  sandbox.readEditedBlock = () => (row, col) => grid[row - 1][col - 1];
+
+  const toasts = [];
+  sandbox.toastIfPossible = text => toasts.push(String(text));
+  sandbox.revertProgramMonthCell = () => {};
+  sandbox.confirmCellEditOrRevert = () => true;
+
+  let flagged = null;
+  sandbox.applyProgramMonthFlagToSessions = (flag, target) => {
+    flagged = { column: flag.column, title: target.title, on: target.on };
+    return { rows: 4, calendars: 1 };
+  };
+  let attached = null;
+  sandbox.attachProgramLeaderRow = (name, title, location) => {
+    attached = { name, title, location };
+    return { status: 'added', email: 'jane@example.com' };
+  };
+
+  const edit = (column, value) => ({
+    value,
+    oldValue: '',
+    range: {
+      getRow: () => 3, getColumn: () => column,
+      getNumRows: () => 1, getNumColumns: () => 1
+    }
+  });
+  const columnOf = name => headers.indexOf(name) + 1;
+
+  // --- The three flags ---
+  flagged = null;
+  check('a tick on Club is answered as Club, wherever Club now sits',
+    [sandbox.handleProgramMonthFlagEdit(edit(columnOf('Club'), 'TRUE'), sheet,
+      sandbox.getHeaderMapAt(sheet, 2), 2), flagged],
+    [true, { column: 'Club', title: 'Chair Yoga', on: true }]);
+
+  // THE OLD POSITION, WHICH IS THE WHOLE TEST. Club was the 6th column; the
+  // 6th column is No_Registration now, and that is what an edit there means.
+  flagged = null;
+  check('and an edit on Club’s OLD column number is read as the column that is there now',
+    [sandbox.handleProgramMonthFlagEdit(edit(6, 'TRUE'), sheet,
+      sandbox.getHeaderMapAt(sheet, 2), 2), flagged],
+    [true, { column: 'No_Registration', title: 'Chair Yoga', on: true }]);
+
+  // A column that is not a flag's is not claimed, so the Leader branch below
+  // is still reached.
+  flagged = null;
+  check('an edit on a column no flag owns is not claimed',
+    [sandbox.handleProgramMonthFlagEdit(edit(columnOf('Location'), 'x'), sheet,
+      sandbox.getHeaderMapAt(sheet, 2), 2), flagged],
+    [false, null]);
+
+  // --- The Leader dropdown ---
+  attached = null;
+  sandbox.handleProgramMonthEdit(edit(columnOf('Leader'), 'Jane Doe'), sheet);
+  check('a name typed in Leader is attached to the row’s own program',
+    attached, { name: 'Jane Doe', title: 'Chair Yoga', location: 'Narberth' });
+
+  // Leader was the 4th column. The 4th column is Type_Tag now, and an edit
+  // there must reach nothing at all — not Program_Leaders, and not a flag.
+  attached = null;
+  flagged = null;
+  sandbox.handleProgramMonthEdit(edit(4, 'Jane Doe'), sheet);
+  check('and an edit on Leader’s OLD column number attaches nobody',
+    [attached, flagged], [null, null]);
+  check('Leader is where the handler looks for it',
+    headers[columnOf(sandbox.PROGRAM_MONTH_LEADER_COLUMN) - 1], 'Leader');
 }
 
 console.log(failures === 0 ? '\nAll program_month tests passed.' : `\n${failures} failure(s).`);

@@ -607,7 +607,7 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
   try {
     const batch = newSheetsBatch_(sheet);
     const labelledHeaders = headers.map(h =>
-      LEADER_OWNED_COLUMNS.indexOf(h) !== -1 ? `${MANUAL_ENTRY_PREFIX} ${h}` : h);
+      LEADER_SHEET_EDITABLE_COLUMNS.indexOf(h) !== -1 ? `${MANUAL_ENTRY_PREFIX} ${h}` : h);
     const bannerText = leaderSheetBannerText_(entry);
 
     sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
@@ -638,11 +638,19 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
       fontSize: TYPO.COLUMN_HEADER.size, fontWeight: TYPO.COLUMN_HEADER.weight,
       background: TYPO.COLUMN_HEADER.background, fontColor: TYPO.COLUMN_HEADER.color,
       vAlign: 'middle', wrap: 'CLIP' });
-    LEADER_OWNED_COLUMNS.forEach(name => {
+    LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
       const idx = headers.indexOf(name);
       if (idx === -1) return;
       sheetsBatchFormat_(batch, MEMORY_TAB_HEADER_ROW, idx + 1, 1, 1, {
         background: MANUAL_ENTRY_HEADER_COLOR, fontColor: '#000000', fontWeight: 'bold' });
+    });
+    // The one-way Attended rule, on its own header cell — the legacy painter
+    // writes the same note from the same function (`46`), and the golden test
+    // compares the two sheets' notes.
+    LEADER_ACK_FLAG_COLUMNS.forEach(name => {
+      const idx = headers.indexOf(name);
+      if (idx === -1) return;
+      sheetsBatchNote_(batch, MEMORY_TAB_HEADER_ROW, idx + 1, leaderSheetAckColumnNote());
     });
 
     let commitProtections = null;
@@ -698,11 +706,11 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
         sheetsBatchFormatRuns_(batch, runs, map['Event_Date'] + 1, 1, { numberFormat: DATE_DISPLAY_FORMAT });
         sheetsBatchFormatRuns_(batch, runs, map['Party_Size'] + 1, 1, { numberFormat: '0' });
         sheetsBatchFormatRuns_(batch, runs, map['Answers'] + 1, 1, { wrap: 'WRAP' });
-        LEADER_OWNED_COLUMNS.forEach(name => {
+        LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
           if (map[name] === undefined) return;
           sheetsBatchFormatRuns_(batch, runs, map[name] + 1, 1, { background: MANUAL_ENTRY_CELL_TINT });
         });
-        LEADER_FLAG_COLUMNS.forEach(name => {
+        LEADER_SHEET_TICK_COLUMNS.forEach(name => {
           if (map[name] === undefined) return;
           runs.forEach(run => sheetsBatchValidation_(batch, run.start, map[name] + 1, run.count, 1,
             { condition: { type: 'BOOLEAN' }, strict: false }));

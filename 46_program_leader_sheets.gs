@@ -60,10 +60,10 @@
 // code instead, each carrying a hidden Row_Key, and the marks are matched back
 // by that key rather than by position.
 //
-// WHICH WAY THE FIVE LEADER COLUMNS FLOW. Both ways, resolved per cell
+// WHICH WAY THE FIVE LEADER-OWNED COLUMNS FLOW. Both ways, resolved per cell
 // against a snapshot:
 //
-//   Every push writes a hidden Pushed_Snapshot beside each row — the five
+//   Every push writes a hidden Pushed_Snapshot beside each row — the leader
 //   values exactly as they were sent out. Every pull compares the sheet's
 //   current values against that snapshot, cell by cell. A cell that DIFFERS is
 //   something the leader typed since the last refresh, and it wins. A cell
@@ -74,6 +74,20 @@
 // That is a real three-way merge and it is why staff and leader can work on
 // the same roster at once. Without it the last writer would win by accident and
 // the loser would never know.
+//
+// AND ONE COLUMN THAT FLOWS ONE WAY ONLY: Attended. The desk owns it — Quick
+// Mark and the sign-in app tick it at the door — but the person who knows who
+// walked into the room is very often the one standing in it, so the roster
+// carries it and a leader may TICK it. Ticking sets Attended on the registrant
+// row; UNTICKING does nothing whatever. The merge above would happily send a
+// false back, and that false would erase a mark somebody made in front of the
+// person it was about — from a browser tab left open since Tuesday, or from a
+// leader tidying up last month's sheet. Attendance only ever goes up from
+// here; taking one off is the desk's job (Quick Mark ▸ Change this
+// registration). The rule is stated where a leader will meet it: in the banner
+// note and on the column's own header cell (leaderSheetAckColumnNote()), and
+// it is enforced in exactly one place for both doors — leaderAckEditApplies_(),
+// which the hourly pull and the web roster page (99zn) both ask.
 //
 // THE SHEET IS BANDED BY SESSION, not a flat list of rows. A class list is read
 // one class at a time — "who is coming on Thursday" — and a leader with twelve
@@ -205,9 +219,47 @@ function leaderSheetTabReadsEmpty_(sheet) {
 const LEADER_SHEET_HEADERS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
   'Phone', 'Email', 'Program_Status',
-  'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
+  // Attended sits with the ticks a leader reads in order — rang them, they
+  // confirmed, they came — rather than at the end of the row, and Waitlisted
+  // and Dropped stay adjacent as the pair with consequences off this sheet.
+  // The SNAPSHOT's order is LEADER_SHEET_EDITABLE_COLUMNS' (`03`) and is not
+  // this one; see its banner for why the two deliberately disagree.
+  'Contacted', 'Confirmed', 'Attended', 'Waitlisted', 'Dropped', 'Leader_Notes',
   'Row_Key', 'Pushed_Snapshot', 'Answers'
 ];
+
+/**
+ * WHAT THE Attended HEADER CELL SAYS, because a tick box that behaves
+ * differently from the four beside it has to say so where it is, not only in
+ * a banner note three paragraphs long that a leader read once in September.
+ *
+ * One string, used by BOTH painters (`99zk` sends it as a batchUpdate note) —
+ * a literal in two places is a sentence that stops matching the day somebody
+ * improves one of them, and tests/sheets_batch_golden.test.js compares the
+ * notes the two paths leave.
+ */
+function leaderSheetAckColumnNote() {
+  return 'Tick this for everyone who came. It goes onto the office\u2019s own ' +
+    'attendance count at the next sync.\n\nUnticking does nothing: the front ' +
+    'desk also marks people in as they arrive, and this box is never allowed ' +
+    'to undo that. If somebody is marked who should not be, ring the office.';
+}
+
+/**
+ * MAY THIS EDIT TO AN ACKNOWLEDGEMENT COLUMN BE WRITTEN ONTO THE REGISTRANT ROW?
+ *
+ * The whole of the one-way rule, in one place, asked by the hourly pull
+ * (pullProgramLeaderSheetEdits) and by the web roster page's writer
+ * (applyLeaderRosterEditLocked_, `99zn`) — two doors onto the same column, and
+ * a rule spelled out separately in each is a rule that holds in one of them.
+ *
+ * Everything that is not an acknowledgement column passes straight through:
+ * the five leader-owned columns merge both ways as they always have.
+ */
+function leaderAckEditApplies_(column, value) {
+  if (LEADER_ACK_FLAG_COLUMNS.indexOf(column) === -1) return true;
+  return normalizeLeaderFlag(value);
+}
 
 /**
  * THE ANSWERS TO THE PROGRAM'S OWN QUESTIONS (Program_Questions, `53`/`54`) —
@@ -269,7 +321,7 @@ defineLazyGlobal_('LEADER_SHEET_BAND_INK', () => PALETTE.INK_STRONG);
  * loud cell says which word to read, the wash says which rows to skip, and a
  * leader who has seen the dashboard recognizes both.
  *
- * The five yellow hand-entry columns are re-tinted over this afterwards, on
+ * The yellow hand-entry columns are re-tinted over this afterwards, on
  * purpose — "type here" outranks "this one is waiting" on a column the leader
  * is meant to tick.
  */
@@ -593,11 +645,18 @@ function normalizeLeaderNote(value) {
   return String(value === null || value === undefined ? '' : value).trim();
 }
 
-/** The five program leader values off a row, normalized — the unit both the snapshot and the merge work in. */
+/**
+ * The program leader values off a row, normalized — the unit both the snapshot
+ * and the merge work in, in LEADER_SHEET_EDITABLE_COLUMNS' order.
+ *
+ * Read off All_Registrants by the push (so the desk's own Attended mark is
+ * what the leader sees) and off the shared sheet by the pull, which is the
+ * whole point of there being one function for it.
+ */
 function readLeaderValues(row, map) {
-  return LEADER_OWNED_COLUMNS.map(name => {
+  return LEADER_SHEET_EDITABLE_COLUMNS.map(name => {
     const raw = map[name] === undefined ? '' : row[map[name]];
-    return LEADER_FLAG_COLUMNS.indexOf(name) === -1
+    return LEADER_SHEET_TICK_COLUMNS.indexOf(name) === -1
       ? normalizeLeaderNote(raw)
       : normalizeLeaderFlag(raw);
   });
@@ -619,7 +678,7 @@ function isLeaderSheetWaitlistedRow(row, sheetMap) {
 }
 
 /**
- * The five values as one hidden cell. JSON rather than a delimiter join
+ * The leader values as one hidden cell. JSON rather than a delimiter join
  * because Leader_Notes is free text and any separator worth reading is
  * one somebody will eventually type into a note.
  */
@@ -627,12 +686,37 @@ function encodeLeaderSnapshot(values) {
   return JSON.stringify(values);
 }
 
+/**
+ * A SHORTER SNAPSHOT IS AN OLDER SNAPSHOT, NOT A BROKEN ONE.
+ *
+ * This read used to insist on exactly LEADER_OWNED_COLUMNS.length values, and
+ * that was right while the list never changed. It does now: every sheet in
+ * Drive is holding a five-value snapshot written before Attended existed, and
+ * the pull that runs BEFORE the template bump redraws them is the one that has
+ * to read a leader's last hour of ticks back. Rejecting those snapshots would
+ * have the pull treat every row on every sheet as untouched — the safe
+ * direction for the WORKBOOK and a silent loss of whatever the leader typed
+ * since the last refresh.
+ *
+ * So a prefix is accepted and padded to today's length with each missing
+ * column's own "nothing here" value, which is exactly what a sheet with no
+ * such column reads back as (readSimpleTable projects a column the sheet does
+ * not have to blank). The two therefore COMPARE EQUAL and the first pull after
+ * the upgrade claims no edit it did not see. Only ever a prefix, which is what
+ * LEADER_SHEET_EDITABLE_COLUMNS' append-only rule guarantees; anything longer
+ * than the current list, or not an array at all, is unreadable as before.
+ */
 function decodeLeaderSnapshot(cell) {
   const raw = String(cell === null || cell === undefined ? '' : cell).trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length === LEADER_OWNED_COLUMNS.length ? parsed : null;
+    if (!Array.isArray(parsed) || parsed.length > LEADER_SHEET_EDITABLE_COLUMNS.length) return null;
+    if (parsed.length < LEADER_OWNED_COLUMNS.length) return null;
+    return LEADER_SHEET_EDITABLE_COLUMNS.map((name, i) => {
+      if (i < parsed.length) return parsed[i];
+      return LEADER_SHEET_TICK_COLUMNS.indexOf(name) === -1 ? '' : false;
+    });
   } catch (err) {
     return null; // an unreadable snapshot means "assume nothing" — see pullProgramLeaderSheetEdits()
   }
@@ -711,8 +795,13 @@ function pullProgramLeaderSheetEdits(registrantRows) {
     const edit = edits[rowKey];
     if (!edit) return;
     const changedHeaders = [];
-    LEADER_OWNED_COLUMNS.forEach((name, i) => {
+    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => {
       if (!edit.changed[i] || map[name] === undefined) return;
+      // ONE WAY FOR Attended: a tick lands, an untick is read and discarded.
+      // See leaderAckEditApplies_() and this file's banner — the desk's mark
+      // is not a leader's to clear, and a stale browser tab must not be able
+      // to send a false that erases it.
+      if (!leaderAckEditApplies_(name, edit.values[i])) return;
       row[map[name]] = edit.values[i];
       changedHeaders.push(name);
       applied++;
@@ -724,9 +813,20 @@ function pullProgramLeaderSheetEdits(registrantRows) {
     // leader's edit, which the next pull would otherwise find already applied.
     if (!changedHeaders.length) return;
     try {
-      const entry = ledgerEntryForCorrection_(row, map, ledgerColumnsPayload_(row, map, changedHeaders),
-        { source: LEDGER_SOURCES.LEADER_SHEET, note: 'Ticked or typed on the program registrant sheet.' });
-      if (entry) appendLedgerEntry(entry);
+      const payload = ledgerColumnsPayload_(row, map, changedHeaders);
+      const id = ledgerIdForRegistrantRow(row, map);
+      // THE ROW MOVING IS NOT EVIDENCE THE REGISTRATION DID (99k). An
+      // Attended tick a leader makes on somebody the desk already marked in
+      // changes this sheet's cell and nothing about the registration, and an
+      // hour where the push could not get the new snapshot out would append
+      // that same entry again, and again. ledgerAlreadyRecords() is the
+      // project's one answer to a correction that corrects nothing.
+      if (id && !ledgerAlreadyRecords(id, payload)) {
+        const entry = ledgerEntryForCorrection_(row, map, payload,
+          { registrationId: id, source: LEDGER_SOURCES.LEADER_SHEET,
+            note: 'Ticked or typed on the program registrant sheet.' });
+        if (entry) appendLedgerEntry(entry);
+      }
     } catch (err) {
       log(`⚠️ A leader's edit was merged but could not be recorded in the ledger (${err}).`);
     }
@@ -739,7 +839,7 @@ function pullProgramLeaderSheetEdits(registrantRows) {
 
 /**
  * The pull's per-cell rule, on rows already read off one sheet: a row whose
- * five leader values differ from its Pushed_Snapshot is an edit, and only the
+ * leader values differ from its Pushed_Snapshot is an edit, and only the
  * cells that differ are marked changed. Rows with no Row_Key or no readable
  * snapshot (bands, hand-pasted lines) are skipped. One copy of the rule, shared
  * by the hourly pull and the web-roster cutover's final read (99zn).
@@ -850,7 +950,16 @@ function applyLeaderFlagCheckboxes_(name, ticks) {
 // v3: waitlisted people moved to the Waitlist tab. The bump is the migration —
 // every existing sheet's fingerprint stops matching, so the next sync redraws
 // each one once and gives it the new tab.
-const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v3';
+// v4: the Attended acknowledgement column. Same migration, for the same
+// reason and this time it is the SHAPE that moved: a sheet drawn under v3 has
+// eleven columns before Row_Key and the new one has twelve, so a push that
+// skipped on a matching fingerprint would leave a leader with a roster that
+// has no such column while the pull looks for it by header (and reads it back
+// blank, harmlessly, until the redraw lands). The bump makes every registered
+// sheet a rewrite exactly once; the push is sliced and resumable precisely so
+// that a template bump cannot cost a run (see pushProgramLeaderSheets' own
+// deadline handling).
+const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v4';
 
 /**
  * WHAT THIS SHEET WOULD BE WRITTEN WITH, as one short string.
@@ -1308,7 +1417,11 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
     // In the row, so in the fingerprint: a changed answer redraws the sheet.
     out[sheetMap['Answers']] = map['Form_Answers'] === undefined
       ? '' : leaderSheetAnswersText(row[map['Form_Answers']]);
-    LEADER_OWNED_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
+    // Including the DESK's own Attended mark, which is what makes the column
+    // worth having on the sheet at all: a leader opening their roster after a
+    // class sees who was already marked in at the door rather than an empty
+    // column inviting them to re-tick nine people.
+    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
     out[sheetMap['Row_Key']] =
       leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
     // Written in the same breath as the values it describes — that identity is
@@ -1541,8 +1654,8 @@ function leaderSheetSessionBandLabel(group) {
 
 /**
  * Draws one shared sheet: banner, header, a band per session with its roster
- * under it, and the yellow "this is yours" wash on exactly the five leader
- * columns.
+ * under it, and the yellow "this is yours" wash on exactly the leader-typed
+ * columns (LEADER_SHEET_EDITABLE_COLUMNS).
  *
  * Laid out on the memory-tab rows (banner 1, header 2, data 3) so
  * readSimpleTable() can read it straight back on the next pull without a
@@ -1589,7 +1702,15 @@ function leaderSheetBannerNote() {
     `Ticking Waitlisted moves that person off the class list and onto the Waitlist tab at the next ` +
     `sync — their seat and their lunch go back too. Until then the row is peach. Everybody waiting ` +
     `is listed on the Waitlist tab, one line each with their dates; to put somebody back on the ` +
-    `class, ask the office.`;
+    `class, ask the office.\n\n` +
+    // THE THIRD TICK THAT LEAVES THIS SHEET, and the only one that travels in
+    // one direction — said here as well as on the column's own cell note,
+    // because a leader who thinks unticking undoes it will untick it. See
+    // leaderAckEditApplies_() and LEADER_ACK_FLAG_COLUMNS (`03`).
+    `Ticking Attended records that somebody came, and it is added to the office's own attendance ` +
+    `count at the next sync. UNTICKING it does nothing — the front desk marks people in as they ` +
+    `arrive too, and this sheet is never allowed to undo that. If somebody is marked who should ` +
+    `not be, ring the office.`;
 }
 
 /**
@@ -1663,7 +1784,14 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, bannerText,
     { note: leaderSheetBannerNote() });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
-  labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_OWNED_COLUMNS);
+  labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_SHEET_EDITABLE_COLUMNS);
+  // The one-way rule, on the column it is about. Drawn whether or not there
+  // are any rows: an empty roster is exactly when a leader reads the headers.
+  LEADER_ACK_FLAG_COLUMNS.forEach(name => {
+    const idx = headers.indexOf(name);
+    if (idx === -1) return;
+    sheet.getRange(MEMORY_TAB_HEADER_ROW, idx + 1).setNote(leaderSheetAckColumnNote());
+  });
 
   if (rows.length === 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
@@ -1768,7 +1896,7 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
     // One question per line — wrapped, or the lines collapse into one.
     const answers = rangeListFor(map['Answers'] + 1);
     if (answers) answers.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-    LEADER_OWNED_COLUMNS.forEach(name => {
+    LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
       if (map[name] === undefined) return;
       const wash = rangeListFor(map[name] + 1);
       if (wash) wash.setBackground(MANUAL_ENTRY_CELL_TINT);
@@ -1777,7 +1905,7 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
     // which is what the snapshot comparison in pullProgramLeaderSheetEdits()
     // expects to be comparing. Never on a band row: a checkbox there is an
     // invitation to tick something that goes nowhere.
-    LEADER_FLAG_COLUMNS.forEach(name => {
+    LEADER_SHEET_TICK_COLUMNS.forEach(name => {
       if (map[name] === undefined) return;
       applyLeaderFlagCheckboxes_(name, rangeListFor(map[name] + 1));
     });

@@ -511,11 +511,126 @@ function reportArchivableMonths() {
  */
 const ARCHIVE_ADVISORY_CELLS = 150000;
 
+// ============================================================================
+// THE TWO LINKS BETWEEN THE SECTIONS
+// ============================================================================
+//
+// Every tab written through writeUpcomingPastSections() is two stacked tables
+// with the Past one BELOW however many Upcoming rows there happen to be — a
+// hundred on the session table in a busy month, a thousand on
+// All_Registrants. The only way to the Past section was to scroll, and the
+// only way back was to scroll further; Ctrl+End overshoots into the collapsed
+// old months and Ctrl+Home lands above the frozen header on the tabs that
+// have a Today block. So each banner now carries one in-sheet link: "⬇ Jump
+// to Past" on the Upcoming banner, "⬆ Back to top" on the Past one.
+//
+// IT GOES IN A CELL A FEW COLUMNS ALONG, never in the banner's own cell and
+// never merged. Column A holds the section's name — and on the Past banner,
+// the hidden-row count collapseOldPastMonths() appends to it — which is the
+// one thing on that row anybody reads. The banner row is otherwise BLANK on
+// every tab in the workbook (writeSectionBanner() writes column 1 only, and
+// sectionedTableValueBlock_() leaves the rest of the row empty), so a cell a
+// few columns in is free whatever the tab, and nothing has to be checked
+// per-tab. Column A is left to spill across the columns in between: the
+// banner text overflows, which a non-empty cell to its right would clip, so
+// the link sits far enough along that "🕓 Past · 247 hidden" still fits.
+//
+// WHITE, NOT LINK-BLUE. #1155CC is the colour a link wants, and on a
+// #2C6BC4 banner it is nearly invisible — the one place in this workbook
+// where the convention and the contrast disagree. So the link keeps the
+// banner's own PAPER on blue (TYPO.BANNER.color) and says it is a link by
+// being underlined, at TYPO.MUTED's size so it cannot be mistaken for the
+// column headers in the row underneath.
+// ============================================================================
+
+/**
+ * Which column the jump link goes in, or 0 for a table too narrow to carry
+ * one without landing on the banner text itself.
+ *
+ * Five is far enough right that no banner label reaches it (the first four
+ * columns of every sectioned tab include at least one wide text column —
+ * Clean_Title, Event, Meal_Description) and near enough left to be on screen
+ * without scrolling sideways. The narrowest sectioned tab in the workbook is
+ * Lunch_Schedule's six columns, so the clamp is belt and braces rather than a
+ * case that happens today.
+ */
+const SECTION_JUMP_LINK_COLUMN = 5;
+
+/** The two labels. Overridable per tab — see writeUpcomingPastSections(). */
+const SECTION_JUMP_TO_PAST_LABEL = '⬇ Jump to Past';
+const SECTION_BACK_TO_TOP_LABEL = '⬆ Back to top';
+
+function sectionJumpLinkColumn_(numCols) {
+  if (!numCols || numCols < 2) return 0;
+  return Math.min(SECTION_JUMP_LINK_COLUMN, numCols);
+}
+
+/**
+ * `=HYPERLINK()` onto a row of THIS tab. `#gid=<id>&range=A<row>` is the
+ * anchor Sheets itself puts in the address bar, and the gid is the only part
+ * that cannot be guessed — the same tab name lives in forty spreadsheets here,
+ * so it is asked of the sheet rather than assumed.
+ *
+ * Returns '' when the sheet will not say what its id is, because a link to
+ * `#gid=null` is worse than no link.
+ */
+function sectionAnchorFormula_(sheet, targetRow, label) {
+  let gid;
+  try {
+    gid = sheet.getSheetId();
+  } catch (err) {
+    gid = null;
+  }
+  if (gid === null || gid === undefined || !targetRow || targetRow < 1) return '';
+  // A double quote in the label would end the string argument and leave a
+  // formula error where the link should be. Every label today is one of this
+  // file's own constants, which is exactly how such a thing goes unnoticed
+  // until somebody passes a tab's own wording through options.
+  const safe = String(label === undefined || label === null ? '' : label).replace(/"/g, '""');
+  return `=HYPERLINK("#gid=${gid}&range=A${targetRow}", "${safe}")`;
+}
+
+/**
+ * Writes one banner-row link cell — or CLEARS it, which is the case that
+ * needs the care. A tab whose Past section has emptied since the last render
+ * (every row of it deleted, or a triage tab worked through) would otherwise
+ * keep offering a link to nothing: the early write (99u) blanks the cell on
+ * the renderers that have one, but this is the shared writer and it states the
+ * cell either way rather than relying on its callers' blocks.
+ *
+ * Never fatal. A link between two sections is a convenience; a render that
+ * failed over one is not a trade worth making.
+ */
+function writeSectionJumpLink_(sheet, row, col, formula) {
+  if (!col) return false;
+  try {
+    const cell = sheet.getRange(row, col).setValue(formula || '');
+    if (!formula) return true;
+    cell
+      .setFontSize(TYPO.MUTED.size)
+      .setFontWeight('normal')
+      .setFontLine('underline')
+      // The banner's label spills rightwards and this cell's own label has to
+      // be allowed to do the same, or a narrow column clips "⬇ Jump to Past"
+      // to "⬇ Jump".
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.OVERFLOW);
+    return true;
+  } catch (err) {
+    log(`ℹ️ Could not write the section link on "${safeSheetName_(sheet)}" row ${row} (${err}).`);
+    return false;
+  }
+}
+
 /**
  * Writes two stacked sub-tables ("Upcoming" then "Past") starting at
  * `startRow`, each with its own banner, header row, and zebra-striped/
  * month-tinted data rows. Returns the exact row numbers used, so callers
  * can layer per-zone validation/conditional-formatting/formulas on top.
+ *
+ * Each banner also carries the one in-sheet link to the other section —
+ * `options.jumpToPastLabel` / `options.backToTopLabel` for a tab whose two
+ * sections are not called Upcoming and Past (Master_Program_Dashboard splits
+ * on status, not date). See SECTION_JUMP_LINK_COLUMN above.
  */
 function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastRows, options) {
   // THE tab-rewrite choke point: every sectioned tab in the workbook is
@@ -536,6 +651,7 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
     .map(h => headers.indexOf(h) + 1)
     .filter(col => col > 0);
 
+  const upcomingBannerRow = row;
   writeSectionBanner(sheet, row, numCols, options.upcomingLabel || '⏳ Upcoming');
   row++;
   writeSectionHeader(sheet, row, numCols, headers);
@@ -594,11 +710,39 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
         `"Show All Past Rows" on the ${APP_MENU_NAME} menu brings them back.`);
   }
 
+  // THE TWO LINKS, LAST — after collapseOldPastMonths() has had its say on the
+  // Past banner's own cell (column A; these are columns apart, but the order
+  // keeps the row's final state in one place) and once pastBannerRow is known,
+  // so both ends of the pair are written in the same pass.
+  //
+  // ONLY WHEN THERE IS SOMEWHERE TO GO. An empty Past section still gets its
+  // banner — that is what tells somebody there is no history yet — but a link
+  // down to it would be a link to nothing, and its "back" counterpart would be
+  // stranded under it. So the pair is written together or cleared together.
+  const jumpCol = sectionJumpLinkColumn_(numCols);
+  if (pastRows.length > 0) {
+    writeSectionJumpLink_(sheet, upcomingBannerRow, jumpCol,
+      sectionAnchorFormula_(sheet, pastBannerRow,
+        options.jumpToPastLabel || SECTION_JUMP_TO_PAST_LABEL));
+    // "Back to top" means the top of THIS table, not row 1: on the tabs that
+    // open with a Today or metrics block the table's own banner is what
+    // somebody who came down here was looking at, and on the flat tabs the
+    // two are the same row anyway.
+    writeSectionJumpLink_(sheet, pastBannerRow, jumpCol,
+      sectionAnchorFormula_(sheet, upcomingBannerRow,
+        options.backToTopLabel || SECTION_BACK_TO_TOP_LABEL));
+  } else {
+    writeSectionJumpLink_(sheet, upcomingBannerRow, jumpCol, '');
+    writeSectionJumpLink_(sheet, pastBannerRow, jumpCol, '');
+  }
+
   return {
     nextRow: row + 1,
+    upcomingBannerRow,
     upcomingHeaderRow, upcomingDataStart, upcomingCount: upcomingRows.length,
     pastBannerRow, pastHeaderRow, pastDataStart, pastCount: pastRows.length,
     hiddenPastRows: hidden,
+    jumpLinkColumn: jumpCol,
     // Where the program headings landed, for the one range-list paint that
     // takes the band's stripe and validations back off them (99zs). Empty on
     // every tab that is not grouped.

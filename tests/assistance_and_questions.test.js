@@ -58,7 +58,25 @@ function check(name, actual, expected) {
   else console.log(`ok   ${name}`);
 }
 
-const at = (h, m) => new Date(2026, 9, 13, h, m, 0);
+// ALWAYS A FUTURE DAY, for the reason tests/appointment_review.test.js states
+// over its own FIXTURE_MONTH: buildAppointmentChoicesForContext() drops any
+// session that has ALREADY STARTED, so a hard-coded day silently stops
+// offering its times the moment the calendar passes it. This one was written
+// as 13 October 2026 and expired on the 14th — and it did not fail, it THREW:
+// the choice list came back holding nothing but the escape hatch, and
+// parseAppointmentChoice() of a list that short returned null, so the file
+// aborted at that line and every check after it went unreported.
+//
+// The month after next, day 1, is the same bound that file uses: far enough
+// ahead that every hour of it is still to come whatever today is, and no
+// spans here cross a day, so nothing below depends on WHICH day it lands on
+// (buildAppointmentSlots() is time arithmetic, and the labels are times).
+const FIXTURE_MONTH = (() => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + 2, 1);
+})();
+const at = (h, m) =>
+  new Date(FIXTURE_MONTH.getFullYear(), FIXTURE_MONTH.getMonth(), 1, h, m, 0);
 
 // --- slot arithmetic -------------------------------------------------------
 const wills = sandbox.buildAppointmentSlots(at(12, 30), at(15, 30), 30);
@@ -193,8 +211,13 @@ check('the escape hatch is always last', free[free.length - 1], sandbox.ASSISTAN
 const booked = { EV1: new Set(['12:30 PM', '1:00 PM']) };
 const left = sandbox.buildAppointmentChoicesForContext(formCtx, booked);
 check('taken times disappear', left.length, 2);
+// GUARDED, because this is the line the expiry above died on. A short list is
+// something to REPORT — the checks after it are the ones that would say why —
+// and parseAppointmentChoice(undefined) returns null, so reading through it
+// takes the rest of the file down with it.
+const firstLeft = left.length ? sandbox.parseAppointmentChoice(left[0]) : null;
 check('and the earliest remaining one is offered first',
-  sandbox.parseAppointmentChoice(left[0]).slotStartLabel, '1:30 PM');
+  firstLeft && firstLeft.slotStartLabel, '1:30 PM');
 
 const past = { sessions: [Object.assign({}, session, { date: new Date(2020, 0, 1) })],
   showLocation: false, showTitle: false };

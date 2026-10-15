@@ -336,7 +336,7 @@ function cutOverLeaderSheet_(programKey, entry) {
           let n = 0;
           rowKeys.forEach(rowKey => {
             const changes = {};
-            LEADER_OWNED_COLUMNS.forEach((col, i) => {
+            LEADER_SHEET_EDITABLE_COLUMNS.forEach((col, i) => {
               if (edits[rowKey].changed[i]) changes[col] = edits[rowKey].values[i];
             });
             const res = applyLeaderRosterEditLocked_({
@@ -504,6 +504,10 @@ function leaderRosterView(token) {
         status: leaderRosterText_(row[sheetMap['Program_Status']]) || 'Active',
         Contacted: normalizeLeaderFlag(row[sheetMap['Contacted']]),
         Confirmed: normalizeLeaderFlag(row[sheetMap['Confirmed']]),
+        // The desk's own mark, carried so the page can show who was already
+        // marked in at the door rather than an empty column. One way out: see
+        // leaderRosterMark().
+        Attended: normalizeLeaderFlag(row[sheetMap['Attended']]),
         Waitlisted: normalizeLeaderFlag(row[sheetMap['Waitlisted']]),
         Dropped: normalizeLeaderFlag(row[sheetMap['Dropped']]),
         notes: leaderRosterText_(row[sheetMap['Leader_Notes']]),
@@ -560,8 +564,17 @@ function leaderRosterMark(token, rowKey, column, value) {
     const state = leaderRosterWriteState_(program.programKey);
     if (!state.writable) return { ok: false, message: state.reason };
     const col = String(column || '');
-    if (LEADER_OWNED_COLUMNS.indexOf(col) === -1) {
+    if (LEADER_SHEET_EDITABLE_COLUMNS.indexOf(col) === -1) {
       return { ok: false, message: 'That column cannot be changed here.' };
+    }
+    // ONE WAY, AND SAID OUT LOUD HERE. The writer below drops an untick of an
+    // acknowledgement column too (leaderAckEditApplies_, `46`), where it would
+    // read as "nothing to change" — which is true and is not what the leader
+    // asked. They pressed a button, so they get the reason rather than a
+    // shrug, and the page puts the tick back. The desk owns clearing it.
+    if (!leaderAckEditApplies_(col, value)) {
+      return { ok: false, message: `${col} is only ever added here — the front desk marks people in ` +
+        `as they arrive, and this page is never allowed to undo that. Ring the office to take one off.` };
     }
     const key = String(rowKey || '');
     const changes = {};
@@ -633,8 +646,13 @@ function applyLeaderRosterEditLocked_(args) {
   const note = a.note || 'Ticked on the web roster page.';
   const clean = {};
   Object.keys(a.changes || {}).forEach(col => {
-    if (LEADER_OWNED_COLUMNS.indexOf(col) === -1) return;
-    clean[col] = LEADER_FLAG_COLUMNS.indexOf(col) === -1
+    if (LEADER_SHEET_EDITABLE_COLUMNS.indexOf(col) === -1) return;
+    // The one-way rule, applied to the QUEUED path as well as the live one
+    // (99b replays these args verbatim, hours later, which is exactly when a
+    // stale false is most likely) and to the cutover's final read of the
+    // frozen sheet. leaderAckEditApplies_() is the single statement of it.
+    if (!leaderAckEditApplies_(col, a.changes[col])) return;
+    clean[col] = LEADER_SHEET_TICK_COLUMNS.indexOf(col) === -1
       ? normalizeLeaderNote(a.changes[col]).slice(0, LEADER_ROSTER_NOTE_MAX_CHARS)
       : normalizeLeaderFlag(a.changes[col]);
   });
@@ -680,7 +698,7 @@ function applyLeaderRosterEditLocked_(args) {
     const changedHeaders = [];
     Object.keys(clean).forEach(col => {
       if (map[col] === undefined) return;
-      const was = LEADER_FLAG_COLUMNS.indexOf(col) === -1
+      const was = LEADER_SHEET_TICK_COLUMNS.indexOf(col) === -1
         ? normalizeLeaderNote(row[map[col]]) : normalizeLeaderFlag(row[map[col]]);
       if (was === clean[col]) return;
       row[map[col]] = clean[col];
