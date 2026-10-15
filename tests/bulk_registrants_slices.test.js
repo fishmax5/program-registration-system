@@ -76,7 +76,8 @@ run(`
   applyQuickMarkLocked = args => {
     __advance(60 * 1000);
     const seen = __calls.some(c => c.name === args.name && c.session === args.session);
-    __calls.push({ name: args.name, session: args.session, standing: args.standing });
+    __calls.push({ name: args.name, session: args.session, standing: args.standing,
+      attended: !!args.attended });
     return seen
       ? { ok: true, message: '✅ ' + args.name + ' is already registered for Yoga on Sep 15 — nothing to add.' }
       : { ok: true, message: 'registered' };
@@ -158,3 +159,120 @@ assert.strictEqual(st.done, true);
 assert.strictEqual(st.next, names.length);
 
 console.log('bulk_registrants_slices: all passed');
+
+// ---------------------------------------------------------------------------
+// 8. THE ATTENDED TICK SURVIVES A HAND-OFF, AND ONLY EVER REACHES TODAY.
+//
+//    Attendance is a fact about a day (99q's banner), so a person put on both
+//    of a program's dates is marked on the one that has happened and not on
+//    the one that has not — and the flag has to be on the SAVED PLAN, because
+//    the slice that writes a given person is routinely not the slice the
+//    button started.
+// ---------------------------------------------------------------------------
+run('dismissBulkRegistrantsResult()');
+calls.length = 0;
+{
+  const todayKey = run('formatDateKey(new Date())');
+  const d = new RealDate(CLOCK);
+  const later = new RealDate(d.getFullYear(), d.getMonth(), d.getDate() + 13);
+  const futureKey = `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}`;
+  sandbox.__sessions = [
+    { value: 'Yoga · today', dateKey: todayKey, dateLabel: 'today' },
+    { value: 'Yoga · later', dateKey: futureKey, dateLabel: 'later' }
+  ];
+  run(`
+    listBulkRegistrantPrograms = () => [{ key: 'A|Yoga', title: 'Yoga', location: 'A', label: 'Yoga — A',
+      todayKey: '${todayKey}', sessions: __sessions }];
+  `);
+
+  // Four people on BOTH dates — two minutes of work each against a four
+  // minute budget, so the list cannot be finished in one slice.
+  const att = ['Ivy', 'Jon', 'Kay', 'Lee'].map((n, i) => ({
+    name: `${n} Attend`, recurrence: 'all', attended: i !== 2
+  }));
+  sandbox.__args = { programKey: 'A|Yoga', picked: [], people: att };
+  let s = run('startBulkRegistrants(__args)');
+  assert.strictEqual(s.active, true, 'the list is longer than one slice');
+  assert.ok(s.next > 0 && s.next < att.length, `part done after one slice (${s.next})`);
+
+  // THE FLAG IS IN THE STORED PLAN, read back out of Script Properties — not
+  // held in the execution that started the job.
+  const plan = JSON.parse(run('JSON.stringify(readBulkRegistrantsPlan_())'));
+  assert.deepStrictEqual(plan.people.map(p => [p.name, !!p.attended]),
+    att.map(p => [p.name, p.attended]), 'every person\'s own answer survived into the plan');
+  assert.ok('BULK_REGISTRANTS_PLAN_V1' in store, 'the key is not versioned up — see startBulkRegistrants');
+
+  // The resumed slices finish the rest.
+  for (let i = 0; i < 6 && run('bulkRegistrantsStatus()').active; i++) run('resumeBulkRegistrants()');
+  s = run('bulkRegistrantsStatus()');
+  assert.strictEqual(s.done, true);
+  assert.strictEqual(s.problem, '');
+  assert.strictEqual(s.next, att.length);
+
+  // THE MARK REACHED THE DESK'S OWN WRITER — for today, and for nobody's
+  // future date.
+  const marked = calls.filter(c => c.attended).map(c => `${c.name}|${c.session}`).sort();
+  assert.deepStrictEqual(marked, ['Ivy Attend|Yoga · today', 'Jon Attend|Yoga · today', 'Lee Attend|Yoga · today'],
+    'attended reached applyQuickMarkLocked on today only, and only for the people ticked');
+  assert.strictEqual(calls.filter(c => c.session === 'Yoga · later').length, att.length,
+    'everybody was still REGISTERED for the future date');
+  assert.strictEqual(calls.filter(c => c.session === 'Yoga · later' && c.attended).length, 0,
+    'and nobody was marked attended on a class that has not happened');
+  assert.strictEqual(calls.filter(c => c.name === 'Kay Attend' && c.attended).length, 0,
+    'a person left unticked is registered and not marked');
+
+  // And the lines say which date it was, rather than "marked attended" beside
+  // a person put on two.
+  const line = n => s.lines.filter(l => l.indexOf(n) !== -1)[0] || '';
+  assert.ok(/Marked attended on today\./.test(line('Ivy Attend')), line('Ivy Attend'));
+  assert.ok(!/later/.test(line('Ivy Attend')), 'the future date is never named as attended');
+  assert.ok(!/attended/i.test(line('Kay Attend')), line('Kay Attend'));
+
+  // BULK_REGISTRANTS_PLAN_V1 KEEPS ITS KEY, and this is what earns that: a
+  // plan saved by the code before this field existed — one whose people carry
+  // no `attended` key at all — is picked up mid-flight and finished without
+  // marking anybody, which is exactly what it always meant. Taken all the way
+  // through the stored property rather than asserted about a literal.
+  run('dismissBulkRegistrantsResult()');
+  calls.length = 0;
+  sandbox.__sessions = [
+    { value: 'Yoga · today', dateKey: todayKey, dateLabel: 'today' },
+    { value: 'Yoga · later', dateKey: futureKey, dateLabel: 'later' }
+  ];
+  sandbox.__args = { programKey: 'A|Yoga', picked: [],
+    people: ['Nan', 'Ora', 'Pat', 'Quy'].map(n => ({ name: `${n} Old`, recurrence: 'all', attended: true })) };
+  s = run('startBulkRegistrants(__args)');
+  assert.strictEqual(s.active, true, 'still going, so there is a plan left to rewrite');
+  {
+    // The stored plan, in the old shape, under the live job's own id.
+    const live = JSON.parse(run('JSON.stringify(readBulkRegistrantsPlan_())'));
+    live.people.forEach(p => { delete p.attended; });
+    sandbox.__old = live;
+    assert.strictEqual(run(`writeChunkedScriptProperty(BULK_REGISTRANTS_PLAN_PROP_KEY,
+      JSON.stringify(__old), BULK_REGISTRANTS_CHUNK_CHARS, BULK_REGISTRANTS_MAX_CHUNKS)`), true);
+  }
+  const doneBefore = s.next;
+  calls.length = 0;
+  for (let i = 0; i < 6 && run('bulkRegistrantsStatus()').active; i++) run('resumeBulkRegistrants()');
+  s = run('bulkRegistrantsStatus()');
+  assert.strictEqual(s.done, true);
+  assert.strictEqual(s.next, 4, 'the old-shape plan was finished, not abandoned');
+  assert.ok(doneBefore < 4);
+  assert.strictEqual(calls.filter(c => c.attended).length, 0,
+    'a plan with no attended field marks nobody — the old meaning, unchanged');
+  assert.ok(calls.length > 0, 'and everybody left was still registered');
+
+  // A list whose every date is still to come says so rather than claiming an
+  // attendance nobody got.
+  run('dismissBulkRegistrantsResult()');
+  calls.length = 0;
+  sandbox.__sessions = [{ value: 'Yoga · later', dateKey: futureKey, dateLabel: 'later' }];
+  sandbox.__args = { programKey: 'A|Yoga', picked: [], people: [{ name: 'Mae Future', recurrence: 'all', attended: true }] };
+  s = run('startBulkRegistrants(__args)');
+  assert.strictEqual(s.done, true);
+  assert.strictEqual(calls.filter(c => c.attended).length, 0, 'nothing in the future is marked');
+  assert.ok(/still to come/.test(s.lines[0]), s.lines[0]);
+  run('dismissBulkRegistrantsResult()');
+}
+
+console.log('bulk attended slices: ok');

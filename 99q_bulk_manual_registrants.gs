@@ -67,6 +67,30 @@
 //             appointment program, which is why those are not offered at all —
 //             an appointment is a chair at a time, and a list has no times.
 //
+// AND WHETHER THEY WERE THERE. A list is as often handed over AFTER the class
+// as before it — the sign-in sheet off the door, typed up at four o'clock, or
+// the leader's email saying "these eight came today" — so the review carries
+// an ATTENDED tick beside the rest: one in the header that sets every row at
+// once, and one per row that may disagree with it.
+//
+// ATTENDANCE IS A FACT ABOUT A DAY, and that is the whole of the rule. A
+// person put on eight Tuesdays has not attended seven of them, and a tick
+// that marked all eight would assert an attendance for a class that has not
+// happened yet — onto the very row the desk will mark for real on the day, so
+// nothing on any screen would ever say it was wrong. So the tick reaches only
+// the dates that are TODAY OR EARLIER (bulkRegistrantAttendedDateKeys); every
+// other date is still registered and is not marked.
+//
+// THE RULE IS APPLIED AT WRITE TIME, not at review time. A slice handed on
+// overnight resumes with a different "today" (the slice already drops the
+// dates that have gone past), so the dates it may mark have to be the ones it
+// is standing on rather than the ones somebody was looking at when they
+// pressed the button. In practice that is today's own session, because the
+// programs offered run from today forward (groupBulkRegistrantPrograms_); it
+// is stated as today-or-earlier because that is what makes it true rather
+// than incidental, and because the dialog disables the box on a row with no
+// such date instead of letting somebody tick what cannot happen.
+//
 // EVERY WRITE IS QUICK MARK'S REGISTER. Nothing here builds a registrant row:
 // each (person, date) goes through applyQuickMarkLocked() with `register`, so
 // the duplicate check, the capacity waitlisting, the walk-in roll entry and
@@ -496,7 +520,11 @@ function groupBulkRegistrantPrograms_(choices) {
     if (choice.dateKey < todayKey || choice.dateKey > horizonKey) return;
     const key = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.title}`;
     if (!byKey[key]) {
-      byKey[key] = { key, title: choice.title, location: choice.location, sessions: [] };
+      // `todayKey` is the WORKBOOK's today, carried so the dialog can grey out
+      // an attended box that would mark nothing. The tablet's own clock is not
+      // an answer here: it may be in another timezone, or simply wrong, and
+      // the rule has to be the one the write will apply.
+      byKey[key] = { key, title: choice.title, location: choice.location, todayKey, sessions: [] };
     }
     if (byKey[key].sessions.some(s => s.value === choice.label)) return;
     byKey[key].sessions.push({
@@ -530,6 +558,22 @@ function bulkRegistrantSessionsFor(program, recurrence, pickedDateKeys) {
     return sessions.filter(s => wanted[s.dateKey]);
   }
   return [];
+}
+
+/**
+ * Which of a person's sessions an attended tick may be applied to, as date
+ * keys. Pure, and the one statement of the rule in the banner above:
+ * attendance is a fact about a day, so a tick reaches today and anything
+ * earlier and no future date at all. `todayKey` is the caller's — the job
+ * reads it per slice, because a slice handed on overnight is standing on a
+ * different day from the one the list was reviewed on.
+ */
+function bulkRegistrantAttendedDateKeys(sessions, todayKey) {
+  const today = String(todayKey || '');
+  if (!today) return [];
+  return (sessions || [])
+    .filter(s => s && s.dateKey && String(s.dateKey) <= today)
+    .map(s => String(s.dateKey));
 }
 
 /**
@@ -713,7 +757,19 @@ function startBulkRegistrants(args) {
       phone: String(p.phone || ''),
       email: String(p.email || ''),
       recurrence: BULK_REGISTRANT_RECURRENCES.indexOf(p.recurrence) !== -1 ? p.recurrence : 'next',
-      lunch: !!p.lunch
+      lunch: !!p.lunch,
+      // WAS THIS PERSON THERE? The header tick sets it for the list and the
+      // row's own tick may disagree; which DATES it then reaches is decided
+      // per slice at write time, not here (see the banner).
+      //
+      // BULK_REGISTRANTS_PLAN_V1 KEEPS ITS KEY. The rule for a stored shape is
+      // a new key, and the reason is a reader that would misread the old
+      // shape — but this field is purely additive and its absence reads back
+      // as false, which is exactly what every plan written before it meant:
+      // nobody marked attended. So a job already mid-flight when this shipped
+      // carries on correctly, and a plan written here and read by the older
+      // code simply ignores it. Nothing stored changed meaning.
+      attended: !!p.attended
     }));
   if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to register.' };
   if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
@@ -818,6 +874,17 @@ function registerOneBulkPerson_(program, picked, person) {
   const sessions = bulkRegistrantSessionsFor(program, recurrence, picked);
   if (!sessions.length) return { line: `⚠️ ${name} — no dates left to put them on, so nothing was written.`, written: 0 };
 
+  // WHICH OF THOSE DATES THE ATTENDED TICK REACHES — today and anything
+  // earlier, and nothing else (bulkRegistrantAttendedDateKeys). Resolved HERE,
+  // inside the slice that is about to write, rather than carried on the plan:
+  // a list reviewed at five o'clock and finished by a trigger after midnight
+  // would otherwise mark yesterday's class attended under tomorrow's name.
+  const attendedKeys = {};
+  if (person.attended) {
+    bulkRegistrantAttendedDateKeys(sessions, formatDateKey(new Date()))
+      .forEach(k => { attendedKeys[k] = true; });
+  }
+
   const outcome = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => {
     let done = 0;
     let already = 0;
@@ -834,6 +901,12 @@ function registerOneBulkPerson_(program, picked, person) {
         session: session.value,
         name,
         register: true,
+        // The desk's own Attended mark, on the dates it may be true of. Never
+        // written here: applyQuickMarkLocked sets the column on an existing
+        // row and on a row it creates, which is what keeps a bulk-added
+        // attendance identical to a ticked one — the same cells, the same
+        // Manual_Override stamp, the same ledger entry.
+        attended: !!attendedKeys[session.dateKey],
         standing: recurrence === 'club',
         standingLunch: recurrence === 'club' && !!person.lunch,
         signup: !!person.lunch && recurrence !== 'club',
@@ -844,7 +917,10 @@ function registerOneBulkPerson_(program, picked, person) {
       // The desk's own "already registered — nothing to add" is a success
       // that wrote nothing; counted apart so the line does not claim a date
       // it did not add (and so a person re-run after a killed slice reads as
-      // what happened).
+      // what happened). The desk says it only when the tick added nothing at
+      // all, so a person already on a date who is now being marked attended
+      // does not come back that way — their Attended cell moved, which is a
+      // write, and is counted as one.
       if (res.ok && /already registered/i.test(String(res.message || ''))) already++;
       else if (res.ok) done++;
       else if (!refused) refused = res.message || '';
@@ -858,16 +934,24 @@ function registerOneBulkPerson_(program, picked, person) {
   if (!outcome) return { busy: true };
 
   const alreadyNote = outcome.already ? ` Already on ${outcome.already} date(s), left as they were.` : '';
+  // NAMED, NOT COUNTED. "Marked attended" beside a person put on eight dates
+  // is the sentence this rule exists to stop anybody reading, so the line says
+  // which date(s) it was — and says nothing at all where the tick reached no
+  // date, rather than reporting an attendance nobody got.
+  const attendedLabels = sessions.filter(s => attendedKeys[s.dateKey]).map(s => s.dateLabel || s.dateKey);
+  const attendedNote = attendedLabels.length
+    ? ` Marked attended on ${attendedLabels.join(', ')}.`
+    : (person.attended ? ' Not marked attended: every date chosen is still to come.' : '');
   let line;
   if (recurrence === 'club') {
     line = outcome.done || outcome.already
-      ? `🔁 ${name} — standing place on ${program.title}; every future date will follow.`
+      ? `🔁 ${name} — standing place on ${program.title}; every future date will follow.${attendedNote}`
       : `⚠️ ${name} — no standing place was made. ${outcome.refused}`;
   } else if (outcome.done) {
-    line = `✅ ${name} — ${outcome.done} of ${sessions.length} date(s).${alreadyNote}` +
+    line = `✅ ${name} — ${outcome.done} of ${sessions.length} date(s).${alreadyNote}${attendedNote}` +
       (outcome.refused ? ` Not the rest: ${outcome.refused}` : '');
   } else if (outcome.already && !outcome.refused) {
-    line = `➖ ${name} — already registered on every date chosen; nothing added.`;
+    line = `➖ ${name} — already registered on every date chosen; nothing added.${attendedNote}`;
   } else {
     line = `⚠️ ${name} — nothing written.${alreadyNote} ${outcome.refused}`;
   }
@@ -1048,6 +1132,10 @@ function buildBulkRegistrantsHtml() {
     <option value="club">Standing place (every future date)</option>
   </select>
   <label style="margin-left:12px"><input type="checkbox" id="lunch"> with lunch</label>
+  <label style="margin-left:12px"><input type="checkbox" id="attended"> mark everyone attended</label>
+  <span class="hint" style="display:block;margin-top:4px">Attended is a fact about a day, so it is only
+  written on dates that are <b>today or earlier</b> — a future date is registered and left unmarked, and a
+  row with no such date has its box greyed out.</span>
 </div>
 <div id="dates" style="margin-top:6px"></div>
 <h3>2. The list</h3>
@@ -1097,6 +1185,12 @@ you can close this window and open it again to see how far it has got.</p>
   var ROWS = [];
   var POLL = null;
   var LABELS = { exact: 'On the roll', contact: 'Same phone/email', similar: 'Similar name', 'new': 'New' };
+  // Today as the WORKBOOK's own date key, for the attended rule — read off
+  // the programs the server sent (groupBulkRegistrantPrograms_ puts it there)
+  // rather than off this tablet's clock, which may be in another timezone or
+  // simply wrong. Empty until the list arrives, which greys every attended box
+  // until it does: nothing may be ticked attended on a day nobody has stated.
+  var TODAY = '';
   var RECURRENCES = [['next','Next date'],['picked','Ticked dates'],['all','Every date'],['club','Standing']];
   var FIELDS = [['name','Name'],['first','First name'],['last','Last name'],['phone','Phone'],['email','Email'],['','— ignore —']];
 
@@ -1121,6 +1215,7 @@ you can close this window and open it again to see how far it has got.</p>
 
   google.script.run.withSuccessHandler(function (list) {
     PROGRAMS = list || [];
+    TODAY = (PROGRAMS[0] && PROGRAMS[0].todayKey) || '';
     var sel = $('program');
     sel.textContent = '';
     sel.appendChild(el('option', PROGRAMS.length ? 'Choose a program…' : 'No upcoming programs found'));
@@ -1154,6 +1249,15 @@ you can close this window and open it again to see how far it has got.</p>
   $('recurrence').addEventListener('change', function () {
     var v = this.value;
     ROWS.forEach(function (r) { r.rec.value = v; });
+    evaluate();
+  });
+  // SELECT ALL, and no more than that: it sets what every row ASKED for, and
+  // evaluate() still decides what each row can actually be given. Untick one
+  // row afterwards and it stays unticked — the header is a starting point for
+  // the list, not an override of the person reading it.
+  $('attended').addEventListener('change', function () {
+    var on = this.checked;
+    ROWS.forEach(function (r) { r.attWanted = on; });
     evaluate();
   });
 
@@ -1279,10 +1383,11 @@ you can close this window and open it again to see how far it has got.</p>
     ROWS = [];
     var table = el('table');
     var head = el('tr');
-    ['', 'Row', 'Pasted', 'Match', 'Register as', 'Phone', 'Email', 'How often', 'Note']
+    ['', 'Row', 'Pasted', 'Match', 'Register as', 'Phone', 'Email', 'How often', 'Attended today', 'Note']
       .forEach(function (h) { head.appendChild(el('th', h)); });
     table.appendChild(head);
     var defaultRec = $('recurrence').value;
+    var defaultAtt = $('attended').checked;
     PEOPLE.forEach(function (p, i) {
       var tr = el('tr');
       var r = { tr: tr, person: p, auto: false, touched: false };
@@ -1305,6 +1410,14 @@ you can close this window and open it again to see how far it has got.</p>
       rec.value = defaultRec;
       rec.addEventListener('change', evaluate);
       tdRec.appendChild(rec); tr.appendChild(tdRec); r.rec = rec;
+      // THE ROW'S OWN ANSWER, which may disagree with the header's. attWanted
+      // is what the person asked for and the box is what can actually happen:
+      // they part company on a row whose dates are all still to come, and come
+      // back together the moment its dates include today (see evaluate()).
+      var tdAtt = el('td'); var att = document.createElement('input');
+      att.type = 'checkbox'; att.checked = defaultAtt;
+      att.addEventListener('change', function () { r.attWanted = att.checked; evaluate(); });
+      tdAtt.appendChild(att); tr.appendChild(tdAtt); r.att = att; r.attWanted = defaultAtt;
       r.note = el('td', '', 'note'); tr.appendChild(r.note);
       table.appendChild(tr);
       ROWS.push(r);
@@ -1326,6 +1439,12 @@ you can close this window and open it again to see how far it has got.</p>
     return p.sessions.filter(function (s) { return picked.indexOf(s.dateKey) !== -1; });
   }
   function chosen(r) { return (r.person.options || [])[Number(r.as.value)] || { name: r.person.name, alreadyOn: {} }; }
+  // The same rule the server applies (bulkRegistrantAttendedDateKeys), said
+  // once more here so the screen can grey out a box that would do nothing.
+  // The server is still the one that decides, on the day it writes.
+  function attendableDates(rec) {
+    return datesFor(rec).filter(function (d) { return d.dateKey <= TODAY; });
+  }
 
   // Who is already there, and who is on the list twice — worked out again on
   // every change, because the answer depends on the name, the dates and the
@@ -1363,6 +1482,15 @@ you can close this window and open it again to see how far it has got.</p>
         note = 'Listed twice — same person as row ' + seen[key] + '.';
       }
       if (!already && key && (r.on.checked || r.auto)) seen[key] = r.person.line;
+      // Attendance is a fact about a day: a row whose chosen dates are all
+      // still to come cannot be marked, so the box is greyed rather than
+      // left ticked over a promise the write will not keep.
+      var canAttend = attendableDates(rec).length > 0;
+      r.att.disabled = !canAttend;
+      r.att.checked = canAttend && !!r.attWanted;
+      r.att.title = canAttend
+        ? 'Marked attended on ' + attendableDates(rec).map(function (d) { return d.dateLabel; }).join(', ')
+        : 'No date today or earlier is chosen for this row, so there is no day to mark.';
       r.note.textContent = note;
       r.tr.className = already ? 'already' : '';
       if (already && !r.touched && r.on.checked) { r.on.checked = false; r.auto = true; }
@@ -1389,9 +1517,11 @@ you can close this window and open it again to see how far it has got.</p>
       if (!r.on.checked) return;
       var opt = chosen(r);
       people.push({ name: opt.name, phone: r.person.phone, email: r.person.email,
-        recurrence: r.rec.value, lunch: lunch });
+        recurrence: r.rec.value, lunch: lunch, attended: r.att.checked && !r.att.disabled });
     });
-    if (!confirm('Register ' + people.length + ' people on ' + p.label + '?')) return;
+    var marked = people.filter(function (x) { return x.attended; }).length;
+    if (!confirm('Register ' + people.length + ' people on ' + p.label + '?' +
+      (marked ? '\\n\\n' + marked + ' of them will also be marked attended — on today, never on a date still to come.' : ''))) return;
     $('commit').disabled = true;
     say('');
     showProgress({ exists: true, active: true, label: p.label, total: people.length, next: 0, lines: [] });
