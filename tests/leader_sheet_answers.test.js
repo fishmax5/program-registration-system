@@ -85,6 +85,14 @@ function registrantRow(fields) {
 }
 
 // --- The column's place -----------------------------------------------------
+//
+// The shape the sheet had before Answers was added. Kept as a list because
+// what is being pinned is that a SYNC-OWNED column goes on the END, after the
+// two hidden machine columns, so a sheet drawn under an older shape reads its
+// leader ticks back by header exactly where they always were. A column
+// written by the LEADER goes in among the other ticks instead, where they will
+// look for it (Attended; see tests/leader_sheet_attended.test.js), which is
+// why this no longer asserts the whole list verbatim.
 const OLD_HEADERS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
   'Phone', 'Email', 'Program_Status',
@@ -92,7 +100,9 @@ const OLD_HEADERS = [
   'Row_Key', 'Pushed_Snapshot'
 ];
 check('Answers is appended after every column the sheet already had',
-  Array.from(LEADER_SHEET_HEADERS), OLD_HEADERS.concat(['Answers']));
+  Array.from(LEADER_SHEET_HEADERS).slice(-3), ['Row_Key', 'Pushed_Snapshot', 'Answers']);
+check('and every column of that older shape is still there, in its own order',
+  Array.from(LEADER_SHEET_HEADERS).filter(h => OLD_HEADERS.indexOf(h) !== -1), OLD_HEADERS);
 check('Answers is sync-owned, never a leader-owned column',
   [LEADER_SHEET_DERIVED_COLUMNS.indexOf('Answers') !== -1, LEADER_OWNED_COLUMNS.indexOf('Answers')],
   [true, -1]);

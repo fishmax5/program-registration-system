@@ -1164,6 +1164,11 @@ const CLUB_LUNCH_OPTIONS = ['Yes - Lunch', 'No Lunch'];
  * never disagree about what is leader-owned, which is the kind of drift that
  * turns a merge into data loss.
  *
+ * These five are the ones that merge BOTH WAYS. The shared roster also carries
+ * the acknowledgement ticks below, which do not, and the three lists after
+ * this one are how "leader-owned" and "a leader may type here" stopped being
+ * the same sentence.
+ *
  * Waitlisted is deliberately SEPARATE from Program_Status's own "Waitlisted"
  * value. They answer different questions: Program_Status is what the system
  * decided from Max_Capacity, and this is what the leader decided about a
@@ -1175,6 +1180,57 @@ const LEADER_OWNED_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped',
 
 /** The first four of those are real checkboxes; Leader_Notes is free text. */
 const LEADER_FLAG_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
+
+/**
+ * THE ACKNOWLEDGEMENT TICK, AND THE ONE DIRECTION IT TRAVELS.
+ *
+ * Attended is not a leader's column the way the five above are — it is the
+ * DESK'S column, ticked at the door by Quick Mark (`38`) and by the sign-in
+ * app (`74`), counted by the dashboard's metrics block (`43`) and stored by
+ * the Metrics tab (`83`). But the person who knows who walked into the room is
+ * very often the one standing in it, and until now they had nowhere to say so:
+ * a leader covering a class at Ashbridge could see the roster on their own
+ * sheet and not record a single arrival on it.
+ *
+ * So the roster carries it, and it travels ONE WAY: a tick sets Attended on
+ * the registrant row, and an UNTICK does nothing at all. That asymmetry is
+ * deliberate and is the only thing that makes the column safe to hand out.
+ * The desk is the authority for clearing a mark — Quick Mark's own "I ticked
+ * the wrong Mary" undo (`99a`) is a decision somebody made in front of the
+ * person — and a leader tidying their sheet a week later, or a browser tab
+ * open since Tuesday saving a stale false, must never be able to erase it.
+ * Attendance only ever goes up from here. It is said in the sheet's banner
+ * note and on the column's own header cell, so a leader is told rather than
+ * surprised (leaderSheetAckColumnNote(), `46`).
+ *
+ * Separate from LEADER_FLAG_COLUMNS rather than added to it for the same
+ * reason: those five merge per cell in BOTH directions against the pushed
+ * snapshot, and a sixth with a different rule inside that list is a rule
+ * nobody reading the merge would see.
+ */
+const LEADER_ACK_FLAG_COLUMNS = ['Attended'];
+
+/**
+ * Everything a program leader may type on the shared roster — the five they
+ * own plus the acknowledgement ticks — and THE ORDER THE PUSHED SNAPSHOT IS
+ * WRITTEN IN, which is why the ack columns are appended rather than slotted in
+ * beside the ticks they sit next to on screen.
+ *
+ * The snapshot is a positional JSON array in a hidden cell of somebody else's
+ * spreadsheet (encodeLeaderSnapshot, `46`), and every sheet in Drive is still
+ * holding one written under the old five-column list. Appending means an old
+ * snapshot is a PREFIX of a new one, so decodeLeaderSnapshot() can pad it and
+ * the first pull after this ships still reads a leader's ticks back correctly
+ * — where a reordered list would have made every stored snapshot unreadable
+ * and quietly dropped an hour of somebody's work.
+ *
+ * The DISPLAY order is LEADER_SHEET_HEADERS' business, and there Attended sits
+ * with the other ticks where a leader expects it.
+ */
+const LEADER_SHEET_EDITABLE_COLUMNS = LEADER_OWNED_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
+
+/** Every column on the shared roster drawn as a real checkbox. Leader_Notes is free text. */
+const LEADER_SHEET_TICK_COLUMNS = LEADER_FLAG_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
 
 const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
 
