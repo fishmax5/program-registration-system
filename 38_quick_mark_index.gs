@@ -583,7 +583,13 @@ function orderQuickMarkChoices(choices) {
  * Program_Settings (so an aged-off program is still offered), the registrant
  * rows (anything hand-added), and Lunch_Schedule (the lunch-only days).
  */
-function collectKnownProgramChoices(location, registrantRows) {
+function collectKnownProgramChoices(location, registrantRows, options) {
+  // `sessionsOnly` is for a caller that keeps only DATED, non-lunch,
+  // non-appointment sessions (Update Registrations in Bulk, `99q`): the session
+  // table is the one source of those, so the Program_Settings, Registrants and
+  // Lunch_Schedule reads — the Registrants tab being the biggest on the
+  // workbook — would be paid for and then thrown away.
+  const sessionsOnly = !!(options && options.sessionsOnly);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const todayKey = formatDateKey(new Date());
   const todayMidnight = parseDateKey(todayKey);
@@ -648,6 +654,10 @@ function collectKnownProgramChoices(location, registrantRows) {
     }
   } catch (err) {
     log(`ℹ️ Quick Mark could not read the program dashboard for its program list (${err}).`);
+  }
+
+  if (sessionsOnly) {
+    return Object.keys(choices).map(k => choices[k]);
   }
 
   try {

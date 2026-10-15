@@ -580,12 +580,11 @@ function bulkSurnameKey_(name) {
  * Appointment programs and lunch-only rows are left out (see the banner).
  */
 function listBulkRegistrantPrograms() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
-  const registrantRows = sheet
-    ? getSectionedRowValues(sheet, HEADERS.All_Registrants, 'Event_ID')
-    : [];
-  return groupBulkRegistrantPrograms_(collectKnownProgramChoices(null, registrantRows));
+  // Session table only. This list keeps dated sessions that are neither lunch
+  // nor appointment, and those come from the session table alone — reading the
+  // whole Registrants tab (and two more tabs) to build it made the dialog's
+  // program box take far longer than anything else on the page.
+  return groupBulkRegistrantPrograms_(collectKnownProgramChoices(null, [], { sessionsOnly: true }));
 }
 
 /** Pure half of listBulkRegistrantPrograms(), so the grouping is testable. */
@@ -1643,6 +1642,8 @@ two columns set to the same name part are joined.</p>
 <span class="new">New</span> is added to the roll as typed.
 Anybody the chosen action <b>cannot do anything for</b> — already registered when registering, not
 registered at all when cancelling — is unticked for you and says why. Untick anybody else to leave them out.</p>
+<p class="hint" style="margin:0 0 6px 0"><a href="#" onclick="return tickAll(true)">Check all</a> ·
+<a href="#" onclick="return tickAll(false)">Uncheck all</a></p>
 <div id="review"></div>
 <div style="margin-top:8px"><button id="commit" onclick="commit()" disabled>Apply to the ticked people</button></div>
 </div>
@@ -1943,7 +1944,10 @@ you can close this window and open it again to see how far it has got.</p>
       var tr = el('tr');
       var r = { tr: tr, person: p, auto: false, touched: false };
       var tdOn = el('td'); var on = document.createElement('input');
-      on.type = 'checkbox'; on.checked = true;
+      // A list read off the program starts with nobody ticked: it is everybody
+      // on the program, and the point of picking is to choose some of them. A
+      // pasted list is the opposite — every line was typed on purpose.
+      on.type = 'checkbox'; on.checked = !FROM_ROSTER;
       on.addEventListener('change', function () { r.touched = true; updateCommit(); });
       tdOn.appendChild(on); tr.appendChild(tdOn); r.on = on;
       tr.appendChild(el('td', String(p.line || i + 1)));
@@ -2148,6 +2152,18 @@ you can close this window and open it again to see how far it has got.</p>
     return n ? ' ' + n + ' with nothing for this action to do (or listed twice) — unticked.' : '';
   }
 
+  // Check all ticks every row that has something to do; a row the review has
+  // greyed out ("already registered", "listed twice") stays unticked, because
+  // ticking those is how a person is registered twice.
+  function tickAll(on) {
+    ROWS.forEach(function (r) {
+      if (on && r.tr.className === 'already') return;
+      r.on.checked = on; r.touched = true; r.auto = false;
+    });
+    updateCommit();
+    return false;
+  }
+
   function updateCommit() {
     var any = ROWS.some(function (r) { return r.on.checked; });
     $('commit').disabled = !(any && program());
@@ -2237,12 +2253,29 @@ you can close this window and open it again to see how far it has got.</p>
       .continueBulkRegistrants();
   }
   function another() {
-    google.script.run.withSuccessHandler(function () { backToSetup(); }).dismissBulkRegistrantsResult();
+    // Go back at once and forget the server's copy in the background: the screen
+    // must not depend on that call, and one that failed used to leave the button
+    // doing nothing at all, silently.
+    backToSetup();
+    google.script.run.withSuccessHandler(function () {})
+      .withFailureHandler(function (err) {
+        say('The finished list could not be cleared (' + err.message + '). You can still start a new one; it will show again if this window is reopened.', 'err');
+      }).dismissBulkRegistrantsResult();
   }
   function backToSetup() {
     if (POLL) { clearInterval(POLL); POLL = null; }
+    // A new list starts empty: the last one's rows, mapping and review would
+    // otherwise sit under the setup, ready to be applied a second time.
+    RAW = null; PEOPLE = []; ROWS = []; FROM_ROSTER = false;
+    $('csv').value = '';
+    try { $('file').value = ''; } catch (e) {}
+    $('review').textContent = '';
+    $('columns').textContent = '';
+    $('mapping').style.display = 'none';
+    $('reviewBox').style.display = 'none';
     $('progress').style.display = 'none';
     $('setup').style.display = '';
+    say('');
     updateCommit();
   }
 </script>`;
