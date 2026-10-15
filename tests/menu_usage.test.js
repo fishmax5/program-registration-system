@@ -94,7 +94,7 @@ check('the bootstrap wrapper matches BOOTSTRAP_ENTRY_NAME', full.names.includes(
 // The Desk menu is the serving day, at its top level, unnested.
 const desk = full.byName(DESK);
 check('desk has no submenus', desk.subs.length, 0);
-['Quick Mark', 'Add Registrants in Bulk', 'Log Volunteer Hours', 'Log a Private Session', 'Sign-In Sheet',
+['Quick Mark', 'Update Registrations in Bulk', 'Log Volunteer Hours', 'Log a Private Session', 'Sign-In Sheet',
  'Open the Sign-In App', 'Update Everything Now', 'Why did nothing happen'].forEach(word =>
   check(`desk carries "${word}"`, desk.items.some(l => l.indexOf(word) >= 0), true));
 check('the Health panel is at the top of Coordinator', full.byName(COORD).fns[0], 'menu_showHealthPanel');

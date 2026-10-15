@@ -61,7 +61,7 @@
 //      interactive and asks the server nothing at all.
 //
 //      A PAGE WITH NO WORKBOOK DATA IN IT IS FREE TO CARRY, and two of the six
-//      are exactly that: Add Registrants in Bulk fetches everything it draws
+//      are exactly that: Update Registrations in Bulk fetches everything it draws
 //      (99q's own banner), and the Health panel's check list is a constant
 //      (99zm). They are marked `static`, carried beside the desk's page, and
 //      cannot go stale because there is nothing in them to be stale. They are
@@ -156,8 +156,8 @@ const STAFF_CONSOLE_PANELS = {
   },
   bulkRegistrants: {
     tab: 'people',
-    title: 'Add Registrants in Bulk',
-    blurb: 'Paste a list or open a CSV / Excel file onto one program.',
+    title: 'Update Registrations in Bulk',
+    blurb: 'A list onto one program: register, cancel, waitlist or correct in one press.',
     // "Nothing from the workbook is interpolated here" — 99q's own banner.
     static: true,
     gate: () => '',

@@ -195,7 +195,7 @@ function buildAppMenu(ui, includeAdmin, role) {
   //   named groups, with everything irreversible collected behind one clearly
   //   labelled door instead of sitting a slot away from a report.
   //
-  //   Add Registrants in Bulk, Log Volunteer Hours and Build a Form Question
+  //   Update Registrations in Bulk, Log Volunteer Hours and Build a Form Question
   //   came UP to the top, beside the serving-day three: each is pressed every
   //   week and was a submenu deep.
   //
@@ -241,7 +241,7 @@ function buildDeskMenu_(ui, title) {
     // The list a leader hands over on the first day of term: one program,
     // a pasted list, matched against the roll and reviewed before anything is
     // written. Every write is Quick Mark's Register — see section 99q.
-    .addItem('\ud83d\udccb Add Registrants in Bulk (paste or CSV)\u2026', menuFn_('showBulkRegistrantsDialog'))
+    .addItem('\ud83d\udccb Update Registrations in Bulk (paste, pick or CSV)\u2026', menuFn_('showBulkRegistrantsDialog'))
     // A volunteer is not a registrant — see 99e and the note under Rosters &
     // Sharing, where the tab itself still opens from.
     .addItem('\ud83e\udd1d Log Volunteer Hours\u2026', menuFn_('showVolunteerHoursDialog'))

@@ -276,3 +276,95 @@ calls.length = 0;
 }
 
 console.log('bulk attended slices: ok');
+
+// ---------------------------------------------------------------------------
+// THE OTHER FIVE ACTIONS, through the one dispatcher the slice calls.
+//
+// Register and Attended are the path they always were; the rest take one lock
+// around the one writer each needs, and every one of them answers { busy } the
+// same way, so the slice's hand-off reads one answer whatever the list is for.
+// ---------------------------------------------------------------------------
+{
+  run('dismissBulkRegistrantsResult()');
+  calls.length = 0;
+  sandbox.__sessions = [{ value: 'Yoga · 9/15', dateKey: '2026-09-15', dateLabel: 'Sep 15' },
+                        { value: 'Yoga · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22' }];
+  const routed = [];
+  sandbox.__routed = routed;
+  // The three writers stubbed at their own front doors, so what is pinned here
+  // is the ROUTING and the plan — each writer's own behaviour is 71's and 99a's.
+  run(`
+    cancelOneBulkPerson_ = (program, sessions, person) => {
+      __routed.push(['cancel', person.name, sessions.length, person.reason]);
+      return { line: 'cancelled ' + person.name, written: sessions.length };
+    };
+    restatusOneBulkPerson_ = (program, sessions, person, toWaitlist) => {
+      __routed.push([toWaitlist ? 'waitlist' : 'reactivate', person.name, sessions.length, person.reason]);
+      return { line: 'restatused ' + person.name, written: 1 };
+    };
+    contactOneBulkPerson_ = (program, sessions, person) => {
+      __routed.push(['contact', person.name, sessions.length, person.reason]);
+      return { line: 'contacted ' + person.name, written: 1 };
+    };
+  `);
+
+  sandbox.__args = { programKey: 'A|Yoga', picked: ['2026-09-22'], people: [
+    { name: 'Can Cel', recurrence: 'all', action: 'cancel', reason: 'term ended' },
+    { name: 'Way Ting', recurrence: 'picked', action: 'waitlist' },
+    { name: 'Put Back', recurrence: 'next', action: 'reactivate' },
+    { name: 'New Phone', recurrence: 'next', action: 'contact' },
+    { name: 'Reg Ular', recurrence: 'next', action: 'register' },
+    { name: 'Came Today', recurrence: 'next', action: 'attended' },
+    { name: 'Non Sense', recurrence: 'next', action: 'burn it all down' }
+  ] };
+  let s = run('startBulkRegistrants(__args)');
+  for (let i = 0; i < 8 && run('bulkRegistrantsStatus()').active; i++) run('resumeBulkRegistrants()');
+  s = run('bulkRegistrantsStatus()');
+  assert.strictEqual(s.done, true);
+  assert.strictEqual(s.problem, '');
+  assert.strictEqual(s.next, 7, 'every person reached');
+
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(routed)), [
+    ['cancel', 'Can Cel', 2, 'term ended'],
+    ['waitlist', 'Way Ting', 1, ''],
+    ['reactivate', 'Put Back', 1, ''],
+    ['contact', 'New Phone', 1, '']
+  ], 'each action to its own writer, with the dates its row asked for');
+
+  // The two register-ish actions went to the desk's own Register instead. The
+  // Attended one asked for the tick and got none, because the only date it was
+  // given is still to come — the rule the slice applies on the day it writes.
+  assert.deepStrictEqual(calls.map(c => [c.name, c.attended]),
+    [['Reg Ular', false], ['Came Today', false], ['Non Sense', false]],
+    'an action outside the vocabulary falls back to Register rather than being guessed at');
+
+  // The plan stores what was chosen and nothing it was not given.
+  run('dismissBulkRegistrantsResult()');
+  sandbox.__args = { programKey: 'A|Yoga', picked: [], people: [{ name: 'Can Cel', recurrence: 'next', action: 'cancel' }] };
+  run('startBulkRegistrants(__args)');
+  const plan = JSON.parse(run('JSON.stringify(readBulkRegistrantsPlan_())') || 'null');
+  if (plan) {
+    assert.strictEqual(plan.people[0].action, 'cancel');
+    assert.strictEqual(plan.people[0].reason, '');
+  }
+  run('stopBulkRegistrants()');
+  run('dismissBulkRegistrantsResult()');
+}
+
+// And the lock: a writer that could not have the workbook is a hand-off, never
+// a line claiming a cancellation that did not happen.
+{
+  sandbox.__sessions = [{ value: 'Yoga · 9/15', dateKey: '2026-09-15', dateLabel: 'Sep 15' }];
+  const busy = JSON.parse(run(`(() => {
+    const was = withScriptLock;
+    withScriptLock = (wait, fn, fallback) => fallback;
+    try {
+      return JSON.stringify(applyOneBulkPersonAction_(
+        { title: 'Yoga', location: 'A', sessions: __sessions }, [],
+        { name: 'Can Cel', recurrence: 'next', action: 'cancel' }));
+    } finally { withScriptLock = was; }
+  })()`));
+  assert.deepStrictEqual(busy, { busy: true }, 'a busy workbook is answered the way Register answers it');
+}
+
+console.log('bulk update actions slices: ok');

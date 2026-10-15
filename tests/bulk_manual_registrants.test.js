@@ -85,6 +85,91 @@ assert.deepStrictEqual(keys('club'), ['2026-09-15']);
 assert.deepStrictEqual(keys('all'), ['2026-09-15', '2026-09-22']);
 assert.deepStrictEqual(keys('picked'), ['2026-09-22'], 'a date the program does not have is ignored');
 
+// 4b. WHICH ROWS AN ACTION IS ABOUT — the pure matcher the five non-register
+//     actions share. Keyed on the DATE, because a list is reviewed against
+//     dates and an Event_ID cannot be read backwards into one.
+{
+  const out = JSON.parse(run(`(() => {
+    const map = getIndexMap(HEADERS.All_Registrants);
+    const row = (name, title, location, date, type, primary) => {
+      const r = new Array(HEADERS.All_Registrants.length).fill('');
+      r[map['Name']] = name; r[map['Event']] = title; r[map['Location']] = location;
+      r[map['Event_Date']] = date; r[map['Person_Type']] = type || 'Attendee';
+      r[map['Primary_Registrant']] = primary || ''; return r;
+    };
+    const program = { title: 'Yoga', location: 'A' };
+    const match = bulkActionRowMatcher_(program, ['2026-09-15'], 'Jane Smith');
+    const rows = {
+      hers:        row('Jane Smith', 'Yoga', 'A', '2026-09-15'),
+      herGuest:    row('Her daughter', 'Yoga', 'A', '2026-09-15', 'Guest', 'Jane Smith'),
+      otherGuest:  row('Somebody else', 'Yoga', 'A', '2026-09-15', 'Guest', 'Bob Kaplan'),
+      otherDate:   row('Jane Smith', 'Yoga', 'A', '2026-09-22'),
+      otherBuilding: row('Jane Smith', 'Yoga', 'B', '2026-09-15'),
+      otherProgram:  row('Jane Smith', 'Bingo', 'A', '2026-09-15'),
+      otherPerson:   row('Bob Kaplan', 'Yoga', 'A', '2026-09-15')
+    };
+    const out = {};
+    Object.keys(rows).forEach(k => { out[k] = match(rows[k], map); });
+    // A guest never widens to the member: the reverse of the rule above.
+    out.guestsOwn = bulkActionRowMatcher_(program, ['2026-09-15'], 'Her daughter')(rows.hers, map);
+    return JSON.stringify(out);
+  })()`));
+  assert.strictEqual(out.hers, true, 'her own row');
+  assert.strictEqual(out.herGuest, true, 'a guest goes with the person who brought them');
+  assert.strictEqual(out.otherGuest, false, 'somebody else\'s guest does not');
+  assert.strictEqual(out.otherDate, false, 'a date nobody chose is left alone');
+  assert.strictEqual(out.otherBuilding, false, 'the same title at the other building is another program');
+  assert.strictEqual(out.otherProgram, false);
+  assert.strictEqual(out.otherPerson, false);
+  assert.strictEqual(out.guestsOwn, false, 'cancelling a guest never widens to their member');
+}
+
+// 4c. PICKING OFF THE PROGRAM instead of pasting: one entry per PERSON, every
+//     name exact by construction, guests and superseded rows left out, a
+//     cancelled row still offered (it is what "put them back on" is about).
+{
+  const roster = JSON.parse(run(`(() => {
+    const map = getIndexMap(HEADERS.All_Registrants);
+    const row = (name, date, status, type, primary, phone) => {
+      const r = new Array(HEADERS.All_Registrants.length).fill('');
+      r[map['Name']] = name; r[map['Event']] = 'Yoga'; r[map['Location']] = 'A';
+      r[map['Event_Date']] = date; r[map['Program_Status']] = status;
+      r[map['Person_Type']] = type || 'Attendee'; r[map['Primary_Registrant']] = primary || '';
+      r[map['Phone']] = phone || ''; return r;
+    };
+    const program = { title: 'Yoga', location: 'A', sessions: [
+      { value: 'Yoga · 9/15', dateKey: '2026-09-15', dateLabel: 'Sep 15' },
+      { value: 'Yoga · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22' }] };
+    const rows = [
+      row('Zoe Last', '2026-09-15', 'Active', '', '', '610-555-0001'),
+      row('Zoe Last', '2026-09-22', 'Active'),
+      row('Ann First', '2026-09-15', 'Waitlisted'),
+      row('Cal Gone', '2026-09-15', 'Cancelled'),
+      row('Sup Ceded', '2026-09-15', 'Superseded'),
+      row('A guest', '2026-09-15', 'Active', 'Guest', 'Zoe Last'),
+      row('Off Window', '2026-10-30', 'Active')
+    ];
+    return JSON.stringify(bulkRosterPeopleFrom_(program, rows, map, [], getIndexMap(HEADERS.Club_Members)));
+  })()`));
+  assert.deepStrictEqual(roster.map(p => p.name), ['Ann First', 'Cal Gone', 'Zoe Last'],
+    'one row per person, sorted by name; guest, superseded and off-window rows left out');
+  assert.deepStrictEqual(roster.map(p => p.match), ['exact', 'exact', 'exact'],
+    'a name off the tab has no spelling left to resolve');
+  const zoe = roster[2];
+  assert.strictEqual(zoe.phone, '610-555-0001', 'the first number any of their rows carries');
+  assert.deepStrictEqual(zoe.statuses, ['Active']);
+  assert.deepStrictEqual(Object.keys(zoe.options[0].alreadyOn).sort(), ['2026-09-15', '2026-09-22']);
+  assert.deepStrictEqual(roster[1].statuses, ['Cancelled'], 'a cancelled person is still offered');
+  assert.deepStrictEqual(roster[1].options[0].alreadyOn, {},
+    'and is NOT counted as registered — the two maps are kept apart');
+  assert.deepStrictEqual(Object.keys(roster[1].options[0].cancelledOn), ['2026-09-15']);
+}
+
+// 4d. Which actions read the review backwards.
+assert.strictEqual(run(`bulkActionNeedsExistingRow('cancel')`), true);
+assert.strictEqual(run(`bulkActionNeedsExistingRow('register')`), false);
+assert.strictEqual(run(`bulkActionNeedsExistingRow('')`), false);
+
 // 5. Nothing from the workbook is interpolated into the dialog.
 assert.ok(!/\$\{/.test(run('buildBulkRegistrantsHtml()')));
 
@@ -251,7 +336,8 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
     walk(fn) { fn(this); this.children.forEach(c => c.walk(fn)); }
   }
   const body = new Node('body');
-  ['setup', 'program', 'recurrenceRow', 'recurrence', 'lunch', 'attended', 'dates', 'file', 'csv',
+  ['setup', 'program', 'action', 'actionHint', 'reason', 'roster', 'recurrenceRow', 'recurrence',
+   'lunch', 'attended', 'dates', 'file', 'csv',
    'read', 'mapping', 'hasHeader', 'columns', 'check', 'reviewBox', 'review', 'commit', 'progress',
    'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status']
     .forEach(id => { const n = new Node('div'); n.id = id; body.appendChild(n); });
@@ -261,8 +347,13 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
     createElement: tag => new Node(tag),
     createTextNode: text => { const n = new Node('#text'); n._text = String(text); return n; },
     getElementById: id => all().find(n => n.id === id) || null,
-    // The one selector the page uses: the ticked date boxes.
+    // The two selectors the page uses: the ticked date boxes, and the standing
+    // -place option every date dropdown carries (hidden for any action but
+    // Register).
     querySelectorAll: sel => {
+      if (sel === 'option[value=club]') {
+        return all().filter(n => n.tagName === 'OPTION' && n.value === 'club');
+      }
       assert.strictEqual(sel, 'input.date:checked', `unexpected selector ${sel}`);
       return all().filter(n => n.tagName === 'INPUT' && n.className === 'date' && n.checked);
     },
@@ -277,6 +368,9 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
                { value: 'Yoga · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22' }]
   };
   let started = null;
+  // What the roster button's server call answers with — everybody already on
+  // the program, in the review's own shape (bulkRosterPeopleFrom_).
+  let ROSTER_ANSWER = { ok: false, message: 'nothing' };
   const runner = () => {
     let onSuccess = null;
     const api = new Proxy({}, {
@@ -286,6 +380,7 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
         if (k === 'bulkRegistrantsStatus') return () => { if (onSuccess) onSuccess({ exists: false }); };
         if (k === 'listBulkRegistrantPrograms') return () => { if (onSuccess) onSuccess([PROGRAM]); };
         if (k === 'startBulkRegistrants') return args => { started = args; if (onSuccess) onSuccess({ ok: true, exists: true, active: false, done: true, lines: [] }); };
+        if (k === 'previewBulkRegistrantsFromRoster') return () => { if (onSuccess) onSuccess(ROSTER_ANSWER); };
         return () => {};
       }
     });
@@ -304,8 +399,10 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   vm.runInContext(script, page, { filename: 'bulk-registrants.js' });
 
   const $ = id => doc.getElementById(id);
-  // A real <select> opens on its first option, which is "Next date only".
+  // A real <select> opens on its first option, which is "Next date only" and
+  // "Register them".
   $('recurrence').value = 'next';
+  $('action').value = 'register';
   // The programs arrived, so the dialog knows what day the workbook is on.
   assert.strictEqual(vm.runInContext('TODAY', page), '2026-09-09');
 
@@ -374,5 +471,101 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   rows()[2].rec.fire('change');
   assert.strictEqual(rows()[2].att.disabled, false);
   assert.strictEqual(rows()[2].att.checked, true, 'what they asked for is restored, not lost');
+
+  // ---- THE OTHER HALF: a list applied to bookings that already exist. ------
+  // (f) THE SAME SCREEN READS BACKWARDS. One person already registered on both
+  //     dates, one on neither: Register unticks the first, Cancel unticks the
+  //     second, and neither verdict is a refusal — the writer's own checks are
+  //     still underneath.
+  const BOTH = { '2026-09-09': 'Active', '2026-09-22': 'Active' };
+  vm.runInContext(`PEOPLE = [
+    { name: 'On List', line: 1, match: 'exact', phone: '', email: '',
+      options: [{ name: 'On List', label: 'On List', nameKey: 'on|list',
+        alreadyOn: ${JSON.stringify(BOTH)}, cancelledOn: {}, standing: false }] },
+    { name: 'Not On', line: 2, match: 'exact', phone: '', email: '',
+      options: [{ name: 'Not On', label: 'Not On', nameKey: 'not|on',
+        alreadyOn: {}, cancelledOn: {}, standing: false }] },
+    { name: 'Was Cancelled', line: 3, match: 'exact', phone: '', email: '',
+      options: [{ name: 'Was Cancelled', label: 'Was Cancelled', nameKey: 'was|cancelled',
+        alreadyOn: {}, cancelledOn: { '2026-09-09': 'Cancelled' }, standing: false }] }
+  ]; drawReview();`, page);
+  $('recurrence').value = 'all';
+  $('recurrence').fire('change');
+  const ticks = () => Array.from(rows().map(r => !!r.on.checked));
+  const notes = () => Array.from(rows().map(r => String(r.note.textContent)));
+
+  assert.deepStrictEqual(ticks(), [false, true, true], 'registering: already there is unticked');
+  assert.ok(/Already registered/.test(notes()[0]), notes()[0]);
+
+  $('action').value = 'cancel';
+  $('action').fire('change');
+  assert.deepStrictEqual(ticks(), [true, false, false],
+    'cancelling: the SAME rows read the other way round');
+  assert.ok(/Will be cancelled/.test(notes()[0]), notes()[0]);
+  assert.ok(/nothing to cancel/.test(notes()[1]), notes()[1]);
+  assert.ok(/Already cancelled/.test(notes()[2]), notes()[2]);
+
+  // (g) PUT BACK ON sees exactly what Cancel cannot: the cancelled row.
+  $('action').value = 'reactivate';
+  $('action').fire('change');
+  assert.deepStrictEqual(ticks(), [false, false, true], 'only the cancelled booking has anything to put back');
+  assert.ok(/nothing to put back/.test(notes()[0]), notes()[0]);
+
+  // (h) WAITLIST needs an ACTIVE booking.
+  $('action').value = 'waitlist';
+  $('action').fire('change');
+  assert.deepStrictEqual(ticks(), [true, false, false]);
+
+  // (i) CONTACT needs a phone or an email ON THE ROW, never off the roll.
+  $('action').value = 'contact';
+  $('action').fire('change');
+  assert.deepStrictEqual(ticks(), [false, false, false], 'no details on any row, so nothing to put on');
+  rows()[0].person.phone = '610-555-0199';
+  vm.runInContext('evaluate()', page);
+  assert.strictEqual(!!rows()[0].on.checked, true);
+  assert.ok(/every upcoming row/.test(notes()[0]), notes()[0]);
+
+  // (j) THE STANDING PLACE OPTION GOES AWAY for anything but Register, and
+  //     anything sitting on it moves to every date rather than to a dead end.
+  const clubOpts = () => doc.querySelectorAll('option[value=club]');
+  assert.ok(clubOpts().length > 0, 'the option exists');
+  assert.ok(clubOpts().every(o => o.hidden), 'hidden while the action is not Register');
+  $('action').value = 'register';
+  $('action').fire('change');
+  assert.ok(clubOpts().every(o => !o.hidden), 'back for Register');
+  $('recurrence').value = 'club';
+  $('recurrence').fire('change');
+  $('action').value = 'cancel';
+  $('action').fire('change');
+  assert.strictEqual($('recurrence').value, 'all', 'a standing place becomes every date, not nothing');
+
+  // (k) A ROW MAY DISAGREE WITH THE HEADER, and what commit sends is each
+  //     row's own answer plus the one reason typed above them.
+  rows()[0].act.value = 'waitlist';
+  rows()[0].act.fire('change');
+  $('reason').value = 'term ended';
+  started = null;
+  vm.runInContext('commit()', page);
+  assert.ok(started, 'the list was sent');
+  const sent = JSON.parse(JSON.stringify(started.people));
+  assert.deepStrictEqual(sent.map(p => [p.name, p.action]), [['On List', 'waitlist']],
+    'only the ticked rows, each with its own action');
+  assert.strictEqual(sent[0].reason, 'term ended');
+  assert.strictEqual(sent[0].attended, false, 'attended is never sent beside another action');
+  assert.strictEqual(sent[0].lunch, false, 'and neither is a lunch');
+
+  // (l) THE SECOND WAY IN: the program's own registrants, with no paste and no
+  //     column mapping at all.
+  ROSTER_ANSWER = { ok: true, fromRoster: true, duplicatesChecked: true,
+    counts: { exact: 1, contact: 0, similar: 0, 'new': 0 },
+    people: [{ name: 'Off The Tab', line: 1, match: 'exact', phone: '', email: '', statuses: ['Active'],
+      options: [{ name: 'Off The Tab', label: 'Off The Tab', nameKey: 'off|tab',
+        alreadyOn: { '2026-09-09': 'Active' }, cancelledOn: {}, standing: false }] }] };
+  vm.runInContext('pickFromRoster()', page);
+  assert.strictEqual($('mapping').style.display, 'none', 'no column mapping for a list off the tab');
+  assert.strictEqual(rows().length, 1);
+  assert.strictEqual(String(rows()[0].person.name), 'Off The Tab');
+  assert.strictEqual(vm.runInContext('FROM_ROSTER', page), true);
 }
 console.log('bulk attended review: ok');
+console.log('bulk update actions: ok');

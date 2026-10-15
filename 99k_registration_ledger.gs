@@ -126,7 +126,14 @@ const LEDGER_SOURCES = Object.freeze({
   // A tick on the leader's web roster page (99zn). Not `leader-sheet`: the
   // two are told apart for the transition, when a program's ticks move from
   // one to the other and "which one did this come through" is the question.
-  LEADER_PAGE: 'leader-page'
+  LEADER_PAGE: 'leader-page',
+  // A list somebody handed the office, applied in one go (99q). Its own word
+  // rather than `change-panel`: that one means a person picked at the desk and
+  // changed in front of whoever it was about, and the question this answers is
+  // "forty rows moved at 4pm — where did that come from", which is a different
+  // question with a different fix. Covers every action that dialog applies, so
+  // one word reads back as "it was the bulk list" whichever of them it was.
+  BULK_LIST: 'bulk-list'
 });
 
 /** Every source, for validation. */

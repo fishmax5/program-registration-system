@@ -1,5 +1,5 @@
 // ============================================================================
-// 99q. BULK MANUAL REGISTRANTS  (one program, a pasted list, reviewed first)
+// 99q. BULK REGISTRATION UPDATES  (one program, one list, reviewed first)
 // ============================================================================
 //
 // Quick Mark's Register tick puts ONE person on ONE session, and that is the
@@ -13,6 +13,51 @@
 // beside it in date order), paste the list or open a CSV or Excel file, say which
 // column is which, and REVIEW what the workbook made of it before anything is
 // written.
+//
+// AND IT WAS ONLY EVER HALF THE JOB. A list arrives at the office in both
+// directions and this dialog could read it in one: the same sheet of paper
+// that says "these twenty are coming every Tuesday" in September says "these
+// six have dropped out" in November, and the whole of the term's last week is
+// "the class is finished, take everybody off". Every one of those was twenty
+// or six or forty trips through the change panel (99a), one person at a time,
+// each a full redraw of the Registrants tab — which is how a list of
+// cancellations becomes a job somebody does half of and finishes on Monday.
+//
+// So the list now carries an ACTION as well as a scope of dates
+// (BULK_REGISTRANT_ACTIONS): register, register-and-mark-attended, cancel,
+// waitlist, put back on, or a corrected phone and email. One per row, with a
+// list-wide default above them, because "all of these cancelled except Marion,
+// who is moving to the waiting list" is one list and one press.
+//
+// WHICH TURNS THE REVIEW ROUND, and that is the only genuinely new idea here.
+// "Already registered" is a reason to UNTICK a row when registering — it is
+// the duplicate 85 exists to clean up — and the only state in which there is
+// anything to do at all when cancelling, where the row to untick is the one
+// the workbook has never heard of. The same screen, the same column, opposite
+// verdicts; said once, in judge(), with the action in front of it rather than
+// threaded as a condition through the loop. Unticking stays a DEFAULT and
+// never a refusal: every writer's own checks are underneath, and a tick put
+// back registers nobody twice and cancels nothing that was not there.
+//
+// AND THE NAMES NO LONGER HAVE TO BE TYPED AT ALL. A paste is right for a list
+// that came from outside the workbook, and that is how people get PUT ON a
+// program; every other action is about people the tab already holds, and
+// asking somebody to re-key those names — against a roll that will then offer
+// them a choice of spellings — is asking for the wrong Mary to be picked at
+// the end of it. So "Pick from this program's registrants"
+// (previewBulkRegistrantsFromRoster) reads them off the tab into the same
+// review, one entry per PERSON, every match exact by construction. The paste
+// and the mapping steps are skipped whole; nothing else about the screen or
+// the write changes, which is what keeps one review rather than two.
+//
+// NOTHING HERE IS A NEW WRITER. Register is Quick Mark's own tick, as it
+// always was; cancel is 71's one cancellation writer, waitlist and put-back-on
+// are 71's two stampers under 99a's guards, and a corrected number is 99a's
+// own contact change. A status is four cells that have to agree, and a list
+// applied to forty people is the worst possible place for a fifth copy of
+// them. What is deliberately NOT offered is `remove`: 99a argues its way to
+// deleting a row outright on the strength of the press being nine changes deep
+// behind one name, which is exactly what a list of forty is not.
 //
 // THE COLUMNS ARE THE PERSON'S CALL, NOT OURS. A list comes out of whatever
 // somebody had to hand — a sign-up sheet typed into Excel, a leader's email, a
@@ -140,6 +185,39 @@ const BULK_REGISTRANTS_MAX_PEOPLE = 400;
 
 /** The four answers to "how often", in the order the dialog offers them. */
 const BULK_REGISTRANT_RECURRENCES = ['next', 'picked', 'all', 'club'];
+
+/**
+ * WHAT TO DO WITH EACH PERSON ON THE LIST. One per row, with a list-wide
+ * default above them, matched on the way in — a value not in here is refused
+ * rather than guessed at, for the reason REGISTRANT_CHANGE_ACTIONS (99a) gives:
+ * the failure mode of guessing is writing the wrong change to the right row.
+ */
+const BULK_REGISTRANT_ACTIONS = [
+  'register',   // put them on, the only thing this dialog could ever do
+  'attended',   // register them if need be, and mark the day they came
+  'cancel',     // take the booking off and give the seat and the meal back
+  'waitlist',   // onto the waiting list: no seat, no meal
+  'reactivate', // off the waiting list, or back on after a cancellation
+  'contact'     // a corrected phone or email across their upcoming rows
+];
+
+/**
+ * Which actions need a row that ALREADY EXISTS — the half of the review that
+ * reads the opposite way round from the other.
+ *
+ * "Already registered" unticks a row under `register`, because registering
+ * somebody twice is the duplicate 85 exists to clean up. Under `cancel` it is
+ * the only state in which there is anything to do at all, and a row the
+ * workbook has never heard of is the one to untick. One list, so the dialog's
+ * note and the write's refusal cannot come to disagree about which way round
+ * a given action reads.
+ */
+const BULK_REGISTRANT_EXISTING_ROW_ACTIONS = ['cancel', 'waitlist', 'reactivate', 'contact'];
+
+/** True for an action that changes a booking rather than making one. */
+function bulkActionNeedsExistingRow(action) {
+  return BULK_REGISTRANT_EXISTING_ROW_ACTIONS.indexOf(String(action || '')) !== -1;
+}
 
 /** What a column can be. '' is "ignore this column". */
 const BULK_REGISTRANT_COLUMN_FIELDS = ['name', 'first', 'last', 'phone', 'email', ''];
@@ -596,14 +674,27 @@ function buildBulkRegistrantAlreadyIndex_(program, registrantRows, regMap, clubR
   });
 
   const byName = {};
+  // CANCELLED ROWS, KEPT APART. They are not registrations, which is why
+  // `alreadyOn` has never counted them and why registering somebody whose
+  // booking was cancelled is a thing this dialog must go on allowing. But
+  // "put them back on" is an action ABOUT a cancelled row, and a review that
+  // could not see one would untick every person it was meant for. Two maps
+  // rather than one value, so neither question can be answered with the
+  // other's answer.
+  const cancelledByName = {};
   (registrantRows || []).forEach(row => {
     const status = String(row[regMap['Program_Status']] || '').trim();
-    if (status === 'Cancelled' || status === 'Superseded') return;
+    if (status === 'Superseded') return;
     if (/guest/i.test(String(row[regMap['Person_Type']] || ''))) return;
     const dateKey = sessionDate[duplicateRegistrationSessionKey(row, regMap)];
     if (!dateKey) return;
     const nameKey = duplicateRegistrationNameKey(row[regMap['Name']]);
     if (!nameKey) return;
+    if (status === 'Cancelled') {
+      cancelledByName[nameKey] = cancelledByName[nameKey] || {};
+      cancelledByName[nameKey][dateKey] = status;
+      return;
+    }
     byName[nameKey] = byName[nameKey] || {};
     // Active beats Waitlisted when a person has both on one date.
     if (byName[nameKey][dateKey] !== 'Active') byName[nameKey][dateKey] = status || 'Active';
@@ -621,7 +712,12 @@ function buildBulkRegistrantAlreadyIndex_(program, registrantRows, regMap, clubR
 
   return name => {
     const key = duplicateRegistrationNameKey(name);
-    return { nameKey: key, alreadyOn: (key && byName[key]) || {}, standing: !!(key && standing[key]) };
+    return {
+      nameKey: key,
+      alreadyOn: (key && byName[key]) || {},
+      cancelledOn: (key && cancelledByName[key]) || {},
+      standing: !!(key && standing[key])
+    };
   };
 }
 
@@ -638,6 +734,124 @@ function bulkRegistrantOptions_(person, lookup) {
     name: n,
     label: n === person.name && person.match !== 'exact' ? `${n} (as typed — new)` : n
   }, lookup(n)));
+}
+
+/**
+ * EVERYBODY ALREADY ON ONE PROGRAM, as the same `people` the paste produces.
+ *
+ * THE SECOND WAY IN, and the one that is right for every action but Register.
+ * A list is pasted when it comes from outside the workbook — a leader's email,
+ * a sign-in sheet — and that is how people get PUT ON a program. The sentences
+ * this dialog grew to answer are the other direction: "the Tuesday class is
+ * cancelled, take everybody off", "these six dropped out", "move the waiting
+ * list onto the trip". Every one of those is about people the workbook already
+ * knows, and asking somebody to type their names back in — against a roll that
+ * will then match them "similar" and offer them a choice of spellings — is
+ * asking them to re-key what is already on the tab, with a chance of picking
+ * the wrong Mary at the end of it.
+ *
+ * So this reads them off the program instead. Pure, so the fold is testable:
+ * `registrantRows` / `regMap` are All_Registrants rows, `clubRows` / `clubMap`
+ * Club_Members rows.
+ *
+ * ONE ENTRY PER PERSON, not per row, because every action in this dialog is a
+ * decision about a person and a scope of dates — the dates themselves ride on
+ * `alreadyOn`, exactly as they do for a pasted name, which is what lets the
+ * review table and its notes be the same code for both ways in. The match is
+ * `exact` by construction: these names came off the tab, so there is no
+ * spelling to resolve and no choice to offer. Sorted by name, because a person
+ * looking for somebody in a list of forty reads rather than scrolls.
+ *
+ * Guests are not listed: a guest is cancelled, waitlisted and moved WITH the
+ * person who brought them (matchesCancellationParty, 71), so offering them as
+ * a row of their own would be offering the same decision twice.
+ */
+function bulkRosterPeopleFrom_(program, registrantRows, regMap, clubRows, clubMap) {
+  const lookup = buildBulkRegistrantAlreadyIndex_(program, registrantRows, regMap, clubRows, clubMap);
+  const location = String((program && program.location) || '').trim().toLowerCase();
+  const titleKey = String(quickMarkTitleKey((program && program.title) || '') || '').toLowerCase();
+  const dates = {};
+  ((program && program.sessions) || []).forEach(s => {
+    dates[`s:${s.dateKey}|${location}|${titleKey}`] = true;
+  });
+
+  const byKey = {};
+  const order = [];
+  (registrantRows || []).forEach(row => {
+    const status = String(row[regMap['Program_Status']] || '').trim();
+    if (status === 'Superseded') return;
+    if (/guest/i.test(String(row[regMap['Person_Type']] || ''))) return;
+    if (!dates[duplicateRegistrationSessionKey(row, regMap)]) return;
+    const name = String(row[regMap['Name']] || '').trim();
+    const key = duplicateRegistrationNameKey(name);
+    if (!name || !key) return;
+    if (!byKey[key]) {
+      byKey[key] = { name, phone: '', email: '', statuses: {} };
+      order.push(key);
+    }
+    const person = byKey[key];
+    // The first non-blank of each, which is nearly always every row's: a
+    // person's number is a fact about them, not about one booking.
+    if (!person.phone && regMap['Phone'] !== undefined) person.phone = String(row[regMap['Phone']] || '').trim();
+    if (!person.email && regMap['Email'] !== undefined) person.email = String(row[regMap['Email']] || '').trim();
+    if (status) person.statuses[status] = (person.statuses[status] || 0) + 1;
+  });
+
+  return order
+    .map(key => byKey[key])
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((person, i) => {
+      const found = lookup(person.name);
+      const states = Object.keys(person.statuses).sort();
+      return {
+        name: person.name,
+        phone: person.phone,
+        email: person.email,
+        line: i + 1,
+        match: 'exact',
+        candidates: [person.name],
+        suggested: person.name,
+        // WHAT THEY ARE NOW, said on the row, because it is what decides which
+        // actions can do anything: there is nothing to cancel about a
+        // cancellation and nothing to promote about an Active seat.
+        statuses: states,
+        options: [Object.assign({ name: person.name, label: person.name }, found)]
+      };
+    });
+}
+
+/**
+ * Called from the dialog's "pick from the program" button: the program's own
+ * people, in the review's shape. Reads; writes nothing.
+ */
+function previewBulkRegistrantsFromRoster(programKey) {
+  const program = listBulkRegistrantPrograms().filter(p => p.key === String(programKey || ''))[0];
+  if (!program) {
+    return { ok: false, message: '\u26a0\ufe0f That program has no upcoming dates any more \u2014 close this and open it again.' };
+  }
+  let people = [];
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const regSheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+    const regRows = regSheet ? getSectionedRowValues(regSheet, HEADERS.All_Registrants, 'Event_ID') : [];
+    const clubRows = readClubMemberRows(ss.getSheetByName(SHEET_NAMES.CLUB_MEMBERS));
+    people = bulkRosterPeopleFrom_(program, regRows, getIndexMap(HEADERS.All_Registrants),
+      clubRows, getIndexMap(HEADERS.Club_Members));
+  } catch (err) {
+    log(`\u26a0\ufe0f Bulk registrations could not read who is on ${program.label} (${err}).`);
+    return { ok: false, message: `\u26a0\ufe0f Could not read who is on that program: ${err}` };
+  }
+  if (!people.length) {
+    return { ok: false, message: '\u2796 Nobody is registered on any of that program\u2019s upcoming dates yet, ' +
+      'so there is nobody to change. Paste a list to put people on it.' };
+  }
+  return {
+    ok: true,
+    people,
+    fromRoster: true,
+    duplicatesChecked: true,
+    counts: { exact: people.length, contact: 0, similar: 0, 'new': 0 }
+  };
 }
 
 /**
@@ -674,7 +888,7 @@ function previewBulkRegistrants(args) {
   }
   const matched = matchBulkRegistrantsToRoll(people, rows, map, corrections);
 
-  let lookup = name => ({ nameKey: duplicateRegistrationNameKey(name), alreadyOn: {}, standing: false });
+  let lookup = name => ({ nameKey: duplicateRegistrationNameKey(name), alreadyOn: {}, cancelledOn: {}, standing: false });
   let checked = false;
   const program = args.programKey
     ? listBulkRegistrantPrograms().filter(p => p.key === args.programKey)[0]
@@ -729,7 +943,7 @@ function writeBulkRegistrantsResult_(result) {
 /** Is a list being worked through? Stale state reads as "no" — see 75. */
 function isBulkRegistrantsJobActive() {
   return isSlicedJobActive(BULK_REGISTRANTS_JOB_PROP_KEY, BULK_REGISTRANTS_STALE_MS, minutes =>
-    `ℹ️ A bulk registration has been idle for ${minutes} minute(s) — treating it as stopped.`);
+    `ℹ️ A bulk registration update has been idle for ${minutes} minute(s) — treating it as stopped.`);
 }
 
 /**
@@ -769,9 +983,20 @@ function startBulkRegistrants(args) {
       // nobody marked attended. So a job already mid-flight when this shipped
       // carries on correctly, and a plan written here and read by the older
       // code simply ignores it. Nothing stored changed meaning.
-      attended: !!p.attended
+      attended: !!p.attended,
+      // WHAT TO DO WITH THEM. Absent reads back as 'register', which is what
+      // every plan written before this field meant and is why
+      // BULK_REGISTRANTS_PLAN_V1 keeps its key: the shape is purely additive
+      // and nothing stored changed meaning (the same reasoning as `attended`
+      // above). A value outside the vocabulary is refused to 'register' here
+      // rather than guessed at further down.
+      action: BULK_REGISTRANT_ACTIONS.indexOf(String(p.action)) !== -1 ? String(p.action) : 'register',
+      // One sentence, for the Admin_Notes stamp and the ledger entry every
+      // status change leaves — "class cancelled", "term ended". Capped by
+      // waitlistStamp()/cancellationStamp() where it lands.
+      reason: String(p.reason || '')
     }));
-  if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to register.' };
+  if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to do.' };
   if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
     return { ok: false, message: `⚠️ More than ${BULK_REGISTRANTS_MAX_PEOPLE} people at once — split the list.` };
   }
@@ -791,7 +1016,12 @@ function startBulkRegistrants(args) {
     startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0, stalledSlices: 0, errorSlices: 0,
     jobId, next: 0, total: people.length, written: 0
   });
-  log(`startBulkRegistrants: ${program.label} — ${people.length} people queued.`);
+  // WHICH ACTIONS, in the log and in the label, because "40 people queued" on
+  // a list that cancels them reads as the opposite of what it is.
+  const actions = {};
+  people.forEach(x => { actions[x.action] = (actions[x.action] || 0) + 1; });
+  const what = Object.keys(actions).sort().map(k => `${actions[k]} ${k}`).join(', ');
+  log(`startBulkRegistrants: ${program.label} — ${people.length} people queued (${what}).`);
   runBulkRegistrantsSlice();
   return Object.assign({ ok: true }, bulkRegistrantsStatus());
 }
@@ -958,10 +1188,248 @@ function registerOneBulkPerson_(program, picked, person) {
   return { line, written: outcome.done };
 }
 
+// ----------------------------------------------------------------------------
+// The other five actions: a list applied to bookings that already exist
+// ----------------------------------------------------------------------------
+//
+// EVERY ONE OF THESE GOES THROUGH THE WRITER THAT ALREADY OWNS IT, for the
+// reason the Register half goes through Quick Mark's own tick: a status is four
+// cells that have to agree (71's banner), and a fourth copy of those four cells
+// here would be a fourth place for them to come apart. So:
+//
+//   cancel      cancelRegistrantRowsLocked (71) — ONE call per person over
+//               every chosen date at once, which is what its matcher argument
+//               is for and what keeps a person's eight cancelled Tuesdays to
+//               one render of the tab rather than eight.
+//   waitlist    stampRegistrantRowWaitlisted (71), per row, one render after.
+//   reactivate  stampRegistrantRowActive / stampRegistrantRowUncancelled (71,
+//               99a) under 99a's own guards — a capacity waitlisting is never
+//               jumped and a seat that is not there is never given.
+//   contact     applyRegistrantChangeLocked's own `contact` (99a), once, which
+//               already spreads a corrected number across every upcoming row.
+//
+// WHAT IS DELIBERATELY NOT HERE IS `remove`. 99a's banner argues its way to
+// deleting a row outright rather than marking it, and the argument turns on
+// the press being "nine changes deep behind a name, a date and a confirmation"
+// — which is exactly what a list of forty names is not. A pasted column read
+// as the wrong thing (the fault the whole mapping step exists for) would here
+// be forty deletions nobody can get back. Cancel is the answer this list is
+// allowed to give; a mistaken cancellation is a row that says so and a seat
+// that can be given back.
+//
+// AND NOTHING IS WRITTEN FOR SOMEBODY WHO IS NOT THERE. Register's refusals
+// are about doing a thing twice; these are about doing it to nobody, and the
+// line says which rather than reporting a success over no rows at all.
+
+/**
+ * The rows one action is about: this person (and the guests who came with
+ * them) on this program, on the chosen dates. Pure, and the one statement of
+ * it — matchesCancellationParty (71) answers the same question keyed on an
+ * Event_ID, which is the right key at the desk and the wrong one here: a list
+ * is reviewed against DATES, and an Event_ID is a hash of calendar, title and
+ * date that nothing can be read back out of.
+ *
+ * A GUEST GOES WITH THE PERSON WHO BROUGHT THEM and never the other way round,
+ * the rule 71 states and this borrows whole.
+ */
+function bulkActionRowMatcher_(program, dateKeys, name) {
+  const location = String((program && program.location) || '').trim().toLowerCase();
+  const titleKey = String(quickMarkTitleKey((program && program.title) || '') || '').toLowerCase();
+  const wanted = {};
+  (dateKeys || []).forEach(k => { wanted[String(k)] = true; });
+  const nameKey = normalizeNameKey(name);
+  return (row, map) => {
+    if (!nameKey) return false;
+    const date = coerceDate(row[map['Event_Date']]);
+    if (!date || !wanted[formatDateKey(date)]) return false;
+    if (String(row[map['Location']] || '').trim().toLowerCase() !== location) return false;
+    if (String(quickMarkTitleKey(row[map['Event']]) || '').toLowerCase() !== titleKey) return false;
+    if (normalizeNameKey(row[map['Name']]) === nameKey) return true;
+    return String(row[map['Person_Type']] || '').trim() === 'Guest' &&
+      normalizeNameKey(row[map['Primary_Registrant']]) === nameKey;
+  };
+}
+
+/** The Admin_Notes stamp and the ledger word every action here shares. */
+function bulkActionStampOptions_(person) {
+  return {
+    // Read in Admin_Notes by somebody six weeks later: the office did this,
+    // which is what "in the workbook" means in that vocabulary (71).
+    source: CANCELLATION_SOURCES.STAFF,
+    ledgerSource: LEDGER_SOURCES.BULK_LIST,
+    by: getCurrentUserEmail() || '',
+    reason: String((person && person.reason) || '')
+  };
+}
+
+/** Cancel one person across every chosen date, in one call and one render. */
+function cancelOneBulkPerson_(program, sessions, person) {
+  const name = String(person.name || '').trim();
+  const dateKeys = sessions.map(s => s.dateKey);
+  const result = cancelRegistrantRowsLocked(
+    bulkActionRowMatcher_(program, dateKeys, name),
+    Object.assign({ name, emptyMessage: `${name} had no live booking on the date(s) chosen.` },
+      bulkActionStampOptions_(person))) || {};
+  if (!result.ok || !result.cancelled) {
+    return { line: `➖ ${name} — nothing cancelled: ${result.message || 'no live booking on those dates.'}`, written: 0 };
+  }
+  invalidateQuickMarkIndexCache();
+  return {
+    line: `✅ ${name} — cancelled on ${result.cancelled} row(s) of ${sessions.length} date(s); ` +
+      `those seats and meals have gone back.`,
+    written: result.cancelled
+  };
+}
+
+/**
+ * Onto the waiting list, or back off it, across every chosen date. One read,
+ * the stampers per row, one render.
+ *
+ * `reactivate` carries 99a's three refusals rather than a looser version of
+ * them: a capacity waitlisting is not promoted out of turn (wasWaitlistedByHand),
+ * a seat that is not there is not given (registrantChangeSeatRefusal), and a
+ * Superseded row is not a booking. Each is COUNTED and said, because "nothing
+ * happened" and "the class is full" need different next steps.
+ */
+function restatusOneBulkPerson_(program, sessions, person, toWaitlist) {
+  const name = String(person.name || '').trim();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH) : null;
+  if (!sheet) return { line: `⚠️ ${name} — there is no registrants tab to change.`, written: 0 };
+
+  const headers = HEADERS.All_Registrants;
+  const map = getIndexMap(headers);
+  const rows = getSectionedRows(sheet, headers, 'Event_ID');
+  const matches = rows.filter(row => bulkActionRowMatcher_(program, sessions.map(s => s.dateKey), name)(row, map));
+  if (!matches.length) {
+    return { line: `➖ ${name} — no row on the date(s) chosen, so nothing was changed.`, written: 0 };
+  }
+
+  const stamp = bulkActionStampOptions_(person);
+  let moved = 0;
+  let full = 0;
+  let inTurn = 0;
+  matches.forEach(row => {
+    const status = String(row[map['Program_Status']] || '').trim();
+    if (status === 'Superseded') return;
+    if (toWaitlist) {
+      const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.WAITLISTED, stamp,
+        { source: LEDGER_SOURCES.BULK_LIST });
+      if (!stampRegistrantRowWaitlisted(row, map, stamp)) return;
+      appendLedgerEntry(entry);
+      moved++;
+      return;
+    }
+    if (status === 'Active') return;
+    if (status === 'Waitlisted' && !wasWaitlistedByHand(row, map)) { inTurn++; return; }
+    const eventId = String(row[map['Event_ID']] || '').trim();
+    if (registrantChangeSeatRefusal(rows, map, eventId, describeRegistrantRowSession(row, map))) { full++; return; }
+    const entry = ledgerEntryForStatusChange_(row, map, LEDGER_KINDS.REACTIVATED, stamp,
+      { source: LEDGER_SOURCES.BULK_LIST, note: status === 'Waitlisted'
+        ? 'Taken off the waiting list from a list the office applied in bulk.'
+        : 'Put back on the list from a list the office applied in bulk.' });
+    if (status === 'Waitlisted') {
+      if (!stampRegistrantRowActive(row, map, stamp)) return;
+      // The leader's own tick left standing would re-waitlist them on the next
+      // sync (applyLeaderWaitlistTicks, 71) — 99a's reasoning, unchanged.
+      if (map['Waitlisted'] !== undefined) row[map['Waitlisted']] = false;
+    } else if (!stampRegistrantRowUncancelled(row, map, stamp)) {
+      return;
+    }
+    appendLedgerEntry(entry);
+    moved++;
+  });
+
+  const notes = [];
+  if (inTurn) notes.push(`${inTurn} waitlisted at capacity, not by hand — left in the queue`);
+  if (full) notes.push(`${full} with no free seat`);
+  if (!moved) {
+    return { line: `➖ ${name} — nothing to ${toWaitlist ? 'waitlist' : 'put back on'}` +
+      (notes.length ? ` (${notes.join('; ')})` : ' on the date(s) chosen') + '.', written: 0 };
+  }
+  finishRegistrantChange(ss, sheet, rows, toWaitlist
+    ? `✅ ${name} moved onto the waiting list for ${moved} row(s).`
+    : `✅ ${name} put back on the list for ${moved} row(s).`);
+  return {
+    line: `✅ ${name} — ${toWaitlist ? 'onto the waiting list' : 'back on the list'} ` +
+      `on ${moved} row(s)` + (notes.length ? `; ${notes.join('; ')}` : '') + '.',
+    written: moved
+  };
+}
+
+/**
+ * A corrected phone or email. 99a's own writer, once — it spreads across every
+ * upcoming row this person has and appends one ledger entry per row, which is
+ * what makes it a correction about a PERSON rather than about one booking. The
+ * date scope therefore does not narrow it, and the line says so rather than
+ * implying the chosen dates were all it touched.
+ */
+function contactOneBulkPerson_(program, sessions, person) {
+  const name = String(person.name || '').trim();
+  const phone = String(person.phone || '').trim();
+  const email = String(person.email || '').trim();
+  if (!phone && !email) {
+    return { line: `➖ ${name} — the list has no phone or email for them, so nothing was changed.`, written: 0 };
+  }
+  const res = applyRegistrantChangeLocked({
+    change: REGISTRANT_CHANGE_ACTIONS.CONTACT,
+    name,
+    location: program.location,
+    session: sessions[0].value,
+    phone, email,
+    reason: String(person.reason || '')
+  }) || {};
+  return res.ok
+    ? { line: `✅ ${name} — ${res.message}`, written: 1 }
+    : { line: `⚠️ ${name} — ${res.message || 'the contact details could not be updated.'}`, written: 0 };
+}
+
+/**
+ * ONE PERSON, ONE ACTION, under the workbook lock — the dispatcher the slice
+ * calls. Register and Attended are the same path they always were
+ * (registerOneBulkPerson_, which takes its own lock per person); the other
+ * four take one lock around the one writer each needs.
+ *
+ * Returns { busy } when the lock could not be had, exactly as the Register
+ * path does, so the slice's hand-off reads one answer for every action.
+ */
+function applyOneBulkPersonAction_(program, picked, person) {
+  const action = BULK_REGISTRANT_ACTIONS.indexOf(String(person && person.action)) !== -1
+    ? String(person.action) : 'register';
+  if (action === 'register') return registerOneBulkPerson_(program, picked, person);
+  // ATTENDED IS REGISTER WITH THE TICK FORCED, and deliberately not a writer of
+  // its own: a sign-in sheet typed up at four o'clock names the people who were
+  // in the room, some of whom never registered, and the desk's own answer to
+  // that is a walk-in row marked attended. Which DATES the tick reaches is
+  // still today-or-earlier, decided inside the slice (see the banner).
+  if (action === 'attended') {
+    return registerOneBulkPerson_(program, picked, Object.assign({}, person, { attended: true }));
+  }
+
+  const name = String((person && person.name) || '').trim();
+  const sessions = bulkRegistrantSessionsFor(program, person.recurrence, picked);
+  if (!sessions.length) {
+    return { line: `⚠️ ${name} — no dates left to change, so nothing was written.`, written: 0 };
+  }
+  const outcome = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => {
+    let res;
+    if (action === 'cancel') res = cancelOneBulkPerson_(program, sessions, person);
+    else if (action === 'waitlist') res = restatusOneBulkPerson_(program, sessions, person, true);
+    else if (action === 'reactivate') res = restatusOneBulkPerson_(program, sessions, person, false);
+    else res = contactOneBulkPerson_(program, sessions, person);
+    // Inside the lock, per person, for the reason the Register path flushes
+    // here: an entry buffered and never flushed is the loss the ledger exists
+    // to prevent (99k).
+    flushPersistentRegistries();
+    return res;
+  }, null);
+  return outcome || { busy: true };
+}
+
 /** ONE SLICE: work down the list until the budget runs out, then hand on. */
 function runBulkRegistrantsSlice() {
   return runSlicedJob({
-    label: 'Add registrants in bulk',
+    label: 'Update registrations in bulk',
     propKey: BULK_REGISTRANTS_JOB_PROP_KEY,
     resumeHandler: BULK_REGISTRANTS_RESUME_HANDLER,
     budgetMs: BULK_REGISTRANTS_BUDGET_MS,
@@ -1004,7 +1472,7 @@ function runBulkRegistrantsSlice() {
         // A sync holds the workbook for up to its whole budget; waiting on the
         // lock person by person would spend this slice doing nothing.
         if (workbookHeldElsewhere()) { busy = true; break; }
-        const outcome = registerOneBulkPerson_(program, plan.picked, people[state.next]);
+        const outcome = applyOneBulkPersonAction_(program, plan.picked, people[state.next]);
         if (outcome.busy) { busy = true; break; }
         result.lines = (result.lines || []).concat([outcome.line]);
         state.written = (state.written || 0) + outcome.written;
@@ -1062,13 +1530,13 @@ function finishBulkRegistrants_(state, problem) {
   clearChunkedScriptProperty(BULK_REGISTRANTS_PLAN_PROP_KEY);
 
   const headline = problem
-    ? `⚠️ Adding registrants in bulk to ${result.label || 'a program'} ${problem} — ` +
+    ? `⚠️ A bulk update of ${result.label || 'a program'} ${problem} — ` +
       `${next} of ${result.total || next} people done, ${remaining.length} not reached.`
-    : `✅ Added ${result.total || next} people in bulk to ${result.label || 'a program'} ` +
-      `(${result.written || 0} registration(s) written).`;
+    : `✅ Applied a bulk update to ${result.total || next} people on ${result.label || 'a program'} ` +
+      `(${result.written || 0} row(s) written).`;
   log(`bulkRegistrants: ${headline}`);
   if (problem && problem !== 'was stopped') {
-    spoolOfficeNote('Add Registrants in Bulk', `${headline} Not reached: ${remaining.join(', ')}.`);
+    spoolOfficeNote('Update Registrations in Bulk', `${headline} Not reached: ${remaining.join(', ')}.`);
   }
   toastIfPossible(headline);
   return result;
@@ -1079,7 +1547,7 @@ function showBulkRegistrantsDialog() {
   const html = HtmlService.createHtmlOutput(buildBulkRegistrantsHtml())
     .setWidth(920)
     .setHeight(720);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Add Registrants in Bulk');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Update Registrations in Bulk');
 }
 
 /**
@@ -1123,8 +1591,20 @@ function buildBulkRegistrantsHtml() {
 <div id="setup">
 <h3>1. Program</h3>
 <select id="program" style="width:100%"><option value="">Loading…</option></select>
+<h3>2. What to do with them</h3>
+<select id="action">
+  <option value="register">Register them</option>
+  <option value="attended">Register if needed, and mark them attended</option>
+  <option value="cancel">Cancel their registration</option>
+  <option value="waitlist">Move them onto the waiting list</option>
+  <option value="reactivate">Put them back on (off the waiting list, or after a cancellation)</option>
+  <option value="contact">Update their phone / email</option>
+</select>
+<label style="margin-left:12px">Why (optional): <input id="reason" type="text" style="width:260px"
+  placeholder="class cancelled, term ended…"></label>
+<p class="hint" id="actionHint" style="margin-top:4px"></p>
 <div id="recurrenceRow" style="margin-top:8px">
-  How often, for everyone (change any row below):
+  Which dates, for everyone (change any row below):
   <select id="recurrence">
     <option value="next">Next date only</option>
     <option value="picked">The dates ticked below</option>
@@ -1138,14 +1618,17 @@ function buildBulkRegistrantsHtml() {
   row with no such date has its box greyed out.</span>
 </div>
 <div id="dates" style="margin-top:6px"></div>
-<h3>2. The list</h3>
-<p class="hint">Open an Excel (.xlsx) or CSV file, or paste the list — one person per line, straight out of a spreadsheet
-or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
+<h3>3. Who</h3>
+<p class="hint"><b>Everybody already on this program</b> is the quick way for anything but Register — their names
+come off the tab, so there is nothing to type and no spelling to get wrong. Tick the ones you mean in the review.</p>
+<div><button id="roster" class="plain" onclick="pickFromRoster()">Pick from this program’s registrants</button></div>
+<p class="hint" style="margin-top:10px">Or open an Excel (.xlsx) or CSV file, or paste the list — one person per line,
+straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
 <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
 <textarea id="csv" style="margin-top:6px" placeholder="…or paste here"></textarea>
 <div style="margin-top:8px"><button id="read" onclick="readColumns()">Read the columns</button></div>
 <div id="mapping" style="display:none">
-<h3>3. Which column is which</h3>
+<h3>4. Which column is which</h3>
 <p class="hint">Check each column's heading — it is a guess. Set a column to <b>ignore</b> to leave it out;
 two columns set to the same name part are joined.</p>
 <label><input type="checkbox" id="hasHeader"> The first row is headings, not a person</label>
@@ -1153,19 +1636,19 @@ two columns set to the same name part are joined.</p>
 <div style="margin-top:8px"><button id="check" onclick="check()">Check against the member roll</button></div>
 </div>
 <div id="reviewBox" style="display:none">
-<h3>4. Review</h3>
+<h3>5. Review</h3>
 <p class="hint"><span class="exact">On the roll</span> is used as-is.
 <span class="contact">Same phone/email</span> is pre-selected — check it.
 <span class="similar">Similar name</span> is offered but not chosen.
 <span class="new">New</span> is added to the roll as typed.
-Anybody <b>already registered</b> on the dates chosen, or listed twice, is unticked for you and says so.
-Untick anybody else to leave them out.</p>
+Anybody the chosen action <b>cannot do anything for</b> — already registered when registering, not
+registered at all when cancelling — is unticked for you and says why. Untick anybody else to leave them out.</p>
 <div id="review"></div>
-<div style="margin-top:8px"><button id="commit" onclick="commit()" disabled>Register them</button></div>
+<div style="margin-top:8px"><button id="commit" onclick="commit()" disabled>Apply to the ticked people</button></div>
 </div>
 </div>
 <div id="progress">
-<h3 id="progTitle">Registering…</h3>
+<h3 id="progTitle">Working through the list…</h3>
 <div class="bar"><div id="barFill"></div></div>
 <div id="progText"></div>
 <p class="hint">This carries on by itself, a few minutes at a time, until everybody is done —
@@ -1174,7 +1657,7 @@ you can close this window and open it again to see how far it has got.</p>
 <div style="margin-top:8px">
   <button id="stop" class="plain" onclick="stopJob()">Stop after this person</button>
   <button id="carryOn" onclick="carryOn()" style="display:none">Carry on</button>
-  <button id="another" onclick="another()" style="display:none">Register another list</button>
+  <button id="another" onclick="another()" style="display:none">Start another list</button>
 </div>
 </div>
 <div id="status"></div>
@@ -1185,6 +1668,27 @@ you can close this window and open it again to see how far it has got.</p>
   var ROWS = [];
   var POLL = null;
   var LABELS = { exact: 'On the roll', contact: 'Same phone/email', similar: 'Similar name', 'new': 'New' };
+  // Where this list came from: the tab's own registrants, or a paste. It
+  // changes nothing about the write — only whether the mapping step is shown
+  // and what the review says a row was read out of.
+  var FROM_ROSTER = false;
+  // The per-row dropdown's words. Short, because they sit in a table cell
+  // beside seven other columns; the full sentences are in the header select.
+  var ACTIONS = [['register','Register'],['attended','Register + attended'],['cancel','Cancel'],
+    ['waitlist','Waitlist'],['reactivate','Put back on'],['contact','Update contact']];
+  // One sentence under the header dropdown, because what a row's note MEANS
+  // reads backwards between the two halves: unticked-because-already-there
+  // when registering, unticked-because-not-there when cancelling.
+  var ACTION_HINTS = {
+    register: 'Puts each ticked person on the dates chosen. Anybody already registered on all of them is unticked.',
+    attended: 'Marks the day they came, and registers anybody who was not signed up — which is what a sign-in sheet typed up at four o’clock is. Attended is only written on dates that are today or earlier.',
+    cancel: 'Takes the booking off and gives the seat and the meal back, on the dates chosen. Their guests go with them. Anybody with no live booking on those dates is unticked.',
+    waitlist: 'No seat and no meal: the row stays, as a place in the queue. Only an active booking can be moved, so anybody already waiting or cancelled is unticked.',
+    reactivate: 'Puts a cancelled or by-hand waitlisted booking back. Somebody waitlisted because the class was FULL is never promoted out of turn, and a seat that is not there is never given — those rows say so and are left alone.',
+    contact: 'Writes the phone and email from the list onto every one of that person’s upcoming rows, whichever dates are chosen above. Nothing else about the booking changes.'
+  };
+  function action() { return $('action').value; }
+  function isRegisterish(a) { return a === 'register' || a === 'attended'; }
   // Today as the WORKBOOK's own date key, for the attended rule — read off
   // the programs the server sent (groupBulkRegistrantPrograms_ puts it there)
   // rather than off this tablet's clock, which may be in another timezone or
@@ -1251,6 +1755,32 @@ you can close this window and open it again to see how far it has got.</p>
     ROWS.forEach(function (r) { r.rec.value = v; });
     evaluate();
   });
+  // THE ACTION, for the whole list, with every row's own dropdown following it
+  // — the same bargain the recurrence and the attended box make: a starting
+  // point for the list, which any one row may then disagree with.
+  $('action').addEventListener('change', function () { applyAction(); });
+  function applyAction() {
+    var a = action();
+    $('actionHint').textContent = ACTION_HINTS[a] || '';
+    // A standing place is a REGISTRATION on every future date, which is not a
+    // thing any of the other five actions can be about. Rather than leave a
+    // dead end in the dropdown, the option goes away and anything sitting on
+    // it moves to every date — the widest honest reading of what was chosen.
+    var clubOk = a === 'register';
+    Array.prototype.forEach.call(document.querySelectorAll('option[value=club]'), function (o) {
+      o.disabled = !clubOk;
+      o.hidden = !clubOk;
+    });
+    if (!clubOk && $('recurrence').value === 'club') $('recurrence').value = 'all';
+    // The two marks only mean anything beside a registration.
+    $('lunch').disabled = !isRegisterish(a);
+    $('attended').disabled = a !== 'register';
+    ROWS.forEach(function (r) {
+      r.act.value = a;
+      if (!clubOk && r.rec.value === 'club') r.rec.value = 'all';
+    });
+    evaluate();
+  }
   // SELECT ALL, and no more than that: it sets what every row ASKED for, and
   // evaluate() still decides what each row can actually be given. Untick one
   // row afterwards and it stays unticked — the header is a starting point for
@@ -1363,6 +1893,7 @@ you can close this window and open it again to see how far it has got.</p>
     google.script.run.withSuccessHandler(function (res) {
       $('check').disabled = false;
       if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
+      FROM_ROSTER = false;
       PEOPLE = res.people;
       drawReview();
       var c = res.counts;
@@ -1376,14 +1907,34 @@ you can close this window and open it again to see how far it has got.</p>
       hasHeader: $('hasHeader').checked, programKey: $('program').value });
   }
 
-  // ---- 4. The review.
+  // THE OTHER WAY IN: this program's own registrants, already matched.
+  function pickFromRoster() {
+    if (!program()) { say('Choose the program first.', 'err'); return; }
+    $('roster').disabled = true;
+    say('Reading who is on this program…');
+    google.script.run.withSuccessHandler(function (res) {
+      $('roster').disabled = false;
+      if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
+      FROM_ROSTER = true;
+      RAW = null;
+      PEOPLE = res.people;
+      $('mapping').style.display = 'none';
+      drawReview();
+      say(PEOPLE.length + ' people are on this program’s upcoming dates. Tick the ones you mean.' + summaryOfAlready());
+    }).withFailureHandler(function (err) {
+      $('roster').disabled = false;
+      say('Failed: ' + err.message, 'err');
+    }).previewBulkRegistrantsFromRoster($('program').value);
+  }
+
+  // ---- 5. The review.
   function drawReview() {
     var box = $('review');
     box.textContent = '';
     ROWS = [];
     var table = el('table');
     var head = el('tr');
-    ['', 'Row', 'Pasted', 'Match', 'Register as', 'Phone', 'Email', 'How often', 'Attended today', 'Note']
+    ['', 'Row', 'Name', 'Match', 'Acting on', 'Phone', 'Email', 'What to do', 'Which dates', 'Attended today', 'Note']
       .forEach(function (h) { head.appendChild(el('th', h)); });
     table.appendChild(head);
     var defaultRec = $('recurrence').value;
@@ -1397,7 +1948,12 @@ you can close this window and open it again to see how far it has got.</p>
       tdOn.appendChild(on); tr.appendChild(tdOn); r.on = on;
       tr.appendChild(el('td', String(p.line || i + 1)));
       tr.appendChild(el('td', p.name));
-      tr.appendChild(el('td', LABELS[p.match] || p.match, p.match));
+      // A name read off the tab has no spelling to resolve, so the Match column
+      // says what it IS instead — Active, Waitlisted, Cancelled — which is the
+      // thing somebody picking people off a roster is actually reading down.
+      tr.appendChild(p.statuses && p.statuses.length
+        ? el('td', p.statuses.join(', '), 'exact')
+        : el('td', LABELS[p.match] || p.match, p.match));
       var tdAs = el('td'); var as = document.createElement('select');
       (p.options || []).forEach(function (opt, k) { var o = el('option', opt.label); o.value = String(k); as.appendChild(o); });
       for (var k = 0; k < (p.options || []).length; k++) if (p.options[k].name === p.suggested) as.value = String(k);
@@ -1405,6 +1961,14 @@ you can close this window and open it again to see how far it has got.</p>
       tdAs.appendChild(as); tr.appendChild(tdAs); r.as = as;
       tr.appendChild(el('td', p.phone || ''));
       tr.appendChild(el('td', p.email || ''));
+      // THE ROW'S OWN ACTION, which may disagree with the header's — "all of
+      // these cancelled except Marion, who is moving to the waiting list" is
+      // one list and one press, not two.
+      var tdAct = el('td'); var act = document.createElement('select');
+      ACTIONS.forEach(function (x) { var o = el('option', x[1]); o.value = x[0]; act.appendChild(o); });
+      act.value = action();
+      act.addEventListener('change', evaluate);
+      tdAct.appendChild(act); tr.appendChild(tdAct); r.act = act;
       var tdRec = el('td'); var rec = document.createElement('select');
       RECURRENCES.forEach(function (x) { var o = el('option', x[1]); o.value = x[0]; rec.appendChild(o); });
       rec.value = defaultRec;
@@ -1424,7 +1988,7 @@ you can close this window and open it again to see how far it has got.</p>
     });
     box.appendChild(table);
     $('reviewBox').style.display = '';
-    evaluate();
+    applyAction();
   }
 
   function pickedKeys() {
@@ -1438,12 +2002,105 @@ you can close this window and open it again to see how far it has got.</p>
     var picked = pickedKeys();
     return p.sessions.filter(function (s) { return picked.indexOf(s.dateKey) !== -1; });
   }
-  function chosen(r) { return (r.person.options || [])[Number(r.as.value)] || { name: r.person.name, alreadyOn: {} }; }
+  function chosen(r) {
+    return (r.person.options || [])[Number(r.as.value)] ||
+      { name: r.person.name, alreadyOn: {}, cancelledOn: {} };
+  }
   // The same rule the server applies (bulkRegistrantAttendedDateKeys), said
   // once more here so the screen can grey out a box that would do nothing.
   // The server is still the one that decides, on the day it writes.
   function attendableDates(rec) {
     return datesFor(rec).filter(function (d) { return d.dateKey <= TODAY; });
+  }
+
+  // WHAT THE CHOSEN ACTION CAN ACTUALLY DO FOR THIS ROW, as { note,
+  // nothingToDo } — said on screen before anything is written, and the one
+  // place the two halves of this dialog read in opposite directions.
+  //
+  // Registering somebody already registered is the duplicate 85 exists to
+  // clean up, so "already there" unticks the row. Cancelling somebody already
+  // registered is the ONLY case there is anything to do, so "not there at all"
+  // unticks it instead. The same screen, the same column, opposite verdicts —
+  // which is exactly why this is one function with the action in front of it
+  // rather than a condition threaded through the loop below.
+  //
+  // Unticking is still a DEFAULT and never a refusal: the writer's own checks
+  // are underneath every one of these, and a tick put back writes nothing
+  // twice and cancels nothing that is not there.
+  function judge(opt, rec, act, person) {
+    var on = opt.alreadyOn || {};
+    var off = opt.cancelledOn || {};
+    var dates = datesFor(rec);
+    if (!dates.length && act !== 'contact') return { note: 'No dates chosen.', nothingToDo: false };
+    var live = dates.filter(function (d) { return on[d.dateKey]; });
+    var activeOnly = dates.filter(function (d) { return on[d.dateKey] === 'Active'; });
+    var waiting = dates.filter(function (d) { return on[d.dateKey] === 'Waitlisted'; });
+    var cancelled = dates.filter(function (d) { return off[d.dateKey]; });
+    var labels = function (list) { return list.map(function (d) { return d.dateLabel; }).join(', '); };
+
+    if (act === 'register') {
+      if (rec === 'club' && opt.standing) {
+        return { note: 'Already has a standing place on this program.', nothingToDo: true };
+      }
+      if (rec === 'club') return { note: '', nothingToDo: false };
+      if (live.length === dates.length) {
+        return { nothingToDo: true, note: 'Already registered' +
+          (dates.length > 1 ? ' on all ' + dates.length + ' dates' : ' for ' + dates[0].dateLabel) +
+          (waiting.length ? ' (waitlisted)' : '') + '.' };
+      }
+      if (live.length) {
+        return { nothingToDo: false, note: 'Already on ' + labels(live) +
+          (waiting.length ? ' (waitlisted)' : '') + ' — only the other ' + (dates.length - live.length) +
+          ' will be added.' };
+      }
+      return { note: '', nothingToDo: false };
+    }
+    if (act === 'attended') {
+      var marks = attendableDates(rec);
+      if (!marks.length) {
+        return { nothingToDo: false, note: 'No date today or earlier is chosen, so nothing will be marked ' +
+          'attended — they will be registered for the ' + dates.length + ' date(s) chosen.' };
+      }
+      return { nothingToDo: false, note: 'Attended on ' + labels(marks) +
+        (live.length ? '' : ' — and registered, since they are not signed up.') };
+    }
+    if (act === 'cancel') {
+      if (!live.length) {
+        return { nothingToDo: true, note: cancelled.length
+          ? 'Already cancelled on ' + labels(cancelled) + ' — nothing to cancel.'
+          : 'Not registered on the date(s) chosen, so there is nothing to cancel.' };
+      }
+      return { nothingToDo: false, note: 'Will be cancelled on ' + labels(live) + '.' +
+        (opt.standing ? ' They also hold a standing place — untick Active on the club list, or the next sync books them again.' : '') };
+    }
+    if (act === 'waitlist') {
+      if (!activeOnly.length) {
+        return { nothingToDo: true, note: waiting.length
+          ? 'Already on the waiting list for ' + labels(waiting) + '.'
+          : 'No active booking on the date(s) chosen, so there is nothing to move.' };
+      }
+      return { nothingToDo: false, note: 'Onto the waiting list for ' + labels(activeOnly) +
+        ' — no seat and no meal.' };
+    }
+    if (act === 'reactivate') {
+      var back = waiting.concat(cancelled);
+      if (!back.length) {
+        return { nothingToDo: true, note: activeOnly.length
+          ? 'Already on the list for ' + labels(activeOnly) + ' — nothing to put back.'
+          : 'Nothing cancelled or waitlisted on the date(s) chosen.' };
+      }
+      return { nothingToDo: false, note: 'Put back on for ' + labels(back) +
+        '. A place the class’s capacity decided is never promoted out of turn — those rows will say so.' };
+    }
+    // contact. The details are read off the ROW as it was read in, never off
+    // the name chosen from the roll — the roll's copy is the one being
+    // replaced, and taking the new number from it would write it back onto
+    // itself and report a correction that corrected nothing.
+    var p = person || {};
+    if (!String(p.phone || '').trim() && !String(p.email || '').trim()) {
+      return { nothingToDo: true, note: 'No phone or email on this row, so there is nothing to put on.' };
+    }
+    return { nothingToDo: false, note: 'Phone / email written onto every upcoming row they have.' };
   }
 
   // Who is already there, and who is on the list twice — worked out again on
@@ -1455,42 +2112,30 @@ you can close this window and open it again to see how far it has got.</p>
     ROWS.forEach(function (r) {
       var opt = chosen(r);
       var rec = r.rec.value;
-      var note = '';
-      var already = false;
-      if (rec === 'club' && opt.standing) {
-        already = true;
-        note = 'Already has a standing place on this program.';
-      } else {
-        var dates = datesFor(rec);
-        var on = dates.filter(function (d) { return opt.alreadyOn && opt.alreadyOn[d.dateKey]; });
-        var waitlisted = on.some(function (d) { return opt.alreadyOn[d.dateKey] === 'Waitlisted'; });
-        if (!dates.length) {
-          note = 'No dates chosen.';
-        } else if (on.length === dates.length && rec !== 'club') {
-          already = true;
-          note = 'Already registered' + (dates.length > 1 ? ' on all ' + dates.length + ' dates' :
-            ' for ' + dates[0].dateLabel) + (waitlisted ? ' (waitlisted)' : '') + '.';
-        } else if (on.length) {
-          note = 'Already on ' + on.map(function (d) { return d.dateLabel; }).join(', ') +
-            (waitlisted ? ' (waitlisted)' : '') + ' — only the other ' + (dates.length - on.length) +
-            ' will be added.';
-        }
-      }
+      var act = r.act.value;
+      var verdict = judge(opt, rec, act, r.person);
+      var note = verdict.note;
+      var already = verdict.nothingToDo;
       var key = opt.nameKey || '';
       if (!already && key && seen[key]) {
         already = true;
         note = 'Listed twice — same person as row ' + seen[key] + '.';
       }
+      // Attended is only offered beside a plain Register: the Attended ACTION
+      // already means it, and the other four are not about a day anybody came.
+      var attendRow = act === 'register';
       if (!already && key && (r.on.checked || r.auto)) seen[key] = r.person.line;
       // Attendance is a fact about a day: a row whose chosen dates are all
       // still to come cannot be marked, so the box is greyed rather than
       // left ticked over a promise the write will not keep.
-      var canAttend = attendableDates(rec).length > 0;
+      var canAttend = attendRow && attendableDates(rec).length > 0;
       r.att.disabled = !canAttend;
       r.att.checked = canAttend && !!r.attWanted;
       r.att.title = canAttend
         ? 'Marked attended on ' + attendableDates(rec).map(function (d) { return d.dateLabel; }).join(', ')
-        : 'No date today or earlier is chosen for this row, so there is no day to mark.';
+        : (attendRow
+          ? 'No date today or earlier is chosen for this row, so there is no day to mark.'
+          : 'Only a plain Register offers this — the Attended action already marks the day.');
       r.note.textContent = note;
       r.tr.className = already ? 'already' : '';
       if (already && !r.touched && r.on.checked) { r.on.checked = false; r.auto = true; }
@@ -1500,7 +2145,7 @@ you can close this window and open it again to see how far it has got.</p>
   }
   function summaryOfAlready() {
     var n = ROWS.filter(function (r) { return r.tr.className === 'already'; }).length;
-    return n ? ' ' + n + ' already registered or listed twice — unticked.' : '';
+    return n ? ' ' + n + ' with nothing for this action to do (or listed twice) — unticked.' : '';
   }
 
   function updateCommit() {
@@ -1511,20 +2156,36 @@ you can close this window and open it again to see how far it has got.</p>
   function commit() {
     var p = program();
     if (!p) { say('Choose a program first.', 'err'); return; }
-    var lunch = $('lunch').checked;
+    var lunch = $('lunch').checked && !$('lunch').disabled;
+    var reason = $('reason').value;
     var people = [];
+    var byAction = {};
     ROWS.forEach(function (r) {
       if (!r.on.checked) return;
       var opt = chosen(r);
+      var act = r.act.value;
+      byAction[act] = (byAction[act] || 0) + 1;
       people.push({ name: opt.name, phone: r.person.phone, email: r.person.email,
-        recurrence: r.rec.value, lunch: lunch, attended: r.att.checked && !r.att.disabled });
+        recurrence: r.rec.value, action: act, reason: reason,
+        lunch: lunch && isRegisterish(act),
+        attended: act === 'register' && r.att.checked && !r.att.disabled });
     });
+    // WHAT IS ABOUT TO HAPPEN, COUNTED BY ACTION. "Apply to 40 people" says
+    // nothing about which forty seats are about to go back, and a cancellation
+    // is the one action here nobody can undo by pressing the button again.
+    var lines = ACTIONS.filter(function (x) { return byAction[x[0]]; })
+      .map(function (x) { return byAction[x[0]] + ' × ' + x[1]; });
     var marked = people.filter(function (x) { return x.attended; }).length;
-    if (!confirm('Register ' + people.length + ' people on ' + p.label + '?' +
-      (marked ? '\\n\\n' + marked + ' of them will also be marked attended — on today, never on a date still to come.' : ''))) return;
+    if (!confirm('On ' + p.label + ':\\n\\n' + lines.join('\\n') +
+      (marked ? '\\n\\n' + marked + ' will also be marked attended — on today, never on a date still to come.' : '') +
+      (byAction.cancel ? '\\n\\nCancelling gives the seats and the meals back. Putting somebody back on afterwards is a separate press.' : '') +
+      '\\n\\nGo ahead?')) return;
     $('commit').disabled = true;
     say('');
     showProgress({ exists: true, active: true, label: p.label, total: people.length, next: 0, lines: [] });
+    // The picked dates are sent whatever the recurrences are, because a row set to
+    // "ticked dates" is re-checked against them on the server (see
+    // bulkRegistrantSessionsFor) and a row set to anything else ignores them.
     google.script.run.withSuccessHandler(function (st) {
       if (st && st.ok === false && !st.exists) { say(st.message || 'Nothing was written.', 'err'); backToSetup(); return; }
       if (st && st.message) say(st.message, st.ok === false ? 'err' : '');
@@ -1542,10 +2203,10 @@ you can close this window and open it again to see how far it has got.</p>
     $('setup').style.display = 'none';
     $('progress').style.display = 'block';
     var total = st.total || 0, next = st.next || 0;
-    $('progTitle').textContent = (st.done ? (st.problem ? 'Stopped: ' : 'Done: ') : 'Registering: ') + (st.label || '');
+    $('progTitle').textContent = (st.done ? (st.problem ? 'Stopped: ' : 'Done: ') : 'Working through: ') + (st.label || '');
     $('barFill').style.width = (total ? Math.round(100 * next / total) : 0) + '%';
     var text = next + ' of ' + total + ' people done';
-    if (st.written !== undefined) text += ' · ' + st.written + ' registration(s) written';
+    if (st.written !== undefined) text += ' · ' + st.written + ' row(s) written';
     if (st.done && st.problem) text += '\\nIt ' + st.problem + '.';
     if (st.stalled) text += '\\nIt has stopped without finishing. Press Carry on to pick up from the next person.';
     if (st.remaining && st.remaining.length) text += '\\nNot reached: ' + st.remaining.join(', ');
