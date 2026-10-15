@@ -1076,6 +1076,9 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
 
   const result = writeUpcomingPastSections(sheet, row, headers, running, finished, {
     upcomingLabel: '▶️ Running', pastLabel: '⏸️ Not Currently Running',
+    // This tab's split is a STATUS, not a date, so the shared "Jump to Past"
+    // would name a section that is not on it.
+    jumpToPastLabel: '⬇ Jump to Not Currently Running',
     // NOT COLLAPSED. Old-month hiding is defined against a tab of sessions,
     // where two months is hundreds of rows; here the whole history of the
     // place is a couple of dozen, and the point of the tab is that it fits on
