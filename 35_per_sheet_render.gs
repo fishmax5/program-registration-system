@@ -27,6 +27,12 @@ function renderRegistrantsSheet(force, allRows, options) {
     pastLabel: '🕓 Past Registrants',
     // "10:00 AM" is words, not a time value — see stampTextColumns().
     textColumns: ['Event_Time'],
+    // BY PROGRAM, THEN BY DATE, with a heading row per program — inside each
+    // of the two sections, which keep their own dates and their own direction.
+    // This tab only: every other tab renderFlatDateSheet() draws is read down
+    // a date (a day's lunch schedule, a triage queue), and the questions asked
+    // of this one are all about a program. See 99zs.
+    groupRows: groupRegistrantRowsByProgram,
     // The shrink guard (99b) — this tab only. Every other tab renderFlatDateSheet
     // draws is a projection of the calendar and is rebuilt from it; a short row
     // array here is an unrecoverable loss of registrations.

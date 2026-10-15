@@ -34,7 +34,7 @@ function getZoneDataRange(sheet, headerRow, nextHeaderRow, dateCol1Based) {
   let firstRow = -1, lastRow = -1;
   for (let row = headerRow + 1; row <= scanEnd; row++) {
     const line = entry.values[row - 1];
-    if (line && coerceDate(line[dateCol1Based - 1])) {
+    if (line && coerceDate(line[dateCol1Based - 1]) && !isSectionedDividerValue(line[0])) {
       if (firstRow === -1) firstRow = row;
       lastRow = row;
     }
@@ -185,7 +185,14 @@ function readSectionedGrid_(sheet, headers, markerHeaderName, endRow, preserveFo
     rows = projection
       ? rows.map(row => projection.map(src => (src === -1 ? '' : row[src])))
       : rows.map(row => row.slice(0, headers.length));
-    combined = combined.concat(dateColIdx >= 0 ? rows.filter(row => coerceDate(row[dateColIdx])) : rows);
+    // A DATA ROW IS A DATED ROW THAT IS NOT A HEADING. The date test alone is
+    // what has always made banners and spacers invisible here, and it covers a
+    // program heading too (99zs writes none with a date). The second test is
+    // for the one heading it would not cover: a program whose own title parses
+    // as a date. Both, so no reader in the project can see a heading row.
+    combined = combined.concat(dateColIdx >= 0
+      ? rows.filter(row => coerceDate(row[dateColIdx]) && !isSectionedDividerValue(row[0]))
+      : rows.filter(row => !isSectionedDividerValue(row[0])));
   });
   return combined;
 }
@@ -567,9 +574,14 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
   // Old months go away LAST, once the rows are written and formatted — hiding
   // them first would only mean formatting a hidden range, and the banner has
   // to be able to say how many went.
+  // A tab whose rows were grouped by program (99zs) is no longer date-ordered
+  // down the page, so "older than the cutoff" has stopped being a suffix and
+  // the one-call scan below cannot find it. See collapseOldGroupedPastRows_().
   const hidden = options.collapseOldMonths === false
     ? 0
-    : collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx);
+    : (options.groupedRows
+        ? collapseOldGroupedPastRows_(sheet, pastDataStart, pastRows, dateColIdx)
+        : collapseOldPastMonths(sheet, pastDataStart, pastRows, dateColIdx));
   if (hidden > 0) {
     // The COUNT in the banner, the explanation in the note. "247 hidden" is
     // the fact somebody scanning the tab needs; the sentence about them still
@@ -586,7 +598,14 @@ function writeUpcomingPastSections(sheet, startRow, headers, upcomingRows, pastR
     nextRow: row + 1,
     upcomingHeaderRow, upcomingDataStart, upcomingCount: upcomingRows.length,
     pastBannerRow, pastHeaderRow, pastDataStart, pastCount: pastRows.length,
-    hiddenPastRows: hidden
+    hiddenPastRows: hidden,
+    // Where the program headings landed, for the one range-list paint that
+    // takes the band's stripe and validations back off them (99zs). Empty on
+    // every tab that is not grouped.
+    dividerRows: options.groupedRows
+      ? registrantGroupDividerRowNumbers(upcomingDataStart, upcomingRows)
+          .concat(registrantGroupDividerRowNumbers(pastDataStart, pastRows))
+      : []
   };
 }
 
@@ -639,7 +658,18 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
 
   const todayKey = formatDateKey(new Date());
   const dateColIdx = headers.indexOf('Event_Date');
-  const { upcoming, past } = partitionByDate(allRows, dateColIdx, todayKey);
+  let { upcoming, past } = partitionByDate(allRows, dateColIdx, todayKey);
+  // GROUPING COMES AFTER THE GUARD AND AFTER THE PARTITION, deliberately. The
+  // guard above counts registrations, and a heading row is not one; the
+  // partition is what decides a row's section, and a heading belongs to the
+  // section its block was put in rather than to a date. From here down the two
+  // arrays carry heading rows, which is what makes the early write (99u), the
+  // values write and the formatting all describe the same rows.
+  if (opts.groupRows) {
+    upcoming = opts.groupRows(upcoming, headers, false);
+    past = opts.groupRows(past, headers, true);
+    opts = Object.assign({}, opts, { groupedRows: true });
+  }
 
   // WRITE BEFORE CLEARING. The new rows land in one call, where the render
   // below will put them, before anything is wiped — so a run killed mid-render
@@ -679,6 +709,12 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
     if (opts.afterWrite) opts.afterWrite(sheet, headers, written);
     return written;
   });
+
+  // AFTER the batch has flushed and after the afterWrite hook, because what
+  // this undoes on a heading row is what those two just did to it.
+  if (result && result.dividerRows && result.dividerRows.length) {
+    formatRegistrantGroupDividers_(sheet, headers.length, result.dividerRows);
+  }
 
   autosizeColumns(sheet, { force: !!opts.force, minCols: headers.length });
   return result;

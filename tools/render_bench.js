@@ -99,6 +99,7 @@ vm.createContext(sandbox);
 vm.runInContext(readSource() + `
 this.HEADERS = HEADERS;
 this.renderFlatDateSheet = renderFlatDateSheet;
+this.groupRegistrantRowsByProgram = groupRegistrantRowsByProgram;
 this.applyRegistrantsFormatting = applyRegistrantsFormatting;
 this.invalidateSectionedRowsCache = invalidateSectionedRowsCache;
 this.writeProgramLeaderSheetTab = writeProgramLeaderSheetTab;
@@ -171,6 +172,9 @@ function render(sheet, rows) {
     upcomingLabel: '⏳ Upcoming Registrants',
     pastLabel: '🕓 Past Registrants',
     textColumns: ['Event_Time'],
+    // What renderRegistrantsSheet() actually passes (99zs) — the heading rows
+    // and the one range-list paint over them are part of what this measures.
+    groupRows: sandbox.groupRegistrantRowsByProgram,
     force: false,
     afterWrite: sandbox.applyRegistrantsFormatting
   });

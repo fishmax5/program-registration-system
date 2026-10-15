@@ -2101,8 +2101,10 @@ function addQuickMarkWalkIn(sheet, args) {
 // It declines, and the caller redraws exactly as before, whenever the shape is
 // not the ordinary one: a row dated before today (the Past section, where old
 // months are hidden), an empty Upcoming section (no row to take a format
-// from), a header row that is not HEADERS.All_Registrants in order, or more
-// rows at once than REGISTRANT_INSERT_MAX_ROWS.
+// from), a program with no block on the tab yet (only a full render can write
+// the heading a block opens with — see 99zs), a header row that is not
+// HEADERS.All_Registrants in order, or more rows at once than
+// REGISTRANT_INSERT_MAX_ROWS.
 
 /** Past this many rows in one go, one redraw is cheaper than the inserts. */
 const REGISTRANT_INSERT_MAX_ROWS = 40;
@@ -2199,27 +2201,55 @@ function insertRegistrantRowsInPlace_(sheet, rows) {
   const headerLine = grid.values[zone.headerRow - 1] || [];
   if (!headers.every((header, i) => normalizeHeaderText(headerLine[i]) === header)) return landed;
 
-  // Where each row goes, against the tab as it stands: after the last row
-  // dated on or before it, so a walk-in lands among its own day.
-  const dates = grid.values.slice(zone.dataStart - 1, zone.dataEnd).map(line => coerceDate(line[dateIdx]));
-  const groups = {};
-  incoming.forEach(item => {
-    let at = 0;
-    dates.forEach((d, i) => { if (d && d.getTime() <= item.date.getTime()) at = i + 1; });
-    (groups[at] = groups[at] || []).push(item);
+  // WHERE EACH ROW GOES, AGAINST THE TAB AS IT STANDS — and since the tab is
+  // grouped by program (99zs), that is inside its own program's block rather
+  // than anywhere its date happens to fall. A row inserted by date alone would
+  // land under another program's heading, which is not a cosmetic difference
+  // the next render tidies: it is the row saying one thing and the heading over
+  // it saying another, to anybody reading the tab in between.
+  //
+  // So the block is found first, by the same Location + Event key the grouping
+  // draws, and the row goes after the last row in THAT block dated on or
+  // before it. A program with no rows on the tab yet has no block and no
+  // heading, and the only thing that can write a heading is a full render — so
+  // that row declines here and the caller redraws, exactly as a past-dated row
+  // or an empty section does.
+  const map = getIndexMap(headers);
+  const lines = grid.values.slice(zone.dataStart - 1, zone.dataEnd);
+  const blocks = {};
+  lines.forEach((line, i) => {
+    if (isSectionedDividerValue(line[0])) return;
+    const d = coerceDate(line[dateIdx]);
+    if (!d) return;
+    const key = registrantProgramGroupKey(line, map);
+    (blocks[key] = blocks[key] || []).push({ row: zone.dataStart + i, date: d });
   });
+
+  const groups = {};
+  for (const item of incoming) {
+    const block = blocks[registrantProgramGroupKey(item.row, map)];
+    if (!block || block.length === 0) return landed;
+    let after = null;
+    block.forEach(entry => { if (entry.date.getTime() <= item.date.getTime()) after = entry.row; });
+    const at = after === null ? block[0].row : after + 1;
+    const group = groups[at] = groups[at] || { rows: [], top: after === null };
+    group.rows.push(item);
+  }
   // Bottom up, so an insert never moves a position still to be used.
   const positions = Object.keys(groups).map(Number).sort((a, b) => b - a);
   const textCol = headers.indexOf('Event_Time') + 1;
 
   positions.forEach(at => {
-    const group = groups[at].sort((a, b) => a.date - b.date);
+    const group = groups[at].rows.sort((a, b) => a.date - b.date);
+    const top = groups[at].top;
     const n = group.length;
-    const first = zone.dataStart + at;
+    const first = at;
     let inserted = false;
     try {
-      if (at === 0) sheet.insertRowsBefore(zone.dataStart, n);
-      else sheet.insertRowsAfter(zone.dataStart + at - 1, n);
+      // Only the neighbour the format is copied from differs; the row the new
+      // rows occupy is `first` either way.
+      if (top) sheet.insertRowsBefore(first, n);
+      else sheet.insertRowsAfter(first - 1, n);
       inserted = true;
       const target = sheet.getRange(first, 1, n, numCols);
       // Nothing inherited from the neighbour may refuse the values: the render
@@ -2242,7 +2272,10 @@ function insertRegistrantRowsInPlace_(sheet, rows) {
     // and tick boxes. Cosmetic from here on: a failure leaves a correct row
     // that the next render dresses properly.
     try {
-      const source = at === 0 ? first + n : first - 1;
+      // The row BELOW when these went in at the top of a block, because the row
+      // above is then the program's heading band (99zs) and copying that would
+      // dress a registrant as a heading.
+      const source = top ? first + n : first - 1;
       sheet.getRange(source, 1, 1, numCols)
         .copyTo(sheet.getRange(first, 1, n, numCols), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
       setDataRowHeights(sheet, first, n);
