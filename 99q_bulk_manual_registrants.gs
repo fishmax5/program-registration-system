@@ -182,6 +182,26 @@ const BULK_REGISTRANTS_CHUNK_CHARS = 8000;
 const BULK_REGISTRANTS_MAX_CHUNKS = 30;
 /** More than this is a roll import, not a class list — and would outgrow the plan's chunks. */
 const BULK_REGISTRANTS_MAX_PEOPLE = 400;
+// The follow-up email (see THE FOLLOW-UP EMAIL below). Its own key: it outlives
+// the plan, which is cleared when the list finishes, and it carries who has
+// already been written to so a re-press can never send the same person twice.
+const BULK_FOLLOWUP_PROP_KEY = 'BULK_REGISTRANTS_FOLLOWUP_V1';
+// One call to the server sends for at most this long; the dialog calls again
+// for the rest. Client-driven rather than a sliced job (75) on 99s's precedent:
+// somebody is watching and the quota (a hundred a day) bounds the list anyway.
+const BULK_FOLLOWUP_BUDGET_MS = 90 * 1000;
+// What this send will not dig the day's mail quota below — the registrant
+// reminders (70) and leader alerts (66) run on the same hundred.
+const BULK_FOLLOWUP_QUOTA_RESERVE = 20;
+// The words for "what happened to you", keyed by the row's action.
+const BULK_FOLLOWUP_CHANGE_PHRASES = {
+  register: 'you have been registered',
+  attended: 'you have been registered and marked as attended',
+  cancel: 'your registration has been cancelled',
+  waitlist: 'you have been moved onto the waiting list',
+  reactivate: 'your registration has been put back on',
+  contact: 'your contact details have been updated'
+};
 
 /** The four answers to "how often", in the order the dialog offers them. */
 const BULK_REGISTRANT_RECURRENCES = ['next', 'picked', 'all', 'club'];
@@ -1065,6 +1085,7 @@ function stopBulkRegistrants() {
 function dismissBulkRegistrantsResult() {
   if (isBulkRegistrantsJobActive()) return bulkRegistrantsStatus();
   clearChunkedScriptProperty(BULK_REGISTRANTS_RESULT_PROP_KEY);
+  clearChunkedScriptProperty(BULK_FOLLOWUP_PROP_KEY);
   return { exists: false };
 }
 
@@ -1089,7 +1110,8 @@ function bulkRegistrantsStatus() {
     written: result.written || 0,
     lines: result.lines || [],
     problem: result.problem || '',
-    remaining: result.remaining || []
+    remaining: result.remaining || [],
+    changedCount: (result.changed || []).length
   };
 }
 
@@ -1474,6 +1496,15 @@ function runBulkRegistrantsSlice() {
         const outcome = applyOneBulkPersonAction_(program, plan.picked, people[state.next]);
         if (outcome.busy) { busy = true; break; }
         result.lines = (result.lines || []).concat([outcome.line]);
+        // WHO WAS ACTUALLY CHANGED, for the follow-up email: a person whose
+        // outcome wrote nothing ("already registered", "no live booking") has
+        // nothing to be told. The dates are the ones CHOSEN for the row, which
+        // can name a date the person was already on — the email says "for",
+        // not "newly added to".
+        if (outcome.written > 0) {
+          result.changed = (result.changed || []).concat([
+            bulkFollowUpEntryFor_(program, plan.picked, people[state.next])]);
+        }
         state.written = (state.written || 0) + outcome.written;
         state.next++;
         result.next = state.next;
@@ -1539,6 +1570,217 @@ function finishBulkRegistrants_(state, problem) {
   }
   toastIfPossible(headline);
   return result;
+}
+
+// ----------------------------------------------------------------------------
+// THE FOLLOW-UP EMAIL: telling the people whose registration just changed
+// ----------------------------------------------------------------------------
+//
+// A list that cancels twenty people at four o'clock is, in the office's hands,
+// twenty phone calls or one email. This is the email: after the job finishes,
+// the dialog offers one message, written once, sent to each person the job
+// ACTUALLY changed (result.changed, recorded as each person finishes — somebody
+// "already registered" or with "no live booking" wrote nothing and is not told
+// anything).
+//
+// IT IS THE ORDINARY MAILER, so every house rule holds without being restated
+// here: the quota floor, quiet hours (5pm–8am: held, not dropped — the list
+// below is KEPT, so pressing Send again after eight carries on), the Config
+// pause, and notification test mode all live in sendRationedEmail (76). A hold
+// stops the whole send, because every later message would be held for the same
+// reason and a loop of identical refusals is what `retry` exists to prevent.
+//
+// NOBODY IS WRITTEN TO TWICE. Each recipient's status is saved as the send
+// goes (BULK_FOLLOWUP_PROP_KEY) and `alreadySent` reads it, so a second press,
+// a reopened window or a call that overlapped the first re-sends no one.
+//
+// THE ADDRESS comes off the list the person was entered on, then Member_Roll
+// by name. A person with neither is shown as "no email" and left out — nothing
+// guesses an address, and nothing else is done about it.
+//
+// Client-driven in chunks (BULK_FOLLOWUP_BUDGET_MS) rather than a sliced job,
+// on 99s's precedent: somebody is watching, and the daily quota bounds the list.
+
+/** The follow-up record for one person the job changed. Pure. */
+function bulkFollowUpEntryFor_(program, picked, person) {
+  const action = BULK_FOLLOWUP_CHANGE_PHRASES[person.action] ? person.action : 'register';
+  let dates = '';
+  if (action === 'contact') dates = '';
+  else if (person.recurrence === 'club') dates = 'every upcoming date';
+  else dates = bulkRegistrantSessionsFor(program, person.recurrence, picked)
+    .map(s => s.dateLabel || s.dateKey).join(', ');
+  return { name: String(person.name || '').trim(), email: String(person.email || '').trim(), action, dates };
+}
+
+/**
+ * Fills {Name} {Program} {Dates} {Change} in `template`. Pure, single pass (a
+ * value containing "{Name}" is not expanded again), case-insensitive, and any
+ * other brace text is left exactly as typed.
+ */
+function renderBulkFollowUpText_(template, vars) {
+  return String(template || '').replace(/\{(name|program|dates|change)\}/gi,
+    (m, key) => String(vars[key.toLowerCase()] || ''));
+}
+
+function bulkFollowUpVars_(state, r) {
+  return {
+    name: r.name,
+    program: state.label || '',
+    dates: r.dates || 'the dates on your registration',
+    change: BULK_FOLLOWUP_CHANGE_PHRASES[r.action] || ''
+  };
+}
+
+function defaultBulkFollowUpMessage_() {
+  return {
+    subject: 'Your registration for {Program} has been updated',
+    body: 'Hello {Name},\n\nWe are writing to let you know that {Change}: {Program}, {Dates}.\n\n' +
+      'If this does not look right, please reply to this email or give us a call.\n\n' +
+      (typeof CENTER_NAME === 'string' ? CENTER_NAME : '')
+  };
+}
+
+function readBulkFollowUp_() {
+  const text = readChunkedScriptProperty(BULK_FOLLOWUP_PROP_KEY);
+  if (!text) return null;
+  try { return JSON.parse(text); } catch (err) { return null; }
+}
+
+function writeBulkFollowUp_(state) {
+  return writeChunkedScriptProperty(BULK_FOLLOWUP_PROP_KEY, JSON.stringify(state),
+    BULK_REGISTRANTS_CHUNK_CHARS, BULK_REGISTRANTS_MAX_CHUNKS);
+}
+
+/** The address for each name the roll holds, keyed by normalizeNameKey. */
+function bulkFollowUpRollEmails_() {
+  const byName = {};
+  try {
+    readMemberRollRows().rows.forEach(row => {
+      const email = String(row.Email || '').trim();
+      if (!BULK_REGISTRANT_EMAIL_RE.test(email)) return;
+      [row.Name, row.Display_Name].forEach(n => {
+        const key = normalizeNameKey(n);
+        if (key && !byName[key]) byName[key] = email;
+      });
+    });
+  } catch (err) {
+    log(`ℹ️ Bulk follow-up could not read the member roll for addresses (${err}).`);
+  }
+  return byName;
+}
+
+/**
+ * Called by the dialog once a list has finished: who can be written to, who
+ * cannot, and the starting wording. Idempotent — a follow-up already prepared
+ * for this job is returned with its sent marks, never rebuilt, which is what
+ * keeps a reopened window from forgetting who has been told.
+ */
+function prepareBulkFollowUp() {
+  const result = readBulkRegistrantsResult_();
+  if (!result || !result.done) return { ok: false, message: 'The list has not finished yet.' };
+  let state = readBulkFollowUp_();
+  if (!state || state.jobId !== result.jobId) {
+    const roll = (result.changed || []).some(c => !BULK_REGISTRANT_EMAIL_RE.test(c.email))
+      ? bulkFollowUpRollEmails_() : {};
+    const seen = {};
+    const recipients = [];
+    (result.changed || []).forEach(c => {
+      const email = BULK_REGISTRANT_EMAIL_RE.test(c.email) ? c.email : (roll[normalizeNameKey(c.name)] || '');
+      // One message per ADDRESS: a household entered twice on one email is one
+      // person to write to, and the second copy is the duplicate this avoids.
+      const key = email.toLowerCase() + '|' + c.action;
+      if (email && seen[key]) return;
+      if (email) seen[key] = true;
+      recipients.push({ name: c.name, email, action: c.action, dates: c.dates, status: '', error: '' });
+    });
+    state = { jobId: result.jobId, label: result.label || '', recipients };
+    if (!writeBulkFollowUp_(state)) {
+      return { ok: false, message: '⚠️ The recipient list could not be saved, so nothing can be sent safely.' };
+    }
+  }
+  return Object.assign({ ok: true, label: state.label, quietHours: isWithinMailQuietHours(),
+    recipients: state.recipients.map((r, id) => ({ id, name: r.name, email: r.email,
+      change: BULK_FOLLOWUP_CHANGE_PHRASES[r.action], dates: r.dates, status: r.status, error: r.error })) },
+    defaultBulkFollowUpMessage_());
+}
+
+/** The first ticked recipient's message exactly as it will go. */
+function previewBulkFollowUp(args) {
+  args = args || {};
+  const state = readBulkFollowUp_();
+  if (!state) return { ok: false, message: 'No follow-up is prepared.' };
+  const ids = (args.ids || []).map(Number);
+  const r = state.recipients[ids.length ? ids[0] : 0];
+  if (!r) return { ok: false, message: 'Tick at least one person.' };
+  const vars = bulkFollowUpVars_(state, r);
+  return { ok: true, to: r.email, subject: renderBulkFollowUpText_(args.subject, vars),
+    body: renderBulkFollowUpText_(args.body, vars) };
+}
+
+/**
+ * Sends to the ticked people not yet written to, for at most
+ * BULK_FOLLOWUP_BUDGET_MS. Returns { ok, sent, failed, remaining, stopped,
+ * message, recipients } — `remaining` > 0 with no `stopped` means "call again".
+ */
+function sendBulkFollowUp(args) {
+  args = args || {};
+  const subject = String(args.subject || '').replace(/[\r\n]+/g, ' ').trim();
+  const body = String(args.body || '').trim();
+  if (!subject || !body) return { ok: false, message: 'Write a subject and a message first.' };
+  if (subject.length > 200 || body.length > 8000) return { ok: false, message: 'That message is too long.' };
+  const state = readBulkFollowUp_();
+  if (!state) return { ok: false, message: 'No follow-up is prepared — close this and reopen the finished list.' };
+
+  const wanted = {};
+  (args.ids || []).forEach(i => { wanted[Number(i)] = true; });
+  const deadline = Date.now() + BULK_FOLLOWUP_BUDGET_MS;
+  let sent = 0;
+  let failed = 0;
+  let stopped = '';
+  try {
+    for (let i = 0; i < state.recipients.length && !stopped; i++) {
+      const r = state.recipients[i];
+      if (!wanted[i] || r.status === 'sent' || r.status === 'failed') continue;
+      if (!BULK_REGISTRANT_EMAIL_RE.test(r.email)) continue;
+      if (Date.now() >= deadline) break;
+      const vars = bulkFollowUpVars_(state, r);
+      const outcome = sendRationedEmail({
+        to: r.email,
+        subject: renderBulkFollowUpText_(subject, vars),
+        body: renderBulkFollowUpText_(body, vars),
+        reserve: BULK_FOLLOWUP_QUOTA_RESERVE,
+        alreadySent: () => r.status === 'sent',
+        // Deliberately empty: the mailer calls this for a PAUSED message too
+        // (76), so the status below — not this — says what happened.
+        recordSent: () => {}
+      });
+      if (outcome.status === 'sent') {
+        r.status = 'sent'; sent++;
+        spoolOfficeNote('Bulk update follow-up emails', `${r.name} <${r.email}> — "${state.label}"`);
+      } else if (outcome.status === 'duplicate') {
+        r.status = 'sent';
+      } else if (outcome.status === 'held') {
+        stopped = outcome.retry === 'diverted'
+          ? 'Notification test mode is on — those went to the office, not to the people. Turn it off on Config to send for real.'
+          : outcome.retry === 'tomorrow'
+            ? 'Today’s mail allowance is used up. The list is kept — press Send again tomorrow.'
+            : 'Mail is held right now (nothing leaves between 5pm and 8am, and the day’s allowance keeps a reserve). ' +
+              'The list is kept — press Send again later.';
+      } else if (outcome.status === 'paused') {
+        stopped = 'Outbound mail is paused on Config, so nothing was sent.';
+      } else {
+        r.status = 'failed'; r.error = String(outcome.error || outcome.status); failed++;
+      }
+      if ((sent + failed) % 10 === 0) writeBulkFollowUp_(state);
+    }
+  } finally {
+    writeBulkFollowUp_(state);
+  }
+  const remaining = state.recipients.filter((r, i) =>
+    wanted[i] && r.status !== 'sent' && r.status !== 'failed' && BULK_REGISTRANT_EMAIL_RE.test(r.email)).length;
+  log(`bulkRegistrants follow-up: ${sent} sent, ${failed} failed, ${remaining} to go${stopped ? ' — ' + stopped : ''}`);
+  return { ok: true, sent, failed, remaining, stopped,
+    recipients: state.recipients.map((r, id) => ({ id, status: r.status, error: r.error })) };
 }
 
 /** The menu item. Open to everyone, like Quick Mark's Register: it deletes nothing. */
@@ -1655,6 +1897,22 @@ registered at all when cancelling — is unticked for you and says why. Untick a
 <p class="hint">This carries on by itself, a few minutes at a time, until everybody is done —
 you can close this window and open it again to see how far it has got.</p>
 <div id="log"></div>
+<div id="followup" style="display:none">
+<h3>Follow up: email the people who were changed</h3>
+<p class="hint">One email each, to the people this list actually changed (anybody it left alone is not here).
+Use <code>{Name}</code>, <code>{Program}</code>, <code>{Dates}</code> and <code>{Change}</code> to personalise it.
+Mail follows the usual rules — nothing leaves between 5pm and 8am, and this list is kept so you can send later.</p>
+<div id="fuWarn" class="err"></div>
+<div id="fuPeople"></div>
+<label>Subject <input id="fuSubject" type="text" style="width:100%;box-sizing:border-box"></label>
+<textarea id="fuBody" style="height:130px;margin-top:6px;font-family:Arial,Helvetica,sans-serif;font-size:13px"></textarea>
+<div style="margin-top:6px">
+  <button id="fuPreview" class="plain" onclick="fuPreview()">Preview</button>
+  <button id="fuSend" onclick="fuSend()">Send emails</button>
+</div>
+<div id="fuPreviewBox" class="hint" style="white-space:pre-wrap"></div>
+<div id="fuStatus" style="white-space:pre-wrap;margin-top:6px"></div>
+</div>
 <div style="margin-top:8px">
   <button id="stop" class="plain" onclick="stopJob()">Stop after this person</button>
   <button id="carryOn" onclick="carryOn()" style="display:none">Carry on</button>
@@ -2231,12 +2489,90 @@ you can close this window and open it again to see how far it has got.</p>
     $('stop').style.display = st.active ? '' : 'none';
     $('carryOn').style.display = st.stalled ? '' : 'none';
     $('another').style.display = (st.done || st.stalled) ? '' : 'none';
+    if (st.done && st.changedCount && !FU_LOADED) loadFollowUp();
     if (st.active && !POLL) POLL = setInterval(poll, 4000);
     if (!st.active && POLL) { clearInterval(POLL); POLL = null; }
   }
   function poll() {
     google.script.run.withSuccessHandler(function (st) { if (st && st.exists) showProgress(st); })
       .bulkRegistrantsStatus();
+  }
+
+  // ---- 6. The follow-up email. Everything from the workbook goes in with textContent.
+  var FU_LOADED = false;
+  var FU = [];
+  function fuSay(text, cls) { var s = $('fuStatus'); s.textContent = text || ''; s.className = cls || ''; }
+  function loadFollowUp() {
+    FU_LOADED = true;
+    google.script.run.withSuccessHandler(function (res) {
+      if (!res || !res.ok) { FU_LOADED = false; fuSay((res && res.message) || 'Could not prepare the follow-up.', 'err'); return; }
+      FU = res.recipients;
+      $('followup').style.display = '';
+      $('fuSubject').value = res.subject;
+      $('fuBody').value = res.body;
+      $('fuWarn').textContent = res.quietHours
+        ? 'It is outside sending hours (5pm–8am), so emails will be held. Press Send again after 8am — this list is kept.' : '';
+      drawFollowUp();
+    }).withFailureHandler(function (err) { FU_LOADED = false; fuSay('Failed: ' + err.message, 'err'); })
+      .prepareBulkFollowUp();
+  }
+  function drawFollowUp() {
+    var box = $('fuPeople');
+    box.textContent = '';
+    var table = el('table');
+    var head = el('tr');
+    ['', 'Name', 'Email', 'Change', 'Sent?'].forEach(function (h) { head.appendChild(el('th', h)); });
+    table.appendChild(head);
+    FU.forEach(function (r) {
+      var tr = el('tr', null, r.email ? '' : 'already');
+      var td = el('td'); var c = document.createElement('input');
+      c.type = 'checkbox'; c.className = 'fu'; c.value = String(r.id);
+      c.checked = !!r.email && r.status !== 'sent'; c.disabled = !r.email || r.status === 'sent';
+      td.appendChild(c); tr.appendChild(td);
+      tr.appendChild(el('td', r.name));
+      tr.appendChild(el('td', r.email || 'no email — will not be sent'));
+      tr.appendChild(el('td', r.change || ''));
+      tr.appendChild(el('td', r.status === 'sent' ? 'Sent' : (r.status === 'failed' ? 'Failed: ' + (r.error || '') : '')));
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+  }
+  function fuIds() {
+    return Array.prototype.map.call(document.querySelectorAll('input.fu:checked'), function (c) { return Number(c.value); });
+  }
+  function fuPreview() {
+    var ids = fuIds();
+    if (!ids.length) { fuSay('Tick at least one person.', 'err'); return; }
+    google.script.run.withSuccessHandler(function (res) {
+      $('fuPreviewBox').textContent = res && res.ok
+        ? 'To: ' + res.to + '\\nSubject: ' + res.subject + '\\n\\n' + res.body : ((res && res.message) || '');
+    }).withFailureHandler(function (err) { fuSay('Failed: ' + err.message, 'err'); })
+      .previewBulkFollowUp({ ids: ids, subject: $('fuSubject').value, body: $('fuBody').value });
+  }
+  function fuSend() {
+    var ids = fuIds();
+    if (!ids.length) { fuSay('Tick at least one person.', 'err'); return; }
+    if (!$('fuSubject').value.trim() || !$('fuBody').value.trim()) { fuSay('Write a subject and a message first.', 'err'); return; }
+    if (!confirm('Send this email to ' + ids.length + ' ' + (ids.length === 1 ? 'person' : 'people') + '? It cannot be recalled.')) return;
+    $('fuSend').disabled = true;
+    fuSay('Sending…');
+    var totals = { sent: 0, failed: 0 };
+    (function next() {
+      google.script.run.withSuccessHandler(function (res) {
+        if (!res || !res.ok) { $('fuSend').disabled = false; fuSay((res && res.message) || 'Nothing came back.', 'err'); return; }
+        totals.sent += res.sent; totals.failed += res.failed;
+        res.recipients.forEach(function (u) { FU[u.id].status = u.status; FU[u.id].error = u.error; });
+        drawFollowUp();
+        var line = totals.sent + ' sent' + (totals.failed ? ', ' + totals.failed + ' failed' : '');
+        if (res.stopped) { $('fuSend').disabled = false; fuSay(line + '.\\n' + res.stopped, 'err'); return; }
+        if (res.remaining > 0) { fuSay(line + ', ' + res.remaining + ' to go…'); next(); return; }
+        $('fuSend').disabled = false;
+        fuSay('Done: ' + line + '.');
+      }).withFailureHandler(function (err) {
+        $('fuSend').disabled = false;
+        fuSay('Failed: ' + err.message + ' — press Send again; anybody already written to is skipped.', 'err');
+      }).sendBulkFollowUp({ ids: ids, subject: $('fuSubject').value, body: $('fuBody').value });
+    })();
   }
   function stopJob() {
     if (!confirm('Stop after the person being registered now? Everybody already done stays done.')) return;
@@ -2267,6 +2603,9 @@ you can close this window and open it again to see how far it has got.</p>
     // A new list starts empty: the last one's rows, mapping and review would
     // otherwise sit under the setup, ready to be applied a second time.
     RAW = null; PEOPLE = []; ROWS = []; FROM_ROSTER = false;
+    FU_LOADED = false; FU = [];
+    $('followup').style.display = 'none';
+    $('fuPreviewBox').textContent = ''; fuSay('');
     $('csv').value = '';
     try { $('file').value = ''; } catch (e) {}
     $('review').textContent = '';
