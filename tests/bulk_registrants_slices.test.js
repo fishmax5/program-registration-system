@@ -119,6 +119,7 @@ assert.strictEqual(st.done, true);
 assert.strictEqual(st.problem, '');
 assert.strictEqual(st.next, names.length);
 assert.strictEqual(st.lines.length, names.length, 'nobody done twice, nobody missed');
+assert.strictEqual(st.changedCount, names.length, 'everybody written is on the follow-up list');
 assert.deepStrictEqual(Array.from(new Set(calls.map(c => c.name))), names);
 assert.strictEqual(triggers.length, 0, 'no trigger left behind');
 assert.ok(!('BULK_REGISTRANTS_JOB_V1' in store) && !('BULK_REGISTRANTS_PLAN_V1' in store));
@@ -131,6 +132,7 @@ st = run('startBulkRegistrants(__args)');
 assert.strictEqual(st.done, true);
 assert.ok(/already registered/.test(st.lines[0]), st.lines[0]);
 assert.strictEqual(st.written, 0);
+assert.strictEqual(st.changedCount, 0, 'nothing written, nobody to email');
 run('dismissBulkRegistrantsResult()');
 
 // 6. Stop keeps what was done and names who was not reached.
