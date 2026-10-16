@@ -27,6 +27,8 @@ this.isProgramSettingsDefaultsValue = isProgramSettingsDefaultsValue;
 this.readProgramSettingsTable_ = readProgramSettingsTable_;
 this.seedNotificationHalf = seedNotificationHalf;
 this.PROGRAM_FORM_TYPES = PROGRAM_FORM_TYPES;
+this.PROGRAM_SETTINGS_LUNCH_GROUP = PROGRAM_SETTINGS_LUNCH_GROUP;
+this.PROGRAM_SETTINGS_INACTIVE_GROUP = PROGRAM_SETTINGS_INACTIVE_GROUP;
 this.NOTIFICATION_CHECKBOX_COLUMNS = NOTIFICATION_CHECKBOX_COLUMNS;
 `, sandbox, { filename: 'program.gs' });
 
@@ -74,6 +76,18 @@ const how = sandbox.seedNotificationHalf(born, map, 'k|l', {}, {}, false, null, 
 check('a new row takes its kind default', [how, born[map['Day_Before']], born[map['Week_Before']]], ['kind-default', true, false]);
 const plain = new Array(headers.length).fill('');
 check('no default means the old built-in', sandbox.seedNotificationHalf(plain, map, 'k|l', {}, {}, false, null, null), 'default');
+
+
+// --- lunch is its own group, and finished programs sink to the foot ---------
+const mk = (title, last) => { const r = new Array(headers.length).fill(''); r[0] = title; r[map['Last_Date']] = last || ''; return r; };
+const g2 = sandbox.groupProgramSettingsRows([
+  { group: sandbox.PROGRAM_SETTINGS_INACTIVE_GROUP, row: mk('Old A', new Date(2026, 0, 5)) },
+  { group: sandbox.PROGRAM_SETTINGS_INACTIVE_GROUP, row: mk('Old B', new Date(2026, 5, 5)) },
+  { group: sandbox.PROGRAM_SETTINGS_LUNCH_GROUP, row: mk('Lunch') },
+  { group: kind, row: mk('Chair Yoga') }
+], headers);
+const titles = g2.rows.map(r => r[0]).filter(t => t.indexOf('--- ') !== 0);
+check('lunch follows the kinds; finished last, newest first', titles, ['Chair Yoga', 'Lunch', 'Old B', 'Old A']);
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

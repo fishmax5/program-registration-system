@@ -333,8 +333,15 @@ function refreshProgramSettings(ss, sessionRows) {
   const kindDefaults = prior.defaults;
   const existingByKey = {};
   prior.rows.forEach(row => {
+    // Every lunch title this workbook has ever used ("🥡 Lunch Only (no
+    // program)" and its successors) is the one Lunch row for its building;
+    // the first one met keeps its staff answers.
+    const lunch = isLunchOnlyProgramTitle(row[map['Event']]);
+    if (lunch) row[map['Event']] = PROGRAM_SETTINGS_LUNCH_TITLE;
     const key = notificationProgramKey(row[map['Event']], row[map['Location']]);
-    if (key !== '|') existingByKey[key] = row;
+    if (key === '|') return;
+    if (lunch && existingByKey[key]) return;
+    existingByKey[key] = row;
   });
 
   // --- the three reads that must happen before the write, newest first ------
@@ -359,14 +366,18 @@ function refreshProgramSettings(ss, sessionRows) {
   const todayKey = formatDateKey(new Date());
   const programs = {};
   rows.forEach(row => {
-    const title = String(row[regMap['Clean_Title']] || '').trim();
     const location = String(row[regMap['Location']] || '').trim();
+    // A meal is not a program: every lunch-only session at a building is the
+    // one Lunch row for that building, whatever date or title it carries.
+    const isLunch = isLunchOnlyEventId(row[regMap['Event_ID']]) ||
+      isLunchOnlyProgramTitle(row[regMap['Clean_Title']]);
+    const title = isLunch ? PROGRAM_SETTINGS_LUNCH_TITLE : String(row[regMap['Clean_Title']] || '').trim();
     if (!title) return;
     const key = notificationProgramKey(title, location);
     const d = coerceDate(row[regMap['Event_Date']]);
     if (!programs[key]) {
       programs[key] = { title, location, sessions: 0, next: null, last: null,
-        typeTag: '', caps: {}, isAssistance: false, isClub: false, noRegistration: false };
+        typeTag: '', caps: {}, isAssistance: false, isClub: false, noRegistration: false, isLunch };
     }
     const p = programs[key];
     p.sessions++;
@@ -405,13 +416,18 @@ function refreshProgramSettings(ss, sessionRows) {
       const p = programs[key];
       const row = new Array(headers.length).fill('');
       const priorRow = existingByKey[key];
-      const group = programSettingsGroupOf(p);
+      // The kind decides what a new row is born with; WHERE it is filed is
+      // lunch (its own group), or — with nothing coming up — the foot of the
+      // tab, the way Master_Program_Dashboard files a finished program.
+      const kind = programSettingsGroupOf(p);
+      const group = !p.next ? PROGRAM_SETTINGS_INACTIVE_GROUP
+        : (p.isLunch ? PROGRAM_SETTINGS_LUNCH_GROUP : kind);
       if (priorRow) PROGRAM_SETTINGS_STAFF_COLUMNS.forEach(h => { row[map[h]] = priorRow[map[h]]; });
       if (!priorRow || mergePending) {
         // A row BORN now takes its kind's defaults; a row carried across the
         // merge was already decided by the legacy tabs and keeps those answers.
         const from = seedNotificationHalf(row, map, key, legacyTicks, legacyModes, p.isAssistance,
-          priorRow, !priorRow ? kindDefaults[group] : null);
+          priorRow, !priorRow && !p.isLunch ? kindDefaults[kind] : null);
         if (from === 'ticks') mergedTicks++;
         if (!priorRow) seeded++;
       }
@@ -541,12 +557,15 @@ function refreshProgramSettings(ss, sessionRows) {
  * in it is not drawn.
  */
 const PROGRAM_SETTINGS_INACTIVE_GROUP = 'INACTIVE';
+const PROGRAM_SETTINGS_LUNCH_GROUP = 'LUNCH';
+const PROGRAM_SETTINGS_LUNCH_TITLE = 'Lunch';
 
 /** The heading each group is drawn with, and the order the groups come in. */
 function programSettingsGroupLabel(group) {
   if (group === PROGRAM_SETTINGS_INACTIVE_GROUP) {
-    return 'Not currently on the calendar (settings kept for when it comes back)';
+    return 'Finished — nothing coming up (settings kept for when it comes back)';
   }
+  if (group === PROGRAM_SETTINGS_LUNCH_GROUP) return 'Lunch (one row per building)';
   const type = getProgramFormType(group);
   return type ? type.label : group;
 }
@@ -571,7 +590,8 @@ function programSettingsGroupOf(program) {
  */
 function groupProgramSettingsRows(entries, headers, kindDefaults) {
   const map = getIndexMap(headers);
-  const order = PROGRAM_FORM_TYPES.map(t => t.key).concat([PROGRAM_SETTINGS_INACTIVE_GROUP]);
+  const kindKeys = PROGRAM_FORM_TYPES.map(t => t.key);
+  const order = kindKeys.concat([PROGRAM_SETTINGS_LUNCH_GROUP, PROGRAM_SETTINGS_INACTIVE_GROUP]);
   const byGroup = {};
   entries.forEach(entry => {
     const group = order.indexOf(entry.group) === -1 ? PROGRAM_SETTINGS_INACTIVE_GROUP : entry.group;
@@ -589,9 +609,16 @@ function groupProgramSettingsRows(entries, headers, kindDefaults) {
     // the point of a default is that it is set BEFORE the first program of
     // that kind arrives. The "not on the calendar" heading is not a kind and
     // has no defaults, so it is still drawn only when it has rows.
-    const wantsDefaults = !!kindDefaults && group !== PROGRAM_SETTINGS_INACTIVE_GROUP;
+    const wantsDefaults = !!kindDefaults && kindKeys.indexOf(group) !== -1;
     if (groupRows.length === 0 && !wantsDefaults) return;
-    groupRows.sort((a, b) => String(a[map['Event']] || '').localeCompare(String(b[map['Event']] || '')));
+    const byTitle = (a, b) => String(a[map['Event']] || '').localeCompare(String(b[map['Event']] || ''));
+    if (group === PROGRAM_SETTINGS_INACTIVE_GROUP) {
+      // Most recently finished first, like the dashboard's finished section.
+      const ended = row => { const d = coerceDate(row[map['Last_Date']]); return d ? d.getTime() : 0; };
+      groupRows.sort((a, b) => (ended(b) - ended(a)) || byTitle(a, b));
+    } else {
+      groupRows.sort(byTitle);
+    }
     dividerOffsets.push(rows.length);
     rows.push(memoryTabDividerRow(headers, `${programSettingsGroupLabel(group)} (${groupRows.length})`));
     if (wantsDefaults) {
