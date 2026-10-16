@@ -648,11 +648,15 @@ function programSettingsTabOptions() {
     banner: '📋 Program Settings',
     bannerNote: 'Every program this workbook has ever run: how it runs, and what it sends the ' +
       'people signed up for it. Grouped by what KIND of program it is, under grey headings ' +
-      'that are not rows. Tick as many channels as apply — they add up, and an unticked ' +
-      'box means that message is not sent.',
+      'that are not rows. The green row under each heading sets what NEW programs of that kind ' +
+      'are born with (existing programs are never changed by it). Tick as many channels as ' +
+      'apply — they add up, and an unticked box means that message is not sent.',
     staffColumns: PROGRAM_SETTINGS_STAFF_COLUMNS,
     dateColumns: ['Next_Date', 'Last_Date'],
-    numberColumns: ['Sessions_Tracked']
+    numberColumns: ['Sessions_Tracked'],
+    // Event AND Location: a program is a pair, and both stay in view while the
+    // notification boxes far to the right are being ticked.
+    freezeColumns: 2
   };
 }
 
@@ -676,6 +680,11 @@ function renameProgramSettingRows(ss, renames) {
   const map = getIndexMap(headers);
   const rows = readSimpleTable(sheet, headers);
   if (rows.length === 0) return;
+  // The new-event defaults rows are skipped by that read, like headings, and a
+  // rename redraws the tab without headings — carry them across so a rename
+  // cannot cost anybody their defaults. refreshProgramSettings() puts them back
+  // under their kinds.
+  const defaultsRows = programSettingsDefaultsRowsFrom_(sheet, headers);
 
   const titleMap = {};
   renames.forEach(rename => { titleMap[normalizeNameKey(rename.oldTitle)] = rename.newTitle; });
@@ -713,7 +722,7 @@ function renameProgramSettingRows(ss, renames) {
   // stale Type_Tag would file it under a kind it may no longer be. The rows
   // are all here and all correct; refreshProgramSettings() draws the groupings
   // back on the next sync. See groupProgramSettingsRows() (section 6c).
-  writeMemoryTab(sheet, headers, kept, programSettingsTabOptions());
+  writeMemoryTab(sheet, headers, defaultsRows.concat(kept), programSettingsTabOptions());
   // The tab section 9e reads its policies off has just been rewritten.
   invalidateNotificationPolicyCache();
   log(`Renamed program(s): moved ${renamed.length} ${SHEET_NAMES.PROGRAM_SETTINGS} row(s) onto ` +

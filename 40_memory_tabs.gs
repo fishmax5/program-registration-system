@@ -326,8 +326,13 @@ function refreshProgramSettings(ss, sessionRows) {
   const headers = HEADERS.Program_Settings;
   const map = getIndexMap(headers);
 
+  // ONE read of the tab: the program rows AND the new-event defaults rows
+  // (which every ordinary reader skips like a heading, and which this alone
+  // must carry across the redraw — they are the staff's own words).
+  const prior = readProgramSettingsTable_(sheet, headers);
+  const kindDefaults = prior.defaults;
   const existingByKey = {};
-  readSimpleTable(sheet, headers).forEach(row => {
+  prior.rows.forEach(row => {
     const key = notificationProgramKey(row[map['Event']], row[map['Location']]);
     if (key !== '|') existingByKey[key] = row;
   });
@@ -399,13 +404,16 @@ function refreshProgramSettings(ss, sessionRows) {
     .forEach(key => {
       const p = programs[key];
       const row = new Array(headers.length).fill('');
-      const prior = existingByKey[key];
-      if (prior) PROGRAM_SETTINGS_STAFF_COLUMNS.forEach(h => { row[map[h]] = prior[map[h]]; });
-      if (!prior || mergePending) {
+      const priorRow = existingByKey[key];
+      const group = programSettingsGroupOf(p);
+      if (priorRow) PROGRAM_SETTINGS_STAFF_COLUMNS.forEach(h => { row[map[h]] = priorRow[map[h]]; });
+      if (!priorRow || mergePending) {
+        // A row BORN now takes its kind's defaults; a row carried across the
+        // merge was already decided by the legacy tabs and keeps those answers.
         const from = seedNotificationHalf(row, map, key, legacyTicks, legacyModes, p.isAssistance,
-          prior);
+          priorRow, !priorRow ? kindDefaults[group] : null);
         if (from === 'ticks') mergedTicks++;
-        if (!prior) seeded++;
+        if (!priorRow) seeded++;
       }
       row[map['Event']] = p.title;
       row[map['Location']] = p.location;
@@ -416,7 +424,7 @@ function refreshProgramSettings(ss, sessionRows) {
       // Only SUGGEST a capacity where the calendar is consistent about it —
       // the staff column is theirs to set, so this never overwrites it.
       if (!row[map['Usual_Capacity']]) row[map['Usual_Capacity']] = pickMostFrequent(p.caps);
-      entries.push({ row, group: programSettingsGroupOf(p) });
+      entries.push({ row, group });
       seen[key] = true;
     });
   // A program the calendar has stopped mentioning keeps its row, its notes and
@@ -453,8 +461,21 @@ function refreshProgramSettings(ss, sessionRows) {
     seen[key] = true;
   });
 
-  const grouped = groupProgramSettingsRows(entries, headers);
+  const grouped = groupProgramSettingsRows(entries, headers, kindDefaults);
   const outRows = grouped.rows;
+
+  // AN HOUR IN WHICH NOTHING CHANGED draws nothing. Everything this tab shows
+  // is in `outRows` (the staff's answers were read off it a moment ago), so
+  // an identical hash means an identical tab; today is in it so formatting
+  // somebody damaged is put right once a day. Never while the legacy merge is
+  // pending, and never when there is no way to hash.
+  const fingerprint = mergePending ? '' : fingerprintOf_(
+    ['program_settings_v2', formatDateKey(new Date()), headers, outRows]);
+  if (fingerprint && storedProgramSettingsFingerprint_() === fingerprint) {
+    invalidateNotificationPolicyCache();
+    log(`${SHEET_NAMES.PROGRAM_SETTINGS}: nothing changed; left as it is.`);
+    return;
+  }
 
   writeMemoryTab(sheet, headers, outRows, programSettingsTabOptions());
 
@@ -480,6 +501,9 @@ function refreshProgramSettings(ss, sessionRows) {
   // checkbox on every row in the band, headings included, and this is what
   // takes them back off. See styleMemoryTabDividers().
   styleMemoryTabDividers(sheet, headers, grouped.dividerOffsets);
+  styleProgramSettingsDefaultsRows_(sheet, headers, grouped.defaultsOffsets);
+  noteProgramSettingsHeaders_(sheet, headers);
+  if (fingerprint) storeProgramSettingsFingerprint_(fingerprint);
   // The tab those settings are read from has just been rewritten; anything
   // asking again in this execution must see the rows as they now stand.
   invalidateNotificationPolicyCache();
@@ -545,7 +569,7 @@ function programSettingsGroupOf(program) {
  *
  * Within a group the order is the one the tab has always had: by title.
  */
-function groupProgramSettingsRows(entries, headers) {
+function groupProgramSettingsRows(entries, headers, kindDefaults) {
   const map = getIndexMap(headers);
   const order = PROGRAM_FORM_TYPES.map(t => t.key).concat([PROGRAM_SETTINGS_INACTIVE_GROUP]);
   const byGroup = {};
@@ -557,16 +581,168 @@ function groupProgramSettingsRows(entries, headers) {
 
   const rows = [];
   const dividerOffsets = [];
+  const defaultsOffsets = [];
   let programCount = 0;
   order.forEach(group => {
-    const groupRows = byGroup[group];
-    if (!groupRows || groupRows.length === 0) return;
+    const groupRows = byGroup[group] || [];
+    // With defaults in play every KIND is drawn, even one nobody is in yet:
+    // the point of a default is that it is set BEFORE the first program of
+    // that kind arrives. The "not on the calendar" heading is not a kind and
+    // has no defaults, so it is still drawn only when it has rows.
+    const wantsDefaults = !!kindDefaults && group !== PROGRAM_SETTINGS_INACTIVE_GROUP;
+    if (groupRows.length === 0 && !wantsDefaults) return;
     groupRows.sort((a, b) => String(a[map['Event']] || '').localeCompare(String(b[map['Event']] || '')));
     dividerOffsets.push(rows.length);
     rows.push(memoryTabDividerRow(headers, `${programSettingsGroupLabel(group)} (${groupRows.length})`));
+    if (wantsDefaults) {
+      defaultsOffsets.push(rows.length);
+      rows.push(programSettingsDefaultsRow(headers, group, kindDefaults[group]));
+    }
     groupRows.forEach(row => { rows.push(row); programCount++; });
   });
-  return { rows, dividerOffsets, programCount };
+  return { rows, dividerOffsets, defaultsOffsets, programCount };
+}
+
+// --- new-event defaults --------------------------------------------------------
+
+/**
+ * THE DEFAULTS ROW: what a program of this KIND is born with.
+ *
+ * A real row under the kind's heading carrying the same notification boxes a
+ * program row has, so setting a default is ticking a box where you would tick
+ * one anyway. It opens with '--- ' (like a heading), which is the whole of what
+ * makes every ordinary reader skip it — readSimpleTable, the notification
+ * policy read, the rename — and the kind's KEY sits in Type_Tag, so it is
+ * matched by key rather than by the words of a heading somebody may reword.
+ *
+ * SEED-ONLY, deliberately. It is copied into a row at the moment that row is
+ * first written (seedNotificationHalf) and never read again for it: editing a
+ * default must not change what an existing program sends. A kind with no
+ * programs yet still gets its row, so it can be set before the first arrives.
+ */
+const PROGRAM_SETTINGS_DEFAULTS_PREFIX = '--- ⚙️ New-event defaults · ';
+const PROGRAM_SETTINGS_FINGERPRINT_PROP_KEY = 'PROGRAM_SETTINGS_RENDER_FINGERPRINT_V1';
+
+function isProgramSettingsDefaultsValue(value) {
+  return String(value === null || value === undefined ? '' : value).trim()
+    .indexOf(PROGRAM_SETTINGS_DEFAULTS_PREFIX) === 0;
+}
+
+function programSettingsDefaultsRow(headers, group, values) {
+  const map = getIndexMap(headers);
+  const row = new Array(headers.length).fill('');
+  row[map['Event']] = `${PROGRAM_SETTINGS_DEFAULTS_PREFIX}${programSettingsGroupLabel(group)} ---`;
+  row[map['Type_Tag']] = group;
+  NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => {
+    row[map[h]] = !!(values && isTruthyCheckbox(values[h]));
+  });
+  row[map['Other_Reminders']] = (values && values['Other_Reminders']) || '';
+  return row;
+}
+
+/**
+ * The whole tab in one grid read: { rows, defaults }. `rows` is what
+ * readSimpleTableValues() returns (headings and defaults rows skipped);
+ * `defaults` is { kindKey: { <tick>: bool, ..., Other_Reminders } } off the
+ * defaults rows. Never throws on an empty or older tab.
+ */
+function readProgramSettingsTable_(sheet, headers) {
+  const out = { rows: [], defaults: {} };
+  if (!sheet) return out;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < MEMORY_TAB_DATA_ROW) return out;
+  const lastCol = Math.max(sheet.getLastColumn(), headers.length);
+  const grid = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const projection = buildHeaderProjectionFromRow(grid[MEMORY_TAB_HEADER_ROW - 1], headers,
+    `"${sheet.getName()}" row ${MEMORY_TAB_HEADER_ROW}`);
+  const map = getIndexMap(headers);
+  const kinds = PROGRAM_FORM_TYPES.map(t => t.key);
+  grid.slice(MEMORY_TAB_DATA_ROW - 1).forEach(raw => {
+    const row = projection ? projection.map(src => (src === -1 ? '' : raw[src])) : raw.slice(0, headers.length);
+    const first = row[0];
+    if (isProgramSettingsDefaultsValue(first)) {
+      const kind = String(row[map['Type_Tag']] || '').trim();
+      if (kinds.indexOf(kind) === -1) return;
+      const values = {};
+      NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { values[h] = isTruthyCheckbox(row[map[h]]); });
+      values['Other_Reminders'] = String(row[map['Other_Reminders']] || '').trim();
+      out.defaults[kind] = values;
+      return;
+    }
+    if (String(first || '').trim() !== '' && !isMemoryTabDividerValue(first)) out.rows.push(row);
+  });
+  return out;
+}
+
+/** The defaults rows only, as rows ready to write — for a writer that has no kinds. */
+function programSettingsDefaultsRowsFrom_(sheet, headers) {
+  const defaults = readProgramSettingsTable_(sheet, headers).defaults;
+  return PROGRAM_FORM_TYPES.map(t => t.key)
+    .filter(k => defaults[k])
+    .map(k => programSettingsDefaultsRow(headers, k, defaults[k]));
+}
+
+/** Green wash, bold, and no stray validation on the cells that are not answers. */
+function styleProgramSettingsDefaultsRows_(sheet, headers, offsets) {
+  if (!offsets || offsets.length === 0) return;
+  const map = getIndexMap(headers);
+  const maxRows = sheet.getMaxRows();
+  const answerCols = NOTIFICATION_CHECKBOX_COLUMNS.concat(['Other_Reminders']);
+  const quiet = headers.filter(h => answerCols.indexOf(h) === -1);
+  try {
+    const rowRanges = [];
+    const quietRanges = [];
+    offsets.forEach(offset => {
+      const row = MEMORY_TAB_DATA_ROW + offset;
+      if (row > maxRows) return;
+      rowRanges.push(sheet.getRange(row, 1, 1, headers.length).getA1Notation());
+      quiet.forEach(h => quietRanges.push(sheet.getRange(row, map[h] + 1).getA1Notation()));
+    });
+    if (rowRanges.length === 0) return;
+    sheet.getRangeList(quietRanges).clearDataValidations();
+    sheet.getRangeList(rowRanges).setBackground(PALETTE.LOC_GREEN).setFontWeight('bold');
+    sheet.getRange(MEMORY_TAB_DATA_ROW + offsets[0], map['Event'] + 1).setNote(
+      'NEW-EVENT DEFAULTS for this kind of program. A program of this kind is born with ' +
+      'these boxes the first time it reaches this tab; changing a default never changes a ' +
+      'program that is already listed. Leave everything clear and new programs send nothing ' +
+      'until somebody decides.');
+  } catch (err) {
+    log(`ℹ️ Could not style the Program_Settings defaults rows (${err}) — the tab is otherwise fine.`);
+  }
+}
+
+/** One setNotes() over the header row: what each half of the tab is for. */
+function noteProgramSettingsHeaders_(sheet, headers) {
+  const notes = {
+    Event: 'Grey headings group programs by kind. The green row under each heading holds the ' +
+      'defaults new programs of that kind are born with.',
+    Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
+    Roster_Delivery: 'Sheet (default), Both, or Web — where the leader\'s roster lives.',
+    Add_Guest_To_Calendar: 'WHAT IT SENDS — add each registrant as a guest on the real calendar event.',
+    Confirm_On_Booking: 'An email the moment somebody registers; the only place an appointment\'s own time is stated.',
+    Week_Before: 'Email 7 days before each session.',
+    Day_Before: 'Email 1 day before.',
+    Morning_Of: 'Email on the day itself.',
+    Other_Reminders: 'Further day counts, e.g. "14, 3". Adds to the boxes; does not replace them.'
+  };
+  try {
+    sheet.getRange(MEMORY_TAB_HEADER_ROW, 1, 1, headers.length)
+      .setNotes([headers.map(h => notes[h] || '')]);
+  } catch (err) {
+    log(`ℹ️ Could not note the Program_Settings headers (${err}) — the tab is otherwise fine.`);
+  }
+}
+
+function storedProgramSettingsFingerprint_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty(PROGRAM_SETTINGS_FINGERPRINT_PROP_KEY) || '';
+  } catch (err) { return ''; }
+}
+
+function storeProgramSettingsFingerprint_(fingerprint) {
+  try {
+    PropertiesService.getScriptProperties().setProperty(PROGRAM_SETTINGS_FINGERPRINT_PROP_KEY, fingerprint);
+  } catch (err) { /* a missing fingerprint only costs one redraw */ }
 }
 
 /**
@@ -584,7 +760,7 @@ function groupProgramSettingsRows(entries, headers) {
  * typed by hand, and there is no reading of "which of these two sentences did
  * they mean" that is safe to make on somebody's behalf.
  */
-function seedNotificationHalf(row, map, key, legacyTicks, legacyModes, isAssistance, prior) {
+function seedNotificationHalf(row, map, key, legacyTicks, legacyModes, isAssistance, prior, kindDefault) {
   const ticks = legacyTicks ? legacyTicks[key] : null;
   if (ticks) {
     NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { row[map[h]] = !!ticks.values[h]; });
@@ -599,6 +775,13 @@ function seedNotificationHalf(row, map, key, legacyTicks, legacyModes, isAssista
   if (legacyModes && legacyModes[key]) {
     writeNotificationTicks(row, map, policyFromLegacyCells(legacyModes[key], isAssistance));
     return 'mode';
+  }
+  if (kindDefault) {
+    // The kind's own defaults row, ticked by staff — the answer a program is
+    // born with, ahead of the built-in "everything clear".
+    NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { row[map[h]] = !!kindDefault[h]; });
+    row[map['Other_Reminders']] = kindDefault['Other_Reminders'] || '';
+    return 'kind-default';
   }
   writeNotificationTicks(row, map, defaultNotificationPolicy(isAssistance));
   return 'default';
@@ -949,7 +1132,7 @@ function writeMemoryTab(sheet, headers, rows, options) {
   }
 
   freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
-  freezeColumnsSafely(sheet, 1); // the name/program is the row's identity — keep it visible
+  freezeColumnsSafely(sheet, options.freezeColumns || 1); // the name/program is the row's identity — keep it visible
   autosizeColumns(sheet, { minCols: numCols, force: true });
 }
 

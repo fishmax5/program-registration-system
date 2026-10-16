@@ -753,6 +753,19 @@ defineLazyGlobal_('HEADERS', () => ({
    * program present on one tab and missing from the other was a state nothing
    * reported.
    *
+   * COLUMN ORDER (October 2026) follows the questions in the order they are
+   * asked: which program, how it runs, what it sends, then the notes. Every
+   * reader here projects by header NAME (readSimpleTable), so a workbook whose
+   * tab is still in the old order reads correctly until the next refresh
+   * redraws it.
+   *
+   * NEW-EVENT DEFAULTS. Under each kind's heading is a '--- ⚙️ New-event
+   * defaults' row carrying the same notification boxes as a program row. It
+   * is not a program (every reader skips it like a heading); it is what a
+   * program of that kind is BORN with when it first reaches this tab.
+   * Seeded once — changing a default never touches a program that exists.
+   * See programSettingsDefaultsRow() in 40.
+   *
    * HOW THE PROGRAM RUNS:
    *   Typical_Attendance  what usually turns up.
    *   Usual_Capacity      the cap to suggest, seeded from a consistent calendar.
@@ -812,13 +825,17 @@ defineLazyGlobal_('HEADERS', () => ({
    * layout drops them.
    */
   Program_Settings: [
-    'Event', 'Location', 'Type_Tag', 'Sessions_Tracked', 'Next_Date', 'Last_Date',
-    'Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
-    'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-    'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes',
-    // LAST, per 34's projection rule: Sheet / Both / Web — where this
-    // program's leader roster lives (99zn). Blank reads as Sheet.
-    'Roster_Delivery'
+    // WHICH PROGRAM, and what the calendar says about it (recomputed).
+    'Event', 'Location', 'Type_Tag', 'Next_Date', 'Last_Date', 'Sessions_Tracked',
+    // HOW IT RUNS. Roster_Delivery (Sheet / Both / Web — where this program's
+    // leader roster lives, 99zn; blank reads as Sheet) sits here with the other
+    // standing facts rather than after the notes, where it was appended.
+    'Usual_Capacity', 'Typical_Attendance', 'Room_Or_Setup', 'Roster_Delivery',
+    // WHAT IT SENDS. The one place a person decides who is told, in the order
+    // it happens: the guest list, the moment of booking, then the reminders.
+    'Add_Guest_To_Calendar', 'Confirm_On_Booking',
+    'Week_Before', 'Day_Before', 'Morning_Of', 'Other_Reminders',
+    'Staff_Notes'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
