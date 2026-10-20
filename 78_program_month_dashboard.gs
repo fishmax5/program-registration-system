@@ -144,7 +144,10 @@ const PROGRAM_MONTH_LINK_PARTS = [
   { header: 'Form_Response_Link', column: 'Register_Link', label: 'Register' },
   { header: 'Edit_Form_Link', column: 'Edit_Form_Link', label: 'Edit form' },
   { header: 'Registrant_Sheet_Link', column: 'Roster_Link', label: 'Roster' },
-  { header: 'Sign_In_Sheet_Link', column: 'Sign_In_Link', label: 'Sign-in sheet' }
+  { header: 'Sign_In_Sheet_Link', column: 'Sign_In_Link', label: 'Sign-in sheet' },
+  // The calendar event's Google Meet link (99zt). A recurring series shares
+  // one, so the most recent session's is the program's.
+  { header: 'Meet_Link', column: 'Meet_Link', label: 'Join Meet' }
 ];
 
 /**

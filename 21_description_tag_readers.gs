@@ -759,6 +759,11 @@ function importCalendarGroups(registrySheet, options) {
   // has just come back off [No Registration] gets its dashboard links back on
   // the SAME sync that restores its form, rather than on the one after.
   updateRegistrationLinkCells(registrySheet, work.allGroups || [], buildFormIdByProgram(work.allGroups || []));
+
+  // AFTER the loop, so a date written by this run gets its Google Meet link on
+  // this run rather than the next. Guarded whole inside: a Meet that will not
+  // create is a missing link, never a failed sync. See 99zt.
+  reconcileMeetLinksFromCalendar(registrySheet, work.allGroups || [], { deadline: options.deadline });
   return summary;
 }
 

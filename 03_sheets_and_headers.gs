@@ -267,7 +267,11 @@ defineLazyGlobal_('HEADERS', () => ({
     // the top of the form says (99t). LAST and hidden, for the same reason as
     // Program_Questions' Description_Placement: existing rows read it as blank
     // until the sync's reconcile pass fills it in.
-    'Event_Description'
+    'Event_Description',
+    // The Google Meet link on the calendar event (99zt), as =HYPERLINK(). Last
+    // for the same reason as Event_Description; blank until the next calendar
+    // sync reads or creates one.
+    'Meet_Link'
   ],
   /**
    * Master_Program_Dashboard — ONE ROW PER PROGRAM (see SHEET_NAMES.PROGRAM_MONTH).
@@ -382,7 +386,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
     'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Meet_Link', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
@@ -831,6 +835,9 @@ defineLazyGlobal_('HEADERS', () => ({
     // leader roster lives, 99zn; blank reads as Sheet) sits here with the other
     // standing facts rather than after the notes, where it was appended.
     'Usual_Capacity', 'Typical_Attendance', 'Room_Or_Setup', 'Roster_Delivery',
+    // Auto (blank) / Yes / No — whether the calendar event gets a Google Meet
+    // link (99zt). Auto means yes on the Zoom calendar or with a [Hybrid] tag.
+    'Google_Meet',
     // WHAT IT SENDS. The one place a person decides who is told, in the order
     // it happens: the guest list, the moment of booking, then the reminders.
     'Add_Guest_To_Calendar', 'Confirm_On_Booking',
@@ -1148,7 +1155,7 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'U
  */
 const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Roster_Delivery'];
+  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Roster_Delivery', 'Google_Meet'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

@@ -432,7 +432,7 @@ const build = (rows, link, leaders, settings) =>
   check('no side-channel is handed back for a rich-text pass', built.links, undefined);
   check('every link column is a column of the tab',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(p => sandbox.HEADERS.Master_Program_Dashboard.indexOf(p.column) !== -1),
-    [true, true, true, true]);
+    [true, true, true, true, true]);
 }
 // The MOST RECENT non-blank link wins, per column — a Regular program has a
 // form per month and the one worth handing out is this month's.
@@ -702,7 +702,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     'Location', 'Program', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
     'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Meet_Link', 'Status', 'Last_Date',
     'Form_ID', 'Group_Key'
   ]);
   // NOTHING WAS DROPPED AND NOTHING WAS ADDED. A reorder needs no header
@@ -712,7 +712,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   check('every column the tab had, it still has',
     headers.slice().sort(), [
       'Club', 'Edit_Form_Link', 'Form_ID', 'Group_Key', 'Last_Date', 'Leader', 'Location',
-      'Next_Date', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
+      'Meet_Link', 'Next_Date', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
       'Register_Link', 'Room', 'Roster_Link', 'Schedule', 'Seats', 'Sessions',
       'Sign_In_Link', 'Status', 'Type_Tag'
     ].sort());
@@ -721,7 +721,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   // builder writes through a table of its own (PROGRAM_MONTH_LINK_PARTS).
   check('and every link part still names one of them',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(part => headers.indexOf(part.column) !== -1),
-    [true, true, true, true]);
+    [true, true, true, true, true]);
 }
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------

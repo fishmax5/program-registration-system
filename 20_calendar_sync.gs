@@ -71,6 +71,7 @@ defineLazyGlobal_('RECOGNIZED_TAG_PATTERNS', () => ([
   NO_REGISTRATION_WORDS_REGEX,
   WAITLIST_ONLY_WORDS_REGEX,
   ASSISTANCE_WORDS_REGEX,
+  HYBRID_WORDS_REGEX,
   /\b(Grouped|Fixed)\b/i,
   /\b(Monthly|Regular)\b/i
 ]));

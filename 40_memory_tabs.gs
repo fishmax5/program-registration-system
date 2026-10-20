@@ -503,7 +503,7 @@ function refreshProgramSettings(ss, sessionRows) {
     checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
     // Where the leader's roster lives (99zn). Closed: a misspelling would read
     // as Sheet, which is safe and silent — the dropdown is what stops it.
-    lists: { Roster_Delivery: ROSTER_DELIVERY_OPTIONS },
+    lists: { Roster_Delivery: ROSTER_DELIVERY_OPTIONS, Google_Meet: GOOGLE_MEET_SETTING_OPTIONS },
     // Event is SUGGESTING, like Program on Program_Leaders: every program the
     // calendar has produced, so a row typed on the spare line (a program the
     // sync has not reached yet) is picked rather than spelled — a misspelled
@@ -745,6 +745,9 @@ function noteProgramSettingsHeaders_(sheet, headers) {
       'defaults new programs of that kind are born with.',
     Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
     Roster_Delivery: 'Sheet (default), Both, or Web — where the leader\'s roster lives.',
+    Google_Meet: 'Auto (default: yes on the Zoom calendar or with a [Hybrid] tag), Yes or No — ' +
+      'whether the calendar event gets a Google Meet link. "No" never removes one already made. ' +
+      'Whether people can join before the host is your Google Workspace Meet setting, not this.',
     Add_Guest_To_Calendar: 'WHAT IT SENDS — add each registrant as a guest on the real calendar event.',
     Confirm_On_Booking: 'An email the moment somebody registers; the only place an appointment\'s own time is stated.',
     Week_Before: 'Email 7 days before each session.',

@@ -494,6 +494,19 @@ const NO_REGISTRATION_TAG = 'No Registration';
 const NO_REGISTRATION_WORDS_REGEX =
   /\b(No\s*-?\s*Registration|No\s+Sign[\s-]?ups?|No\s+Sign\s*-?\s*Up|Registration\s+Not\s+Required|Drop[\s-]?In)\b/i;
 
+/**
+ * HYBRID — the [Hybrid] tag: the program meets in the room AND online.
+ *
+ * It changes one thing: the program's events are given a Google Meet link by
+ * default (see 99zt), the same default every event on the Zoom calendar gets.
+ * Program_Settings' Google_Meet column overrides it either way. Read only
+ * from a TAG-ONLY bracket ("[Hybrid]", "[Hybrid, Cap: 12]"), never from prose:
+ * "[Hybrid of yoga and pilates]" is a sentence about the class, not a request
+ * for a video link.
+ */
+const HYBRID_TAG = 'Hybrid';
+const HYBRID_WORDS_REGEX = /\b(Hybrid|In[\s-]?Person\s*\+\s*Online)\b/i;
+
 /** Written into the No_Registration checkbox column for a session that takes no sign-ups. */
 const NO_REGISTRATION_COLUMN_VALUE = true;
 

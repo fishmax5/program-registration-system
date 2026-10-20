@@ -171,7 +171,7 @@ check('a description that looks like a formula is written as text',
   sandbox.eventDescriptionCellValue('=SUM(A1)'), "'=SUM(A1)");
 check('…and reads back without the apostrophe', sandbox.readEventDescriptionCell("'=SUM(A1)"), '=SUM(A1)');
 const sHeaders = sandbox.HEADERS.All_Program_Sessions;
-check('Event_Description is the LAST session column', sHeaders[sHeaders.length - 1], 'Event_Description');
+check('Event_Description is appended at the end, before Meet_Link', sHeaders.slice(-2), ['Event_Description', 'Meet_Link']);
 const sMap = sandbox.getIndexMap(sHeaders);
 const rowWith = values => { const r = sHeaders.map(() => ''); Object.keys(values).forEach(k => { r[sMap[k]] = values[k]; }); return r; };
 const ctx = sandbox.buildFormSessionContext('f9',
