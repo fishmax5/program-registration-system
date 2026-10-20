@@ -546,6 +546,8 @@ function buildAdminMenu_(ui, title) {
         // (forms, snapshots, archives, templates) in its System subfolder.
         // It moves files; it changes no link and deletes nothing. See 82/82b.
         .addItem('\ud83d\uddc2\ufe0f Organize Generated Files', menuFn_('organizeGeneratedFiles'))
+        .addItem('\ud83d\udcc1 Choose System Home Folder\u2026', menuFn_('chooseSystemHomeFolder'))
+        .addItem('\ud83d\udce7 Install Membership Application Alert', menuFn_('installMembershipApplicationAlert'))
         // For a workbook upgraded from the version that put the office on every
         // event's guest list: it takes those addresses back off the upcoming
         // events (the office is mailed a digest instead now — see section 5b).

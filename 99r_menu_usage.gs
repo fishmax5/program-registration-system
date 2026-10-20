@@ -177,6 +177,8 @@ function menu_openUpAllFormSharing() { recordMenuUsage_('openUpAllFormSharing');
 function menu_openUpAllGeneratedFileSharing() { recordMenuUsage_('openUpAllGeneratedFileSharing'); return openUpAllGeneratedFileSharing(); }
 function menu_openVolunteerHoursTab() { recordMenuUsage_('openVolunteerHoursTab'); return openVolunteerHoursTab(); }
 function menu_organizeGeneratedFiles() { recordMenuUsage_('organizeGeneratedFiles'); return organizeGeneratedFiles(); }
+function menu_chooseSystemHomeFolder() { recordMenuUsage_('chooseSystemHomeFolder'); return chooseSystemHomeFolder(); }
+function menu_installMembershipApplicationAlert() { recordMenuUsage_('installMembershipApplicationAlert'); return installMembershipApplicationAlert(); }
 function menu_previewLegacyTabMerge() { recordMenuUsage_('previewLegacyTabMerge'); return previewLegacyTabMerge(); }
 function menu_pushLunchMenuToForms() { recordMenuUsage_('pushLunchMenuToForms'); return pushLunchMenuToForms(); }
 function menu_pushProgramQuestionsToForms() { recordMenuUsage_('pushProgramQuestionsToForms'); return pushProgramQuestionsToForms(); }

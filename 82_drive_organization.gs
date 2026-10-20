@@ -715,3 +715,90 @@ function organizeGeneratedFiles() {
     summary + (notes.length ? `\n\n${notes.join('\n')}` : ''),
     ui.ButtonSet.OK);
 }
+
+// ----------------------------------------------------------------------------
+// 82c. MOVING THE ANCHOR
+//
+// The anchor is "the folder the workbook sits in", remembered once. When the
+// office wants everything this system makes inside a subfolder of its own — the
+// workbook staying where it is — the stored id has to change, and the folders
+// already built under the OLD anchor have to come across with it. Changing the
+// id alone is not enough: the lookups would find no `System` under the new
+// anchor, make an empty one, and leave the real one (with every form in it)
+// behind. So the three shelves move first, then the id is stored, then the
+// ordinary sweep (organizeGeneratedFiles) files anything still loose.
+//
+// Moving a folder changes no link and no id; nothing is deleted.
+// ----------------------------------------------------------------------------
+
+/** A Drive folder id out of a pasted folder URL, or a bare id; '' if neither. */
+function parseDriveFolderId_(text) {
+  const raw = String(text || '').trim();
+  const fromUrl = raw.match(/\/folders\/([A-Za-z0-9_-]{10,})/);
+  if (fromUrl) return fromUrl[1];
+  return /^[A-Za-z0-9_-]{10,}$/.test(raw) ? raw : '';
+}
+
+/**
+ * Moves `System`, `Sign-In Sheets` and `Program Registrant Sheets` from the
+ * current anchor into `newRoot`, then makes `newRoot` the anchor. Returns the
+ * lines to report. Never throws on a single folder it cannot move.
+ */
+function moveSystemFoldersToNewAnchor_(newRoot) {
+  const moved = [];
+  const oldRoot = getSystemRootFolder();
+  if (oldRoot && oldRoot.getId() !== newRoot.getId()) {
+    [SYSTEM_SUBFOLDER_NAME, SIGN_IN_DOC_FOLDER_NAME, LEADER_SHEET_FOLDER_NAME].forEach(name => {
+      const folder = pickSystemFolder_(oldRoot.getFoldersByName(name));
+      if (!folder || folder.getId() === newRoot.getId()) return;
+      if (moveDriveFileInto(folder, newRoot, `the "${name}" folder`)) {
+        moved.push(`${name} → ${newRoot.getName()}`);
+      }
+    });
+  }
+  PropertiesService.getScriptProperties().setProperty(SYSTEM_ROOT_FOLDER_PROP_KEY, newRoot.getId());
+  clearSystemFolderCache();
+  moved.forEach(line => log(`Anchor moved: ${line}`));
+  log(`Filed this system's generated files under "${newRoot.getName()}" from now on.`);
+  return moved;
+}
+
+/**
+ * Admin menu: pick the folder everything this system makes is filed under.
+ * Asks for the folder's link, shows what it will do, and then runs the
+ * ordinary Organize sweep so nothing is left loose in the old place.
+ */
+function chooseSystemHomeFolder() {
+  if (!requireAuthorizedAdmin('Choose System Home Folder')) return;
+  const ui = SpreadsheetApp.getUi();
+  const answer = ui.prompt('Choose System Home Folder',
+    'Paste the link to the Drive folder that should hold "System", "Sign-In Sheets" and ' +
+    '"Program Registrant Sheets". Those folders are MOVED there with everything in them; ' +
+    'no link changes and nothing is deleted.',
+    ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+
+  const id = parseDriveFolderId_(answer.getResponseText());
+  if (!id) {
+    ui.alert('Choose System Home Folder', 'That does not look like a Drive folder link.', ui.ButtonSet.OK);
+    return;
+  }
+  let target;
+  try {
+    target = DriveApp.getFolderById(id);
+    target.getName();
+  } catch (err) {
+    ui.alert('Choose System Home Folder',
+      `This account cannot open that folder (${err}). Check the link and that the folder is shared with it.`,
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const moved = moveSystemFoldersToNewAnchor_(target);
+  ui.alert('Choose System Home Folder',
+    `New files will be filed under "${target.getName()}".\n\n` +
+    (moved.length ? `Moved:\n${moved.join('\n')}` : 'No folders needed moving.') +
+    '\n\nNext the sweep will file anything still loose.',
+    ui.ButtonSet.OK);
+  organizeGeneratedFiles();
+}

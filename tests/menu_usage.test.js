@@ -172,6 +172,8 @@ const BEFORE_R4 = [
   'showReimportFormDialog',
   'backfillSignInSheetRegistry',
   'organizeGeneratedFiles',
+  'chooseSystemHomeFolder',
+  'installMembershipApplicationAlert',
   'removeAdminGuestsFromCalendarEvents',
   'backfillLedgerFromTab',
   'bootstrapCalendars',
