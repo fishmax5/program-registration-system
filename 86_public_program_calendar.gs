@@ -382,6 +382,17 @@ function publicSeatsPhrase_(row, map, noRegistration, waitlistOnly) {
 const PUBLIC_CALENDAR_EMBED_MESSAGE = 'programCalendarHeight.v1';
 
 /**
+ * WHERE "CLEAR SEARCH" GOES — the website page that hosts the embed, with no
+ * ?q= on it. EDIT THIS ONE LINE if the page moves. The link is opened in the
+ * top window (target="_top"), because the frame this page lives in is not the
+ * address bar anybody is looking at.
+ */
+const PUBLIC_CALENDAR_SEARCH_HOME_URL = 'https://www.newhorizonsseniorcenter.org/programming';
+
+/** The longest search term read off a URL; anything past it is cut. */
+const PUBLIC_CALENDAR_SEARCH_MAX_CHARS = 100;
+
+/**
  * THE PRESENTATION OPTIONS IN A REQUEST — and nothing else is read from one.
  *
  * Deliberately separate from publicProgramCalendar(): what the snapshot
@@ -391,13 +402,17 @@ const PUBLIC_CALENDAR_EMBED_MESSAGE = 'programCalendarHeight.v1';
  * already-public payload is DRAWN, so they are read here and applied in the
  * browser.
  *
- * { embed, location, days } — location is what the visitor typed and is
- * resolved against the real buildings in buildPublicCalendarHtml(), days is
- * null when the URL did not ask, meaning "whatever this browser last chose".
+ * { embed, location, span, query } — location is what the visitor typed and is
+ * resolved against the real buildings in buildPublicCalendarHtml(), span is ''
+ * when the URL did not ask, meaning "whatever this browser last chose", and
+ * query is the ?q= search term the host website passed through (trimmed,
+ * whitespace folded, cut at PUBLIC_CALENDAR_SEARCH_MAX_CHARS). The query only
+ * decides which tiles are SHOWN: the snapshot is the same for everybody.
  */
 function publicCalendarViewOptions(params) {
   const p = params || {};
   return {
+    query: publicCalendarSearchQuery_(p),
     embed: isPublicCalendarEmbedRequest_(p),
     // ?building= is the word a person writing the embed reaches for; ?location=
     // is what every other page on this deployment already calls it, and a URL
@@ -410,6 +425,13 @@ function publicCalendarViewOptions(params) {
     // newsletter works in an iframe without anybody having to know it should.
     span: publicCalendarSpanRequested_(p)
   };
+}
+
+/** The ?q= search term of a request: a string, trimmed, one space between words, capped. */
+function publicCalendarSearchQuery_(params) {
+  const raw = params && params.q;
+  if (raw === undefined || raw === null) return '';
+  return String(raw).replace(/\s+/g, ' ').trim().slice(0, PUBLIC_CALENDAR_SEARCH_MAX_CHARS).trim();
 }
 
 /**

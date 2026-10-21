@@ -386,6 +386,11 @@ function publicEmbedStyles() {
   .legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
   .legend b { color: var(--warn); font-weight: 700; }
 
+  /* "Showing programs matching …" — present only while a search is active. */
+  .qbar { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 10px 14px; margin-top: 12px; font-size: 14px; display: none; }
+  .qbar a, .empty a { color: var(--ink); font-weight: 600; text-decoration: underline; cursor: pointer; }
+  .empty a { display: inline-block; margin-top: 10px; }
   .empty { text-align: center; color: var(--muted); padding: 44px 20px; background: var(--card);
            border: 1px solid var(--line); border-radius: var(--radius); }
   .empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
@@ -492,6 +497,64 @@ function publicEmbedHeightScript(mode) {
     var x = window.pageXOffset || 0, y = window.pageYOffset || 0;
     redraw();
     try { window.scrollTo(x, y); } catch (err) { /* nothing to restore */ }
+  }`;
+}
+
+/**
+ * THE SEARCH BOX'S LOGIC, shared by both public pages and inlined into each.
+ *
+ * Words are ANDed: every word must appear somewhere in the haystack the page
+ * builds for a program (matchesSearch). The ?q= term arrives in EMBED.query
+ * (already trimmed and capped by publicCalendarSearchQuery_ in 86) and is only
+ * ever written to the page with textContent or an input's .value — never as
+ * markup. "Clear search" goes to EMBED.clearUrl in the TOP window, because the
+ * frame is not the address bar; if the visitor has since typed a different
+ * term in the box, it clears the box in place instead.
+ *
+ * Expects `view` ({ q }), `EMBED` ({ query, clearUrl }), `el()` and `draw()`
+ * from the page, and an element #qbar.
+ */
+function publicSearchScript() {
+  return `
+  function searchWords() {
+    return String(view.q || '').toLowerCase().split(/\\s+/).filter(Boolean);
+  }
+  function matchesSearch(haystack, words) {
+    for (var i = 0; i < words.length; i++) {
+      if (haystack.indexOf(words[i]) === -1) return false;
+    }
+    return true;
+  }
+  function clearSearchLink() {
+    var link = el('a', '', 'Clear search');
+    link.href = EMBED.clearUrl || '#';
+    link.target = '_top';
+    link.rel = 'noopener';
+    link.addEventListener('click', function (event) {
+      if (EMBED.query && view.q.trim() === EMBED.query) return; // reload the host page without ?q=
+      event.preventDefault();
+      EMBED.query = '';
+      view.q = '';
+      document.getElementById('q').value = '';
+      draw();
+    });
+    return link;
+  }
+  function drawSearchBar(resultCount) {
+    var bar = document.getElementById('qbar');
+    var term = String(view.q || '').trim();
+    bar.textContent = '';
+    if (!term || !DATA || DATA.ok === false) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    bar.appendChild(document.createTextNode('Showing programs matching "' + term + '" \\u00b7 '
+      + (resultCount === 1 ? '1 result' : resultCount + ' results') + ' \\u00b7 '));
+    bar.appendChild(clearSearchLink());
+  }
+  function noMatchBox() {
+    var none = el('div', 'empty full');
+    none.appendChild(el('b', '', 'No programs match "' + String(view.q || '').trim() + '".'));
+    none.appendChild(clearSearchLink());
+    return none;
   }`;
 }
 

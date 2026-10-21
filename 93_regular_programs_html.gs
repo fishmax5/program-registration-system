@@ -42,11 +42,14 @@ function buildPublicRegularHtml(snapshot, options) {
   }
   // The same double escape the snapshot gets, and for a sharper reason: this
   // one came off the URL.
+  // ?q= is escaped harder still: every `<` becomes <.
   const embedding = JSON.stringify(JSON.stringify({
     embed,
     location: pinnedLocation,
-    message: PUBLIC_CALENDAR_EMBED_MESSAGE
-  })).replace(/<\//g, '<\\/');
+    message: PUBLIC_CALENDAR_EMBED_MESSAGE,
+    query: String(opts.query || ''),
+    clearUrl: PUBLIC_CALENDAR_SEARCH_HOME_URL
+  })).replace(/</g, '\\u003c');
 
   return `
 ${publicEmbedStyles()}${publicEmbedSkinStyles(embed)}
@@ -64,13 +67,15 @@ ${embed ? '' : `  <header>
     <div class="locbar" id="locbar" role="group" aria-label="Location"></div>
     <div class="row2">
       <input type="search" id="q" placeholder="Search programs" autocomplete="off"
-             oninput="onSearch()" aria-label="Search programs">
+             maxlength="100" oninput="onSearch()" aria-label="Search programs">
     </div>
     <div class="count">
       <span id="count"></span>
       <button type="button" onclick="refresh(true)" id="refresh">Refresh</button>
     </div>
   </div>
+
+  <div class="qbar" id="qbar" role="status"></div>
 
   <div id="list" class="week"></div>
 
@@ -103,6 +108,11 @@ ${embed ? '' : `  <header>
     if (saved && typeof saved.location === 'string') view.location = saved.location;
   } catch (err) { /* private browsing, or nothing stored yet */ }
   if (EMBED.location) view.location = EMBED.location;
+  // A search from the host site (?q=): prefilled into the box, never saved.
+  if (EMBED.query) {
+    view.q = EMBED.query;
+    document.getElementById('q').value = EMBED.query;
+  }
 
   function save() {
     // A PINNED PAGE REMEMBERS NOTHING — see the note in the calendar page: an
@@ -144,15 +154,28 @@ ${embed ? '' : `  <header>
   }
 
   function visible() {
-    var needle = view.q.trim().toLowerCase();
+    var words = searchWords();
     var out = [];
     for (var i = 0; i < PROGRAMS.length; i++) {
       var p = PROGRAMS[i];
       if (view.location && p.location !== view.location) continue;
-      if (needle && (p.title + ' ' + p.location).toLowerCase().indexOf(needle) === -1) continue;
+      if (words.length && !matchesSearch(programHaystack(p), words)) continue;
       out.push(p);
     }
     return out;
+  }
+
+  /**
+   * What a search looks at: title, building, the weekday (full and plural —
+   * "tuesday", "tuesdays") and the tags. Only fields the public snapshot
+   * already carries; leaders and descriptions are not in it.
+   */
+  function programHaystack(p) {
+    var parts = [p.title, p.location, p.weekday, p.weekday ? p.weekday + 's' : ''];
+    var sessions = p.sessions || [];
+    if (sessions.some(function (s) { return s.club; })) parts.push('club');
+    if (sessions.some(function (s) { return s.appointment; })) parts.push('by appointment appointment');
+    return parts.join(' ').toLowerCase();
   }
 
   /** A date somebody can still take a place on, as opposed to join a queue for. */
@@ -339,6 +362,8 @@ ${embed ? '' : `  <header>
       list.appendChild(el('div', 'notice full', DATA && DATA.message
         ? DATA.message
         : 'We could not read the program calendar just now. Please try again shortly.'));
+    } else if (!rows.length && view.q.trim()) {
+      list.appendChild(noMatchBox());
     } else if (!rows.length) {
       var none = el('div', 'empty full');
       none.appendChild(el('b', '', 'Nothing weekly here yet'));
@@ -370,6 +395,7 @@ ${embed ? '' : `  <header>
     document.getElementById('foot').textContent = DATA && DATA.generatedAt
       ? 'Updated ' + DATA.generatedAt + '. Seats are checked again when you open a form.'
       : '';
+    drawSearchBar(rows.length);
     postHeight();
   }
 
@@ -433,6 +459,7 @@ ${embed ? '' : `  <header>
   // The frame's height — the whole of what an embed says to its host. See
   // publicEmbedHeightScript (91): posted to window.top, tagged 'regular'.
 ${publicEmbedHeightScript('regular')}
+${publicSearchScript()}
 
   drawIntro();
   drawLocations();

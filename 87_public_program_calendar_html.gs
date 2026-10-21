@@ -105,11 +105,15 @@ function buildPublicCalendarHtml(snapshot, options) {
   // THE SAME DOUBLE ESCAPE THE SNAPSHOT GETS, and for a sharper reason: this
   // one came off the URL. ?building=</script> is a page ended mid-sentence by
   // anybody who can type an address, so nothing here is ever interpolated raw.
+  // ?q= is escaped harder still: every `<` becomes <, so no search term can
+  // open a comment or close the script block.
   const embedding = JSON.stringify(JSON.stringify({
     embed,
     location: pinnedLocation,
-    message: PUBLIC_CALENDAR_EMBED_MESSAGE
-  })).replace(/<\//g, '<\\/');
+    message: PUBLIC_CALENDAR_EMBED_MESSAGE,
+    query: String(opts.query || ''),
+    clearUrl: PUBLIC_CALENDAR_SEARCH_HOME_URL
+  })).replace(/</g, '\\u003c');
 
   return `
 ${publicEmbedStyles()}${publicEmbedSkinStyles(embed)}
@@ -132,13 +136,15 @@ ${embed ? '' : `  <header>
     <div class="locbar" id="locbar" role="group" aria-label="Location"></div>
     <div class="row2">
       <input type="search" id="q" placeholder="Search programs" autocomplete="off"
-             oninput="onSearch()" aria-label="Search programs">
+             maxlength="100" oninput="onSearch()" aria-label="Search programs">
     </div>
     <div class="count">
       <span id="count"></span>
       <button type="button" onclick="refresh(true)" id="refresh">Refresh</button>
     </div>
   </div>
+
+  <div class="qbar" id="qbar" role="status"></div>
 
   <div id="list"></div>
 
@@ -181,6 +187,16 @@ ${embed ? '' : `  <header>
   if (SPAN === 'week') view.days = 7;
   else if (SPAN === 'month') view.days = 31;
   else if (SPAN === 'all') view.days = 0;
+
+  // A SEARCH FROM THE HOST SITE (?q=) looks at everything, not just this week:
+  // a visitor searching "tai chi" must not be told nothing matches because
+  // the class starts next Monday. An explicit ?span= still wins, and nothing
+  // is saved, so the next plain visit opens as it always did.
+  if (EMBED.query) {
+    view.q = EMBED.query;
+    document.getElementById('q').value = EMBED.query;
+    if (!SPAN) view.days = 0;
+  }
 
   // AN EMBED'S BUILDING IS THE EXCEPTION, and it is a different kind of claim:
   // a printed link is handed to a person, but a pinned embed IS a page on the
@@ -232,16 +248,38 @@ ${embed ? '' : `  <header>
   // --------------------------------------------------------------------
   function visible() {
     var last = view.days ? keyPlusDays(todayKey(), view.days - 1) : '';
-    var needle = view.q.trim().toLowerCase();
     var out = [];
     for (var i = 0; i < SESSIONS.length; i++) {
       var s = SESSIONS[i];
       if (last && s.dateKey > last) break; // sorted by date: nothing after this matches either
       if (view.location && s.location !== view.location) continue;
-      if (needle && (s.title + ' ' + s.location).toLowerCase().indexOf(needle) === -1) continue;
       out.push(s);
     }
     return out;
+  }
+
+  /**
+   * THE SEARCH, decided per PROGRAM rather than per date: every word of the
+   * query must appear somewhere in the title, building, a weekday it meets on
+   * (short, full and plural — "tue", "tuesday", "tuesdays") or its tags. A
+   * matching program keeps all its dates. Only fields the public snapshot
+   * already carries are searched; leaders and descriptions are not in it.
+   */
+  function groupHaystack(group) {
+    var parts = [group.title, group.location];
+    group.sessions.forEach(function (s) {
+      parts.push(s.weekday, PLURAL_DAYS[s.weekday]);
+    });
+    if (group.club) parts.push('club');
+    if (group.appointment) parts.push('by appointment appointment');
+    if (group.lunch) parts.push('lunch');
+    return parts.join(' ').toLowerCase();
+  }
+
+  function searchGroups(groups) {
+    var words = searchWords();
+    if (!words.length) return groups;
+    return groups.filter(function (g) { return matchesSearch(groupHaystack(g), words); });
   }
 
   /**
@@ -522,8 +560,9 @@ ${embed ? '' : `  <header>
 
   function draw() {
     var list = document.getElementById('list');
-    var rows = visible();
-    var groups = programsFrom(rows);
+    var groups = searchGroups(programsFrom(visible()));
+    var rows = [];
+    groups.forEach(function (g) { rows = rows.concat(g.sessions); });
 
     list.textContent = '';
     if (!DATA || DATA.ok === false) {
@@ -531,12 +570,12 @@ ${embed ? '' : `  <header>
         ? DATA.message
         : 'We could not read the program calendar just now. Please try again shortly.');
       list.appendChild(warn);
+    } else if (!groups.length && view.q.trim()) {
+      list.appendChild(noMatchBox());
     } else if (!groups.length) {
       var none = el('div', 'empty full');
       none.appendChild(el('b', '', 'Nothing here yet'));
-      none.appendChild(el('div', '', view.q
-        ? 'No programs match that search in this date range.'
-        : 'Nothing is scheduled in this date range. Try a longer one.'));
+      none.appendChild(el('div', '', 'Nothing is scheduled in this date range. Try a longer one.'));
       list.appendChild(none);
     } else {
       groups.forEach(function (group) { list.appendChild(cardFor(group)); });
@@ -552,6 +591,7 @@ ${embed ? '' : `  <header>
     [7, 31, 0].forEach(function (d) {
       document.getElementById('r' + d).setAttribute('aria-pressed', view.days === d ? 'true' : 'false');
     });
+    drawSearchBar(groups.length);
     postHeight();
   }
 
@@ -656,6 +696,7 @@ ${embed ? '' : `  <header>
   // number of pixels and a mode — nothing anybody may not see.
   // --------------------------------------------------------------------
 ${publicEmbedHeightScript('public')}
+${publicSearchScript()}
 
   drawIntro();
   drawLocations();
