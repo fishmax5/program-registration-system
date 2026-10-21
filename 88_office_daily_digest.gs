@@ -456,8 +456,13 @@ function sendOfficeDigestForDay(dateKey) {
     return false;
   }
   try {
-    MailApp.sendEmail(emails.join(','), buildOfficeDigestSubject(dateKey, entries),
-      buildOfficeDigestBody(dateKey, entries));
+    MailApp.sendEmail({
+      to: emails.join(','),
+      subject: buildOfficeDigestSubject(dateKey, entries),
+      body: buildOfficeDigestBody(dateKey, entries),
+      replyTo: MAIL_REPLY_TO,
+      name: MAIL_SENDER_NAME
+    });
   } catch (err) {
     // Kept, not dropped: tomorrow's pass sweeps every day before today, so a
     // digest that could not be sent this morning goes out with the next one.

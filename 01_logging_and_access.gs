@@ -189,6 +189,22 @@ function getCurrentUserEmail() {
   }
 }
 
+/**
+ * The person at the keyboard, where Google will say. Unlike
+ * getCurrentUserEmail() this is NOT the account the code runs as: in a menu
+ * dialog it is whoever pressed the button, which is the one fact a "your mark
+ * did not save" message needs. Blank when Google withholds it (a consumer
+ * account outside the workbook's domain), and callers must treat blank as
+ * "unknown", never as the office account.
+ */
+function getActiveUserEmail() {
+  try {
+    return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (err) {
+    return '';
+  }
+}
+
 function isAuthorizedAdmin() {
   const email = getCurrentUserEmail();
   if (!email) return false;

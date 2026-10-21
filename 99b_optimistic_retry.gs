@@ -449,7 +449,13 @@ function reportExhaustedOptimisticRetry(entry, message, tries) {
       `Session: ${args.session || args.dateKey || '(none chosen)'}\n` +
       `\nWhat the workbook said the first time:\n${entry.firstMessage || '(nothing)'}\n` +
       `\nWhat it said on the last attempt:\n${message}\n\n` +
-      'Nothing was written. This one does need entering by hand.');
+      'Nothing was written. This one does need entering by hand.\n\n' +
+      'Replies to this message go to Caroline.',
+      // A desk mark goes to whoever made it (stamped when it was queued) and
+      // Caroline. Door sign-ins and the rest carry no submitter and stay with
+      // the office table.
+      { to: entry.kind === 'quickMark' || entry.kind === 'quickMarkHousehold'
+        ? [args.submittedBy || MAIL_REPLY_TO] : [] });
   } catch (err) {
     log(`ℹ️ Could not report an exhausted optimistic retry (${err}).`);
   }

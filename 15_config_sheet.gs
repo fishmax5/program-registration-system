@@ -1627,7 +1627,7 @@ function notifyAdmin(subject, body) {
  * went wrong — quite possibly that mail is over quota — and holding back the
  * message that reports the shortage is exactly backwards.
  */
-function notifyAdminUrgent(subject, body) {
+function notifyAdminUrgent(subject, body, options) {
   // QUIET HOURS (section 9g) reach even this one — nobody is at the desk at
   // 2am to act on it. It is FILED for the 10am digest rather than held, since
   // this path has no ledger and no next pass to retry it with.
@@ -1637,12 +1637,21 @@ function notifyAdminUrgent(subject, body) {
       `${subject}: ${body}`);
     return false;
   }
+  // `options.to` names the people THIS fault is about (the desk user whose mark
+  // was lost) instead of the office table. The admin account is unmonitored,
+  // so a fault is addressed to a person; Caroline is always on it.
+  const named = options && Array.isArray(options.to) ? options.to : [];
   const ticked = adminEmailsForCategory('syncDigest');
-  const emails = ticked.length > 0 ? ticked : getAllAdminNotificationEmails();
+  let emails = ticked.length > 0 ? ticked : getAllAdminNotificationEmails();
+  if (named.length > 0) {
+    emails = named.concat([MAIL_REPLY_TO])
+      .map(a => String(a || '').trim().toLowerCase())
+      .filter((a, i, all) => a && isPlausibleEmail(a) && all.indexOf(a) === i);
+  }
   if (emails.length === 0) return false;
   const to = emails.join(',');
   try {
-    MailApp.sendEmail(to, subject, body);
+    MailApp.sendEmail({ to, subject, body, replyTo: MAIL_REPLY_TO, name: MAIL_SENDER_NAME });
     log(`Sent urgent admin notification to ${emails.join(', ')}: ${subject}`);
     return true;
   } catch (err) {

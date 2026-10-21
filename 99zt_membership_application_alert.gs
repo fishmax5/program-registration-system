@@ -54,6 +54,8 @@ function onMembershipApplicationSubmit(e) {
     const message = buildMembershipApplicationEmail_(response, membershipResponsesUrl_(form));
     MailApp.sendEmail({
       to: MEMBERSHIP_ALERT_RECIPIENT,
+      replyTo: MAIL_REPLY_TO,
+      name: MAIL_SENDER_NAME,
       subject: message.subject,
       body: message.text,
       htmlBody: message.html,

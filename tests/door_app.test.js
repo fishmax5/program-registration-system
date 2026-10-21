@@ -309,7 +309,7 @@ sandbox.getAdminNotificationRows = () => [
     registrantReminders: false, calendarInviteGuest: false }
 ];
 const sentMail = [];
-sandbox.MailApp.sendEmail = (to, subject, body) => sentMail.push({ to, subject, body });
+sandbox.MailApp.sendEmail = (a, subject, body) => sentMail.push(typeof a === "object" ? a : { to: a, subject, body });
 
 sandbox.walkInSignIn = () => ({ ok: true, message: '✅ Signed in — Joan Alvarez.', lines: [], name: 'Joan Alvarez' });
 const okRes = sandbox.doorSignIn(JSON.stringify({ name: 'Joan Alvarez', location: 'Narberth' }));

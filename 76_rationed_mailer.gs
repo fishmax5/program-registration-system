@@ -517,7 +517,11 @@ function sendRationedEmail(request) {
   const options = {
     to,
     subject: String(req.subject === null || req.subject === undefined ? '' : req.subject),
-    body: String(req.body === null || req.body === undefined ? '' : req.body)
+    body: String(req.body === null || req.body === undefined ? '' : req.body),
+    // The sending account is unmonitored: a member who hits Reply must reach
+    // a person. See MAIL_REPLY_TO (04).
+    replyTo: MAIL_REPLY_TO,
+    name: MAIL_SENDER_NAME
   };
   const forwardToOffice = !!req.officeCopy && bccList.length > 0;
   if (bccList.length > 0 && !forwardToOffice) options.bcc = bccList.join(',');

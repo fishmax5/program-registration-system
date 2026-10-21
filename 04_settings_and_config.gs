@@ -707,6 +707,17 @@ const CENTER_NAME = 'New Horizons Senior Center';
 const CENTER_PHONE = '(610) 664-2366';
 const CENTER_EMAIL = 'info@newhorizonsseniorcenter.org';
 
+/**
+ * WHO A REPLY GOES TO. The admin account this workbook sends from is a
+ * send-only address nobody reads, so every message to a member or a leader
+ * carries a Reply-To that reaches a person, and a display name so it does not
+ * arrive "from" an account name. MailApp cannot change the From address
+ * itself (that needs a verified Gmail "Send mail as" alias), so Reply-To is
+ * the whole of what this can do — see sendRationedEmail() (76).
+ */
+const MAIL_REPLY_TO = 'carolinemeiers@newhorizonsseniorcenter.org';
+const MAIL_SENDER_NAME = CENTER_NAME;
+
 /** The standing sign-off appended to every form description. */
 const FORM_ASSISTANCE_TAGLINE =
   `If you need additional assistance, please call ${CENTER_PHONE} or email ${CENTER_EMAIL}`;

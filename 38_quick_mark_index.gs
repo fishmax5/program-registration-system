@@ -1006,6 +1006,12 @@ function reportOptimisticQuickMarkFailure(args, result) {
     // below is what happens when those retries are spent, or when the queue
     // could not be written at all, because a mark that is neither written nor
     // queued nor reported is a mark that never happened.
+    //
+    // WHO PRESSED IT is captured NOW, in the desk user's own execution: the
+    // retries run hours later as the trigger owner, where getActiveUser() is
+    // blank, and the failure notice below is addressed to that person.
+    const submitter = getActiveUserEmail();
+    if (submitter) args = Object.assign({}, args, { submittedBy: submitter });
     if (queueOptimisticRetry(args.household ? 'quickMarkHousehold' : 'quickMark', args, result.message)) return;
 
     // URGENT, not the daily digest: the desk has already moved on and the
@@ -1018,7 +1024,10 @@ function reportOptimisticQuickMarkFailure(args, result) {
       `Ticked: ${describeQuickMark(!!args.attended, !!args.lunch, !!args.signup, !!args.register, !!args.waitlist)}\n` +
       (args.appointmentTime ? `Appointment: ${args.appointmentTime}\n` : '') +
       `\nWhat the workbook said:\n${result.message}\n\n` +
-      'Nothing was written. Check the row, and mark it again from Quick Mark if it is still needed.');
+      'Nothing was written. Check the row, and mark it again from Quick Mark if it is still needed.\n\n' +
+      'Replies to this message go to Caroline.',
+      // To the person who made the mark and Caroline, not the office table.
+      { to: [submitter || MAIL_REPLY_TO] });
   } catch (err) {
     log(`ℹ️ Could not report a failed Quick Mark (${err}).`);
   }
