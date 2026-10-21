@@ -159,8 +159,9 @@ function programTitleMatchKey(value) {
   // A bracket tag describes how a program RUNS, not which program it is, so
   // "[Club] Mah Jongg" and "Mah Jongg" are one title typed two ways.
   text = text.replace(/\[[^\]]*\]/g, ' ');
-  if (text.normalize) text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  // Spacing, case, punctuation and the common abbreviations (w/ = with, & = and)
+  // are one shared rule with the calendar's own title parser \u2014 see 20.
+  return eventTitleMatchKey(text);
 }
 
 /** True for the three types that need a Choices cell to mean anything. */

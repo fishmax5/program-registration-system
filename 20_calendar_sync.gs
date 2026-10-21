@@ -323,8 +323,12 @@ function parseEventTitle(title) {
   const legacy = parseSettingsBrackets(raw);
   // Strip every bracketed group, wherever it sits, so the clean title is
   // stable no matter how someone spaced things out.
-  const cleanTitle = raw.replace(BRACKET_GROUP_REGEX, ' ').replace(/\s+/g, ' ').trim();
-  if (!cleanTitle) return null;
+  const typedTitle = raw.replace(BRACKET_GROUP_REGEX, ' ').replace(/\s+/g, ' ').trim();
+  if (!typedTitle) return null;
+  // "Line Dancing w/ IBX", "w/IBX" and "with IBX" are one program typed three
+  // ways; they all come out as ONE spelling here, so Event_ID, the group key
+  // and every reader downstream agree without each having to fold titles.
+  const cleanTitle = canonicalEventTitle_(typedTitle);
 
   return {
     cleanTitle,
@@ -340,6 +344,99 @@ function parseEventTitle(title) {
     legacyMaxPerMonth: legacy.maxPerMonth,
     hasLegacyBrackets: legacy.sawAny
   };
+}
+
+/**
+ * A calendar title worn down to what spellings of ONE program have in common:
+ * case, accents, spacing and punctuation, plus the common abbreviations —
+ * `w/` and `w/o`, `&`, `St`, and weekday short forms (`Mon`, `Tues`, `Sat.`).
+ * Returns '' for an empty title.
+ *
+ * WHY. Event_ID and the group key are built from the title, so "Line Dancing
+ * w/ IBX", "Line Dancing w/IBX" and "Line Dancing with IBX" were three
+ * programs: three forms, three rosters, three rows on every dashboard.
+ *
+ * WHAT IT DOES NOT DO is guess at resemblance. "Chair Yoga" and "Chair Yoga
+ * (Beginner)" keep different keys, as `programTitleMatchKey` (53) insists; only
+ * a difference of spacing, punctuation or one of the listed abbreviations is
+ * ignored. The lists are deliberately short — an abbreviation is added here
+ * only when two spellings of it are certain to be one title.
+ */
+const TITLE_WORD_EXPANSIONS = {
+  st: 'saint',
+  mon: 'monday', tue: 'tuesday', tues: 'tuesday', wed: 'wednesday',
+  thu: 'thursday', thur: 'thursday', thurs: 'thursday', fri: 'friday'
+};
+
+function foldTitleAbbreviations_(value) {
+  let text = String(value || '');
+  if (text.normalize) text = text.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  text = text.toLowerCase();
+  text = text.replace(/\bw\s*\/\s*o\b/g, ' without ').replace(/\bw\s*\/\s*/g, ' with ');
+  text = text.replace(/&/g, ' and ');
+  // "Sat" and "Sun" are also words ("Sun Salutations"), so only the dotted
+  // abbreviation is read as a day.
+  text = text.replace(/\bsat\./g, ' saturday ').replace(/\bsun\./g, ' sunday ');
+  return text.replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean)
+    .map(word => (TITLE_WORD_EXPANSIONS.hasOwnProperty(word) ? TITLE_WORD_EXPANSIONS[word] : word))
+    .join(' ');
+}
+
+function eventTitleMatchKey(title) {
+  return foldTitleAbbreviations_(title).replace(/ /g, '');
+}
+
+/**
+ * Which spelling of a program the system keeps. THE ONE ALREADY ON THE SESSION
+ * TABLE WINS — it is the one in every existing Event_ID, so choosing it leaves
+ * registrations where they are. Where the table holds several spellings of one
+ * key (the situation this exists to end), the one with the most rows wins,
+ * ties broken alphabetically so every run answers alike. A program the table
+ * has never heard of keeps the first spelling this execution meets.
+ */
+let __canonicalTitleSpellings = null;
+
+function canonicalEventTitle_(typedTitle) {
+  const key = eventTitleMatchKey(typedTitle);
+  if (!key) return typedTitle;
+  if (!__canonicalTitleSpellings) __canonicalTitleSpellings = loadSessionTableTitleSpellings_();
+  if (!Object.prototype.hasOwnProperty.call(__canonicalTitleSpellings, key)) {
+    __canonicalTitleSpellings[key] = typedTitle;
+  }
+  return __canonicalTitleSpellings[key];
+}
+
+/** Forgets the per-execution answers — after a rename rewrote Clean_Title, and between tests. */
+function resetCanonicalEventTitles_() {
+  __canonicalTitleSpellings = null;
+}
+
+function loadSessionTableTitleSpellings_() {
+  const chosen = {};
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    if (!sheet) return chosen;
+    const headers = HEADERS.All_Program_Sessions;
+    const map = getIndexMap(headers);
+    const counts = {};
+    getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+      const title = String(row[map['Clean_Title']] || '').trim();
+      const key = eventTitleMatchKey(title);
+      if (!key) return;
+      counts[key] = counts[key] || {};
+      counts[key][title] = (counts[key][title] || 0) + 1;
+    });
+    Object.keys(counts).forEach(key => {
+      const spellings = Object.keys(counts[key]).sort((a, b) =>
+        (counts[key][b] - counts[key][a]) || (a < b ? -1 : a > b ? 1 : 0));
+      chosen[key] = spellings[0];
+    });
+  } catch (err) {
+    // Not having read the table only means a new spelling may be chosen by
+    // first sight instead; never worth failing a title parse over.
+    log(`Could not read the session table's title spellings (${err}) — using the calendar's.`);
+  }
+  return chosen;
 }
 
 /**

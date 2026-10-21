@@ -189,7 +189,9 @@ const notTentative = title => {
 tentative('*Yoga Basics', 'Yoga Basics');
 tentative('No Yoga Basics', 'Yoga Basics');
 tentative('NO Yoga Basics', 'Yoga Basics');
-tentative('no yoga basics', 'yoga basics');
+// Case is one of the small differences that no longer makes a second program
+// (see title_spelling_variants.test.js), so it folds onto the spelling above.
+tentative('no yoga basics', 'Yoga Basics');
 tentative('No: Yoga Basics', 'Yoga Basics');
 tentative('No - Yoga Basics', 'Yoga Basics');
 tentative('* No Yoga Basics', 'Yoga Basics');
