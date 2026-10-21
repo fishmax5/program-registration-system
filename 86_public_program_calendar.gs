@@ -387,7 +387,7 @@ const PUBLIC_CALENDAR_EMBED_MESSAGE = 'programCalendarHeight.v1';
  * top window (target="_top"), because the frame this page lives in is not the
  * address bar anybody is looking at.
  */
-const PUBLIC_CALENDAR_SEARCH_HOME_URL = 'https://www.newhorizonsseniorcenter.org/programming';
+const PUBLIC_CALENDAR_SEARCH_HOME_URL = 'https://lynx-heron-7t43.squarespace.com/programming';
 
 /** The longest search term read off a URL; anything past it is cut. */
 const PUBLIC_CALENDAR_SEARCH_MAX_CHARS = 100;
