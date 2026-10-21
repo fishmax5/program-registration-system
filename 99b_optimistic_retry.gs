@@ -452,10 +452,11 @@ function reportExhaustedOptimisticRetry(entry, message, tries) {
       'Nothing was written. This one does need entering by hand.\n\n' +
       'Replies to this message go to Caroline.',
       // A desk mark goes to whoever made it (stamped when it was queued) and
-      // Caroline. Door sign-ins and the rest carry no submitter and stay with
-      // the office table.
+      // Caroline. Door sign-ins carry no submitter and go to Caroline alone;
+      // the rest stay with the office table.
       { to: entry.kind === 'quickMark' || entry.kind === 'quickMarkHousehold'
-        ? [args.submittedBy || MAIL_REPLY_TO] : [] });
+        ? [args.submittedBy || MAIL_REPLY_TO]
+        : entry.kind === 'doorSignIn' ? [MAIL_REPLY_TO] : [] });
   } catch (err) {
     log(`ℹ️ Could not report an exhausted optimistic retry (${err}).`);
   }

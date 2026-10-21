@@ -324,7 +324,7 @@ if (sentMail.length) {
   ok('naming who it was', /Joan Alvarez/.test(sentMail[0].body));
   ok('and where', /Narberth/.test(sentMail[0].body));
   ok('and the reason walkInSignIn gave', /Nothing was recorded/.test(sentMail[0].body));
-  ok('to the Config admin-notifications address', sentMail[0].to === 'admin@example.org');
+  ok('to Caroline, not the office table', sentMail[0].to === vm.runInContext('MAIL_REPLY_TO', sandbox));
 }
 
 sentMail.length = 0;

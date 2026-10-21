@@ -271,7 +271,9 @@ function reportDoorSignInFailure(payload, reason) {
   ];
   // URGENT, not the daily digest: somebody is standing at the door and the
   // visit may need entering by hand today. See notifyAdminUrgent() (15).
-  notifyAdminUrgent('[Door app] A sign-in did not complete', lines.join('\n'));
+  notifyAdminUrgent('[Door app] A sign-in did not complete', lines.join('\n'),
+    // The tablet has no signed-in person, so this goes to Caroline alone.
+    { to: [MAIL_REPLY_TO] });
 }
 
 /**

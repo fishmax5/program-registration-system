@@ -1,7 +1,7 @@
 // THE ADMIN ACCOUNT IS SEND-ONLY. Nobody reads it, so (1) every message to a
 // member or leader carries a Reply-To that reaches Caroline, and (2) a Quick
 // Mark that did not save is addressed to the person who made it plus Caroline,
-// not to the office table. Door sign-in failures keep the office table: the
+// not to the office table. Door sign-in failures go to Caroline alone: the
 // tablet has no signed-in person.
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
@@ -73,6 +73,11 @@ ok('unknown submitter -> Caroline only', sent.length === 1 && sent[0].to === REP
 sent.length = 0;
 sandbox.notifyAdminUrgent('door', 'body');
 ok('door-style urgent mail still goes to the office table', sent[0] && sent[0].to === 'office@example.org');
+
+// 4b. A door sign-in failure goes to Caroline alone.
+sent.length = 0;
+sandbox.reportExhaustedOptimisticRetry({ kind: 'doorSignIn', args: { name: 'Joan' }, firstMessage: 'a' }, 'b', 4);
+ok('exhausted door retry -> Caroline only', sent.length === 1 && sent[0].to === REPLY);
 
 // 5. The retried-then-exhausted notice uses the stamped submitter.
 sent.length = 0;
