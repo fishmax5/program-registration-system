@@ -221,11 +221,22 @@ function buildDateLabelSets(sessions, options) {
   // two rows reading the same thing — see the dedupe above) and say BOTH their
   // times on one line, which is the first time the form has been able to
   // disclose the second sitting at all.
+  //
+  // "(Open)" goes on a line only where THIS caller knows the capacity hints
+  // (options.capacityHints present, even if empty): a caller that passes none
+  // (26's group paths) cannot tell a full date from an open one, and saying
+  // Open there would be a claim nobody checked. Appointment forms are told
+  // apart — their availability is per TIME, on the time question
+  // (describeAppointmentAvailability()), and a per-day "Open" over a day with
+  // one slot left is the wrong grain.
+  const markOpen = !!options.capacityHints && !options.isAssistance && !options.isLunchOnly;
   const lineFor = label => {
     const times = timesByLabel[label];
     const parts = partsByLabel[label];
-    if (!times || times.length === 0 || !parts) return label;
-    return `${parts.base}, ${times.join(' and ')}${parts.hint}${parts.capacityHint}`;
+    const line = (!times || times.length === 0 || !parts)
+      ? label
+      : `${parts.base}, ${times.join(' and ')}${parts.hint}${parts.capacityHint}`;
+    return (markOpen && parts && !parts.capacityHint) ? `${line}${OPEN_HINT_SUFFIX}` : line;
   };
 
   return {

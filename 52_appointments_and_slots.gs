@@ -231,6 +231,35 @@ function buildAppointmentChoicesForContext(context, booked) {
   return dedupePreservingOrder(choices);
 }
 
+/**
+ * Which TIMES are open and which are booked, one line per upcoming session:
+ * "Mon, Oct 13, 2026 · Narberth: 10:00 AM Open, 10:30 AM Booked". Derived from
+ * the choices alone — a slot is open exactly when it is still offered — so it
+ * needs no second read of the registrants and cannot disagree with the list
+ * above it. Past the length a form's help text comfortably holds it falls back
+ * to a count per session.
+ */
+function describeAppointmentAvailability(context, choices) {
+  const offered = new Set(choices || []);
+  const now = new Date();
+  const detailed = [];
+  const counted = [];
+  ((context && context.sessions) || []).forEach(session => {
+    if (!session.date || session.date < now) return;
+    const label = formatSessionLabel(session.date, session.location, context.showLocation,
+      session.title, context.showTitle);
+    const slots = buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session));
+    if (slots.length === 0) return;
+    const open = slots.map(slot => offered.has(appointmentChoiceLabel(label, slot.startLabel)));
+    const openCount = open.filter(Boolean).length;
+    detailed.push(`${label}: ${slots.map((slot, i) => `${slot.startLabel} ${open[i] ? 'Open' : 'Booked'}`).join(', ')}`);
+    counted.push(`${label}: ${openCount === 0 ? 'FULL' : `${openCount} of ${slots.length} times open`}`);
+  });
+  const full = dedupePreservingOrder(detailed).join('\n');
+  if (!full) return '';
+  return full.length <= 2500 ? full : dedupePreservingOrder(counted).join('\n');
+}
+
 /** What the mode page is retitled to on an appointment form — it no longer asks about modes. */
 const APPOINTMENT_PAGE_TITLE = 'Choose Your Appointment';
 
@@ -407,11 +436,12 @@ function applyAppointmentChoices(form, context, choices, modePage) {
     it.getTitle() === TEMPLATE_ITEM_TITLES.APPOINTMENT &&
     it.getType() !== FormApp.ItemType.PAGE_BREAK)[0] || null;
 
-  const helpText = wanted.length > 1
+  const availability = describeAppointmentAvailability(context, choices);
+  const helpText = (wanted.length > 1
     ? 'Appointments are one person at a time. Times already taken are not listed — pick any time shown. ' +
       'If none of them work, choose the last option and we will call you.'
     : 'Every appointment on this form is taken. Choose the option below and we will contact you ' +
-      'about another time.';
+      'about another time.') + (availability ? `\n\nAvailability:\n${availability}` : '');
 
   if (existing) {
     const list = existing.asListItem();

@@ -567,6 +567,16 @@ function computeStatus(activeCount, maxCapacity) {
  */
 const CAPACITY_HINT_SUFFIX = ' (FULL - Waitlist)';
 
+/**
+ * The other half of CAPACITY_HINT_SUFFIX, for the form DESCRIPTION's date lines
+ * only (buildDateLabelSets()' `allDateLines`). Every date the description lists
+ * now says whether it can be signed up for: "(FULL - Waitlist)" or "(Open)".
+ * Never added to a grid row LABEL — the label is the join key a response is
+ * matched back to its session by, and a date flipping Open -> FULL would
+ * otherwise rename the row under every registration already collected.
+ */
+const OPEN_HINT_SUFFIX = ' (Open)';
+
 /** What formatDateLabelWithMeal() puts between a session label and its menu hint. */
 const MEAL_HINT_SEPARATOR = ' — ';
 
