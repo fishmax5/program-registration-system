@@ -516,12 +516,29 @@ function publicEmbedHeightScript(mode) {
  */
 function publicSearchScript() {
   return `
+  // Both sides are worn down the same way before comparing: case, accents,
+  // apostrophes and hyphens go ("t'ai chi" -> "tai chi", "Mah-Jongg" ->
+  // "mahjongg"), other punctuation and "&" become spaces / "and".
+  function foldSearchText(text) {
+    var t = String(text || '').toLowerCase();
+    try { t = t.normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); } catch (err) { /* old browser */ }
+    return t.replace(/&/g, ' and ')
+      .replace(/['\\u2018\\u2019\\u02bc\\-\\u2010-\\u2015]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ').trim();
+  }
   function searchWords() {
-    return String(view.q || '').toLowerCase().split(/\\s+/).filter(Boolean);
+    return foldSearchText(view.q).split(' ').filter(Boolean);
   }
   function matchesSearch(haystack, words) {
+    var hay = foldSearchText(haystack);
+    var compact = hay.replace(/ /g, '');
     for (var i = 0; i < words.length; i++) {
-      if (haystack.indexOf(words[i]) === -1) return false;
+      var w = words[i];
+      if (hay.indexOf(w) !== -1 || compact.indexOf(w) !== -1) continue;
+      // a plural the title does not use ("classes" -> "class", "games" -> "game")
+      if (w.length > 3 && w.slice(-1) === 's' && (hay.indexOf(w.slice(0, -1)) !== -1 ||
+          (w.slice(-2) === 'es' && hay.indexOf(w.slice(0, -2)) !== -1))) continue;
+      return false;
     }
     return true;
   }
