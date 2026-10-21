@@ -457,6 +457,12 @@ function isPublicCalendarEmbedRequest_(params) {
  */
 function publicCalendarEmbedUrl(options) {
   const opts = options || {};
+  // THE FASTER ROAD, WHEN IT EXISTS (99zu): the same page as a static file on
+  // GitHub Pages, once every file has been published. It falls back to Apps
+  // Script by itself if anything is wrong, so choosing it is never a risk for
+  // the visitor — and until it is live this is the address it always was.
+  const pages = publicPagesEmbedUrl_('public', opts);
+  if (pages) return pages;
   return checkInPageUrl({
     mode: 'public',
     span: opts.span || '',
@@ -481,10 +487,12 @@ function publicCalendarEmbedUrl(options) {
  * itself rather than none.
  */
 function publicCalendarEmbedSnippet(options) {
-  return publicEmbedSnippetFor_(publicCalendarEmbedUrl(options), {
+  const url = publicCalendarEmbedUrl(options);
+  return publicEmbedSnippetFor_(url, {
     id: 'program-calendar',
     title: 'Programs and sign-ups',
-    mode: 'public'
+    mode: 'public',
+    origin: publicPagesOriginForUrl_(url)
   });
 }
 
@@ -505,6 +513,8 @@ function publicEmbedSnippetFor_(url, options) {
   const id = String(opts.id || 'program-calendar');
   const title = String(opts.title || 'Programs and sign-ups');
   const mode = String(opts.mode || 'public');
+  // Set only for the GitHub Pages form: its origin, as well as Google's.
+  const origin = String(opts.origin || '');
   return [
     `<div id="${id}-loading" style="padding:32px 0;text-align:center;opacity:.7">Loading schedule\u2026</div>`,
     `<iframe id="${id}" src="${url}"`,
@@ -521,7 +531,10 @@ function publicEmbedSnippetFor_(url, options) {
     '    if (loading && loading.parentNode) loading.parentNode.removeChild(loading);',
     '  }',
     '  window.addEventListener("message", function (event) {',
-    '    if (!/\\.googleusercontent\\.com$/.test(String(event.origin || ""))) return;',
+    // The Apps Script page posts from a googleusercontent frame; the GitHub
+    // Pages page (99zu) from its own origin, and falls back to the former.
+    `    var origin = String(event.origin || "");`,
+    `    if (!/\\.googleusercontent\\.com$/.test(origin)${origin ? ` && origin !== ${JSON.stringify(origin)}` : ''}) return;`,
     '    var data = event.data;',
     `    if (!data || data.type !== ${JSON.stringify(PUBLIC_CALENDAR_EMBED_MESSAGE)}) return;`,
     `    if (data.mode !== ${JSON.stringify(mode)}) return;`,

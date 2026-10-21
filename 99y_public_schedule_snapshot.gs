@@ -24,6 +24,10 @@
 //   3. doGet inlines whatever getScheduleSnapshot_() returns; the page draws
 //      that at once and asks getScheduleSnapshot() once in the background,
 //      redrawing only if `builtAt` moved.
+//   4. The trigger and the end of a calendar sync then hand the snapshot they
+//      built to publishPublicPagesAfterBuild_() (99zu), which pushes it — and
+//      the two pages, as static files — to GitHub Pages when Admin has set that
+//      up. A page VIEW never publishes: it must not wait on GitHub.
 //
 // WHY A DRIVE FILE AND NOT SCRIPT PROPERTIES for the fallback: two months of
 // sessions at two buildings is well past 100KB of JSON, and Script Properties
@@ -250,7 +254,11 @@ function refreshPublicScheduleSnapshot() {
       return false;
     }
     const snapshot = buildScheduleSnapshot_();
-    return !!(snapshot && snapshot.ok !== false);
+    const built = !!(snapshot && snapshot.ok !== false);
+    // The same snapshot, as files on GitHub Pages (99zu). After the build and
+    // never inside a page view; a no-op unless Admin has set it up.
+    if (built) publishPublicPagesAfterBuild_(snapshot);
+    return built;
   } catch (err) {
     log(`⚠️ Public schedule snapshot rebuild failed (${err}).`);
     return false;
@@ -260,7 +268,8 @@ function refreshPublicScheduleSnapshot() {
 /** The calendar sync's call (90) — same rebuild, no lease check: the sync IS the holder. Never throws. */
 function refreshPublicScheduleSnapshotAfterSync_() {
   try {
-    buildScheduleSnapshot_();
+    const snapshot = buildScheduleSnapshot_();
+    if (snapshot && snapshot.ok !== false) publishPublicPagesAfterBuild_(snapshot);
   } catch (err) {
     log(`⚠️ Public schedule snapshot was not rebuilt after the sync (${err}).`);
   }

@@ -407,6 +407,9 @@ function buildCoordinatorMenu_(ui, title, role) {
     // itself — are on the Desk menu.
     .addSubMenu(ui.createMenu('\ud83d\udeaa Sign-In & Door')
       .addItem('\ud83d\udcf1 Door Pages (links & PIN)\u2026', menuFn_('showCheckInPageDialog'))
+      // The public calendar pages as files on GitHub Pages (99zu): the repo,
+      // the token, and the first publish. Off until somebody sets it up.
+      .addItem('\ud83c\udf10 Public Pages on GitHub Pages\u2026', menuFn_('setUpPublicPagesPublishing'))
       // The check-in page queues its marks and a trigger writes them; this is
       // the "write them NOW" for somebody standing over the tab wondering
       // where this morning's ticks are. See flushCheckInQueue().

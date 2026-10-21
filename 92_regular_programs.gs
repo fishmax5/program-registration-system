@@ -63,7 +63,17 @@ const PUBLIC_REGULAR_DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 
  * below draws tiles out of them exactly as 87 does.
  */
 function publicRegularPrograms(payload) {
-  const snapshot = publicProgramCalendar(payload);
+  return regularProgramsFromSnapshot_(publicProgramCalendar(payload));
+}
+
+/**
+ * THE FOLD OF A SNAPSHOT YOU ALREADY HOLD. Split out of publicRegularPrograms()
+ * so the GitHub Pages publisher (99zu) folds the snapshot it has just built
+ * rather than asking the cache for it again — one rule, two callers, and the
+ * static regular.json cannot disagree with the Apps Script page about what a
+ * weekly program is.
+ */
+function regularProgramsFromSnapshot_(snapshot) {
   if (!snapshot || snapshot.ok === false) return snapshot;
   const programs = foldRegularPrograms_(snapshot.sessions || []);
   const locations = {};

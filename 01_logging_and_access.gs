@@ -112,7 +112,10 @@ const ADMIN_GATED_ACTIONS = [
   // Create and remove the instant import's submit trigger (99zr) — trigger
   // work, gated for the reason writeTriggers() is.
   'Instant Registration Import',
-  'New Responses Spreadsheet'
+  'New Responses Spreadsheet',
+  // Stores a GitHub token and starts publishing the public pages to a third
+  // party (99zu) — outward-facing and credential-bearing, so gated.
+  'Set Up GitHub Pages Schedule'
 ];
 
 /** Does this action still ask who is signed in? */

@@ -226,6 +226,7 @@ function menu_showBulkWaitlistOnlyDialog() { recordMenuUsage_('showBulkWaitlistO
 function menu_showCalendarInviteDialog() { recordMenuUsage_('showCalendarInviteDialog'); return showCalendarInviteDialog(); }
 function menu_openSignInApp() { recordMenuUsage_('openSignInApp'); return openSignInApp(); }
 function menu_showCheckInPageDialog() { recordMenuUsage_('showCheckInPageDialog'); return showCheckInPageDialog(); }
+function menu_setUpPublicPagesPublishing() { recordMenuUsage_('setUpPublicPagesPublishing'); return setUpPublicPagesPublishing(); }
 function menu_showColumnWidthDialog() { recordMenuUsage_('showColumnWidthDialog'); return showColumnWidthDialog(); }
 function menu_showDeleteRegistrationsDialog() { recordMenuUsage_('showDeleteRegistrationsDialog'); return showDeleteRegistrationsDialog(); }
 function menu_showDuplicateRegistrationsDialog() { recordMenuUsage_('showDuplicateRegistrationsDialog'); return showDuplicateRegistrationsDialog(); }

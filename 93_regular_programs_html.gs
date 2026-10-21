@@ -31,7 +31,10 @@
 function buildPublicRegularHtml(snapshot, options) {
   const snap = snapshot || { ok: false, programs: [] };
   const opts = options || {};
-  const embed = !!opts.embed;
+  // `options.static` is the static form (see 87's banner and 91's 18c): the
+  // fold fetched from regular.json at boot instead of inlined.
+  const staticCfg = opts.static || null;
+  const embed = !staticCfg && !!opts.embed;
   const data = JSON.stringify(JSON.stringify(snap)).replace(/<\//g, '<\\/');
 
   const wanted = String(opts.location || '').trim().toLowerCase();
@@ -52,7 +55,7 @@ function buildPublicRegularHtml(snapshot, options) {
   })).replace(/</g, '\\u003c');
 
   return `
-${publicEmbedStyles()}${publicEmbedSkinStyles(embed)}
+${publicEmbedStyles()}${staticCfg ? publicEmbedSkinStyles(true, true) : publicEmbedSkinStyles(embed)}
 
 <div class="wrap">
 ${embed ? '' : `  <header>
@@ -83,9 +86,8 @@ ${embed ? '' : `  <header>
 </div>
 
 <script>
-  var DATA = JSON.parse(${data});
+  ${staticCfg ? publicStaticBootVars(staticCfg) : publicInlineBootVars(data, JSON.stringify(''), embedding)}
   var PROGRAMS = (DATA && DATA.programs) || [];
-  var EMBED = JSON.parse(${embedding});
   var STORE_KEY = 'publicCalendarPrefs.v1';
   // FOUR, not the calendar page's six: a tile here stands in a weekday
   // column a fifth of the screen wide, and six chips in it is four rows of
@@ -354,6 +356,7 @@ ${embed ? '' : `  <header>
   }
 
   function draw() {
+    if (LOADING) { drawLoading(); return; }
     var list = document.getElementById('list');
     var rows = visible();
 
@@ -433,6 +436,13 @@ ${embed ? '' : `  <header>
 
   /** The quiet re-read, on the same terms as the calendar page's. */
   function refresh(force) {
+    if (STATIC_MODE) {
+      refreshStatic(force, function (res) {
+        PROGRAMS = res.programs || [];
+        drawLocations(); draw();
+      });
+      return;
+    }
     var button = document.getElementById('refresh');
     if (force) button.textContent = 'Refreshing\\u2026';
     google.script.run
@@ -460,12 +470,26 @@ ${embed ? '' : `  <header>
   // publicEmbedHeightScript (91): posted to window.top, tagged 'regular'.
 ${publicEmbedHeightScript('regular')}
 ${publicSearchScript()}
+${staticCfg ? publicStaticLoaderScript() : ''}
 
-  drawIntro();
-  drawLocations();
-  draw();
-  watchHeight();
-  window.setTimeout(function () { refresh(false); }, 400);
+  if (STATIC_MODE) {
+    watchHeight();
+    draw();
+    loadStatic(function () {
+      PROGRAMS = (DATA && DATA.programs) || [];
+      applyPinned();
+      drawIntro();
+      drawLocations();
+      draw();
+      window.setTimeout(function () { refresh(false); }, 400);
+    });
+  } else {
+    drawIntro();
+    drawLocations();
+    draw();
+    watchHeight();
+    window.setTimeout(function () { refresh(false); }, 400);
+  }
 </script>
 `;
 }

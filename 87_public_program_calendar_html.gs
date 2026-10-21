@@ -81,6 +81,10 @@
  *   embed     this page is inside somebody else's website — see the banner in
  *             17b, and publicEmbedSkinStyles() in 91
  *   location  one building, pinned by the embed's author
+ *   static    { dataUrl, execUrl } — draw the STATIC form (see 91's banner 18c,
+ *             published by 99zu): no data inlined, the snapshot fetched at
+ *             boot, the query string read in the browser, the Apps Script
+ *             address as the fallback. `snapshot` is ignored in that form.
  *
  * THE PINNED BUILDING IS RESOLVED HERE, against the buildings the snapshot
  * actually has, and case-insensitively: an embed is typed by hand into a
@@ -92,7 +96,10 @@
 function buildPublicCalendarHtml(snapshot, options) {
   const snap = snapshot || { ok: false, sessions: [] };
   const opts = options || {};
-  const embed = !!opts.embed;
+  const staticCfg = opts.static || null;
+  // A static page cannot know it is framed until the browser tells it, so it
+  // always carries the header and scopes the embed skin under html.is-embed.
+  const embed = !staticCfg && !!opts.embed;
   const data = JSON.stringify(JSON.stringify(snap)).replace(/<\//g, '<\\/');
   const span = JSON.stringify(String(opts.span || ''));
 
@@ -116,7 +123,7 @@ function buildPublicCalendarHtml(snapshot, options) {
   })).replace(/</g, '\\u003c');
 
   return `
-${publicEmbedStyles()}${publicEmbedSkinStyles(embed)}
+${publicEmbedStyles()}${staticCfg ? publicEmbedSkinStyles(true, true) : publicEmbedSkinStyles(embed)}
 
 <div class="wrap">
 ${embed ? '' : `  <header>
@@ -152,10 +159,8 @@ ${embed ? '' : `  <header>
 </div>
 
 <script>
-  var DATA = JSON.parse(${data});
+  ${staticCfg ? publicStaticBootVars(staticCfg) : publicInlineBootVars(data, span, embedding)}
   var SESSIONS = (DATA && DATA.sessions) || [];
-  var SPAN = ${span};
-  var EMBED = JSON.parse(${embedding});
   var STORE_KEY = 'publicCalendarPrefs.v1';
   // How many dates a tile shows before it offers the rest. Six is two rows in
   // a half-width tile: enough to see the rhythm of a weekly class, short of
@@ -559,6 +564,7 @@ ${embed ? '' : `  <header>
   }
 
   function draw() {
+    if (LOADING) { drawLoading(); return; }
     var list = document.getElementById('list');
     var groups = searchGroups(programsFrom(visible()));
     var rows = [];
@@ -654,6 +660,13 @@ ${embed ? '' : `  <header>
    * screen costs the person nothing and keeps the numbers honest.
    */
   function refresh(force) {
+    if (STATIC_MODE) {
+      refreshStatic(force, function (res) {
+        SESSIONS = res.sessions || [];
+        drawIntro(); drawLocations(); draw();
+      });
+      return;
+    }
     var button = document.getElementById('refresh');
     if (force) button.textContent = 'Refreshing…';
     google.script.run
@@ -697,14 +710,30 @@ ${embed ? '' : `  <header>
   // --------------------------------------------------------------------
 ${publicEmbedHeightScript('public')}
 ${publicSearchScript()}
+${staticCfg ? publicStaticLoaderScript() : ''}
 
-  drawIntro();
-  drawLocations();
-  draw();
   // On load, on every draw (draw() calls postHeight), and whenever the
   // content itself changes size — a tile expanded, a font settled.
-  watchHeight();
-  window.setTimeout(function () { refresh(false); }, 400);
+  if (STATIC_MODE) {
+    // The fetch was started in <head>; until it lands the page says so, and
+    // everything else (intro, buildings, tiles) is drawn from what arrives.
+    watchHeight();
+    draw();
+    loadStatic(function () {
+      SESSIONS = (DATA && DATA.sessions) || [];
+      applyPinned();
+      drawIntro();
+      drawLocations();
+      draw();
+      window.setTimeout(function () { refresh(false); }, 400);
+    });
+  } else {
+    drawIntro();
+    drawLocations();
+    draw();
+    watchHeight();
+    window.setTimeout(function () { refresh(false); }, 400);
+  }
 </script>
 `;
 }

@@ -108,7 +108,9 @@ const PUBLIC_CALENDAR_SPANS = {
 
 function publicCalendarSpanRequested_(params) {
   const asked = String((params && (params.span || params.range)) || '').trim().toLowerCase();
-  return PUBLIC_CALENDAR_SPANS[asked] || '';
+  // Own keys only: ?span=constructor used to come back as Object's constructor.
+  return Object.prototype.hasOwnProperty.call(PUBLIC_CALENDAR_SPANS, asked)
+    ? PUBLIC_CALENDAR_SPANS[asked] : '';
 }
 
 /**
@@ -416,13 +418,20 @@ function publicEmbedStyles() {
  * nothing here to scroll past), and the bottom padding goes, because in a
  * frame it is empty space nobody can explain rather than room for a thumb.
  */
-function publicEmbedSkinStyles(embed) {
-  if (!embed) return '';
+function publicEmbedSkinStyles(embed, scoped) {
+  if (!embed && !scoped) return '';
+  // SCOPED is the static page's form (99zu): a page served from GitHub Pages
+  // cannot know it is framed until the browser tells it, so the same rules sit
+  // under `html.is-embed`, which a script in <head> sets BEFORE the first
+  // paint (publicStaticParamsScript) — the embed skin is still never drawn
+  // late, it is just switched on by a class that arrives before anything is.
+  const p = scoped ? 'html.is-embed ' : '';
   return `
 <style>
-  .wrap { padding: 0 2px 2px 2px; max-width: none; }
-  .controls { position: static; margin-top: 0; }
-  footer { margin-top: 18px; font-size: 12px; }
+  ${p}.wrap { padding: 0 2px 2px 2px; max-width: none; }
+  ${p}.controls { position: static; margin-top: 0; }
+  ${p}footer { margin-top: 18px; font-size: 12px; }${scoped ? `
+  html.is-embed header { display: none; }` : ''}
 </style>`;
 }
 
@@ -578,6 +587,257 @@ function publicSearchScript() {
 /** How long the height report waits for things to settle. */
 const PUBLIC_EMBED_HEIGHT_DEBOUNCE_MS = 100;
 
+// ============================================================================
+// 18c. THE STATIC FORM OF BOTH PAGES  (served from GitHub Pages, 99zu)
+// ============================================================================
+//
+// The Apps Script route draws these pages in a sandboxed iframe inside Google's
+// own wrapper, after a redirect, from a script execution — and that is most of
+// what a visitor waits for, whatever is in the snapshot. The same two pages are
+// therefore also published as FILES (99zu): an HTML page with no data in it and
+// a JSON file beside it, on GitHub Pages' CDN. The page is the SAME template —
+// buildPublicCalendarHtml / buildPublicRegularHtml take `options.static` — so
+// there is one page to maintain, not a second one that drifts.
+//
+// What the static form changes, and only this:
+//
+//   1. THE DATA COMES FROM A FETCH, started in <head> (publicStaticParamsScript)
+//      so it is in flight while the rest of the page parses. The Apps Script
+//      form inlines it instead; nothing else about the page differs.
+//   2. THE QUERY STRING IS READ IN THE BROWSER. Apps Script reads ?embed=,
+//      ?building=, ?span= and ?q= on the server; a file cannot, so
+//      publicStaticParams() reimplements exactly those four readers
+//      (publicCalendarViewOptions, publicCalendarSpanRequested_,
+//      isPublicCalendarEmbedRequest_, publicCalendarSearchQuery_) and
+//      tests/public_static_pages.test.js runs both over the same inputs.
+//   3. ANYTHING THAT GOES WRONG HANDS THE VISITOR TO THE APPS SCRIPT PAGE:
+//      the fetch fails or times out, the JSON is not usable, or it is older
+//      than PUBLIC_STATIC_STALE_AFTER_MS (the publisher has stopped). The
+//      address is baked in at publish time and carries the original query
+//      string. A visitor on the static page never sees "could not load" unless
+//      there is no Apps Script address to fall back to.
+//   4. THE EMBED HEIGHT MESSAGE IS UNCHANGED (same type, same mode, posted to
+//      window.top), so the website's listener works for either origin.
+//
+// What it does NOT change: the snapshot's fields. The JSON is the snapshot
+// 86 builds, byte for byte apart from being serialized — the field list that
+// may leave the workbook is pinned in tests/public_calendar.test.js and the
+// publisher's own test pins that the files carry nothing else.
+// ============================================================================
+
+/** The published file names, per page — the publisher and the pages both read this. */
+const PUBLIC_STATIC_FILES = {
+  public: { page: 'index.html', data: 'schedule.json' },
+  regular: { page: 'regular.html', data: 'regular.json' }
+};
+
+/**
+ * How old a fetched file may be before the page stops trusting it and hands the
+ * visitor to the Apps Script page. The publisher re-pushes unchanged data every
+ * PUBLIC_PAGES_HEARTBEAT_MS (3h), so a healthy file is never this old.
+ */
+const PUBLIC_STATIC_STALE_AFTER_MS = 12 * 60 * 60 * 1000;
+
+/** How long the first fetch may take before the visitor is handed to Apps Script. */
+const PUBLIC_STATIC_FETCH_TIMEOUT_MS = 8000;
+
+/**
+ * THE <head> SCRIPT: the four query readers, the embed class, and the early
+ * fetch. Plain ES5, no template-literal hazards (no backslashes except the
+ * doubled ones below).
+ */
+function publicStaticParamsScript(dataUrl) {
+  const spans = JSON.stringify(PUBLIC_CALENDAR_SPANS);
+  return `<script>
+  var PUBLIC_SPANS = ${spans};
+  var PUBLIC_QUERY_MAX = ${PUBLIC_CALENDAR_SEARCH_MAX_CHARS};
+  function publicStaticParams() {
+    var sp = null;
+    try { sp = new URLSearchParams(window.location.search); } catch (err) { sp = null; }
+    function get(name) { var v = sp ? sp.get(name) : null; return v === null ? '' : String(v); }
+    var out = { embed: false, location: '', span: '', query: '' };
+    if (!sp) return out;
+    if (sp.has('embed')) {
+      var e = get('embed').trim().toLowerCase();
+      out.embed = e !== 'no' && e !== 'false' && e !== '0';
+    }
+    out.location = (get('building') || get('location') || get('loc')).trim();
+    var asked = (get('span') || get('range')).trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(PUBLIC_SPANS, asked)) out.span = PUBLIC_SPANS[asked];
+    out.query = get('q').replace(/\\s+/g, ' ').trim().slice(0, PUBLIC_QUERY_MAX).trim();
+    return out;
+  }
+  try {
+    if (publicStaticParams().embed) document.documentElement.className += ' is-embed';
+  } catch (err) { /* the page is drawn unframed */ }
+  window.__scheduleFetch = null;
+  try {
+    if (window.fetch) {
+      window.__scheduleFetch = window.fetch(${JSON.stringify(String(dataUrl))}, { credentials: 'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      window.__scheduleFetch.catch(function () { /* the loader decides what a failure means */ });
+    }
+  } catch (err) { window.__scheduleFetch = null; }
+</script>`;
+}
+
+/**
+ * THE STATIC PAGE'S STARTING STATE, in the place the Apps Script form writes
+ * `var DATA = JSON.parse(...)`. DATA is null until the fetch lands and LOADING
+ * says so, which is what draw() checks first.
+ */
+function publicStaticBootVars(cfg) {
+  const conf = JSON.stringify(JSON.stringify({
+    dataUrl: String(cfg.dataUrl || ''),
+    execUrl: String(cfg.execUrl || ''),
+    staleMs: PUBLIC_STATIC_STALE_AFTER_MS,
+    timeoutMs: PUBLIC_STATIC_FETCH_TIMEOUT_MS
+  })).replace(/</g, '\\u003c');
+  const shared = JSON.stringify(JSON.stringify({
+    message: PUBLIC_CALENDAR_EMBED_MESSAGE,
+    clearUrl: PUBLIC_CALENDAR_SEARCH_HOME_URL
+  })).replace(/</g, '\\u003c');
+  return `var STATIC_MODE = true;
+  var STATIC = JSON.parse(${conf});
+  var PARAMS = publicStaticParams();
+  var DATA = null;
+  var LOADING = true;
+  var SPAN = PARAMS.span;
+  var EMBED = JSON.parse(${shared});
+  EMBED.embed = PARAMS.embed;
+  EMBED.location = '';
+  EMBED.query = PARAMS.query;`;
+}
+
+/** The Apps Script form's starting state — what the pages have always done. */
+function publicInlineBootVars(dataJson, spanJson, embeddingJson) {
+  return `var STATIC_MODE = false;
+  var LOADING = false;
+  var DATA = JSON.parse(${dataJson});
+  var SPAN = ${spanJson};
+  var EMBED = JSON.parse(${embeddingJson});`;
+}
+
+/**
+ * THE LOADER: the first fetch, the fallback, the quiet re-read, and the pinned
+ * building (which Apps Script resolves on the server against the buildings in
+ * the snapshot, and a file can only resolve once the snapshot has arrived).
+ * Emitted into the static page only.
+ */
+function publicStaticLoaderScript() {
+  return `
+  function staticUsable(j) {
+    if (!j || j.ok === false || !j.builtAt) return false;
+    if (!(j.sessions || j.programs)) return false;
+    return (Date.now() - Number(j.builtAt)) < STATIC.staleMs;
+  }
+
+  function staticFetch(cacheMode, done) {
+    var finished = false;
+    var ctl = window.AbortController ? new window.AbortController() : null;
+    var timer = window.setTimeout(function () {
+      if (ctl) ctl.abort();
+      finish(new Error('timeout'));
+    }, STATIC.timeoutMs);
+    function finish(err, json) {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timer);
+      done(err, json);
+    }
+    if (!window.fetch) { finish(new Error('no fetch')); return; }
+    var init = { cache: cacheMode, credentials: 'omit' };
+    if (ctl) init.signal = ctl.signal;
+    window.fetch(STATIC.dataUrl, init)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { finish(null, j); }, function (e) { finish(e || new Error('fetch')); });
+  }
+
+  /** The same page, from Apps Script, carrying the query string it was asked with. */
+  function fallbackToExec() {
+    if (!STATIC.execUrl) return false;
+    var search = String(window.location.search || '').replace(/^[?]/, '');
+    var url = STATIC.execUrl;
+    if (search) url += (url.indexOf('?') === -1 ? '?' : '&') + search;
+    try { window.location.replace(url); return true; } catch (err) { return false; }
+  }
+
+  function drawLoading() {
+    var list = document.getElementById('list');
+    list.textContent = '';
+    list.appendChild(el('div', 'empty full', 'Loading programs\\u2026'));
+    postHeight();
+  }
+
+  function applyPinned() {
+    var wanted = String(PARAMS.location || '').trim().toLowerCase();
+    var known = (DATA && DATA.locations) || [];
+    EMBED.location = '';
+    for (var i = 0; wanted && i < known.length && !EMBED.location; i++) {
+      if (String(known[i]).trim().toLowerCase() === wanted) EMBED.location = known[i];
+    }
+    if (EMBED.location) view.location = EMBED.location;
+  }
+
+  function loadStatic(onReady) {
+    var settled = false;
+    var timer = null;
+    function settle(err, json) {
+      if (settled) return;
+      settled = true;
+      if (timer) window.clearTimeout(timer);
+      if (err || !staticUsable(json)) {
+        if (fallbackToExec()) return;
+        DATA = { ok: false };
+      } else {
+        DATA = json;
+      }
+      LOADING = false;
+      onReady();
+    }
+    timer = window.setTimeout(function () { settle(new Error('timeout')); }, STATIC.timeoutMs);
+    var early = window.__scheduleFetch;
+    if (early) early.then(function (j) { settle(null, j); }, function (e) { settle(e || new Error('fetch')); });
+    else staticFetch('default', settle);
+  }
+
+  /**
+   * THE QUIET RE-READ. 'no-cache' revalidates with the CDN (a 304 when nothing
+   * moved), so the first paint may come from a copy up to ten minutes old and
+   * this is what brings it current. Nothing on screen changes unless builtAt did.
+   */
+  function refreshStatic(force, apply) {
+    var button = document.getElementById('refresh');
+    if (force) button.textContent = 'Refreshing\\u2026';
+    staticFetch('no-cache', function (err, res) {
+      button.textContent = 'Refresh';
+      if (err || !staticUsable(res)) return;
+      if (DATA && DATA.builtAt && res.builtAt === DATA.builtAt) return;
+      DATA = res;
+      applyPinned();
+      redrawKeepingPlace(function () { apply(res); });
+    });
+  }`;
+}
+
+/**
+ * The finished document: the page fragment (which starts with its own <style>
+ * blocks) wrapped in the skeleton Apps Script would otherwise supply.
+ */
+function publicStaticDocument(title, fragment, dataUrl) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${String(title).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</title>
+${publicStaticParamsScript(dataUrl)}
+</head>
+<body>${fragment}</body>
+</html>
+`;
+}
+
 /**
  * THE REGULAR-PROGRAMS PAGE'S OWN EMBED ADDRESS AND SNIPPET — the calendar's,
  * with this page's mode on it and its own frame id, so a website that embeds
@@ -585,6 +845,9 @@ const PUBLIC_EMBED_HEIGHT_DEBOUNCE_MS = 100;
  */
 function publicRegularEmbedUrl(options) {
   const opts = options || {};
+  // GitHub Pages once it is live (99zu), else Apps Script — see 86's twin.
+  const pages = publicPagesEmbedUrl_('regular', opts);
+  if (pages) return pages;
   return checkInPageUrl({
     mode: 'regular',
     params: { embed: '1', building: opts.location || '' }
@@ -592,9 +855,11 @@ function publicRegularEmbedUrl(options) {
 }
 
 function publicRegularEmbedSnippet(options) {
-  return publicEmbedSnippetFor_(publicRegularEmbedUrl(options), {
+  const url = publicRegularEmbedUrl(options);
+  return publicEmbedSnippetFor_(url, {
     id: 'regular-programs',
     title: 'Weekly programs',
-    mode: 'regular'
+    mode: 'regular',
+    origin: publicPagesOriginForUrl_(url)
   });
 }
