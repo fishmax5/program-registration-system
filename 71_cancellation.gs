@@ -885,6 +885,11 @@ function stampRegistrantRowWaitlisted(row, map, opts) {
   row[map['Program_Status']] = 'Waitlisted';
   if (map['Lunch_Status'] !== undefined) row[map['Lunch_Status']] = 'Waitlisted';
   row[map['Manual_Override']] = 'Manually Edited';
+  // The leader sheet's Waitlisted tick is the other half of this state. A hand
+  // waitlisting (Quick Mark, the change panel, the bulk list) that left it
+  // false read, at the next sync, as a leader UNticking it — and
+  // applyLeaderWaitlistTicks() then promoted the person straight back on.
+  if (map['Waitlisted'] !== undefined) row[map['Waitlisted']] = true;
   appendAdminNote(row, map, waitlistStamp(WAITLIST_HANDLED_MARK, opts));
   return true;
 }
@@ -913,6 +918,7 @@ function stampRegistrantRowActive(row, map, opts) {
     row[map['Lunch_Status']] = (lunchType && lunchType !== 'No Lunch') ? 'Needed' : 'No Lunch';
   }
   row[map['Manual_Override']] = 'Manually Edited';
+  if (map['Waitlisted'] !== undefined) row[map['Waitlisted']] = false;
   appendAdminNote(row, map, waitlistStamp('Taken off the waitlist', opts));
   return true;
 }

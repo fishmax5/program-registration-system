@@ -494,9 +494,21 @@ function buildLeaderAlertBody(leader, programs) {
     lines.push(`${program.title} — ${program.location}`);
     lines.push('');
 
+    // Waitlisted people are not on the class list: they are named once, at the
+    // foot, with no date, and a person leaving the waitlist is not worth a line.
+    const waitlistNames = [];
+    const dated = program.changes.filter(change => {
+      if (change.to === 'W') {
+        const name = titleCaseLeaderAlertName(change.name);
+        if (waitlistNames.indexOf(name) === -1) waitlistNames.push(name);
+        return false;
+      }
+      return !(change.kind === 'left' && change.from === 'W');
+    });
+
     let shown = 0;
     let lastDateKey = '';
-    program.changes.forEach(change => {
+    dated.forEach(change => {
       if (shown >= LEADER_ALERT_MAX_LINES_PER_PROGRAM) return;
       if (change.dateKey !== lastDateKey) {
         lastDateKey = change.dateKey;
@@ -506,10 +518,14 @@ function buildLeaderAlertBody(leader, programs) {
       lines.push(`    ${describeLeaderAlertChange(change)}`);
       shown++;
     });
-    if (program.changes.length > shown) {
+    if (dated.length > shown) {
       // The full picture is one click away and always right; an email that
       // pages through two hundred changes is neither.
-      lines.push(`    …and ${program.changes.length - shown} more change(s).`);
+      lines.push(`    …and ${dated.length - shown} more change(s).`);
+    }
+    if (waitlistNames.length) {
+      lines.push('');
+      lines.push(`  Added to the waitlist: ${waitlistNames.join(', ')}`);
     }
 
     lines.push('');
@@ -881,19 +897,27 @@ function buildLeaderDigestBody(leader, sessions) {
     : 'Here is who is on your roster ahead of your upcoming sessions.');
   lines.push('');
 
+  // Waitlisted people are listed once at the foot, outside the dates.
+  const waitlistByProgram = {};
   sessions.forEach(session => {
+    const roster = session.roster.filter(person => !person.waitlisted);
+    session.roster.filter(person => person.waitlisted).forEach(person => {
+      const key = `${session.title} — ${session.location}`;
+      const names = waitlistByProgram[key] || (waitlistByProgram[key] = []);
+      if (names.indexOf(person.name) === -1) names.push(person.name);
+    });
     lines.push(`${session.title} — ${session.location} — ${formatDateLabel(session.date)}`);
-    if (session.roster.length === 0) {
+    if (roster.length === 0) {
       lines.push('  Nobody is registered yet.');
     } else {
       let shown = 0;
-      session.roster.forEach(person => {
+      roster.forEach(person => {
         if (shown >= LEADER_ALERT_MAX_LINES_PER_PROGRAM) return;
         lines.push(`  ${describeLeaderDigestPerson(person)}`);
         shown++;
       });
-      if (session.roster.length > shown) {
-        lines.push(`  …and ${session.roster.length - shown} more.`);
+      if (roster.length > shown) {
+        lines.push(`  …and ${roster.length - shown} more.`);
       }
     }
     lines.push('');
@@ -903,6 +927,11 @@ function buildLeaderDigestBody(leader, sessions) {
       lines.push('');
     }
   });
+
+  Object.keys(waitlistByProgram).forEach(key => {
+    lines.push(`Waitlist — ${key}: ${waitlistByProgram[key].join(', ')}`);
+  });
+  if (Object.keys(waitlistByProgram).length) lines.push('');
 
   lines.push('This lists who is registered as of right now — later changes are not reported here.');
   lines.push('To change when or whether you hear from us, edit Notify_Timing and Notify_Roster_Changes ' +
@@ -914,7 +943,7 @@ function buildLeaderDigestBody(leader, sessions) {
 function buildLeaderDigestSubject(sessions) {
   if (sessions.length === 1) {
     const session = sessions[0];
-    const count = session.roster.length;
+    const count = session.roster.filter(person => !person.waitlisted).length;
     return `${session.title} (${session.location}) — ${formatDateLabel(session.date)} — ` +
       `${count} ${count === 1 ? 'person' : 'people'} on the roster`;
   }

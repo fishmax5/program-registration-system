@@ -181,8 +181,12 @@ check('and names the session it is about',
 check('an active registrant is listed', digest.indexOf('Ann Smith') !== -1, true);
 check('a party rides along, because it is chairs to set out',
   digest.indexOf('Bob Jones (party of 3)') !== -1, true);
-check('the waitlist is marked rather than merged into the roster',
-  digest.indexOf('Cyd Ray — waitlisted') !== -1, true);
+check('the waitlist is not merged into the roster',
+  digest.indexOf('Cyd Ray — waitlisted'), -1);
+check('...it is named once at the foot, outside the dates',
+  /Waitlist — Chair Yoga — Narberth: .*Cyd Ray/.test(digest), true);
+check('...below every session line',
+  digest.indexOf('Waitlist —') > digest.lastIndexOf('Chair Yoga — Narberth —'), true);
 check('somebody who cancelled is not coming, so is not listed',
   digest.indexOf('Dee Lee'), -1);
 check('and neither is a superseded row', digest.indexOf('Old Bob'), -1);

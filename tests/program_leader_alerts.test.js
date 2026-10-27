@@ -145,6 +145,20 @@ check('the email greets the leader by name', body.indexOf('Hello Jane,'), 0);
 check('and names the program and the site', body.indexOf('Chair Yoga — Narberth') !== -1, true);
 check('and links the sheet the changes happened on', body.indexOf('/d/F1/edit') !== -1, true);
 check('and says how to make it stop', body.indexOf('Notify_Roster_Changes') !== -1, true);
+const wlBody = sandbox.buildLeaderAlertBody({ name: 'Jane' }, [{
+  title: 'Chair Yoga', location: 'Narberth', url: '',
+  changes: [
+    { kind: 'joined', dateKey: '2026-11-03', name: 'fay ross', to: 'W', partySize: 1 },
+    { kind: 'status', dateKey: '2026-11-03', name: 'gus hill', from: 'A', to: 'W', partySize: 1 },
+    { kind: 'left', dateKey: '2026-11-03', name: 'old wait', from: 'W', partySize: 1 },
+    { kind: 'joined', dateKey: '2026-11-03', name: 'eve park', to: 'A', partySize: 1 }
+  ]
+}]);
+check('waitlisted people get no dated line',
+  /\n    [+~-] (Fay Ross|Gus Hill)/.test(wlBody), false);
+check('...and are named once at the foot', wlBody.indexOf('Added to the waitlist: Fay Ross, Gus Hill') !== -1, true);
+check('someone leaving the waitlist is not named', wlBody.indexOf('Old Wait'), -1);
+check('the roster change still is', wlBody.indexOf('+ Eve Park — signed up') !== -1, true);
 check('a leader with no name recorded still gets a greeting',
   sandbox.buildLeaderAlertBody({ name: '', email: 'j@e.com' }, programs).indexOf('Hello,'), 0);
 
