@@ -340,5 +340,18 @@ ok('a thrown error never reaches the caller', thrownRes && thrownRes.ok === fals
 ok('and is emailed to staff too', sentMail.length === 1);
 if (sentMail.length) ok('with the error in it', /sheet is locked/.test(sentMail[0].body));
 
+// ---------------------------------------------------------------------------
+// Door app, Oct 2026: box ticks / row goes on, several people at once, green
+// at once, guests on the walk-in screen.
+// ---------------------------------------------------------------------------
+ok('an event row goes on to the names when tapped anywhere but its box',
+  /li\.onclick = function \(e\)/.test(page) && /className = 'tickzone'/.test(page));
+ok('names carry a tick for signing several people in on one confirm screen',
+  /function personTile\(/.test(page) && /function drawGroup\(/.test(page) && /function submitGroup\(/.test(page));
+ok('a group is capped at the server\'s party size plus the head', /DOOR_GROUP_MAX = 9/.test(page));
+ok('a sign-in turns the name green before the server answers', /markSignedInLocally\(\[payload\]/.test(page));
+ok('the idle list is re-read on a timer', /setInterval\(function \(\) \{/.test(page));
+ok('the walk-in screen can add guests, sent as the party', /Add a guest/.test(page) && /party: guests/.test(page));
+
 console.log(fail ? `\n${fail} FAILURE(S)` : '\nall passed');
 process.exit(fail ? 1 : 0);

@@ -144,8 +144,25 @@ function buildDoorAppHtml(options) {
   button.card { background: #fff; border: 1px solid #DADCE0; border-radius: 10px; padding: 14px 12px;
                 font-size: 17px; text-align: left; cursor: pointer; min-height: 62px; color: #202124; }
   button.card .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px; line-height: 1.35; }
-  button.card.here { background: #E6F4EA; border-color: #B7DFC4; }
-  button.card.here .meta { color: #188038; }
+  button.card.here { background: #CEEAD6; border-color: #34A853; border-width: 2px; }
+  button.card.here .meta { color: #137333; font-weight: 600; }
+  /* A NAME CARD WITH A TICK BESIDE IT. Tapping the card signs that one person
+     in; the box on its corner collects several for one confirm screen. */
+  .cardwrap { display: flex; align-items: stretch; }
+  .cardwrap button.card { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .cardwrap .tickzone { flex: 0 0 54px; display: flex; background: #fff; border: 1px solid #DADCE0;
+                        border-left: 0; border-radius: 0 10px 10px 0;
+                        align-items: center; justify-content: center; cursor: pointer; }
+  .cardwrap .tickzone input { width: 26px; height: 26px; margin: 0; }
+  .cardwrap.picked button.card { border-color: #1A73E8; border-width: 2px; background: #F1F7FE; }
+  #groupbar { position: sticky; top: 64px; z-index: 4; margin: 0 0 10px 0; }
+  /* EVENT ROWS: the box is the only thing that ticks; the rest of the row goes on. */
+  li.item.go { cursor: pointer; display: flex; align-items: stretch; }
+  li.item.go label.tickzone { display: flex; align-items: flex-start; padding: 14px 8px 14px 12px; cursor: pointer; }
+  li.item.go .what { flex: 1; padding: 14px 12px 14px 4px; }
+  .guestrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .guestrow input { flex: 1; }
+  .guestrow button { flex: 0 0 auto; min-height: 48px; }
   button.card.pick { border-color: #1A73E8; border-width: 2px; background: #F1F7FE; }
 
   /* THE MEMBERSHIP NOTE — said before the question, so nobody answers "not
@@ -273,10 +290,16 @@ function buildDoorAppHtml(options) {
   // radio redraws the whole screen (one render function, one truth about what
   // is selected), and a redraw that emptied the name box somebody had just
   // filled in would be the page losing their answer for them.
-  var WALKIN = { name: '', email: '', phone: '' };
+  var WALKIN = { name: '', email: '', phone: '', guests: [] };
   // yes | no. The only thing 'no' does is file a note for the office (see
   // recordMembershipHandoff()); there is no application screen behind it.
   var MEMBER = '';
+  // SEVERAL PEOPLE, ONE CONFIRM SCREEN: person key -> person, ticked on the name
+  // list; GROUP is the confirm screen's own state for them once Sign in is
+  // pressed ({ person, picked, lunch } each). Both are about one visit.
+  var TICKED = {};
+  var DOOR_GROUP_MAX = 9;   // head + the server's DOOR_PARTY_MAX (8) companions
+  var GROUP = null;
   var busy = false;
   var pin = '';
 
@@ -355,7 +378,8 @@ function buildDoorAppHtml(options) {
     PERSON = null; PICKED = {}; LUNCH = false; PARTY = {};
     HERE_FOR = {}; SHOW_ALL = false;
     RECURRING = 'none'; MEMBER = '';
-    WALKIN = { name: '', email: '', phone: '' };
+    WALKIN = { name: '', email: '', phone: '', guests: [] };
+    TICKED = {}; GROUP = null;
   }
 
   // ---------------------------------------------------------------- the day
@@ -399,8 +423,8 @@ function buildDoorAppHtml(options) {
    * vanishes mid-answer is worse.
    */
   function screenIsIdle() {
-    if (PERSON) return false;
-    if (STEP === 'names') return true;
+    if (PERSON || GROUP) return false;
+    if (STEP === 'names') return !Object.keys(TICKED).length;
     return STEP === 'events' && !Object.keys(HERE_FOR).length;
   }
 
@@ -418,6 +442,7 @@ function buildDoorAppHtml(options) {
     if (!DAY) return drawEmpty(main);
     if (STEP === 'events') return drawEvents(main);
     if (STEP === 'person') return drawPerson(main);
+    if (STEP === 'group') return drawGroup(main);
     if (STEP === 'walkin') return drawWalkIn(main);
     drawNames(main);
   }
@@ -514,7 +539,8 @@ function buildDoorAppHtml(options) {
     if (DAY.dateKey !== OPTS.todayKey) main.appendChild(offDayBanner());
     main.appendChild(el('h2', '', 'What are you here for today?'));
     main.appendChild(el('p', 'hint',
-      'Tap everything you are here for, then find your name on the next screen.'));
+      'Tap the one you are here for, then find your name on the next screen. To pick more ' +
+      'than one, tick the boxes and press Continue.'));
 
     var choices = eventChoices();
     var list = el('ul', 'list', '');
@@ -589,15 +615,30 @@ function buildDoorAppHtml(options) {
    */
   function eventChoiceItem(choice) {
     var on = isHereFor(choice.value);
-    var li = el('li', 'item' + (on ? ' on' : ''), '');
+    var li = el('li', 'item go' + (on ? ' on' : ''), '');
+    // THE BOX TICKS; ANYWHERE ELSE ON THE ROW GOES ON. Tapping a program is
+    // "this is the one" — it is added to whatever is ticked and the name list
+    // opens. Ticking several is the box, then Continue.
     var label = document.createElement('label');
+    label.className = 'tickzone';
     var box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = on;
     box.disabled = busy;
     box.onchange = function () {
       if (box.checked) HERE_FOR[choice.value] = true; else delete HERE_FOR[choice.value];
-      li.className = 'item' + (box.checked ? ' on' : '');
+      li.className = 'item go' + (box.checked ? ' on' : '');
+    };
+    li.onclick = function (e) {
+      if (busy) return;
+      var t = e.target;
+      while (t && t !== li) { if (t === label) return; t = t.parentNode; }
+      HERE_FOR[choice.value] = true;
+      hideStatus();
+      SHOW_ALL = false;
+      STEP = 'names';
+      draw();
+      window.scrollTo(0, 0);
     };
     var what = el('div', 'what', '');
     var meta = [];
@@ -610,8 +651,8 @@ function buildDoorAppHtml(options) {
       (meta.length ? '<span class="meta' + (choice.byAppointment ? ' warn' : '') + '">' +
         esc(meta.join(' · ')) + '</span>' : '');
     label.appendChild(box);
-    label.appendChild(what);
     li.appendChild(label);
+    li.appendChild(what);
     return li;
   }
 
@@ -645,7 +686,14 @@ function buildDoorAppHtml(options) {
       : 'Here for ' + whatIsShowing() + ' · Change',
       function () { STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0); }));
 
+    var bar = el('div', '', '');
+    bar.id = 'groupbar';
+    main.appendChild(bar);
+    refreshGroupBar();
+
     main.appendChild(el('h2', '', 'Tap your name'));
+    main.appendChild(el('p', 'hint',
+      'Tap a name to sign in one person. To sign in several people together, tick the box beside each name.'));
     var people = (DAY.people || []).filter(personIsSelected).sort(function (a, b) {
       var d = sortKey(a.name).localeCompare(sortKey(b.name));
       return d || a.name.localeCompare(b.name);
@@ -722,7 +770,7 @@ function buildDoorAppHtml(options) {
         grid = el('div', 'cards', '');
         main.appendChild(grid);
       }
-      grid.appendChild(personCard(p));
+      grid.appendChild(personTile(p));
     });
   }
 
@@ -831,13 +879,52 @@ function buildDoorAppHtml(options) {
     hits.forEach(function (m) {
       var person = null;
       (DAY.people || []).forEach(function (p) { if (p.key === m.key) person = p; });
-      box.appendChild(person ? personCard(person) : personCard({
+      box.appendChild(personTile(person || {
         name: m.name, key: m.key, registered: [], attended: [], lunchRegistered: false, here: false
       }));
     });
     // Every keystroke redraws this box; keep the box and the button under it
     // in view above whatever keyboard is up.
     keepInView(document.getElementById('search'), asTyped);
+  }
+
+  /**
+   * A NAME CARD WITH A TICK BESIDE IT. The card still signs in that one person
+   * (choose()); the box collects people for ONE confirm screen (drawGroup()).
+   * Ticking redraws nothing — the search box above may be mid-word.
+   */
+  function personTile(p) {
+    var wrap = el('div', 'cardwrap' + (TICKED[p.key] ? ' picked' : ''), '');
+    wrap.appendChild(personCard(p));
+    var zone = document.createElement('label');
+    zone.className = 'tickzone';
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !!TICKED[p.key];
+    box.disabled = busy;
+    box.onchange = function () {
+      if (box.checked) TICKED[p.key] = p; else delete TICKED[p.key];
+      if (Object.keys(TICKED).length > DOOR_GROUP_MAX) {
+        delete TICKED[p.key];
+        box.checked = false;
+        say('Up to ' + DOOR_GROUP_MAX + ' people can sign in together.', 'err');
+      }
+      wrap.className = 'cardwrap' + (TICKED[p.key] ? ' picked' : '');
+      refreshGroupBar();
+    };
+    zone.appendChild(box);
+    wrap.appendChild(zone);
+    return wrap;
+  }
+
+  function refreshGroupBar() {
+    var bar = document.getElementById('groupbar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    var n = Object.keys(TICKED).length;
+    if (!n) return;
+    bar.appendChild(button('big', 'Sign in ' + n + (n === 1 ? ' person' : ' people') + ' together', startGroup));
+    bar.firstChild.style.marginTop = '0';
   }
 
   function personCard(p) {
@@ -875,6 +962,33 @@ function buildDoorAppHtml(options) {
     return b;
   }
 
+  /**
+   * WHAT A PERSON STARTS WITH TICKED — the four fallbacks choose() explains,
+   * shared by the single confirm screen and the group's.
+   */
+  function defaultPicks(p) {
+    var picked = {};
+    (p.registered || []).forEach(function (v) { if (isHereFor(v)) picked[v] = true; });
+    if (!Object.keys(picked).length) {
+      (p.was || []).forEach(function (v) { if (isHereFor(v)) picked[v] = true; });
+    }
+    if (!Object.keys(picked).length) {
+      Object.keys(HERE_FOR).forEach(function (v) { picked[v] = true; });
+    }
+    if (!Object.keys(picked).length) {
+      (p.registered || []).forEach(function (v) { picked[v] = true; });
+    }
+    // LAST OF ALL, WHAT THEY USUALLY COME TO. Only reachable through "Show
+    // everyone here today", where nothing was tapped at the door and a regular
+    // holds no rows for today — without this that person's confirm screen is
+    // blank and Confirm refuses, which is the one path this screen must not
+    // have.
+    if (!Object.keys(picked).length) {
+      (p.was || []).forEach(function (v) { picked[v] = true; });
+    }
+    return picked;
+  }
+
   function choose(p) {
     PERSON = p;
     // WHAT THEY SAID AT THE DOOR, CROSSED WITH WHAT THE WORKBOOK EXPECTS OF
@@ -891,25 +1005,7 @@ function buildDoorAppHtml(options) {
     // for somebody found through the search box who is registered for none of
     // it; and then their own registrations. A confirm screen with nothing on
     // it is a person told to see a staff member for no reason.
-    PICKED = {};
-    (p.registered || []).forEach(function (v) { if (isHereFor(v)) PICKED[v] = true; });
-    if (!Object.keys(PICKED).length) {
-      (p.was || []).forEach(function (v) { if (isHereFor(v)) PICKED[v] = true; });
-    }
-    if (!Object.keys(PICKED).length) {
-      Object.keys(HERE_FOR).forEach(function (v) { PICKED[v] = true; });
-    }
-    if (!Object.keys(PICKED).length) {
-      (p.registered || []).forEach(function (v) { PICKED[v] = true; });
-    }
-    // LAST OF ALL, WHAT THEY USUALLY COME TO. Only reachable through "Show
-    // everyone here today", where nothing was tapped at the door and a regular
-    // holds no rows for today — without this that person's confirm screen is
-    // blank and Confirm refuses, which is the one path this screen must not
-    // have.
-    if (!Object.keys(PICKED).length) {
-      (p.was || []).forEach(function (v) { PICKED[v] = true; });
-    }
+    PICKED = defaultPicks(p);
     LUNCH = !!p.lunchRegistered || lunchHereFor();
     PARTY = {};
     (p.household || []).forEach(function (m) {
@@ -972,6 +1068,65 @@ function buildDoorAppHtml(options) {
     }));
   }
 
+  // SCREEN 4b — several people at once: one confirm screen, each person's own ticks.
+  function startGroup() {
+    var people = Object.keys(TICKED).map(function (k) { return TICKED[k]; });
+    if (!people.length) return;
+    GROUP = people.map(function (p) {
+      return { person: p, picked: defaultPicks(p), lunch: !!p.lunchRegistered || lunchHereFor() };
+    });
+    PERSON = null;
+    STEP = 'group';
+    hideStatus();
+    draw();
+    window.scrollTo(0, 0);
+  }
+
+  function drawGroup(main) {
+    main.appendChild(el('h2', '', 'Signing in ' + GROUP.length + ' people'));
+    main.appendChild(el('p', 'hint',
+      'Each person is signed in for what is ticked under their name. Change anything that is wrong, ' +
+      'then confirm once for everybody.'));
+    GROUP.forEach(function (g, idx) {
+      main.appendChild(el('h3', '', g.person.name));
+      var list = el('ul', 'list', '');
+      (DAY.programs || []).forEach(function (program) { list.appendChild(programItem(program, g)); });
+      list.appendChild(lunchItem(!!g.person.lunchRegistered, g));
+      main.appendChild(list);
+    });
+    var go = button('big', 'Confirm and sign in everybody', submitGroup);
+    go.id = 'go';
+    go.disabled = busy;
+    main.appendChild(go);
+    main.appendChild(button('plain', 'Back to the list', function () {
+      GROUP = null; STEP = 'names'; draw();
+    }));
+  }
+
+  function submitGroup() {
+    var entries = GROUP.map(function (g) {
+      return {
+        name: g.person.name,
+        phone: g.person.phone || '',
+        email: g.person.email || '',
+        newMember: false,
+        programs: Object.keys(g.picked),
+        lunch: !!g.lunch
+      };
+    });
+    for (var i = 0; i < entries.length; i++) {
+      if (!entries[i].programs.length && !entries[i].lunch) {
+        return say('Tick what ' + entries[i].name + ' is here for first.', 'err');
+      }
+    }
+    var head = entries.shift();
+    send({
+      name: head.name, phone: head.phone, email: head.email, newMember: false,
+      programs: head.programs, lunch: head.lunch, recurring: 'none', member: '',
+      party: entries
+    });
+  }
+
   /**
    * INTO THE WALK-IN SCREEN, WITH WHAT THIS TABLET IS FOR ALREADY TICKED.
    *
@@ -993,7 +1148,7 @@ function buildDoorAppHtml(options) {
       if (value !== lunchValue) PICKED[value] = true;
     });
     LUNCH = lunchHereFor();
-    WALKIN = { name: name || '', email: '', phone: '' };
+    WALKIN = { name: name || '', email: '', phone: '', guests: [] };
     STEP = 'walkin';
     hideStatus();
     draw();
@@ -1051,6 +1206,38 @@ function buildDoorAppHtml(options) {
     // on this screen that bring a keyboard up, and with them here the button
     // they lead to is the next thing under the last box rather than three
     // sections further down, behind the keyboard.
+    // GUESTS — a name each. They are signed in for the same programs and the
+    // same lunch answer as the person bringing them, as people who came with
+    // them (they are not asked to be members or to leave a number).
+    main.appendChild(el('h2', '', 'Bringing a guest?'));
+    (WALKIN.guests || []).forEach(function (gname, idx) {
+      var row = el('div', 'guestrow', '');
+      var gi = document.createElement('input');
+      gi.type = 'text';
+      gi.className = 'guestname';
+      gi.placeholder = "Guest's name";
+      gi.value = gname || '';
+      noSuggest(gi, 'words');
+      row.appendChild(gi);
+      row.appendChild(button('plain', 'Remove', function () {
+        stashWalkIn();
+        WALKIN.guests.splice(idx, 1);
+        draw();
+      }));
+      row.lastChild.style.width = 'auto';
+      row.lastChild.style.marginTop = '0';
+      main.appendChild(row);
+    });
+    if ((WALKIN.guests || []).length < DOOR_GROUP_MAX - 1) {
+      main.appendChild(button('plain', (WALKIN.guests || []).length ? 'Add another guest' : 'Add a guest', function () {
+        stashWalkIn();
+        WALKIN.guests.push('');
+        draw();
+        var boxes = document.querySelectorAll('.guestname');
+        if (boxes.length) boxes[boxes.length - 1].focus();
+      }));
+    }
+
     main.appendChild(el('h2', '', 'How can we reach you?'));
     main.appendChild(el('p', 'hint',
       'An email or a phone number — whichever you have. We need one of them so the office ' +
@@ -1105,21 +1292,23 @@ function buildDoorAppHtml(options) {
     return li;
   }
 
-  function programItem(program) {
-    var registered = PERSON && (PERSON.registered || []).indexOf(program.value) !== -1;
-    var attended = PERSON && (PERSON.attended || []).indexOf(program.value) !== -1;
+  function programItem(program, ctx) {
+    var who = ctx ? ctx.person : PERSON;
+    var picked = ctx ? ctx.picked : PICKED;
+    var registered = who && (who.registered || []).indexOf(program.value) !== -1;
+    var attended = who && (who.attended || []).indexOf(program.value) !== -1;
     // An appointment nobody booked is not something a door can hand out: a
     // slot is a chair at a time and choosing one is a conversation. Shown, so
     // it is plainly not missing; not tickable.
     var locked = !registered && program.byAppointment;
-    var li = el('li', 'item' + (locked ? ' off' : (PICKED[program.value] ? ' on' : '')), '');
+    var li = el('li', 'item' + (locked ? ' off' : (picked[program.value] ? ' on' : '')), '');
     var label = document.createElement('label');
     var box = document.createElement('input');
     box.type = 'checkbox';
-    box.checked = !!PICKED[program.value] && !locked;
+    box.checked = !!picked[program.value] && !locked;
     box.disabled = locked || busy;
     box.onchange = function () {
-      if (box.checked) PICKED[program.value] = true; else delete PICKED[program.value];
+      if (box.checked) picked[program.value] = true; else delete picked[program.value];
       li.className = 'item' + (box.checked ? ' on' : '');
     };
     var what = el('div', 'what', '');
@@ -1140,19 +1329,20 @@ function buildDoorAppHtml(options) {
     return li;
   }
 
-  function lunchItem(registered) {
+  function lunchItem(registered, ctx) {
+    var state = ctx || { get lunch() { return LUNCH; }, set lunch(v) { LUNCH = v; } };
     var lunch = DAY.lunch || {};
     var offered = !!lunch.offered;
     var locked = !offered && !registered;
-    var li = el('li', 'item' + (locked ? ' off' : (LUNCH ? ' on' : '')), '');
+    var li = el('li', 'item' + (locked ? ' off' : (state.lunch ? ' on' : '')), '');
     var label = document.createElement('label');
     var box = document.createElement('input');
     box.type = 'checkbox';
-    box.checked = LUNCH && !locked;
+    box.checked = !!state.lunch && !locked;
     box.disabled = locked || busy;
     box.onchange = function () {
-      LUNCH = box.checked;
-      li.className = 'item' + (LUNCH ? ' on' : '');
+      state.lunch = box.checked;
+      li.className = 'item' + (state.lunch ? ' on' : '');
     };
     var what = el('div', 'what', '');
     var title = 'Lunch' + (lunch.dish ? ' — ' + lunch.dish : '');
@@ -1257,6 +1447,10 @@ function buildDoorAppHtml(options) {
     if (name) WALKIN.name = name.value;
     if (email) WALKIN.email = email.value;
     if (phone) WALKIN.phone = phone.value;
+    var gs = document.querySelectorAll('.guestname');
+    if (gs.length || (WALKIN.guests || []).length) {
+      WALKIN.guests = Array.prototype.map.call(gs, function (g) { return g.value; });
+    }
   }
 
   function submitWalkIn() {
@@ -1273,6 +1467,10 @@ function buildDoorAppHtml(options) {
       return say('An email address or a phone number is needed so the office can follow up.', 'err');
     }
     if (!MEMBER) return say('Tell us whether you are a member already.', 'err');
+    var guests = (WALKIN.guests || []).map(function (g) { return String(g || '').trim(); })
+      .filter(function (g) { return g; }).map(function (g) {
+        return { name: g, phone: '', email: '', newMember: false, programs: programs, lunch: !!LUNCH };
+      });
     send({
       name: name,
       phone: phone,
@@ -1283,7 +1481,8 @@ function buildDoorAppHtml(options) {
       programs: programs,
       lunch: !!LUNCH,
       recurring: RECURRING,
-      member: MEMBER
+      member: MEMBER,
+      party: guests
     });
   }
 
@@ -1315,6 +1514,11 @@ function buildDoorAppHtml(options) {
     var notAMember = payload.member === 'no';
 
     var partyNames = (payload.party || []).map(function (p) { return p.name; });
+    // GREEN AT ONCE. The name list is the board leaders read to see who is here,
+    // so everybody just signed in is marked on the list the tablet already
+    // holds before the server has answered; the quiet re-read below replaces
+    // it with the workbook's own version.
+    markSignedInLocally([payload].concat(payload.party || []));
     // BACK TO THE FIRST QUESTION, EMPTY. The next person in the queue is a
     // different visit — and a tablet left on the last person's ticks is the
     // one way this page could sign somebody in for a class they never named.
@@ -1354,6 +1558,28 @@ function buildDoorAppHtml(options) {
         // reached the server at all, and there is nothing left to tell.
       })
       .doorSignIn(JSON.stringify(payload));
+  }
+
+  function markSignedInLocally(entries) {
+    if (!DAY) return;
+    DAY.people = DAY.people || [];
+    entries.forEach(function (e) {
+      var wanted = String(e.name || '').trim().toLowerCase();
+      if (!wanted) return;
+      var found = null;
+      DAY.people.forEach(function (p) { if (String(p.name || '').trim().toLowerCase() === wanted) found = p; });
+      if (!found) {
+        found = { name: e.name, key: wanted, phone: e.phone || '', registered: [], attended: [],
+                  lunchRegistered: false, household: [], guests: [] };
+        DAY.people.push(found);
+      }
+      found.here = true;
+      found.attended = (e.programs || []).slice();
+      (e.programs || []).forEach(function (v) {
+        if ((found.registered || []).indexOf(v) === -1) found.registered.push(v);
+      });
+      if (e.lunch) found.lunchRegistered = true;
+    });
   }
 
   function footer() {
@@ -1744,6 +1970,13 @@ function buildDoorAppHtml(options) {
       fitSoon();
     }, 0);
   });
+
+  // THE BOARD STAYS CURRENT: other tablets and the desk sign people in too, so an
+  // idle list is re-read every half minute. syncDay() leaves a half-answered
+  // screen alone (screenIsIdle), so this never redraws under a finger.
+  if (typeof setInterval === 'function') setInterval(function () {
+    if (!busy && SETUP && DAY && !document.hidden) syncDay();
+  }, 30000);
 
   start();
 </script>

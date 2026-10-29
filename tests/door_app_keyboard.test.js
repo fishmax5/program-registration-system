@@ -224,7 +224,8 @@ if (!runError) {
   ok('"Continue as …" is the first thing under the box, ahead of the names',
     first && first.id === 'astyped' && /Continue as "Mary"/.test(first.textContent));
   ok('the matching names still follow it',
-    results.children.filter(n => n.tagName === 'BUTTON' && /card/.test(n.className)).length === 2);
+    results.children.filter(n => /cardwrap/.test(n.className) &&
+      n.children.some(c => c.tagName === 'BUTTON' && /card/.test(c.className))).length === 2);
 
   search.value = 'Zelda';
   vm.runInContext('drawSearchResults();', page);
