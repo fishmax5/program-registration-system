@@ -583,6 +583,8 @@ defineLazyGlobal_('TAB_GROUPS', () => ([
   { color: PALETTE.TAB_SETUP, names: [
     SHEET_NAMES.LUNCH_SCHEDULE,
     SHEET_NAMES.CONFIG,
+    // Beside Config because it is setup too: where rooms are listed and assigned (99zx).
+    SHEET_NAMES.ROOM_MANAGEMENT,
     SHEET_NAMES.PROGRAM_QUESTIONS
   ] },
   { color: PALETTE.TAB_LISTS, names: [

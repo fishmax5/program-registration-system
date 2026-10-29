@@ -112,7 +112,12 @@ const SHEET_NAMES = {
   // it covers through, so a fold reads only the rows after it. A derived
   // cache: deleting it sends every reader back to the full fold and loses
   // nothing. Hidden; machine-written. See 99zq_ledger_checkpoint.gs.
-  LEDGER_CHECKPOINT: 'Ledger_Checkpoint'
+  LEDGER_CHECKPOINT: 'Ledger_Checkpoint',
+  // Where rooms are said: the master list, the program → room assignments and
+  // the keyword rules, four tables side by side. Staff-owned; its Room column
+  // is Program_Settings' Room_Or_Setup written through, not a second store.
+  // See 99zx_room_management.gs.
+  ROOM_MANAGEMENT: 'Room_Management'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';

@@ -62,6 +62,9 @@ function refreshMemoryTabs(registrantRows, sessionRows) {
     // from the dropdown, which is exactly the program somebody is about to
     // write a question for. See refreshProgramQuestionsValidation() (55).
     refreshProgramQuestionsValidation();
+    // The room assignments, drawn from the Program_Settings rows just written
+    // (99zx). Never throws, and written after them so Effective_Room is current.
+    refreshRoomManagementTab(ss);
   } catch (err) {
     // Never let a memory-tab refresh take down a sync — these tabs are
     // reference material, not the system of record.

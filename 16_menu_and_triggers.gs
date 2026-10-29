@@ -300,6 +300,8 @@ function buildCoordinatorMenu_(ui, title, role) {
       // roster work: it is what somebody has to know to serve the person, and
       // it is edited by the same people who keep the rosters.
       .addItem('\ud83d\udd14 Regular Needs (standing notes)\u2026', menuFn_('openRegularNeedsTab'))
+      // Where rooms are listed and assigned to programs, live (99zx).
+      .addItem('\ud83d\udeaa Room Management', menuFn_('openRoomManagementTab'))
       // Beside the standing notes because it is the same tab's other half: who
       // the office knows, as against what it knows about them. The dedupe runs
       // on every write already (section 77) — this is the item for the

@@ -106,19 +106,6 @@ function styleConfigSheet(sheet) {
   applyValueListValidationBounded(sheet, CONFIG_LAYOUT.SYSTEM_TABS.startCol,
     SYSTEM_TABS_HIDE_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
-  // The Rooms list: the building is picked (a room is only meaningful beside
-  // its building, and the conflict check compares `Building: Room` labels —
-  // 99zw); the room name is typed. Bounded, so the column below stays clean.
-  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.ROOMS.startCol, Object.values(CALENDAR_MAP),
-    CONFIG_DATA_START_ROW, ROOMS_CONFIG_MAX_ROWS);
-  try {
-    sheet.getRange(CONFIG_HEADER_ROW, CONFIG_LAYOUT.ROOMS.startCol + 1).setNote(
-      'One row per room. This is the canonical list: Program_Settings\' Room_Or_Setup and the session ' +
-      'table\'s Room_Override are matched against "Building: Room" exactly, and a room that is not here ' +
-      'cannot be checked for double-booking.');
-  } catch (err) { /* a note is a courtesy */ }
-  forgetRoomsList();
-
   // Who is copied on what: a tick box per category, bounded to the rows the
   // table actually has, so the columns below it stay clean.
   const adminSection = CONFIG_LAYOUT.ADMIN_NOTIFICATIONS;

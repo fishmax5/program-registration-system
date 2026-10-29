@@ -172,6 +172,7 @@ function menu_dedupeMemberRollNow() { recordMenuUsage_('dedupeMemberRollNow'); r
 function menu_destroyAndRebuildAllForms() { recordMenuUsage_('destroyAndRebuildAllForms'); return destroyAndRebuildAllForms(); }
 function menu_flushCheckInQueueNow() { recordMenuUsage_('flushCheckInQueueNow'); return flushCheckInQueueNow(); }
 function menu_linkProgramAcrossLocations() { recordMenuUsage_('linkProgramAcrossLocations'); return linkProgramAcrossLocations(); }
+function menu_openRoomManagementTab() { recordMenuUsage_('openRoomManagementTab'); return openRoomManagementTab(); }
 function menu_openRegularNeedsTab() { recordMenuUsage_('openRegularNeedsTab'); return openRegularNeedsTab(); }
 function menu_openUpAllFormSharing() { recordMenuUsage_('openUpAllFormSharing'); return openUpAllFormSharing(); }
 function menu_openUpAllGeneratedFileSharing() { recordMenuUsage_('openUpAllGeneratedFileSharing'); return openUpAllGeneratedFileSharing(); }

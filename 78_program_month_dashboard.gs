@@ -575,7 +575,9 @@ function programMonthSettingsCell(title, locations, index) {
     const row = index[notificationProgramKey(title, location)];
     if (!row) return;
     found = true;
-    const room = String(row[map['Room_Or_Setup']] || '').trim();
+    // The room it actually gets — its own, else a keyword rule's (99zx) — so a
+    // program placed by rule shows where it is, not a blank.
+    const room = effectiveDefaultRoom_(title, location, row[map['Room_Or_Setup']]).text;
     if (room && rooms.indexOf(room) === -1) rooms.push(room);
     if (!policy) policy = policyFromNotificationRow(row, map, false);
   });

@@ -57,6 +57,11 @@ this.HEADERS = HEADERS;
 this.SHEET_NAMES = SHEET_NAMES;
 this.notificationProgramKey = notificationProgramKey;
 this.CONFIG_LAYOUT = CONFIG_LAYOUT;
+this.ROOM_MANAGEMENT_LAYOUT = ROOM_MANAGEMENT_LAYOUT;
+this.readRoomKeywordRules = readRoomKeywordRules;
+this.forgetRoomKeywordRules = forgetRoomKeywordRules;
+this.effectiveDefaultRoom_ = effectiveDefaultRoom_;
+this.readRoomsList = readRoomsList;
 this.PROGRAM_DASHBOARD_EDITABLE_COLUMNS = PROGRAM_DASHBOARD_EDITABLE_COLUMNS;
 this.REGISTRATION_SYNC_TAIL_STEPS = REGISTRATION_SYNC_TAIL_STEPS;
 this.HEALTH_CHECKS = HEALTH_CHECKS;
@@ -122,6 +127,18 @@ const s = (room, title, startH, endH, extra) => Object.assign({
 // 2. READING THE WORKBOOK: override beats default, strays are named
 // ---------------------------------------------------------------------------
 const configRows = [['Narberth', 'Social Hall'], ['Narberth', 'Library'], ['Ashbridge', 'Social Hall'], ['', '']];
+// What the Room_Management tab holds: the rooms list and the keyword rules.
+let TAB_ROOMS = configRows.map(r => r.slice());
+let TAB_RULES = [];
+let HAS_TAB = true;
+let LEGACY_CONFIG_ROOMS = [];
+const gridSheet = (cols) => ({
+  getLastRow: () => 2 + Math.max.apply(null, Object.keys(cols).map(k => cols[k]().length).concat([0])),
+  getRange: (r, c, n, w) => ({ getValues: () => {
+    const src = (cols[c] || (() => []))();
+    return src.slice(r - 3, r - 3 + n).map(x => x.slice(0, w));
+  } })
+});
 const headers = sandbox.HEADERS.All_Program_Sessions;
 const psHeaders = sandbox.HEADERS.Program_Settings;
 const sessionRow = (title, location, start, end, override, id) => {
@@ -146,13 +163,14 @@ let SESSIONS = [];
 let SETTINGS = [];
 function install() {
   sandbox.forgetRoomsList();
-  const configSheet = {
-    getLastRow: () => 2 + configRows.length,
-    getRange: (r, c, n, w) => ({ getValues: () => configRows.slice(0, n).map(x => x.slice(0, w)) })
-  };
+  sandbox.forgetRoomKeywordRules();
+  const L = sandbox.ROOM_MANAGEMENT_LAYOUT;
+  const tabSheet = gridSheet({ [L.ROOMS.startCol]: () => TAB_ROOMS, [L.RULES.startCol]: () => TAB_RULES });
+  const configSheet = gridSheet({ 44: () => LEGACY_CONFIG_ROOMS });
   const sessionSheet = { getName: () => 'S' };
   sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
     getSheetByName: name => name === sandbox.SHEET_NAMES.CONFIG ? configSheet
+      : name === sandbox.SHEET_NAMES.ROOM_MANAGEMENT ? (HAS_TAB ? tabSheet : null)
       : name === sandbox.SHEET_NAMES.PROGRAM_DASHBOARD ? sessionSheet : null
   });
   sandbox.getSectionedRowValues = () => SESSIONS.map(r => r.slice());
@@ -209,13 +227,62 @@ function install() {
 
 // No rooms listed: the check says so rather than reporting a clean bill of health.
 {
-  const saved = configRows.splice(0, configRows.length);
+  const saved = TAB_ROOMS; TAB_ROOMS = [];
   install();
   const a = sandbox.analyzeRoomConflicts();
   ok('no rooms listed means nothing is checked', a.roomsListed === 0 && a.conflicts.length === 0);
   ok('and the report says so', /No rooms are listed/.test(sandbox.describeRoomConflicts(a)));
   ok('and the digest step files nothing', sandbox.checkRoomConflictsForDigest() === 0);
-  saved.forEach(r => configRows.push(r));
+  TAB_ROOMS = saved;
+}
+
+// ---------------------------------------------------------------------------
+// 2b. KEYWORD RULES, AND WHERE THE ROOMS LIST COMES FROM
+// ---------------------------------------------------------------------------
+{
+  const R = 'Narberth: Social Hall', LIB = 'Narberth: Library';
+  TAB_RULES = [['yoga', '', R], ['Bingo', 'Ashbridge', LIB], ['bingo', '', 'Narberth: Gym'], ['', '', R]];
+  install();
+  const rules = sandbox.readRoomKeywordRules();
+  ok('rules are read top to bottom; a blank keyword is skipped',
+    rules.length === 2 && rules[0].keyword === 'yoga' && rules[1].keyword === 'Bingo');
+  ok('a rule naming a room not on the list is not applied and is named',
+    sandbox.readRoomKeywordRulesUnresolved().join() === 'bingo');
+
+  const eff = (title, loc, raw) => sandbox.effectiveDefaultRoom_(title, loc, raw);
+  ok('a keyword fills a program with no room', eff('Chair Yoga', 'Narberth', '').label === R &&
+    eff('Chair Yoga', 'Narberth', '').source === 'keyword');
+  ok('keyword matching ignores case', eff('GENTLE YOGA', 'Narberth', '').label === R);
+  ok('a program\'s own listed room beats a keyword', eff('Chair Yoga', 'Narberth', LIB).label === LIB &&
+    eff('Chair Yoga', 'Narberth', LIB).source === 'program');
+  ok('text that is not a room does not block a keyword',
+    eff('Chair Yoga', 'Narberth', 'chairs in rows').label === R);
+  ok('a building-scoped rule applies only there',
+    eff('Bingo', 'Ashbridge', '').label === LIB && eff('Bingo', 'Narberth', '').label === '');
+  ok('no rule and free text is "unlisted"', eff('Painting', 'Narberth', 'easels').source === 'unlisted' &&
+    eff('Painting', 'Narberth', '').source === '');
+
+  // The keyword decides the room the conflict check uses, with no Program_Settings room at all.
+  SETTINGS = [];
+  SESSIONS = [
+    sessionRow('Chair Yoga', 'Narberth', day(3, 9), day(3, 11), '', 'yoga'),
+    sessionRow('Gentle Yoga', 'Narberth', day(3, 10), day(3, 12), '', 'yoga2')
+  ];
+  ok('two programs placed by keyword in one room conflict', sandbox.analyzeRoomConflicts().conflicts.length === 1);
+  SESSIONS[1] = sessionRow('Gentle Yoga', 'Narberth', day(3, 10), day(3, 12), LIB, 'yoga2');
+  ok('an override still beats a keyword', sandbox.analyzeRoomConflicts().conflicts.length === 0);
+  TAB_RULES = [];
+
+  // Where the list comes from.
+  TAB_ROOMS = []; LEGACY_CONFIG_ROOMS = [['Narberth', 'Old Hall']];
+  install();
+  ok('until the tab has rooms, Config\'s old section still counts',
+    sandbox.readRoomsList().map(r => r.label).join() === 'Narberth: Old Hall');
+  TAB_ROOMS = [['Ashbridge', 'New Hall']];
+  install();
+  ok('the tab\'s list wins once it has any', sandbox.readRoomsList().map(r => r.label).join() === 'Ashbridge: New Hall');
+  LEGACY_CONFIG_ROOMS = []; TAB_ROOMS = configRows.map(r => r.slice());
+  install();
 }
 
 // ---------------------------------------------------------------------------
@@ -264,10 +331,10 @@ function install() {
   const h = sandbox.HEADERS.All_Program_Sessions;
   ok('Room_Override is the LAST session-table column', h[h.length - 1] === 'Room_Override');
   ok('Room_Override is a human-editable column', Array.from(sandbox.PROGRAM_DASHBOARD_EDITABLE_COLUMNS).indexOf('Room_Override') !== -1);
-  const taken = Object.values(sandbox.CONFIG_LAYOUT).filter(x => x !== sandbox.CONFIG_LAYOUT.ROOMS)
-    .reduce((m, x) => Math.max(m, x.startCol + x.headers.length - 1), 0);
-  ok('Rooms sit in fresh columns past every other section', sandbox.CONFIG_LAYOUT.ROOMS.startCol > taken + 0 &&
-    sandbox.CONFIG_LAYOUT.ROOMS.headers.join() === 'Building,Room');
+  ok('Config no longer carries a Rooms section', sandbox.CONFIG_LAYOUT.ROOMS === undefined);
+  const secs = Object.values(sandbox.ROOM_MANAGEMENT_LAYOUT);
+  const spans = secs.map(x => [x.startCol, x.startCol + x.headers.length - 1]).sort((p, q) => p[0] - q[0]);
+  ok('the four tables never share a column', spans.every((sp, i) => i === 0 || sp[0] > spans[i - 1][1]));
   ok('the hourly tail has the room step, before the ledger verifier',
     (() => { const ids = sandbox.REGISTRATION_SYNC_TAIL_STEPS.map(x => x.id);
       return ids.indexOf('room_conflicts') !== -1 && ids.indexOf('room_conflicts') < ids.indexOf('ledger_verify'); })());

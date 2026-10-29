@@ -49,6 +49,8 @@ function onEdit(e) {
       handleProgramMonthEdit(e, sheet);
     } else if (name === SHEET_NAMES.CONFIG) {
       handleConfigEdit(e, sheet);
+    } else if (name === SHEET_NAMES.ROOM_MANAGEMENT) {
+      handleRoomManagementEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
       handleClubMembersEdit(e, sheet);
     } else if (name === SHEET_NAMES.MEMBER_ROLL) {
