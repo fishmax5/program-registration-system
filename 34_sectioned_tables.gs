@@ -786,6 +786,8 @@ function stampTextColumns(sheet, cols, startRow, numRows) {
  */
 function renderFlatDateSheet(sheet, headers, allRows, opts) {
   opts = opts || {};
+  const phase = renderPhaseMarker_(sheet, opts);
+  phase('start', allRows.length + ' row(s)');
   // THE LAST THING BEFORE THE WIPE. A tab whose caller declared a guard marker
   // (All_Registrants, and nothing else today) gets its incoming row count
   // compared against what it is currently holding, and a rewrite that would
@@ -825,6 +827,7 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   writeTabValuesBeforeRender_(sheet,
     [sectionedTableValueBlock_(tableStart, headers, upcoming, past, opts)],
     { noClearFallback: !!opts.guardMarker });
+  phase('values written ahead of formatting');
   sheet.clearFormats();
   // Row visibility is a sheet-level property that survives clear(), exactly
   // like column visibility below — so last render's hidden old-month range
@@ -847,21 +850,58 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // hook to write a column at a time would have moved almost none of the cost.
   // See 97_render_batching.gs.
   const result = withRenderBatch(sheet, headers.length, () => {
+    phase('writing sections');
     const written = writeUpcomingPastSections(sheet, opts.startRow || 1, headers, upcoming, past, opts);
+    phase('sections written; running afterWrite');
     checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(tableStart), written.upcomingHeaderRow);
     freezeRowsSafely(sheet, written.upcomingHeaderRow);
     if (opts.afterWrite) opts.afterWrite(sheet, headers, written);
     return written;
   });
 
+  phase('render batch flushed');
   // AFTER the batch has flushed and after the afterWrite hook, because what
   // this undoes on a heading row is what those two just did to it.
   if (result && result.dividerRows && result.dividerRows.length) {
     formatRegistrantGroupDividers_(sheet, headers.length, result.dividerRows);
   }
 
+  phase('autosizing columns');
   autosizeColumns(sheet, { force: !!opts.force, minCols: headers.length });
+  phase('done');
   return result;
+}
+
+/**
+ * Where a render of a GUARDED tab (All_Registrants) is, written down as it goes.
+ *
+ * An "Error code INTERNAL" is an abort of the execution: no catch, no finally,
+ * no log line — so a render that dies leaves a tab half drawn and nothing to say
+ * which step it was on. Each phase logs with the seconds elapsed and stores its
+ * name in Document Properties; the marker is removed by 'done'. One still
+ * standing when the next render begins is an execution that died on that phase,
+ * and is logged then. Never throws, and does nothing for the unguarded tabs.
+ */
+function renderPhaseMarker_(sheet, opts) {
+  if (!opts || !opts.guardMarker) return function () {};
+  const name = sheet.getName();
+  const key = 'RENDER_IN_FLIGHT_V1';
+  const startedAt = Date.now();
+  let props = null;
+  try {
+    props = PropertiesService.getDocumentProperties();
+    const left = props.getProperty(key);
+    if (left) log(`⚠️ A previous render of "${name}" did not finish — last recorded phase: ${left}.`);
+  } catch (err) { props = null; }
+  return function (label, detail) {
+    const secs = Math.round((Date.now() - startedAt) / 100) / 10;
+    log(`Render "${name}" +${secs}s: ${label}${detail ? ' — ' + detail : ''}`);
+    if (!props) return;
+    try {
+      if (label === 'done') props.deleteProperty(key);
+      else props.setProperty(key, `${label} (${new Date().toISOString()})`);
+    } catch (err) { /* a marker that will not write must not fail a render */ }
+  };
 }
 
 
