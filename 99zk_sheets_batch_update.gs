@@ -80,6 +80,12 @@ function sheetsBatchAvailable_() {
     const flag = PropertiesService.getScriptProperties().getProperty(SHEETS_BATCH_FORMATTING_PROP_KEY);
     if (String(flag || '').trim().toLowerCase() === 'off') return false;
   } catch (err) { /* no properties — the default is on */ }
+  try {
+    // Document Properties too: Script Properties can be full (see 99zd), and a
+    // switch that cannot be written is no switch. See setSheetsBatchFormatting().
+    const flag = PropertiesService.getDocumentProperties().getProperty(SHEETS_BATCH_FORMATTING_PROP_KEY);
+    if (String(flag || '').trim().toLowerCase() === 'off') return false;
+  } catch (err) { /* the default is on */ }
   return true;
 }
 
@@ -812,4 +818,17 @@ function flushRenderBatchViaSheetsApi_(scope) {
     recordSheetsBatchFailure_('a render', sheet, err);
     return false;
   }
+}
+
+
+/**
+ * Editor-runnable switch: setSheetsBatchFormatting(false) sends every render down
+ * the SpreadsheetApp path; setSheetsBatchFormatting(true) puts it back. Written
+ * to Document Properties, which has room when Script Properties does not.
+ */
+function setSheetsBatchFormatting(on) {
+  const props = PropertiesService.getDocumentProperties();
+  if (on === false) props.setProperty(SHEETS_BATCH_FORMATTING_PROP_KEY, 'off');
+  else props.deleteProperty(SHEETS_BATCH_FORMATTING_PROP_KEY);
+  log(`Sheets API batch formatting is now ${on === false ? 'OFF' : 'ON'}.`);
 }
