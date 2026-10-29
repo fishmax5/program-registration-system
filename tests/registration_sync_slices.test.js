@@ -148,7 +148,7 @@ function installStubs() {
     'updateMasterLunchDashboard', 'refreshMemoryTabs', 'renderClubMembersSheet', 'refreshClubMemberLabels',
     'ensureRegistrantSheetsForUpcomingPrograms', 'ensureProgramLeaderSheetsForNotifyingLeaders',
     'pushProgramLeaderSheets', 'notifyProgramLeadersOfRosterChanges', 'sendProgramLeaderDaySnapshotDigests',
-    'inviteRegistrantsToCalendarEvents', 'sendRegistrantReminders'
+    'inviteRegistrantsToCalendarEvents', 'sendRegistrantReminders', 'checkRoomConflictsForDigest'
   ].forEach(name => { sandbox[name] = record(name); });
   sandbox.renderProgramDashboard = (...args) => {
     calls.push({ name: 'renderProgramDashboard', args });

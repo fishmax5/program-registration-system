@@ -106,6 +106,16 @@ const CONFIG_LAYOUT = {
     title: '🗄️ Hide System Tabs',
     startCol: 42,
     headers: ['Hide_System_Tabs']
+  },
+  // Fresh columns once more (43 is the spacer). The canonical list of rooms:
+  // building + room name, which is what Program_Settings' Room_Or_Setup and the
+  // session table's Room_Override are offered and matched against — see
+  // 99zw_room_conflicts.gs. The last section on the tab and open-ended below
+  // its header, so nothing sits under it to be reflowed.
+  ROOMS: {
+    title: '🚪 Rooms (Building + Room)',
+    startCol: 44,
+    headers: ['Building', 'Room']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -118,7 +128,7 @@ const CONFIG_LAYOUT = {
 // (Months_Ahead) and grew into it. Nothing reads this — it is the record of
 // which columns are blank, and a record that says a live cell is blank is
 // worse than no record.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41, 43];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the

@@ -83,16 +83,16 @@
  * own: Form_ID is how these rows were grouped and Group_Key is what one row
  * IS, and neither is something anybody scans a tab for.
  *
- * ROOM IS HERE FOR A DIFFERENT REASON, and it is worth saying which: nobody is
- * filling Room_Or_Setup in at the moment, so the column was a blank running
- * the height of the tab — which on a front page reads as an answer ("no room
- * booked") rather than as a question nobody has asked yet. It is HIDDEN, not
- * removed: the cell is still written on every render (see
- * programMonthSettingsCell()), so the day somebody starts keeping rooms on
- * Program_Settings, taking this one name back off this list is the whole
- * change.
+ * ROOM USED TO BE HERE, and no longer is. It was hidden while nobody filled
+ * Room_Or_Setup in, because a column of blanks on a front page reads as an
+ * answer ("no room booked") rather than a question nobody has asked. Rooms are
+ * now a real list on Config with a dropdown on Program_Settings (99zw), so the
+ * column is shown: it prints the program's usual room, and a program with none
+ * chosen is a blank that means exactly that. A single date that moved rooms is
+ * on the session table's Room_Override, not here — this tab is one row per
+ * PROGRAM.
  */
-const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key', 'Room'];
+const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key'];
 
 /**
  * The three program-wide flag columns this tab offers as tick boxes, in the

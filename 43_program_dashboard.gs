@@ -954,6 +954,14 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
       });
     }
 
+    // A room for this date only (99zw): suggested from Config's Rooms list, and
+    // open — a room typed that is not on the list is still kept, and the
+    // conflict report names it as one it could not compare. Never protected
+    // (it is not in the list below): it is the one column here a person types.
+    if (map['Room_Override'] !== undefined) {
+      applyOpenValueListValidationBounded(sheet, map['Room_Override'] + 1, roomOptionLabels(), z.start, z.count);
+    }
+
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
         .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());

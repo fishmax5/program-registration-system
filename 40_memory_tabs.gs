@@ -486,7 +486,7 @@ function refreshProgramSettings(ss, sessionRows) {
   // somebody damaged is put right once a day. Never while the legacy merge is
   // pending, and never when there is no way to hash.
   const fingerprint = mergePending ? '' : fingerprintOf_(
-    ['program_settings_v2', formatDateKey(new Date()), headers, outRows]);
+    ['program_settings_v2', formatDateKey(new Date()), headers, outRows, roomOptionLabels()]);
   if (fingerprint && storedProgramSettingsFingerprint_() === fingerprint) {
     invalidateNotificationPolicyCache();
     log(`${SHEET_NAMES.PROGRAM_SETTINGS}: nothing changed; left as it is.`);
@@ -510,6 +510,12 @@ function refreshProgramSettings(ss, sessionRows) {
     // Event is a row no session ever reads its ticks from.
     openLists: {
       Other_Reminders: OTHER_REMINDER_SUGGESTIONS,
+      // The program's usual room, from Config's Rooms list (99zw). Suggesting,
+      // because this column has always allowed free text and a strict list
+      // would turn every existing note into an invalid cell; text that is not
+      // on the list is simply not checked for double-booking, and the report
+      // says which.
+      Room_Or_Setup: roomOptionLabels(),
       Event: Object.keys(programs).map(k => programs[k].title).filter(uniqueStrings).sort()
     }
   });
@@ -744,6 +750,8 @@ function noteProgramSettingsHeaders_(sheet, headers) {
     Event: 'Grey headings group programs by kind. The green row under each heading holds the ' +
       'defaults new programs of that kind are born with.',
     Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
+    Room_Or_Setup: 'The program\'s usual room — pick from Config\'s Rooms list. A single date that moves rooms is ' +
+      'set on the session table\'s Room_Override column. Text that is not on the list is not checked for double-booking.',
     Roster_Delivery: 'Sheet (default), Both, or Web — where the leader\'s roster lives.',
     Add_Guest_To_Calendar: 'WHAT IT SENDS — add each registrant as a guest on the real calendar event.',
     Confirm_On_Booking: 'An email the moment somebody registers; the only place an appointment\'s own time is stated.',

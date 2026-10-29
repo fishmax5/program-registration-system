@@ -272,7 +272,15 @@ defineLazyGlobal_('HEADERS', () => ({
     // the top of the form says (99t). LAST and hidden, for the same reason as
     // Program_Questions' Description_Placement: existing rows read it as blank
     // until the sync's reconcile pass fills it in.
-    'Event_Description'
+    'Event_Description',
+    // A room for THIS DATE only, typed by staff when a session moves rooms at
+    // the last minute (99zw). LAST, for the same reason Event_Description is:
+    // existing rows read it as blank, and the next render writes it out. The
+    // only column on this table that no calendar read regenerates, which is
+    // why the sync leaves it alone: the render writes back every column of the
+    // rows it read, and new rows are only ever appended. Never written to the
+    // calendar event's Location.
+    'Room_Override'
   ],
   /**
    * Master_Program_Dashboard — ONE ROW PER PROGRAM (see SHEET_NAMES.PROGRAM_MONTH).

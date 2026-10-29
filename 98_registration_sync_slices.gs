@@ -272,6 +272,14 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     run: ctx => sendRegistrantReminders(ctx.sessionRows(), ctx.reusableRows())
   },
   {
+    // READ-ONLY, and cheap (one session-table read the run already holds).
+    // Files each NEW double-booked room for the office's 10am digest, once per
+    // conflict per day — see 99zw. Warns only; nothing here blocks anything.
+    id: 'room_conflicts',
+    label: 'checking for double-booked rooms',
+    run: () => { checkRoomConflictsForDigest(); return undefined; }
+  },
+  {
     // LAST, AND READ-ONLY. The registration ledger's verifier (99n) folds the
     // ledger, reads the tab and files the differences for the office's 10am
     // digest. It runs after everything else because it is a statement about
