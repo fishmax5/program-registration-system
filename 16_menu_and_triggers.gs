@@ -248,6 +248,11 @@ function buildDeskMenu_(ui, title) {
     // An appointment that is never on the calendar — private counselling,
     // weekend help — recorded for the stats and published nowhere. See 99zi.
     .addItem('\ud83d\udd12 Log a Private Session\u2026', menuFn_('showPrivateSessionDialog'))
+    // An event that is simply there every day and on no calendar — Jigsaw
+    // Puzzles, Community Hour — offered first on Quick Mark and the sign-in app
+    // so walk-ins can be signed in. See 99zv.
+    .addItem('\u267e\ufe0f Add an Always-Open Event\u2026', menuFn_('showAddStandingEventDialog'))
+    .addItem('\u267e\ufe0f Always-Open Events (edit the list)', menuFn_('showStandingEventsTab'))
     .addSeparator()
     // THE DOOR, from the desk's side: the printed sheet for today, and the
     // sign-in app on the laptop. Both were a submenu deep under Sign-In &

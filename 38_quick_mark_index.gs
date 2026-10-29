@@ -526,14 +526,17 @@ function orderQuickMarkChoices(choices) {
   const upcoming = [];
   const past = [];
   const undated = [];
+  const always = [];
   choices.forEach(choice => {
-    if (!choice.dateKey) undated.push(choice);
+    if (!choice.dateKey && choice.standingEvent) always.push(choice);
+    else if (!choice.dateKey) undated.push(choice);
     else if (choice.dateKey >= todayKey) upcoming.push(choice);
     else past.push(choice);
   });
   upcoming.sort((a, b) => (a.dateKey < b.dateKey ? -1 : (a.dateKey > b.dateKey ? 1 : a.label.localeCompare(b.label))));
   past.sort((a, b) => (a.dateKey > b.dateKey ? -1 : (a.dateKey < b.dateKey ? 1 : a.label.localeCompare(b.label))));
   undated.sort((a, b) => a.label.localeCompare(b.label));
+  always.sort((a, b) => a.label.localeCompare(b.label));
 
   const perLocation = {};
   const out = [];
@@ -546,6 +549,7 @@ function orderQuickMarkChoices(choices) {
       location: choice.location, appointment: choice.appointment || null, group
     });
   });
+  push(always, STANDING_EVENT_CHOICE_GROUP);
   push(upcoming, 'Upcoming');
   push(past, 'Past');
   push(undated, 'Any date (program only)');
@@ -616,6 +620,9 @@ function collectKnownProgramChoices(location, registrantRows, options) {
       dateKey,
       location: rowLocation,
       lunchOnly: !!(options && options.lunchOnly),
+      // An ALWAYS-OPEN event (99zv): undated by design, and resolved to today at
+      // the moment of the mark rather than to the nearest session.
+      standingEvent: !!(options && options.standingEvent),
       // { eventId, end, slotMinutes } for a [Personalized Assistance] session,
       // null for every other one. It is what lets the dialog offer the free
       // APPOINTMENT TIMES on that session — a desk booking one of these has to
@@ -660,6 +667,17 @@ function collectKnownProgramChoices(location, registrantRows, options) {
     return Object.keys(choices).map(k => choices[k]);
   }
 
+  // ALWAYS-OPEN EVENTS FIRST, so their undated entry carries the flag: `note`
+  // keeps whichever entry for a title/building it saw first, and the
+  // Program_Settings pass below would otherwise claim it.
+  try {
+    standingEventsAt(location).forEach(ev => {
+      note(ev.title, ev.location, '', { standingEvent: true });
+    });
+  } catch (err) {
+    log(`ℹ️ Quick Mark could not read the always-open events (${err}).`);
+  }
+
   try {
     const options = ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS);
     if (options) {
@@ -677,6 +695,10 @@ function collectKnownProgramChoices(location, registrantRows, options) {
 
   const lrMap = getIndexMap(HEADERS.All_Registrants);
   (registrantRows || []).forEach(row => {
+    // One dated entry per day somebody signed in at an always-open event would
+    // fill the per-location cap with Past entries and push real sessions out.
+    // The undated entry (above) is how they are reached.
+    if (isStandingEventId(row[lrMap['Event_ID']])) return;
     note(row[lrMap['Event']], row[lrMap['Location']], row[lrMap['Event_Date']]);
   });
 
@@ -1241,6 +1263,15 @@ function applyQuickMarkLocked(args) {
   const nameKey = normalizeNameKey(name);
   const todayKey = formatDateKey(new Date());
   const candidates = [];
+
+  // AN ALWAYS-OPEN EVENT IS TODAY'S, never "the nearest session" (99zv): it has
+  // no sessions, so the nearest row is last Thursday's sign-in. Pinning the date
+  // here is what makes the row search below find today's row and nobody else's.
+  const standingEvent = findStandingEvent(selection.title, location);
+  if (standingEvent) {
+    if (!selection.dateKey) selection.dateKey = todayKey;
+    selection.standingEvent = standingEvent;
+  }
 
   // THE GRID getSectionZones() HAS JUST READ, not a second and third read of
   // the same rows. Finding the zones already fetched the whole tab (96); each
@@ -1812,9 +1843,13 @@ function addQuickMarkWalkIn(sheet, args) {
     return { ok: false, message: `⚠️ "${name}" has no registration yet. Pick a session and mark again to add them as a walk-in.` };
   }
 
+  // A real session of the same title on that date wins; the synthetic one is
+  // only for an always-open event with nothing on the calendar (99zv).
   const session = selection.lunchOnly
     ? buildLunchOnlySession(selection.dateKey, location)
-    : findNearestSessionForProgram(program, location, selection.dateKey);
+    : (findNearestSessionForProgram(program, location, selection.dateKey) ||
+      (selection.standingEvent
+        ? buildStandingEventSession(selection.standingEvent, selection.dateKey, location) : null));
   if (!session) {
     const when = selection.dateKey ? ` on ${formatDateLabel(parseDateKey(selection.dateKey))}` : '';
     return {
@@ -1835,6 +1870,19 @@ function addQuickMarkWalkIn(sheet, args) {
   // snapshot. Two people in one chair is the failure this whole tag exists to
   // prevent, and the desk is now a second way to cause it.
   let slot = null;
+  if (session.isStandingEvent && standing) {
+    return {
+      ok: false,
+      message: `⚠️ ${program} is open every day and has no sessions, so there is no standing place to ` +
+        'make for it — just sign them in each time. Untick "every future session" and mark again.'
+    };
+  }
+  if (session.isStandingEvent && waitlist) {
+    return {
+      ok: false,
+      message: `⚠️ ${program} has no capacity, so there is no waitlist to add "${name}" to.`
+    };
+  }
   if (session.isAssistance && standing) {
     return {
       ok: false,
@@ -1896,7 +1944,9 @@ function addQuickMarkWalkIn(sheet, args) {
   // Quick Mark — is a question nobody ever sees. Instead the first call
   // returns the question and the dialog asks it, then calls back with
   // confirmed:true. Same guard, somewhere it can actually be answered.
-  if (!args.confirmed) {
+  // An always-open event has no registration to be missing, so nobody is asked
+  // whether to "add a new row": signing in IS the whole of it (99zv).
+  if (!args.confirmed && !session.isStandingEvent) {
     return {
       ok: false,
       needsConfirm: true,

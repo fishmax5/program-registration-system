@@ -90,7 +90,7 @@ const optMap = sandbox.getIndexMap(sandbox.HEADERS.Program_Settings);
 const optionRow = new Array(sandbox.HEADERS.Program_Settings.length).fill('');
 optionRow[optMap['Event']] = 'Chair Yoga';
 optionRow[optMap['Location']] = 'Narberth';
-sandbox.readSimpleTable = () => [optionRow];
+sandbox.readSimpleTable = sheet => (sheet && sheet.__name === 'Standing_Events' ? [] : [optionRow]);
 sandbox.readSimpleTableValues = () => [optionRow];
 sandbox.readLunchScheduleRows = () => [];
 sandbox.getCateringPolicyForLocation = () => 'Always';

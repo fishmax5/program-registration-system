@@ -365,7 +365,9 @@ function buildDashboardRollup(registrantRows) {
         // LUNCH_ONLY_EVENT_ID_PREFIX). Those never have a session, and their
         // meal is exactly as real as anyone else's, so they take their date and
         // location from the row itself.
-        if (!isLunchOnlyEventId(eventId)) {
+        // An ALWAYS-OPEN event (99zv) is the same case: a real date and building
+        // on the row, no session behind it, and a meal as real as anyone's.
+        if (!isLunchOnlyEventId(eventId) && !isStandingEventId(eventId)) {
           // ...but a row like that can be carrying REAL MEALS — a served tick,
           // a count of portions handed over — and dropping those on the floor
           // is the same mistake an orphan Meal_Source must never make. It is

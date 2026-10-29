@@ -258,6 +258,8 @@ function menu_showTimeBlockDialog() { recordMenuUsage_('showTimeBlockDialog'); r
 function menu_showTriggerStatus() { recordMenuUsage_('showTriggerStatus'); return showTriggerStatus(); }
 function menu_showVolunteerHoursDialog() { recordMenuUsage_('showVolunteerHoursDialog'); return showVolunteerHoursDialog(); }
 function menu_showPrivateSessionDialog() { recordMenuUsage_('showPrivateSessionDialog'); return showPrivateSessionDialog(); }
+function menu_showAddStandingEventDialog() { recordMenuUsage_('showAddStandingEventDialog'); return showAddStandingEventDialog(); }
+function menu_showStandingEventsTab() { recordMenuUsage_('showStandingEventsTab'); return showStandingEventsTab(); }
 function menu_openPrivateSessionsTab() { recordMenuUsage_('openPrivateSessionsTab'); return openPrivateSessionsTab(); }
 function menu_reportPrivateSessions() { recordMenuUsage_('reportPrivateSessions'); return reportPrivateSessions(); }
 function menu_showWeekendEventLoaderDialog() { recordMenuUsage_('showWeekendEventLoaderDialog'); return showWeekendEventLoaderDialog(); }

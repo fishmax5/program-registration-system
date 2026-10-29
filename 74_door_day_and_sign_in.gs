@@ -202,6 +202,25 @@ function readWalkInDay(location, dateKeyOverride) {
     });
   }
 
+  // ALWAYS-OPEN EVENTS (99zv): on no calendar, so they are never in the session
+  // table above — added here for every day they are open, FIRST (order -1), as
+  // drop-ins with no form. Added before the registrant scan so that scan's
+  // `addProgram` for a row signed in against one finds it already listed and
+  // leaves its place on the screen alone; a real session of the same title has
+  // already claimed the value, and is kept.
+  standingEventsAt(loc).forEach(ev => {
+    if (!standingEventOpenOn(ev, dateKey)) return;
+    addProgram({
+      value: sessionValue(ev.title),
+      title: ev.title,
+      time: ev.timeNote || '',
+      byAppointment: false,
+      noRegistration: true,
+      standingEvent: true,
+      order: -1
+    });
+  });
+
   const people = [];
   const peopleByKey = {};
   // EVERY ROW OF THE LAST TWO MONTHS AT THIS BUILDING, held raw and filtered

@@ -103,6 +103,11 @@ const SHEET_NAMES = {
   // the ledger and the leader alerts. Staff-owned: Quick Mark appends, nothing
   // rewrites it. See 99z_program_waitlist.gs.
   PROGRAM_WAITLIST: 'Program_Waitlist',
+  // Events that are ALWAYS OPEN and never on a calendar — Jigsaw Puzzles,
+  // Community Hour. Staff-owned: one row per event per building. They are
+  // offered first on Quick Mark and the sign-in app every day they are open, and
+  // a walk-in is recorded against that day. See 99zv_standing_events.gs.
+  STANDING_EVENTS: 'Standing_Events',
   // The registration ledger's fold, written down nightly with the ledger row
   // it covers through, so a fold reads only the rows after it. A derived
   // cache: deleting it sends every reader back to the full fold and loses
@@ -1088,6 +1093,12 @@ defineLazyGlobal_('HEADERS', () => ({
   Program_Waitlist: [
     'Program', 'Location', 'Name', 'Phone', 'Email', 'Party_Size',
     'Status', 'Added_On', 'Added_By', 'Notes'
+  ],
+  // One row per ALWAYS-OPEN event per building. Days_Open blank = every day the
+  // building is open; otherwise "Mon-Fri", "Tue, Thu". Active blank = on.
+  // See 99zv_standing_events.gs.
+  Standing_Events: [
+    'Event', 'Location', 'Days_Open', 'Time_Note', 'Active', 'Notes'
   ]
 }));
 

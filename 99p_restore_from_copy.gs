@@ -188,7 +188,8 @@ function classifyCopyRegistrants(input) {
       membershipGone = !member;
     }
 
-    if (!input.sessionEventIds.has(eventId) && !isLunchOnlyEventId(eventId)) {
+    if (!input.sessionEventIds.has(eventId) && !isLunchOnlyEventId(eventId) &&
+      !isStandingEventId(eventId)) {
       counts.noSession++;
       if (noSessionSamples.length < 15) {
         noSessionSamples.push(`${name} — ${row[map['Event']] || eventId} (${restoreCopyDateLabel_(row[map['Event_Date']])})`);
