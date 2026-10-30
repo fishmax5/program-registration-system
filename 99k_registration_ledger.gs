@@ -133,7 +133,11 @@ const LEDGER_SOURCES = Object.freeze({
   // "forty rows moved at 4pm — where did that come from", which is a different
   // question with a different fix. Covers every action that dialog applies, so
   // one word reads back as "it was the bulk list" whichever of them it was.
-  BULK_LIST: 'bulk-list'
+  BULK_LIST: 'bulk-list',
+  // A whole date moved to another building's calendar (99zy), registrants and
+  // all. Not `change-panel`: that is one person rung through at the desk, and
+  // "forty people moved because a building closed" is a different question.
+  RELOCATE: 'relocate'
 });
 
 /** Every source, for validation. */

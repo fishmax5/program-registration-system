@@ -388,6 +388,9 @@ function buildCoordinatorMenu_(ui, title, role) {
       // range beside them. It queues the calendar tag exactly as an edit
       // does, and it unticks as well as ticks. See 99m.
       .addItem('\ud83d\udd34 Close Sessions to New Registrations\u2026', menuFn_('showBulkWaitlistOnlyDialog'))
+      // A BUILDING CLOSES: tick dates and send them, registrants and all, to
+      // the other building's calendar. See 99zy.
+      .addItem('\ud83c\udfe2 Move Sessions to Another Building\u2026', menuFn_('showRelocateSessionsDialog'))
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
       // sense together — a [Personalized Assistance] program is booked by time
