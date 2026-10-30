@@ -17,8 +17,11 @@
 // WHAT ONE RELOCATION DOES, per ticked date, in this order, because each step
 // is only safe once the one before it has landed:
 //   1. MOVE THE CALENDAR EVENT to the destination building's calendar
-//      (advanced Calendar service `Events.move`). If Google refuses, that date
-//      is skipped and reported and NOTHING else is touched for it.
+//      (advanced Calendar service `Events.move`; a date of a recurring series
+//      is copied across and cancelled at the source instead — see
+//      `relocateMoveCalendarEvent_`, because `CalendarApp`'s id is the SERIES').
+//      If Google refuses, that date is skipped and reported and NOTHING else
+//      is touched for it.
 //   2. LOAD THE DATE at the destination through the sync's own
 //      `processCalendarGroup` (the same call the weekend loader, `80`, makes),
 //      so it gets its program's form, its row and its registration link
@@ -237,6 +240,60 @@ function relocateApiEventId_(event) {
 }
 
 /**
+ * The Calendar API resource for ONE CalendarApp event. `CalendarApp`'s getId()
+ * is the SERIES id for every date of a recurring event, so moving by it moved
+ * the whole series on the first date and left every later date "not found" —
+ * the move looked stuck after one change. The API's own instance (its own id,
+ * carrying `recurringEventId`) is found by listing the event's slot with
+ * `singleEvents`. Returns null when it cannot be told apart.
+ */
+function relocateFindApiEvent_(calendarId, event) {
+  const startMs = event.getStartTime().getTime();
+  const found = Calendar.Events.list(calendarId, {
+    timeMin: new Date(startMs).toISOString(),
+    timeMax: new Date(event.getEndTime().getTime()).toISOString(),
+    singleEvents: true,
+    maxResults: 50
+  });
+  const title = String(event.getTitle() || '');
+  const hits = ((found && found.items) || []).filter(item => {
+    const dt = item.start && item.start.dateTime;
+    return dt && new Date(dt).getTime() === startMs && String(item.summary || '') === title;
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * Moves ONE date to the other calendar. A plain event is moved. An instance of
+ * a recurring event is not moved (Google offers no calendar change for a single
+ * instance, and moving the series would take every date): a standalone copy is
+ * inserted at the destination first, then the instance is cancelled at the
+ * source, and a failed cancel takes the copy back out so the date is never on
+ * both. No guest is mailed by either step.
+ */
+function relocateMoveCalendarEvent_(fromCalendarId, toCalendarId, event) {
+  const api = relocateFindApiEvent_(fromCalendarId, event);
+  if (!api) throw new Error('could not tell this date from the rest of its series');
+  if (!api.recurringEventId) {
+    Calendar.Events.move(fromCalendarId, api.id, toCalendarId, { sendUpdates: 'none' });
+    return;
+  }
+  const copy = {
+    summary: api.summary, description: api.description, location: api.location,
+    start: api.start, end: api.end, colorId: api.colorId, transparency: api.transparency,
+    visibility: api.visibility, attendees: api.attendees, reminders: api.reminders
+  };
+  Object.keys(copy).forEach(k => { if (copy[k] === undefined) delete copy[k]; });
+  const inserted = Calendar.Events.insert(copy, toCalendarId, { sendUpdates: 'none' });
+  try {
+    Calendar.Events.remove(fromCalendarId, api.id, { sendUpdates: 'none' });
+  } catch (err) {
+    try { Calendar.Events.remove(toCalendarId, inserted.id, { sendUpdates: 'none' }); } catch (ignored) { /* reported below */ }
+    throw err;
+  }
+}
+
+/**
  * Called from the dialog. `roomLabel` is optional and must be on the Rooms
  * list for the destination building; it becomes `Room_Override` on each moved
  * date. Returns a summary string, "⚠️"-prefixed when nothing (or not all) went.
@@ -302,7 +359,7 @@ function relocateSessionsLocked_(eventIds, toLocation, toCalendarId, room) {
       continue;
     }
     try {
-      Calendar.Events.move(fromCalendarId, relocateApiEventId_(event), toCalendarId);
+      relocateMoveCalendarEvent_(fromCalendarId, toCalendarId, event);
       moved.push(item);
     } catch (err) {
       problems.push(`${item.title} ${item.dateKey}: Google would not move the event (${err}).`);
