@@ -35,12 +35,20 @@ defineLazyGlobal_('SYSTEM_TAB_NAMES', () => [
   SHEET_NAMES.REGISTRATION_LEDGER,
   SHEET_NAMES.LEDGER_CHECKPOINT || 'Ledger_Checkpoint',
   SHEET_NAMES.TRIAGE,
-  SHEET_NAMES.METRICS,
   PENDING_FLAG_SHEET_NAME,
   QUICK_MARK_INDEX_SHEET_NAME,
   LEGACY_ACTIVE_PROGRAMS_SHEET_NAME,
   LEGACY_REGISTRANT_NOTIFICATIONS_SHEET_NAME
 ].filter((name, i, all) => name && all.indexOf(name) === i));
+
+/**
+ * Tabs that WERE in the back room and are staff-facing now (`Metrics`: people
+ * read it). A workbook that already hid and protected one has it released ONCE
+ * (`releaseFormerSystemTabs_`) — once, so a tab somebody later hides on purpose
+ * is not shown again every morning.
+ */
+defineLazyGlobal_('FORMER_SYSTEM_TAB_NAMES', () => [SHEET_NAMES.METRICS]);
+const SYSTEM_TABS_RELEASED_PROP_KEY = 'SYSTEM_TABS_RELEASED_V1';
 
 /** How a protection this file added is recognized again — never one somebody else made. */
 const SYSTEM_TAB_PROTECTION_DESCRIPTION =
@@ -131,6 +139,7 @@ function applySystemTabVisibility(opts) {
     return result;
   }
   if (!ss) return result;
+  releaseFormerSystemTabs_(ss);
 
   const hide = options.hide !== undefined ? !!options.hide : isSystemTabHidingEnabled();
   const protect = options.protect !== undefined ? !!options.protect : hide;
@@ -192,6 +201,30 @@ function applySystemTabVisibility(opts) {
   if (result.errors.length) log(`ℹ️ System tabs: ${result.errors.join('; ')}`);
   __systemTabVisibilityAppliedThisRun = true;
   return result;
+}
+
+/** Shows each former system tab and lifts OUR protection from it, once per name. Never throws. */
+function releaseFormerSystemTabs_(ss) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    let done = [];
+    try { done = JSON.parse(props.getProperty(SYSTEM_TABS_RELEASED_PROP_KEY) || '[]'); } catch (err) { done = []; }
+    const pending = FORMER_SYSTEM_TAB_NAMES.filter(name => name && done.indexOf(name) === -1);
+    if (!pending.length) return;
+    pending.forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      if (!sheet) return; // not drawn yet: nothing hidden, nothing to release
+      try { if (safeIsHidden_(sheet)) sheet.showSheet(); } catch (err) { /* left as it was */ }
+      try {
+        const existing = findSystemTabProtection_(sheet);
+        if (existing) existing.remove();
+      } catch (err) { /* a protection that will not lift is only a warning */ }
+      done.push(name);
+    });
+    props.setProperty(SYSTEM_TABS_RELEASED_PROP_KEY, JSON.stringify(done));
+  } catch (err) {
+    log(`ℹ️ Could not release former system tabs (${err}).`);
+  }
 }
 
 function safeIsHidden_(sheet) {

@@ -100,10 +100,11 @@ const S = sandbox.SHEET_NAMES;
 const SYSTEM = sandbox.SYSTEM_TAB_NAMES;
 
 // --- The lists ------------------------------------------------------------
-for (const must of [S.REGISTRATION_LEDGER, 'Ledger_Checkpoint', S.TRIAGE, S.METRICS,
+for (const must of [S.REGISTRATION_LEDGER, 'Ledger_Checkpoint', S.TRIAGE,
   '_Pending_Tag_Changes', 'Quick_Mark_Index']) {
   assert.ok(SYSTEM.includes(must), `${must} is a system tab`);
 }
+assert.ok(!SYSTEM.includes(S.METRICS), 'Metrics is read by staff — not a system tab');
 const front = sandbox.frontOfficeTabNames();
 assert.ok(front.length > 0);
 assert.ok(front.every(n => !SYSTEM.includes(n)), 'front office and back room never overlap');
@@ -157,9 +158,23 @@ current = makeSpreadsheet([S.REGISTRANT_DASH, S.CONFIG, S.TRIAGE, S.METRICS, 'Of
   [S.TRIAGE, S.METRICS, 'Office Notes']);
 sandbox.reorderTabs(current);
 assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, true);
-assert.strictEqual(current.getSheetByName(S.METRICS).hidden, true);
+assert.strictEqual(current.getSheetByName(S.METRICS).hidden, false, 'Metrics is released from the back room');
 assert.strictEqual(current.getSheetByName('Office Notes').hidden, true, 'staff-hidden tab stays hidden');
 assert.strictEqual(current.active.hidden, false, 'left on a visible tab');
+
+// --- Metrics was a system tab: a workbook that hid it gets it back, once --------
+sandbox.PropertiesService.getScriptProperties().deleteProperty('SYSTEM_TABS_RELEASED_V1');
+current = makeSpreadsheet([S.CONFIG, S.REGISTRATION_LEDGER, S.METRICS]);
+current.getSheetByName(S.METRICS).hidden = true;
+current.getSheetByName(S.METRICS).protections.push(
+  makeProtection(sandbox.SYSTEM_TAB_PROTECTION_DESCRIPTION, true));
+sandbox.applySystemTabVisibility();
+assert.strictEqual(current.getSheetByName(S.METRICS).hidden, false, 'Metrics is shown again');
+assert.strictEqual(current.getSheetByName(S.METRICS).getProtections().length, 0, 'our warning is lifted');
+assert.strictEqual(current.getSheetByName(S.REGISTRATION_LEDGER).hidden, true);
+current.getSheetByName(S.METRICS).hidden = true; // somebody hides it on purpose
+sandbox.applySystemTabVisibility();
+assert.strictEqual(current.getSheetByName(S.METRICS).hidden, true, 'released once, not every day');
 
 // --- openSystemTab_: show then activate -----------------------------------
 const opened = sandbox.openSystemTab_(S.METRICS);
