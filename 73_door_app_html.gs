@@ -209,6 +209,8 @@ function buildDoorAppHtml(options) {
   button.plain { background: #fff; border: 1px solid #DADCE0; color: #1A73E8; border-radius: 8px;
                  padding: 13px 14px; font-size: 15px; cursor: pointer; min-height: 48px; width: 100%;
                  margin-top: 8px; }
+  /* BACK BUTTONS read as backing out, not as another way forward. */
+  button.plain.back { color: #C5221F; border-color: #C5221F; font-weight: 600; margin-top: 18px; }
   .foot { margin-top: 26px; font-size: 13px; color: #5F6368; line-height: 1.6; }
 
   #status { position: fixed; left: 0; right: 0; bottom: 0; padding: 13px 16px; background: #202124;
@@ -1063,7 +1065,7 @@ function buildDoorAppHtml(options) {
     go.id = 'go';
     go.disabled = busy;
     main.appendChild(go);
-    main.appendChild(button('plain', 'Not you? Back to the list', function () {
+    main.appendChild(button('plain back', '← Not you? Back to the list', function () {
       PERSON = null; STEP = 'names'; draw();
     }));
   }
@@ -1098,7 +1100,7 @@ function buildDoorAppHtml(options) {
     go.id = 'go';
     go.disabled = busy;
     main.appendChild(go);
-    main.appendChild(button('plain', 'Back to the list', function () {
+    main.appendChild(button('plain back', '← Back to the list', function () {
       GROUP = null; STEP = 'names'; draw();
     }));
   }
@@ -1249,7 +1251,7 @@ function buildDoorAppHtml(options) {
     go.id = 'go';
     go.disabled = busy;
     main.appendChild(go);
-    main.appendChild(button('plain', 'Back to the name list', function () {
+    main.appendChild(button('plain back', '← Back to the name list', function () {
       stashWalkIn();
       STEP = 'names';
       draw();
