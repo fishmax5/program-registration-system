@@ -90,7 +90,6 @@ vm.runInContext(src + `
 ;this.roomKeywordMatches_ = roomKeywordMatches_;
 this.keywordRuleFor_ = keywordRuleFor_;
 this.buildRoomManagementProgramRows = buildRoomManagementProgramRows;
-this.roomManagementDayInfo_ = roomManagementDayInfo_;
 this.planBulkRoomAssign = planBulkRoomAssign;
 this.refreshRoomManagementTab = refreshRoomManagementTab;
 this.handleRoomManagementEdit = handleRoomManagementEdit;
@@ -136,32 +135,31 @@ const rules = [{ keyword: 'yoga', building: '', room: R1 }, { keyword: 'bingo', 
     { event: 'Art', location: 'Narberth', room: R1 }
   ], rooms, rules);
   ok('rows are sorted by location then event',
-    rows.map(r => r[0]).join() === 'Bingo,Art,Chair Yoga,Painting', rows.map(r => r[0]).join());
-  const byEvent = Object.fromEntries(rows.map(r => [r[0], r]));
-  ok('its own room says "Set here"', byEvent.Art[3] === R1 && byEvent.Art[4] === 'Set here');
-  ok('a keyword says which', byEvent['Chair Yoga'][3] === R1 && /Keyword "yoga"/.test(byEvent['Chair Yoga'][4]));
-  ok('free text says it is not checked', byEvent.Painting[3] === '' && /Not on the rooms list/.test(byEvent.Painting[4]));
-  ok('the Room cell shows what is stored, not what is derived', byEvent['Chair Yoga'][2] === '' && byEvent.Painting[2] === 'easels');
+    rows.map(r => r[1]).join() === 'Bingo,Art,Chair Yoga,Painting', rows.map(r => r[1]).join());
+  const byEvent = Object.fromEntries(rows.map(r => [r[1], r]));
+  ok('its own room says "Set here"', byEvent.Art[4] === R1 && byEvent.Art[5] === 'Set here');
+  ok('a keyword says which', byEvent['Chair Yoga'][4] === R1 && /Keyword "yoga"/.test(byEvent['Chair Yoga'][5]));
+  ok('free text says it is not checked', byEvent.Painting[4] === '' && /Not on the rooms list/.test(byEvent.Painting[5]));
+  ok('the Room cell shows what is stored, not what is derived', byEvent['Chair Yoga'][3] === '' && byEvent.Painting[3] === 'easels');
 
-  // Sorted by day: 2026-10-30 is a Friday.
-  const today = '2026-10-30';
+  // By date: 2026-10-30 is a Friday.
+  const today = '2026-10-30', end = '2026-11-30';
   const sched = {};
-  const addDays = (e, l, ks) => { sched[sandbox.notificationProgramKey(e, l)] = ks; };
-  addDays('Painting', 'Narberth', ['2026-10-31']);
-  addDays('Chair Yoga', 'Narberth', ['2026-11-03', '2026-11-05', '2026-11-10', '2026-10-01']);
-  addDays('Bingo', 'Ashbridge', ['2026-10-30']);
-  const byDay = sandbox.buildRoomManagementProgramRows([
+  const on = (e, l, ks) => { sched[sandbox.notificationProgramKey(e, l)] = ks; };
+  on('Painting', 'Narberth', ['2026-11-03']);
+  on('Chair Yoga', 'Narberth', ['2026-11-03', '2026-11-05', '2026-10-01', '2026-12-15']);
+  on('Bingo', 'Ashbridge', ['2026-11-03', '2026-11-02']);
+  const byDate = sandbox.buildRoomManagementProgramRows([
     { event: 'Painting', location: 'Narberth', room: '' },
     { event: 'Art', location: 'Narberth', room: R1 },
     { event: 'Chair Yoga', location: 'Narberth', room: '' },
     { event: 'Bingo', location: 'Ashbridge', room: R2 }
-  ], rooms, rules, sched, today);
-  ok('rows run today first, round the week, nothing-coming-up last',
-    byDay.map(r => r[0]).join() === 'Bingo,Painting,Chair Yoga,Art', byDay.map(r => r[0]).join());
-  ok('the Day column names the weekdays in the order they come round',
-    byDay[0][5] === 'Fri' && byDay[1][5] === 'Sat' && byDay[2][5] === 'Tue, Thu' && byDay[3][5] === '',
-    JSON.stringify(byDay.map(r => r[5])));
-  ok('a past date does not count as a day', sandbox.roomManagementDayInfo_(['2026-10-01'], today).label === '');
+  ], rooms, rules, sched, today, end);
+  const shape = byDate.map(r => r[0] ? `${r[0]} ${r[1]}` : (r[1] ? `- ${r[1]}` : '')).join(' | ');
+  ok('dates ascend, programs sit under their date, a blank row between dates, the rest last',
+    shape === 'Mon 11/2 Bingo |  | Tue 11/3 Bingo | Tue 11/3 Chair Yoga | Tue 11/3 Painting |  | Thu 11/5 Chair Yoga |  | - Art', shape);
+  ok('a past date and one beyond the window are not drawn', !shape.includes('10/1') && !shape.includes('12/15'));
+  ok('every row is the table\'s width', byDate.every(r => r.length === sandbox.L.PROGRAMS.headers.length));
 
   const progs = [{ event: 'Chair Yoga', location: 'Narberth', room: R1 }, { event: 'Gentle Yoga', location: 'Narberth', room: '' },
     { event: 'Bingo', location: 'Narberth', room: '' }];
@@ -211,11 +209,11 @@ function loadPsGrid() {
   const blocks = calls.filter(c => c.op === 'setValues' && c.c === L.PROGRAMS.startCol && c.r === 3);
   ok('the Programs block is ONE setValues from row 3', blocks.length === 1 && blocks[0].n >= 2 && blocks[0].w === 6);
   ok('Chair Yoga got the keyword room in Effective_Room',
-    tab.grid[key(3, 4)] === R1 && tab.grid[key(4, 4)] === R1, JSON.stringify([tab.grid[key(3, 1)], tab.grid[key(3, 4)]]));
+    tab.grid[key(3, 5)] === R1 && tab.grid[key(4, 5)] === R1, JSON.stringify([tab.grid[key(3, 2)], tab.grid[key(3, 5)]]));
   const wroteStaffTables = calls.some(c => (c.op === 'setValues' || c.op === 'setValue') &&
     ((c.c >= L.RULES.startCol && c.r >= 3) || (c.c >= L.ROOMS.startCol && c.r >= 3) || (c.c >= L.ASSIGN.startCol && c.c < L.RULES.startCol - 1 && c.r === 3 && c.op === 'setValues')));
   ok('the rules, rooms and assign box are never written by a redraw', !wroteStaffTables);
-  ok('the live Matches formula is set', calls.some(c => c.op === 'setFormula' && /COUNTIF/.test(c.f)));
+  ok('the live Matches formula is set', calls.some(c => c.op === 'setFormula' && /UNIQUE/.test(c.f)));
 
   const merges = calls.filter(c => c.op === 'merge').length;
   calls.length = 0;
@@ -261,15 +259,15 @@ function loadPsGrid() {
   const edit = (r, c, n, w, value) => ({ range: makeRange(tab, r, c, n, w), value });
 
   // Pick a room for the first program row.
-  tab.grid[key(3, 3)] = R1;
+  tab.grid[key(3, 4)] = R1;
   written.length = 0; toasts.length = 0;
-  sandbox.handleRoomManagementEdit(edit(3, 3, 1, 1), tab.sheet);
-  ok('a Room pick writes through to Program_Settings', written.length === 1 && written[0][2] === R1 && written[0][0] === tab.grid[key(3, 1)],
+  sandbox.handleRoomManagementEdit(edit(3, 4, 1, 1), tab.sheet);
+  ok('a Room pick writes through to Program_Settings', written.length === 1 && written[0][2] === R1 && written[0][0] === tab.grid[key(3, 2)],
     JSON.stringify(written));
 
   // Typing in a derived column writes nothing.
   written.length = 0;
-  sandbox.handleRoomManagementEdit(edit(3, 4, 1, 1), tab.sheet);
+  sandbox.handleRoomManagementEdit(edit(3, 5, 1, 1), tab.sheet);
   ok('typing over a derived cell saves nothing', written.length === 0);
 
   // Apply, declined.

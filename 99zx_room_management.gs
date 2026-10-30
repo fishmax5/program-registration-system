@@ -18,8 +18,8 @@
 //                     `Program_Settings`' `Room_Or_Setup` at once — and two
 //                     derived cells beside it, `Effective_Room` and `Why`, that
 //                     say what the program actually gets and from where. Rows
-//                     are ordered by DAY — see `roomManagementDayInfo_` — so
-//                     whatever meets soonest is at the top.
+//                     are laid out by DATE, soonest first, with a blank row
+//                     between one date and the next.
 //   Assign by Keyword the one-off: type a word, pick a room, tick Apply. Every
 //                     program whose title contains the word is given that room
 //                     (after one confirmation naming them). `Matches` is a sheet
@@ -44,7 +44,7 @@
 // ONE SOURCE OF TRUTH. The Room cell on this tab is NOT a second store: it is
 // `Room_Or_Setup`, written through on edit and read back on every refresh, so
 // a hand edit on Program_Settings shows up here and nothing can disagree. The
-// derived cells (`Event`, `Location`, `Effective_Room`, `Why`, `Day`) are redrawn from
+// derived cells (`Date`, `Event`, `Location`, `Effective_Room`, `Why`) are redrawn from
 // Program_Settings and the rules on every refresh — typing over them is put
 // right, and the header note says so.
 //
@@ -67,7 +67,7 @@
  */
 const ROOM_MANAGEMENT_LAYOUT = {
   PROGRAMS: { title: '🚪 Programs → Room', startCol: 1,
-    headers: ['Event', 'Location', 'Room', 'Effective_Room', 'Why', 'Day'] },
+    headers: ['Date', 'Event', 'Location', 'Room', 'Effective_Room', 'Why'] },
   ASSIGN: { title: '⚡ Assign by Keyword (one-off)', startCol: 7,
     headers: ['Keyword', 'Room', 'Matches', 'Apply'] },
   RULES: { title: '📌 Keyword Rules (standing)', startCol: 12,
@@ -118,64 +118,66 @@ function keywordRuleFor_(title, location, rules) {
 }
 
 const ROOM_MANAGEMENT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-/** Sorts after every real day offset (0-6): a program with nothing coming up. */
-const ROOM_MANAGEMENT_NO_DAY_RANK = 99;
 
-/** The weekday (0 = Sunday) of a `yyyy-MM-dd` key, read as a calendar date so no timezone can move it. */
-function roomManagementWeekday_(dateKey) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateKey || ''));
-  return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay() : -1;
+/** "Mon 11/2" for a `yyyy-MM-dd` key — text on purpose, so Sheets never turns it into a date. */
+function roomManagementDateLabel_(dateKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
+  if (!m) return '';
+  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  return `${ROOM_MANAGEMENT_DAY_NAMES[day]} ${Number(m[2])}/${Number(m[3])}`;
 }
 
 /**
- * The day(s) a program meets, counted from today. `dateKeys` is the program's
- * session dates (`yyyy-MM-dd`, any order); dates before `todayKey` are ignored.
- * Returns `{ label, rank, next }`: `label` the distinct weekdays in the order
- * they next come round ("Thu, Tue" on a Wednesday), `rank` how many days until
- * the first of them (0 = today), `next` the date of the next session. A program
- * with nothing coming up has a blank label and `ROOM_MANAGEMENT_NO_DAY_RANK`.
- */
-function roomManagementDayInfo_(dateKeys, todayKey) {
-  const upcoming = (dateKeys || []).map(String).filter(k => k >= todayKey).sort();
-  const todayDay = roomManagementWeekday_(todayKey);
-  if (upcoming.length === 0 || todayDay < 0) return { label: '', rank: ROOM_MANAGEMENT_NO_DAY_RANK, next: '' };
-  const offsets = [];
-  upcoming.forEach(k => {
-    const off = (roomManagementWeekday_(k) - todayDay + 7) % 7;
-    if (offsets.indexOf(off) === -1) offsets.push(off);
-  });
-  offsets.sort((a, b) => a - b);
-  return { label: offsets.map(o => ROOM_MANAGEMENT_DAY_NAMES[(todayDay + o) % 7]).join(', '),
-    rank: offsets[0], next: upcoming[0] };
-}
-
-/**
- * The rows of the Programs table: `[Event, Location, Room, Effective_Room, Why, Day]`.
+ * The rows of the Programs table: `[Date, Event, Location, Room, Effective_Room, Why]`.
  * `programs` is `[{ event, location, room }]` with `room` the raw Room_Or_Setup.
- * `schedule` is `{ <notificationProgramKey>: [dateKey, ...] }` and `todayKey`
- * today's `yyyy-MM-dd`. Sorted by how soon the program next meets by weekday
- * (today, then tomorrow, round the week), then its next date, then Location and
- * Event; programs with nothing coming up go last in Location/Event order. With
- * no schedule it is Location then Event, as before.
+ * `schedule` is `{ <notificationProgramKey>: [dateKey, ...] }`; only dates from
+ * `todayKey` to `endKey` are drawn.
+ *
+ * Laid out like the other program tabs: by DATE, soonest first, every program
+ * meeting that day under it (Location then Event), and one BLANK row between
+ * one date and the next. A program therefore appears once per date it meets;
+ * the Room cell is still the program's (`Room_Or_Setup`), so a pick on any of
+ * its rows is the same pick. Programs with nothing in the window follow the
+ * last date after a blank row with no Date, so none disappears from the tab.
+ * With no schedule every program is in that last block (Location then Event).
  */
-function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayKey) {
-  const dayOf = p => roomManagementDayInfo_(
-    (schedule || {})[notificationProgramKey(p.event, p.location)], todayKey || '');
-  const decorated = (programs || []).map(p => ({ p, day: dayOf(p) }));
-  decorated.sort((a, b) =>
-    (a.day.rank - b.day.rank) ||
-    String(a.day.next).localeCompare(String(b.day.next)) ||
-    String(a.p.location).localeCompare(String(b.p.location)) ||
-    String(a.p.event).localeCompare(String(b.p.event)));
-  return decorated.map(d => {
-    const p = d.p;
+function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayKey, endKey) {
+  const width = ROOM_MANAGEMENT_LAYOUT.PROGRAMS.headers.length;
+  const byLocationEvent = (a, b) =>
+    String(a.location).localeCompare(String(b.location)) || String(a.event).localeCompare(String(b.event));
+  const rowFor = (p, dateLabel) => {
     const eff = effectiveDefaultRoom_(p.event, p.location, p.room, rooms, rules);
     let why = '';
     if (eff.source === 'program') why = 'Set here';
     else if (eff.source === 'keyword') why = `Keyword "${eff.rule.keyword}"`;
-    else if (eff.source === 'unlisted') why = 'Not on the rooms list — not checked';
-    return [p.event, p.location, p.room || '', eff.label, why, d.day.label];
+    else if (eff.source === 'unlisted') why = 'Not on the rooms list \u2014 not checked';
+    return [dateLabel, p.event, p.location, p.room || '', eff.label, why];
+  };
+
+  const byDate = {};
+  const scheduled = {};
+  (programs || []).forEach(p => {
+    const pk = notificationProgramKey(p.event, p.location);
+    (schedule && schedule[pk] || []).forEach(k => {
+      k = String(k);
+      if (k < (todayKey || '') || (endKey && k > endKey)) return;
+      const day = byDate[k] = byDate[k] || {};
+      day[pk] = p;                       // twin sessions on one date are one row
+      scheduled[pk] = true;
+    });
   });
+
+  const rows = [];
+  const blank = () => { if (rows.length) rows.push(new Array(width).fill('')); };
+  Object.keys(byDate).sort().forEach(k => {
+    blank();
+    Object.keys(byDate[k]).map(pk => byDate[k][pk]).sort(byLocationEvent)
+      .forEach(p => rows.push(rowFor(p, roomManagementDateLabel_(k))));
+  });
+  const rest = (programs || []).filter(p => !scheduled[notificationProgramKey(p.event, p.location)])
+    .sort(byLocationEvent);
+  if (rest.length) { blank(); rest.forEach(p => rows.push(rowFor(p, ''))); }
+  return rows;
 }
 
 /**
@@ -333,7 +335,7 @@ function refreshRoomManagementTab(ss) {
     const programs = readRoomManagementPrograms_();
     const todayKey = formatDateKey(new Date());
     const rows = buildRoomManagementProgramRows(programs, rooms, rules,
-      readRoomManagementSchedule_(todayKey), todayKey);
+      readRoomManagementSchedule_(todayKey), todayKey, deskMonthHorizonKey());
 
     const sec = ROOM_MANAGEMENT_LAYOUT.PROGRAMS;
     const width = sec.headers.length;
@@ -383,12 +385,12 @@ function writeRoomManagementStructure_(sheet) {
     try { sheet.getRange(ROOM_MANAGEMENT_HEADER_ROW, L[sec].startCol + L[sec].headers.indexOf(header)).setNote(text); }
     catch (err) { /* a note is a courtesy */ }
   };
-  note('PROGRAMS', 'Event', 'One row per program on Program_Settings. Event, Location, Effective_Room and Why are redrawn ' +
+  note('PROGRAMS', 'Event', 'One row per program per date. Date, Event, Location, Effective_Room and Why are redrawn ' +
     'from the workbook on every refresh — type in Room only.');
   note('PROGRAMS', 'Room', 'Pick this program\'s usual room. This IS Program_Settings\' Room_Or_Setup: choosing one saves it ' +
     'there at once. Blank = let a keyword rule decide. A single date that moves rooms goes on the session table\'s Room_Override.');
-  note('PROGRAMS', 'Day', 'The weekday(s) this program next meets, soonest first. Rows are ordered by it: what meets today ' +
-    'or tomorrow is at the top, programs with nothing coming up at the bottom.');
+  note('PROGRAMS', 'Date', 'Upcoming dates through the end of next month, soonest first, a blank row between days. A program ' +
+    'is listed under every date it meets; its Room is the same on each. Programs with nothing coming up are at the bottom.');
   note('PROGRAMS', 'Effective_Room', 'What the program actually gets: its own room, else the first matching keyword rule.');
   note('ASSIGN', 'Keyword', 'Type a word that appears in program titles, pick a room, then tick Apply. Every matching ' +
     'program is set to that room after one confirmation. Matches counts them as you type.');
@@ -401,7 +403,8 @@ function writeRoomManagementStructure_(sheet) {
   const a = L.ASSIGN;
   const kw = columnLetter_(a.startCol);
   sheet.getRange(ROOM_MANAGEMENT_DATA_ROW, a.startCol + 2).setFormula(
-    `=IF(${kw}${ROOM_MANAGEMENT_DATA_ROW}="","",COUNTIF($A$${ROOM_MANAGEMENT_DATA_ROW}:$A$1000,"*"&${kw}${ROOM_MANAGEMENT_DATA_ROW}&"*")&" program(s)")`);
+    `=IF(${kw}${ROOM_MANAGEMENT_DATA_ROW}="","",IFERROR(ROWS(UNIQUE(FILTER($B$${ROOM_MANAGEMENT_DATA_ROW}:$B$1000&"|"&$C$${ROOM_MANAGEMENT_DATA_ROW}:$C$1000,` +
+    `$B$${ROOM_MANAGEMENT_DATA_ROW}:$B$1000<>"",ISNUMBER(SEARCH(${kw}${ROOM_MANAGEMENT_DATA_ROW},$B$${ROOM_MANAGEMENT_DATA_ROW}:$B$1000))))),0)&" program(s)")`);
   try { sheet.setFrozenRows(ROOM_MANAGEMENT_HEADER_ROW); } catch (err) { /* frozen across a merge */ }
 }
 
@@ -421,7 +424,7 @@ function applyRoomManagementDropdowns_(sheet, rooms, programCount) {
   const row = ROOM_MANAGEMENT_DATA_ROW;
 
   // Programs' Room: SUGGESTING, because Room_Or_Setup has always allowed free text.
-  applyOpenValueListValidationBounded(sheet, L.PROGRAMS.startCol + 2, labels, row, programSpan);
+  applyOpenValueListValidationBounded(sheet, L.PROGRAMS.startCol + 3, labels, row, programSpan);
   // The one-off and the rules: closed, so a typo cannot silently match nothing.
   applyValueListValidationBounded(sheet, L.ASSIGN.startCol + 1, labels, row, 1);
   applyCheckboxValidationBounded(sheet, L.ASSIGN.startCol + 3, row, 1);
@@ -431,7 +434,7 @@ function applyRoomManagementDropdowns_(sheet, rooms, programCount) {
 
   try {
     const tint = MANUAL_ENTRY_CELL_TINT;
-    sheet.getRange(row, L.PROGRAMS.startCol + 2, programSpan, 1).setBackground(tint);
+    sheet.getRange(row, L.PROGRAMS.startCol + 3, programSpan, 1).setBackground(tint);
     sheet.getRange(row, L.ASSIGN.startCol, 1, 2).setBackground(tint);
     sheet.getRange(row, L.ASSIGN.startCol + 3, 1, 1).setBackground(tint).setHorizontalAlignment('center');
     sheet.getRange(row, L.RULES.startCol, ROOM_MANAGEMENT_MAX_RULES, 3).setBackground(tint);
@@ -474,12 +477,12 @@ function handleRoomManagementEdit(e, sheet) {
     return;
   }
 
-  if (touches('PROGRAMS', 2)) {
-    const block = sheet.getRange(row, L.PROGRAMS.startCol, numRows, 3).getValues();
+  if (touches('PROGRAMS', 3)) {
+    const block = sheet.getRange(row, L.PROGRAMS.startCol, numRows, 4).getValues();
     let saved = 0;
     block.forEach(r => {
-      if (!String(r[0] || '').trim()) return;
-      if (writeProgramSettingsRoom_(r[0], r[1], r[2])) saved++;
+      if (!String(r[1] || '').trim()) return;
+      if (writeProgramSettingsRoom_(r[1], r[2], r[3])) saved++;
     });
     toastIfPossible(saved > 0
       ? `🚪 Room saved for ${saved} program(s).`
