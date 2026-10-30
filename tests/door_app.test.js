@@ -148,8 +148,12 @@ ok('and every visit starts from an empty one',
   /function startNextPerson\(\)[\s\S]{0,200}HERE_FOR = \{\}; SHOW_ALL = false;/.test(page));
 ok('a completed sign-in goes back to that question, not to the name list',
   /startNextPerson\(\);\s*\n\s*STEP = 'events';/.test(page));
-ok('the name list says what it is showing, with a way back',
-  /Here for ' \+ whatIsShowing\(\) \+ ' · Change/.test(page));
+ok('the name list says what it is showing, with a red way back to the programs',
+  /Signed up for ' \+ whatIsShowing\(\)/.test(page) && /button\('plain back', '← Back to programs'/.test(page));
+ok('a tapped name asks for confirmation in a full-screen popup before signing in',
+  /askConfirm\(lines, submit/.test(page) && /id="confirm"/.test(page) && /'← Back'/.test(page));
+ok('a local sign-in survives a re-read of the day, so the name stays green',
+  /function reapplyLocalSignIns/.test(page) && /DAY = res\.day;\s*\n\s*reapplyLocalSignIns\(\)/.test(page));
 ok('and staff can get past the question entirely',
   /Not sure\? Show everyone here today/.test(page));
 ok('the regulars have a section of their own', /Here recently/.test(page));

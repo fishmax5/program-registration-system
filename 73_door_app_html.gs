@@ -239,7 +239,25 @@ function buildDoorAppHtml(options) {
                  padding: 13px 14px; font-size: 15px; cursor: pointer; min-height: 48px; width: 100%;
                  margin-top: 8px; }
   /* BACK BUTTONS read as backing out, not as another way forward. */
-  button.plain.back { color: #C5221F; border-color: #C5221F; font-weight: 600; margin-top: 18px; }
+  button.plain.back { color: #C5221F; border: 2px solid #C5221F; background: #FCE8E6; font-weight: 700;
+                      font-size: 19px; min-height: 60px; margin-top: 18px; }
+  /* THE THIRD TAP: a full-screen question, names and events, with two huge
+     buttons. Nothing is written until Confirm. */
+  #confirm { position: fixed; inset: 0; z-index: 70; background: rgba(32,33,36,.72); display: flex;
+             align-items: center; justify-content: center; padding: 16px; }
+  #confirm .sheet { background: #fff; border-radius: 18px; width: 100%; max-width: 760px;
+                    max-height: 100%; overflow-y: auto; padding: 28px 26px; }
+  #confirm h2 { font-size: 34px; margin: 0 0 16px 0; }
+  #confirm .who { margin: 0 0 14px 0; padding: 14px 16px; background: #F1F3F4; border-radius: 12px; }
+  #confirm .who .n { font-size: 32px; font-weight: 700; line-height: 1.2; }
+  #confirm .who .e { font-size: 24px; color: #3C4043; margin-top: 4px; line-height: 1.3; }
+  #confirm .btns { display: flex; gap: 14px; margin-top: 22px; }
+  #confirm .btns button { border-radius: 14px; font-size: 32px; font-weight: 800; min-height: 110px;
+                          cursor: pointer; }
+  #confirm .btns .yes { flex: 2 1 0; background: #188038; color: #fff; border: 0;
+                        box-shadow: 0 4px 10px rgba(24,128,56,.45); }
+  #confirm .btns .no { flex: 1 1 0; background: #FCE8E6; color: #C5221F; border: 3px solid #C5221F; }
+  @media (max-width: 480px) { #confirm .btns { flex-direction: column-reverse; } }
   .foot { margin-top: 26px; font-size: 13px; color: #5F6368; line-height: 1.6; }
 
   #status { position: fixed; left: 0; right: 0; bottom: 0; padding: 13px 16px; background: #202124;
@@ -288,6 +306,7 @@ function buildDoorAppHtml(options) {
 <main id="app" class="hide"></main>
 <div id="status"></div>
 <div id="done" class="hide" onclick="closeDone()"></div>
+<div id="confirm" class="hide"></div>
 <div id="okb" class="hide"></div>
 
 <script>
@@ -300,6 +319,8 @@ function buildDoorAppHtml(options) {
   var STEP = 'setup';      // setup -> events -> names -> person | walkin
   var PERSON = null;       // { name, key, isNew, phone, email, registered[], ... }
   var PICKED = {};         // session value -> true — the CONFIRM screen's ticks
+  var CONFIRMING = false;  // the third-tap popup is up: a re-read must not redraw under it
+  var SIGNED_LOCAL = [];   // {at, entry} — sign-ins made on this tablet, re-applied to every fresh read
   var SHOW_MORE = false;   // "Add another event" pressed: the confirm screen lists every program, not just theirs
   var LUNCH = false;
   // WHAT THE PERSON AT THE DOOR SAID THEY ARE HERE FOR: session value -> true.
@@ -423,6 +444,7 @@ function buildDoorAppHtml(options) {
       setBusy(false);
       if (!res || !res.ok) { DAY = null; draw(); return handle(res); }
       DAY = res.day;
+      reapplyLocalSignIns();
       hideStatus();
       draw();
       if (then) then();
@@ -443,6 +465,7 @@ function buildDoorAppHtml(options) {
       if (!res || !res.ok || !res.day) return;
       if (!screenIsIdle()) { PENDING = res.day; return; }
       DAY = res.day;
+      reapplyLocalSignIns();
       draw();
     });
   }
@@ -455,6 +478,7 @@ function buildDoorAppHtml(options) {
    * vanishes mid-answer is worse.
    */
   function screenIsIdle() {
+    if (CONFIRMING) return false;
     if (PERSON || GROUP) return false;
     if (STEP === 'names') return !Object.keys(TICKED).length;
     return STEP === 'events' && !Object.keys(HERE_FOR).length;
@@ -462,7 +486,7 @@ function buildDoorAppHtml(options) {
 
   // --------------------------------------------------------------------- draw
   function draw() {
-    if (PENDING && screenIsIdle()) { DAY = PENDING; PENDING = null; }
+    if (PENDING && screenIsIdle()) { DAY = PENDING; PENDING = null; reapplyLocalSignIns(); }
     var main = document.getElementById('app');
     var setupBtn = document.getElementById('setupbtn');
     main.innerHTML = '';
@@ -713,10 +737,11 @@ function buildDoorAppHtml(options) {
     // and an empty one look identical to somebody who does not know a filter
     // is on — and the person reading it answered the question a moment ago,
     // so it is also how they check the tablet heard them.
-    main.appendChild(button('plain', SHOW_ALL
-      ? 'Everybody here today · Choose what you are here for'
-      : 'Here for ' + whatIsShowing() + ' · Change',
-      function () { STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0); }));
+    var backToPrograms = button('plain back', '← Back to programs', function () {
+      STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0);
+    });
+    backToPrograms.style.marginTop = '0';
+    main.appendChild(backToPrograms);
 
     var bar = el('div', '', '');
     bar.id = 'groupbar';
@@ -745,7 +770,11 @@ function buildDoorAppHtml(options) {
     // is the same personal screen as anybody else's, already ticked for what
     // this tablet is for — which is what it takes the place of, a volunteer
     // typing a name they have known for years into the search box every week.
-    var past = (DAY.past || []).filter(pastIsSelected).sort(function (a, b) {
+    var present = {};
+    (DAY.people || []).forEach(function (q) { present[String(q.name || '').trim().toLowerCase()] = true; });
+    var past = (DAY.past || []).filter(pastIsSelected).filter(function (entry) {
+      return !present[String(entry.name || '').trim().toLowerCase()];
+    }).sort(function (a, b) {
       var d = sortKey(a.name).localeCompare(sortKey(b.name));
       return d || a.name.localeCompare(b.name);
     });
@@ -955,7 +984,7 @@ function buildDoorAppHtml(options) {
     bar.innerHTML = '';
     var n = Object.keys(TICKED).length;
     if (!n) return;
-    bar.appendChild(button('big', 'Sign in ' + n + (n === 1 ? ' person' : ' people') + ' together', startGroup));
+    bar.appendChild(button('big submit', 'Submit ' + n + (n === 1 ? ' person' : ' people'), startGroup));
     bar.firstChild.style.marginTop = '0';
   }
 
@@ -1050,8 +1079,15 @@ function buildDoorAppHtml(options) {
     RECURRING = 'none';
     MEMBER = '';
     SHOW_MORE = false;
+    if (instant && !busy && (Object.keys(PICKED).length || LUNCH)) {
+      var lines = [{ name: p.name, what: picksText(PICKED, LUNCH) }];
+      (p.guests || []).forEach(function (g) { lines.push({ name: g.name, what: 'guest of ' + p.name }); });
+      (p.household || []).forEach(function (m) {
+        if (PARTY[m.key] && !m.here) lines.push({ name: m.name, what: picksText(m.registered || [], m.lunchRegistered) });
+      });
+      return askConfirm(lines, submit, function () { PERSON = null; PICKED = {}; LUNCH = false; PARTY = {}; });
+    }
     STEP = 'person';
-    if (instant && !busy && (Object.keys(PICKED).length || LUNCH)) return submit();
     draw();
     window.scrollTo(0, 0);
   }
@@ -1142,10 +1178,56 @@ function buildDoorAppHtml(options) {
       return { person: p, picked: defaultPicks(p), lunch: !!p.lunchRegistered || lunchHereFor() };
     });
     PERSON = null;
-    STEP = 'group';
     hideStatus();
+    var ready = GROUP.every(function (g) { return Object.keys(g.picked).length || g.lunch; });
+    if (ready) {
+      return askConfirm(GROUP.map(function (g) {
+        return { name: g.person.name, what: picksText(g.picked, g.lunch) };
+      }), submitGroup, function () { GROUP = null; });
+    }
+    STEP = 'group';
     draw();
     window.scrollTo(0, 0);
+  }
+
+  // What somebody is being signed in for, in words: the programs, then lunch.
+  function picksText(picked, lunch) {
+    var values = Array.isArray(picked) ? picked : Object.keys(picked || {});
+    var bits = values.map(titleOf);
+    if (lunch) bits.push('Lunch');
+    return bits.join(' · ');
+  }
+
+  // THE THIRD TAP. Full-screen, names and events in large type, one huge
+  // Confirm and one large Back. Built with textContent: the names are typed.
+  function askConfirm(lines, onYes, onNo) {
+    var box = document.getElementById('confirm');
+    box.innerHTML = '';
+    var sheet = el('div', 'sheet', '');
+    sheet.appendChild(el('h2', '', lines.length > 1 ? 'Sign in these ' + lines.length + ' people?' : 'Sign in?'));
+    lines.forEach(function (l) {
+      var w = el('div', 'who', '');
+      w.appendChild(el('div', 'n', l.name));
+      if (l.what) w.appendChild(el('div', 'e', l.what));
+      sheet.appendChild(w);
+    });
+    var btns = el('div', 'btns', '');
+    var no = el('button', 'no', '← Back');
+    no.onclick = function () { closeConfirm(); if (onNo) onNo(); };
+    var yes = el('button', 'yes', 'Confirm');
+    yes.id = 'go';
+    yes.onclick = function () { closeConfirm(); onYes(); };
+    btns.appendChild(no);
+    btns.appendChild(yes);
+    sheet.appendChild(btns);
+    box.appendChild(sheet);
+    CONFIRMING = true;
+    box.classList.remove('hide');
+  }
+
+  function closeConfirm() {
+    CONFIRMING = false;
+    document.getElementById('confirm').classList.add('hide');
   }
 
   function drawGroup(main) {
@@ -1628,7 +1710,22 @@ function buildDoorAppHtml(options) {
       .doorSignIn(JSON.stringify(payload));
   }
 
+  // A read that was already in flight, or one taken before a queued write has
+  // landed, would turn a name grey again a moment after it went green. Keep what
+  // this tablet signed in for a few minutes and lay it back over every read.
+  var SIGNED_LOCAL_MS = 180000;
+  function reapplyLocalSignIns() {
+    var now = Date.now();
+    SIGNED_LOCAL = SIGNED_LOCAL.filter(function (s) { return now - s.at < SIGNED_LOCAL_MS; });
+    if (SIGNED_LOCAL.length) applySignedLocally(SIGNED_LOCAL.map(function (s) { return s.entry; }));
+  }
+
   function markSignedInLocally(entries) {
+    entries.forEach(function (e) { SIGNED_LOCAL.push({ at: Date.now(), entry: e }); });
+    applySignedLocally(entries);
+  }
+
+  function applySignedLocally(entries) {
     if (!DAY) return;
     DAY.people = DAY.people || [];
     entries.forEach(function (e) {
