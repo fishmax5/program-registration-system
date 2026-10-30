@@ -193,6 +193,16 @@ function buildDoorAppHtml(options) {
   li.item .title { font-size: 17px; }
   li.item .meta { display: block; font-size: 13px; color: #5F6368; margin-top: 3px; line-height: 1.4; }
   li.item.on { border-color: #B7DFC4; background: #F4FBF6; }
+  /* THE FIRST SCREEN: program cards two across, large enough to hit with a thumb. */
+  ul.events { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  ul.events li.item { margin-bottom: 0; }
+  ul.events li.item .title { font-size: 24px; font-weight: 600; line-height: 1.25; }
+  ul.events li.item .meta { font-size: 17px; margin-top: 6px; }
+  ul.events li.item.go .what { padding: 20px 14px 20px 4px; }
+  ul.events li.item.go label.tickzone { padding: 20px 8px 20px 14px; }
+  ul.events li.item input[type=checkbox] { width: 32px; height: 32px; }
+  ul.events > p { grid-column: 1 / -1; }
+  @media (max-width: 480px) { ul.events { grid-template-columns: 1fr; } }
   li.item.off label { cursor: default; opacity: .72; }
   .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em;
          border-radius: 999px; padding: 2px 8px; margin-right: 6px; vertical-align: 1px; }
@@ -206,6 +216,25 @@ function buildDoorAppHtml(options) {
   button.big { width: 100%; background: #1A73E8; color: #fff; border: 0; border-radius: 10px;
                padding: 16px; font-size: 18px; font-weight: 600; cursor: pointer; margin-top: 16px; }
   button.big[disabled] { opacity: .5; }
+  /* THE CONFIRM SCREEN'S ACTIONS LIVE BESIDE THE LIST, NOT UNDER IT. A confirm
+     screen with four programs on it pushed "Confirm and sign in" below the
+     fold, so the one button everybody needs was the one nobody could see. The
+     rail is sticky: it rides down the screen with the list. On a narrow
+     screen it becomes a bar along the bottom instead. */
+  .cwrap { display: flex; gap: 16px; align-items: flex-start; }
+  .cbody { flex: 1 1 auto; min-width: 0; }
+  .crail { flex: 0 0 210px; position: sticky; top: 14px; display: flex; flex-direction: column;
+           gap: 10px; }
+  button.big.submit { background: #188038; font-size: 30px; font-weight: 800; padding: 44px 12px;
+                      margin-top: 0; box-shadow: 0 4px 10px rgba(24,128,56,.45); letter-spacing: .02em; }
+  .crail button.plain { margin-top: 0; font-size: 14px; min-height: 40px; padding: 8px 10px; }
+  @media (max-width: 640px) {
+    .cwrap { display: block; }
+    .crail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; top: auto; flex-direction: row;
+             align-items: stretch; padding: 10px 12px; background: #fff; border-top: 1px solid #DADCE0; }
+    button.big.submit { flex: 2 1 0; font-size: 24px; padding: 18px 8px; }
+    .crail button.plain { flex: 1 1 0; }
+  }
   button.plain { background: #fff; border: 1px solid #DADCE0; color: #1A73E8; border-radius: 8px;
                  padding: 13px 14px; font-size: 15px; cursor: pointer; min-height: 48px; width: 100%;
                  margin-top: 8px; }
@@ -271,6 +300,7 @@ function buildDoorAppHtml(options) {
   var STEP = 'setup';      // setup -> events -> names -> person | walkin
   var PERSON = null;       // { name, key, isNew, phone, email, registered[], ... }
   var PICKED = {};         // session value -> true — the CONFIRM screen's ticks
+  var SHOW_MORE = false;   // "Add another event" pressed: the confirm screen lists every program, not just theirs
   var LUNCH = false;
   // WHAT THE PERSON AT THE DOOR SAID THEY ARE HERE FOR: session value -> true.
   // Answered on the first screen, read by the name list (which sections it
@@ -545,7 +575,7 @@ function buildDoorAppHtml(options) {
       'than one, tick the boxes and press Continue.'));
 
     var choices = eventChoices();
-    var list = el('ul', 'list', '');
+    var list = el('ul', 'list events', '');
     choices.forEach(function (choice) { list.appendChild(eventChoiceItem(choice)); });
     if (!choices.length) {
       list.appendChild(el('p', 'hint',
@@ -960,7 +990,7 @@ function buildDoorAppHtml(options) {
       bits.push('with ' + p.household.map(function (m) { return m.name; }).join(', '));
     }
     b.innerHTML = esc(p.name) + (bits.length ? '<span class="meta">' + esc(bits.join(' · ')) + '</span>' : '');
-    b.onclick = function () { choose(p); };
+    b.onclick = function () { choose(p, true); };
     return b;
   }
 
@@ -991,7 +1021,11 @@ function buildDoorAppHtml(options) {
     return picked;
   }
 
-  function choose(p) {
+  // THREE TAPS: the program, the name, done. A name tapped on the list signs
+  // that person in at once for what the first screen and the workbook already
+  // say (instant); the confirm screen is only for a card that arrives with
+  // nothing to sign in for, where it is the place to tick something.
+  function choose(p, instant) {
     PERSON = p;
     // WHAT THEY SAID AT THE DOOR, CROSSED WITH WHAT THE WORKBOOK EXPECTS OF
     // THEM. Somebody registered for Chair Yoga who tapped Chair Yoga two
@@ -1015,13 +1049,45 @@ function buildDoorAppHtml(options) {
     });
     RECURRING = 'none';
     MEMBER = '';
+    SHOW_MORE = false;
     STEP = 'person';
+    if (instant && !busy && (Object.keys(PICKED).length || LUNCH)) return submit();
     draw();
     window.scrollTo(0, 0);
   }
 
   // SCREEN 4 — one person: everything they are down for today, to confirm.
+  // The programs a confirm screen lists: what this person is down for or has
+  // ticked, until "Add another event" is pressed. Never an empty list.
+  function confirmPrograms(who, picked) {
+    var all = DAY.programs || [];
+    if (SHOW_MORE) return all;
+    var mine = all.filter(function (p) {
+      return picked[p.value] || (who.registered || []).indexOf(p.value) !== -1;
+    });
+    return mine.length ? mine : all;
+  }
+
+  // Body on the left; a sticky rail on the right with one big Submit and a
+  // small "Add another event" (gone once pressed — everything is showing).
+  function confirmLayout(main, body, submitFn, hasMore) {
+    var wrap = el('div', 'cwrap', '');
+    var rail = el('div', 'crail', '');
+    var go = button('big submit', 'Submit', submitFn);
+    go.id = 'go';
+    go.disabled = busy;
+    rail.appendChild(go);
+    if (hasMore && !SHOW_MORE) {
+      rail.appendChild(button('plain', '+ Add another event', function () { SHOW_MORE = true; draw(); }));
+    }
+    wrap.appendChild(body);
+    wrap.appendChild(rail);
+    main.appendChild(wrap);
+  }
+
   function drawPerson(main) {
+    var page = main;
+    main = el('div', 'cbody', '');
     main.appendChild(el('h2', '', 'Hello, ' + PERSON.name));
     main.appendChild(el('p', 'hint', (PERSON.registered || []).length
       ? 'This is what you are down for on ' + DAY.dateLabel +
@@ -1037,7 +1103,7 @@ function buildDoorAppHtml(options) {
     }
 
     var list = el('ul', 'list', '');
-    (DAY.programs || []).forEach(function (program) { list.appendChild(programItem(program)); });
+    confirmPrograms(PERSON, PICKED).forEach(function (program) { list.appendChild(programItem(program)); });
     if (!(DAY.programs || []).length) {
       list.appendChild(el('p', 'hint', 'No programs are on at ' + DAY.location + ' that day.'));
     }
@@ -1061,19 +1127,17 @@ function buildDoorAppHtml(options) {
     lunchList.appendChild(lunchItem(!!PERSON.lunchRegistered));
     main.appendChild(lunchList);
 
-    var go = button('big', 'Confirm and sign in', submit);
-    go.id = 'go';
-    go.disabled = busy;
-    main.appendChild(go);
     main.appendChild(button('plain back', '← Not you? Back to the list', function () {
       PERSON = null; STEP = 'names'; draw();
     }));
+    confirmLayout(page, main, submit, confirmPrograms(PERSON, PICKED).length < (DAY.programs || []).length);
   }
 
   // SCREEN 4b — several people at once: one confirm screen, each person's own ticks.
   function startGroup() {
     var people = Object.keys(TICKED).map(function (k) { return TICKED[k]; });
     if (!people.length) return;
+    SHOW_MORE = false;
     GROUP = people.map(function (p) {
       return { person: p, picked: defaultPicks(p), lunch: !!p.lunchRegistered || lunchHereFor() };
     });
@@ -1085,6 +1149,8 @@ function buildDoorAppHtml(options) {
   }
 
   function drawGroup(main) {
+    var page = main;
+    main = el('div', 'cbody', '');
     main.appendChild(el('h2', '', 'Signing in ' + GROUP.length + ' people'));
     main.appendChild(el('p', 'hint',
       'Each person is signed in for what is ticked under their name. Change anything that is wrong, ' +
@@ -1092,17 +1158,17 @@ function buildDoorAppHtml(options) {
     GROUP.forEach(function (g, idx) {
       main.appendChild(el('h3', '', g.person.name));
       var list = el('ul', 'list', '');
-      (DAY.programs || []).forEach(function (program) { list.appendChild(programItem(program, g)); });
+      confirmPrograms(g.person, g.picked).forEach(function (program) { list.appendChild(programItem(program, g)); });
       list.appendChild(lunchItem(!!g.person.lunchRegistered, g));
       main.appendChild(list);
     });
-    var go = button('big', 'Confirm and sign in everybody', submitGroup);
-    go.id = 'go';
-    go.disabled = busy;
-    main.appendChild(go);
     main.appendChild(button('plain back', '← Back to the list', function () {
       GROUP = null; STEP = 'names'; draw();
     }));
+    var more = GROUP.some(function (g) {
+      return confirmPrograms(g.person, g.picked).length < (DAY.programs || []).length;
+    });
+    confirmLayout(page, main, submitGroup, more);
   }
 
   function submitGroup() {
