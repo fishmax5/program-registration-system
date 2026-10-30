@@ -873,6 +873,145 @@ function previewBulkRegistrantsFromRoster(programKey) {
   };
 }
 
+// ----------------------------------------------------------------------------
+// The third way in: a session that was deleted, off Deleted_Event_Triage
+// ----------------------------------------------------------------------------
+//
+// When a calendar event goes, its registrants are MOVED to the triage tab
+// (moveRegistrantsToTriage, 26) and the sentence the office then needs is "put
+// those people on the replacement". The names are on the tab already, so this
+// reads them off it into the same review a paste produces — matched against
+// the roll and checked against who is already on the target program — and,
+// once the job has put somebody on, takes THAT person's triage row away so the
+// tab stops asking the office to confirm somebody who has been dealt with.
+// Someone the job did not write (already registered, refused, not reached)
+// stays in triage. Guests are not listed and not removed: they ride with the
+// person who brought them, and Register here is per person.
+
+/** One triage session's identity: its Event_ID, else title | location | date. */
+function bulkTriageEventKey_(row, tMap) {
+  const id = String(row[tMap['Event_ID']] || '').trim();
+  if (id) return id;
+  const d = coerceDate(row[tMap['Event_Date']]);
+  return [row[tMap['Deleted_Event_Title']] || row[tMap['Event']] || '',
+    row[tMap['Deleted_Event_Location']] || row[tMap['Location']] || '',
+    d ? formatDateKey(d) : ''].join('|');
+}
+
+/** Pure: [{ key, label, count }] — one per deleted session, newest first. */
+function bulkTriageEventsFrom_(triageRows, tMap) {
+  const byKey = {};
+  const order = [];
+  (triageRows || []).forEach(row => {
+    if (/guest/i.test(String(row[tMap['Person_Type']] || ''))) return;
+    if (!String(row[tMap['Name']] || '').trim()) return;
+    const key = bulkTriageEventKey_(row, tMap);
+    if (!byKey[key]) {
+      const d = coerceDate(row[tMap['Event_Date']]);
+      byKey[key] = {
+        key, count: 0, dateKey: d ? formatDateKey(d) : '',
+        label: `${row[tMap['Deleted_Event_Title']] || row[tMap['Event']] || '(untitled)'}` +
+          ` — ${row[tMap['Deleted_Event_Location']] || row[tMap['Location']] || ''}` +
+          (d ? ` — ${formatDateLabel(d)}` : '')
+      };
+      order.push(key);
+    }
+    if (String(row[tMap['Program_Status']] || '').trim() === 'Superseded') return;
+    // People, not rows: the review lists one per name, so the count must agree.
+    const nameKey = duplicateRegistrationNameKey(row[tMap['Name']]);
+    byKey[key].seen = byKey[key].seen || {};
+    if (nameKey && !byKey[key].seen[nameKey]) { byKey[key].seen[nameKey] = true; byKey[key].count++; }
+  });
+  return order.map(k => byKey[k]).sort((a, b) => b.dateKey.localeCompare(a.dateKey))
+    .map(e => ({ key: e.key, count: e.count, label: `${e.label} (${e.count})` }));
+}
+
+/** Pure: one { name, phone, email, line } per person on one triage session. */
+function bulkTriagePeopleFrom_(triageRows, tMap, eventKey) {
+  const seen = {};
+  const people = [];
+  (triageRows || []).forEach(row => {
+    if (bulkTriageEventKey_(row, tMap) !== eventKey) return;
+    if (/guest/i.test(String(row[tMap['Person_Type']] || ''))) return;
+    if (String(row[tMap['Program_Status']] || '').trim() === 'Superseded') return;
+    const name = String(row[tMap['Name']] || '').trim();
+    const nameKey = duplicateRegistrationNameKey(name);
+    if (!name || !nameKey || seen[nameKey]) return;
+    seen[nameKey] = true;
+    people.push({ name, phone: String(row[tMap['Phone']] || '').trim(),
+      email: String(row[tMap['Email']] || '').trim(), line: people.length + 1 });
+  });
+  return people.sort((a, b) => a.name.localeCompare(b.name)).map((p, i) => Object.assign(p, { line: i + 1 }));
+}
+
+function readBulkTriageRows_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRIAGE);
+  return sheet ? getSectionedRowValues(sheet, HEADERS.Deleted_Event_Triage, 'Event_ID') : [];
+}
+
+/** Called from the dialog: the deleted sessions that still have people in triage. */
+function listBulkTriageEvents() {
+  try {
+    return { ok: true, events: bulkTriageEventsFrom_(readBulkTriageRows_(), getIndexMap(HEADERS.Deleted_Event_Triage)) };
+  } catch (err) {
+    log(`⚠️ Bulk registrations could not read ${SHEET_NAMES.TRIAGE} (${err}).`);
+    return { ok: false, events: [], message: `⚠️ Could not read the triage tab: ${err}` };
+  }
+}
+
+/** Called from the dialog: one deleted session's people, in the review's shape. Writes nothing. */
+function previewBulkRegistrantsFromTriage(args) {
+  args = args || {};
+  if (!args.programKey) {
+    return { ok: false, message: '⚠️ Choose the program to move them onto first.' };
+  }
+  let people;
+  try {
+    people = bulkTriagePeopleFrom_(readBulkTriageRows_(), getIndexMap(HEADERS.Deleted_Event_Triage),
+      String(args.triageKey || ''));
+  } catch (err) {
+    return { ok: false, message: `⚠️ Could not read the triage tab: ${err}` };
+  }
+  if (!people.length) {
+    return { ok: false, message: '➖ Nobody is left in triage for that session.' };
+  }
+  if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
+    return { ok: false, message: `⚠️ That session has ${people.length} people — more than ` +
+      `${BULK_REGISTRANTS_MAX_PEOPLE} at once. Split it into two lists.` };
+  }
+  return Object.assign(reviewBulkPeople_(people, args.programKey), { fromTriage: true });
+}
+
+/**
+ * Takes the triage rows of the people the job actually wrote off the tab.
+ * Matched on the name key within the one session; never throws (the people are
+ * already registered, and a tidy-up must not turn that into a failure).
+ */
+function removeBulkTriagedPeople_(triageKey, names) {
+  try {
+    const want = {};
+    (names || []).forEach(n => { const k = duplicateRegistrationNameKey(n); if (k) want[k] = true; });
+    if (!triageKey || !Object.keys(want).length) return 0;
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRIAGE);
+    if (!sheet) return 0;
+    const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
+    const removed = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => {
+      const all = getSectionedRows(sheet, HEADERS.Deleted_Event_Triage, 'Event_ID');
+      const kept = all.filter(row => !(bulkTriageEventKey_(row, tMap) === triageKey &&
+        !/guest/i.test(String(row[tMap['Person_Type']] || '')) &&
+        want[duplicateRegistrationNameKey(row[tMap['Name']])]));
+      if (kept.length === all.length) return 0;
+      renderTriageSheet(false, kept);
+      return all.length - kept.length;
+    }, 0);
+    if (removed) log(`bulkRegistrants: took ${removed} registrant(s) off ${SHEET_NAMES.TRIAGE} after moving them.`);
+    return removed || 0;
+  } catch (err) {
+    log(`⚠️ Bulk registrations could not tidy ${SHEET_NAMES.TRIAGE} (${err}).`);
+    return 0;
+  }
+}
+
 /**
  * Called from the dialog: the mapped list, matched and checked for who is
  * already on the program, for review. Writes nothing.
@@ -896,6 +1035,15 @@ function previewBulkRegistrants(args) {
       'at once is a roll import rather than a class list. Split it into two lists.' };
   }
 
+  return reviewBulkPeople_(people, args.programKey);
+}
+
+/**
+ * The review's shape for a list of { name, phone, email, line }, wherever it
+ * came from (a paste, or Deleted_Event_Triage): matched against the roll and
+ * checked against who is already on the chosen program. Writes nothing.
+ */
+function reviewBulkPeople_(people, programKey) {
   let rows = [];
   const map = getIndexMap(HEADERS.Member_Roll);
   let corrections = {};
@@ -909,8 +1057,8 @@ function previewBulkRegistrants(args) {
 
   let lookup = name => ({ nameKey: duplicateRegistrationNameKey(name), alreadyOn: {}, cancelledOn: {}, standing: false });
   let checked = false;
-  const program = args.programKey
-    ? listBulkRegistrantPrograms().filter(p => p.key === args.programKey)[0]
+  const program = programKey
+    ? listBulkRegistrantPrograms().filter(p => p.key === programKey)[0]
     : null;
   if (program) {
     try {
@@ -1021,7 +1169,11 @@ function startBulkRegistrants(args) {
   }
 
   const jobId = Utilities.getUuid();
-  const plan = { jobId, program, picked: (args.picked || []).map(String), people };
+  // triageKey: the deleted session these people were read from, so finishing
+  // can take the ones actually written off Deleted_Event_Triage. Additive, so
+  // BULK_REGISTRANTS_PLAN_V1 keeps its key (absent reads as "not from triage").
+  const plan = { jobId, program, picked: (args.picked || []).map(String), people,
+    triageKey: String(args.triageKey || '') };
   if (!writeChunkedScriptProperty(BULK_REGISTRANTS_PLAN_PROP_KEY, JSON.stringify(plan),
     BULK_REGISTRANTS_CHUNK_CHARS, BULK_REGISTRANTS_MAX_CHUNKS)) {
     return { ok: false, message: '⚠️ The list could not be saved to work through — nothing was written. ' +
@@ -1557,6 +1709,10 @@ function finishBulkRegistrants_(state, problem) {
   result.remaining = remaining;
   result.finishedAt = Date.now();
   writeBulkRegistrantsResult_(result);
+  const triageKey = plan && plan.jobId === result.jobId ? plan.triageKey : '';
+  if (triageKey) {
+    removeBulkTriagedPeople_(triageKey, (result.changed || []).map(c => c.name));
+  }
   clearChunkedScriptProperty(BULK_REGISTRANTS_PLAN_PROP_KEY);
 
   const headline = problem
@@ -1863,6 +2019,11 @@ function buildBulkRegistrantsHtml() {
 <p class="hint"><b>Everybody already on this program</b> is the quick way for anything but Register — their names
 come off the tab, so there is nothing to type and no spelling to get wrong. Tick the ones you mean in the review.</p>
 <div><button id="roster" class="plain" onclick="pickFromRoster()">Pick from this program’s registrants</button></div>
+<p class="hint" style="margin-top:10px"><b>Moving people off a deleted event?</b> Choose it here — its registrants are in
+<code>Deleted_Event_Triage</code>. They are put on the program and dates chosen above, and anybody who is
+registered by this list is taken off triage.</p>
+<div><select id="triageEvent" style="max-width:560px"><option value="">Loading deleted events…</option></select>
+<button id="triageBtn" class="plain" onclick="pickFromTriage()">Pick from this deleted event</button></div>
 <p class="hint" style="margin-top:10px">Or open an Excel (.xlsx) or CSV file, or paste the list — one person per line,
 straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
 <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
@@ -1931,6 +2092,9 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // changes nothing about the write — only whether the mapping step is shown
   // and what the review says a row was read out of.
   var FROM_ROSTER = false;
+  // The deleted session (Deleted_Event_Triage) the list was read from, if any;
+  // sent with the start so finishing can take the people it wrote off triage.
+  var TRIAGE_KEY = '';
   // The per-row dropdown's words. Short, because they sit in a table cell
   // beside seven other columns; the full sentences are in the header select.
   var ACTIONS = [['register','Register'],['attended','Register + attended'],['cancel','Cancel'],
@@ -1986,6 +2150,18 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     PROGRAMS.forEach(function (p) { var o = el('option', p.label); o.value = p.key; sel.appendChild(o); });
   }).withFailureHandler(function (err) { say('Could not read the programs: ' + err.message, 'err'); })
     .listBulkRegistrantPrograms();
+
+  google.script.run.withSuccessHandler(function (res) {
+    var sel = $('triageEvent');
+    sel.textContent = '';
+    var evs = (res && res.events) || [];
+    var first = el('option', evs.length ? 'Choose a deleted event…' : 'No deleted events in triage');
+    first.value = ''; sel.appendChild(first);
+    evs.forEach(function (e) { var o = el('option', e.label); o.value = e.key; sel.appendChild(o); });
+    $('triageBtn').disabled = !evs.length;
+  }).withFailureHandler(function () {
+    $('triageEvent').textContent = ''; $('triageBtn').disabled = true;
+  }).listBulkTriageEvents();
 
   // ---- 1. Program and dates.
   $('program').addEventListener('change', function () {
@@ -2153,6 +2329,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       $('check').disabled = false;
       if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
       FROM_ROSTER = false;
+      TRIAGE_KEY = '';
       PEOPLE = res.people;
       drawReview();
       var c = res.counts;
@@ -2175,6 +2352,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       $('roster').disabled = false;
       if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
       FROM_ROSTER = true;
+      TRIAGE_KEY = '';
       RAW = null;
       PEOPLE = res.people;
       $('mapping').style.display = 'none';
@@ -2184,6 +2362,31 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       $('roster').disabled = false;
       say('Failed: ' + err.message, 'err');
     }).previewBulkRegistrantsFromRoster($('program').value);
+  }
+
+  // THE THIRD WAY IN: the people of one deleted event, off Deleted_Event_Triage.
+  // Nobody starts ticked (as with the roster): it is a choice of who to move.
+  function pickFromTriage() {
+    if (!program()) { say('Choose the program to move them onto first (step 1).', 'err'); return; }
+    var key = $('triageEvent').value;
+    if (!key) { say('Choose a deleted event first.', 'err'); return; }
+    $('triageBtn').disabled = true;
+    say('Reading who was on that event…');
+    google.script.run.withSuccessHandler(function (res) {
+      $('triageBtn').disabled = false;
+      if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
+      FROM_ROSTER = true;
+      TRIAGE_KEY = key;
+      RAW = null;
+      PEOPLE = res.people;
+      $('mapping').style.display = 'none';
+      drawReview();
+      say(PEOPLE.length + ' people were on that event. Tick the ones to move, then choose the dates above.' +
+        summaryOfAlready());
+    }).withFailureHandler(function (err) {
+      $('triageBtn').disabled = false;
+      say('Failed: ' + err.message, 'err');
+    }).previewBulkRegistrantsFromTriage({ triageKey: key, programKey: $('program').value });
   }
 
   // ---- 5. The review.
@@ -2469,7 +2672,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       // carrying on from its trigger — so ask rather than assume.
       say('The first run reported: ' + err.message + ' — checking whether it is carrying on…');
       poll();
-    }).startBulkRegistrants({ programKey: p.key, picked: pickedKeys(), people: people });
+    }).startBulkRegistrants({ programKey: p.key, picked: pickedKeys(), people: people, triageKey: TRIAGE_KEY });
   }
 
   // ---- 5. Progress, polled — the work does not live in this window.
@@ -2602,7 +2805,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     if (POLL) { clearInterval(POLL); POLL = null; }
     // A new list starts empty: the last one's rows, mapping and review would
     // otherwise sit under the setup, ready to be applied a second time.
-    RAW = null; PEOPLE = []; ROWS = []; FROM_ROSTER = false;
+    RAW = null; PEOPLE = []; ROWS = []; FROM_ROSTER = false; TRIAGE_KEY = '';
     FU_LOADED = false; FU = [];
     $('followup').style.display = 'none';
     $('fuPreviewBox').textContent = ''; fuSay('');
