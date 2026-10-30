@@ -189,7 +189,12 @@ function noMismatchLogged(label) {
 // --- 83: the Metrics tab, under its two summary tables --------------------
 {
   const headers = sandbox.HEADERS.Metrics;
-  const rows = ['2026-07', '2026-08', '2025-09'].map(m => rowOf(headers, { Month: m, Sessions: 3, Registrations: 9 }));
+  const rows = ['2026-07', '2026-08', '2025-09'].map(m => rowOf(headers, {
+    Month: m, Sessions: 3, Registrations: 9,
+    // Two buildings on the newest month, so the by-building block under the
+    // history is drawn too (and must not be mistaken for the history).
+    By_Site: m === '2026-08' ? JSON.stringify({ Ashbridge: { Sessions: 1, Registrations: 4 }, Narberth: { Sessions: 2, Registrations: 5 } }) : ''
+  }));
   const { grid, sheet } = sheetNamed('Metrics');
   checkWriteBeforeClear('Metrics', sheet, grid,
     () => sandbox.writeMetricsSheet(sheet, rows, new RealDate(2026, 8, 9)),

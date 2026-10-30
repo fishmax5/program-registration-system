@@ -57,6 +57,11 @@ this.metricsMonthLabel = metricsMonthLabel;
 this.HEADERS = HEADERS;
 this.kitchenOrdersForMonth = kitchenOrdersForMonth;
 this.getIndexMap = getIndexMap;
+this.readStoredMetricsRows = readStoredMetricsRows;
+this.metricsSummaryLayout_ = metricsSummaryLayout_;
+this.metricsSiteBlockRows_ = metricsSiteBlockRows_;
+this.MANUAL_ENTRY_PREFIX = MANUAL_ENTRY_PREFIX;
+this.MEMBER_ROLL_HEADERS = HEADERS.Member_Roll;
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -308,6 +313,189 @@ check('and its counts simply are not there',
     [septMetrics.Kitchen_Ordered, septMetrics.Kitchen_Order_Days], [45, 3]);
   check('a month known only from the lunch dashboard is still listed',
     sandbox.metricsMonthsPresent(withKitchen).indexOf('2026-10') !== -1, true);
+}
+
+
+// ---------------------------------------------------------------------------
+// 5. THE SAME MONTH, BUILDING BY BUILDING
+// ---------------------------------------------------------------------------
+// Ashbridge and Narberth in August 2026. Ann comes to both buildings, so she is
+// one participant at the centre and one at each building — the buildings
+// legitimately add up to MORE than the whole, and the summary says so.
+{
+  const at = (row, location) => { row[regMap['Location']] = location; return row; };
+  const sess = (id, d, title, location, opts) => {
+    const row = session(id, 2026, 8, d, title, Object.assign({ location: location }, opts || {}));
+    return row;
+  };
+  const sessions = [
+    sess('n-yoga', 5, 'Chair Yoga', 'Narberth', { cap: 4 }),     // 4 of 4: full
+    sess('a-tai', 6, 'Tai Chi', 'Ashbridge', { cap: 10 }),        // 1 of 10: under half
+    sess('a-club', 7, 'Mah Jongg', 'Ashbridge', { cap: 8, club: true }),
+    sess('a-help', 8, 'Computer Help', 'Ashbridge', { assistance: true })
+  ];
+  const regs = [
+    at(registrant('n-yoga', 2026, 8, 5, 'Ann Adams', { attended: true }), 'Narberth'),
+    at(registrant('n-yoga', 2026, 8, 5, 'Ben Brooks', { attended: true }), 'Narberth'),
+    at(registrant('n-yoga', 2026, 8, 5, 'Cara Cole'), 'Narberth'),
+    at(registrant('n-yoga', 2026, 8, 5, 'Dan Diaz'), 'Narberth'),
+    at(registrant('n-yoga', 2026, 8, 5, 'Wait Ing', { status: 'Waitlisted' }), 'Narberth'),
+    at(registrant('a-tai', 2026, 8, 6, 'Ann Adams', { attended: true }), 'Ashbridge'),
+    at(registrant('a-club', 2026, 8, 7, 'Eve Ellis', { attended: true }), 'Ashbridge'),
+    at(registrant('a-help', 2026, 8, 8, 'Eve Ellis'), 'Ashbridge'),
+    // July: Ann and Ben were here; Eve was not. Ann at Narberth only.
+    at(registrant('n-jul', 2026, 7, 9, 'Ann Adams'), 'Narberth'),
+    at(registrant('n-jul', 2026, 7, 9, 'Ben Brooks'), 'Narberth'),
+    // May: Fay came, and has not been seen since — lapsing at the end of August.
+    // Ann also came in May and is still coming.
+    at(registrant('n-may', 2026, 5, 5, 'Fay Fox'), 'Narberth'),
+    at(registrant('n-may', 2026, 5, 5, 'Ann Adams'), 'Narberth')
+  ];
+  const roll = (name, first, status, retired, locations) => {
+    const row = new Array(sandbox.MEMBER_ROLL_HEADERS.length).fill('');
+    const m = sandbox.getIndexMap(sandbox.MEMBER_ROLL_HEADERS);
+    row[m['Name']] = name; row[m['First_Seen']] = first; row[m['Status']] = status;
+    row[m['Retired_Date']] = retired; row[m['Locations']] = locations;
+    return row;
+  };
+  const siteSource = {
+    sessionRows: sessions, sessionMap: sessionMap,
+    registrantRows: regs, registrantMap: regMap,
+    memberMap: sandbox.getIndexMap(sandbox.MEMBER_ROLL_HEADERS),
+    memberRows: [
+      roll('Ann Adams', new Date(2025, 0, 10), 'Active', '', 'Narberth, Ashbridge'),
+      roll('Ben Brooks', new Date(2025, 5, 1), 'Active', '', 'Narberth'),
+      roll('Eve Ellis', new Date(2026, 7, 3), 'Active', '', 'Ashbridge'),     // added in August
+      roll('Old Timer', new Date(2024, 0, 1), 'Retired', new Date(2026, 7, 20), 'Narberth'), // retired in August
+      roll('Gone Long', new Date(2024, 0, 1), 'Retired', new Date(2025, 1, 1), 'Narberth')   // retired last year
+    ]
+  };
+  const firsts = sandbox.metricsFirstMonthByPerson(regs, regMap);
+  const aug = sandbox.computeMonthlyMetrics('2026-08', siteSource, firsts, NOW);
+  const bySite = JSON.parse(aug.By_Site);
+
+  check('both buildings get a figure', Object.keys(bySite).sort(), ['Ashbridge', 'Narberth']);
+  check('sessions are counted where they were held',
+    [bySite.Narberth.Sessions, bySite.Ashbridge.Sessions, aug.Sessions], [1, 3, 4]);
+  check('registrations per building add up to the whole',
+    [bySite.Narberth.Registrations, bySite.Ashbridge.Registrations, aug.Registrations], [4, 3, 7]);
+  check('a person at both buildings is one participant at the centre and one at each',
+    [aug.Participants, bySite.Narberth.Participants, bySite.Ashbridge.Participants], [5, 4, 2]);
+  check('a building with no capped waitlist trouble has no waitlist key stored',
+    [bySite.Narberth.Waitlisted, bySite.Ashbridge.Waitlisted], [1, 0]);
+  check('the whole-centre row is not changed by also counting buildings',
+    [aug.Waitlisted, aug.Cancellations], [1, 0]);
+
+  // --- demand ---
+  check('a capped session with every seat taken filled', [aug.Sessions_Full, bySite.Narberth.Sessions_Full], [1, 1]);
+  check('a capped session under half full is counted',
+    [aug.Sessions_Under_Half, bySite.Ashbridge.Sessions_Under_Half], [2, 2]);
+  check('no-shows are registered, past, and not ticked — once anybody was ticked',
+    [aug.No_Shows, bySite.Narberth.No_Shows], [3, 2]);
+  check('waitlist share is turned away over everyone who asked',
+    [aug.Waitlist_Share, bySite.Narberth.Waitlist_Share], [0.13, 0.2]);
+  check('club and assistance registrations follow the session',
+    [aug.Club_Registrations, aug.Assistance_Registrations], [1, 1]);
+
+  // --- coming back ---
+  // July had Ann and Ben; August has Ann, Ben, Cara, Dan, Eve → 2 of 5.
+  check('returning people are last month\'s share of this month\'s',
+    [aug.Returning_Rate, bySite.Narberth.Returning_Rate], [0.4, 0.5]);
+  check('a building with nobody the month before has no returning figure',
+    bySite.Ashbridge.Returning_Rate, undefined);
+  check('visits per person', aug.Visits_Per_Person, 1.4);
+  // End of Aug 31: last 90 days start after Jun 2; the 90 before are Mar 4–Jun 2.
+  // Fay was seen in May and not since; Ann was seen in both.
+  check('lapsing people were seen before and not lately', [aug.Lapsing_People, bySite.Narberth.Lapsing_People], [1, 1]);
+  check('the first month has nobody to lapse', sandbox.computeMonthlyMetrics('2026-05', siteSource, firsts, NOW).Lapsing_People, '');
+
+  // --- the roll ---
+  // End of August: Ann, Ben, Eve and Old Timer (retired the 20th, so gone by the 31st) → 3.
+  check('the roll at month end leaves out who retired in the month',
+    [aug.Roll_Size, aug.Roll_Added, aug.Roll_Retired], [3, 1, 1]);
+  check('the roll by building uses the buildings listed against each person',
+    [bySite.Narberth.Roll_Size, bySite.Ashbridge.Roll_Size], [2, 2]);
+  check('no roll at all is blank, not an empty roll',
+    sandbox.computeMonthlyMetrics('2026-08',
+      Object.assign({}, siteSource, { memberRows: null, __metricsContext: undefined }), firsts, NOW).Roll_Size, '');
+
+  // --- the summary reads By_Site back ---
+  const rowFor = metrics => metricHeaders.map(h => (metrics[h] === undefined ? '' : metrics[h]));
+  const stored2 = [rowFor(aug)];
+  const sum2 = sandbox.buildYearOverYearSummary(stored2, new Date(2026, 8, 16));
+  check('the summary names the buildings its stored rows know', sum2.sites, ['Ashbridge', 'Narberth']);
+  const regsInd = sum2.indicators.filter(i => i.label === 'Registrations')[0];
+  check('a building\'s twelve-month figure reads its own slice',
+    [regsInd.current, regsInd.sites.Narberth.current, regsInd.sites.Ashbridge.current], [7, 4, 3]);
+  const rollInd = sum2.indicators.filter(i => i.label === 'People on the roll')[0];
+  check('a stock is the last month with one, not a sum', rollInd.current, 3);
+  const progInd = sum2.indicators.filter(i => i.label === 'Programs offered (per month)')[0];
+  check('a per-month count is averaged', progInd.current, 4);
+  check('a month stored before buildings were counted has none to show',
+    sandbox.buildYearOverYearSummary([storedRow('2026-08', { Registrations: 9 })], new Date(2026, 8, 16)).sites, []);
+
+  // --- the by-building block ---
+  const block = sandbox.metricsSiteBlockRows_(stored2);
+  check('the by-building block has a row per month per building', block.rows.map(r => r.slice(0, 2)),
+    [['2026-08', 'Ashbridge'], ['2026-08', 'Narberth']]);
+  check('and its columns line up with its headers',
+    block.rows[1][block.headers.indexOf('Registrations')], 4);
+
+  // --- the layout the early write counts on ---
+  const layout = sandbox.metricsSummaryLayout_(sum2.indicators);
+  check('every group is a heading row and every indicator one row',
+    [layout.filter(e => e.divider).length, layout.filter(e => e.indicator).length],
+    [6, sum2.indicators.length]);
+}
+
+// ---------------------------------------------------------------------------
+// 6. READING THE HISTORY BACK OFF A TAB THAT HAS SUMMARIES ABOVE IT
+// ---------------------------------------------------------------------------
+// The history sits under a banner and two summary tables, and the by-building
+// block sits under it. It used to be read from row 2, which is blank, so every
+// column projected to "not on the sheet" and EVERY stored month read back empty:
+// a recount then merged into nothing and dropped the months it could not count.
+{
+  const blank = new Array(metricHeaders.length).fill('');
+  const monthRow = (key, values) => {
+    const row = blank.slice();
+    row[metricMap['Month']] = key;
+    row[metricMap['Month_Label']] = sandbox.metricsMonthLabel(key);
+    Object.keys(values).forEach(h => { row[metricMap[h]] = values[h]; });
+    return row;
+  };
+  const header = metricHeaders.slice();
+  header[metricMap['Notes']] = `${sandbox.MANUAL_ENTRY_PREFIX} Notes`;
+  const pad = row => row.concat(new Array(Math.max(0, metricHeaders.length - row.length)).fill(''));
+  const grid = [
+    pad(['📈 Metrics — Year Over Year']),
+    pad([]),
+    pad(['Indicator', 'Last 12 months', 'Prior 12 months', 'Change']),
+    pad(['Sessions held', 120, 96, '▲ 24']),
+    pad([]),
+    pad(['📅 Month by month']),
+    header,
+    monthRow('2026-08', { Sessions: 3, Registrations: 9, Notes: 'heat wave' }),
+    monthRow('2025-08', { Sessions: 40, Registrations: 300 }),
+    pad([]),
+    pad(['📍 Month by month, by building']),
+    pad(['Month', 'Site', 'Sessions']),
+    pad(['2026-08', 'Narberth', 3])
+  ];
+  const sheet = {
+    getName: () => 'Metrics',
+    getLastRow: () => grid.length,
+    getLastColumn: () => metricHeaders.length,
+    getRange: (r, c, nr, nc) => ({ getValues: () => grid.slice(r - 1, r - 1 + nr).map(row => row.slice(c - 1, c - 1 + nc)) })
+  };
+  const read = sandbox.readStoredMetricsRows(sheet);
+  check('the history is found under the summaries and stops before the by-building block',
+    read.map(r => r[metricMap['Month']]), ['2025-08', '2026-08']);
+  check('its columns are read by name, whatever order the tab has them in',
+    [read[1][metricMap['Registrations']], read[1][metricMap['Notes']], read[0][metricMap['Sessions']]], [9, 'heat wave', 40]);
+  check('a tab with no history header reads as empty', sandbox.readStoredMetricsRows(
+    { getName: () => 'Metrics', getLastRow: () => 1, getLastColumn: () => 4,
+      getRange: () => ({ getValues: () => [['hello', '', '', '']] }) }), []);
 }
 
 console.log(failures === 0 ? '\nAll monthly metrics checks passed.' : `\n${failures} check(s) failed.`);
