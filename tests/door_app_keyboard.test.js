@@ -267,8 +267,9 @@ ok('the results list is never absolutely positioned',
 ok('nothing in the page is position: absolute', !/position:\s*absolute/.test(style));
 
 ok('the fixed strips are re-docked from visualViewport.height + offsetTop',
-  /VV\.offsetTop \+ VV\.height/.test(script) && /okb\.style\.bottom/.test(script) &&
-  /status\.style\.bottom/.test(script));
+  /VV\.offsetTop \+ VV\.height/.test(script) && /okb\.style\.bottom/.test(script));
+ok('the status strip sits at the top, clear of both keyboards',
+  /#status\s*\{[^}]*top:\s*0/.test(style) && !/status\.style\.bottom/.test(script));
 ok('a browser without visualViewport falls back to scrollIntoView on focus',
   /if \(!VV\)[\s\S]{0,120}scrollIntoView/.test(script));
 

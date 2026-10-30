@@ -141,6 +141,10 @@ function buildDoorAppHtml(options) {
             margin: 16px 0 6px 0; border-bottom: 1px solid #E8EAED; padding-bottom: 4px; }
   .letter:first-of-type { margin-top: 4px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  /* THE NAME LISTS: three across under each letter. A grid fills left to right
+     and then down, so a row reads A-B-C and the next row D-E-F. */
+  .cards.names { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 560px) { .cards.names { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   button.card { background: #fff; border: 1px solid #DADCE0; border-radius: 10px; padding: 14px 12px;
                 font-size: 17px; text-align: left; cursor: pointer; min-height: 62px; color: #202124; }
   button.card .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px; line-height: 1.35; }
@@ -155,7 +159,7 @@ function buildDoorAppHtml(options) {
                         align-items: center; justify-content: center; cursor: pointer; }
   .cardwrap .tickzone input { width: 26px; height: 26px; margin: 0; }
   .cardwrap.picked button.card { border-color: #1A73E8; border-width: 2px; background: #F1F7FE; }
-  #groupbar { position: sticky; top: 64px; z-index: 4; margin: 0 0 10px 0; }
+  #groupbar { position: sticky; top: 76px; z-index: 6; margin: 0 0 10px 0; }
   /* EVENT ROWS: the box is the only thing that ticks; the rest of the row goes on. */
   li.item.go { cursor: pointer; display: flex; align-items: stretch; }
   li.item.go label.tickzone { display: flex; align-items: flex-start; padding: 14px 8px 14px 12px; cursor: pointer; }
@@ -221,20 +225,16 @@ function buildDoorAppHtml(options) {
      fold, so the one button everybody needs was the one nobody could see. The
      rail is sticky: it rides down the screen with the list. On a narrow
      screen it becomes a bar along the bottom instead. */
-  .cwrap { display: flex; gap: 16px; align-items: flex-start; }
-  .cbody { flex: 1 1 auto; min-width: 0; }
-  .crail { flex: 0 0 210px; position: sticky; top: 14px; display: flex; flex-direction: column;
-           gap: 10px; }
-  button.big.submit { background: #188038; font-size: 30px; font-weight: 800; padding: 44px 12px;
+  .cwrap { padding-top: 112px; }
+  .cbody { min-width: 0; }
+  /* PINNED TO THE TOP, under the header with a gap: the side column never
+     stayed put on the tablet, and a button below the fold is no button. */
+  .crail { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); width: min(820px, 100%);
+           z-index: 40; display: flex; flex-direction: row; align-items: stretch; gap: 10px;
+           padding: 8px 16px; background: #F8F9FA; box-shadow: 0 6px 10px -6px rgba(0,0,0,.35); }
+  button.big.submit { flex: 2 1 0; background: #188038; font-size: 28px; font-weight: 800; padding: 22px 12px;
                       margin-top: 0; box-shadow: 0 4px 10px rgba(24,128,56,.45); letter-spacing: .02em; }
-  .crail button.plain { margin-top: 0; font-size: 14px; min-height: 40px; padding: 8px 10px; }
-  @media (max-width: 640px) {
-    .cwrap { display: block; }
-    .crail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; top: auto; flex-direction: row;
-             align-items: stretch; padding: 10px 12px; background: #fff; border-top: 1px solid #DADCE0; }
-    button.big.submit { flex: 2 1 0; font-size: 24px; padding: 18px 8px; }
-    .crail button.plain { flex: 1 1 0; }
-  }
+  .crail button.plain { flex: 1 1 0; margin-top: 0; font-size: 16px; min-height: 48px; padding: 8px 10px; }
   button.plain { background: #fff; border: 1px solid #DADCE0; color: #1A73E8; border-radius: 8px;
                  padding: 13px 14px; font-size: 15px; cursor: pointer; min-height: 48px; width: 100%;
                  margin-top: 8px; }
@@ -260,8 +260,10 @@ function buildDoorAppHtml(options) {
   @media (max-width: 480px) { #confirm .btns { flex-direction: column-reverse; } }
   .foot { margin-top: 26px; font-size: 13px; color: #5F6368; line-height: 1.6; }
 
-  #status { position: fixed; left: 0; right: 0; bottom: 0; padding: 13px 16px; background: #202124;
-            z-index: 55; color: #fff; font-size: 14px; line-height: 1.45; transform: translateY(120%);
+  /* AT THE TOP, never the bottom: the bottom is where the touch keyboard and
+     the system keyboard are, and "Reading the list..." sat on top of them. */
+  #status { position: fixed; left: 0; right: 0; top: 0; padding: 13px 16px; background: #202124;
+            z-index: 55; color: #fff; font-size: 14px; line-height: 1.45; transform: translateY(-120%);
             transition: transform .18s ease; }
   #status.show { transform: translateY(0); }
   #status.err { background: #C5221F; }
@@ -828,7 +830,7 @@ function buildDoorAppHtml(options) {
       if (initial !== letter) {
         letter = initial;
         main.appendChild(el('div', 'letter', letter));
-        grid = el('div', 'cards', '');
+        grid = el('div', 'cards names', '');
         main.appendChild(grid);
       }
       grid.appendChild(personTile(p));
@@ -2093,10 +2095,7 @@ function buildDoorAppHtml(options) {
   function fitToKeyboard() {
     var inset = VV ? Math.max(0, Math.round(window.innerHeight - keyboardTopY())) : 0;
     var okb = document.getElementById('okb');
-    var status = document.getElementById('status');
     okb.style.bottom = inset + 'px';
-    var okbHeight = okb.classList.contains('hide') ? 0 : okb.getBoundingClientRect().height;
-    status.style.bottom = Math.round(inset + okbHeight) + 'px';
     // Room to scroll the last box on a short screen up above the keyboard.
     var typing = isTypingBox(document.activeElement);
     document.body.classList.toggle('kb-up', typing || inset > 80);
