@@ -145,6 +145,14 @@ function buildDoorAppHtml(options) {
      and then down, so a row reads A-B-C and the next row D-E-F. */
   .cards.names { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   @media (max-width: 560px) { .cards.names { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  /* THE COMPACT LIST: one continuous grid, no gaps between letters. Each row
+     carries the letter (or "A–B" where it spans two) of the names in it, in a
+     narrow gutter, instead of a heading that strands a half-empty row. The
+     column count is set by drawNameGrid() to match the breakpoint above. */
+  .namerow { display: grid; gap: 6px; margin-bottom: 6px; align-items: stretch; }
+  .rowletter { font-size: 13px; font-weight: 700; color: #5F6368; letter-spacing: .04em;
+               display: flex; align-items: center; justify-content: center; }
+  .namerow button.card { padding: 10px 12px; min-height: 52px; }
   button.card { background: #fff; border: 1px solid #DADCE0; border-radius: 10px; padding: 14px 12px;
                 font-size: 17px; text-align: left; cursor: pointer; min-height: 62px; color: #202124; }
   button.card .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px; line-height: 1.35; }
@@ -823,18 +831,18 @@ function buildDoorAppHtml(options) {
    * exactly the way the registered names above them are.
    */
   function drawNameGrid(main, people) {
-    var letter = '';
-    var grid = null;
-    people.forEach(function (p) {
-      var initial = (sortKey(p.name).charAt(0) || '#').toUpperCase();
-      if (initial !== letter) {
-        letter = initial;
-        main.appendChild(el('div', 'letter', letter));
-        grid = el('div', 'cards names', '');
-        main.appendChild(grid);
-      }
-      grid.appendChild(personTile(p));
-    });
+    // Same breakpoint as the .cards.names rule above: two across on a phone.
+    var cols = window.matchMedia && window.matchMedia('(max-width: 560px)').matches ? 2 : 3;
+    for (var i = 0; i < people.length; i += cols) {
+      var chunk = people.slice(i, i + cols);
+      var first = (sortKey(chunk[0].name).charAt(0) || '#').toUpperCase();
+      var last = (sortKey(chunk[chunk.length - 1].name).charAt(0) || '#').toUpperCase();
+      var row = el('div', 'namerow', '');
+      row.style.gridTemplateColumns = '36px repeat(' + cols + ', minmax(0, 1fr))';
+      row.appendChild(el('div', 'rowletter', first === last ? first : first + '–' + last));
+      chunk.forEach(function (p) { row.appendChild(personTile(p)); });
+      main.appendChild(row);
+    }
   }
 
   /** What the sections are about, in the words the person tapped. */
