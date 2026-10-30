@@ -17,7 +17,9 @@
 //                     a Room dropdown that is LIVE — picking one writes
 //                     `Program_Settings`' `Room_Or_Setup` at once — and two
 //                     derived cells beside it, `Effective_Room` and `Why`, that
-//                     say what the program actually gets and from where.
+//                     say what the program actually gets and from where. Rows
+//                     are ordered by DAY — see `roomManagementDayInfo_` — so
+//                     whatever meets soonest is at the top.
 //   Assign by Keyword the one-off: type a word, pick a room, tick Apply. Every
 //                     program whose title contains the word is given that room
 //                     (after one confirmation naming them). `Matches` is a sheet
@@ -42,7 +44,7 @@
 // ONE SOURCE OF TRUTH. The Room cell on this tab is NOT a second store: it is
 // `Room_Or_Setup`, written through on edit and read back on every refresh, so
 // a hand edit on Program_Settings shows up here and nothing can disagree. The
-// derived cells (`Event`, `Location`, `Effective_Room`, `Why`) are redrawn from
+// derived cells (`Event`, `Location`, `Effective_Room`, `Why`, `Day`) are redrawn from
 // Program_Settings and the rules on every refresh — typing over them is put
 // right, and the header note says so.
 //
@@ -65,7 +67,7 @@
  */
 const ROOM_MANAGEMENT_LAYOUT = {
   PROGRAMS: { title: '🚪 Programs → Room', startCol: 1,
-    headers: ['Event', 'Location', 'Room', 'Effective_Room', 'Why'] },
+    headers: ['Event', 'Location', 'Room', 'Effective_Room', 'Why', 'Day'] },
   ASSIGN: { title: '⚡ Assign by Keyword (one-off)', startCol: 7,
     headers: ['Keyword', 'Room', 'Matches', 'Apply'] },
   RULES: { title: '📌 Keyword Rules (standing)', startCol: 12,
@@ -115,21 +117,64 @@ function keywordRuleFor_(title, location, rules) {
   return null;
 }
 
+const ROOM_MANAGEMENT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** Sorts after every real day offset (0-6): a program with nothing coming up. */
+const ROOM_MANAGEMENT_NO_DAY_RANK = 99;
+
+/** The weekday (0 = Sunday) of a `yyyy-MM-dd` key, read as a calendar date so no timezone can move it. */
+function roomManagementWeekday_(dateKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateKey || ''));
+  return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay() : -1;
+}
+
 /**
- * The rows of the Programs table: `[Event, Location, Room, Effective_Room, Why]`.
- * `programs` is `[{ event, location, room }]` with `room` the raw Room_Or_Setup.
- * Sorted by Location then Event, so the order does not move with the calendar.
+ * The day(s) a program meets, counted from today. `dateKeys` is the program's
+ * session dates (`yyyy-MM-dd`, any order); dates before `todayKey` are ignored.
+ * Returns `{ label, rank, next }`: `label` the distinct weekdays in the order
+ * they next come round ("Thu, Tue" on a Wednesday), `rank` how many days until
+ * the first of them (0 = today), `next` the date of the next session. A program
+ * with nothing coming up has a blank label and `ROOM_MANAGEMENT_NO_DAY_RANK`.
  */
-function buildRoomManagementProgramRows(programs, rooms, rules) {
-  const sorted = (programs || []).slice().sort((a, b) =>
-    String(a.location).localeCompare(String(b.location)) || String(a.event).localeCompare(String(b.event)));
-  return sorted.map(p => {
+function roomManagementDayInfo_(dateKeys, todayKey) {
+  const upcoming = (dateKeys || []).map(String).filter(k => k >= todayKey).sort();
+  const todayDay = roomManagementWeekday_(todayKey);
+  if (upcoming.length === 0 || todayDay < 0) return { label: '', rank: ROOM_MANAGEMENT_NO_DAY_RANK, next: '' };
+  const offsets = [];
+  upcoming.forEach(k => {
+    const off = (roomManagementWeekday_(k) - todayDay + 7) % 7;
+    if (offsets.indexOf(off) === -1) offsets.push(off);
+  });
+  offsets.sort((a, b) => a - b);
+  return { label: offsets.map(o => ROOM_MANAGEMENT_DAY_NAMES[(todayDay + o) % 7]).join(', '),
+    rank: offsets[0], next: upcoming[0] };
+}
+
+/**
+ * The rows of the Programs table: `[Event, Location, Room, Effective_Room, Why, Day]`.
+ * `programs` is `[{ event, location, room }]` with `room` the raw Room_Or_Setup.
+ * `schedule` is `{ <notificationProgramKey>: [dateKey, ...] }` and `todayKey`
+ * today's `yyyy-MM-dd`. Sorted by how soon the program next meets by weekday
+ * (today, then tomorrow, round the week), then its next date, then Location and
+ * Event; programs with nothing coming up go last in Location/Event order. With
+ * no schedule it is Location then Event, as before.
+ */
+function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayKey) {
+  const dayOf = p => roomManagementDayInfo_(
+    (schedule || {})[notificationProgramKey(p.event, p.location)], todayKey || '');
+  const decorated = (programs || []).map(p => ({ p, day: dayOf(p) }));
+  decorated.sort((a, b) =>
+    (a.day.rank - b.day.rank) ||
+    String(a.day.next).localeCompare(String(b.day.next)) ||
+    String(a.p.location).localeCompare(String(b.p.location)) ||
+    String(a.p.event).localeCompare(String(b.p.event)));
+  return decorated.map(d => {
+    const p = d.p;
     const eff = effectiveDefaultRoom_(p.event, p.location, p.room, rooms, rules);
     let why = '';
     if (eff.source === 'program') why = 'Set here';
     else if (eff.source === 'keyword') why = `Keyword "${eff.rule.keyword}"`;
     else if (eff.source === 'unlisted') why = 'Not on the rooms list — not checked';
-    return [p.event, p.location, p.room || '', eff.label, why];
+    return [p.event, p.location, p.room || '', eff.label, why, d.day.label];
   });
 }
 
@@ -177,6 +222,34 @@ function readRoomManagementPrograms_() {
     });
   } catch (err) {
     log(`ℹ️ Could not read the programs for ${SHEET_NAMES.ROOM_MANAGEMENT} (${err}).`);
+  }
+  return out;
+}
+
+/**
+ * Every program's session dates from the session table, as
+ * `{ <notificationProgramKey>: [yyyy-MM-dd, ...] }` — upcoming only, since the
+ * Day column and the order are about what is next. Never throws.
+ */
+function readRoomManagementSchedule_(todayKey) {
+  const out = {};
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+    if (!sheet) return out;
+    const headers = HEADERS.All_Program_Sessions;
+    const map = getIndexMap(headers);
+    getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
+      const start = coerceDate(row[map['Event_Date']]);
+      if (!start) return;
+      const key = formatDateKey(start);
+      if (key < todayKey) return;
+      const pk = notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+        String(row[map['Location']] || '').trim());
+      (out[pk] = out[pk] || []).push(key);
+    });
+  } catch (err) {
+    log(`ℹ️ Could not read the session days for ${SHEET_NAMES.ROOM_MANAGEMENT} (${err}) — ordered by location.`);
   }
   return out;
 }
@@ -258,7 +331,9 @@ function refreshRoomManagementTab(ss) {
     const rooms = readRoomsList();
     const rules = readRoomKeywordRules();
     const programs = readRoomManagementPrograms_();
-    const rows = buildRoomManagementProgramRows(programs, rooms, rules);
+    const todayKey = formatDateKey(new Date());
+    const rows = buildRoomManagementProgramRows(programs, rooms, rules,
+      readRoomManagementSchedule_(todayKey), todayKey);
 
     const sec = ROOM_MANAGEMENT_LAYOUT.PROGRAMS;
     const width = sec.headers.length;
@@ -312,6 +387,8 @@ function writeRoomManagementStructure_(sheet) {
     'from the workbook on every refresh — type in Room only.');
   note('PROGRAMS', 'Room', 'Pick this program\'s usual room. This IS Program_Settings\' Room_Or_Setup: choosing one saves it ' +
     'there at once. Blank = let a keyword rule decide. A single date that moves rooms goes on the session table\'s Room_Override.');
+  note('PROGRAMS', 'Day', 'The weekday(s) this program next meets, soonest first. Rows are ordered by it: what meets today ' +
+    'or tomorrow is at the top, programs with nothing coming up at the bottom.');
   note('PROGRAMS', 'Effective_Room', 'What the program actually gets: its own room, else the first matching keyword rule.');
   note('ASSIGN', 'Keyword', 'Type a word that appears in program titles, pick a room, then tick Apply. Every matching ' +
     'program is set to that room after one confirmation. Matches counts them as you type.');

@@ -90,6 +90,7 @@ vm.runInContext(src + `
 ;this.roomKeywordMatches_ = roomKeywordMatches_;
 this.keywordRuleFor_ = keywordRuleFor_;
 this.buildRoomManagementProgramRows = buildRoomManagementProgramRows;
+this.roomManagementDayInfo_ = roomManagementDayInfo_;
 this.planBulkRoomAssign = planBulkRoomAssign;
 this.refreshRoomManagementTab = refreshRoomManagementTab;
 this.handleRoomManagementEdit = handleRoomManagementEdit;
@@ -142,6 +143,26 @@ const rules = [{ keyword: 'yoga', building: '', room: R1 }, { keyword: 'bingo', 
   ok('free text says it is not checked', byEvent.Painting[3] === '' && /Not on the rooms list/.test(byEvent.Painting[4]));
   ok('the Room cell shows what is stored, not what is derived', byEvent['Chair Yoga'][2] === '' && byEvent.Painting[2] === 'easels');
 
+  // Sorted by day: 2026-10-30 is a Friday.
+  const today = '2026-10-30';
+  const sched = {};
+  const addDays = (e, l, ks) => { sched[sandbox.notificationProgramKey(e, l)] = ks; };
+  addDays('Painting', 'Narberth', ['2026-10-31']);
+  addDays('Chair Yoga', 'Narberth', ['2026-11-03', '2026-11-05', '2026-11-10', '2026-10-01']);
+  addDays('Bingo', 'Ashbridge', ['2026-10-30']);
+  const byDay = sandbox.buildRoomManagementProgramRows([
+    { event: 'Painting', location: 'Narberth', room: '' },
+    { event: 'Art', location: 'Narberth', room: R1 },
+    { event: 'Chair Yoga', location: 'Narberth', room: '' },
+    { event: 'Bingo', location: 'Ashbridge', room: R2 }
+  ], rooms, rules, sched, today);
+  ok('rows run today first, round the week, nothing-coming-up last',
+    byDay.map(r => r[0]).join() === 'Bingo,Painting,Chair Yoga,Art', byDay.map(r => r[0]).join());
+  ok('the Day column names the weekdays in the order they come round',
+    byDay[0][5] === 'Fri' && byDay[1][5] === 'Sat' && byDay[2][5] === 'Tue, Thu' && byDay[3][5] === '',
+    JSON.stringify(byDay.map(r => r[5])));
+  ok('a past date does not count as a day', sandbox.roomManagementDayInfo_(['2026-10-01'], today).label === '');
+
   const progs = [{ event: 'Chair Yoga', location: 'Narberth', room: R1 }, { event: 'Gentle Yoga', location: 'Narberth', room: '' },
     { event: 'Bingo', location: 'Narberth', room: '' }];
   let plan = sandbox.planBulkRoomAssign(progs, 'yoga', R1, rooms);
@@ -188,7 +209,7 @@ function loadPsGrid() {
   ok('the refresh returns the sheet', !!sheet);
   ok('it never calls clear()', !calls.some(c => c.op === 'clear'));
   const blocks = calls.filter(c => c.op === 'setValues' && c.c === L.PROGRAMS.startCol && c.r === 3);
-  ok('the Programs block is ONE setValues from row 3', blocks.length === 1 && blocks[0].n >= 2 && blocks[0].w === 5);
+  ok('the Programs block is ONE setValues from row 3', blocks.length === 1 && blocks[0].n >= 2 && blocks[0].w === 6);
   ok('Chair Yoga got the keyword room in Effective_Room',
     tab.grid[key(3, 4)] === R1 && tab.grid[key(4, 4)] === R1, JSON.stringify([tab.grid[key(3, 1)], tab.grid[key(3, 4)]]));
   const wroteStaffTables = calls.some(c => (c.op === 'setValues' || c.op === 'setValue') &&
