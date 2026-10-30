@@ -93,8 +93,12 @@ check('sessions and people once, hours per session',
   S.privateSessionMetricsForMonth('2026-09', entries), { sessions: 2, people: 2, attendances: 3, hours: 2.5 });
 const html = S.buildPrivateSessionHtml({ names: ['</script><b>x</b>'], programs: [], locations: [], recent: [] });
 check('nothing from the workbook is written as markup', html.indexOf('</script><b>x</b>'), -1);
-check('Metrics carries the three new columns last',
-  S.HEADERS.Metrics.slice(-3), ['Private_Sessions', 'Private_Session_People', 'Private_Session_Hours']);
+// Appended after the kitchen columns, as a run, in this order. Later columns
+// (loyalty, the roll, demand, By_Site) have been added after them since.
+const privateAt = S.HEADERS.Metrics.indexOf('Private_Sessions');
+check('Metrics carries the three private-session columns together, after the kitchen ones',
+  [S.HEADERS.Metrics.slice(privateAt, privateAt + 3), privateAt > S.HEADERS.Metrics.indexOf('Kitchen_Ordered_By_Location')],
+  [['Private_Sessions', 'Private_Session_People', 'Private_Session_Hours'], true]);
 
 console.log(failures === 0 ? '\nAll office-feedback checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);

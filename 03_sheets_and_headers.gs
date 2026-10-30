@@ -1035,7 +1035,23 @@ defineLazyGlobal_('HEADERS', () => ({
     // The private sessions of the same month (99zi): sessions and people once
     // each, hours per session. Appended last for the reason the kitchen
     // columns were.
-    'Private_Sessions', 'Private_Session_People', 'Private_Session_Hours'
+    'Private_Sessions', 'Private_Session_People', 'Private_Session_Hours',
+    // Loyalty, the roll, demand and program mix — appended last for the same
+    // reason. Returning_Rate is a FRACTION like the two rate columns above;
+    // Lapsing_People and the three Roll_ columns are counts of people (see 83
+    // for what each one means and what it cannot know).
+    'Returning_Rate', 'Visits_Per_Person', 'Lapsing_People',
+    'Roll_Size', 'Roll_Added', 'Roll_Retired',
+    'Sessions_Full', 'Sessions_Under_Half', 'No_Shows', 'Waitlist_Share',
+    'Club_Registrations', 'Assistance_Registrations',
+    // The same month counted once per BUILDING, as one JSON object keyed by
+    // building name ({"Ashbridge":{"Sessions":12,...},...}). One column rather
+    // than one per building per number because the buildings are whatever
+    // Location says, not a list this file may assume, and a third building
+    // must not need a schema change. Hidden on the tab; the summary tables and
+    // the by-site block under the history read it. A month stored before this
+    // column existed has none until it is recounted.
+    'By_Site'
   ],
   /**
    * Volunteer_Hours — ONE ROW PER VISIT, which is the grain the year-end
