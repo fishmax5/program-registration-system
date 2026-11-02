@@ -807,7 +807,7 @@ function captureMonthlyMetrics(options) {
 
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.METRICS);
   const rows = mergeMetricsRows(readStoredMetricsRows(sheet), counted);
-  writeMetricsSheet(sheet, rows, now);
+  writeMetricsSheet(sheet, rows, now, source);
 
   log(`Metrics: captured ${counted.length} month(s)` +
     (skipped.length > 0 ? `, left ${skipped.length} stored month(s) alone (no rows behind them)` : ''));
@@ -1127,12 +1127,20 @@ function metricsSiteBlockRows_(rows) {
  * writeMemoryTab() for exactly that reason — a memory tab is a table with a
  * banner, and this is several tables.
  */
-function writeMetricsSheet(sheet, rows, now) {
+function writeMetricsSheet(sheet, rows, now, source) {
   const headers = HEADERS.Metrics;
   const numCols = headers.length;
   const summary = buildYearOverYearSummary(rows, now);
   const siteBlock = metricsSiteBlockRows_(rows);
-  try { ensureSheetColumns(sheet, Math.max(numCols, siteBlock.headers.length, 4 + 3 * Math.max(summary.sites.length, summary.thisMonthSites.length))); }
+  // Live, not stored — see computeProgramAttendance(). Absent when the caller
+  // has no source rows to hand (a redraw from the stored rows alone).
+  let attendance = null;
+  if (source) {
+    try { attendance = computeProgramAttendance(source, now); }
+    catch (err) { log(`ℹ️ Metrics: could not count attendance by program (${err}).`); }
+  }
+  const attendanceCols = attendance ? metricsProgramAttendanceTable_(attendance).headers.length : 0;
+  try { ensureSheetColumns(sheet, Math.max(numCols, siteBlock.headers.length, attendanceCols, 4 + 3 * Math.max(summary.sites.length, summary.thisMonthSites.length))); }
   catch (err) { log(`ℹ️ Metrics: could not widen the tab (${err}).`); }
 
   // WRITE BEFORE CLEARING. This is the one tab in the workbook that is a
@@ -1232,6 +1240,14 @@ function writeMetricsSheet(sheet, rows, now) {
     sheet.getRange(row, 1, siteBlock.rows.length, siteBlock.headers.length).setValues(siteBlock.rows);
     metricsFormatSiteBlock_(sheet, row, siteBlock);
     row += siteBlock.rows.length;
+  }
+
+  // ATTENDANCE BY PROGRAM, this fiscal year — last, below everything the
+  // stored record draws, so neither the early write above nor
+  // readStoredMetricsRows() has anything new to account for.
+  if (attendance) {
+    try { row = writeProgramAttendanceBlock_(sheet, row + 1, numCols, attendance); }
+    catch (err) { log(`ℹ️ Metrics: could not draw attendance by program (${err}).`); }
   }
 
   // Everything above the history is the answer; the history is the evidence.
@@ -1350,6 +1366,155 @@ function writeMetricsSummaryTable(sheet, startRow, periodLabels, siteLabels, ind
     log(`ℹ️ Metrics: could not set the summary number formats (${err}).`);
   }
   return dataRow + values.length;
+}
+
+// ----------------------------------------------------------------------------
+// ATTENDANCE BY PROGRAM, FISCAL YEAR TO DATE
+// ----------------------------------------------------------------------------
+//
+// The question the monthly record cannot answer, asked for a grant report:
+// how many times was each program attended, and by how many DIFFERENT people,
+// at each building and across both — since the fiscal year began.
+//
+// THE UNDUPLICATED COUNT IS WHY THIS CANNOT BE BUILT FROM THE STORED MONTHS.
+// A stored month holds "Participants": distinct people THAT month. Twelve of
+// those added up count a weekly regular twelve times, and no arithmetic on the
+// stored rows can take that back out, because which people they were is not
+// stored. So this is counted from All_Registrants every time the tab is drawn,
+// and — unlike everything above it — it is NOT a record: a fiscal year whose
+// rows have been archived reads low here. The banner note says so.
+//
+// WHAT COUNTS is exactly what the monthly Attended column counts, so the
+// building totals here add up to that column over the same months: an Active
+// row, Attended ticked, on a date before today. A person is their name worn
+// down by normalizeNameKey() — the same key the monthly Participants use —
+// so one person under two spellings is two people until the duplicate review
+// (85) or a Display_Name correction (77) brings them together. Lunch-only rows
+// fold onto one "Lunch" program per building, whatever the dish was called.
+
+/** The month (0-based) a fiscal year begins in: July. */
+const METRICS_FISCAL_YEAR_START_MONTH = 6;
+
+/** 'YYYY-MM-DD' of the first day of the fiscal year `now` falls in. */
+function metricsFiscalYearStartKey_(now) {
+  const year = now.getMonth() >= METRICS_FISCAL_YEAR_START_MONTH ? now.getFullYear() : now.getFullYear() - 1;
+  return formatDateKey(new Date(year, METRICS_FISCAL_YEAR_START_MONTH, 1));
+}
+
+/**
+ * Pure: attendance per program per building since the fiscal year began.
+ * Returns { startKey, todayKey, sites, programs: [{ title, bySite, all }], totals: { bySite, all } },
+ * where each cell is { total, unique }. `options.startKey` overrides the start.
+ */
+function computeProgramAttendance(source, now, options) {
+  options = options || {};
+  const rMap = source.registrantMap;
+  const startKey = options.startKey || metricsFiscalYearStartKey_(now);
+  const todayKey = formatDateKey(now);
+  const ALL = '\u0000all';
+
+  const programs = {}; // key -> { spellings: {title: n}, cells: {site|ALL: {total, people:{}}} }
+  const totals = {};
+  const sites = {};
+  const bump = (cells, site, person) => {
+    const cell = cells[site] || (cells[site] = { total: 0, people: {} });
+    cell.total++;
+    if (person) cell.people[person] = true;
+  };
+
+  (source.registrantRows || []).forEach(row => {
+    if (String(row[rMap['Program_Status']] || '').trim() !== 'Active') return;
+    if (!isTruthyCheckbox(row[rMap['Attended']])) return;
+    const when = coerceDate(row[rMap['Event_Date']]);
+    if (!when) return;
+    const dateKey = formatDateKey(when);
+    if (dateKey < startKey || dateKey >= todayKey) return;
+
+    const rawTitle = String(row[rMap['Event']] || '').trim();
+    const lunch = isLunchOnlyEventId(row[rMap['Event_ID']]) || isLunchOnlyProgramTitle(rawTitle);
+    const title = lunch ? PUBLIC_LUNCH_PROGRAM_TITLE : (rawTitle || '(no program name)');
+    const key = lunch ? LUNCH_ONLY_TITLE_MATCH_KEY : title.replace(/\s+/g, ' ').toLowerCase();
+    const site = metricsLocationOf_(row, rMap);
+    const person = normalizeNameKey(row[rMap['Name']]);
+    sites[site] = true;
+
+    const program = programs[key] || (programs[key] = { spellings: {}, cells: {} });
+    program.spellings[title] = (program.spellings[title] || 0) + 1;
+    bump(program.cells, site, person);
+    bump(program.cells, ALL, person);
+    bump(totals, site, person);
+    bump(totals, ALL, person);
+  });
+
+  const siteList = Object.keys(sites).sort();
+  const shape = cells => {
+    const out = { bySite: {}, all: { total: 0, unique: 0 } };
+    const one = cell => (cell ? { total: cell.total, unique: Object.keys(cell.people).length } : { total: 0, unique: 0 });
+    siteList.forEach(site => { out.bySite[site] = one(cells[site]); });
+    out.all = one(cells[ALL]);
+    return out;
+  };
+  const list = Object.keys(programs).map(key => {
+    const spellings = programs[key].spellings;
+    // The commonest spelling names the program; ties go alphabetically.
+    const title = Object.keys(spellings).sort((a, b) => (spellings[b] - spellings[a]) || a.localeCompare(b))[0];
+    return Object.assign({ title: title }, shape(programs[key].cells));
+  }).sort((a, b) => a.title.localeCompare(b.title));
+
+  return { startKey: startKey, todayKey: todayKey, sites: siteList, programs: list, totals: shape(totals) };
+}
+
+/** The block as a table: Program, then attendance + unique people per building, then all buildings. */
+function metricsProgramAttendanceTable_(attendance) {
+  const headers = ['Program'];
+  attendance.sites.forEach(site => headers.push(`${site} — attendance`, `${site} — unique people`));
+  headers.push('All buildings — attendance', 'All buildings — unique people');
+  const line = (label, entry) => {
+    const out = [label];
+    attendance.sites.forEach(site => out.push(entry.bySite[site].total, entry.bySite[site].unique));
+    out.push(entry.all.total, entry.all.unique);
+    return out;
+  };
+  const rows = attendance.programs.map(program => line(program.title, program));
+  rows.push(line('All programs', attendance.totals));
+  return { headers: headers, rows: rows };
+}
+
+/** Draws the block at `startRow`; returns the row after it. */
+function writeProgramAttendanceBlock_(sheet, startRow, bannerCols, attendance) {
+  const table = metricsProgramAttendanceTable_(attendance);
+  // Parsed by hand: new Date('YYYY-MM-DD') is UTC midnight, which is the day
+  // BEFORE in this centre's timezone.
+  const parts = String(attendance.startKey).split('-').map(Number);
+  const fromLabel = parts.length === 3
+    ? Utilities.formatDate(new Date(parts[0], parts[1] - 1, parts[2]), TIMEZONE, 'MMM d, yyyy')
+    : attendance.startKey;
+  let row = startRow;
+  writeSectionBanner(sheet, row, Math.max(bannerCols, table.headers.length),
+    `🎟️ Attendance by program — this fiscal year (since ${fromLabel})`, {
+      note: 'Counted fresh from All_Registrants every time this tab is drawn — NOT a stored record like the tables ' +
+        'above, so it reads low once a month\'s rows are archived.\n\n' +
+        'Attendance: every check-in (Attended ticked on an Active registration, on a date before today). ' +
+        'The building totals match the Attended column above over the same months.\n\n' +
+        'Unique people: each person counted ONCE per program, per building, however many times they came. ' +
+        'The "All programs" row counts each person once across every program; "All buildings" once across both. ' +
+        'People are matched by name, so one person under two spellings counts twice — merge duplicates first.\n\n' +
+        'Only people marked as attended are here: a visit nobody ticked is not counted.'
+    });
+  row++;
+  writeSectionHeader(sheet, row, table.headers.length, table.headers);
+  row++;
+  sheet.getRange(row, 1, table.rows.length, table.headers.length).setValues(table.rows);
+  try {
+    applyZebraStripingManualBounded(sheet, row, table.rows.length, table.headers.length);
+    if (table.headers.length > 1) {
+      sheet.getRange(row, 2, table.rows.length, table.headers.length - 1).setNumberFormat('#,##0');
+    }
+    sheet.getRange(row + table.rows.length - 1, 1, 1, table.headers.length).setFontWeight('bold');
+  } catch (err) {
+    log(`ℹ️ Metrics: could not format attendance by program (${err}).`);
+  }
+  return row + table.rows.length;
 }
 
 // ----------------------------------------------------------------------------

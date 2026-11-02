@@ -60,6 +60,9 @@ this.getIndexMap = getIndexMap;
 this.readStoredMetricsRows = readStoredMetricsRows;
 this.metricsSummaryLayout_ = metricsSummaryLayout_;
 this.metricsSiteBlockRows_ = metricsSiteBlockRows_;
+this.computeProgramAttendance = computeProgramAttendance;
+this.metricsProgramAttendanceTable_ = metricsProgramAttendanceTable_;
+this.metricsFiscalYearStartKey_ = metricsFiscalYearStartKey_;
 this.MANUAL_ENTRY_PREFIX = MANUAL_ENTRY_PREFIX;
 this.MEMBER_ROLL_HEADERS = HEADERS.Member_Roll;
 `, sandbox, { filename: 'program.gs' });
@@ -109,6 +112,7 @@ function registrant(eventId, y, m, d, name, opts) {
   row[regMap['Meals_Ordered']] = opts.meals === undefined ? '' : opts.meals;
   row[regMap['Lunch_Served']] = opts.served ? true : '';
   row[regMap['Day1_Dined_In']] = opts.dinedIn === undefined ? '' : opts.dinedIn;
+  if (opts.location) row[regMap['Location']] = opts.location;
   return row;
 }
 
@@ -496,6 +500,60 @@ check('and its counts simply are not there',
   check('a tab with no history header reads as empty', sandbox.readStoredMetricsRows(
     { getName: () => 'Metrics', getLastRow: () => 1, getLastColumn: () => 4,
       getRange: () => ({ getValues: () => [['hello', '', '', '']] }) }), []);
+}
+
+// ---------------------------------------------------------------------------
+// ATTENDANCE BY PROGRAM, FISCAL YEAR TO DATE
+// ---------------------------------------------------------------------------
+{
+  check('the fiscal year starts in July', [
+    sandbox.metricsFiscalYearStartKey_(new Date(2026, 8, 16)),
+    sandbox.metricsFiscalYearStartKey_(new Date(2026, 6, 1)),
+    sandbox.metricsFiscalYearStartKey_(new Date(2027, 2, 3))
+  ], ['2026-07-01', '2026-07-01', '2026-07-01']);
+
+  const A = 'Ashbridge', N = 'Narberth';
+  const rows = [
+    // Mah Jongg at Ashbridge: Ann three times, Bob once.
+    registrant('mj1', 2026, 7, 7, 'Ann Lee', { event: 'Mah Jongg', location: A, attended: true }),
+    registrant('mj2', 2026, 7, 14, 'ann  lee', { event: 'Mah Jongg', location: A, attended: true }),
+    registrant('mj3', 2026, 8, 4, 'Ann Lee', { event: 'Mah Jongg', location: A, attended: true }),
+    registrant('mj3', 2026, 8, 4, 'Bob Ray', { event: 'Mah Jongg', location: A, attended: true }),
+    // Ann at Chess too, and at Narberth's Mah Jongg (spelled differently).
+    registrant('ch1', 2026, 8, 5, 'Ann Lee', { event: 'Chess', location: A, attended: true }),
+    registrant('mjn', 2026, 8, 6, 'Ann Lee', { event: 'Mah  jongg', location: N, attended: true }),
+    // Lunch, two dishes, one program.
+    registrant('LUNCHONLY:2026-08-07|Ashbridge', 2026, 8, 7, 'Cy Doe',
+      { event: 'Lunch @ Ashbridge — Soup', location: A, attended: true }),
+    registrant('LUNCHONLY:2026-08-14|Ashbridge', 2026, 8, 14, 'Cy Doe',
+      { event: 'Lunch @ Ashbridge — Chili', location: A, attended: true }),
+    // NOT counted: not attended, cancelled, before July, today, waitlisted.
+    registrant('mj4', 2026, 8, 11, 'Dee Fox', { event: 'Mah Jongg', location: A }),
+    registrant('mj4', 2026, 8, 11, 'Eve Gu', { event: 'Mah Jongg', location: A, attended: true, status: 'Cancelled' }),
+    registrant('mj0', 2026, 6, 30, 'Fay Ho', { event: 'Mah Jongg', location: A, attended: true }),
+    registrant('mj9', 2026, 9, 16, 'Gil Iv', { event: 'Mah Jongg', location: A, attended: true }),
+    registrant('mj5', 2026, 8, 18, 'Hal Jo', { event: 'Mah Jongg', location: A, attended: true, status: 'Waitlisted' })
+  ];
+  const result = sandbox.computeProgramAttendance({ registrantRows: rows, registrantMap: regMap }, NOW);
+  check('buildings found', result.sites, [A, N]);
+  check('programs named by their commonest spelling, lunch folded, alphabetical',
+    result.programs.map(p => p.title), ['Chess', 'Lunch', 'Mah Jongg']);
+  const mj = result.programs.find(p => p.title === 'Mah Jongg');
+  check('Mah Jongg: total vs unique per building and across both',
+    [mj.bySite[A], mj.bySite[N], mj.all], [{ total: 4, unique: 2 }, { total: 1, unique: 1 }, { total: 5, unique: 2 }]);
+  check('Lunch: two dishes are one program, one person',
+    result.programs.find(p => p.title === 'Lunch').all, { total: 2, unique: 1 });
+  check('All programs: each person once per building and once overall',
+    [result.totals.bySite[A], result.totals.bySite[N], result.totals.all],
+    [{ total: 7, unique: 3 }, { total: 1, unique: 1 }, { total: 8, unique: 3 }]);
+
+  const table = sandbox.metricsProgramAttendanceTable_(result);
+  check('table headers', table.headers, ['Program', 'Ashbridge — attendance', 'Ashbridge — unique people',
+    'Narberth — attendance', 'Narberth — unique people', 'All buildings — attendance', 'All buildings — unique people']);
+  check('table ends with the totals row', table.rows[table.rows.length - 1], ['All programs', 7, 3, 1, 1, 8, 3]);
+  check('a workbook with nothing attended is just the totals row',
+    sandbox.metricsProgramAttendanceTable_(sandbox.computeProgramAttendance({ registrantRows: [], registrantMap: regMap }, NOW)).rows,
+    [['All programs', 0, 0]]);
 }
 
 console.log(failures === 0 ? '\nAll monthly metrics checks passed.' : `\n${failures} check(s) failed.`);
