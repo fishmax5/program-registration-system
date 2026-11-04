@@ -881,10 +881,50 @@ function pruneLeaderDigestLedger(liveEventDateKeys, todayKey) {
   });
 }
 
-/** One session's roster, as the digest states it: name, party size, and whether it is the waitlist. */
+/**
+ * One roster line, as the digest states it: the time when the session has
+ * slots, the name (a whole party on one line — see foldLeaderDigestParties),
+ * "couple" for two and "party of N" above that, and whether it is the waitlist.
+ */
 function describeLeaderDigestPerson(person) {
-  const party = person.partySize > 1 ? ` (party of ${person.partySize})` : '';
-  return `${person.name}${party}${person.waitlisted ? ' — waitlisted' : ''}`;
+  const size = Number(person.partySize) || 1;
+  const party = size === 2 ? ' (couple)' : size > 2 ? ` (party of ${size})` : '';
+  const time = person.time ? `${person.time} — ` : '';
+  return `${time}${person.name}${party}${person.waitlisted ? ' — waitlisted' : ''}`;
+}
+
+/**
+ * One line per PARTY, ordered by appointment time then name. The roster email
+ * listed "John Pavloff (party of 2)" and "Mrs. Pavloff (party of 2)" as two
+ * lines, which a leader reads as four people — the same fold the shared sheet
+ * makes (foldLeaderSheetParties_, `46`), on Event_ID + Party_ID + status.
+ * People: { name, partySize, waitlisted, time?, partyId?, primary? }.
+ */
+function foldLeaderDigestParties(people) {
+  const groups = {};
+  const out = [];
+  (people || []).forEach(p => {
+    if (!p.partyId) { out.push(Object.assign({}, p)); return; }
+    const key = `${p.partyId}|${p.waitlisted ? 'W' : 'A'}`;
+    if (!groups[key]) { groups[key] = []; out.push(groups[key]); }
+    groups[key].push(p);
+  });
+  const isHead = p => {
+    const primary = normalizeNameKey(p.primary);
+    return !primary || primary === 'self' || primary === normalizeNameKey(p.name);
+  };
+  const lines = out.map(item => {
+    if (!Array.isArray(item)) return item;
+    const members = item.slice();
+    const headIdx = members.findIndex(isHead);
+    if (headIdx > 0) members.unshift(members.splice(headIdx, 1)[0]);
+    return Object.assign({}, members[0], {
+      name: leaderPartyNames(members.map(m => m.name)),
+      partySize: Math.max(members.length, ...members.map(m => Number(m.partySize) || 1))
+    });
+  });
+  return lines.sort((a, b) => compareLeaderTimeLabels(a.time, b.time) ||
+    normalizeNameKey(a.name).localeCompare(normalizeNameKey(b.name)));
 }
 
 /** The body of one leader's digest: each due session, and who is on it right now. */
@@ -943,9 +983,16 @@ function buildLeaderDigestBody(leader, sessions) {
 function buildLeaderDigestSubject(sessions) {
   if (sessions.length === 1) {
     const session = sessions[0];
-    const count = session.roster.filter(person => !person.waitlisted).length;
-    return `${session.title} (${session.location}) — ${formatDateLabel(session.date)} — ` +
-      `${count} ${count === 1 ? 'person' : 'people'} on the roster`;
+    const coming = session.roster.filter(person => !person.waitlisted);
+    const count = coming.length;
+    const people = coming.reduce((n, p) => n + (Number(p.partySize) || 1), 0);
+    // "5 bookings (7 people)" when a couple is on it: Heather counts the
+    // appointments, and seven of something against five slots is what
+    // looked like a double booking.
+    const tail = people > count
+      ? `${count} ${count === 1 ? 'booking' : 'bookings'} (${people} people)`
+      : `${count} ${count === 1 ? 'person' : 'people'} on the roster`;
+    return `${session.title} (${session.location}) — ${formatDateLabel(session.date)} — ${tail}`;
   }
   return `${sessions.length} upcoming sessions on your roster`;
 }
@@ -1045,11 +1092,15 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
     if (!name) return;
     if (!rosterByEvent[eventId]) rosterByEvent[eventId] = [];
     rosterByEvent[eventId].push({
-      name, partySize: Number(row[regMap['Party_Size']]) || 1, waitlisted: status === 'Waitlisted'
+      name, partySize: Number(row[regMap['Party_Size']]) || 1, waitlisted: status === 'Waitlisted',
+      time: eventTimeLabelOf(row[regMap['Event_Time']]),
+      partyId: String(row[regMap['Party_ID']] || '').trim(),
+      primary: regMap['Primary_Registrant'] === undefined ? '' : String(row[regMap['Primary_Registrant']] || '').trim()
     });
   });
-  Object.keys(rosterByEvent).forEach(eventId => rosterByEvent[eventId].sort(
-    (a, b) => normalizeNameKey(a.name).localeCompare(normalizeNameKey(b.name))));
+  Object.keys(rosterByEvent).forEach(eventId => {
+    rosterByEvent[eventId] = foldLeaderDigestParties(rosterByEvent[eventId]);
+  });
 
   const ledger = getLeaderDigestLedger();
   const registry = getProgramLeaderSheetRegistry();

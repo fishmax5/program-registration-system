@@ -156,6 +156,25 @@ const LEADER_SHEET_TAB_NAME = 'Sign_Up_Sheet';
 const LEADER_SHEET_BACK_DAYS = 14;
 const LEADER_SHEET_FORWARD_DAYS = 90;
 
+/**
+ * HOW LONG A CANCELLATION STAYS ON A LEADER'S ROSTER (November 2026).
+ *
+ * A cancelled row used to stay on the sheet for as long as its session was in
+ * the window, struck through in orange. That is the right record for the
+ * office and the wrong one for a leader: Heather Turner (Low Cost Wills) read
+ * "11:00 — Maryrose Crowe (Cancelled), George Moosburner, Noreen Walsh" as
+ * three people booked into one appointment, against an emailed list that
+ * (correctly) left Maryrose out. Two days is long enough for a leader to see
+ * that somebody dropped out, and short enough that the roster goes back to
+ * being the list of who is coming. The Registrants tab keeps every row.
+ *
+ * Measured from the date in the `Cancelled … on <date>` stamp every
+ * cancellation writer puts in Admin_Notes (`71`'s cancellationStamp). A
+ * Cancelled row with no such stamp (typed by hand, or older than the stamp)
+ * has no date to count from and is treated as long-cancelled.
+ */
+const LEADER_SHEET_CANCELLED_SHOW_DAYS = 2;
+
 /** Backstop on one sheet's size — the window already bounds this; a runaway roster shouldn't blow the write. */
 const LEADER_SHEET_MAX_ROWS = 3000;
 
@@ -634,6 +653,155 @@ function leaderRowKey(eventId, partyId, name) {
   return `${String(eventId || '').trim()}|${String(partyId || '').trim()}|${normalizeNameKey(name)}`;
 }
 
+/**
+ * The Row_Key of a FOLDED party line (foldLeaderSheetParties_): one key for
+ * every person who came in on one form response for one session. The name
+ * slot is `*`, which normalizeNameKey can never produce from a real name, so
+ * a party key cannot collide with a person's.
+ */
+function leaderPartyRowKey(eventId, partyId) {
+  return `${String(eventId || '').trim()}|${String(partyId || '').trim()}|*`;
+}
+
+/**
+ * Does this Registrants row answer to this roster Row_Key? Its own key, or —
+ * when the roster line is a folded party — the party's. The ONE statement of
+ * the match, used by the hourly pull and the web roster page (99zn), so a
+ * leader's tick on "John Pavloff & Mrs. Pavloff" lands on both of them.
+ */
+function leaderRowKeyMatches(row, map, rowKey) {
+  const key = String(rowKey || '');
+  if (!key) return false;
+  if (leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]) === key) return true;
+  const partyId = String(row[map['Party_ID']] || '').trim();
+  return !!partyId && leaderPartyRowKey(row[map['Event_ID']], partyId) === key;
+}
+
+/**
+ * Minutes after midnight of the FIRST clock time in a label ("9:30 AM – 10:00
+ * AM" → 570), or null. What the roster and the leader digest order a day by.
+ */
+function leaderTimeLabelMinutes(label) {
+  const m = String(label || '').match(/(\d{1,2})(?::(\d{2}))?\s*([AaPp])\.?[Mm]?/);
+  if (!m) return null;
+  let hour = parseInt(m[1], 10) % 12;
+  if (m[3].toUpperCase() === 'P') hour += 12;
+  return hour * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+}
+
+/** Sort comparator on two time labels: by the clock, untimed last, text as a tiebreak. */
+function compareLeaderTimeLabels(a, b) {
+  const ta = String(a || '');
+  const tb = String(b || '');
+  if (ta === tb) return 0;
+  const ma = leaderTimeLabelMinutes(ta);
+  const mb = leaderTimeLabelMinutes(tb);
+  if (ma !== null && mb !== null && ma !== mb) return ma - mb;
+  if (ma !== null && mb === null) return -1;
+  if (ma === null && mb !== null) return 1;
+  return ta.localeCompare(tb);
+}
+
+/**
+ * The date in the LAST `Cancelled … on <date>` stamp in Admin_Notes, or null.
+ * The last, because a registration cancelled, put back and cancelled again
+ * carries both stamps and the second is the one that counts.
+ */
+function leaderCancellationDate_(notes) {
+  const re = /Cancelled\b[^|]*?\bon\s+(?:[A-Za-z]{3},\s*)?([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})/g;
+  let found = null;
+  let m;
+  while ((m = re.exec(String(notes || ''))) !== null) found = m[1];
+  if (!found) return null;
+  const date = new Date(found.replace('.', ''));
+  return isNaN(date.getTime()) ? null : date;
+}
+
+/** True for a Cancelled row whose cancellation is older than LEADER_SHEET_CANCELLED_SHOW_DAYS. */
+function leaderSheetCancellationExpired_(row, map, now) {
+  if (String(row[map['Program_Status']] || '').trim() !== 'Cancelled') return false;
+  const when = map['Admin_Notes'] === undefined ? null : leaderCancellationDate_(row[map['Admin_Notes']]);
+  if (!when) return true;
+  const today = parseDateKey(formatDateKey(now || new Date()));
+  const cancelled = parseDateKey(formatDateKey(when));
+  return Math.round((today - cancelled) / 86400000) > LEADER_SHEET_CANCELLED_SHOW_DAYS;
+}
+
+/**
+ * "John Pavloff & Mrs. Pavloff" / "Ann, Bob & Carl" — a party's names as one.
+ * Whoever filled in the form first, then the rest in the order they came.
+ */
+function leaderPartyNames(names) {
+  const list = [];
+  (names || []).forEach(name => {
+    const n = String(name || '').trim();
+    if (n && !list.some(x => normalizeNameKey(x) === normalizeNameKey(n))) list.push(n);
+  });
+  if (list.length <= 1) return list[0] || '';
+  return `${list.slice(0, -1).join(', ')} & ${list[list.length - 1]}`;
+}
+
+/**
+ * ONE LINE PER PARTY (November 2026). A couple who book a Wills appointment
+ * are one appointment, and the roster listing them as two people — each
+ * "party of 2" — read as four people, or as two bookings in one slot. So the
+ * rows one form response made for one session (same Event_ID, same Party_ID,
+ * same Program_Status) are drawn as one line: the names together, the party's
+ * size, the ticks OR-ed (somebody marked in is the party marked in), the notes
+ * joined. Its Row_Key is leaderPartyRowKey(), and leaderRowKeyMatches() is
+ * what sends a tick on that line back to every person in it.
+ *
+ * A row with no Party_ID (added at the desk) is never folded: there is nothing
+ * that says who it came with.
+ */
+function foldLeaderSheetParties_(rows, partyOf) {
+  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
+  const groups = {};
+  const out = [];
+  (rows || []).forEach(row => {
+    const meta = partyOf.get(row) || {};
+    if (!meta.partyId) { out.push(row); return; }
+    const key = `${meta.eventId}|${meta.partyId}|${String(row[sheetMap['Program_Status']] || '').trim()}`;
+    if (!groups[key]) {
+      groups[key] = { rows: [], meta };
+      out.push(groups[key]);
+    }
+    groups[key].rows.push(row);
+  });
+
+  const isHead = (row, meta) => {
+    const primary = normalizeNameKey(meta.primary);
+    return !primary || primary === 'self' || primary === normalizeNameKey(row[sheetMap['Name']]);
+  };
+
+  return out.map(item => {
+    if (Array.isArray(item)) return item;
+    if (item.rows.length === 1) return item.rows[0];
+    const members = item.rows.slice();
+    const headIdx = members.findIndex(r => isHead(r, partyOf.get(r) || {}));
+    if (headIdx > 0) members.unshift(members.splice(headIdx, 1)[0]);
+    const folded = members[0].slice();
+    folded[sheetMap['Name']] = leaderPartyNames(members.map(r => r[sheetMap['Name']]));
+    folded[sheetMap['Party_Size']] = Math.max(members.length,
+      ...members.map(r => parseInt(r[sheetMap['Party_Size']], 10) || 1));
+    ['Phone', 'Email', 'Answers'].forEach(col => {
+      if (!String(folded[sheetMap[col]] || '').trim()) {
+        const other = members.find(r => String(r[sheetMap[col]] || '').trim());
+        if (other) folded[sheetMap[col]] = other[sheetMap[col]];
+      }
+    });
+    const values = LEADER_SHEET_EDITABLE_COLUMNS.map(name => {
+      const cells = members.map(r => readLeaderValues(r, sheetMap)[LEADER_SHEET_EDITABLE_COLUMNS.indexOf(name)]);
+      if (LEADER_SHEET_TICK_COLUMNS.indexOf(name) !== -1) return cells.some(Boolean);
+      return cells.filter((v, i) => v && cells.indexOf(v) === i).join(' | ');
+    });
+    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => { folded[sheetMap[name]] = values[i]; });
+    folded[sheetMap['Row_Key']] = leaderPartyRowKey(item.meta.eventId, item.meta.partyId);
+    folded[sheetMap['Pushed_Snapshot']] = encodeLeaderSnapshot(values);
+    return folded;
+  });
+}
+
 /** A checkbox cell, however Sheets hands it back (boolean from a tick, text from a paste). */
 function normalizeLeaderFlag(value) {
   if (value === true) return true;
@@ -792,7 +960,9 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   let applied = 0;
   registrantRows.forEach(row => {
     const rowKey = leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
-    const edit = edits[rowKey];
+    const partyId = String(row[map['Party_ID']] || '').trim();
+    // A folded party line's edit belongs to every person in the party.
+    const edit = edits[rowKey] || (partyId ? edits[leaderPartyRowKey(row[map['Event_ID']], partyId)] : null);
     if (!edit) return;
     const changedHeaders = [];
     LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => {
@@ -1393,6 +1563,7 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   const map = getIndexMap(HEADERS.All_Registrants);
   const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
   const byProgram = {};
+  const partyOf = new Map();
 
   (registrantRows || []).forEach(row => {
     const eventId = String(row[map['Event_ID']] || '').trim();
@@ -1403,6 +1574,8 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
     // replaced. Showing them would list the same person twice with no way for
     // a program leader to tell which one is real.
     if (String(row[map['Program_Status']] || '').trim() === 'Superseded') return;
+    // A cancellation shows for LEADER_SHEET_CANCELLED_SHOW_DAYS, then leaves.
+    if (leaderSheetCancellationExpired_(row, map)) return;
 
     const values = readLeaderValues(row, map);
     const out = new Array(LEADER_SHEET_HEADERS.length).fill('');
@@ -1430,6 +1603,16 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
 
     if (!byProgram[programKey]) byProgram[programKey] = [];
     byProgram[programKey].push(out);
+    partyOf.set(out, {
+      eventId,
+      partyId: String(row[map['Party_ID']] || '').trim(),
+      primary: map['Primary_Registrant'] === undefined ? '' : String(row[map['Primary_Registrant']] || '').trim()
+    });
+  });
+
+  // One line per PARTY, not per person — see foldLeaderSheetParties_().
+  Object.keys(byProgram).forEach(programKey => {
+    byProgram[programKey] = foldLeaderSheetParties_(byProgram[programKey], partyOf);
   });
 
   // Date, then TIME, then name: the order a program leader reads a class list
@@ -1440,12 +1623,19 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
   // would interleave the two into one band that belonged to neither.
   Object.keys(byProgram).forEach(programKey => {
     byProgram[programKey].sort((a, b) => {
+      // On the DATE KEY, not the Date's milliseconds: a row the desk or the
+      // door wrote can carry a time of day on its Event_Date, and comparing
+      // instants then sorted two rows of one day apart — which is how the
+      // Wills roster for Nov 10 came out banded 10:30, 11:00, 9:30, 10:00,
+      // 11:00, 11:30. And the time on the CLOCK, not as text, because
+      // "9:30 AM" sorts after "11:00 AM" alphabetically.
       const da = coerceDate(a[sheetMap['Event_Date']]);
       const db = coerceDate(b[sheetMap['Event_Date']]);
-      if (da && db && da.getTime() !== db.getTime()) return da - db;
-      const ta = String(a[sheetMap['Event_Time']] || '');
-      const tb = String(b[sheetMap['Event_Time']] || '');
-      if (ta !== tb) return ta.localeCompare(tb);
+      const ka = da ? formatDateKey(da) : '';
+      const kb = db ? formatDateKey(db) : '';
+      if (ka !== kb) return ka < kb ? -1 : 1;
+      const byTime = compareLeaderTimeLabels(a[sheetMap['Event_Time']], b[sheetMap['Event_Time']]);
+      if (byTime) return byTime;
       return normalizeNameKey(a[sheetMap['Name']]).localeCompare(normalizeNameKey(b[sheetMap['Name']]));
     });
     if (byProgram[programKey].length > LEADER_SHEET_MAX_ROWS) {

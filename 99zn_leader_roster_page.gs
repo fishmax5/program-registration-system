@@ -681,7 +681,7 @@ function applyLeaderRosterEditLocked_(args) {
       ? grid.values.slice(zone.dataStart - 1, zone.dataEnd)
       : sheet.getRange(zone.dataStart, 1, count, numCols).getValues();
     values.forEach((row, i) => {
-      if (leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]) !== rowKey) return;
+      if (!leaderRowKeyMatches(row, map, rowKey)) return;
       matches.push({ sheetRow: zone.dataStart + i, row: row.slice(0, numCols) });
     });
   });
@@ -725,7 +725,7 @@ function applyLeaderRosterEditLocked_(args) {
           HEADERS.All_Program_Sessions, 'Event_ID');
       }
       const others = getSectionedRows(sheet, headers, 'Event_ID').filter(other =>
-        leaderRowKey(other[map['Event_ID']], other[map['Party_ID']], other[map['Name']]) !== rowKey);
+        !leaderRowKeyMatches(other, map, rowKey));
       applyLeaderWaitlistTicks(others.concat([row]), sessionRows, { ledgerSource: source, note, only: [row] });
       if (!clean.Waitlisted && String(row[map['Program_Status']] || '').trim() === 'Waitlisted') refused = true;
     }
