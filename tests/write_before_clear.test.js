@@ -211,7 +211,8 @@ function noMismatchLogged(label) {
     Event_ID: 'mj' + day, Event_Date: new RealDate(2026, 7, day), Event: 'Mah Jongg',
     Location: 'Ashbridge', Name: name, Program_Status: 'Active', Attended: true
   });
-  const source = { registrantRows: [attended('Ann', 4), attended('Ann', 11), attended('Bob', 11)],
+  const noShow = Object.assign(attended('Cy', 11), {}); noShow[sandbox.getIndexMap(regHeaders)['Attended']] = '';
+  const source = { registrantRows: [attended('Ann', 4), attended('Ann', 11), attended('Bob', 11), noShow],
     registrantMap: sandbox.getIndexMap(regHeaders) };
   const { grid, sheet } = sheetNamed('Metrics');
   checkWriteBeforeClear('Metrics with attendance by program', sheet, grid,
@@ -219,9 +220,9 @@ function noMismatchLogged(label) {
     { expectRows: [['2026-08'], ['2026-07']] });
   noMismatchLogged('Metrics');
   const flat = grid.map(r => r.join('|'));
-  assert.ok(flat.some(line => line.indexOf('Attendance by program') >= 0), 'the attendance banner is drawn');
-  assert.ok(flat.some(line => line.indexOf('Mah Jongg|3|2|3|2') === 0), 'Mah Jongg: 3 visits, 2 people');
-  assert.ok(flat.some(line => line.indexOf('All programs|3|2|3|2') === 0), 'the totals row');
+  assert.ok(flat.some(line => line.indexOf('Registrations & attendance by program') >= 0), 'the banner is drawn');
+  assert.ok(flat.some(line => line.indexOf('Mah Jongg|4|3|3|2|4|3|3|2') === 0), 'Mah Jongg: 4 registrations by 3 people, 3 visits by 2');
+  assert.ok(flat.some(line => line.indexOf('All programs|4|3|3|2|4|3|3|2') === 0), 'the totals row');
 }
 
 // --- 38: Quick Mark's stored index ----------------------------------------

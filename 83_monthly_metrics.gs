@@ -1373,12 +1373,21 @@ function writeMetricsSummaryTable(sheet, startRow, periodLabels, siteLabels, ind
 }
 
 // ----------------------------------------------------------------------------
-// ATTENDANCE BY PROGRAM, FISCAL YEAR TO DATE
+// REGISTRATIONS AND ATTENDANCE BY PROGRAM, FISCAL YEAR TO DATE
 // ----------------------------------------------------------------------------
 //
 // The question the monthly record cannot answer, asked for a grant report:
 // how many times was each program attended, and by how many DIFFERENT people,
 // at each building and across both — since the fiscal year began.
+//
+// BOTH REGISTRATIONS AND ATTENDANCE, SIDE BY SIDE, BECAUSE NEITHER IS TRUE.
+// Attendance is only as good as the ticking: a visit nobody marked is not
+// counted, so it reads LOW wherever the desk was busy. Registrations count
+// people who signed up and never came, so they read HIGH — but they also catch
+// the regulars nobody ticked. The truth sits between, and a report that showed
+// only one would be confidently wrong in a direction nobody could see. So each
+// building gets four numbers per program: registrations, unique registrants,
+// attendance, unique attendees.
 //
 // THE UNDUPLICATED COUNT IS WHY THIS CANNOT BE BUILT FROM THE STORED MONTHS.
 // A stored month holds "Participants": distinct people THAT month. Twelve of
@@ -1388,13 +1397,15 @@ function writeMetricsSummaryTable(sheet, startRow, periodLabels, siteLabels, ind
 // and — unlike everything above it — it is NOT a record: a fiscal year whose
 // rows have been archived reads low here. The banner note says so.
 //
-// WHAT COUNTS is exactly what the monthly Attended column counts, so the
-// building totals here add up to that column over the same months: an Active
-// row, Attended ticked, on a date before today. A person is their name worn
-// down by normalizeNameKey() — the same key the monthly Participants use —
-// so one person under two spellings is two people until the duplicate review
-// (85) or a Display_Name correction (77) brings them together. Lunch-only rows
-// fold onto one "Lunch" program per building, whatever the dish was called.
+// WHAT COUNTS is what the monthly columns count, so the building totals here
+// add up to them over the same months: an Active row on a date before today
+// is a registration (the monthly Registrations, restricted to sessions that
+// have happened), and one with Attended ticked is also an attendance (the
+// monthly Attended). A person is their name worn down by normalizeNameKey() —
+// the same key the monthly Participants use — so one person under two
+// spellings is two people until the duplicate review (85) or a Display_Name
+// correction (77) brings them together. Lunch-only rows fold onto one "Lunch"
+// program per building, whatever the dish was called.
 
 /** The month (0-based) a fiscal year begins in: July. */
 const METRICS_FISCAL_YEAR_START_MONTH = 6;
@@ -1406,9 +1417,12 @@ function metricsFiscalYearStartKey_(now) {
 }
 
 /**
- * Pure: attendance per program per building since the fiscal year began.
- * Returns { startKey, todayKey, sites, programs: [{ title, bySite, all }], totals: { bySite, all } },
- * where each cell is { total, unique }. `options.startKey` overrides the start.
+ * Pure: registrations and attendance per program per building since the
+ * fiscal year began. Returns { startKey, todayKey, sites, programs: [{ title,
+ * bySite, all }], totals: { bySite, all } }, where each cell is
+ * { registered, registrants, attended, attendees } — the first of each pair a
+ * count of rows, the second a count of distinct people.
+ * `options.startKey` overrides the start.
  */
 function computeProgramAttendance(source, now, options) {
   options = options || {};
@@ -1417,18 +1431,22 @@ function computeProgramAttendance(source, now, options) {
   const todayKey = formatDateKey(now);
   const ALL = '\u0000all';
 
-  const programs = {}; // key -> { spellings: {title: n}, cells: {site|ALL: {total, people:{}}} }
+  const programs = {}; // key -> { spellings: {title: n}, cells: {site|ALL: cell} }
   const totals = {};
   const sites = {};
-  const bump = (cells, site, person) => {
-    const cell = cells[site] || (cells[site] = { total: 0, people: {} });
-    cell.total++;
-    if (person) cell.people[person] = true;
+  const bump = (cells, site, person, attended) => {
+    const cell = cells[site] ||
+      (cells[site] = { registered: 0, registrants: {}, attended: 0, attendees: {} });
+    cell.registered++;
+    if (person) cell.registrants[person] = true;
+    if (attended) {
+      cell.attended++;
+      if (person) cell.attendees[person] = true;
+    }
   };
 
   (source.registrantRows || []).forEach(row => {
     if (String(row[rMap['Program_Status']] || '').trim() !== 'Active') return;
-    if (!isTruthyCheckbox(row[rMap['Attended']])) return;
     const when = coerceDate(row[rMap['Event_Date']]);
     if (!when) return;
     const dateKey = formatDateKey(when);
@@ -1440,22 +1458,25 @@ function computeProgramAttendance(source, now, options) {
     const key = lunch ? LUNCH_ONLY_TITLE_MATCH_KEY : title.replace(/\s+/g, ' ').toLowerCase();
     const site = metricsLocationOf_(row, rMap);
     const person = normalizeNameKey(row[rMap['Name']]);
+    const attended = isTruthyCheckbox(row[rMap['Attended']]);
     sites[site] = true;
 
     const program = programs[key] || (programs[key] = { spellings: {}, cells: {} });
     program.spellings[title] = (program.spellings[title] || 0) + 1;
-    bump(program.cells, site, person);
-    bump(program.cells, ALL, person);
-    bump(totals, site, person);
-    bump(totals, ALL, person);
+    bump(program.cells, site, person, attended);
+    bump(program.cells, ALL, person, attended);
+    bump(totals, site, person, attended);
+    bump(totals, ALL, person, attended);
   });
 
   const siteList = Object.keys(sites).sort();
+  const one = cell => (cell
+    ? { registered: cell.registered, registrants: Object.keys(cell.registrants).length,
+      attended: cell.attended, attendees: Object.keys(cell.attendees).length }
+    : { registered: 0, registrants: 0, attended: 0, attendees: 0 });
   const shape = cells => {
-    const out = { bySite: {}, all: { total: 0, unique: 0 } };
-    const one = cell => (cell ? { total: cell.total, unique: Object.keys(cell.people).length } : { total: 0, unique: 0 });
+    const out = { bySite: {}, all: one(cells[ALL]) };
     siteList.forEach(site => { out.bySite[site] = one(cells[site]); });
-    out.all = one(cells[ALL]);
     return out;
   };
   const list = Object.keys(programs).map(key => {
@@ -1468,15 +1489,25 @@ function computeProgramAttendance(source, now, options) {
   return { startKey: startKey, todayKey: todayKey, sites: siteList, programs: list, totals: shape(totals) };
 }
 
-/** The block as a table: Program, then attendance + unique people per building, then all buildings. */
+/** The four figures each building (and all buildings) gets, in column order. */
+const METRICS_PROGRAM_ATTENDANCE_FIGURES = [
+  { key: 'registered', label: 'registrations' },
+  { key: 'registrants', label: 'unique registrants' },
+  { key: 'attended', label: 'attendance' },
+  { key: 'attendees', label: 'unique attendees' }
+];
+
+/** The block as a table: Program, then the four figures per building, then all buildings. */
 function metricsProgramAttendanceTable_(attendance) {
   const headers = ['Program'];
-  attendance.sites.forEach(site => headers.push(`${site} — attendance`, `${site} — unique people`));
-  headers.push('All buildings — attendance', 'All buildings — unique people');
+  const groups = attendance.sites.concat(['All buildings']);
+  groups.forEach(group => METRICS_PROGRAM_ATTENDANCE_FIGURES.forEach(figure =>
+    headers.push(`${group} — ${figure.label}`)));
   const line = (label, entry) => {
     const out = [label];
-    attendance.sites.forEach(site => out.push(entry.bySite[site].total, entry.bySite[site].unique));
-    out.push(entry.all.total, entry.all.unique);
+    attendance.sites.forEach(site =>
+      METRICS_PROGRAM_ATTENDANCE_FIGURES.forEach(figure => out.push(entry.bySite[site][figure.key])));
+    METRICS_PROGRAM_ATTENDANCE_FIGURES.forEach(figure => out.push(entry.all[figure.key]));
     return out;
   };
   const rows = attendance.programs.map(program => line(program.title, program));
@@ -1495,15 +1526,17 @@ function writeProgramAttendanceBlock_(sheet, startRow, bannerCols, attendance) {
     : attendance.startKey;
   let row = startRow;
   writeSectionBanner(sheet, row, Math.max(bannerCols, table.headers.length),
-    `🎟️ Attendance by program — this fiscal year (since ${fromLabel})`, {
-      note: 'Counted fresh from All_Registrants every time this tab is drawn — NOT a stored record like the tables ' +
-        'above, so it reads low once a month\'s rows are archived.\n\n' +
-        'Attendance: every check-in (Attended ticked on an Active registration, on a date before today). ' +
-        'The building totals match the Attended column above over the same months.\n\n' +
-        'Unique people: each person counted ONCE per program, per building, however many times they came. ' +
+    `🎟️ Registrations & attendance by program — this fiscal year (since ${fromLabel})`, {
+      note: 'Both are shown because neither is exact. Attendance counts only people TICKED as attended, so it reads ' +
+        'low wherever a visit was not marked. Registrations count everyone signed up for a session that has ' +
+        'happened, including people who did not come, so they read high. The true figure is between the two.\n\n' +
+        'Registrations: Active registrations on dates before today. Attendance: those with Attended ticked. ' +
+        'The building totals match the monthly Registrations (past sessions only) and Attended columns above.\n\n' +
+        'Unique: each person counted ONCE per program, per building, however many times they came. ' +
         'The "All programs" row counts each person once across every program; "All buildings" once across both. ' +
         'People are matched by name, so one person under two spellings counts twice — merge duplicates first.\n\n' +
-        'Only people marked as attended are here: a visit nobody ticked is not counted.'
+        'Counted fresh from All_Registrants every time this tab is drawn — NOT a stored record like the tables ' +
+        'above, so it reads low once a month\'s rows are archived.'
     });
   row++;
   writeSectionHeader(sheet, row, table.headers.length, table.headers);
@@ -1516,7 +1549,7 @@ function writeProgramAttendanceBlock_(sheet, startRow, bannerCols, attendance) {
     }
     sheet.getRange(row + table.rows.length - 1, 1, 1, table.headers.length).setFontWeight('bold');
   } catch (err) {
-    log(`ℹ️ Metrics: could not format attendance by program (${err}).`);
+    log(`ℹ️ Metrics: could not format registrations & attendance by program (${err}).`);
   }
   return row + table.rows.length;
 }

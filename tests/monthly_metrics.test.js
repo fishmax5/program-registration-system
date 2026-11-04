@@ -535,25 +535,31 @@ check('and its counts simply are not there',
     registrant('mj5', 2026, 8, 18, 'Hal Jo', { event: 'Mah Jongg', location: A, attended: true, status: 'Waitlisted' })
   ];
   const result = sandbox.computeProgramAttendance({ registrantRows: rows, registrantMap: regMap }, NOW);
+  const cell = (registered, registrants, attended, attendees) => ({ registered, registrants, attended, attendees });
   check('buildings found', result.sites, [A, N]);
   check('programs named by their commonest spelling, lunch folded, alphabetical',
     result.programs.map(p => p.title), ['Chess', 'Lunch', 'Mah Jongg']);
   const mj = result.programs.find(p => p.title === 'Mah Jongg');
-  check('Mah Jongg: total vs unique per building and across both',
-    [mj.bySite[A], mj.bySite[N], mj.all], [{ total: 4, unique: 2 }, { total: 1, unique: 1 }, { total: 5, unique: 2 }]);
+  // Ashbridge Mah Jongg: Ann x3 + Bob attended, Dee registered and did not come.
+  // Cancelled, pre-July, today and waitlisted rows count as neither.
+  check('Mah Jongg: registrations and attendance, each total and unique, per building and across both',
+    [mj.bySite[A], mj.bySite[N], mj.all], [cell(5, 3, 4, 2), cell(1, 1, 1, 1), cell(6, 3, 5, 2)]);
   check('Lunch: two dishes are one program, one person',
-    result.programs.find(p => p.title === 'Lunch').all, { total: 2, unique: 1 });
+    result.programs.find(p => p.title === 'Lunch').all, cell(2, 1, 2, 1));
   check('All programs: each person once per building and once overall',
     [result.totals.bySite[A], result.totals.bySite[N], result.totals.all],
-    [{ total: 7, unique: 3 }, { total: 1, unique: 1 }, { total: 8, unique: 3 }]);
+    [cell(8, 4, 7, 3), cell(1, 1, 1, 1), cell(9, 4, 8, 3)]);
 
   const table = sandbox.metricsProgramAttendanceTable_(result);
-  check('table headers', table.headers, ['Program', 'Ashbridge — attendance', 'Ashbridge — unique people',
-    'Narberth — attendance', 'Narberth — unique people', 'All buildings — attendance', 'All buildings — unique people']);
-  check('table ends with the totals row', table.rows[table.rows.length - 1], ['All programs', 7, 3, 1, 1, 8, 3]);
-  check('a workbook with nothing attended is just the totals row',
+  check('table headers: four figures per building, then all buildings', table.headers, ['Program',
+    'Ashbridge — registrations', 'Ashbridge — unique registrants', 'Ashbridge — attendance', 'Ashbridge — unique attendees',
+    'Narberth — registrations', 'Narberth — unique registrants', 'Narberth — attendance', 'Narberth — unique attendees',
+    'All buildings — registrations', 'All buildings — unique registrants', 'All buildings — attendance', 'All buildings — unique attendees']);
+  check('table ends with the totals row', table.rows[table.rows.length - 1],
+    ['All programs', 8, 4, 7, 3, 1, 1, 1, 1, 9, 4, 8, 3]);
+  check('a workbook with nothing registered is just the totals row',
     sandbox.metricsProgramAttendanceTable_(sandbox.computeProgramAttendance({ registrantRows: [], registrantMap: regMap }, NOW)).rows,
-    [['All programs', 0, 0]]);
+    [['All programs', 0, 0, 0, 0]]);
 }
 
 console.log(failures === 0 ? '\nAll monthly metrics checks passed.' : `\n${failures} check(s) failed.`);
