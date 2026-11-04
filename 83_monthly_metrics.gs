@@ -1250,9 +1250,13 @@ function writeMetricsSheet(sheet, rows, now, source) {
     catch (err) { log(`ℹ️ Metrics: could not draw attendance by program (${err}).`); }
   }
 
-  // Everything above the history is the answer; the history is the evidence.
-  // Freezing through the column header keeps the first visible in a scroll.
-  freezeRowsSafely(sheet, headerRow);
+  // NO FROZEN ROWS. This used to freeze through the history's column header so
+  // the summaries stayed in view — but the two summary tables are tall, and a
+  // frozen band taller than the window leaves nothing below it to scroll, so
+  // the tab could not be read past the top. Set to 0 explicitly (rather than
+  // simply not freezing) so a tab drawn by the old code is unfrozen too.
+  try { sheet.setFrozenRows(0); }
+  catch (err) { log(`ℹ️ Metrics: could not unfreeze the rows (${err}).`); }
   freezeColumnsSafely(sheet, 2); // Month and Month_Label are the row's identity
   autosizeColumns(sheet, { minCols: numCols, force: true });
   // The per-building JSON is the store, not something to read.
