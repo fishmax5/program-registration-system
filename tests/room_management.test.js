@@ -91,6 +91,7 @@ vm.runInContext(src + `
 this.keywordRuleFor_ = keywordRuleFor_;
 this.buildRoomManagementProgramRows = buildRoomManagementProgramRows;
 this.planBulkRoomAssign = planBulkRoomAssign;
+this.roomManagementDateKeyFromLabel_ = roomManagementDateKeyFromLabel_;
 this.refreshRoomManagementTab = refreshRoomManagementTab;
 this.handleRoomManagementEdit = handleRoomManagementEdit;
 this.writeProgramSettingsRoom_ = writeProgramSettingsRoom_;
@@ -160,6 +161,24 @@ const rules = [{ keyword: 'yoga', building: '', room: R1 }, { keyword: 'bingo', 
     shape === 'Mon 11/2 Bingo |  | Tue 11/3 Bingo | Tue 11/3 Chair Yoga | Tue 11/3 Painting |  | Thu 11/5 Chair Yoga |  | - Art', shape);
   ok('a past date and one beyond the window are not drawn', !shape.includes('10/1') && !shape.includes('12/15'));
   ok('every row is the table\'s width', byDate.every(r => r.length === sandbox.L.PROGRAMS.headers.length));
+
+  // Times beside the date, sorted within a day; a date's own room is that row's alone.
+  const K = (e, l, d) => sandbox.notificationProgramKey(e, l) + '|' + d;
+  const timed = sandbox.buildRoomManagementProgramRows([
+    { event: 'Painting', location: 'Narberth', room: R1 },
+    { event: 'Chair Yoga', location: 'Narberth', room: R1 }
+  ], rooms, rules, sched, today, end,
+  { [K('Chair Yoga', 'Narberth', '2026-11-03')]: R2 },
+  { [K('Painting', 'Narberth', '2026-11-03')]: { label: '1:00 PM \u2013 2:00 PM', sort: '1300' },
+    [K('Chair Yoga', 'Narberth', '2026-11-03')]: { label: '9:30 AM \u2013 10:30 AM', sort: '0930' } });
+  const tues = timed.filter(r => /^Tue 11\/3/.test(r[0]));
+  ok('a day is sorted by start time and the time sits beside the date',
+    tues.map(r => r[1]).join() === 'Chair Yoga,Painting' && /Tue 11\/3 \u00b7 9:30 AM/.test(tues[0][0]), tues.map(r => r[0]).join('|'));
+  ok('a date\'s own room shows on that row only',
+    tues[0][3] === R2 && /Set for this date/.test(tues[0][5]) &&
+    timed.filter(r => r[1] === 'Chair Yoga' && /11\/5/.test(r[0]))[0][3] === R1);
+  ok('a dated label with a time still resolves to its date',
+    sandbox.roomManagementDateKeyFromLabel_('Tue 11/3 \u00b7 9:30 AM \u2013 10:30 AM', today) === '2026-11-03');
 
   const progs = [{ event: 'Chair Yoga', location: 'Narberth', room: R1 }, { event: 'Gentle Yoga', location: 'Narberth', room: '' },
     { event: 'Bingo', location: 'Narberth', room: '' }];

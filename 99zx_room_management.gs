@@ -136,16 +136,26 @@ function roomManagementDateLabel_(dateKey) {
  * Laid out like the other program tabs: by DATE, soonest first, every program
  * meeting that day under it (Location then Event), and one BLANK row between
  * one date and the next. A program therefore appears once per date it meets;
- * the Room cell is still the program's (`Room_Or_Setup`), so a pick on any of
- * its rows is the same pick. Programs with nothing in the window follow the
+ * a pick on a dated row is THAT DATE's room only; the Room cell of
+ * its rows is the program's usual room unless that DATE has its own (`overrides`,
+ * `{ "<programKey>|<yyyy-MM-dd>": room }`, read from Room_Override). Programs with nothing in the window follow the
  * last date after a blank row with no Date, so none disappears from the tab.
  * With no schedule every program is in that last block (Location then Event).
  */
-function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayKey, endKey) {
+function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayKey, endKey, overrides, times) {
   const width = ROOM_MANAGEMENT_LAYOUT.PROGRAMS.headers.length;
   const byLocationEvent = (a, b) =>
     String(a.location).localeCompare(String(b.location)) || String(a.event).localeCompare(String(b.event));
-  const rowFor = (p, dateLabel) => {
+  const timeOf = (p, k) => (times && times[notificationProgramKey(p.event, p.location) + '|' + k]) || null;
+  const rowFor = (p, dateLabel, dateKey) => {
+    // A DATE's own room (Room_Override on the session table) is the date's
+    // alone: it shows in that row's Room cell and no other row's.
+    const own = dateKey && overrides ? String(overrides[notificationProgramKey(p.event, p.location) + '|' + dateKey] || '').trim() : '';
+    if (own) {
+      const label = resolveRoomLabel_(own, rooms);
+      return [dateLabel, p.event, p.location, own, label || own,
+        label ? 'Set for this date' : 'Set for this date \u2014 not on the rooms list, not checked'];
+    }
     const eff = effectiveDefaultRoom_(p.event, p.location, p.room, rooms, rules);
     let why = '';
     if (eff.source === 'program') why = 'Set here';
@@ -171,8 +181,15 @@ function buildRoomManagementProgramRows(programs, rooms, rules, schedule, todayK
   const blank = () => { if (rows.length) rows.push(new Array(width).fill('')); };
   Object.keys(byDate).sort().forEach(k => {
     blank();
-    Object.keys(byDate[k]).map(pk => byDate[k][pk]).sort(byLocationEvent)
-      .forEach(p => rows.push(rowFor(p, roomManagementDateLabel_(k))));
+    // Soonest start first within a day, so two programs wanting one room at the
+    // same hour sit side by side; no known time sorts last.
+    const sortOf = p => { const t = timeOf(p, k); return t && t.sort ? t.sort : '9999'; };
+    Object.keys(byDate[k]).map(pk => byDate[k][pk])
+      .sort((a, b) => sortOf(a).localeCompare(sortOf(b)) || byLocationEvent(a, b))
+      .forEach(p => {
+        const t = timeOf(p, k);
+        rows.push(rowFor(p, roomManagementDateLabel_(k) + (t && t.label ? ' \u00b7 ' + t.label : ''), k));
+      });
   });
   const rest = (programs || []).filter(p => !scheduled[notificationProgramKey(p.event, p.location)])
     .sort(byLocationEvent);
@@ -257,6 +274,111 @@ function readRoomManagementSchedule_(todayKey) {
 }
 
 /**
+ * Each upcoming session's start (and end) as `{ "<programKey>|<yyyy-MM-dd>":
+ * { label: "9:30 AM \u2013 10:30 AM", sort: "0930" } }` — the earliest session
+ * of a program on a date. Never throws.
+ */
+function readRoomManagementTimes_(todayKey) {
+  const out = {};
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+    if (!sheet) return out;
+    const headers = HEADERS.All_Program_Sessions;
+    const map = getIndexMap(headers);
+    getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
+      const start = coerceDate(row[map['Event_Date']]);
+      if (!start) return;
+      const key = formatDateKey(start);
+      if (key < todayKey) return;
+      const label = publicSessionTimeLabel_(row, map, start);
+      const sort = publicSessionSortTime_(start);
+      const k = notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+        String(row[map['Location']] || '').trim()) + '|' + key;
+      if (!out[k] || sort < out[k].sort) out[k] = { label, sort };
+    });
+  } catch (err) {
+    log(`ℹ️ Could not read the session times for ${SHEET_NAMES.ROOM_MANAGEMENT} (${err}).`);
+  }
+  return out;
+}
+
+/**
+ * Each upcoming date's own room, as `{ "<programKey>|<yyyy-MM-dd>": room }`,
+ * from the session table's Room_Override. Never throws.
+ */
+function readRoomManagementOverrides_(todayKey) {
+  const out = {};
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+    if (!sheet) return out;
+    const headers = HEADERS.All_Program_Sessions;
+    const map = getIndexMap(headers);
+    getSectionedRowValues(sheet, headers, 'Event_ID').forEach(row => {
+      const own = String(row[map['Room_Override']] || '').trim();
+      if (!own) return;
+      const start = coerceDate(row[map['Event_Date']]);
+      if (!start) return;
+      const key = formatDateKey(start);
+      if (key < todayKey) return;
+      out[notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+        String(row[map['Location']] || '').trim()) + '|' + key] = own;
+    });
+  } catch (err) {
+    log(`ℹ️ Could not read the per-date rooms for ${SHEET_NAMES.ROOM_MANAGEMENT} (${err}).`);
+  }
+  return out;
+}
+
+/**
+ * "Mon 11/2" back to the upcoming `yyyy-MM-dd` it was drawn from (the first
+ * such month/day on or after today), or ''. The label has no year on purpose.
+ */
+function roomManagementDateKeyFromLabel_(label, todayKey) {
+  const m = /(\d{1,2})\/(\d{1,2})/.exec(String(label || ''));
+  if (!m) return '';
+  const mm = ('0' + m[1]).slice(-2), dd = ('0' + m[2]).slice(-2);
+  const y = Number(String(todayKey).slice(0, 4));
+  const a = `${y}-${mm}-${dd}`;
+  return a >= todayKey ? a : `${y + 1}-${mm}-${dd}`;
+}
+
+/**
+ * Sets (or, with a blank, clears) ONE date's room on the session table's
+ * Room_Override — every session row of that program, building and date, and no
+ * other date. Cell by cell, never a column write, so a sync redrawing the tab
+ * at the same moment cannot be handed a stale column. Returns rows written.
+ */
+function writeSessionRoomOverride_(event, location, dateKey, value) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss ? ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD) : null;
+  if (!sheet || !dateKey) return 0;
+  const model = loadSessionGrid(sheet);
+  if (!model) return 0;
+  const col = model.map['Room_Override'], titleCol = model.map['Clean_Title'],
+    locCol = model.map['Location'], dateCol = model.map['Event_Date'];
+  if (!col || !titleCol || !locCol || !dateCol) return 0;
+  const wanted = notificationProgramKey(event, location);
+  const stored = String(value == null ? '' : value).trim();
+  let written = 0;
+  model.zones.forEach(zone => {
+    for (let r = 0; r < zone.count; r++) {
+      const line = model.grid[zone.start - 1 + r];
+      if (!line) continue;
+      const d = coerceDate(line[dateCol - 1]);
+      if (!d || formatDateKey(d) !== dateKey) continue;
+      if (notificationProgramKey(String(line[titleCol - 1] || '').trim(),
+        String(line[locCol - 1] || '').trim()) !== wanted) continue;
+      sheet.getRange(zone.start + r, col).setValue(stored);
+      written++;
+    }
+  });
+  if (written) invalidateSectionedRowsCache(sheet);
+  return written;
+}
+
+/**
  * Writes one program's room onto Program_Settings' `Room_Or_Setup` — the one
  * store — and drops the memo that reads it. A blank clears it. Returns true if
  * a row was found. A value that names a listed room is written as its canonical
@@ -335,7 +457,8 @@ function refreshRoomManagementTab(ss) {
     const programs = readRoomManagementPrograms_();
     const todayKey = formatDateKey(new Date());
     const rows = buildRoomManagementProgramRows(programs, rooms, rules,
-      readRoomManagementSchedule_(todayKey), todayKey, deskMonthHorizonKey());
+      readRoomManagementSchedule_(todayKey), todayKey, deskMonthHorizonKey(),
+      readRoomManagementOverrides_(todayKey), readRoomManagementTimes_(todayKey));
 
     const sec = ROOM_MANAGEMENT_LAYOUT.PROGRAMS;
     const width = sec.headers.length;
@@ -387,10 +510,14 @@ function writeRoomManagementStructure_(sheet) {
   };
   note('PROGRAMS', 'Event', 'One row per program per date. Date, Event, Location, Effective_Room and Why are redrawn ' +
     'from the workbook on every refresh — type in Room only.');
-  note('PROGRAMS', 'Room', 'Pick this program\'s usual room. This IS Program_Settings\' Room_Or_Setup: choosing one saves it ' +
-    'there at once. Blank = let a keyword rule decide. A single date that moves rooms goes on the session table\'s Room_Override.');
+  note('PROGRAMS', 'Room', 'On a DATED row, a pick is for THAT DATE ONLY (saved on the session table\'s Room_Override); the ' +
+    'other dates of the program are untouched. Pick the program\'s usual room, or clear the cell, to take the date back to the ' +
+    'usual room. On an undated row (nothing coming up) a pick is the program\'s usual room, which IS Program_Settings\' ' +
+    'Room_Or_Setup. A program\'s usual room is also set on Program_Settings, or for many at once with Assign by Keyword. ' +
+    'No keyword rule applies unless it is in the Keyword Rules table.');
   note('PROGRAMS', 'Date', 'Upcoming dates through the end of next month, soonest first, a blank row between days. A program ' +
-    'is listed under every date it meets; its Room is the same on each. Programs with nothing coming up are at the bottom.');
+    'is listed under every date it meets, each with its own Room. The start/end time sits beside the date and each day is ' +
+    'sorted by start time, so two programs wanting one room at once are neighbours. Programs with nothing coming up are at the bottom.');
   note('PROGRAMS', 'Effective_Room', 'What the program actually gets: its own room, else the first matching keyword rule.');
   note('ASSIGN', 'Keyword', 'Type a word that appears in program titles, pick a room, then tick Apply. Every matching ' +
     'program is set to that room after one confirmation. Matches counts them as you type.');
@@ -479,13 +606,30 @@ function handleRoomManagementEdit(e, sheet) {
 
   if (touches('PROGRAMS', 3)) {
     const block = sheet.getRange(row, L.PROGRAMS.startCol, numRows, 4).getValues();
-    let saved = 0;
+    const todayKey = formatDateKey(new Date());
+    const rooms = readRoomsList();
+    const programs = readRoomManagementPrograms_();
+    let saved = 0, dated = 0;
     block.forEach(r => {
       if (!String(r[1] || '').trim()) return;
-      if (writeProgramSettingsRoom_(r[1], r[2], r[3])) saved++;
+      const dateKey = String(r[0] || '').trim() ? roomManagementDateKeyFromLabel_(r[0], todayKey) : '';
+      if (dateKey) {
+        // A dated row is THAT DATE only. Typing the program's own usual room (or
+        // clearing the cell) takes the date back to the usual room; nothing is
+        // inferred from a keyword rule.
+        const wanted = notificationProgramKey(r[1], r[2]);
+        const prog = programs.filter(p => notificationProgramKey(p.event, p.location) === wanted)[0];
+        const typed = String(r[3] == null ? '' : r[3]).trim();
+        const usual = prog ? (resolveRoomLabel_(prog.room, rooms) || String(prog.room || '').trim()) : '';
+        const label = resolveRoomLabel_(typed, rooms) || typed;
+        const own = !label || (usual && label === usual) ? '' : label;
+        if (writeSessionRoomOverride_(r[1], r[2], dateKey, own) > 0) { saved++; dated++; }
+      } else if (writeProgramSettingsRoom_(r[1], r[2], r[3])) {
+        saved++;
+      }
     });
     toastIfPossible(saved > 0
-      ? `🚪 Room saved for ${saved} program(s).`
+      ? (dated > 0 ? `\ud83d\udeaa Room saved for ${dated} date(s) only.` : `\ud83d\udeaa Room saved for ${saved} program(s).`)
       : 'That row is not a program on Program_Settings, so nothing was saved.');
   } else if (touches('PROGRAMS')) {
     toastIfPossible('That column is worked out from the workbook — type in Room to change a program\'s room.');
