@@ -256,6 +256,15 @@ function buildDoorAppHtml(options) {
   ul.events li.item.go label.tickzone { padding: 28px 8px 28px 16px; }
   ul.events li.item input[type=checkbox] { width: 22px; height: 22px; }
   ul.events > p { grid-column: 1 / -1; }
+  /* TIME OF DAY: what is on now and what is about to start stand out, and what
+     is over fades back (still tappable — somebody may be late or early). */
+  .when { display: inline-block; font-size: 17px; font-weight: 800; letter-spacing: .04em; border-radius: 999px;
+          padding: 4px 12px; margin-bottom: 8px; }
+  .when.now { background: #137333; color: #fff; }
+  .when.soon { background: #F9AB00; color: #222; }
+  ul.events li.item.t-now { border-color: #137333; border-width: 4px; }
+  ul.events li.item.t-soon { border-color: #F9AB00; border-width: 4px; }
+  ul.events li.item.t-ended { opacity: .6; }
   @media (max-width: 480px) { ul.events { grid-template-columns: 1fr; } }
   li.item.off label { cursor: default; opacity: .72; }
   .tag { display: inline-block; font-size: 14px; font-weight: 700; letter-spacing: .04em;
@@ -824,7 +833,9 @@ function buildDoorAppHtml(options) {
         value: program.value,
         title: program.title,
         time: program.time || '',
-        byAppointment: !!program.byAppointment
+        byAppointment: !!program.byAppointment,
+        startMin: typeof program.startMin === 'number' ? program.startMin : null,
+        endMin: typeof program.endMin === 'number' ? program.endMin : null
       });
     });
     var lunch = DAY.lunch || {};
@@ -836,7 +847,46 @@ function buildDoorAppHtml(options) {
         isLunch: true
       });
     }
-    return out;
+    return sortByTime(out);
+  }
+
+  var SOON_MIN = 60;   // "Starting soon" means within this many minutes
+
+  /** Minutes since midnight on THIS tablet — only meaningful on the day it is set for. */
+  function nowMinutes() {
+    if (!DAY || DAY.dateKey !== OPTS.todayKey) return null;
+    var d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  }
+
+  /**
+   * WHERE A PROGRAM IS IN THE DAY: 'now' (started, not ended), 'soon' (starts
+   * within SOON_MIN), 'later', 'ended', or '' when there is no time to judge
+   * (an always-open event, lunch, another day). A program with a start but no
+   * end counts as 'now' for the first hour — a door is not the place to guess
+   * a class is over — and as 'ended' after that.
+   */
+  function timeStatus(choice, now) {
+    if (now === null || choice.startMin === null || choice.startMin === undefined) return '';
+    var end = typeof choice.endMin === 'number' ? choice.endMin : choice.startMin + 60;
+    if (now >= end) return 'ended';
+    if (now >= choice.startMin) return 'now';
+    if (choice.startMin - now <= SOON_MIN) return 'soon';
+    return 'later';
+  }
+
+  /** On now, then soon, then by start time, then untimed, then what is over. */
+  function sortByTime(list) {
+    var now = nowMinutes();
+    var rank = { now: 0, soon: 1, later: 2, '': 3, ended: 4 };
+    list.forEach(function (c, i) { c.status = timeStatus(c, now); c.seq = i; });
+    return list.slice().sort(function (a, b) {
+      var d = rank[a.status] - rank[b.status];
+      if (d) return d;
+      var as = typeof a.startMin === 'number' ? a.startMin : 1e6;
+      var bs = typeof b.startMin === 'number' ? b.startMin : 1e6;
+      return (as - bs) || (a.seq - b.seq);
+    });
   }
 
   /**
@@ -867,7 +917,7 @@ function buildDoorAppHtml(options) {
     box.setAttribute('aria-hidden', 'true');
     box.onchange = function () {
       if (box.checked) HERE_FOR[choice.value] = true; else delete HERE_FOR[choice.value];
-      li.className = 'item go' + (box.checked ? ' on' : '');
+      li.className = 'item go' + (box.checked ? ' on' : '') + (choice.status ? ' t-' + choice.status : '');
       li.setAttribute('aria-pressed', box.checked ? 'true' : 'false');
     };
     function goOn() {
@@ -895,9 +945,12 @@ function buildDoorAppHtml(options) {
     // appointment program and then finds they cannot be booked into it has
     // been sent round a loop the door could have opened flat.
     if (choice.byAppointment) meta.push('Booked by appointment — see a staff member');
-    what.innerHTML = '<span class="title">' + esc(choice.title) + '</span>' +
+    var badge = choice.status === 'now' ? '<span class="when now">HAPPENING NOW</span>'
+      : (choice.status === 'soon' ? '<span class="when soon">STARTING SOON</span>' : '');
+    what.innerHTML = badge + '<span class="title">' + esc(choice.title) + '</span>' +
       (meta.length ? '<span class="meta' + (choice.byAppointment ? ' warn' : '') + '">' +
         esc(meta.join(' · ')) + '</span>' : '');
+    if (choice.status) li.className += ' t-' + choice.status;
     label.appendChild(box);
     li.appendChild(label);
     li.appendChild(what);
@@ -2534,6 +2587,15 @@ function buildDoorAppHtml(options) {
   // screen alone (screenIsIdle), so this never redraws under a finger.
   if (typeof setInterval === 'function') setInterval(function () {
     if (!busy && SETUP && DAY && !document.hidden) syncDay();
+  }, 30000);
+  // The minute hand moves too: a program that has just started or ended is
+  // re-ranked on the first screen — only while nothing is half answered.
+  var STATUS_SIG = '';
+  if (typeof setInterval === 'function') setInterval(function () {
+    if (STEP !== 'events' || !DAY || busy || !screenIsIdle()) return;
+    var sig = eventChoices().map(function (c) { return c.value + ':' + c.status; }).join('|');
+    if (STATUS_SIG && sig !== STATUS_SIG) draw();
+    STATUS_SIG = sig;
   }, 30000);
 
   start();

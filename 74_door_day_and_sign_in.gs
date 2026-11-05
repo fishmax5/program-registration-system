@@ -216,7 +216,18 @@ function readWalkInDay(location, dateKeyOverride) {
         // is the only attendance number one of these will ever have.
         noRegistration: map['No_Registration'] !== undefined &&
           isTruthyCheckbox(row[map['No_Registration']]),
-        order: d.getHours() * 60 + d.getMinutes()
+        order: d.getHours() * 60 + d.getMinutes(),
+        // Minutes since midnight, so the page can say what is on NOW and what
+        // is starting soon. endMin is null where the row has no end on the
+        // same day — such a program is never called "happening now".
+        startMin: d.getHours() * 60 + d.getMinutes(),
+        endMin: (() => {
+          if (map['Event_End'] === undefined) return null;
+          const e = coerceDate(row[map['Event_End']]);
+          if (!e || formatDateKey(e) !== dateKey) return null;
+          const m = e.getHours() * 60 + e.getMinutes();
+          return m > d.getHours() * 60 + d.getMinutes() ? m : null;
+        })()
       });
     });
   }

@@ -43,9 +43,11 @@ function dayFixture(extraPeople) {
   return {
     location: 'Narberth', dateKey: TODAY, dateLabel: 'Thu, Nov 5, 2026',
     programs: [
-      { value: val('Jigsaw'), title: 'Jigsaw', time: '9:00 AM', byAppointment: false },
-      { value: val('Chair Yoga'), title: 'Chair Yoga', time: '10:00 AM', byAppointment: false },
-      { value: val('Bingo'), title: 'Bingo', time: '1:00 PM', byAppointment: false }
+      { value: val('Jigsaw'), title: 'Jigsaw', time: '9:00 AM', byAppointment: false, startMin: 540, endMin: 600 },
+      { value: val('Chair Yoga'), title: 'Chair Yoga', time: '10:00 AM', byAppointment: false, startMin: 600, endMin: 660 },
+      { value: val('Bingo'), title: 'Bingo', time: '1:00 PM', byAppointment: false, startMin: 780, endMin: 840 },
+      { value: val('Tai Chi'), title: 'Tai Chi', time: '10:30 AM', byAppointment: false, startMin: 630, endMin: 690 },
+      { value: val('Puzzles'), title: 'Puzzles', time: '', byAppointment: false, startMin: null, endMin: null }
     ],
     lunch: { offered: false, ruledOut: true, type: '', dish: '', title: 'Lunch', value: val('Lunch') },
     people, past: [],
@@ -388,6 +390,39 @@ async function main() {
     ok('Continue is at least 64px tall', sz.go >= 64);
     ok('"Not sure?" is 18px or larger', sz.plain >= 18);
     ok('the program checkbox is smaller than before', await page.$eval('ul.events li.item input', i => i.getBoundingClientRect().width <= 24));
+    await ctx.close();
+  }
+
+  // -------------------------------------------------------------------------
+  // Programs sorted by time: now first, then soon, then later, untimed, ended.
+  // -------------------------------------------------------------------------
+  {
+    const { page, ctx } = await openPage();
+    await page.waitForSelector('ul.events li.item');
+    async function order(minute) {
+      await page.evaluate(m => { nowMinutes = () => m; draw(); }, minute);
+      return page.$$eval('ul.events li.item .title', n => n.map(x => x.textContent));
+    }
+    // 10:20 — Chair Yoga is on, Tai Chi starts in 10 minutes, Bingo is later, Jigsaw is over.
+    ok('on now first, then soon, then later, then untimed, then ended',
+      (await order(620)).join() === 'Chair Yoga,Tai Chi,Bingo,Puzzles,Jigsaw');
+    ok('the running program says HAPPENING NOW',
+      (await page.textContent('ul.events li.item:first-child')).includes('HAPPENING NOW'));
+    ok('the next one says STARTING SOON',
+      (await page.textContent('ul.events li.item:nth-child(2)')).includes('STARTING SOON'));
+    ok('a later program has no badge', !(await page.textContent('ul.events li.item:nth-child(3)')).match(/HAPPENING|STARTING/));
+    ok('the highlight is a thick border as well as words',
+      await page.$eval('ul.events li.item:first-child', li => parseFloat(getComputedStyle(li).borderTopWidth) >= 4));
+    // 08:00 — nothing on; strictly by start time, 9:00 is within the hour
+    ok('early morning is plain time order with the 9am one soon',
+      (await order(480)).join() === 'Jigsaw,Chair Yoga,Tai Chi,Bingo,Puzzles');
+    ok('and 9am is called soon (within the hour)',
+      (await page.textContent('ul.events li.item:first-child')).includes('STARTING SOON'));
+    // another day: no judging at all, plain time order
+    await page.evaluate(() => { nowMinutes = function () { return null; }; draw(); });
+    ok('with no clock to judge by, it is plain time order and no badges',
+      (await page.$$eval('ul.events li.item .title', n => n.map(x => x.textContent))).join() === 'Jigsaw,Chair Yoga,Tai Chi,Bingo,Puzzles' &&
+      !(await page.textContent('ul.events')).match(/HAPPENING|STARTING/));
     await ctx.close();
   }
 

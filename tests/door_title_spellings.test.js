@@ -124,6 +124,7 @@ ok('a registered person holds the tile\'s own value',
   ann && jig[0] && ann.registered.length === 1 && ann.registered[0] === jig[0].value);
 ok('every one of the seven is matched to the tile',
   day.people.filter(p => p.registered.indexOf(jig[0].value) !== -1).length === 7);
+ok('each program carries its start minute for the time-of-day sort', jig[0].startMin === 600 && jig[0].endMin === null);
 const yoga = day.programs.filter(p => p.title === 'Chair Yoga')[0];
 const beginner = day.programs.filter(p => p.title === 'Chair Yoga (Beginner)')[0];
 ok('different programs keep different values', yoga && beginner && yoga.value !== beginner.value);
