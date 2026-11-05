@@ -816,6 +816,21 @@ function quickMarkTitleKey(title) {
 }
 
 /**
+ * Whether two titles name one program for the purpose of finding a person's
+ * existing row. The exact key first; failing that, the project's spelling-
+ * tolerant key (programTitleMatchKey, 53), because the door app now hands the
+ * calendar's spelling of a program to a write about a row that still carries
+ * the spelling the form wrote ("Jig-Saw" vs "Jigsaw") — an exact-only match
+ * there would add a SECOND row for somebody already registered.
+ */
+function quickMarkTitlesMatch_(a, b) {
+  if (quickMarkTitleKey(a) === quickMarkTitleKey(b)) return true;
+  if (isLunchOnlyProgramTitle(a) || isLunchOnlyProgramTitle(b)) return false;
+  const ka = programTitleMatchKey(a);
+  return !!ka && ka === programTitleMatchKey(b);
+}
+
+/**
  * Event_ID prefix for a lunch-only row. Deliberately NOT a computeEventId()
  * hash: there is no calendar event to key one off, and the prefix is what lets
  * buildDashboardRollup() recognize the row as legitimately session-less rather
@@ -1289,8 +1304,7 @@ function applyQuickMarkLocked(args) {
     values.forEach((row, i) => {
       if (normalizeNameKey(row[map['Name']]) !== nameKey) return;
       if (location && String(row[map['Location']] || '').trim() !== location) return;
-      if (selection.title &&
-        quickMarkTitleKey(row[map['Event']]) !== quickMarkTitleKey(selection.title)) return;
+      if (selection.title && !quickMarkTitlesMatch_(row[map['Event']], selection.title)) return;
       const d = coerceDate(row[map['Event_Date']]);
       // A dated choice means THAT session and no other — the whole reason the
       // session list names dates. Only an undated choice falls back to the

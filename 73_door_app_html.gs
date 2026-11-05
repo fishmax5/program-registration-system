@@ -118,8 +118,16 @@ function buildDoorAppHtml(options) {
   header .who { flex: 1; min-width: 0; }
   header h1 { margin: 0; font-size: 19px; font-weight: 600; }
   header .sub { font-size: 14px; opacity: .92; margin-top: 3px; }
-  header button.setup { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.4);
-                        border-radius: 8px; padding: 9px 11px; font-size: 13px; cursor: pointer; }
+  /* STAFF ONLY, AND A LONG PRESS: a tap on it by a member would drop the
+     tablet onto the setup screen. The fill is the progress of the hold, drawn
+     as a background that grows (nothing on this page is positioned over it). */
+  header button.setup { color: #fff; border: 1px solid rgba(255,255,255,.55); border-radius: 8px;
+                        padding: 10px 12px; font-size: 15px; cursor: pointer; touch-action: none;
+                        user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+                        background: linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55)) no-repeat left center / 0% 100%,
+                                    rgba(255,255,255,.16);
+                        transition: background-size .15s ease-out; }
+  header button.setup.holding { background-size: 100% 100%, auto; transition: background-size 2s linear; }
   main { padding: 14px 16px 110px 16px; max-width: 820px; margin: 0 auto; }
   h2 { font-size: 17px; margin: 22px 0 8px 0; }
   h2:first-child { margin-top: 4px; }
@@ -272,7 +280,7 @@ function buildDoorAppHtml(options) {
      the system keyboard are, and "Reading the list..." sat on top of them. */
   #status { position: fixed; left: 0; right: 0; top: 0; padding: 13px 16px; background: #202124;
             z-index: 55; color: #fff; font-size: 14px; line-height: 1.45; transform: translateY(-120%);
-            transition: transform .18s ease; }
+            transition: transform .18s ease; pointer-events: none; }
   #status.show { transform: translateY(0); }
   #status.err { background: #C5221F; }
   #status.ok { background: #188038; }
@@ -280,6 +288,12 @@ function buildDoorAppHtml(options) {
   ul.result li { background: #fff; border: 1px solid #E8EAED; border-radius: 8px; padding: 12px;
                  margin-bottom: 8px; font-size: 15px; line-height: 1.45; }
   .hide { display: none !important; }
+  .loading { text-align: center; padding: 48px 8px; }
+  .loading .msg { font-size: 22px; color: #222; margin: 0 0 12px 0; }
+  .spinner { width: 64px; height: 64px; margin: 0 auto 20px auto; border: 7px solid #DADCE0;
+             border-top-color: #1A73E8; border-radius: 50%; animation: doorspin 1s linear infinite; }
+  @keyframes doorspin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
   /* THE ON-SCREEN KEYBOARD — for a tablet whose own keyboard is missing,
      covers half the screen, or is locked away by a kiosk app. Off unless
      setup turns it on; see the TOUCH KEYBOARD block in the script. */
@@ -302,7 +316,8 @@ function buildDoorAppHtml(options) {
     <h1 id="heading">Sign In</h1>
     <div class="sub" id="subheading"></div>
   </div>
-  <button class="setup hide" id="setupbtn" onclick="openSetup()">Change setup</button>
+  <button class="setup hide" id="setupbtn" type="button"
+          aria-label="Staff only. Press and hold for two seconds to change setup.">Staff: hold to change setup</button>
 </header>
 
 <div id="pinbox" class="hide" style="padding:24px 16px;max-width:360px;margin:0 auto;">
@@ -365,6 +380,10 @@ function buildDoorAppHtml(options) {
   var GROUP = null;
   var busy = false;
   var pin = '';
+  var DAY_TIMEOUT_MS = 15000;  // google.script.run has no timeout of its own
+  var HOLD_MS = 2000;       // how long "Change setup" must be held
+  var holdTimer = null;
+  var holdStarted = 0;
 
   // --------------------------------------------------------------- the setup
   // WHAT USED TO BE IN THE URL. One address is deployed; the building and the
@@ -423,6 +442,51 @@ function buildDoorAppHtml(options) {
     loadDay();
   }
 
+  /**
+   * "CHANGE SETUP" IS A LONG PRESS. A member's tap on it would put the tablet
+   * on the setup screen for the next person in the queue, so a tap does
+   * nothing but say how to do it; holding for HOLD_MS fills the button and
+   * then opens setup. Pointer events cover mouse, touch and pen; Enter/Space
+   * held does the same for a keyboard.
+   */
+  function holdStart() {
+    if (holdTimer) return;
+    holdStarted = Date.now();
+    var b = document.getElementById('setupbtn');
+    b.classList.add('holding');
+    holdTimer = window.setTimeout(function () {
+      holdTimer = null;
+      b.classList.remove('holding');
+      openSetup();
+    }, HOLD_MS);
+  }
+
+  function holdCancel() {
+    if (!holdTimer) return;
+    window.clearTimeout(holdTimer);
+    holdTimer = null;
+    document.getElementById('setupbtn').classList.remove('holding');
+    say('Staff: keep holding the button for 2 seconds to change setup.', 'hint');
+  }
+
+  (function wireSetupHold() {
+    var b = document.getElementById('setupbtn');
+    ['pointerdown'].forEach(function (n) {
+      b.addEventListener(n, function (e) { if (e.button > 0) return; holdStart(); });
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (n) {
+      b.addEventListener(n, holdCancel);
+    });
+    b.addEventListener('keydown', function (e) {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); holdStart(); }
+    });
+    b.addEventListener('keyup', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') holdCancel();
+    });
+    b.addEventListener('blur', holdCancel);
+    b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  })();
+
   function openSetup() {
     STEP = 'setup';
     startNextPerson();
@@ -448,8 +512,10 @@ function buildDoorAppHtml(options) {
   // ---------------------------------------------------------------- the day
   function loadDay(then) {
     setBusy(true);
+    hideStatus();
     draw();
-    say('Reading the list...', '');
+    // The spinner on the page says "Reading the list…"; a toast as well would
+    // be a second dark bar over the header for something that is not a problem.
     call('doorDay', { location: SETUP.location, dateKey: SETUP.dateKey }, function (res) {
       setBusy(false);
       if (!res || !res.ok) { DAY = null; draw(); return handle(res); }
@@ -458,7 +524,7 @@ function buildDoorAppHtml(options) {
       hideStatus();
       draw();
       if (then) then();
-    });
+    }, DAY_TIMEOUT_MS);
   }
 
   /**
@@ -490,8 +556,29 @@ function buildDoorAppHtml(options) {
   function screenIsIdle() {
     if (CONFIRMING) return false;
     if (PERSON || GROUP) return false;
-    if (STEP === 'names') return !Object.keys(TICKED).length;
+    if (STEP === 'names') return !Object.keys(TICKED).length && !searchInUse();
     return STEP === 'events' && !Object.keys(HERE_FOR).length;
+  }
+
+  /**
+   * SOMEBODY IS TYPING THEIR NAME. A redraw rebuilds <main>, which throws the
+   * search box away with whatever was in it — so the half-minute re-read used
+   * to wipe a name mid-word. The box counts as in use while it holds text or
+   * has focus; the held-back day (PENDING) is applied by applyPendingDay()
+   * once it is empty and blurred.
+   */
+  function searchInUse() {
+    var box = document.getElementById('search');
+    if (!box) return false;
+    return box === document.activeElement || !!box.value.trim();
+  }
+
+  function applyPendingDay() {
+    if (!PENDING || !DAY || !screenIsIdle()) return;
+    DAY = PENDING;
+    PENDING = null;
+    reapplyLocalSignIns();
+    draw();
   }
 
   // --------------------------------------------------------------------- draw
@@ -513,9 +600,24 @@ function buildDoorAppHtml(options) {
     drawNames(main);
   }
 
+  /**
+   * NOTHING TO SHOW YET. While the read is under way: a spinner and one line,
+   * and NO button — "Try again" beside a list that is still loading invites a
+   * second tap on a read that was about to land. The button appears only once
+   * the read has failed or timed out (busy is false again by then).
+   */
   function drawEmpty(main) {
-    main.appendChild(el('p', 'hint', busy ? 'Reading the list...' : 'The list has not loaded yet.'));
-    main.appendChild(button('plain', 'Try again', function () { loadDay(); }));
+    var box = el('div', 'loading', '');
+    box.setAttribute('role', 'status');
+    if (busy) {
+      box.appendChild(el('div', 'spinner', ''));
+      box.appendChild(el('p', 'msg', 'Reading the list…'));
+      main.appendChild(box);
+      return;
+    }
+    box.appendChild(el('p', 'msg', 'The list did not load.'));
+    box.appendChild(button('big', 'Try again', function () { loadDay(); }));
+    main.appendChild(box);
   }
 
   // SCREEN 1 — set this tablet up: which door, and which day.
@@ -810,7 +912,8 @@ function buildDoorAppHtml(options) {
     box.placeholder = 'Your name';
     noSuggest(box, 'words');
     box.setAttribute('enterkeyhint', 'search');
-    box.oninput = drawSearchResults;
+    box.oninput = function () { drawSearchResults(); if (!box.value.trim()) applyPendingDay(); };
+    box.addEventListener('blur', function () { window.setTimeout(applyPendingDay, 0); });
     main.appendChild(box);
     var results = el('div', 'cards', '');
     results.id = 'results';
@@ -1838,11 +1941,34 @@ function buildDoorAppHtml(options) {
     return input;
   }
 
-  function call(fn, payload, done) {
+  /**
+   * One server call. timeoutMs (the day read passes DAY_TIMEOUT_MS) stands in
+   * for the timeout google.script.run does not have: a request that never
+   * answers is treated as a failure, so the page can offer Try again instead of
+   * a spinner for ever. An answer that turns up after that is still used —
+   * the list arriving late beats a list that never does.
+   */
+  function call(fn, payload, done, timeoutMs) {
     payload.pin = pin;
+    var timer = null;
+    var timedOut = false;
+    if (timeoutMs) {
+      timer = window.setTimeout(function () {
+        timer = null;
+        timedOut = true;
+        setBusy(false);
+        draw();
+        say('The list is taking too long. Check the connection, then tap Try again.', 'err');
+      }, timeoutMs);
+    }
     google.script.run
-      .withSuccessHandler(done)
+      .withSuccessHandler(function (res) {
+        if (timer) { window.clearTimeout(timer); timer = null; }
+        done(res);
+      })
       .withFailureHandler(function (err) {
+        if (timer) { window.clearTimeout(timer); timer = null; }
+        if (timedOut) return;
         setBusy(false);
         draw();
         say(err && err.message ? err.message : String(err), 'err');
@@ -1867,7 +1993,7 @@ function buildDoorAppHtml(options) {
     box.textContent = text || '';
     box.className = 'show' + (kind ? ' ' + kind : '');
     if (hideTimer) window.clearTimeout(hideTimer);
-    if (kind === 'ok') hideTimer = window.setTimeout(hideStatus, 6000);
+    if (kind === 'ok' || kind === 'hint') hideTimer = window.setTimeout(hideStatus, kind === 'hint' ? 3500 : 6000);
   }
 
   function hideStatus() {

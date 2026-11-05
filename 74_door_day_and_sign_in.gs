@@ -156,7 +156,26 @@ function readWalkInDay(location, dateKeyOverride) {
   const dateKey = String(dateKeyOverride || '').trim() || formatDateKey(new Date());
   const date = parseDateKey(dateKey);
   const dateLabel = formatDateLabel(date);
-  const sessionValue = title => `${title}${LOCATION_LABEL_SEPARATOR}${dateLabel}`;
+  // ONE SPELLING PER PROGRAM. A tile's value comes from the session table's
+  // Clean_Title and a person's registered value from the Event written on their
+  // own row, and the page compares those as exact strings — so "Jig-Saw" on the
+  // calendar and "Jigsaw" on a registration were two programs: the tile said
+  // "Nobody is signed up" while "Show everyone" listed the seven people who
+  // were, and the registrant's spelling added a duplicate tile beside it.
+  // Titles are therefore folded through programTitleMatchKey() — the project's
+  // own rule for "two spellings of one program" (no case, punctuation, spacing
+  // or bracket tag) — and the FIRST spelling met wins. The session table is
+  // read first, so it is the calendar's spelling that every value carries,
+  // which is also the one the write path resolves a session by. "Chair Yoga"
+  // and "Chair Yoga (Beginner)" keep different keys and stay two programs.
+  const spellingByKey = {};
+  const canonicalTitle = title => {
+    const key = programTitleMatchKey(title);
+    if (!key) return title;
+    if (!Object.prototype.hasOwnProperty.call(spellingByKey, key)) spellingByKey[key] = title;
+    return spellingByKey[key];
+  };
+  const sessionValue = title => `${canonicalTitle(title)}${LOCATION_LABEL_SEPARATOR}${dateLabel}`;
 
   const programs = [];
   const programByValue = {};
@@ -312,7 +331,7 @@ function readWalkInDay(location, dateKeyOverride) {
       // written against a program the calendar has since dropped — still
       // belongs on the list: the person is standing there holding it.
       addProgram({
-        value, title, time: eventTimeLabelOf(row[map['Event_Time']]),
+        value, title: canonicalTitle(title), time: eventTimeLabelOf(row[map['Event_Time']]),
         byAppointment: false, noRegistration: false, order: 24 * 60
       });
       if (person.registered.indexOf(value) === -1) person.registered.push(value);
@@ -457,14 +476,14 @@ function foldPastRegistrants(pastRows, programs, peopleByKey) {
   if (!pastRows.length || !programs.length) return [];
   const byTitleKey = {};
   programs.forEach(program => {
-    const key = normalizeNameKey(program.title);
+    const key = programTitleMatchKey(program.title) || normalizeNameKey(program.title);
     if (key && !byTitleKey[key]) byTitleKey[key] = program;
   });
 
   const byKey = {};
   const out = [];
   pastRows.forEach(entry => {
-    const program = byTitleKey[normalizeNameKey(entry.title)];
+    const program = byTitleKey[programTitleMatchKey(entry.title) || normalizeNameKey(entry.title)];
     if (!program) return;
     const key = normalizeNameKey(entry.name);
     if (!key || peopleByKey[key]) return;
