@@ -107,7 +107,7 @@ ok('the page script parses as JavaScript', parses);
 ok('the setup screen asks for a building and a day',
   /Which building\?/.test(page) && /Which day\?/.test(page));
 ok('there is no walk-in button — a name nobody knows just carries on',
-  !/Sign in as a walk-in/.test(page) && /'Continue as "' \+ typed/.test(page));
+  !/Sign in as a walk-in/.test(page) && /'Sign in as ' \+ typed/.test(page));
 ok('the confirmation covers the screen rather than a strip at the bottom',
   /id="done"/.test(page) && /You\\'re signed in!/.test(page) && /showDone\(name, partyNames/.test(page));
 ok('the walk-in form asks for either contact detail',

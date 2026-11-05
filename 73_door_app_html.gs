@@ -43,7 +43,7 @@
 // in section 16h) — a weekly class has the same eight people in it every week
 // and half of them have never filled in a form; then the search box. There is
 // no walk-in button any more: somebody who types a name the member roll does
-// not know is offered "Continue as <name>" and carried to the details screen,
+// not know is offered "Sign in as <name>" and carried to the details screen,
 // and nothing on screen calls them a walk-in. Staff can get past the question entirely with
 // "Show everyone here today", for the person who cannot work out which class
 // is theirs.
@@ -70,9 +70,10 @@
 // noSuggest(): autocomplete/autocorrect off, spellcheck off, and a name the
 // browser has never seen, which is what stops Chrome offering last week's
 // visitor's name in a dropdown over the results. The page's own results are
-// IN FLOW directly under the box (never an overlay), with "Continue as …"
-// FIRST, so it is the thing right under a thumb rather than twenty-four cards
-// down. (2) The viewport meta asks for interactive-widget=resizes-content
+// IN FLOW directly under the box (never an overlay): the matches first, in a
+// box that scrolls on its own, then "Sign in as …" BELOW it (outside that box,
+// so it stays on screen), enabled from three characters. (2) The viewport meta
+// asks for interactive-widget=resizes-content
 // (60), so the keyboard shrinks the page instead of sliding over it. (3) The
 // KEYBOARD FIT block in the script reads window.visualViewport (resize and
 // scroll) and keeps the focused box and the action under it inside what is
@@ -81,6 +82,27 @@
 // system keyboard (visualViewport.height + offsetTop) rather than leaving them
 // under it. Without visualViewport, focus falls back to scrollIntoView().
 // tests/door_app_keyboard.test.js.
+//
+// NOVEMBER 2026 — A REVIEW WITH SENIORS IN MIND. What changed and why:
+//   - A BACKGROUND RE-READ NEVER WIPES TYPING. screenIsIdle() counts the name
+//     box (focused, or holding text) as in use; the held-back day (PENDING) is
+//     applied by applyPendingDay() once it is empty and blurred.
+//   - ONE SPELLING PER PROGRAM (74): a tile and a registration spelled
+//     differently ("Jig-Saw" / "Jigsaw") share one value, so the tile no longer
+//     says "Nobody is signed up" over seven people.
+//   - "CHANGE SETUP" IS A 2-SECOND LONG PRESS with a filling background and a
+//     hint; a tap does nothing. Its staff line is on the setup screen only.
+//   - LOADING IS A SPINNER, and Try again appears only after a failure or the
+//     DAY_TIMEOUT_MS (15s) call() adds because google.script.run has none.
+//   - READABLE: 18px+ dark body, hint and footer; two-column names at 21px under
+//     real A-Z headings; strong "Selected" tiles; a neutral Back button; a
+//     visible label over the name box; one 4px focus ring for everything.
+//   - SEARCH matches the START of a name word (nameMatches), and "Sign in as …"
+//     is below the matches. NOTHING CARRIES OVER: Back to programs and a minute
+//     with no touch (IDLE_RESET_MS) both clear what was ticked.
+//   - THE KEYBOARD: see "WHY IT FAILED ON THE TABLET" in the KEYBOARD FIT block.
+//     tests/door_app_browser.test.js drives all of this in Chromium (skipped,
+//     saying so, without Playwright).
 // ============================================================================
 
 /**
@@ -111,13 +133,17 @@ function buildDoorAppHtml(options) {
   /* Every target is a thumb's worth: this is used standing up, on a tablet,
      by people who are not staff and are not looking for long. */
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* ONE FOCUS RING FOR EVERYTHING: a 4px dark ring with a 3px white gap, so it
+     shows on the blue header, on white cards and on a checkbox alike. */
+  :focus { outline: none; }
+  :focus-visible { outline: 4px solid #111; outline-offset: 3px; box-shadow: 0 0 0 3px #fff; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-         font-size: 16px; color: #202124; margin: 0; background: #F8F9FA; }
+         font-size: 18px; color: #222; margin: 0; background: #F8F9FA; line-height: 1.4; }
   header { background: #1A73E8; color: #fff; padding: 12px 16px; position: sticky; top: 0; z-index: 5;
            display: flex; align-items: center; gap: 12px; }
   header .who { flex: 1; min-width: 0; }
-  header h1 { margin: 0; font-size: 19px; font-weight: 600; }
-  header .sub { font-size: 14px; opacity: .92; margin-top: 3px; }
+  header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+  header .sub { font-size: 18px; opacity: .92; margin-top: 3px; }
   /* STAFF ONLY, AND A LONG PRESS: a tap on it by a member would drop the
      tablet onto the setup screen. The fill is the progress of the hold, drawn
      as a background that grows (nothing on this page is positioned over it). */
@@ -129,57 +155,61 @@ function buildDoorAppHtml(options) {
                         transition: background-size .15s ease-out; }
   header button.setup.holding { background-size: 100% 100%, auto; transition: background-size 2s linear; }
   main { padding: 14px 16px 110px 16px; max-width: 820px; margin: 0 auto; }
-  h2 { font-size: 17px; margin: 22px 0 8px 0; }
+  h2 { font-size: 26px; margin: 24px 0 10px 0; }
+  h3 { font-size: 22px; margin: 18px 0 8px 0; }
   h2:first-child { margin-top: 4px; }
-  p.hint { color: #5F6368; font-size: 14px; line-height: 1.5; margin: 0 0 10px 0; }
+  p.hint { color: #222; font-size: 18px; line-height: 1.5; margin: 0 0 12px 0; }
 
   input[type=text], input[type=tel], input[type=email], input[type=date], select {
-    width: 100%; padding: 13px; font-size: 16px; border: 1px solid #DADCE0;
-    border-radius: 8px; background: #fff; }
+    width: 100%; padding: 14px; font-size: 20px; border: 2px solid #5F6368;
+    border-radius: 8px; background: #fff; color: #222; }
+  /* A placeholder is a hint, not a label: dark enough to read, and the box
+     always has a visible label above it as well. */
+  input::placeholder { color: #4A4A4A; opacity: 1; }
   /* A focused box scrolled "to the top" lands under the sticky header rather
      than behind it. */
   input, select { scroll-margin-top: 84px; scroll-margin-bottom: 16px; }
   /* The search's own results: IN FLOW, under the box. Never an overlay. */
   #results { position: static; }
-  label.field { display: block; font-weight: 600; margin: 12px 0 5px 0; font-size: 14px; color: #5F6368; }
+  label.field { display: block; font-weight: 700; margin: 14px 0 6px 0; font-size: 20px; color: #222; }
 
-  /* THE NAME LIST. Letter headings and a dense grid, because the whole point
-     of the list is that finding your own name on it beats typing it. */
-  .letter { font-size: 13px; font-weight: 700; color: #5F6368; letter-spacing: .08em;
-            margin: 16px 0 6px 0; border-bottom: 1px solid #E8EAED; padding-bottom: 4px; }
+  /* THE NAME LIST. A real A-Z heading per letter and TWO columns of large names:
+     the whole point of the list is that finding your own name on it beats
+     typing it, and a senior reads 21px names in two columns more easily than
+     small ones in three. */
+  .letter { font-size: 24px; font-weight: 800; color: #222; margin: 20px 0 8px 0;
+            border-bottom: 3px solid #BDC1C6; padding-bottom: 4px; }
   .letter:first-of-type { margin-top: 4px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
-  /* THE NAME LISTS: three across under each letter. A grid fills left to right
-     and then down, so a row reads A-B-C and the next row D-E-F. */
-  .cards.names { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  @media (max-width: 560px) { .cards.names { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  /* THE COMPACT LIST: one continuous grid, no gaps between letters. Each row
-     carries the letter (or "A–B" where it spans two) of the names in it, in a
-     narrow gutter, instead of a heading that strands a half-empty row. The
-     column count is set by drawNameGrid() to match the breakpoint above. */
-  .namerow { display: grid; gap: 6px; margin-bottom: 6px; align-items: stretch; }
-  .rowletter { font-size: 13px; font-weight: 700; color: #5F6368; letter-spacing: .04em;
-               display: flex; align-items: center; justify-content: center; }
-  .namerow button.card { padding: 10px 12px; min-height: 52px; }
-  button.card { background: #fff; border: 1px solid #DADCE0; border-radius: 10px; padding: 14px 12px;
-                font-size: 17px; text-align: left; cursor: pointer; min-height: 62px; color: #202124; }
-  button.card .meta { display: block; font-size: 12px; color: #5F6368; margin-top: 3px; line-height: 1.35; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .cards.names { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  button.card { background: #fff; border: 2px solid #9AA0A6; border-radius: 10px; padding: 14px 12px;
+                font-size: 21px; font-weight: 600; text-align: left; cursor: pointer; min-height: 72px; color: #222; }
+  button.card .meta { display: block; font-size: 16px; font-weight: 400; color: #333; margin-top: 4px; line-height: 1.35; }
   button.card.here { background: #CEEAD6; border-color: #34A853; border-width: 2px; }
-  button.card.here .meta { color: #137333; font-weight: 600; }
+  button.card.here .meta { color: #0B5D2A; font-weight: 700; }
   /* A NAME CARD WITH A TICK BESIDE IT. Tapping the card signs that one person
      in; the box on its corner collects several for one confirm screen. */
   .cardwrap { display: flex; align-items: stretch; }
   .cardwrap button.card { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-  .cardwrap .tickzone { flex: 0 0 54px; display: flex; background: #fff; border: 1px solid #DADCE0;
+  .cardwrap .tickzone { flex: 0 0 48px; display: flex; background: #fff; border: 2px solid #9AA0A6;
                         border-left: 0; border-radius: 0 10px 10px 0;
                         align-items: center; justify-content: center; cursor: pointer; }
-  .cardwrap .tickzone input { width: 26px; height: 26px; margin: 0; }
+  .cardwrap .tickzone input { width: 20px; height: 20px; margin: 0; }
   .cardwrap.picked button.card { border-color: #1A73E8; border-width: 2px; background: #F1F7FE; }
-  #groupbar { position: sticky; top: 76px; z-index: 6; margin: 0 0 10px 0; }
+  #groupbar { position: sticky; top: 94px; z-index: 6; margin: 0 0 10px 0; }
   /* EVENT ROWS: the box is the only thing that ticks; the rest of the row goes on. */
   li.item.go { cursor: pointer; display: flex; align-items: stretch; }
   li.item.go label.tickzone { display: flex; align-items: flex-start; padding: 14px 8px 14px 12px; cursor: pointer; }
+  li.item.go:focus-visible { outline-offset: 4px; }
   li.item.go .what { flex: 1; padding: 14px 12px 14px 4px; }
+  button.switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%;
+                  min-height: 76px; padding: 12px 18px; margin: 4px 0 16px 0; border-radius: 12px;
+                  border: 3px solid #5F6368; background: #fff; color: #222; font-size: 22px; font-weight: 700;
+                  text-align: left; cursor: pointer; }
+  button.switch .state { flex: 0 0 auto; min-width: 84px; text-align: center; padding: 10px 14px; border-radius: 999px;
+                         background: #E8EAED; color: #222; font-size: 22px; font-weight: 800; }
+  button.switch.on { border-color: #137333; background: #CDEBD6; }
+  button.switch.on .state { background: #137333; color: #fff; }
   .guestrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .guestrow input { flex: 1; }
   .guestrow button { flex: 0 0 auto; min-height: 48px; }
@@ -188,7 +218,7 @@ function buildDoorAppHtml(options) {
   /* THE MEMBERSHIP NOTE — said before the question, so nobody answers "not
      yet" thinking it means they cannot come in. */
   .note { background: #F1F7FE; border: 1px solid #C6DAFC; color: #174EA6; border-radius: 10px;
-          padding: 12px 14px; font-size: 15px; line-height: 1.45; margin: 4px 0 10px 0; }
+          padding: 12px 14px; font-size: 18px; line-height: 1.45; margin: 4px 0 10px 0; }
 
   /* THE CONFIRMATION. It covers the whole screen, because the page goes
      straight back to the first question for the next person and a strip at the
@@ -202,61 +232,65 @@ function buildDoorAppHtml(options) {
   #done .big { font-size: 38px; font-weight: 700; margin: 0 0 10px 0; }
   #done .name { font-size: 26px; margin: 0 0 8px 0; line-height: 1.3; }
   #done .more { font-size: 18px; margin: 6px 0 0 0; max-width: 560px; line-height: 1.45; opacity: .95; }
-  #done .tapnext { margin-top: 34px; font-size: 16px; opacity: .85; border: 1px solid rgba(255,255,255,.6);
+  #done .tapnext { margin-top: 34px; font-size: 20px; opacity: .85; border: 1px solid rgba(255,255,255,.6);
                    border-radius: 999px; padding: 10px 22px; }
 
   ul.list { list-style: none; margin: 0; padding: 0; }
-  li.item { background: #fff; border: 1px solid #E8EAED; border-radius: 10px; margin-bottom: 8px; }
+  li.item { background: #fff; border: 2px solid #BDC1C6; border-radius: 10px; margin-bottom: 8px; }
   li.item label { display: flex; align-items: flex-start; gap: 12px; padding: 14px 12px; cursor: pointer; }
-  li.item input[type=checkbox], li.item input[type=radio] { width: 26px; height: 26px; margin: 0; flex: 0 0 auto; }
+  li.item input[type=checkbox], li.item input[type=radio] { width: 24px; height: 24px; margin: 0; flex: 0 0 auto; }
   li.item .what { flex: 1; }
-  li.item .title { font-size: 17px; }
-  li.item .meta { display: block; font-size: 13px; color: #5F6368; margin-top: 3px; line-height: 1.4; }
-  li.item.on { border-color: #B7DFC4; background: #F4FBF6; }
+  li.item .title { font-size: 21px; }
+  li.item .meta { display: block; font-size: 16px; color: #333; margin-top: 4px; line-height: 1.4; }
+  /* SELECTED reads from across the room: a strong fill, a thick border, and on
+     the first screen the word itself — colour alone is not an answer. */
+  li.item.on { border-color: #137333; background: #CDEBD6; box-shadow: inset 0 0 0 3px #137333; }
+  ul.events li.item.on .what::after { content: '✓  Selected'; display: block; margin-top: 10px;
+                                      font-size: 22px; font-weight: 800; color: #0B5D2A; }
   /* THE FIRST SCREEN: program cards two across, large enough to hit with a thumb. */
   ul.events { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  ul.events li.item { margin-bottom: 0; }
-  ul.events li.item .title { font-size: 24px; font-weight: 600; line-height: 1.25; }
-  ul.events li.item .meta { font-size: 17px; margin-top: 6px; }
-  ul.events li.item.go .what { padding: 20px 14px 20px 4px; }
-  ul.events li.item.go label.tickzone { padding: 20px 8px 20px 14px; }
-  ul.events li.item input[type=checkbox] { width: 32px; height: 32px; }
+  ul.events li.item { margin-bottom: 0; min-height: 170px; }
+  ul.events li.item .title { font-size: 30px; font-weight: 700; line-height: 1.2; }
+  ul.events li.item .meta { font-size: 22px; margin-top: 8px; }
+  ul.events li.item.go .what { padding: 28px 16px 28px 4px; }
+  ul.events li.item.go label.tickzone { padding: 28px 8px 28px 16px; }
+  ul.events li.item input[type=checkbox] { width: 22px; height: 22px; }
   ul.events > p { grid-column: 1 / -1; }
   @media (max-width: 480px) { ul.events { grid-template-columns: 1fr; } }
   li.item.off label { cursor: default; opacity: .72; }
-  .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  .tag { display: inline-block; font-size: 14px; font-weight: 700; letter-spacing: .04em;
          border-radius: 999px; padding: 2px 8px; margin-right: 6px; vertical-align: 1px; }
   .tag.yes { background: #E6F4EA; color: #137333; }
   .tag.no { background: #FEF7E0; color: #B06000; }
   .tag.grey { background: #F1F3F4; color: #5F6368; }
   .warn { color: #B06000; }
   .banner { background: #FEF7E0; border: 1px solid #FDE293; color: #B06000; border-radius: 10px;
-            padding: 12px 14px; font-size: 14px; line-height: 1.45; margin-bottom: 12px; }
+            padding: 12px 14px; font-size: 18px; line-height: 1.45; margin-bottom: 12px; }
 
   button.big { width: 100%; background: #1A73E8; color: #fff; border: 0; border-radius: 10px;
-               padding: 16px; font-size: 18px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+               padding: 18px; font-size: 24px; font-weight: 700; cursor: pointer; margin-top: 16px; min-height: 72px; }
   button.big[disabled] { opacity: .5; }
   /* THE CONFIRM SCREEN'S ACTIONS LIVE BESIDE THE LIST, NOT UNDER IT. A confirm
      screen with four programs on it pushed "Confirm and sign in" below the
      fold, so the one button everybody needs was the one nobody could see. The
      rail is sticky: it rides down the screen with the list. On a narrow
      screen it becomes a bar along the bottom instead. */
-  .cwrap { padding-top: 112px; }
+  .cwrap { padding-top: 120px; }
   .cbody { min-width: 0; }
   /* PINNED TO THE TOP, under the header with a gap: the side column never
      stayed put on the tablet, and a button below the fold is no button. */
-  .crail { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); width: min(820px, 100%);
+  .crail { position: fixed; top: 94px; left: 50%; transform: translateX(-50%); width: min(820px, 100%);
            z-index: 40; display: flex; flex-direction: row; align-items: stretch; gap: 10px;
            padding: 8px 16px; background: #F8F9FA; box-shadow: 0 6px 10px -6px rgba(0,0,0,.35); }
   button.big.submit { flex: 2 1 0; background: #188038; font-size: 28px; font-weight: 800; padding: 22px 12px;
                       margin-top: 0; box-shadow: 0 4px 10px rgba(24,128,56,.45); letter-spacing: .02em; }
-  .crail button.plain { flex: 1 1 0; margin-top: 0; font-size: 16px; min-height: 48px; padding: 8px 10px; }
-  button.plain { background: #fff; border: 1px solid #DADCE0; color: #1A73E8; border-radius: 8px;
-                 padding: 13px 14px; font-size: 15px; cursor: pointer; min-height: 48px; width: 100%;
+  .crail button.plain { flex: 1 1 0; margin-top: 0; font-size: 18px; min-height: 56px; padding: 8px 10px; }
+  button.plain { background: #fff; border: 2px solid #5F6368; color: #222; border-radius: 8px;
+                 padding: 13px 14px; font-size: 18px; color: #222; cursor: pointer; min-height: 56px; width: 100%;
                  margin-top: 8px; }
   /* BACK BUTTONS read as backing out, not as another way forward. */
-  button.plain.back { color: #C5221F; border: 2px solid #C5221F; background: #FCE8E6; font-weight: 700;
-                      font-size: 19px; min-height: 60px; margin-top: 18px; }
+  button.plain.back { color: #222; border: 2px solid #5F6368; background: #fff; font-weight: 700;
+                      font-size: 20px; min-height: 60px; margin-top: 18px; }
   /* THE THIRD TAP: a full-screen question, names and events, with two huge
      buttons. Nothing is written until Confirm. */
   #confirm { position: fixed; inset: 0; z-index: 70; background: rgba(32,33,36,.72); display: flex;
@@ -274,7 +308,7 @@ function buildDoorAppHtml(options) {
                         box-shadow: 0 4px 10px rgba(24,128,56,.45); }
   #confirm .btns .no { flex: 1 1 0; background: #FCE8E6; color: #C5221F; border: 3px solid #C5221F; }
   @media (max-width: 480px) { #confirm .btns { flex-direction: column-reverse; } }
-  .foot { margin-top: 26px; font-size: 13px; color: #5F6368; line-height: 1.6; }
+  .foot { margin-top: 26px; font-size: 18px; color: #222; line-height: 1.6; }
 
   /* AT THE TOP, never the bottom: the bottom is where the touch keyboard and
      the system keyboard are, and "Reading the list..." sat on top of them. */
@@ -286,7 +320,28 @@ function buildDoorAppHtml(options) {
   #status.ok { background: #188038; }
   ul.result { list-style: none; margin: 12px 0 0 0; padding: 0; }
   ul.result li { background: #fff; border: 1px solid #E8EAED; border-radius: 8px; padding: 12px;
-                 margin-bottom: 8px; font-size: 15px; line-height: 1.45; }
+                 margin-bottom: 8px; font-size: 18px; line-height: 1.45; }
+  /* THE MATCHES: two columns in a box that scrolls on its own, so a long list
+     never pushes the Sign in button below it off the screen. */
+  .cards.matches { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 45vh; overflow-y: auto;
+                   -webkit-overflow-scrolling: touch; padding: 2px; }
+  /* TYPING MODE (set while the name box or anything in its block has focus):
+     the screen compacts to the box, its matches and the button, pinned just
+     under a slim header — everything that needs to be seen while typing fits in
+     the part of the screen above a keyboard, even a short landscape tablet's.
+     The rest comes back the moment focus leaves the block. */
+  body.typing { padding-bottom: 0; }
+  body.typing.okb-open { padding-bottom: 300px; }
+  body.typing header { padding: 6px 16px; }
+  body.typing header h1 { font-size: 20px; }
+  body.typing header .sub, body.typing header button.setup { display: none !important; }
+  body.typing main { padding: 8px 16px 8px 16px; }
+  body.typing main > *:not(#typeblock) { display: none !important; }
+  body.typing #typeblock label.field { margin: 0 0 4px 0; font-size: 18px; }
+  body.typing #typeblock input#search { padding: 10px 14px; }
+  body.typing #results { margin-top: 6px !important; }
+  body.typing #astyped { margin-top: 8px !important; min-height: 64px; padding: 10px 14px; }
+  body.typing #typeblock p.hint { margin: 6px 0 0 0; font-size: 18px; }
   .hide { display: none !important; }
   .loading { text-align: center; padding: 48px 8px; }
   .loading .msg { font-size: 22px; color: #222; margin: 0 0 12px 0; }
@@ -308,6 +363,7 @@ function buildDoorAppHtml(options) {
   body.okb-open { padding-bottom: 300px; }
   /* While a keyboard is up: room to scroll the last box clear of it. */
   body.kb-up { padding-bottom: 50vh; }
+  body.typing.kb-up { padding-bottom: 0; }
   body.okb-open.kb-up { padding-bottom: calc(50vh + 300px); }
 </style>
 
@@ -655,18 +711,24 @@ function buildDoorAppHtml(options) {
       document.getElementById('setupdate').value = OPTS.todayKey;
     }));
 
-    var kbWrap = document.createElement('label');
-    kbWrap.style.display = 'block';
-    kbWrap.style.margin = '16px 0';
-    var kbBox = document.createElement('input');
-    kbBox.type = 'checkbox';
-    kbBox.checked = KEYBOARD_ON;
-    kbBox.onchange = function () { setKeyboardOn(kbBox.checked); };
-    kbWrap.appendChild(kbBox);
-    kbWrap.appendChild(document.createTextNode(' Show touch screen keyboard'));
     main.appendChild(el('h2', '', 'Keyboard'));
     main.appendChild(el('p', 'hint',
       'For a tablet whose own keyboard is hidden or gets in the way. Remembered on this tablet.'));
+    // A LARGE SWITCH, NOT A TINY BOX: the whole row is the target and says its
+    // state in words (On / Off), at a size a volunteer can hit and read.
+    var kbWrap = document.createElement('button');
+    kbWrap.type = 'button';
+    kbWrap.className = 'switch';
+    kbWrap.setAttribute('role', 'switch');
+    function paintKb() {
+      kbWrap.setAttribute('aria-checked', KEYBOARD_ON ? 'true' : 'false');
+      kbWrap.className = 'switch' + (KEYBOARD_ON ? ' on' : '');
+      kbWrap.innerHTML = '';
+      kbWrap.appendChild(el('span', 'lbl', 'Show touch screen keyboard'));
+      kbWrap.appendChild(el('span', 'state', KEYBOARD_ON ? 'ON' : 'OFF'));
+    }
+    kbWrap.onclick = function () { setKeyboardOn(!KEYBOARD_ON); paintKb(); };
+    paintKb();
     main.appendChild(kbWrap);
 
     var go = button('big', 'Start', function () {
@@ -680,6 +742,7 @@ function buildDoorAppHtml(options) {
       loadDay();
     });
     main.appendChild(go);
+    main.appendChild(footer(true));
   }
 
   /** Redrawing setup without losing what has been typed into the date box. */
@@ -784,6 +847,13 @@ function buildDoorAppHtml(options) {
   function eventChoiceItem(choice) {
     var on = isHereFor(choice.value);
     var li = el('li', 'item go' + (on ? ' on' : ''), '');
+    // ONE STOP PER TILE. The whole tile is the button — focusable, Enter/Space
+    // press it — and the little box inside is for touch only (tabindex -1), so
+    // a keyboard or switch user meets each program once, not twice.
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    li.setAttribute('aria-label', choice.title + (choice.time ? ', ' + choice.time : ''));
+    li.setAttribute('aria-pressed', on ? 'true' : 'false');
     // THE BOX TICKS; ANYWHERE ELSE ON THE ROW GOES ON. Tapping a program is
     // "this is the one" — it is added to whatever is ticked and the name list
     // opens. Ticking several is the box, then Continue.
@@ -793,20 +863,30 @@ function buildDoorAppHtml(options) {
     box.type = 'checkbox';
     box.checked = on;
     box.disabled = busy;
+    box.setAttribute('tabindex', '-1');
+    box.setAttribute('aria-hidden', 'true');
     box.onchange = function () {
       if (box.checked) HERE_FOR[choice.value] = true; else delete HERE_FOR[choice.value];
       li.className = 'item go' + (box.checked ? ' on' : '');
+      li.setAttribute('aria-pressed', box.checked ? 'true' : 'false');
     };
-    li.onclick = function (e) {
-      if (busy) return;
-      var t = e.target;
-      while (t && t !== li) { if (t === label) return; t = t.parentNode; }
+    function goOn() {
       HERE_FOR[choice.value] = true;
       hideStatus();
       SHOW_ALL = false;
       STEP = 'names';
       draw();
       window.scrollTo(0, 0);
+    }
+    li.onclick = function (e) {
+      if (busy) return;
+      var t = e.target;
+      while (t && t !== li) { if (t === label) return; t = t.parentNode; }
+      goOn();
+    };
+    li.onkeydown = function (e) {
+      if (busy || e.target !== li) return;
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goOn(); }
     };
     var what = el('div', 'what', '');
     var meta = [];
@@ -850,6 +930,9 @@ function buildDoorAppHtml(options) {
     // is on — and the person reading it answered the question a moment ago,
     // so it is also how they check the tablet heard them.
     var backToPrograms = button('plain back', '← Back to programs', function () {
+      // BACKING OUT IS STARTING OVER: what was ticked on the way in is one
+      // person's answer, and the next hand on the tablet must not inherit it.
+      HERE_FOR = {}; TICKED = {}; SHOW_ALL = false;
       STEP = 'events'; hideStatus(); draw(); window.scrollTo(0, 0);
     });
     backToPrograms.style.marginTop = '0';
@@ -860,28 +943,10 @@ function buildDoorAppHtml(options) {
     main.appendChild(bar);
     refreshGroupBar();
 
-    main.appendChild(el('h2', '', 'Tap your name'));
-    main.appendChild(el('p', 'hint',
-      'Tap a name to sign in one person. To sign in several people together, tick the box beside each name.'));
     var people = (DAY.people || []).filter(personIsSelected).sort(function (a, b) {
       var d = sortKey(a.name).localeCompare(sortKey(b.name));
       return d || a.name.localeCompare(b.name);
     });
-    if (people.length) {
-      main.appendChild(el('p', 'hint', 'Signed up for ' + whatIsShowing() + '.'));
-      drawNameGrid(main, people);
-    } else {
-      main.appendChild(el('p', 'hint',
-        'Nobody is signed up for ' + whatIsShowing() + '. ' +
-        'Type your name below.'));
-    }
-
-    // SECTION 2 — THE REGULARS. Somebody who has been to these same programs
-    // in the last two months and is not down for today: the drop-in class
-    // nobody registers for, the member who always just turns up. Tapping one
-    // is the same personal screen as anybody else's, already ticked for what
-    // this tablet is for — which is what it takes the place of, a volunteer
-    // typing a name they have known for years into the search box every week.
     var present = {};
     (DAY.people || []).forEach(function (q) { present[String(q.name || '').trim().toLowerCase()] = true; });
     var past = (DAY.past || []).filter(pastIsSelected).filter(function (entry) {
@@ -890,6 +955,28 @@ function buildDoorAppHtml(options) {
       var d = sortKey(a.name).localeCompare(sortKey(b.name));
       return d || a.name.localeCompare(b.name);
     });
+
+    // WHAT THIS LIST IS OF — and when there IS no list, only how to type.
+    // "Tap your name" over a list of nobody, with "Nobody is signed up" under
+    // it, tells a member two things that cannot both help them; the typing
+    // instructions are the whole of what this screen has to say then.
+    if (people.length) {
+      main.appendChild(el('h2', '', 'Tap your name'));
+      main.appendChild(el('p', 'hint',
+        'Signed up for ' + whatIsShowing() + '. Tap a name to sign in one person. ' +
+        'To sign in several people together, tick the box beside each name.'));
+      drawNameGrid(main, people);
+    } else if (!past.length) {
+      main.appendChild(el('h2', '', 'Type your name'));
+      main.appendChild(el('p', 'hint', 'Type your name in the box below, then tap the big button.'));
+    }
+
+    // SECTION 2 — THE REGULARS. Somebody who has been to these same programs
+    // in the last two months and is not down for today: the drop-in class
+    // nobody registers for, the member who always just turns up. Tapping one
+    // is the same personal screen as anybody else's, already ticked for what
+    // this tablet is for — which is what it takes the place of, a volunteer
+    // typing a name they have known for years into the search box every week.
     if (past.length) {
       main.appendChild(el('h2', '', 'Here recently'));
       main.appendChild(el('p', 'hint',
@@ -904,21 +991,26 @@ function buildDoorAppHtml(options) {
     // carried on with the name they typed (drawSearchResults()). The word
     // "walk-in" is never said to them — it is our word for them, not theirs,
     // and a separate button for it read as a second, harder way in.
-    main.appendChild(el('h2', '', 'Not seeing your name?'));
-    main.appendChild(el('p', 'hint', 'Type your name here.'));
+    if (people.length || past.length) main.appendChild(el('h2', '', 'Not seeing your name?'));
+    var typeBlock = el('div', '', '');
+    typeBlock.id = 'typeblock';
+    main.appendChild(typeBlock);
+    var searchLabel = el('label', 'field', 'Type your name');
+    searchLabel.setAttribute('for', 'search');
+    typeBlock.appendChild(searchLabel);
     var box = document.createElement('input');
     box.type = 'text';
     box.id = 'search';
-    box.placeholder = 'Your name';
+    box.placeholder = 'First or last name';
     noSuggest(box, 'words');
     box.setAttribute('enterkeyhint', 'search');
     box.oninput = function () { drawSearchResults(); if (!box.value.trim()) applyPendingDay(); };
     box.addEventListener('blur', function () { window.setTimeout(applyPendingDay, 0); });
-    main.appendChild(box);
-    var results = el('div', 'cards', '');
+    typeBlock.appendChild(box);
+    var results = el('div', '', '');
     results.id = 'results';
     results.style.marginTop = '10px';
-    main.appendChild(results);
+    typeBlock.appendChild(results);
     if (!(DAY.members || []).length) {
       main.appendChild(el('p', 'hint',
         'The member directory is empty — run "Update Everything Now" in the workbook to build it. ' +
@@ -928,24 +1020,25 @@ function buildDoorAppHtml(options) {
   }
 
   /**
-   * LETTER HEADINGS, off the surname — which is how a list of people is read,
-   * and the only thing that makes a screen of eighty names usable without a
-   * search. Shared by both sections, so the regulars underneath are scanned
-   * exactly the way the registered names above them are.
+   * A-Z HEADINGS, off the surname — which is how a list of people is read, and
+   * the only thing that makes a screen of eighty names usable without a
+   * search. Each letter is a real heading over its own two-column grid. Shared
+   * by both sections, so the regulars underneath are scanned exactly the way
+   * the registered names above them are.
    */
   function drawNameGrid(main, people) {
-    // Same breakpoint as the .cards.names rule above: two across on a phone.
-    var cols = window.matchMedia && window.matchMedia('(max-width: 560px)').matches ? 2 : 3;
-    for (var i = 0; i < people.length; i += cols) {
-      var chunk = people.slice(i, i + cols);
-      var first = (sortKey(chunk[0].name).charAt(0) || '#').toUpperCase();
-      var last = (sortKey(chunk[chunk.length - 1].name).charAt(0) || '#').toUpperCase();
-      var row = el('div', 'namerow', '');
-      row.style.gridTemplateColumns = '36px repeat(' + cols + ', minmax(0, 1fr))';
-      row.appendChild(el('div', 'rowletter', first === last ? first : first + '–' + last));
-      chunk.forEach(function (p) { row.appendChild(personTile(p)); });
-      main.appendChild(row);
-    }
+    var letter = null;
+    var grid = null;
+    people.forEach(function (p) {
+      var l = (sortKey(p.name).charAt(0) || '#').toUpperCase();
+      if (l !== letter) {
+        letter = l;
+        main.appendChild(el('div', 'letter', l));
+        grid = el('div', 'cards names', '');
+        main.appendChild(grid);
+      }
+      grid.appendChild(personTile(p));
+    });
   }
 
   /** What the sections are about, in the words the person tapped. */
@@ -1011,52 +1104,86 @@ function buildDoorAppHtml(options) {
     return (parts.length ? parts[parts.length - 1] : String(name || '')).toUpperCase();
   }
 
+  /**
+   * DOES THIS PERSON MATCH WHAT WAS TYPED? Every typed word has to be the START
+   * of some word of the name (first name, last name, middle name, or a
+   * nickname the roll carries in the search field) — "mar" finds Mary Smith and
+   * Tom Marsh, but not Tamara Jones or Rosemary Lee, which "anywhere in the
+   * string" matching buried them among.
+   */
+  function nameMatches(member, needle) {
+    var hay = String(member.search || member.name || '').toLowerCase();
+    var words = hay.split(/[\\s,.()"\\-]+/).filter(Boolean);
+    var typedWords = needle.split(/\\s+/).filter(Boolean);
+    if (!typedWords.length) return false;
+    return typedWords.every(function (t) {
+      return words.some(function (w) { return w.indexOf(t) === 0; });
+    });
+  }
+
+  var SIGN_IN_AS_MIN = 3;  // characters before "Sign in as …" is enabled
+
+  /**
+   * MATCHES FIRST, THEN THE BIG BUTTON. Anybody the roll knows is offered as a
+   * card; the name as typed is offered last as "Sign in as …", enabled only
+   * once there are enough letters for it to be a name rather than a slip of
+   * the thumb. The matches sit in their own scrolling box with the button
+   * BELOW it (outside the scroll), so on a short screen with the keyboard up
+   * the button stays on screen while the list scrolls — see capResults().
+   */
   function drawSearchResults() {
     var typed = document.getElementById('search').value.trim();
     var needle = typed.toLowerCase();
     var box = document.getElementById('results');
     box.innerHTML = '';
-    if (needle.length < 2) return;
+    if (!needle) return;
     // MATCHED ON EVERY SPELLING, not just the one on the row: the search field carries
     // the nickname a form's parenthetical was holding ("Robert (Bob) Kaplan"),
     // so a volunteer typing what they actually call somebody finds them. See
     // memberSearchNames() in 77_households_and_names.gs.
-    var hits = (DAY.members || []).filter(function (m) {
-      var hay = m.search || m.name.toLowerCase();
-      return hay.indexOf(needle) !== -1;
+    var hits = needle.length < 2 ? [] : (DAY.members || []).filter(function (m) {
+      return nameMatches(m, needle);
     }).slice(0, 24);
-    // THE TYPED NAME IS ALWAYS AN ANSWER. Anybody the roll knows is offered
-    // as a card; and whether or not anybody matched, the name as typed is
-    // offered too, carried straight into the details screen so nobody types it
-    // twice. Offered even beside matches, because "Mary Cohen" matching
-    // "Mary Cohen-Stein" is not the same person. A name that matches nobody is
-    // a walk-in, and that is all it takes — nothing on screen calls it one.
-    var hint = el('p', 'hint', hits.length
-      ? 'Is this you? Tap your name.'
-      : 'Not on our list yet — that is fine. Tap the button above to carry on.');
-    hint.style.gridColumn = '1 / -1';
-    // "CONTINUE AS …" IS FIRST, directly under the box. It used to come after
-    // up to twenty-four cards, which on a tablet with its keyboard up is
-    // somewhere under the keyboard — a button nobody can see. Big and blue when
-    // nobody matched (it is the only answer); a plain full-width button when
-    // there are names below it, worded so that tapping your own card is still
-    // the obvious thing to do.
-    var asTyped = button(hits.length ? 'plain' : 'big',
-      hits.length ? 'Not listed below? Continue as "' + typed + '"' : 'Continue as "' + typed + '"',
-      function () { startWalkIn(typed); });
-    asTyped.id = 'astyped';
-    asTyped.style.gridColumn = '1 / -1';
-    asTyped.style.marginTop = '0';
-    asTyped.style.minHeight = '56px';
-    box.appendChild(asTyped);
-    box.appendChild(hint);
+    // The roll is not the only place a name lives: somebody expected today who
+    // is not on Member_Roll yet is still on the day's list.
+    if (needle.length >= 2) {
+      var seen = {};
+      hits.forEach(function (m) { seen[m.key] = true; });
+      (DAY.people || []).forEach(function (p) {
+        if (!seen[p.key] && !p.isGuest && nameMatches(p, needle) && hits.length < 24) {
+          seen[p.key] = true;
+          hits.push({ name: p.name, key: p.key });
+        }
+      });
+    }
+    var list = el('div', 'cards matches', '');
+    list.id = 'matches';
+    if (hits.length) {
+      var hint = el('p', 'hint', 'Is this you? Tap your name.');
+      hint.style.gridColumn = '1 / -1';
+      hint.style.margin = '0';
+      list.appendChild(hint);
+    }
     hits.forEach(function (m) {
       var person = null;
       (DAY.people || []).forEach(function (p) { if (p.key === m.key) person = p; });
-      box.appendChild(personTile(person || {
+      list.appendChild(personTile(person || {
         name: m.name, key: m.key, registered: [], attended: [], lunchRegistered: false, here: false
       }));
     });
+    if (hits.length) box.appendChild(list);
+    var ready = typed.length >= SIGN_IN_AS_MIN;
+    var asTyped = button('big', 'Sign in as ' + typed, function () { startWalkIn(typed); });
+    asTyped.id = 'astyped';
+    asTyped.disabled = busy || !ready;
+    asTyped.style.marginTop = '12px';
+    box.appendChild(asTyped);
+    if (!ready) {
+      box.appendChild(el('p', 'hint', 'Keep typing — the button works once you have typed your name.'));
+    } else if (!hits.length) {
+      box.appendChild(el('p', 'hint', 'Not on our list yet — that is fine. Tap the button to carry on.'));
+    }
+    capResults();
     // Every keystroke redraws this box; keep the box and the button under it
     // in view above whatever keyboard is up.
     keepInView(document.getElementById('search'), asTyped);
@@ -1076,6 +1203,8 @@ function buildDoorAppHtml(options) {
     box.type = 'checkbox';
     box.checked = !!TICKED[p.key];
     box.disabled = busy;
+    box.setAttribute('tabindex', '-1');
+    box.setAttribute('aria-label', 'Add ' + p.name + ' to a group sign-in');
     box.onchange = function () {
       if (box.checked) TICKED[p.key] = p; else delete TICKED[p.key];
       if (Object.keys(TICKED).length > DOOR_GROUP_MAX) {
@@ -1860,7 +1989,7 @@ function buildDoorAppHtml(options) {
     });
   }
 
-  function footer() {
+  function footer(staff) {
     var d = el('div', 'foot', '');
     var when = '';
     if (DAY && DAY.stale) {
@@ -1869,7 +1998,11 @@ function buildDoorAppHtml(options) {
     } else if (DAY && DAY.readAt) {
       when = 'Read at ' + DAY.readAt + '. ';
     }
-    d.textContent = when + 'Staff: use "Change setup" at the top to switch building or day.';
+    // THE STAFF LINE IS FOR SETUP ONLY. A member reading "Change setup" is a
+    // member wondering whether it is for them (and the button wants a long
+    // press, so a tap would only confuse); it is said where staff are.
+    d.textContent = when + (staff
+      ? 'To switch building or day later, hold the "Change setup" button at the top for 2 seconds.' : '');
     return d;
   }
 
@@ -1921,7 +2054,7 @@ function buildDoorAppHtml(options) {
 
   /**
    * NO BROWSER SUGGESTIONS, EVER. The browser's own autofill dropdown opens
-   * over whatever is under the box — on the search, that is "Continue as …"
+   * over whatever is under the box — on the search, that is "Sign in as …"
    * and the names — and on a shared tablet it offers whoever typed last. The
    * name attribute is one the browser has never seen (it keys its memory on
    * it); autocomplete/autocorrect/spellcheck off take the rest away.
@@ -2157,9 +2290,35 @@ function buildDoorAppHtml(options) {
   // (60) asks the browsers that support it to shrink the page instead, in which
   // case the inset below is simply 0 and only the scrolling does anything.
   // No visualViewport: focus falls back to scrollIntoView().
+  //
+  // WHY IT FAILED ON THE TABLET, and what is done about each cause:
+  //  (1) THE PAGE LIVES IN APPS SCRIPT'S SANDBOX IFRAME. Inside it,
+  //      visualViewport and innerHeight often do not change at all when a
+  //      system keyboard opens (the keyboard resizes only the outer page, and
+  //      interactive-widget=resizes-content in 60 only reaches browsers that
+  //      support it — not iOS Safari or most kiosk WebViews). The fit logic
+  //      then read "no keyboard", so nothing was ever scrolled clear of it.
+  //      keyboardInset() now ASSUMES a keyboard of KB_ASSUMED_LANDSCAPE /
+  //      KB_ASSUMED_PORTRAIT of the page's full height whenever a touch device
+  //      has a text box focused and nothing reports otherwise.
+  //  (2) 50vh OF EXTRA PADDING IS ROOM TO SCROLL, NOT VISIBILITY. It let the
+  //      box be scrolled up, but the sticky header and the group bar then ate
+  //      the strip that was left. Typing mode (body.typing) hides everything
+  //      but the name block, slims the header, and caps the matches' own height
+  //      (capResults) so box + matches + Sign in all fit above the keyboard.
+  //  (3) The fixed on-screen keyboard (#okb) is already subtracted by
+  //      visibleBottom(); typing mode keeps its padding at 300px.
   var VV = window.visualViewport || null;
   var FIT_FOCUS = null;
   var FIT_FRAME = 0;
+  var KB_ASSUMED_LANDSCAPE = 0.52;
+  var KB_ASSUMED_PORTRAIT = 0.4;
+  var TOUCH_DEVICE = ('ontouchstart' in window) ||
+                      (typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0);
+  // The tallest the page has been with nothing being typed: a drop below it
+  // while typing means the browser DID resize the page for the keyboard.
+  var BASE_H = window.innerHeight;
+  var typingExitTimer = null;
 
   function isTypingBox(node) {
     if (!node || node.tagName !== 'INPUT') return false;
@@ -2175,9 +2334,29 @@ function buildDoorAppHtml(options) {
     return document.getElementById('go');
   }
 
+  /**
+   * HOW MUCH OF THE BOTTOM OF THE PAGE A SYSTEM KEYBOARD IS COVERING. Measured
+   * where the browser reports it (the visual viewport shrank, or the page
+   * itself was resized); assumed where it does not (see above). Zero when our
+   * own on-screen keyboard is in use — that is subtracted separately.
+   */
+  function keyboardInset() {
+    var h = window.innerHeight;
+    if (!isTypingBox(document.activeElement)) {
+      BASE_H = Math.max(BASE_H, h);
+      return VV ? Math.max(0, Math.round(h - (VV.offsetTop + VV.height))) : 0;
+    }
+    var reported = VV ? Math.max(0, Math.round(h - (VV.offsetTop + VV.height))) : 0;
+    if (reported > 80) return reported;
+    if (BASE_H - h > 80) return 0;                 // the page was resized to fit
+    if (KEYBOARD_ON || !TOUCH_DEVICE) return reported;
+    return Math.round(BASE_H * (window.innerWidth > BASE_H ? KB_ASSUMED_LANDSCAPE : KB_ASSUMED_PORTRAIT));
+  }
+
   /** The bottom of what can be seen, in the page's own (client) coordinates. */
   function keyboardTopY() {
-    return VV ? VV.offsetTop + VV.height : window.innerHeight;
+    var top = VV ? VV.offsetTop + VV.height : window.innerHeight;
+    return Math.min(top, window.innerHeight - keyboardInset());
   }
 
   function visibleBottom() {
@@ -2227,12 +2406,62 @@ function buildDoorAppHtml(options) {
 
   /** Re-dock the fixed strips to the top of the system keyboard. */
   function fitToKeyboard() {
-    var inset = VV ? Math.max(0, Math.round(window.innerHeight - keyboardTopY())) : 0;
+    // The touch keyboard sits on the REPORTED system keyboard only: an assumed
+    // inset must not lift it off the bottom of the screen.
+    var reported = VV ? Math.max(0, Math.round(window.innerHeight - (VV.offsetTop + VV.height))) : 0;
     var okb = document.getElementById('okb');
-    okb.style.bottom = inset + 'px';
+    okb.style.bottom = reported + 'px';
     // Room to scroll the last box on a short screen up above the keyboard.
     var typing = isTypingBox(document.activeElement);
-    document.body.classList.toggle('kb-up', typing || inset > 80);
+    document.body.classList.toggle('kb-up', typing || reported > 80);
+    capResults();
+  }
+
+  /**
+   * TYPING MODE: on while focus is inside the name block (the box, or a match
+   * being tapped — so the layout does not jump under a finger between
+   * touchstart and click); off a moment after focus leaves it, for the same
+   * reason. See the body.typing rules in the stylesheet.
+   */
+  function syncTypingMode() {
+    var block = document.getElementById('typeblock');
+    var inside = !!(block && document.activeElement && block.contains(document.activeElement));
+    if (inside) {
+      if (typingExitTimer) { window.clearTimeout(typingExitTimer); typingExitTimer = null; }
+      if (!document.body.classList.contains('typing')) {
+        document.body.classList.add('typing');
+        window.scrollTo(0, 0);
+      }
+      capResults();
+      return;
+    }
+    if (!document.body.classList.contains('typing') || typingExitTimer) return;
+    typingExitTimer = window.setTimeout(function () {
+      typingExitTimer = null;
+      var b = document.getElementById('typeblock');
+      if (b && document.activeElement && b.contains(document.activeElement)) return;
+      document.body.classList.remove('typing');
+      capResults();
+    }, 350);
+  }
+
+  /**
+   * THE MATCHES SCROLL INSIDE THEIR OWN BOX. While typing, the box is sized to
+   * the room between itself and the top of the keyboard, minus the Sign in
+   * button under it, so the button is always on screen; otherwise the
+   * stylesheet's 45vh cap applies.
+   */
+  function capResults() {
+    var m = document.getElementById('matches');
+    if (!m) return;
+    if (!document.body.classList.contains('typing')) { m.style.maxHeight = ''; return; }
+    var btn = document.getElementById('astyped');
+    var below = 0;
+    var node = m.nextElementSibling;
+    while (node) { below += node.offsetHeight + 8; node = node.nextElementSibling; }
+    void btn;
+    var room = visibleBottom() - m.getBoundingClientRect().top - below - 10;
+    m.style.maxHeight = Math.max(72, Math.floor(room)) + 'px';
   }
 
   function fitSoon() {
@@ -2252,6 +2481,7 @@ function buildDoorAppHtml(options) {
   window.addEventListener('resize', fitSoon);
 
   document.addEventListener('focusin', function (e) {
+    syncTypingMode();
     if (!isTypingBox(e.target)) return;
     FIT_FOCUS = e.target;
     if (!VV) {
@@ -2265,9 +2495,39 @@ function buildDoorAppHtml(options) {
   document.addEventListener('focusout', function () {
     window.setTimeout(function () {
       if (!isTypingBox(document.activeElement)) FIT_FOCUS = null;
+      syncTypingMode();
       fitSoon();
     }, 0);
   });
+
+  // NOTHING CARRIES OVER TO THE NEXT HAND. A tablet left half-answered — a
+  // program ticked, a name half typed, a group half chosen — goes back to the
+  // first question after IDLE_RESET_MS with no touch or key, so the next person
+  // never inherits it. Not while setup is up (somebody is configuring), and
+  // not mid-write (a sign-in the page has already handed to the server).
+  var IDLE_RESET_MS = 60000;
+  var idleTimer = null;
+  function idleReset() {
+    idleTimer = null;
+    if (STEP === 'setup' || !SETUP || !DAY || busy) return;
+    var pristine = STEP === 'events' && !hereForCount() && !Object.keys(TICKED).length && !CONFIRMING;
+    if (pristine) { applyPendingDay(); return; }
+    closeConfirm();
+    startNextPerson();
+    STEP = 'events';
+    hideStatus();
+    draw();
+    applyPendingDay();
+    window.scrollTo(0, 0);
+  }
+  function touchIdle() {
+    if (idleTimer) window.clearTimeout(idleTimer);
+    idleTimer = window.setTimeout(idleReset, IDLE_RESET_MS);
+  }
+  ['pointerdown', 'touchstart', 'keydown', 'input'].forEach(function (n) {
+    document.addEventListener(n, touchIdle, true);
+  });
+  touchIdle();
 
   // THE BOARD STAYS CURRENT: other tablets and the desk sign people in too, so an
   // idle list is re-read every half minute. syncDay() leaves a half-answered

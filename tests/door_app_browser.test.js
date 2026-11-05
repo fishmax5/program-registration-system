@@ -44,12 +44,16 @@ function dayFixture(extraPeople) {
     location: 'Narberth', dateKey: TODAY, dateLabel: 'Thu, Nov 5, 2026',
     programs: [
       { value: val('Jigsaw'), title: 'Jigsaw', time: '9:00 AM', byAppointment: false },
-      { value: val('Chair Yoga'), title: 'Chair Yoga', time: '10:00 AM', byAppointment: false }
+      { value: val('Chair Yoga'), title: 'Chair Yoga', time: '10:00 AM', byAppointment: false },
+      { value: val('Bingo'), title: 'Bingo', time: '1:00 PM', byAppointment: false }
     ],
     lunch: { offered: false, ruledOut: true, type: '', dish: '', title: 'Lunch', value: val('Lunch') },
     people, past: [],
     members: [{ name: 'Mary Smith', key: 'mary smith', search: 'mary smith' },
       { name: 'Tom Marsh', key: 'tom marsh', search: 'tom marsh' },
+      { name: 'Tamara Jones', key: 'tamara jones', search: 'tamara jones' },
+      { name: 'Rosemary Lee', key: 'rosemary lee', search: 'rosemary lee' },
+      { name: 'Robert Kaplan', key: 'robert kaplan', search: 'robert (bob) kaplan' },
       { name: 'Ann Adler', key: 'ann adler', search: 'ann adler' }],
     readAt: '9:00 AM'
   };
@@ -186,6 +190,204 @@ async function main() {
     const { page, ctx } = await openPage({ mode: 'fail' });
     await page.waitForSelector('#app button:has-text("Try again")', { timeout: 3000 });
     ok('after a failure, Try again appears', !(await page.locator('.spinner').count()));
+    await ctx.close();
+  }
+
+  // -------------------------------------------------------------------------
+  // HIGH. The names screen, search and typing layout.
+  // -------------------------------------------------------------------------
+  async function toNames(page, title) {
+    await page.waitForSelector('ul.events li.item');
+    await page.click('ul.events li.item:has-text("' + title + '") .what');
+    await page.waitForSelector('#search');
+  }
+  {
+    const { page, ctx, errors } = await openPage({ touch: true });
+    await toNames(page, 'Jigsaw');
+    const labels = await page.$$eval('.rowletter', n => n.length);
+    ok('there are no per-row letter labels', labels === 0);
+    ok('each letter is a real heading', await page.$$eval('.letter', n => n.map(x => x.textContent).join('') === 'AB'));
+    ok('the name list is two columns',
+      await page.evaluate(() => getComputedStyle(document.querySelector('.cards.names')).gridTemplateColumns.split(' ').length === 2));
+    ok('names are 20px or larger', await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('button.card')).fontSize) >= 20));
+    ok('card detail text is 16px or larger',
+      await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('button.card .meta')).fontSize) >= 16));
+    ok('the checkbox beside a name is smaller than before (20px)',
+      await page.evaluate(() => document.querySelector('.cardwrap .tickzone input').getBoundingClientRect().width <= 20));
+    ok('the name box has a visible label above it',
+      (await page.textContent('label[for=search]')) === 'Type your name');
+    ok('body, hint and footer text are 18px or larger and dark',
+      await page.evaluate(() => ['body', 'p.hint', '.foot'].every(sel => {
+        const e = document.querySelector(sel); if (!e) return true;
+        const c = getComputedStyle(e);
+        const m = /rgb\((\d+), (\d+), (\d+)/.exec(c.color);
+        return parseFloat(c.fontSize) >= 18 && +m[1] <= 0x22 + 2 && +m[2] <= 0x22 + 2 && +m[3] <= 0x22 + 2;
+      })));
+    ok('the Back button is neutral, not red',
+      await page.evaluate(() => { const c = getComputedStyle(document.querySelector('button.plain.back')); return !/197, 34, 31/.test(c.color + c.borderTopColor); }));
+    ok('the member footer does not mention staff or Change setup',
+      !/Staff|Change setup/.test(await page.textContent('.foot')));
+
+    // search semantics
+    async function hitsFor(text) {
+      await page.fill('#search', '');
+      await page.type('#search', text);
+      return page.evaluate(() => Array.prototype.map.call(document.querySelectorAll('#matches button.card'), b => b.firstChild.textContent));
+    }
+    const mar = await hitsFor('mar');
+    ok('a name is matched from the START of a word (mar: Mary, Marsh)', mar.indexOf('Mary Smith') !== -1 && mar.indexOf('Tom Marsh') !== -1);
+    ok('and not from the middle of one (Tamara, Rosemary are not offered)', mar.indexOf('Tamara Jones') === -1 && mar.indexOf('Rosemary Lee') === -1);
+    ok('two typed words both have to start a word', (await hitsFor('tom ma')).join() === 'Tom Marsh');
+    ok('a nickname on the roll is still found', (await hitsFor('bob')).join() === 'Robert Kaplan');
+    ok('the last name finds the person too', (await hitsFor('kap')).join() === 'Robert Kaplan');
+
+    // the Sign in as button
+    await page.fill('#search', '');
+    await page.type('#search', 'Zo');
+    ok('"Sign in as" is disabled under three characters', await page.evaluate(() => document.getElementById('astyped').disabled === true));
+    await page.type('#search', 'e');
+    ok('and enabled from three', await page.evaluate(() => document.getElementById('astyped').disabled === false));
+    ok('it reads "Sign in as <name>"', (await page.textContent('#astyped')) === 'Sign in as Zoe');
+    ok('and sits BELOW the matches', await page.evaluate(() => {
+      const m = document.getElementById('matches'); const b = document.getElementById('astyped');
+      return !m || m.getBoundingClientRect().bottom <= b.getBoundingClientRect().top + 1;
+    }));
+
+    // typing mode: everything that matters is above where a keyboard would be
+    await page.fill('#search', '');
+    await page.type('#search', 'ma');
+    await page.waitForTimeout(150);
+    const geo = await page.evaluate(() => ({
+      ih: innerHeight, kb: keyboardTopY(), typing: document.body.classList.contains('typing'),
+      input: document.getElementById('search').getBoundingClientRect().bottom,
+      btn: document.getElementById('astyped').getBoundingClientRect().bottom,
+      back: !!document.querySelector('main > button.back') && getComputedStyle(document.querySelector('main > button.back')).display
+    }));
+    ok('typing compacts the screen', geo.typing === true && geo.back === 'none');
+    ok('the assumed keyboard covers about the bottom half (touch device, no signal)', geo.kb < geo.ih * 0.6 && geo.kb > geo.ih * 0.4);
+    ok('the box and the Sign in button are both above it', geo.input < geo.kb && geo.btn < geo.kb);
+    // a LONG match list scrolls inside its own box and the button stays put
+    const many = [];
+    for (let i = 0; i < 30; i++) many.push({ name: 'Mabel Z' + String.fromCharCode(65 + (i % 26)) + i, key: 'mz' + i, search: 'mabel z' + i });
+    await page.evaluate(m => { DAY.members = m; }, many);
+    await page.fill('#search', '');
+    await page.type('#search', 'mab');
+    await page.waitForTimeout(150);
+    const geo2 = await page.evaluate(() => {
+      const m = document.getElementById('matches');
+      return { btn: document.getElementById('astyped').getBoundingClientRect().bottom, kb: keyboardTopY(),
+        scrolls: m.scrollHeight > m.clientHeight, matchesBottom: m.getBoundingClientRect().bottom,
+        btnTop: document.getElementById('astyped').getBoundingClientRect().top };
+    });
+    ok('a long list scrolls inside its own box', geo2.scrolls === true);
+    ok('and the Sign in button is still above the keyboard', geo2.btn <= geo2.kb);
+    ok('with the matches ending where the button begins', geo2.matchesBottom <= geo2.btnTop + 1);
+    // leaving the box brings the full screen back
+    await page.evaluate(() => document.getElementById('search').blur());
+    await page.waitForTimeout(500);
+    ok('leaving the box ends typing mode', await page.evaluate(() => !document.body.classList.contains('typing')));
+    ok('no script errors on the names screen', errors.length === 0);
+    await ctx.close();
+  }
+  // A short landscape tablet, and a browser that DID resize the page.
+  {
+    const { page, ctx } = await openPage({ touch: true, viewport: { width: 1024, height: 600 } });
+    await toNames(page, 'Jigsaw');
+    await page.click('#search');
+    await page.type('#search', 'mar');
+    await page.waitForTimeout(200);
+    const g = await page.evaluate(() => ({ kb: keyboardTopY(),
+      btn: document.getElementById('astyped').getBoundingClientRect().bottom,
+      input: document.getElementById('search').getBoundingClientRect().bottom }));
+    ok('on a short (600px) landscape tablet the box and button still clear the keyboard', g.input < g.kb && g.btn <= g.kb);
+    await page.setViewportSize({ width: 1024, height: 300 });   // the browser shrank the page for its keyboard
+    await page.waitForTimeout(250);
+    const g2 = await page.evaluate(() => ({ kb: keyboardTopY(), ih: innerHeight,
+      btn: document.getElementById('astyped').getBoundingClientRect().bottom }));
+    ok('when the page is really resized, the keyboard is not assumed a second time', g2.kb === g2.ih);
+    await ctx.close();
+  }
+
+  // -------------------------------------------------------------------------
+  // HIGH. Empty list, resets, selected tile.
+  // -------------------------------------------------------------------------
+  {
+    const { page, ctx } = await openPage();
+    await toNames(page, 'Bingo');
+    const body = await page.textContent('#app');
+    ok('an empty list shows only how to type', /Type your name/.test(body) && !/Tap your name/.test(body) && !/Nobody is signed up/.test(body));
+    await ctx.close();
+  }
+  {
+    const { page, ctx } = await openPage();
+    await page.waitForSelector('ul.events li.item');
+    await page.click('ul.events li.item:first-child label.tickzone');
+    const on = await page.$eval('ul.events li.item:first-child', li => {
+      const c = getComputedStyle(li), a = getComputedStyle(li.querySelector('.what'), '::after');
+      return { bg: c.backgroundColor, shadow: c.boxShadow, word: a.content };
+    });
+    ok('a selected program tile has a strong fill, a thick border and says Selected',
+      on.bg !== 'rgb(255, 255, 255)' && /3px/.test(on.shadow) && /Selected/.test(on.word));
+    // ONE focusable element per tile
+    const stops = await page.$$eval('ul.events li.item', lis => lis.map(li =>
+      Array.prototype.filter.call(li.querySelectorAll('*'), e => e.tabIndex >= 0).length + (li.tabIndex >= 0 ? 1 : 0)));
+    ok('each program tile is ONE tab stop', stops.every(n => n === 1));
+    ok('the tile is a button for assistive tech', await page.$eval('ul.events li.item', li => li.getAttribute('role') === 'button'));
+    await page.focus('ul.events li.item:nth-child(2)');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#search');
+    ok('Enter on a focused tile goes on to the names', true);
+    const ring = await page.evaluate(() => { const css = document.querySelector('style').textContent; return /:focus-visible\s*\{[^}]*outline:\s*4px/.test(css) && /outline-offset:\s*3px/.test(css); });
+    ok('there is a global 4px focus ring with an offset', ring);
+    await ctx.close();
+  }
+  {
+    const { page, ctx } = await openPage();
+    await toNames(page, 'Jigsaw');
+    await page.click('.cardwrap .tickzone');              // tick somebody
+    await page.click('button.back');
+    ok('Back to programs clears what was ticked and the answer',
+      await page.evaluate(() => hereForCount() === 0 && Object.keys(TICKED).length === 0 && SHOW_ALL === false && STEP === 'events'));
+    // idle reset
+    await page.evaluate(() => { IDLE_RESET_MS = 400; });
+    await page.click('ul.events li.item:first-child label.tickzone');
+    await page.waitForTimeout(150);
+    await page.evaluate(() => touchIdle());               // restart the clock with the short setting
+    await page.waitForTimeout(700);
+    ok('after a minute of nothing (shortened here) the answer is cleared and the first question is back',
+      await page.evaluate(() => hereForCount() === 0 && STEP === 'events'));
+    await toNames(page, 'Jigsaw');
+    await page.evaluate(() => touchIdle());
+    await page.waitForTimeout(700);
+    ok('and from the names screen too', await page.evaluate(() => STEP === 'events' && hereForCount() === 0));
+    await ctx.close();
+  }
+  // Setup: footer for staff here, and a big keyboard switch.
+  {
+    const { page, ctx } = await openPage({ noSetup: true });
+    await page.waitForSelector('.foot');
+    ok('the staff line is shown on the setup screen', /hold/i.test(await page.textContent('.foot')));
+    const sw = await page.$eval('button.switch', b => ({ fs: parseFloat(getComputedStyle(b).fontSize), h: b.getBoundingClientRect().height, role: b.getAttribute('role') }));
+    ok('the keyboard toggle is a large switch (18px+ text)', sw.fs >= 18 && sw.h >= 60 && sw.role === 'switch');
+    await page.click('button.switch');
+    ok('and says ON when on', /ON/.test(await page.textContent('button.switch')) &&
+      (await page.getAttribute('button.switch', 'aria-checked')) === 'true');
+    await ctx.close();
+  }
+  // Program screen sizes.
+  {
+    const { page, ctx } = await openPage();
+    await page.waitForSelector('ul.events li.item');
+    const sz = await page.evaluate(() => ({
+      tile: document.querySelector('ul.events li.item').getBoundingClientRect().height,
+      title: parseFloat(getComputedStyle(document.querySelector('ul.events .title')).fontSize),
+      go: document.getElementById('go').getBoundingClientRect().height,
+      plain: parseFloat(getComputedStyle(document.querySelector('main button.plain')).fontSize)
+    }));
+    ok('program tiles are tall with large titles', sz.tile >= 150 && sz.title >= 28);
+    ok('Continue is at least 64px tall', sz.go >= 64);
+    ok('"Not sure?" is 18px or larger', sz.plain >= 18);
+    ok('the program checkbox is smaller than before', await page.$eval('ul.events li.item input', i => i.getBoundingClientRect().width <= 24));
     await ctx.close();
   }
 

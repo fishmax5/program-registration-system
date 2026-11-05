@@ -9,8 +9,9 @@
 //      autocorrect and spellcheck off, a capitalization that fits the field,
 //      and a name the browser has never seen (it keys its memory on that).
 //   2. The search's results are IN FLOW, directly under the box, never an
-//      absolutely positioned overlay, and "Continue as …" is the FIRST thing
-//      in them rather than the last of twenty-four cards.
+//      absolutely positioned overlay. The matches come first, in a box that
+//      scrolls on its own, and "Sign in as …" is BELOW them (outside that box,
+//      so it stays on screen), enabled from three characters.
 //   3. The details screen's boxes sit directly above "Sign in".
 //   4. visualViewport is listened to (resize AND scroll), the fixed strips are
 //      re-docked from visualViewport.height + offsetTop, and there is a
@@ -214,23 +215,39 @@ if (!runError) {
   ok('the search box capitalizes words (it is a name)', search && search.getAttribute('autocapitalize') === 'words');
 
   const results = doc.getElementById('results');
+  const block = doc.getElementById('typeblock');
   const app = doc.getElementById('app');
   ok('the results sit directly under the search box, in the same flow',
-    results && app.children.indexOf(results) === app.children.indexOf(search) + 1);
+    results && block && block.children.indexOf(results) === block.children.indexOf(search) + 1);
 
   search.value = 'Mary';
   vm.runInContext('drawSearchResults();', page);
-  const first = results.children[0];
-  ok('"Continue as …" is the first thing under the box, ahead of the names',
-    first && first.id === 'astyped' && /Continue as "Mary"/.test(first.textContent));
-  ok('the matching names still follow it',
-    results.children.filter(n => /cardwrap/.test(n.className) &&
+  const matches = doc.getElementById('matches');
+  ok('the matching names come FIRST, in a box of their own',
+    matches && results.children[0] === matches &&
+    matches.children.filter(n => /cardwrap/.test(n.className) &&
       n.children.some(c => c.tagName === 'BUTTON' && /card/.test(c.className))).length === 2);
+  const asTyped = doc.getElementById('astyped');
+  ok('"Sign in as …" is BELOW the matches, outside the scrolling box',
+    asTyped && results.children.indexOf(asTyped) > results.children.indexOf(matches) &&
+    matches.children.indexOf(asTyped) === -1 && /Sign in as Mary/.test(asTyped.textContent));
+  ok('and enabled once there are three characters', asTyped && !asTyped.disabled);
+
+  search.value = 'Ma';
+  vm.runInContext('drawSearchResults();', page);
+  ok('with two characters the button is shown but disabled',
+    doc.getElementById('astyped') && doc.getElementById('astyped').disabled === true);
+
+  search.value = 'ary';
+  vm.runInContext('drawSearchResults();', page);
+  ok('a name is matched from the START of a word, not from anywhere inside it',
+    !doc.getElementById('matches'));
 
   search.value = 'Zelda';
   vm.runInContext('drawSearchResults();', page);
-  ok('with nobody matched, "Continue as …" is the big button and still first',
-    results.children[0].id === 'astyped' && /big/.test(results.children[0].className));
+  ok('with nobody matched, "Sign in as …" is the big button and the only answer',
+    results.children[0].id === 'astyped' && /big/.test(results.children[0].className) &&
+    !doc.getElementById('matches'));
 
   // -------------------------------------------------------------------------
   // 1 + 3. The details screen.
