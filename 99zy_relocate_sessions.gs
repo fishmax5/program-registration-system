@@ -171,9 +171,35 @@ function groupRelocatableSessions_(sessionRows, map, calendarId, peopleByEvent, 
   });
   return order.map(t => byProgram[t]).map(p => {
     p.sessions.sort((a, b) => (a.dateKey < b.dateKey ? -1 : (a.dateKey > b.dateKey ? 1 : 0)));
-    p.label = `${p.title} — ${p.sessions.length} upcoming date(s)`;
+    p.weekly = isWeeklyRelocatableProgram_(p.sessions);
+    p.label = `${p.title} — ${p.sessions.length} upcoming date(s)${p.weekly ? ' · weekly' : ''}`;
     return p;
   }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Pure. Is this program a weekly recurring one, judged from its dates the way
+ * `78`'s `detectProgramMonthRecurrence` does (nothing stores "weekly"): at
+ * least two dates, all on one weekday, every gap a whole number of weeks, and
+ * the smallest gap exactly one week — so a class that skips a week is still
+ * weekly, and an every-other-week one is not. It decides only whether the
+ * dialog offers "Move all dates"; the move itself is still per Event_ID.
+ */
+function isWeeklyRelocatableProgram_(sessions) {
+  const keys = (sessions || []).map(s => s.dateKey).filter(Boolean).sort();
+  if (keys.length < 2) return false;
+  const utc = key => {
+    const p = String(key).split('-').map(Number);
+    return Date.UTC(p[0], p[1] - 1, p[2]);
+  };
+  const days = keys.map(k => Math.round(utc(k) / 86400000));
+  let smallest = Infinity;
+  for (let i = 1; i < days.length; i++) {
+    const gap = days[i] - days[i - 1];
+    if (gap <= 0 || gap % 7 !== 0) return false;
+    smallest = Math.min(smallest, gap);
+  }
+  return smallest === 7;
 }
 
 /**
@@ -558,10 +584,24 @@ function buildRelocateSessionsHtml(state) {
       var all = document.createElement('input'); all.type = 'checkbox'; all.style.marginRight = '6px';
       all.onchange = function () { p.sessions.forEach(function (s, i) { document.getElementById('s_' + p.key + i).checked = all.checked; }); };
       h.insertBefore(all, h.firstChild); box.appendChild(h);
+      // A weekly program gets an explicit "Move all dates" box: ticks every
+      // upcoming date; unticking any single date clears it again.
+      if (p.weekly) {
+        var wl = document.createElement('label'); wl.className = 'row muted';
+        var wc = document.createElement('input'); wc.type = 'checkbox';
+        wc.onchange = function () { all.checked = wc.checked; all.onchange(); };
+        wl.appendChild(wc);
+        wl.appendChild(document.createTextNode(' Move all ' + p.sessions.length + ' weekly dates'));
+        box.appendChild(wl);
+        p.__weeklyBox = wc;
+      }
       p.sessions.forEach(function (s, i) {
         var l = document.createElement('label'); l.className = 'row';
         var c = document.createElement('input'); c.type = 'checkbox'; c.name = 'ev'; c.value = s.eventId;
         c.id = 's_' + p.key + i;
+        c.onchange = function () {
+          if (!c.checked) { all.checked = false; if (p.__weeklyBox) p.__weeklyBox.checked = false; }
+        };
         l.appendChild(c); l.appendChild(document.createTextNode(' ' + s.label)); box.appendChild(l);
       });
     });

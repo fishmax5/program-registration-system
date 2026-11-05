@@ -45,6 +45,7 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.groupRelocatableSessions_ = groupRelocatableSessions_;
 this.planRelocation_ = planRelocation_;
+this.isWeeklyRelocatableProgram_ = isWeeklyRelocatableProgram_;
 this.relocateRegistrantRows_ = relocateRegistrantRows_;
 this.countLiveRegistrantsByEvent_ = countLiveRegistrantsByEvent_;
 this.relocateCalendarIdForLocation_ = relocateCalendarIdForLocation_;
@@ -108,6 +109,16 @@ const sessions = [
   const yoga = out.filter(p => p.title === 'Chair Yoga')[0];
   ok('dates in order, with the registered count shown', yoga.sessions[0].eventId === 'n1' &&
     /3 registered/.test(yoga.sessions[0].label) && !/registered/.test(yoga.sessions[1].label));
+  ok('a weekly program is flagged so the dialog offers "Move all dates"',
+    yoga.weekly === true && /weekly/.test(yoga.label));
+  ok('a one-date program is not weekly', out.filter(p => p.title === 'Bingo')[0].weekly === false);
+  const wk = (...keys) => keys.map(dateKey => ({ dateKey }));
+  ok('a weekly class that skips a week is still weekly',
+    sandbox.isWeeklyRelocatableProgram_(wk('2026-11-10', '2026-11-17', '2026-12-01')));
+  ok('every other week is not weekly',
+    !sandbox.isWeeklyRelocatableProgram_(wk('2026-11-10', '2026-11-24', '2026-12-08')));
+  ok('two different weekdays are not weekly',
+    !sandbox.isWeeklyRelocatableProgram_(wk('2026-11-10', '2026-11-18')));
 }
 
 // 2. THE PLAN
