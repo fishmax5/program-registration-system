@@ -334,6 +334,12 @@ function refreshProgramSettings(ss, sessionRows) {
   // must carry across the redraw — they are the staff's own words).
   const prior = readProgramSettingsTable_(sheet, headers);
   const kindDefaults = prior.defaults;
+  // The special-event row is the one default with a built-in answer, so that
+  // it works before anybody has opened the tab. Only while NO row exists for
+  // it: a row staff cleared is a row that exists, and is kept as they left it.
+  if (!kindDefaults[PROGRAM_SETTINGS_SPECIAL_GROUP]) {
+    kindDefaults[PROGRAM_SETTINGS_SPECIAL_GROUP] = builtInSpecialEventDefaults_();
+  }
   const existingByKey = {};
   prior.rows.forEach(row => {
     // Every lunch title this workbook has ever used ("🥡 Lunch Only (no
@@ -367,6 +373,8 @@ function refreshProgramSettings(ss, sessionRows) {
     getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
 
   const todayKey = formatDateKey(new Date());
+  const specialLookbackKey = formatDateKey(
+    new Date(Date.now() - PROGRAM_SETTINGS_SPECIAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000));
   const programs = {};
   rows.forEach(row => {
     const location = String(row[regMap['Location']] || '').trim();
@@ -384,6 +392,7 @@ function refreshProgramSettings(ss, sessionRows) {
     }
     const p = programs[key];
     p.sessions++;
+    if (!p.dateKeys) p.dateKeys = {};
     p.typeTag = normalizeTypeTag(row[regMap['Type_Tag']]);
     // ANY assistance session makes the program an assistance program for this
     // purpose: the default that matters is the one that states somebody's
@@ -402,6 +411,7 @@ function refreshProgramSettings(ss, sessionRows) {
     }
     if (d) {
       const dk = formatDateKey(d);
+      p.dateKeys[dk] = true;
       if (dk >= todayKey && (!p.next || d < p.next)) p.next = d;
       if (!p.last || d > p.last) p.last = d;
     }
@@ -422,7 +432,10 @@ function refreshProgramSettings(ss, sessionRows) {
       // The kind decides what a new row is born with; WHERE it is filed is
       // lunch (its own group), or — with nothing coming up — the foot of the
       // tab, the way Master_Program_Dashboard files a finished program.
-      const kind = programSettingsGroupOf(p);
+      // A ONE-OFF is filed (and born) as a special event: see isSpecialEventProgram_.
+      const baseKind = programSettingsGroupOf(p);
+      const kind = isSpecialEventProgram_(p, baseKind, todayKey, specialLookbackKey)
+        ? PROGRAM_SETTINGS_SPECIAL_GROUP : baseKind;
       const group = !p.next ? PROGRAM_SETTINGS_INACTIVE_GROUP
         : (p.isLunch ? PROGRAM_SETTINGS_LUNCH_GROUP : kind);
       if (priorRow) PROGRAM_SETTINGS_STAFF_COLUMNS.forEach(h => { row[map[h]] = priorRow[map[h]]; });
@@ -569,8 +582,57 @@ const PROGRAM_SETTINGS_INACTIVE_GROUP = 'INACTIVE';
 const PROGRAM_SETTINGS_LUNCH_GROUP = 'LUNCH';
 const PROGRAM_SETTINGS_LUNCH_TITLE = 'Lunch';
 
+/**
+ * A SEVENTH group, and deliberately not a seventh KIND. PROGRAM_FORM_TYPES (57)
+ * is exactly a set of values for four controls and round-trips both ways, which
+ * the review dialog depends on; "this has one date" is not a control anybody
+ * sets, it is DERIVED from the session table every refresh. So it lives here,
+ * beside Lunch, as a heading with its own new-event defaults row, and nothing
+ * about how the program's form is built changes.
+ *
+ * WHAT COUNTS. An ordinary program (not a club, not appointments, not
+ * [No Registration], not lunch) with exactly ONE distinct date from
+ * PROGRAM_SETTINGS_SPECIAL_LOOKBACK_DAYS ago through the end of the session
+ * table, and that date still ahead. Looking back is the point: a series on its
+ * last remaining date has its earlier dates just behind it and is not a
+ * one-off, and the session table reaches the registration horizon, so a weekly
+ * class has many dates in front of it. An annual event has none from a year
+ * ago inside the window, which is the right answer for it.
+ *
+ * SEED-ONLY, like every default (seedNotificationHalf): it decides what a row
+ * is born with and where it is filed today. A program that later gains a second
+ * date moves back under its own kind heading and keeps its ticks.
+ */
+const PROGRAM_SETTINGS_SPECIAL_GROUP = 'SPECIAL';
+const PROGRAM_SETTINGS_SPECIAL_LOOKBACK_DAYS = 45;
+
+/** What a special event is born with when staff have not set the row: the guest-list invite, a week before, a day before. */
+function builtInSpecialEventDefaults_() {
+  const values = {};
+  NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { values[h] = false; });
+  values['Add_Guest_To_Calendar'] = true;
+  values['Week_Before'] = true;
+  values['Day_Before'] = true;
+  values['Other_Reminders'] = '';
+  return values;
+}
+
+/** The keys that carry a defaults row: the six kinds and the special-event group. */
+function programSettingsDefaultKinds_() {
+  return PROGRAM_FORM_TYPES.map(t => t.key).concat([PROGRAM_SETTINGS_SPECIAL_GROUP]);
+}
+
+/** Pure. `program` is the tally refreshProgramSettings builds; `baseKind` is programSettingsGroupOf(program). */
+function isSpecialEventProgram_(program, baseKind, todayKey, lookbackKey) {
+  if (!program || program.isLunch || program.isClub || program.noRegistration || program.isAssistance) return false;
+  if (baseKind !== 'MONTHLY' && baseKind !== 'SERIES') return false;
+  const keys = Object.keys(program.dateKeys || {}).filter(k => k >= lookbackKey);
+  return keys.length === 1 && keys[0] >= todayKey;
+}
+
 /** The heading each group is drawn with, and the order the groups come in. */
 function programSettingsGroupLabel(group) {
+  if (group === PROGRAM_SETTINGS_SPECIAL_GROUP) return 'Special events — one date, not repeating';
   if (group === PROGRAM_SETTINGS_INACTIVE_GROUP) {
     return 'Finished — nothing coming up (settings kept for when it comes back)';
   }
@@ -599,8 +661,8 @@ function programSettingsGroupOf(program) {
  */
 function groupProgramSettingsRows(entries, headers, kindDefaults) {
   const map = getIndexMap(headers);
-  const kindKeys = PROGRAM_FORM_TYPES.map(t => t.key);
-  const order = kindKeys.concat([PROGRAM_SETTINGS_LUNCH_GROUP, PROGRAM_SETTINGS_INACTIVE_GROUP]);
+  const kindKeys = programSettingsDefaultKinds_();
+  const order =kindKeys.concat([PROGRAM_SETTINGS_LUNCH_GROUP, PROGRAM_SETTINGS_INACTIVE_GROUP]);
   const byGroup = {};
   entries.forEach(entry => {
     const group = order.indexOf(entry.group) === -1 ? PROGRAM_SETTINGS_INACTIVE_GROUP : entry.group;
@@ -692,7 +754,7 @@ function readProgramSettingsTable_(sheet, headers) {
   const projection = buildHeaderProjectionFromRow(grid[MEMORY_TAB_HEADER_ROW - 1], headers,
     `"${sheet.getName()}" row ${MEMORY_TAB_HEADER_ROW}`);
   const map = getIndexMap(headers);
-  const kinds = PROGRAM_FORM_TYPES.map(t => t.key);
+  const kinds = programSettingsDefaultKinds_();
   grid.slice(MEMORY_TAB_DATA_ROW - 1).forEach(raw => {
     const row = projection ? projection.map(src => (src === -1 ? '' : raw[src])) : raw.slice(0, headers.length);
     const first = row[0];
@@ -713,7 +775,7 @@ function readProgramSettingsTable_(sheet, headers) {
 /** The defaults rows only, as rows ready to write — for a writer that has no kinds. */
 function programSettingsDefaultsRowsFrom_(sheet, headers) {
   const defaults = readProgramSettingsTable_(sheet, headers).defaults;
-  return PROGRAM_FORM_TYPES.map(t => t.key)
+  return programSettingsDefaultKinds_()
     .filter(k => defaults[k])
     .map(k => programSettingsDefaultsRow(headers, k, defaults[k]));
 }
