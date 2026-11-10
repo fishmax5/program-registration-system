@@ -151,6 +151,10 @@ const HEALTH_CHECKS = [
     title: '📈 Is the Ledger Still Growing?',
     blurb: 'Entries appended lately that change nothing, and which writer is appending them.',
     run: () => reportLedgerGrowth() },
+  { id: 'ledgerTriage', group: 'Registrations', kind: 'report', action: 'reportLedgerTriage', slow: true,
+    title: '🗂️ Triage the Ledger Findings',
+    blurb: 'Sorts what the ledger check found by past/future, kind and last writer, and checks future dates against the 3am snapshots. Changes nothing.',
+    run: () => reportLedgerTriage() },
 
   { id: 'doctor', group: 'Forms & sessions', kind: 'tool', action: 'showFormLinkDoctorDialog',
     title: '🩺 Form & Link Doctor…',

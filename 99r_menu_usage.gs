@@ -277,3 +277,4 @@ function menu_showLeaderRosterPagesDialog() { recordMenuUsage_('showLeaderRoster
 function menu_bootstrapCalendars() { recordMenuUsage_('bootstrapCalendars'); return bootstrapCalendars(); }
 function menu_showInstantImportSetup() { recordMenuUsage_('showInstantImportSetup'); return showInstantImportSetup(); }
 function menu_startNewResponsesSpreadsheet() { recordMenuUsage_('startNewResponsesSpreadsheet'); return startNewResponsesSpreadsheet(); }
+function menu_reportLedgerTriage() { recordMenuUsage_('reportLedgerTriage'); return reportLedgerTriage(); }
