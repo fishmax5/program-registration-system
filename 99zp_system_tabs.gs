@@ -34,7 +34,6 @@
 defineLazyGlobal_('SYSTEM_TAB_NAMES', () => [
   SHEET_NAMES.REGISTRATION_LEDGER,
   SHEET_NAMES.LEDGER_CHECKPOINT || 'Ledger_Checkpoint',
-  SHEET_NAMES.TRIAGE,
   PENDING_FLAG_SHEET_NAME,
   QUICK_MARK_INDEX_SHEET_NAME,
   LEGACY_ACTIVE_PROGRAMS_SHEET_NAME,
@@ -47,7 +46,9 @@ defineLazyGlobal_('SYSTEM_TAB_NAMES', () => [
  * (`releaseFormerSystemTabs_`) — once, so a tab somebody later hides on purpose
  * is not shown again every morning.
  */
-defineLazyGlobal_('FORMER_SYSTEM_TAB_NAMES', () => [SHEET_NAMES.METRICS]);
+// `Deleted_Event_Triage` joined it in November 2026: staff review and clear it
+// (registrants from a vanished session wait there), so it is front office.
+defineLazyGlobal_('FORMER_SYSTEM_TAB_NAMES', () => [SHEET_NAMES.METRICS, SHEET_NAMES.TRIAGE]);
 const SYSTEM_TABS_RELEASED_PROP_KEY = 'SYSTEM_TABS_RELEASED_V1';
 
 /** How a protection this file added is recognized again — never one somebody else made. */

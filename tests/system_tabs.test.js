@@ -98,13 +98,14 @@ this.resetRun = () => { __systemTabVisibilityAppliedThisRun = false; };
 
 const S = sandbox.SHEET_NAMES;
 const SYSTEM = sandbox.SYSTEM_TAB_NAMES;
+const PENDING = '_Pending_Tag_Changes'; // stand-in for "a system tab"
 
 // --- The lists ------------------------------------------------------------
-for (const must of [S.REGISTRATION_LEDGER, 'Ledger_Checkpoint', S.TRIAGE,
-  '_Pending_Tag_Changes', 'Quick_Mark_Index']) {
+for (const must of [S.REGISTRATION_LEDGER, 'Ledger_Checkpoint', PENDING, 'Quick_Mark_Index']) {
   assert.ok(SYSTEM.includes(must), `${must} is a system tab`);
 }
 assert.ok(!SYSTEM.includes(S.METRICS), 'Metrics is read by staff — not a system tab');
+assert.ok(!SYSTEM.includes(S.TRIAGE), 'Deleted_Event_Triage is reviewed by staff — not a system tab');
 const front = sandbox.frontOfficeTabNames();
 assert.ok(front.length > 0);
 assert.ok(front.every(n => !SYSTEM.includes(n)), 'front office and back room never overlap');
@@ -115,12 +116,12 @@ for (const staff of [S.PROGRAM_DASHBOARD, S.PROGRAM_MONTH, S.REGISTRANT_DASH, S.
 }
 
 // --- Apply: hides and protects only existing system tabs ------------------
-current = makeSpreadsheet([S.CONFIG, S.REGISTRANT_DASH, S.REGISTRATION_LEDGER, S.TRIAGE, 'Office Notes']);
+current = makeSpreadsheet([S.CONFIG, S.REGISTRANT_DASH, S.REGISTRATION_LEDGER, PENDING, 'Office Notes']);
 current.active = current.getSheetByName(S.REGISTRATION_LEDGER); // somebody is looking at it
 configValue = '';
 let r = sandbox.applySystemTabVisibility();
 assert.strictEqual(r.errors.length, 0);
-assert.strictEqual(JSON.stringify(r.hidden.slice().sort()), JSON.stringify([S.REGISTRATION_LEDGER, S.TRIAGE].sort()));
+assert.strictEqual(JSON.stringify(r.hidden.slice().sort()), JSON.stringify([S.REGISTRATION_LEDGER, PENDING].sort()));
 assert.strictEqual(current.getSheetByName(S.REGISTRATION_LEDGER).hidden, true);
 assert.strictEqual(current.getSheetByName('Office Notes').hidden, false, 'a staff tab is never touched');
 assert.strictEqual(current.getSheetByName(S.REGISTRANT_DASH).hidden, false);
@@ -142,7 +143,7 @@ sandbox.applySystemTabVisibility();
 assert.strictEqual(ledgerProt[0].isWarningOnly(), true);
 
 // --- Config "No": shown, and only OUR protection lifted -------------------
-const triage = current.getSheetByName(S.TRIAGE);
+const triage = current.getSheetByName(PENDING);
 const someoneElses = makeProtection('derived columns', true);
 triage.protections.push(someoneElses);
 configValue = 'No';
@@ -154,10 +155,11 @@ assert.strictEqual(JSON.stringify(triage.getProtections().map(p => p.getDescript
 configValue = '';
 
 // --- reorderTabs: activating un-hides; it must hide again ------------------
-current = makeSpreadsheet([S.REGISTRANT_DASH, S.CONFIG, S.TRIAGE, S.METRICS, 'Office Notes'],
-  [S.TRIAGE, S.METRICS, 'Office Notes']);
+current = makeSpreadsheet([S.REGISTRANT_DASH, S.CONFIG, PENDING, S.METRICS, S.TRIAGE, 'Office Notes'],
+  [PENDING, S.METRICS, S.TRIAGE, 'Office Notes']);
 sandbox.reorderTabs(current);
-assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, true);
+assert.strictEqual(current.getSheetByName(PENDING).hidden, true);
+assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, false, 'Deleted_Event_Triage is released from the back room');
 assert.strictEqual(current.getSheetByName(S.METRICS).hidden, false, 'Metrics is released from the back room');
 assert.strictEqual(current.getSheetByName('Office Notes').hidden, true, 'staff-hidden tab stays hidden');
 assert.strictEqual(current.active.hidden, false, 'left on a visible tab');
@@ -182,31 +184,31 @@ assert.strictEqual(opened.hidden, false);
 assert.strictEqual(current.active, opened);
 
 // --- Toggle and the daily pass ---------------------------------------------
-current = makeSpreadsheet([S.CONFIG, S.REGISTRATION_LEDGER, S.TRIAGE]);
+current = makeSpreadsheet([S.CONFIG, S.REGISTRATION_LEDGER, PENDING]);
 sandbox.applySystemTabVisibility();
 assert.strictEqual(sandbox.toggleSystemTabVisibility(), 'shown');
 assert.ok(Number(props.SYSTEM_TABS_SHOWN_UNTIL_V1) > Date.now());
-assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, false);
+assert.strictEqual(current.getSheetByName(PENDING).hidden, false);
 // Protection stays on while shown.
-assert.strictEqual(current.getSheetByName(S.TRIAGE).getProtections().length, 1);
+assert.strictEqual(current.getSheetByName(PENDING).getProtections().length, 1);
 // Inside the window, the daily pass leaves them be.
 sandbox.resetRun();
 assert.strictEqual(sandbox.applySystemTabVisibilityIfDue_(), false);
-assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, false);
+assert.strictEqual(current.getSheetByName(PENDING).hidden, false);
 // Window lapsed: hides and clears it.
 props.SYSTEM_TABS_SHOWN_UNTIL_V1 = String(Date.now() - 1);
 sandbox.resetRun();
 assert.strictEqual(sandbox.applySystemTabVisibilityIfDue_(), true);
-assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, true);
+assert.strictEqual(current.getSheetByName(PENDING).hidden, true);
 assert.ok(!('SYSTEM_TABS_SHOWN_UNTIL_V1' in props));
 // Same day again: not due.
-current.getSheetByName(S.TRIAGE).hidden = false;
+current.getSheetByName(PENDING).hidden = false;
 sandbox.resetRun();
 assert.strictEqual(sandbox.applySystemTabVisibilityIfDue_(), false);
 // Toggle while shown → hides now.
 assert.strictEqual(sandbox.toggleSystemTabVisibility(), 'shown');
 assert.strictEqual(sandbox.toggleSystemTabVisibility(), 'hidden');
-assert.strictEqual(current.getSheetByName(S.TRIAGE).hidden, true);
+assert.strictEqual(current.getSheetByName(PENDING).hidden, true);
 
 // --- Never throws -----------------------------------------------------------
 current = makeSpreadsheet([S.CONFIG, S.REGISTRATION_LEDGER]);

@@ -258,7 +258,8 @@ function buildDoorAppHtml(options) {
   ul.events > p { grid-column: 1 / -1; }
   /* TIME OF DAY: what is on now and what is about to start stand out, and what
      is over fades back (still tappable — somebody may be late or early). */
-  .when { display: inline-block; font-size: 17px; font-weight: 800; letter-spacing: .04em; border-radius: 999px;
+  /* Its own line: block-level, shrink-wrapped, so the pill never shares a line with the title. */
+  .when { display: block; width: fit-content; font-size: 17px; font-weight: 800; letter-spacing: .04em; border-radius: 999px;
           padding: 4px 12px; margin-bottom: 8px; }
   .when.now { background: #137333; color: #fff; }
   .when.soon { background: #F9AB00; color: #222; }
