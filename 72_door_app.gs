@@ -277,6 +277,110 @@ function reportDoorSignInFailure(payload, reason) {
 }
 
 /**
+ * A STANDING VOLUNTEER SIGN-IN — the door app's always-available "I'm here to
+ * volunteer" button, which belongs to no program and needs no calendar event.
+ *
+ * Payload: { name, hours, location, dateKey, pin }. The volunteer says how long
+ * they will be here (a button of hours on the tablet) and ONE row goes onto
+ * `Volunteer_Hours` through `logVolunteerVisit()` (99e) — the tab's one writer,
+ * so the arithmetic, the lock and the row shape are not repeated here. Arrived
+ * is the moment of the press (today only: a tablet set up on another day has
+ * no honest arrival time) and Departed is left blank, so the hours are the ones
+ * the volunteer PLANNED; the row's note says so, because a number promised at
+ * the door is not a number somebody clocked out with. Staff correct it on the
+ * tab, where Arrived/Departed beat a typed number (99e).
+ *
+ * Same bargain as `doorSignIn()`: the tablet has already shown "signed in" and
+ * moved on, so a refusal reaches nobody there. A workbook held by a sync is
+ * QUEUED on 99b's queue (kind `doorVolunteer`, written by `flushDeskWritesAfterSync`)
+ * and anything else that fails is mailed to Caroline alone, urgently, for the
+ * same reason a failed door sign-in is.
+ */
+function doorVolunteerSignIn(payload) {
+  const args = parseCheckInPayload(payload);
+  if (!checkInPinAccepted(args.pin)) return checkInPinRefusal();
+  const refusal = doorVolunteerRefusal_(args);
+  if (refusal) return { ok: false, message: refusal };
+
+  if (workbookHeldElsewhere() &&
+      queueOptimisticRetry('doorVolunteer', args, 'Queued behind a sync that was holding the workbook.')) {
+    return { ok: true, queued: true, name: String(args.name).trim(),
+      message: '⏳ Saved — a sync is running, so it goes onto the sheet the moment the sync lets go.' };
+  }
+  let res;
+  try {
+    res = doorVolunteerWrite_(args);
+  } catch (err) {
+    log(`doorVolunteerSignIn threw: ${err}`);
+    res = { ok: false, message: `Threw an error: ${err}` };
+  }
+  if (!res.ok) reportDoorVolunteerFailure_(args, res.message);
+  return res;
+}
+
+/** The volunteer's hours, or a reason there are none: a number, 0.25 to the typo guard. */
+function doorVolunteerRefusal_(args) {
+  if (!String(args.name || '').trim()) return 'Type your name first — nothing was recorded.';
+  const hours = Number(args.hours);
+  if (!isFinite(hours) || hours <= 0) return 'Choose how many hours you will be here — nothing was recorded.';
+  if (hours > VOLUNTEER_SELF_LOG_MAX_HOURS) {
+    return `That is more than ${VOLUNTEER_SELF_LOG_MAX_HOURS} hours, which is more than one visit can be ` +
+      'logged as here. Ask a staff member. Nothing was recorded.';
+  }
+  if (!matchCheckInLocation(args.location)) return 'Choose a location in setup first — nothing was recorded.';
+  const dateKey = String(args.dateKey || '').trim() || formatDateKey(new Date());
+  if (!parseDateKey(dateKey) || dateKey > formatDateKey(new Date())) {
+    return 'Volunteer hours can only be signed in for today or an earlier day. Nothing was recorded.';
+  }
+  return '';
+}
+
+/**
+ * The write itself, with NO checks beyond `doorVolunteerRefusal_` — called from
+ * the endpoint and from 99b's retry (which runs it without the script lock,
+ * because `logVolunteerVisit()` takes it for itself). Returns { ok, message }.
+ */
+function doorVolunteerWrite_(args) {
+  const refusal = doorVolunteerRefusal_(args);
+  if (refusal) return { ok: false, message: refusal };
+  const name = String(args.name).trim();
+  const hours = Number(args.hours);
+  const todayKey = formatDateKey(new Date());
+  const dateKey = String(args.dateKey || '').trim() || todayKey;
+  const written = logVolunteerVisit({
+    name: name,
+    date: dateKey,
+    location: matchCheckInLocation(args.location),
+    arrived: dateKey === todayKey ? Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a') : '',
+    hours: hours,
+    notes: 'Signed in at the door app — hours are what the volunteer said they would stay.',
+    loggedBy: 'door app'
+  });
+  if (/^⚠️/.test(String(written || ''))) {
+    return { ok: false, message: String(written).replace(/^⚠️\s*/, '') };
+  }
+  try {
+    spoolOfficeNote(VOLUNTEER_SELF_LOG_DIGEST_SECTION,
+      `${name} signed in at the door (${matchCheckInLocation(args.location)}) to volunteer for ` +
+      `${hours} hour(s) on ${formatDateLabel(coerceVolunteerVisitDate(dateKey))}.`);
+  } catch (err) {
+    log(`ℹ️ Door volunteer sign-in: could not file the digest line (${err}).`);
+  }
+  return { ok: true, message: String(written), hours: hours };
+}
+
+/** A failed volunteer sign-in, to Caroline alone — the door has no signed-in person. */
+function reportDoorVolunteerFailure_(args, reason) {
+  if (queueOptimisticRetry('doorVolunteer', args, reason)) return;
+  notifyAdminUrgent('[Door app] A volunteer sign-in did not complete',
+    ['A door app volunteer sign-in did not complete, but the tablet had already shown "signed in".', '',
+      `Name: ${args.name || '(none)'}`, `Location: ${args.location || '(none)'}`,
+      `Date: ${args.dateKey || '(today)'}`, `Hours: ${args.hours || '(none)'}`, '',
+      `Reason: ${reason}`, '', 'Please enter this visit on Volunteer_Hours by hand.'].join('\n'),
+    { to: [MAIL_REPLY_TO] });
+}
+
+/**
  * A CONTACT DETAIL, EITHER KIND. Plenty of members have a phone and no email
  * at all, and refusing their sign-in over an address they have never had is
  * the page turning somebody away at the door of their own senior center. One

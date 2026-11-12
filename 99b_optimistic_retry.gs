@@ -288,8 +288,9 @@ function flushOptimisticRetryQueue(options) {
     // burns a try against a collision with nobody but us. The door's sign-in
     // (74) is that kind of writer; Quick Mark's locked body (38) is the other,
     // and is only correct WITH the lock held.
-    const held = batch.filter(entry => entry.kind !== 'doorSignIn');
-    const unheld = batch.filter(entry => entry.kind === 'doorSignIn');
+    const takesOwnLock = entry => entry.kind === 'doorSignIn' || entry.kind === 'doorVolunteer';
+    const held = batch.filter(entry => !takesOwnLock(entry));
+    const unheld = batch.filter(takesOwnLock);
 
     let outcomes = [];
     if (held.length) {
@@ -395,6 +396,10 @@ function applyQueuedOptimisticWrite(entry) {
       // itself, one mark at a time, through applyQuickMarkFromDialog(). See
       // the split in flushOptimisticRetryQueue().
       return walkInSignIn(args);
+    case 'doorVolunteer':
+      // A standing volunteer sign-in (72). Also unlocked: logVolunteerVisit()
+      // takes the script lock itself.
+      return doorVolunteerWrite_(args);
     default:
       return { ok: false, message: `Unknown queued write kind "${entry.kind}".` };
   }
@@ -435,6 +440,7 @@ function reportExhaustedOptimisticRetry(entry, message, tries) {
   try {
     const args = entry.args || {};
     const what = entry.kind === 'doorSignIn' ? 'A door app sign-in'
+      : entry.kind === 'doorVolunteer' ? 'A door app volunteer sign-in'
       : entry.kind === 'leaderRosterMark' ? `A tick on the web roster page for ${args.programTitle || 'a program'}`
       : entry.kind === 'deleteRegistrations' ? `A queued deletion of ${(args.eventIds || []).length} session(s)` +
         ` (${(args.eventIds || []).join(', ')})`
@@ -456,7 +462,7 @@ function reportExhaustedOptimisticRetry(entry, message, tries) {
       // the rest stay with the office table.
       { to: entry.kind === 'quickMark' || entry.kind === 'quickMarkHousehold'
         ? [args.submittedBy || MAIL_REPLY_TO]
-        : entry.kind === 'doorSignIn' ? [MAIL_REPLY_TO] : [] });
+        : entry.kind === 'doorSignIn' || entry.kind === 'doorVolunteer' ? [MAIL_REPLY_TO] : [] });
   } catch (err) {
     log(`ℹ️ Could not report an exhausted optimistic retry (${err}).`);
   }

@@ -298,6 +298,10 @@ function buildDoorAppHtml(options) {
   button.plain { background: #fff; border: 2px solid #5F6368; color: #222; border-radius: 8px;
                  padding: 13px 14px; font-size: 18px; color: #222; cursor: pointer; min-height: 56px; width: 100%;
                  margin-top: 8px; }
+  /* THE VOLUNTEER'S HOURS: big buttons, one pressed. */
+  .hours { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+  .hours button.plain { margin-top: 0; font-size: 26px; font-weight: 700; min-height: 72px; }
+  .hours button.plain.on { background: #1A73E8; border-color: #1A73E8; color: #fff; }
   /* BACK BUTTONS read as backing out, not as another way forward. */
   button.plain.back { color: #222; border: 2px solid #5F6368; background: #fff; font-weight: 700;
                       font-size: 20px; min-height: 60px; margin-top: 18px; }
@@ -429,6 +433,11 @@ function buildDoorAppHtml(options) {
   // reason this exists, and making them tap twice would be the same two taps
   // as before. Cleared on every choose(), because it is about one visit.
   var PARTY = {};
+  // THE STANDING VOLUNTEER SIGN-IN: what has been typed and chosen on that
+  // screen, held outside the DOM for the same reason WALKIN is (a redraw on an
+  // hours button must not empty the name box). About one visit; cleared with it.
+  var VOL = { name: '', hours: 0, other: '' };
+  var VOLUNTEER_HOUR_CHOICES = [1, 2, 3, 4, 5, 6];
   var RECURRING = 'none';  // none | month | club
   // WHAT HAS BEEN TYPED INTO THE WALK-IN FORM, held outside the DOM. Picking a
   // radio redraws the whole screen (one render function, one truth about what
@@ -572,6 +581,7 @@ function buildDoorAppHtml(options) {
     HERE_FOR = {}; SHOW_ALL = false;
     RECURRING = 'none'; MEMBER = '';
     WALKIN = { name: '', email: '', phone: '', guests: [] };
+    VOL = { name: '', hours: 0, other: '' };
     TICKED = {}; GROUP = null;
   }
 
@@ -663,6 +673,7 @@ function buildDoorAppHtml(options) {
     if (STEP === 'person') return drawPerson(main);
     if (STEP === 'group') return drawGroup(main);
     if (STEP === 'walkin') return drawWalkIn(main);
+    if (STEP === 'volunteer') return drawVolunteer(main);
     drawNames(main);
   }
 
@@ -818,7 +829,104 @@ function buildDoorAppHtml(options) {
       draw();
       window.scrollTo(0, 0);
     }));
+
+    // ALWAYS HERE, ON EVERY DAY: volunteering belongs to no program and needs
+    // no calendar event, so it is not one of the choices above (which are the
+    // day's programs). It is its own button, and its own short screen.
+    main.appendChild(button('plain', 'I am here to volunteer', function () {
+      hideStatus();
+      STEP = 'volunteer';
+      draw();
+      window.scrollTo(0, 0);
+    }));
     main.appendChild(footer());
+  }
+
+  // SCREEN 6 — a volunteer signing in: who they are, and how long they will be
+  // here. The hours are a choice of big buttons (and an Other box), never typed
+  // arithmetic; Sign in is disabled until both are given.
+  function stashVolunteer() {
+    var n = document.getElementById('volname');
+    var o = document.getElementById('volother');
+    if (n) VOL.name = n.value;
+    if (o) VOL.other = o.value;
+  }
+
+  function volunteerHours() {
+    var typed = parseFloat(String(VOL.other || '').replace(',', '.'));
+    if (VOL.hours === -1) return isFinite(typed) && typed > 0 ? typed : 0;
+    return VOL.hours > 0 ? VOL.hours : 0;
+  }
+
+  function drawVolunteer(main) {
+    main.appendChild(el('h2', '', 'Volunteering today'));
+    main.appendChild(el('p', 'hint', 'Thank you for helping! How many hours will you be here?'));
+    var grid = el('div', 'hours', '');
+    VOLUNTEER_HOUR_CHOICES.forEach(function (h) {
+      var b = button('plain' + (VOL.hours === h ? ' on' : ''), h + (h === 1 ? ' hour' : ' hours'), function () {
+        stashVolunteer(); VOL.hours = h; draw();
+      });
+      b.setAttribute('aria-pressed', VOL.hours === h ? 'true' : 'false');
+      grid.appendChild(b);
+    });
+    var other = button('plain' + (VOL.hours === -1 ? ' on' : ''), 'Other', function () {
+      stashVolunteer(); VOL.hours = -1; draw();
+      var box = document.getElementById('volother');
+      if (box) box.focus();
+    });
+    other.setAttribute('aria-pressed', VOL.hours === -1 ? 'true' : 'false');
+    grid.appendChild(other);
+    main.appendChild(grid);
+    if (VOL.hours === -1) main.appendChild(field('volother', 'How many hours? (for example 2.5)', 'tel', VOL.other));
+
+    // THE TYPING COMES LAST, directly above Sign in, like the walk-in screen.
+    main.appendChild(field('volname', 'Your name', 'text', VOL.name));
+    var go = button('big', 'Sign in', submitVolunteer);
+    go.id = 'go';
+    go.disabled = busy;
+    main.appendChild(go);
+    main.appendChild(button('plain back', 'Back', function () {
+      stashVolunteer();
+      STEP = 'events';
+      draw();
+    }));
+  }
+
+  function submitVolunteer() {
+    stashVolunteer();
+    var name = String(VOL.name || '').trim();
+    var hours = volunteerHours();
+    if (!name) return say('Type your name first.', 'err');
+    if (!hours) return say('Choose how many hours you will be here.', 'err');
+    if (hours > 16) return say('That is a lot of hours — ask a staff member to add it.', 'err');
+    var payload = { name: name, hours: hours, location: SETUP.location, dateKey: SETUP.dateKey, pin: pin };
+    // OPTIMISTIC, like send(): the next person's first question is drawn at
+    // once and the confirmation covers it. A failure is mailed to the office by
+    // the server (doorVolunteerSignIn) — nobody is left at the tablet to read it.
+    startNextPerson();
+    STEP = 'events';
+    draw();
+    window.scrollTo(0, 0);
+    hideStatus();
+    showDone(name, [], 'Thank you! ' + hours + (hours === 1 ? ' hour' : ' hours') + ' of volunteering recorded.');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.needsPin) {
+          try { window.localStorage.removeItem('checkInPin'); } catch (err) { /* ignore */ }
+          pin = '';
+          closeDone();
+          STEP = 'events';
+          draw();
+          say(res.message || 'Wrong PIN — ask a staff member to sign back in.', 'err');
+          return showPin();
+        }
+        if (res && res.ok === false) {
+          closeDone();
+          say(res.message || 'That did not save — ask a staff member.', 'err');
+        }
+      })
+      .withFailureHandler(function () { /* reported server-side; nothing left to tell */ })
+      .doorVolunteerSignIn(JSON.stringify(payload));
   }
 
   /**
