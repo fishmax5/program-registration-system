@@ -32,6 +32,7 @@ this.PROGRAM_SETTINGS_INACTIVE_GROUP = PROGRAM_SETTINGS_INACTIVE_GROUP;
 this.NOTIFICATION_CHECKBOX_COLUMNS = NOTIFICATION_CHECKBOX_COLUMNS;
 this.isSpecialEventProgram_ = isSpecialEventProgram_; this.builtInSpecialEventDefaults_ = builtInSpecialEventDefaults_;
 this.PROGRAM_SETTINGS_SPECIAL_GROUP = PROGRAM_SETTINGS_SPECIAL_GROUP;
+this.consolidateNotificationRow_ = consolidateNotificationRow_; this.consolidateKindDefaults_ = consolidateKindDefaults_;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -111,6 +112,24 @@ const spGrid = [['banner'], headers.slice()].concat(sandbox.groupProgramSettings
 const spRead = sandbox.readProgramSettingsTable_({ getLastRow: () => spGrid.length, getLastColumn: () => headers.length,
   getName: () => 'Program_Settings', getRange: () => ({ getValues: () => spGrid }) }, headers);
 check('the special-event default round-trips through the tab', spRead.defaults[SP].Week_Before, true);
+
+// --- the one-time consolidation (Nov 2026): one alert for assistance, none else
+const ticked = () => { const r = new Array(headers.length).fill('');
+  ['Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of', 'Confirm_On_Booking'].forEach(h => { r[map[h]] = true; });
+  r[map['Other_Reminders']] = '3'; return r; };
+const ord = ticked();
+check('an ordinary program row is cleared', sandbox.consolidateNotificationRow_(ord, map, false), true);
+check('...every box and the day list', [sandbox.NOTIFICATION_CHECKBOX_COLUMNS.some(h => ord[map[h]] === true), ord[map['Other_Reminders']]], [false, '']);
+const asst = ticked();
+sandbox.consolidateNotificationRow_(asst, map, true);
+check('an assistance row keeps Day_Before only',
+  sandbox.NOTIFICATION_CHECKBOX_COLUMNS.filter(h => asst[map[h]] === true), ['Day_Before']);
+check('an already-consolidated row reports no change', sandbox.consolidateNotificationRow_(asst, map, true), false);
+const kd = { MONTHLY: { Week_Before: true, Other_Reminders: '3' }, APPOINTMENTS: { Week_Before: true }, SPECIAL: { Week_Before: true, Day_Before: true } };
+sandbox.consolidateKindDefaults_(kd);
+check('kind defaults are cleared, assistance gets Day_Before, special events are untouched',
+  [kd.MONTHLY.Week_Before, kd.MONTHLY.Other_Reminders, kd.APPOINTMENTS.Week_Before, kd.APPOINTMENTS.Day_Before, kd.SPECIAL.Week_Before],
+  [false, '', false, true, true]);
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

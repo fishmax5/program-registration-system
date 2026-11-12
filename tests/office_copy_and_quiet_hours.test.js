@@ -166,21 +166,21 @@ check('and so does the whole rest of the day',
 //
 // The window is fixed and it covers EVERY send, not just the reminders part 2
 // is about. The two ends are half-open the same way, so a trigger firing on
-// the hour has one answer: 5pm is quiet, 8am is not.
+// the hour has one answer: 5pm is quiet, 9am is not.
 // ---------------------------------------------------------------------------
 const at = h => new Date(Date.UTC(2026, 8, 8, h, 0));
-check('the window is 5pm to 8am',
-  [sandbox.MAIL_QUIET_HOURS_START_HOUR, sandbox.MAIL_QUIET_HOURS_END_HOUR], [17, 8]);
+check('the window is 5pm to 9am',
+  [sandbox.MAIL_QUIET_HOURS_START_HOUR, sandbox.MAIL_QUIET_HOURS_END_HOUR], [17, 9]);
 check('4:59pm still sends', sandbox.isWithinMailQuietHours(new Date(Date.UTC(2026, 8, 8, 16, 59))), false);
 check('5pm is quiet', sandbox.isWithinMailQuietHours(at(17)), true);
 check('midnight is quiet', sandbox.isWithinMailQuietHours(at(0)), true);
-check('7:59am is still quiet',
-  sandbox.isWithinMailQuietHours(new Date(Date.UTC(2026, 8, 8, 7, 59))), true);
-check('8am sends again', sandbox.isWithinMailQuietHours(at(8)), false);
+check('8:59am is still quiet',
+  sandbox.isWithinMailQuietHours(new Date(Date.UTC(2026, 8, 8, 8, 59))), true);
+check('9am sends again', sandbox.isWithinMailQuietHours(at(9)), false);
 check('and so does the middle of the day', sandbox.isWithinMailQuietHours(at(12)), false);
 
 // A message inside the window is HELD, which is not what the pause does with
-// one: nothing is sent, nothing is recorded, and the first pass after 8am owes
+// one: nothing is sent, nothing is recorded, and the first pass after 9am owes
 // it. That difference is the whole reason it is not simply 'paused'.
 sentMail.length = 0;
 sandbox.resetRationedMailState();

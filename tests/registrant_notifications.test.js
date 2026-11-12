@@ -174,10 +174,10 @@ const ordinary = sandbox.defaultNotificationPolicy(false);
 check('a new ordinary program sends nothing',
   [ordinary.invite, ordinary.remind, ordinary.days], [false, false, []]);
 const assistance = sandbox.defaultNotificationPolicy(true);
-check('a new appointment program sends nothing either',
+check('a new appointment program gets ONE alert: the day before, nothing else',
   [assistance.invite, assistance.remind, assistance.confirmTime, assistance.personalizeTime,
     assistance.days],
-  [false, false, false, true, []]);
+  [false, true, false, true, [1]]);
 
 // ...and what the refresh seeds that row with reads back as the same policy.
 const seeded = new Array(NOTIFY_HEADERS.length).fill('');
@@ -220,7 +220,7 @@ check('"+ reminders" with no days typed takes the default cadence',
 // A typo must not be the way a program is carried across as silent.
 const typo = legacy('inviite', '', true);
 check('an unrecognized mode carries across as the kind default',
-  [typo.invite, typo.remind, typo.days], [false, false, []]);
+  [typo.invite, typo.remind, typo.days], [false, true, [1]]);
 
 // Case and spacing are what a person typed, not what they meant.
 check('the retired value is matched case-insensitively',
@@ -322,9 +322,9 @@ check('a program with no history is born with every box clear',
   [fromDefault.from, fromDefault.policy.invite, fromDefault.policy.remind],
   ['default', false, false]);
 const appointment = seed({}, {}, true);
-check('...and an appointment program is born clear too',
+check('...and an appointment program is born with the day-before alert only',
   [appointment.policy.invite, appointment.policy.remind, appointment.policy.confirmTime],
-  [false, false, false]);
+  [false, true, false]);
 
 // 5. STAFF_NOTES IS JOINED, NEVER PICKED. Both retired tabs had one, both were
 //    typed by hand, and choosing between two sentences on somebody's behalf is

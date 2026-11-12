@@ -340,6 +340,10 @@ function refreshProgramSettings(ss, sessionRows) {
   if (!kindDefaults[PROGRAM_SETTINGS_SPECIAL_GROUP]) {
     kindDefaults[PROGRAM_SETTINGS_SPECIAL_GROUP] = builtInSpecialEventDefaults_();
   }
+  // ONE-TIME CONSOLIDATION (November 2026): see consolidateNotificationDefaults_.
+  const consolidatePending = !notificationConsolidationDone_();
+  if (consolidatePending) consolidateKindDefaults_(kindDefaults);
+  let consolidatedRows = 0;
   const existingByKey = {};
   prior.rows.forEach(row => {
     // Every lunch title this workbook has ever used ("🥡 Lunch Only (no
@@ -447,6 +451,10 @@ function refreshProgramSettings(ss, sessionRows) {
         if (from === 'ticks') mergedTicks++;
         if (!priorRow) seeded++;
       }
+      if (consolidatePending && priorRow && kind !== PROGRAM_SETTINGS_SPECIAL_GROUP &&
+          consolidateNotificationRow_(row, map, p.isAssistance)) {
+        consolidatedRows++;
+      }
       row[map['Event']] = p.title;
       row[map['Location']] = p.location;
       row[map['Type_Tag']] = p.typeTag;
@@ -505,6 +513,9 @@ function refreshProgramSettings(ss, sessionRows) {
     ['program_settings_v2', formatDateKey(new Date()), headers, outRows, roomOptionLabels()]);
   if (fingerprint && storedProgramSettingsFingerprint_() === fingerprint) {
     invalidateNotificationPolicyCache();
+    // The rows as swept are the rows already on the tab, so the sweep has
+    // nothing left to do — and must not run again over a tick staff add later.
+    if (consolidatePending) markNotificationConsolidationDone_(0);
     log(`${SHEET_NAMES.PROGRAM_SETTINGS}: nothing changed; left as it is.`);
     return;
   }
@@ -550,6 +561,7 @@ function refreshProgramSettings(ss, sessionRows) {
   // every carried-over answer on a sheet that then failed to be written.
   markLegacyNotifyModeMigrationDone(legacyModes, seeded);
   if (mergePending) markProgramSettingsMergeDone(ss, legacyTicks, mergedTicks);
+  if (consolidatePending) markNotificationConsolidationDone_(consolidatedRows);
 
   log(`${SHEET_NAMES.PROGRAM_SETTINGS} refreshed: ${grouped.programCount} program(s) ` +
     `in ${grouped.dividerOffsets.length} group(s).`);
@@ -605,6 +617,71 @@ const PROGRAM_SETTINGS_LUNCH_TITLE = 'Lunch';
  */
 const PROGRAM_SETTINGS_SPECIAL_GROUP = 'SPECIAL';
 const PROGRAM_SETTINGS_SPECIAL_LOOKBACK_DAYS = 45;
+
+/**
+ * THE ONE-TIME CONSOLIDATION (November 2026).
+ *
+ * From the office: members were getting so many alerts, at such hours, that some
+ * had started deleting every email unread. The weekly announcement (Givebutter,
+ * Sundays) already says what is coming up, so the workbook's own mail narrows to:
+ *   - a PERSONAL ASSISTANCE program: ONE alert, the day before (nothing else);
+ *   - a special event (one date, not repeating): left exactly as it is;
+ *   - every other program, and lunch: nothing.
+ * That is what a row is BORN with now (defaultNotificationPolicy), and this is
+ * the same answer applied once to the rows that already exist, and to the
+ * new-event defaults rows. It runs while NOTIFICATIONS_CONSOLIDATED_V1 is unset
+ * and sets it once the tab is written, so a box staff tick afterwards is theirs.
+ * A row for a program the calendar has stopped mentioning is left alone: nothing
+ * here can tell whether it is an assistance program, and silencing one between
+ * terms would be the worse mistake.
+ */
+const NOTIFICATION_CONSOLIDATION_PROP_KEY = 'NOTIFICATIONS_CONSOLIDATED_V1';
+
+function notificationConsolidationDone_() {
+  try {
+    return !!PropertiesService.getScriptProperties().getProperty(NOTIFICATION_CONSOLIDATION_PROP_KEY);
+  } catch (err) { return true; } // unreadable: never sweep staff's ticks on a guess
+}
+
+function markNotificationConsolidationDone_(changedRows) {
+  try {
+    PropertiesService.getScriptProperties().setProperty(NOTIFICATION_CONSOLIDATION_PROP_KEY,
+      JSON.stringify({ at: new Date().toISOString(), rows: changedRows || 0 }));
+  } catch (err) { /* the sweep is idempotent; it only costs another pass */ }
+  if (changedRows > 0) {
+    spoolOfficeNote('Registrant notifications',
+      `Registrant alerts were consolidated: ${changedRows} program row(s) on Program_Settings ` +
+      `were cleared (personal assistance programs keep one alert the day before; special events unchanged).`);
+  }
+}
+
+/** Sets one row's six answers to the consolidated policy. Returns true if anything changed. */
+function consolidateNotificationRow_(row, map, isAssistance) {
+  const wanted = {};
+  NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { wanted[h] = false; });
+  wanted['Other_Reminders'] = '';
+  if (isAssistance) wanted['Day_Before'] = true;
+  let changed = false;
+  Object.keys(wanted).forEach(h => {
+    if (map[h] === undefined) return;
+    const now = h === 'Other_Reminders' ? String(row[map[h]] || '').trim() !== '' : isTruthyCheckbox(row[map[h]]);
+    const want = h === 'Other_Reminders' ? false : wanted[h];
+    if (now !== want) changed = true;
+    row[map[h]] = wanted[h];
+  });
+  return changed;
+}
+
+/** The new-event defaults rows, swept the same way (special events keep theirs). */
+function consolidateKindDefaults_(kindDefaults) {
+  Object.keys(kindDefaults).forEach(kind => {
+    if (kind === PROGRAM_SETTINGS_SPECIAL_GROUP || !kindDefaults[kind]) return;
+    const d = kindDefaults[kind];
+    NOTIFICATION_CHECKBOX_COLUMNS.forEach(h => { d[h] = false; });
+    d['Other_Reminders'] = '';
+    if (kind === 'APPOINTMENTS') d['Day_Before'] = true;
+  });
+}
 
 /** What a special event is born with when staff have not set the row: the guest-list invite, a week before, a day before. */
 function builtInSpecialEventDefaults_() {

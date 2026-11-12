@@ -156,7 +156,16 @@ function defaultNotificationPolicy(isAssistance) {
   // people before anybody had looked at it. Now a new row is born with every
   // box clear and staff tick what they want; an existing row's ticks are
   // untouched. personalizeTime is not a send, so an appointment keeps it.
-  return { invite: false, remind: false, days: [], confirmTime: false, personalizeTime: !!isAssistance };
+  //
+  // EXCEPT ONE ALERT FOR A PERSONAL ASSISTANCE PROGRAM (November 2026, from the
+  // office: people were deleting mail unread because there was so much of it).
+  // The appointment is the one thing a member cannot be left to find in the
+  // Sunday announcement, so an assistance row is born with Day_Before only —
+  // no calendar invite, no booking confirmation, no week-before, no morning-of.
+  if (isAssistance) {
+    return { invite: false, remind: true, days: [1], confirmTime: false, personalizeTime: true };
+  }
+  return { invite: false, remind: false, days: [], confirmTime: false, personalizeTime: false };
 }
 
 /**
