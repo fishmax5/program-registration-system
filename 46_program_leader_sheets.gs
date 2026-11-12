@@ -1334,6 +1334,8 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    // Lunch sessions get no registrant sheet; one made earlier is left as it is.
+    if (isLunchOnlyProgramTitle(entry.title)) return;
     // A program delivered on the web roster page (99zn): its sheet is cut
     // over (frozen after one last read) rather than rewritten, and one that
     // came back from the page is un-frozen here so the write below redraws it.
@@ -2641,6 +2643,7 @@ function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
     if (!title || !location) return;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) return;
+    if (isLunchOnlyProgramTitle(title)) return; // lunch has no roster to share
     const dateKey = formatDateKey(date);
     if (dateKey < todayKey || dateKey > horizonKey) return;
     const key = leaderProgramKey(title, location);
@@ -2687,6 +2690,7 @@ function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
   leaders.forEach(leader => leader.programs.forEach(program => {
     if (registry[program.key] && registry[program.key].fileId) return; // already has one
     if (!known[program.key]) return; // not a program this workbook recognizes
+    if (isLunchOnlyProgramTitle(program.title)) return; // lunch has no roster to share
     if (rosterDeliveryFor(program.key) === ROSTER_DELIVERY.WEB) return; // the web page (99zn)
     missing[program.key] = program;
   }));
@@ -2753,6 +2757,7 @@ function listProgramLeaderProgramOptions() {
     const location = String(row[map['Location']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!title || !location || !date) return;
+    if (isLunchOnlyProgramTitle(title)) return; // lunch has no roster to share
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
     const key = leaderProgramKey(title, location);
