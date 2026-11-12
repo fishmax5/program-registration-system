@@ -427,6 +427,38 @@ function resolveRegistrantLunchType(wantsLunch, registryEntry) {
   return (meal && (meal.type === 'Hot' || meal.type === 'Cold')) ? meal.type : '';
 }
 
+/**
+ * A PROTECTED ROW THAT IS A CANCELLATION DOES NOT VETO A NEW REGISTRATION.
+ *
+ * Every cancellation stamps Manual_Override (71) — that is what stops the next
+ * sync re-deriving the row from its form response and quietly un-cancelling
+ * it. But the same protection also turned away the person's NEXT submission:
+ * somebody who cancelled and then registered again (the Low Cost Wills form,
+ * 1FRC6rl879UX3HO_-CiRXiBRi9fwN-swKo_TaDjYKlrQ) produced no row, no warning
+ * and no ledger entry, because buildRegistrantRow() returned before it looked
+ * at what the protected row actually said.
+ *
+ * The same two conditions the tombstone lift below uses, plus the row's own
+ * status: a LIVE submission (the import reading a response as it arrives, never
+ * the all-dates or club catch-ups re-deriving standing state), a Party_ID that
+ * is NOT the cancelled row's own (so re-reading the response that was cancelled
+ * stays blocked however often it comes round), and the protected row being
+ * Cancelled. The cancelled row is then superseded by the new one through the
+ * ordinary resubmission path. A hand-edited or hand-added Active row is still
+ * never touched.
+ */
+function cancelledRowGivesWayToNewSubmission_(args, key) {
+  if (!args.fromLiveSubmission || !args.partyId) return false;
+  const existingRow = args.existingRowIndex && args.existingRowIndex.get(key);
+  if (!existingRow) return false;
+  const map = getIndexMap(HEADERS.All_Registrants);
+  if (String(existingRow[map['Program_Status']] || '').trim() !== 'Cancelled') return false;
+  const existingPartyId = String(existingRow[map['Party_ID']] || '').trim();
+  if (existingPartyId && existingPartyId === String(args.partyId).trim()) return false;
+  log(`A cancelled registration was replaced by a new submission: ${existingRow[map['Name']]} on ${existingRow[map['Event_ID']]}.`);
+  return true;
+}
+
 function buildRegistrantRow(args) {
   const {
     registryEntry, name, personType, lunchType, primaryRegistrant, adminNotes, formEditUrl,
@@ -475,7 +507,7 @@ function buildRegistrantRow(args) {
   const intendsLunch = !!lunchType && lunchType !== 'No Lunch';
   const wantsLunch = intendsLunch && !lunchIsRuledOutOn(registryEntry.eventDate, registryEntry.location);
 
-  if (protectedKeys.has(key)) {
+  if (protectedKeys.has(key) && !cancelledRowGivesWayToNewSubmission_(args, key)) {
     return null; // never overwrite a manually-edited/added row, resubmission or not
   }
 

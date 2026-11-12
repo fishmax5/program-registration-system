@@ -545,7 +545,7 @@ function refreshFormForNewDates(formId, group, configInfo) {
 
   const sessions = sessionsOfGroup(group);
   const { allDateLabels, lunchDateLabels, allDateLines } =
-    buildDateLabelSets(sessions, { showLocation: group.isShared });
+    buildDateLabelSets(sessions, { showLocation: formShowsLocationForGroup(formId, group) });
 
   form.setDescription(buildFormDescription(group.locations, allDateLabels, group.isFixed, lunchDateLabels.length > 0,
     { isClub: group.isClub, programTitle: group.cleanTitle, isLunchOnly: group.isLunchOnly,

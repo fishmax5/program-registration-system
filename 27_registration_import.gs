@@ -417,6 +417,7 @@ function buildRegistryIndex(registrySheet) {
   const map = getIndexMap(headers);
   const labelOptionsByForm = buildLabelOptionsByForm(rows, map);
   const sharedFormIds = getSharedFormIdSet();
+  const altLabels = {};
   rows.forEach(row => {
     const formId = row[map['Form_ID']];
     const eventDateRaw = row[map['Event_Date']];
@@ -467,8 +468,47 @@ function buildRegistryIndex(registrySheet) {
       // meant: whether the public FORM offers to join.
       programKey: computeClubKey(cleanTitle, location, sharedFormIds.has(formId))
     };
+    // THE OTHER SPELLING OF THIS SESSION'S LABEL — with the location if the
+    // form's labels leave it off, without it if they carry it. Collected here
+    // and resolved below.
+    const altLabel = formatSessionLabel(eventDate, location, !opts.showLocation, cleanTitle, opts.showTitle);
+    if (altLabel !== label) {
+      const altKey = `${formId}|${altLabel}`;
+      if (!altLabels[altKey]) altLabels[altKey] = new Set();
+      altLabels[altKey].add(label);
+    }
   });
+  attachRegistryLabelAliases_(index, altLabels);
   return index;
+}
+
+/**
+ * A grid row labelled the OTHER way round still finds its session — when only
+ * one session could be meant.
+ *
+ * A form's labels name a location or they do not, and the two sides that
+ * decide it have disagreed: a program moved to another building (99zy) leaves
+ * a form whose rows span two buildings (so this index expects "· Building")
+ * while a refresh from the calendar had written labels without it, or the
+ * reverse. Responses to the labels actually on the form then matched nothing
+ * and were dropped with no warning. formShowsLocationForGroup() (09) makes the
+ * two sides agree from now on; this is what reads the responses already
+ * submitted against the other spelling.
+ *
+ * An alias is kept only when it names exactly ONE session and is not itself
+ * a real label — "Tue 9/16" on a form with sessions at two buildings that day
+ * is genuinely ambiguous and stays unresolved. Stored NON-ENUMERABLE, because
+ * a dozen callers walk Object.keys(registryIndex) as "the sessions on this
+ * form", and an alias there would be a session counted twice.
+ */
+function attachRegistryLabelAliases_(index, altLabels) {
+  const aliases = {};
+  Object.keys(altLabels || {}).forEach(altKey => {
+    if (index[altKey]) return;
+    const targets = Array.from(altLabels[altKey]);
+    if (targets.length === 1) aliases[altKey] = targets[0];
+  });
+  Object.defineProperty(index, '__labelAliases', { value: aliases, enumerable: false });
 }
 
 /**

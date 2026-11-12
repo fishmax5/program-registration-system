@@ -354,6 +354,47 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   });
 }
 
+/**
+ * Whether a form built from a calendar GROUP names locations in its labels —
+ * the SAME rule buildFormSessionContext() applies to the form's rows.
+ *
+ * WHY THE CALENDAR SIDE CANNOT ANSWER FROM THE GROUP ALONE. It used to read
+ * `group.isShared` and nothing else, while the sheet side (and therefore
+ * buildRegistryIndex(), which every response is matched back through) reads
+ * "do this form's session rows span more than one location". Those agree until
+ * a program MOVES building (99zy): the group now holds only the new building's
+ * dates, but the form's rows still include the old building's, so the sheet
+ * side says "name the location" and the calendar side wrote labels without it.
+ * Every response to those labels then matched no session and imported nobody.
+ *
+ * So: a [Shared] group, a form the registry knows as shared, or a form whose
+ * rows on the session table (plus the group's own) span more than one
+ * location. A read that fails falls back to the group's own answer.
+ */
+function formShowsLocationForGroup(formId, group) {
+  if (group && group.isShared) return true;
+  if (!formId) return false;
+  try {
+    if (getSharedFormIdSet().has(formId)) return true;
+    const ss = SpreadsheetApp.getActive();
+    const sheet = ss && ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
+    const locations = new Set((group && group.locations || [])
+      .map(l => String(l || '').trim()).filter(Boolean));
+    if (sheet) {
+      const headers = HEADERS.All_Program_Sessions;
+      const map = getIndexMap(headers);
+      getSectionedRows(sheet, headers, 'Event_ID').forEach(row => {
+        if (String(row[map['Form_ID']] || '').trim() !== formId) return;
+        const loc = String(row[map['Location']] || '').trim();
+        if (loc) locations.add(loc);
+      });
+    }
+    return locations.size > 1;
+  } catch (err) {
+    return !!(group && group.isShared);
+  }
+}
+
 /** { Form_ID: {showLocation, showTitle} } for a batch of session rows — how each form's date labels read. */
 function buildLabelOptionsByForm(rows, map) {
   const sharedFormIds = getSharedFormIdSet();

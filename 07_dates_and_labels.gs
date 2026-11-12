@@ -650,6 +650,15 @@ function resolveSessionLabelForForm(registryIndex, formId, decoratedLabel) {
   for (let i = 0; i < candidates.length; i++) {
     if (registryIndex[`${formId}|${candidates[i]}`]) return candidates[i];
   }
+  // THE OTHER SPELLING — with or without "· Building" — answered only where it
+  // names exactly one session. See attachRegistryLabelAliases_() (27).
+  const aliases = registryIndex && registryIndex.__labelAliases;
+  if (aliases) {
+    for (let i = 0; i < candidates.length; i++) {
+      const target = aliases[`${formId}|${candidates[i]}`];
+      if (target && registryIndex[`${formId}|${target}`]) return target;
+    }
+  }
   return '';
 }
 

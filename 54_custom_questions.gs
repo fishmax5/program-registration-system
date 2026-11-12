@@ -410,7 +410,10 @@ function formContextFromGroup(group, formId) {
     sessions,
     locations: group.locations || distinctLocations(sessions.map(s => s.location)),
     titles: [group.cleanTitle].filter(Boolean),
-    showLocation: !!group.isShared,
+    // The sheet side's rule, not just the group's tag — see
+    // formShowsLocationForGroup() (09). Appointment time labels (52) are built
+    // from this and matched back through buildRegistryIndex() (27).
+    showLocation: formShowsLocationForGroup(formId, group),
     showTitle: false,
     isClub: !!group.isClub,
     isFixed: !!group.isFixed,
