@@ -91,7 +91,11 @@
  * lists instead, which is one round trip on open and exactly what a workbook
  * with no stored index has always done.
  */
-const QUICK_MARK_INLINE_INDEX_MAX_CHARS = 400000;
+// Measured on the literal, which the page now carries ONCE (it carried it twice
+// at 400000, so the document could reach ~800K before this refused). 600000
+// keeps the document below what the old ceiling already allowed, and lets a
+// 420K index (Nov 2026) travel inside the dialog instead of being fetched.
+const QUICK_MARK_INLINE_INDEX_MAX_CHARS = 600000;
 
 function showQuickMarkDialog() {
   // isDeskWorkBlocked(), not isBootstrapActive(): a forms sweep is no reason to
@@ -523,7 +527,11 @@ function buildQuickMarkHtml(preloadedIndex) {
   // shipped inside this page — see showQuickMarkDialog(). Null only on a
   // workbook that has never built its lists, and then the fetch below fills it
   // in exactly as it used to.
-  var INDEX = ${inlineIndex} ? JSON.parse(${inlineIndex}) : null;
+  // The literal is written ONCE. It used to be written twice (a truthiness
+  // test, then the parse), which doubled the document: a 420K index shipped as
+  // 840K and, being over the ceiling, was never inlined at all.
+  var INDEX_JSON = ${inlineIndex};
+  var INDEX = INDEX_JSON ? JSON.parse(INDEX_JSON) : null;
 
   function openVolunteers() {
     google.script.run.showVolunteerHoursDialog();

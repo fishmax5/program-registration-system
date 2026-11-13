@@ -43,7 +43,7 @@ function ok(n,c){ if(c) console.log('ok   '+n); else {fail++;console.log('FAIL '
 const withIndex = sandbox.buildQuickMarkHtml(index);
 const without  = sandbox.buildQuickMarkHtml(null);
 
-ok('an index-less dialog still says INDEX = null', /var INDEX = null \? JSON\.parse\(null\) : null;/.test(without));
+ok('an index-less dialog still says INDEX = null', /var INDEX_JSON = null;\s*var INDEX = INDEX_JSON \? JSON\.parse\(INDEX_JSON\) : null;/.test(without));
 ok('a preloaded dialog carries the data inline', withIndex.indexOf('Chair Yoga') !== -1);
 
 // The </script> in the hostile name must not appear raw anywhere, or the page
@@ -54,8 +54,9 @@ const closes = body.split('</script>').length - 1;
 ok('the page has exactly one closing script tag', closes === 1);
 
 // And the literal must actually parse back to the same object.
-const m = /var INDEX = ("(?:[^"\\]|\\.)*") \? JSON\.parse/.exec(withIndex);
+const m = /var INDEX_JSON = ("(?:[^"\\]|\\.)*");/.exec(withIndex);
 ok('the inlined value is a single string literal', !!m);
+ok('and it is written into the page exactly once', withIndex.split(m ? m[1] : '\u0000').length - 1 === 1);
 if (m) {
   const parsed = JSON.parse(JSON.parse(m[1]));
   ok('it round-trips to the same index', JSON.stringify(parsed) === JSON.stringify(index));
