@@ -109,14 +109,27 @@
 //             deskMonthHorizonKey, the same horizon the door registers into).
 //   club      a standing place: a Club_Members row, which catches up every
 //             future session by itself (applyClubRosterCatchup). Never on an
-//             appointment program, which is why those are not offered at all —
-//             an appointment is a chair at a time, and a list has no times.
+//             appointment program: an appointment is a chair at a time and does
+//             not repeat, so there each person carries ONE date and ONE time
+//             (see "APPOINTMENT PROGRAMS" below).
 //
 // AND WHETHER THEY WERE THERE. A list is as often handed over AFTER the class
 // as before it — the sign-in sheet off the door, typed up at four o'clock, or
 // the leader's email saying "these eight came today" — so the review carries
 // an ATTENDED tick beside the rest: one in the header that sets every row at
 // once, and one per row that may disagree with it.
+//
+// APPOINTMENT PROGRAMS (Personalized Assistance — computer tech support) are
+// offered too. A list for one carries a TIME per person: a Time column mapped
+// at step 4 ("10:30 AM", "2pm", "14:15" — an ambiguous "10:30" is matched to
+// whichever reading the session actually has a free slot at) and a per-row
+// date + time dropdown in the review, drawn from the same free slots Quick
+// Mark's own time box offers (freeAppointmentTimesForChoice). A row with no
+// usable time is UNTICKED and says so, never guessed. Each person is one date
+// and one time — no standing place, no "every date". The write is still Quick
+// Mark's Register with `appointmentTime`, so a slot somebody took in between
+// is refused by the desk's own check (appointmentSlotTaken), not by a second
+// copy of it here.
 //
 // ATTENDANCE IS A FACT ABOUT A DAY, and that is the whole of the rule. A
 // person put on eight Tuesdays has not attended seven of them, and a tick
@@ -240,7 +253,7 @@ function bulkActionNeedsExistingRow(action) {
 }
 
 /** What a column can be. '' is "ignore this column". */
-const BULK_REGISTRANT_COLUMN_FIELDS = ['name', 'first', 'last', 'phone', 'email', ''];
+const BULK_REGISTRANT_COLUMN_FIELDS = ['name', 'first', 'last', 'phone', 'email', 'time', ''];
 
 /** Column headings the paste recognizes, lower-cased, → field. */
 const BULK_REGISTRANT_HEADER_FIELDS = {
@@ -249,7 +262,11 @@ const BULK_REGISTRANT_HEADER_FIELDS = {
   'last': 'last', 'last name': 'last', 'last_name': 'last', 'lastname': 'last', 'surname': 'last',
   'phone': 'phone', 'telephone': 'phone', 'phone number': 'phone', 'cell': 'phone', 'mobile': 'phone',
   'tel': 'phone',
-  'email': 'email', 'e-mail': 'email', 'email address': 'email'
+  'email': 'email', 'e-mail': 'email', 'email address': 'email',
+  // An appointment program's booked time (see bulkTimeCandidates_). Only read
+  // when the chosen program is booked by appointment; ignored otherwise.
+  'time': 'time', 'appointment': 'time', 'appointment time': 'time', 'appt': 'time',
+  'appt time': 'time', 'appt.': 'time', 'slot': 'time'
 };
 
 const BULK_REGISTRANT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -287,13 +304,14 @@ function guessBulkRegistrantFields_(records, columns) {
   const sample = records.slice(0, 50);
   const shapes = [];
   for (let i = 0; i < columns; i++) {
-    const s = { filled: 0, email: 0, phone: 0, text: 0, oneWord: 0 };
+    const s = { filled: 0, email: 0, phone: 0, time: 0, text: 0, oneWord: 0 };
     sample.forEach(r => {
       const v = String(r[i] || '');
       if (!v) return;
       s.filled++;
       if (BULK_REGISTRANT_EMAIL_RE.test(v)) s.email++;
       else if (bulkLooksLikePhone_(v)) s.phone++;
+      else if (bulkLooksLikeTime_(v)) s.time++;
       else {
         s.text++;
         if (!/[\s,]/.test(v)) s.oneWord++;
@@ -304,10 +322,12 @@ function guessBulkRegistrantFields_(records, columns) {
   const fields = new Array(columns).fill('');
   let sawEmail = false;
   let sawPhone = false;
+  let sawTime = false;
   shapes.forEach((s, i) => {
     if (!s.filled) return;
     if (!sawEmail && s.email * 2 >= s.filled) { fields[i] = 'email'; sawEmail = true; return; }
-    if (!sawPhone && s.phone * 2 >= s.filled) { fields[i] = 'phone'; sawPhone = true; }
+    if (!sawPhone && s.phone * 2 >= s.filled) { fields[i] = 'phone'; sawPhone = true; return; }
+    if (!sawTime && s.time * 2 >= s.filled) { fields[i] = 'time'; sawTime = true; }
   });
   const textCols = [];
   shapes.forEach((s, i) => { if (!fields[i] && s.filled && s.text * 2 >= s.filled) textCols.push(i); });
@@ -327,6 +347,47 @@ function bulkLooksLikePhone_(value) {
 }
 
 /**
+ * A typed appointment time, as the minutes-of-day it could mean: "10:30 AM" →
+ * [630], "2pm" → [840], "14:15" → [855], and an AMBIGUOUS "10:30" or "3" →
+ * both readings ([630, 1350] / [180, 900]), because the list is matched against
+ * the session's own free slots and a daytime session has only one of them.
+ * Pure. [] for anything that is not a time. Digits alone are only a time with a
+ * colon, dot or am/pm beside them — a bare "30" is a quantity, not 12:30.
+ */
+function bulkTimeCandidates_(value) {
+  const text = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  if (!text) return [];
+  if (text === 'noon') return [720];
+  if (text === 'midnight') return [0];
+  const m = text.match(/^(\d{1,2})(?:[:.h]?(\d{2}))?\s*([ap])?\.?\s*(?:m\.?)?$/);
+  if (!m) return [];
+  const hasMark = /[:.h]/.test(text) || !!m[3];
+  if (!hasMark && !/^\d{3,4}$/.test(text)) return [];
+  let hour = Number(m[1]);
+  let min = Number(m[2] || 0);
+  if (/^\d{3,4}$/.test(text)) { hour = Math.floor(Number(text) / 100); min = Number(text) % 100; }
+  if (min > 59 || hour > 23) return [];
+  if (m[3]) {
+    if (hour < 1 || hour > 12) return [];
+    return [(hour % 12) * 60 + (m[3] === 'p' ? 720 : 0) + min];
+  }
+  if (hour === 0 || hour >= 13) return [hour * 60 + min];
+  // 1–12 with no marker: either half of the day.
+  return [(hour % 12) * 60 + min, (hour % 12) * 60 + 720 + min];
+}
+
+/** True when a cell reads as a clock time (see bulkTimeCandidates_). */
+function bulkLooksLikeTime_(value) {
+  return bulkTimeCandidates_(value).length > 0;
+}
+
+/** "10:30 AM" (a slot's start label) → minutes since midnight, or -1. */
+function bulkSlotMinutes_(startLabel) {
+  const c = bulkTimeCandidates_(startLabel);
+  return c.length === 1 ? c[0] : -1;
+}
+
+/**
  * Rows as people, through the mapping the person chose:
  * [{ name, phone, email, line }] where `line` is the row's number in the list
  * as they see it (the header, if any, is line 1). Name fields mapped twice are
@@ -336,12 +397,12 @@ function peopleFromBulkRecords(records, fields, hasHeader) {
   const body = hasHeader ? (records || []).slice(1) : (records || []);
   const people = [];
   body.forEach((record, i) => {
-    const p = { name: '', first: '', last: '', phone: '', email: '' };
+    const p = { name: '', first: '', last: '', phone: '', email: '', time: '' };
     (fields || []).forEach((field, c) => {
       if (!field || BULK_REGISTRANT_COLUMN_FIELDS.indexOf(field) === -1) return;
       const value = String((record && record[c]) || '').trim();
       if (!value) return;
-      if (field === 'phone' || field === 'email') { p[field] = p[field] || value; return; }
+      if (field === 'phone' || field === 'email' || field === 'time') { p[field] = p[field] || value; return; }
       p[field] = p[field] ? `${p[field]} ${value}` : value;
     });
     // "Smith, Jane" in a single cell is a name, read the way the roll reads it.
@@ -349,7 +410,12 @@ function peopleFromBulkRecords(records, fields, hasHeader) {
     const parts = splitPersonName(name);
     const full = composeMemberName(parts.first, parts.last) || name;
     if (!String(full || '').trim()) return;
-    people.push({ name: full, phone: p.phone, email: p.email, line: i + 1 + (hasHeader ? 1 : 0) });
+    const person = { name: full, phone: p.phone, email: p.email, line: i + 1 + (hasHeader ? 1 : 0) };
+    // Only when a Time column was mapped and filled, so a list for an ordinary
+    // program reads back exactly as it always did. `timeMins` is what the
+    // dialog matches against the session's free slots; `time` is what was typed.
+    if (p.time) { person.time = p.time; person.timeMins = bulkTimeCandidates_(p.time); }
+    people.push(person);
   });
   return people;
 }
@@ -597,23 +663,51 @@ function bulkSurnameKey_(name) {
 /**
  * Every program the list can be pasted against: one entry per building ×
  * title, with its upcoming dated sessions through the end of next month.
- * Appointment programs and lunch-only rows are left out (see the banner).
+ * Lunch-only rows are left out. Appointment programs ARE offered, with their free
+ * times per date (see groupBulkRegistrantPrograms_).
  */
 function listBulkRegistrantPrograms() {
-  // Session table only. This list keeps dated sessions that are neither lunch
-  // nor appointment, and those come from the session table alone — reading the
-  // whole Registrants tab (and two more tabs) to build it made the dialog's
-  // program box take far longer than anything else on the page.
-  return groupBulkRegistrantPrograms_(collectKnownProgramChoices(null, [], { sessionsOnly: true }));
+  // Session table only. This list keeps dated sessions, and those come from the
+  // session table alone — reading the whole Registrants tab (and two more tabs)
+  // to build it made the dialog's program box take far longer than anything
+  // else on the page.
+  const choices = collectKnownProgramChoices(null, [], { sessionsOnly: true });
+  // The ONE exception: an appointment program needs to know which of its times
+  // are already taken, and that is a fact about the Registrants tab. Read only
+  // when there is an appointment session in the window to ask about, so a
+  // workbook with no such program pays nothing for them being offered.
+  let booked = null;
+  try {
+    const todayKey = formatDateKey(new Date());
+    const horizonKey = deskMonthHorizonKey(new Date());
+    const wanted = choices.some(c => c.appointment && c.dateKey && c.dateKey >= todayKey && c.dateKey <= horizonKey);
+    if (wanted) {
+      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+      booked = readBookedAppointmentTimes(sheet ? getSectionedRowValues(sheet, HEADERS.All_Registrants, 'Event_ID') : []);
+    }
+  } catch (err) {
+    log(`ℹ️ Bulk registrants could not read the booked appointment times (${err}) — every slot will show as free; the write still refuses a taken one.`);
+  }
+  return groupBulkRegistrantPrograms_(choices, booked);
 }
 
-/** Pure half of listBulkRegistrantPrograms(), so the grouping is testable. */
-function groupBulkRegistrantPrograms_(choices) {
+/**
+ * Pure half of listBulkRegistrantPrograms(), so the grouping is testable.
+ *
+ * AN APPOINTMENT PROGRAM IS OFFERED, with `appointment: true` and, on each
+ * session, `times` — the free slots as [{ value: '10:30 AM', label:
+ * '10:30 AM – 11:00 AM', min: 630 }] from the very function Quick Mark's time
+ * dropdown uses (freeAppointmentTimesForChoice), so the desk and this dialog
+ * are never offered different chairs. A list for such a program carries a TIME
+ * per person (see registerOneBulkPerson_); what it never carries is a standing
+ * place or "every date", because a chair at a time does not repeat.
+ */
+function groupBulkRegistrantPrograms_(choices, bookedTimes) {
   const todayKey = formatDateKey(new Date());
   const horizonKey = deskMonthHorizonKey(new Date());
   const byKey = {};
   (choices || []).forEach(choice => {
-    if (!choice.dateKey || choice.lunchOnly || choice.appointment) return;
+    if (!choice.dateKey || choice.lunchOnly) return;
     if (choice.dateKey < todayKey || choice.dateKey > horizonKey) return;
     const key = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.title}`;
     if (!byKey[key]) {
@@ -623,17 +717,29 @@ function groupBulkRegistrantPrograms_(choices) {
       // the rule has to be the one the write will apply.
       byKey[key] = { key, title: choice.title, location: choice.location, todayKey, sessions: [] };
     }
+    if (choice.appointment) byKey[key].appointment = true;
     if (byKey[key].sessions.some(s => s.value === choice.label)) return;
-    byKey[key].sessions.push({
+    const session = {
       value: choice.label,
       dateKey: choice.dateKey,
       dateLabel: formatDateLabel(parseDateKey(choice.dateKey))
-    });
+    };
+    if (choice.appointment) {
+      let times = [];
+      try {
+        times = freeAppointmentTimesForChoice(choice, bookedTimes || {})
+          .map(t => ({ value: t.value, label: t.label, min: bulkSlotMinutes_(t.value) }));
+      } catch (err) {
+        log(`ℹ️ Bulk registrants could not cut the appointment times for ${choice.label} (${err}).`);
+      }
+      session.times = times;
+    }
+    byKey[key].sessions.push(session);
   });
   return Object.keys(byKey).map(k => byKey[k])
     .map(p => {
       p.sessions.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
-      p.label = `${p.title} — ${p.location || 'no location'} (${p.sessions.length} upcoming)`;
+      p.label = `${p.title} — ${p.location || 'no location'} (${p.sessions.length} upcoming${p.appointment ? ', by appointment' : ''})`;
       return p;
     })
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -1161,7 +1267,13 @@ function startBulkRegistrants(args) {
       // One sentence, for the Admin_Notes stamp and the ledger entry every
       // status change leaves — "class cancelled", "term ended". Capped by
       // waitlistStamp()/cancellationStamp() where it lands.
-      reason: String(p.reason || '')
+      reason: String(p.reason || ''),
+      // An appointment program: the ONE date (dateKey) and slot start label
+      // ("10:30 AM") this person is booked at. Additive, absent on every
+      // ordinary row and on every plan written before it, so the plan key
+      // keeps its name.
+      apptDate: String(p.apptDate || ''),
+      appointmentTime: String(p.appointmentTime || '')
     }));
   if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to do.' };
   if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
@@ -1273,9 +1385,18 @@ function bulkRegistrantsStatus() {
  */
 function registerOneBulkPerson_(program, picked, person) {
   const name = String(person.name || '').trim();
-  const recurrence = person.recurrence;
-  const sessions = bulkRegistrantSessionsFor(program, recurrence, picked);
+  const byAppointment = !!(program && program.appointment);
+  const appointmentTime = byAppointment ? String(person.appointmentTime || '').trim() : '';
+  // An appointment is one chair on one date: never a standing place, never
+  // "every date", whatever the row said.
+  const recurrence = byAppointment ? 'picked' : person.recurrence;
+  const sessions = byAppointment
+    ? bulkRegistrantSessionsFor(program, 'picked', person.apptDate ? [person.apptDate] : [])
+    : bulkRegistrantSessionsFor(program, recurrence, picked);
   if (!sessions.length) return { line: `⚠️ ${name} — no dates left to put them on, so nothing was written.`, written: 0 };
+  if (byAppointment && !appointmentTime) {
+    return { line: `⚠️ ${name} — ${program.title} is booked by appointment and no time was chosen, so nothing was written.`, written: 0 };
+  }
 
   // WHICH OF THOSE DATES THE ATTENDED TICK REACHES — today and anything
   // earlier, and nothing else (bulkRegistrantAttendedDateKeys). Resolved HERE,
@@ -1313,6 +1434,9 @@ function registerOneBulkPerson_(program, picked, person) {
         standing: recurrence === 'club',
         standingLunch: recurrence === 'club' && !!person.lunch,
         signup: !!person.lunch && recurrence !== 'club',
+        // The booked slot (start label), which Quick Mark requires on an
+        // appointment session and checks against the slots already taken.
+        appointmentTime,
         confirmWalkIn: true,
         phone: String(person.phone || ''),
         email: String(person.email || '')
@@ -1350,6 +1474,8 @@ function registerOneBulkPerson_(program, picked, person) {
     line = outcome.done || outcome.already
       ? `🔁 ${name} — standing place on ${program.title}; every future date will follow.${attendedNote}`
       : `⚠️ ${name} — no standing place was made. ${outcome.refused}`;
+  } else if (byAppointment && outcome.done) {
+    line = `✅ ${name} — ${sessions[0].dateLabel || sessions[0].dateKey} at ${appointmentTime}.${attendedNote}`;
   } else if (outcome.done) {
     line = `✅ ${name} — ${outcome.done} of ${sessions.length} date(s).${alreadyNote}${attendedNote}` +
       (outcome.refused ? ` Not the rest: ${outcome.refused}` : '');
@@ -1762,6 +1888,12 @@ function bulkFollowUpEntryFor_(program, picked, person) {
   const action = BULK_FOLLOWUP_CHANGE_PHRASES[person.action] ? person.action : 'register';
   let dates = '';
   if (action === 'contact') dates = '';
+  else if (program && program.appointment && (action === 'register' || action === 'attended') && person.apptDate) {
+    // The date AND the time: an appointment email that names only the day
+    // leaves the one fact the person needs out.
+    dates = bulkRegistrantSessionsFor(program, 'picked', [person.apptDate])
+      .map(s => `${s.dateLabel || s.dateKey}${person.appointmentTime ? ' at ' + person.appointmentTime : ''}`).join(', ');
+  }
   else if (person.recurrence === 'club') dates = 'every upcoming date';
   else dates = bulkRegistrantSessionsFor(program, person.recurrence, picked)
     .map(s => s.dateLabel || s.dateKey).join(', ');
@@ -2014,6 +2146,9 @@ function buildBulkRegistrantsHtml() {
   written on dates that are <b>today or earlier</b> — a future date is registered and left unmarked, and a
   row with no such date has its box greyed out.</span>
 </div>
+<p class="hint" id="apptHint" style="display:none;margin-top:6px"><b>Booked by appointment.</b> Each person gets
+<b>one date and one time</b>, chosen on their row in the review (free times only — the same ones Quick Mark offers).
+A row with no time is unticked until you pick one. Standing places and “every date” do not apply.</p>
 <div id="dates" style="margin-top:6px"></div>
 <h3>3. Who</h3>
 <p class="hint"><b>Everybody already on this program</b> is the quick way for anything but Register — their names
@@ -2032,7 +2167,8 @@ straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>. An Ex
 <div id="mapping" style="display:none">
 <h3>4. Which column is which</h3>
 <p class="hint">Check each column's heading — it is a guess. Set a column to <b>ignore</b> to leave it out;
-two columns set to the same name part are joined.</p>
+two columns set to the same name part are joined. <b>Appointment time</b> is only used for a program booked by
+appointment (e.g. computer tech support): "10:30 AM", "2pm" or "14:15" is matched to a free time on the date chosen.</p>
 <label><input type="checkbox" id="hasHeader"> The first row is headings, not a person</label>
 <div id="columns" style="margin-top:6px"></div>
 <div style="margin-top:8px"><button id="check" onclick="check()">Check against the member roll</button></div>
@@ -2119,7 +2255,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // until it does: nothing may be ticked attended on a day nobody has stated.
   var TODAY = '';
   var RECURRENCES = [['next','Next date'],['picked','Ticked dates'],['all','Every date'],['club','Standing']];
-  var FIELDS = [['name','Name'],['first','First name'],['last','Last name'],['phone','Phone'],['email','Email'],['','— ignore —']];
+  var FIELDS = [['name','Name'],['first','First name'],['last','Last name'],['phone','Phone'],['email','Email'],['time','Appointment time'],['','— ignore —']];
 
   function el(tag, text, cls) {
     var e = document.createElement(tag);
@@ -2166,6 +2302,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // ---- 1. Program and dates.
   $('program').addEventListener('change', function () {
     drawDates();
+    applyAction();
     // Who is already registered depends on the program, so a list already
     // checked is checked again against the new one.
     if (PEOPLE.length) check();
@@ -2201,7 +2338,17 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     // thing any of the other five actions can be about. Rather than leave a
     // dead end in the dropdown, the option goes away and anything sitting on
     // it moves to every date — the widest honest reading of what was chosen.
-    var clubOk = a === 'register';
+    var pr = program();
+    var appt = !!(pr && pr.appointment);
+    // A chair at a time does not repeat, so an appointment program has no
+    // standing place either.
+    var clubOk = a === 'register' && !appt;
+    // Dates are per row for a registration on an appointment program, so the
+    // list-wide date controls are put away rather than left to disagree.
+    var rowDates = appt && isRegisterish(a);
+    $('recurrenceRow').style.display = rowDates ? 'none' : '';
+    $('dates').style.display = rowDates ? 'none' : '';
+    $('apptHint').style.display = rowDates ? '' : 'none';
     Array.prototype.forEach.call(document.querySelectorAll('option[value=club]'), function (o) {
       o.disabled = !clubOk;
       o.hidden = !clubOk;
@@ -2439,6 +2586,18 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       rec.value = defaultRec;
       rec.addEventListener('change', evaluate);
       tdRec.appendChild(rec); tr.appendChild(tdRec); r.rec = rec;
+      // APPOINTMENT PROGRAMS: this person's own date and time, which replace the
+      // row's "which dates" for a registration. Drawn for every row and shown
+      // only while it applies (see evaluate()).
+      var apptBox = el('div'); apptBox.style.display = 'none';
+      var dSel = document.createElement('select'); var tSel = document.createElement('select');
+      tSel.style.marginTop = '3px';
+      apptBox.appendChild(dSel); apptBox.appendChild(document.createElement('br')); apptBox.appendChild(tSel);
+      tdRec.appendChild(apptBox);
+      r.apptBox = apptBox; r.dSel = dSel; r.tSel = tSel;
+      fillApptDates(r);
+      dSel.addEventListener('change', function () { fillApptTimes(r, ''); evaluate(); });
+      tSel.addEventListener('change', evaluate);
       // THE ROW'S OWN ANSWER, which may disagree with the header's. attWanted
       // is what the person asked for and the box is what can actually happen:
       // they part company on a row whose dates are all still to come, and come
@@ -2454,6 +2613,55 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     box.appendChild(table);
     $('reviewBox').style.display = '';
     applyAction();
+  }
+
+  // ---- Appointment programs: a date and a free time per person.
+  function isAppt() { var p = program(); return !!(p && p.appointment); }
+  function sessionByKey(key) {
+    var p = program();
+    if (!p) return null;
+    for (var i = 0; i < p.sessions.length; i++) if (p.sessions[i].dateKey === key) return p.sessions[i];
+    return null;
+  }
+  // The typed time ("2pm", "10:30") as the slot of THIS session it can mean —
+  // an ambiguous one matches whichever reading the session has a free slot at.
+  function slotForTyped(session, person) {
+    var mins = (person && person.timeMins) || [];
+    var times = (session && session.times) || [];
+    for (var m = 0; m < mins.length; m++) for (var i = 0; i < times.length; i++) if (times[i].min === mins[m]) return times[i];
+    return null;
+  }
+  function fillApptDates(r) {
+    r.dSel.textContent = '';
+    var p = program();
+    if (!p || !p.appointment) return;
+    var pick = '';
+    p.sessions.forEach(function (s) {
+      var n = (s.times || []).length;
+      var o = el('option', s.dateLabel + (n ? '' : ' — fully booked')); o.value = s.dateKey; r.dSel.appendChild(o);
+      // Prefer the first date that actually has the typed time free, else the
+      // first date with anything free at all.
+      if (!pick && n && (!(r.person.timeMins && r.person.timeMins.length) || slotForTyped(s, r.person))) pick = s.dateKey;
+    });
+    if (!pick) for (var i = 0; i < p.sessions.length; i++) if ((p.sessions[i].times || []).length) { pick = p.sessions[i].dateKey; break; }
+    r.dSel.value = pick || (p.sessions[0] && p.sessions[0].dateKey) || '';
+    fillApptTimes(r, r.person.time || '');
+  }
+  function fillApptTimes(r, typed) {
+    var keep = r.tSel.value;
+    r.tSel.textContent = '';
+    var s = sessionByKey(r.dSel.value);
+    var blank = el('option', '— choose a time —'); blank.value = ''; r.tSel.appendChild(blank);
+    ((s && s.times) || []).forEach(function (t) { var o = el('option', t.label); o.value = t.value; r.tSel.appendChild(o); });
+    var hit = typed ? slotForTyped(s, r.person) : null;
+    var want = hit ? hit.value : keep;
+    var offered = ((s && s.times) || []).some(function (t) { return t.value === want; });
+    r.tSel.value = offered ? want : '';
+  }
+  function apptRow(r) { return isAppt() && isRegisterish(r.act.value); }
+  function rowDatesOf(r) {
+    if (apptRow(r)) { var s = sessionByKey(r.dSel.value); return s ? [s] : []; }
+    return datesFor(r.rec.value);
   }
 
   function pickedKeys() {
@@ -2474,8 +2682,8 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // The same rule the server applies (bulkRegistrantAttendedDateKeys), said
   // once more here so the screen can grey out a box that would do nothing.
   // The server is still the one that decides, on the day it writes.
-  function attendableDates(rec) {
-    return datesFor(rec).filter(function (d) { return d.dateKey <= TODAY; });
+  function attendableDates(rec, dates) {
+    return (dates || datesFor(rec)).filter(function (d) { return d.dateKey <= TODAY; });
   }
 
   // WHAT THE CHOSEN ACTION CAN ACTUALLY DO FOR THIS ROW, as { note,
@@ -2492,10 +2700,10 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // Unticking is still a DEFAULT and never a refusal: the writer's own checks
   // are underneath every one of these, and a tick put back writes nothing
   // twice and cancels nothing that is not there.
-  function judge(opt, rec, act, person) {
+  function judge(opt, rec, act, person, datesOverride) {
     var on = opt.alreadyOn || {};
     var off = opt.cancelledOn || {};
-    var dates = datesFor(rec);
+    var dates = datesOverride || datesFor(rec);
     if (!dates.length && act !== 'contact') return { note: 'No dates chosen.', nothingToDo: false };
     var live = dates.filter(function (d) { return on[d.dateKey]; });
     var activeOnly = dates.filter(function (d) { return on[d.dateKey] === 'Active'; });
@@ -2521,7 +2729,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       return { note: '', nothingToDo: false };
     }
     if (act === 'attended') {
-      var marks = attendableDates(rec);
+      var marks = attendableDates(rec, dates);
       if (!marks.length) {
         return { nothingToDo: false, note: 'No date today or earlier is chosen, so nothing will be marked ' +
           'attended — they will be registered for the ' + dates.length + ' date(s) chosen.' };
@@ -2574,14 +2782,37 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // ticked it by hand; one that stops being one is ticked again.
   function evaluate() {
     var seen = {};
+    var seenSlot = {};
     ROWS.forEach(function (r) {
       var opt = chosen(r);
       var rec = r.rec.value;
       var act = r.act.value;
-      var verdict = judge(opt, rec, act, r.person);
+      var appt = apptRow(r);
+      r.apptBox.style.display = appt ? '' : 'none';
+      r.rec.style.display = appt ? 'none' : '';
+      var dates = rowDatesOf(r);
+      var verdict = judge(opt, appt ? 'picked' : rec, act, r.person, appt ? dates : null);
       var note = verdict.note;
       var already = verdict.nothingToDo;
       var key = opt.nameKey || '';
+      // A chair at a time: no time chosen is not a registration, and two rows
+      // on the same chair cannot both have it. Both say so rather than guess.
+      if (appt && !already) {
+        var slot = r.dSel.value + '|' + r.tSel.value;
+        if (!r.tSel.value) {
+          already = true;
+          var typedNote = r.person.time && !slotForTyped(sessionByKey(r.dSel.value), r.person)
+            ? '“' + r.person.time + '” is not a free time on that date — ' : '';
+          note = typedNote + 'Choose a time.';
+        } else if (seenSlot[slot]) {
+          already = true;
+          note = 'Same date and time as row ' + seenSlot[slot] + ' — one person per chair.';
+        } else if (r.on.checked || r.auto) seenSlot[slot] = r.person.line;
+        if (!already) {
+          var ds = sessionByKey(r.dSel.value);
+          note = (ds ? ds.dateLabel : r.dSel.value) + ' at ' + r.tSel.value + '. ' + note;
+        }
+      }
       if (!already && key && seen[key]) {
         already = true;
         note = 'Listed twice — same person as row ' + seen[key] + '.';
@@ -2593,11 +2824,11 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       // Attendance is a fact about a day: a row whose chosen dates are all
       // still to come cannot be marked, so the box is greyed rather than
       // left ticked over a promise the write will not keep.
-      var canAttend = attendRow && attendableDates(rec).length > 0;
+      var canAttend = attendRow && attendableDates(rec, dates).length > 0;
       r.att.disabled = !canAttend;
       r.att.checked = canAttend && !!r.attWanted;
       r.att.title = canAttend
-        ? 'Marked attended on ' + attendableDates(rec).map(function (d) { return d.dateLabel; }).join(', ')
+        ? 'Marked attended on ' + attendableDates(rec, dates).map(function (d) { return d.dateLabel; }).join(', ')
         : (attendRow
           ? 'No date today or earlier is chosen for this row, so there is no day to mark.'
           : 'Only a plain Register offers this — the Attended action already marks the day.');
@@ -2637,16 +2868,24 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     var reason = $('reason').value;
     var people = [];
     var byAction = {};
+    var missingTime = [];
     ROWS.forEach(function (r) {
       if (!r.on.checked) return;
       var opt = chosen(r);
       var act = r.act.value;
       byAction[act] = (byAction[act] || 0) + 1;
+      var appt = apptRow(r);
+      if (appt && !r.tSel.value) missingTime.push(r.person.name);
       people.push({ name: opt.name, phone: r.person.phone, email: r.person.email,
-        recurrence: r.rec.value, action: act, reason: reason,
+        recurrence: appt ? 'picked' : r.rec.value, action: act, reason: reason,
+        apptDate: appt ? r.dSel.value : '', appointmentTime: appt ? r.tSel.value : '',
         lunch: lunch && isRegisterish(act),
         attended: act === 'register' && r.att.checked && !r.att.disabled });
     });
+    if (missingTime.length) {
+      say('Choose a time for: ' + missingTime.join(', ') + ' — this program is booked by appointment.', 'err');
+      return;
+    }
     // WHAT IS ABOUT TO HAPPEN, COUNTED BY ACTION. "Apply to 40 people" says
     // nothing about which forty seats are about to go back, and a cancellation
     // is the one action here nobody can undo by pressing the button again.

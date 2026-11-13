@@ -18,6 +18,7 @@ const sandbox = {
     formatDate: (date, tz, pattern) => {
       const d = new RealDate(date);
       if (pattern === 'yyyy-MM-dd') return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      if (pattern === 'h:mm a') return `${d.getHours() % 12 || 12}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
       return `${d.getMonth() + 1}/${d.getDate()}`;
     },
     computeDigest: () => [1], DigestAlgorithm: { MD5: 'MD5' }, sleep: () => {},
@@ -64,7 +65,7 @@ assert.strictEqual(out[2].suggested, 'Mark Lee', 'a similar name is offered, nev
 assert.deepStrictEqual(out[2].candidates, ['Mary Lee']);
 assert.strictEqual(out[4].suggested, 'Jane Smith', 'phone matched on digits');
 
-// 3. Grouping: two buildings stay two programs; past, lunch and appointment rows are left out.
+// 3. Grouping: two buildings stay two programs; past and lunch rows are left out; an appointment program is offered.
 const programs = JSON.parse(run(`JSON.stringify(groupBulkRegistrantPrograms_([
   { label: 'Yoga · 9/15', title: 'Yoga', dateKey: '2026-09-15', location: 'A' },
   { label: 'Yoga · 9/22', title: 'Yoga', dateKey: '2026-09-22', location: 'A' },
@@ -74,11 +75,14 @@ const programs = JSON.parse(run(`JSON.stringify(groupBulkRegistrantPrograms_([
   { label: 'Help · 9/15', title: 'Help', dateKey: '2026-09-15', location: 'A', appointment: {} },
   { label: 'Yoga · 12/1', title: 'Yoga', dateKey: '2026-12-01', location: 'A' }
 ]))`));
-assert.strictEqual(programs.length, 2);
-assert.deepStrictEqual(programs[0].sessions.map(s => s.dateKey), ['2026-09-15', '2026-09-22']);
+assert.strictEqual(programs.length, 3);
+const yogaA = programs.filter(p => p.title === 'Yoga' && p.location === 'A')[0];
+assert.deepStrictEqual(yogaA.sessions.map(s => s.dateKey), ['2026-09-15', '2026-09-22']);
+assert.ok(!yogaA.appointment, 'an ordinary program is not by appointment');
+assert.ok(programs.filter(p => p.title === 'Help')[0].appointment, 'an appointment program is offered, flagged');
 
 // 4. Which dates.
-const p = JSON.stringify(programs[0]);
+const p = JSON.stringify(yogaA);
 const keys = rec => JSON.parse(run(`JSON.stringify(bulkRegistrantSessionsFor(${p}, '${rec}', ['2026-09-22', '2027-01-01']))`)).map(s => s.dateKey);
 assert.deepStrictEqual(keys('next'), ['2026-09-15']);
 assert.deepStrictEqual(keys('club'), ['2026-09-15']);
@@ -337,7 +341,7 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   }
   const body = new Node('body');
   ['setup', 'program', 'action', 'actionHint', 'reason', 'roster', 'recurrenceRow', 'recurrence',
-   'lunch', 'attended', 'dates', 'file', 'csv',
+   'lunch', 'attended', 'dates', 'apptHint', 'file', 'csv',
    'read', 'mapping', 'hasHeader', 'columns', 'check', 'reviewBox', 'review', 'commit', 'progress',
    'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status']
     .forEach(id => { const n = new Node('div'); n.id = id; body.appendChild(n); });
@@ -566,6 +570,96 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   assert.strictEqual(rows().length, 1);
   assert.strictEqual(String(rows()[0].person.name), 'Off The Tab');
   assert.strictEqual(vm.runInContext('FROM_ROSTER', page), true);
+
+  // (m) AN APPOINTMENT PROGRAM: each row is one date and one time, a typed time
+  //     is matched to a free slot, and a row with no usable time or the same
+  //     chair as an earlier row is unticked and says so.
+  vm.runInContext(`PROGRAMS.push({ key: 'A|Tech', title: 'Tech', location: 'A', label: 'Tech — A', appointment: true,
+    todayKey: '2026-09-09', sessions: [
+      { value: 'Tech · 9/15', dateKey: '2026-09-15', dateLabel: 'Sep 15', times: [
+        { value: '10:00 AM', label: '10:00 AM – 10:30 AM', min: 600 }, { value: '2:00 PM', label: '2:00 PM – 2:30 PM', min: 840 }] },
+      { value: 'Tech · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22', times: [
+        { value: '10:00 AM', label: '10:00 AM – 10:30 AM', min: 600 }] }] })`, page);
+  $('program').value = 'A|Tech';
+  $('action').value = 'register';
+  vm.runInContext('FROM_ROSTER = false', page); // a pasted list: every row starts ticked
+  vm.runInContext(`PEOPLE = [
+    { name: 'Typed Two', line: 1, match: 'new', phone: '', email: '', time: '2pm', timeMins: [840],
+      options: [{ name: 'Typed Two', label: 'Typed Two', nameKey: 'typed|two', alreadyOn: {}, standing: false }] },
+    { name: 'No Time', line: 2, match: 'new', phone: '', email: '',
+      options: [{ name: 'No Time', label: 'No Time', nameKey: 'no|time', alreadyOn: {}, standing: false }] },
+    { name: 'Bad Time', line: 3, match: 'new', phone: '', email: '', time: '3:30', timeMins: [210, 930],
+      options: [{ name: 'Bad Time', label: 'Bad Time', nameKey: 'bad|time', alreadyOn: {}, standing: false }] }
+  ]; drawReview();`, page);
+  $('program').fire('change');
+  const aNotes = () => Array.from(rows().map(r => String(r.note.textContent)));
+  assert.strictEqual(rows()[0].dSel.value, '2026-09-15', 'the date that has the typed time free');
+  assert.strictEqual(rows()[0].tSel.value, '2:00 PM', 'a typed 2pm is matched to the free 2:00 PM slot');
+  assert.strictEqual(rows()[0].on.checked, true);
+  assert.ok(/Sep 15 at 2:00 PM/.test(aNotes()[0]), aNotes()[0]);
+  assert.strictEqual(rows()[1].on.checked, false, 'no typed time: unticked until one is chosen');
+  assert.ok(/Choose a time/.test(aNotes()[1]), aNotes()[1]);
+  assert.strictEqual(rows()[2].on.checked, false, 'a typed time with no free slot is not guessed');
+  assert.ok(/3:30/.test(aNotes()[2]) && /Choose a time/.test(aNotes()[2]), aNotes()[2]);
+  assert.strictEqual($('recurrenceRow').style.display, 'none', 'list-wide dates are put away');
+
+  // Choosing 2:00 PM on Sep 15 for the second row is the same chair as row 1.
+  rows()[1].dSel.value = '2026-09-15'; rows()[1].dSel.fire('change');
+  rows()[1].tSel.value = '2:00 PM'; rows()[1].tSel.fire('change');
+  assert.ok(/one person per chair/.test(aNotes()[1]), aNotes()[1]);
+  // A different chair is fine, and what commit sends is the date and the time.
+  rows()[1].tSel.value = '10:00 AM'; rows()[1].tSel.fire('change');
+  assert.strictEqual(rows()[1].on.checked, true, 'a free, distinct chair ticks the row again');
+  started = null;
+  vm.runInContext('commit()', page);
+  assert.ok(started, 'the list was sent');
+  const apptSent = JSON.parse(JSON.stringify(started.people));
+  assert.deepStrictEqual(apptSent.map(p => [p.name, p.apptDate, p.appointmentTime, p.recurrence]),
+    [['Typed Two', '2026-09-15', '2:00 PM', 'picked'], ['No Time', '2026-09-15', '10:00 AM', 'picked']]);
 }
 console.log('bulk attended review: ok');
 console.log('bulk update actions: ok');
+
+
+// 5. APPOINTMENT PROGRAMS: times typed in a list, and the free slots per date.
+{
+  const cands = t => JSON.parse(run(`JSON.stringify(bulkTimeCandidates_(${JSON.stringify(t)}))`));
+  assert.deepStrictEqual(cands('10:30 AM'), [630]);
+  assert.deepStrictEqual(cands('2pm'), [840]);
+  assert.deepStrictEqual(cands('14:15'), [855]);
+  assert.deepStrictEqual(cands('12 pm'), [720]);
+  assert.deepStrictEqual(cands('12:30 am'), [30]);
+  assert.deepStrictEqual(cands('10:30'), [630, 1350], 'no am/pm: both readings, matched to the free slots later');
+  assert.deepStrictEqual(cands('noon'), [720]);
+  assert.deepStrictEqual(cands('30'), [], 'a bare number is not a time');
+  assert.deepStrictEqual(cands('610-555-0100'), []);
+  assert.deepStrictEqual(cands('13:75'), []);
+
+  // Header and shape both find a Time column; a phone is still a phone.
+  const hdr = JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('Name\\tAppt Time\\nJane Smith\\t10:30 AM'))`));
+  assert.deepStrictEqual(hdr.fields, ['name', 'time']);
+  const shape = JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('Jane Smith\\t10:30 AM\\t610-555-0100\\nBob Kaplan\\t2:00 PM\\t610-555-0101'))`));
+  assert.deepStrictEqual(shape.fields, ['name', 'time', 'phone']);
+
+  // The people carry the typed time and its candidates only when a Time column is mapped.
+  const withTime = JSON.parse(run(`JSON.stringify(peopleFromBulkRecords([['Jane Smith','10:30 AM'],['Bob Kaplan','']], ['name','time'], false))`));
+  assert.strictEqual(withTime[0].time, '10:30 AM');
+  assert.deepStrictEqual(withTime[0].timeMins, [630]);
+  assert.strictEqual(withTime[1].time, undefined, 'a blank time adds nothing');
+  const without = JSON.parse(run(`JSON.stringify(peopleFromBulkRecords([['Jane Smith']], ['name'], false))`));
+  assert.deepStrictEqual(Object.keys(without[0]).sort(), ['email', 'line', 'name', 'phone'], 'an ordinary list reads exactly as before');
+
+  // Free slots per session: 10:00-12:00 in 30-minute slots, 10:30 already taken.
+  const appt = JSON.parse(run(`(() => {
+    const start = new Date(2026, 8, 15, 10, 0, 0), end = new Date(2026, 8, 15, 12, 0, 0);
+    const choice = { label: 'Tech · 9/15', title: 'Tech', dateKey: '2026-09-15', location: 'A',
+      appointment: { eventId: 'E1', start, end, slotMinutes: 30 } };
+    return JSON.stringify(groupBulkRegistrantPrograms_([choice], { E1: new Set(['10:30 AM']) }));
+  })()`));
+  assert.strictEqual(appt.length, 1);
+  assert.ok(appt[0].appointment);
+  const times = appt[0].sessions[0].times;
+  assert.deepStrictEqual(times.map(t => t.value), ['10:00 AM', '11:00 AM', '11:30 AM'], 'a booked slot is not offered');
+  assert.deepStrictEqual(times.map(t => t.min), [600, 660, 690]);
+  assert.ok(/by appointment/.test(appt[0].label));
+}
