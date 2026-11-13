@@ -263,12 +263,17 @@ function buildQuickMarkHtml(preloadedIndex) {
 </select>
 <div id="freshness"></div>
 
-<label class="field" for="session">2. Session (soonest first)</label>
-<select id="session" onchange="sessionChanged()" disabled>
+<label class="field" for="program">2. Program (A–Z)</label>
+<select id="program" onchange="programChanged()" disabled>
   <option value="">— choose a location first —</option>
 </select>
 
-<label class="field" for="name">3. Name</label>
+<label class="field" for="session">3. Date (soonest first)</label>
+<select id="session" onchange="sessionChanged()" disabled>
+  <option value="">— choose a program first —</option>
+</select>
+
+<label class="field" for="name">4. Name</label>
 <select id="name" onchange="nameChanged()" disabled>
   <option value="">— choose a session first —</option>
 </select>
@@ -282,7 +287,7 @@ function buildQuickMarkHtml(preloadedIndex) {
 <label class="tick" id="moveLabel" style="display:none">
   <input type="checkbox" id="moveTime" onchange="showAppointmentTimes(); refreshButton()"> 🕐 Move them to a different time
   <span class="note">— they rang to reschedule, or turned up for the wrong slot</span></label>
-<label class="field" for="apptTime" id="apptTimeLabel" style="display:none">4. Appointment time</label>
+<label class="field" for="apptTime" id="apptTimeLabel" style="display:none">5. Appointment time</label>
 <select id="apptTime" onchange="refreshButton()" style="display:none">
   <option value="">— choose a time —</option>
 </select>
@@ -506,6 +511,11 @@ function buildQuickMarkHtml(preloadedIndex) {
   var LOCATIONS = ${locations};
   var SEP = '${QUICK_MARK_SESSION_KEY_SEPARATOR}';
   var NAME_TIME_SEP = '${QUICK_MARK_NAME_TIME_SEPARATOR}';
+  // Between a title and its date in a session label, and between a lunch's name
+  // and its dish — used to show only the DATE in the date dropdown.
+  var LABEL_SEP = ${JSON.stringify(LOCATION_LABEL_SEPARATOR)};
+  var MEAL_SEP = ${JSON.stringify(MEAL_HINT_SEPARATOR)};
+  var STANDING_GROUP = ${JSON.stringify(STANDING_EVENT_CHOICE_GROUP)};
   var NEED_PRESETS = ${needPresets};
   var NEED_FREQUENCIES = ${needFrequencies};
   var NEED_WEEKDAYS = ${needWeekdays};
@@ -631,18 +641,23 @@ function buildQuickMarkHtml(preloadedIndex) {
     blank.value = '';
     blank.textContent = placeholder;
     select.appendChild(blank);
+    // Built off-document and attached once: the name list is the whole roll
+    // (thousands of options) and appending each to a live select is where the
+    // pause after picking a date went.
+    var frag = document.createDocumentFragment();
     var group = null;
     options.forEach(function (opt) {
       if (opt.group && (!group || group.label !== opt.group)) {
         group = document.createElement('optgroup');
         group.label = opt.group;
-        select.appendChild(group);
+        frag.appendChild(group);
       }
       var o = document.createElement('option');
       o.value = opt.value;
       o.textContent = opt.label;
-      (opt.group ? group : select).appendChild(o);
+      (opt.group ? group : frag).appendChild(o);
     });
+    select.appendChild(frag);
     select.disabled = false;
   }
 
@@ -702,8 +717,15 @@ function buildQuickMarkHtml(preloadedIndex) {
   // point of pressing it is to pick up somebody who registered five minutes
   // ago, and the stored copy is exactly what would not have them.
   function loadIndex(again) {
-    el('session').disabled = true;
-    el('name').disabled = true;
+    // A RELOAD LEAVES THE DROPDOWNS ALONE: the lists already here are still
+    // good enough to keep working from while a fresh copy is built (marks are
+    // checked against the live sheet anyway), and locking them for the length
+    // of a rebuild was most of the waiting after a change. Only a first load,
+    // with nothing to work from, disables them.
+    if (!again) {
+      el('session').disabled = true;
+      el('name').disabled = true;
+    }
     say(again ? 'Reloading lists…' : 'Loading the sessions…', 'busy');
     var call = google.script.run
       .withSuccessHandler(function (ix) {
@@ -739,30 +761,114 @@ function buildQuickMarkHtml(preloadedIndex) {
     // not a wasted click: loadIndex() calls back through here the moment they
     // arrive, and the choice is still sitting in the dropdown.
     if (!INDEX) {
+      el('program').innerHTML = '<option value="">— loading… —</option>';
+      el('program').disabled = true;
       el('session').innerHTML = '<option value="">— loading… —</option>';
       el('session').disabled = true;
       if (loc) say('Loading the sessions at ' + loc + '…', 'busy');
       return;
     }
     if (!loc) {
-      el('session').innerHTML = '<option value="">— choose a location first —</option>';
+      el('program').innerHTML = '<option value="">— choose a location first —</option>';
+      el('program').disabled = true;
+      el('session').innerHTML = '<option value="">— choose a program first —</option>';
       el('session').disabled = true;
       return;
     }
-    // THE CHOSEN SESSION SURVIVES A RELOAD, the same way the location does.
-    // This runs again every time the lists are re-fetched — the ↻ link, and
-    // now every change the panel makes — and a desk that has just moved one
+    // THE CHOSEN PROGRAM AND DATE SURVIVE A RELOAD, the same way the location
+    // does. This runs again every time the lists are re-fetched — the ↻ link,
+    // and now every change the panel makes — and a desk that has just moved one
     // person out of a queue of thirty should not have to find their session
     // again to mark the next one.
-    var keep = el('session').value;
-    var sessions = INDEX.sessions.filter(function (s) { return s.location === loc; });
-    fill(el('session'), sessions, sessions.length ? '— choose a session —' : '— no sessions found —');
-    if (keep && sessions.some(function (s) { return s.value === keep; })) {
-      el('session').value = keep;
-      sessionChanged();
+    var keepProgram = el('program').value;
+    var programs = programsAt(loc);
+    fill(el('program'), programs, programs.length ? '— choose a program —' : '— no programs found —');
+    if (keepProgram && programs.some(function (p) { return p.value === keepProgram; })) {
+      el('program').value = keepProgram;
+      programChanged();
       return;
     }
-    say(sessions.length + ' session(s) at ' + loc + '.', '');
+    el('session').innerHTML = '<option value="">— choose a program first —</option>';
+    el('session').disabled = true;
+    say(programs.length + ' program(s) at ' + loc + '.', '');
+  }
+
+  // --- program first, then date ----------------------------------------------
+  // A lunch is named per dish ("Lunch @ Narberth — Chx Parm"), which would make
+  // every lunch day its own program, so all of them are ONE program here and the
+  // dish moves into the date line instead.
+  function programKeyOf(s) { return isLunchTitle(s.title) ? '::lunch-only::' : String(s.title || ''); }
+  function programNameOf(s) { return isLunchTitle(s.title) ? '🥡 Lunch only (no program)' : s.title; }
+
+  // The A–Z list of programs at one location, straight out of the sessions the
+  // dialog already holds — no round trip.
+  function programsAt(loc) {
+    var seen = {};
+    var out = [];
+    INDEX.sessions.forEach(function (s) {
+      if (s.location !== loc) return;
+      var k = programKeyOf(s);
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ value: k, label: programNameOf(s), sort: isLunchTitle(s.title) ? 'lunch only' : String(s.title || '') });
+    });
+    out.sort(function (a, b) { return a.sort.localeCompare(b.sort, undefined, { sensitivity: 'base' }); });
+    return out;
+  }
+
+  // What the date dropdown shows for a session: the date alone, since the
+  // program is already chosen. The value stays the full label, so everything
+  // downstream of the session select works exactly as it did.
+  function dateLabelOf(s) {
+    if (s.group === STANDING_GROUP) return 'Today — open every day';
+    if (!s.dateKey) return 'Any date — nearest session';
+    var i = String(s.label).lastIndexOf(LABEL_SEP);
+    var datePart = i >= 0 ? String(s.label).slice(i + LABEL_SEP.length) : s.label;
+    if (isLunchTitle(s.title)) {
+      var j = String(s.title).indexOf(MEAL_SEP);
+      if (j >= 0) datePart += '  —  ' + String(s.title).slice(j + MEAL_SEP.length);
+    }
+    return datePart;
+  }
+
+  function localTodayKey() {
+    var d = new Date();
+    var m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  function programChanged() {
+    var loc = el('location').value;
+    var prog = el('program').value;
+    var keep = el('session').value;
+    el('name').disabled = true;
+    el('name').innerHTML = '<option value="">— choose a session first —</option>';
+    if (!INDEX || !loc || !prog) {
+      el('session').innerHTML = '<option value="">— choose a program first —</option>';
+      el('session').disabled = true;
+      sessionChanged();
+      refreshChangePanel();
+      return;
+    }
+    var sessions = INDEX.sessions.filter(function (s) {
+      return s.location === loc && programKeyOf(s) === prog;
+    });
+    fill(el('session'), sessions.map(function (s) {
+      return { value: s.value, label: dateLabelOf(s), group: s.group };
+    }), sessions.length ? '— choose a date —' : '— no dates found —');
+    // Kept across a reload; otherwise TODAY'S session is picked for the desk
+    // (the common case, and the date is on screen to be changed). Any other day
+    // is never guessed.
+    var today = localTodayKey();
+    var pick = null;
+    if (keep && sessions.some(function (s) { return s.value === keep; })) pick = keep;
+    else {
+      sessions.some(function (s) { if (s.dateKey === today) { pick = s.value; return true; } return false; });
+    }
+    if (pick) el('session').value = pick;
+    sessionChanged();
+    refreshChangePanel();
+    if (!pick) say(sessions.length + ' date(s) for this program.', '');
   }
 
   // The names for one session: those registered for it, then everyone else on
@@ -901,7 +1007,7 @@ function buildQuickMarkHtml(preloadedIndex) {
     el('earlierLabel').style.display = on ? 'block' : 'none';
     if (!on) el('earlier').checked = false;
 
-    el('apptTimeLabel').textContent = moving ? 'Move them to' : '4. Appointment time';
+    el('apptTimeLabel').textContent = moving ? 'Move them to' : '5. Appointment time';
     el('apptNote').textContent = moving
       ? 'Currently at ' + held + '. Only free slots are listed, plus the one they already hold.'
       : (free.length

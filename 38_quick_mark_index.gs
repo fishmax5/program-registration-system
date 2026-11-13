@@ -462,10 +462,10 @@ function buildQuickMarkIndex() {
     const found = households.byKey[key];
     members.push({
       name, key,
-      // Every spelling this person can be found under, so a desk typing the
-      // name they actually use finds the row that says something else — see
-      // memberSearchNames() in 77_households_and_names.gs.
-      search: memberSearchNames(name, '').join(' ').toLowerCase(),
+      // (There used to be a `search` string of every spelling here. Nothing in
+      // this dialog reads it — the door app builds its own from
+      // memberSearchNames() — and it was the biggest part of the roll's weight
+      // in a page that has to stay under QUICK_MARK_INLINE_INDEX_MAX_CHARS.)
       // The REST of their household, never themselves.
       household: found ? found.members.filter(m => m.key !== key) : []
     });
@@ -523,6 +523,12 @@ function freeAppointmentTimesForChoice(choice, bookedTimes) {
  */
 function orderQuickMarkChoices(choices) {
   const todayKey = formatDateKey(new Date());
+  // Only RECENT past sessions travel with the dialog. A year of finished
+  // sessions with their rosters is most of the index, and the index has to fit
+  // inside the dialog's own page (QUICK_MARK_INLINE_INDEX_MAX_CHARS, `36`) —
+  // over it the page fetches its lists, which is the wait this cut removes.
+  // The dateless "program only" entry still reaches anybody older.
+  const pastCutoffKey = formatDateKey(new Date(Date.now() - QUICK_MARK_PAST_DAYS * 86400000));
   const upcoming = [];
   const past = [];
   const undated = [];
@@ -531,7 +537,7 @@ function orderQuickMarkChoices(choices) {
     if (!choice.dateKey && choice.standingEvent) always.push(choice);
     else if (!choice.dateKey) undated.push(choice);
     else if (choice.dateKey >= todayKey) upcoming.push(choice);
-    else past.push(choice);
+    else if (choice.dateKey >= pastCutoffKey) past.push(choice);
   });
   upcoming.sort((a, b) => (a.dateKey < b.dateKey ? -1 : (a.dateKey > b.dateKey ? 1 : a.label.localeCompare(b.label))));
   past.sort((a, b) => (a.dateKey > b.dateKey ? -1 : (a.dateKey < b.dateKey ? 1 : a.label.localeCompare(b.label))));
@@ -920,6 +926,9 @@ function collectKnownMembers() {
  * ordering above guarantees the cut falls on the least relevant end.
  */
 const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
+
+/** How far back Quick Mark's session list reaches (see orderQuickMarkChoices). */
+const QUICK_MARK_PAST_DAYS = 45;
 
 /**
  * Called from the dialog. Applies one mark to the real registrant row, and
