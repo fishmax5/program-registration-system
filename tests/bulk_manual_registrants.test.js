@@ -343,8 +343,16 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   ['setup', 'program', 'action', 'actionHint', 'reason', 'roster', 'recurrenceRow', 'recurrence',
    'lunch', 'attended', 'dates', 'apptHint', 'file', 'csv',
    'read', 'mapping', 'hasHeader', 'columns', 'check', 'reviewBox', 'review', 'commit', 'progress',
-   'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status']
+   'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status',
+   // The lunch-served mode's own controls (see section 13).
+   'programOnly', 'whoOnly', 'lunchOnly', 'lunchBuilding', 'lunchDates', 'lunchReviewBox', 'lunchReview',
+   'lunchCommit']
     .forEach(id => { const n = new Node('div'); n.id = id; body.appendChild(n); });
+  // The mode switch: two radios, program ticked.
+  ['program', 'lunch'].forEach(v => {
+    const n = new Node('input'); n.type = 'radio'; n.attrs.name = 'mode'; n.value = v; n.checked = v === 'program';
+    body.appendChild(n);
+  });
   const all = () => { const out = []; body.walk(n => out.push(n)); return out; };
   doc = {
     body,
@@ -358,11 +366,18 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
       if (sel === 'option[value=club]') {
         return all().filter(n => n.tagName === 'OPTION' && n.value === 'club');
       }
+      if (sel === 'input[name=mode]') return all().filter(n => n.tagName === 'INPUT' && n.attrs.name === 'mode');
+      if (sel === 'input[name=mode]:checked') return all().filter(n => n.tagName === 'INPUT' && n.attrs.name === 'mode' && n.checked);
+      if (sel === 'input.lunchDate:checked') {
+        return all().filter(n => n.tagName === 'INPUT' && n.className === 'lunchDate' && n.checked);
+      }
+      if (sel === 'input.lunchDate') return all().filter(n => n.tagName === 'INPUT' && n.className === 'lunchDate');
       assert.strictEqual(sel, 'input.date:checked', `unexpected selector ${sel}`);
       return all().filter(n => n.tagName === 'INPUT' && n.className === 'date' && n.checked);
     },
     addEventListener: () => {}
   };
+  doc.querySelector = sel => doc.querySelectorAll(sel)[0] || null;
   // google.script.run, with the two boot calls answered by hand so the page
   // holds the programs the server would have sent.
   const PROGRAM = {
@@ -372,6 +387,7 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
                { value: 'Yoga · 9/22', dateKey: '2026-09-22', dateLabel: 'Sep 22' }]
   };
   let started = null;
+  let lunchSent = null;
   // What the roster button's server call answers with — everybody already on
   // the program, in the review's own shape (bulkRosterPeopleFrom_).
   let ROSTER_ANSWER = { ok: false, message: 'nothing' };
@@ -384,6 +400,7 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
         if (k === 'bulkRegistrantsStatus') return () => { if (onSuccess) onSuccess({ exists: false }); };
         if (k === 'listBulkRegistrantPrograms') return () => { if (onSuccess) onSuccess([PROGRAM]); };
         if (k === 'startBulkRegistrants') return args => { started = args; if (onSuccess) onSuccess({ ok: true, exists: true, active: false, done: true, lines: [] }); };
+        if (k === 'startBulkLunchServed') return args => { lunchSent = args; if (onSuccess) onSuccess({ ok: true, exists: true, active: false, done: true, lines: [] }); };
         if (k === 'previewBulkRegistrantsFromRoster') return () => { if (onSuccess) onSuccess(ROSTER_ANSWER); };
         return () => {};
       }
@@ -616,6 +633,84 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
   const apptSent = JSON.parse(JSON.stringify(started.people));
   assert.deepStrictEqual(apptSent.map(p => [p.name, p.apptDate, p.appointmentTime, p.recurrence]),
     [['Typed Two', '2026-09-15', '2:00 PM', 'picked'], ['No Time', '2026-09-15', '10:00 AM', 'picked']]);
+
+  // -------------------------------------------------------------------------
+  // 13. LUNCH SERVED MODE, in the same fake DOM: the switch swaps the program
+  //     controls for the building and dates; the review says per name what the
+  //     write will do (skip, mark, ADD AS A WALK-IN, leave an order open); and
+  //     the commit sends exactly the ticked people with their counts.
+  // -------------------------------------------------------------------------
+  const radios = doc.querySelectorAll('input[name=mode]');
+  const setMode = v => { radios.forEach(r => { r.checked = r.value === v; }); radios[0].fire('change'); };
+  setMode('lunch');
+  assert.strictEqual($('programOnly').style.display, 'none', 'the program controls go away');
+  assert.strictEqual($('whoOnly').style.display, 'none', 'the program roster/triage pickers go away');
+  assert.strictEqual($('lunchOnly').style.display, '', 'the building and dates appear');
+  assert.strictEqual(vm.runInContext('mode()', page), 'lunch');
+
+  vm.runInContext(`LUNCH = { todayKey: '2026-11-13', buildings: [{ location: 'Narberth', dates: [
+    { dateKey: '2026-10-07', dateLabel: 'Oct 7', dish: '' }, { dateKey: '2026-10-06', dateLabel: 'Oct 6', dish: 'Chx Parm' }] }] };`, page);
+  $('lunchBuilding').value = 'Narberth';
+  $('lunchBuilding').fire('change');
+  const lunchBoxes = doc.querySelectorAll('input.lunchDate');
+  assert.strictEqual(lunchBoxes.length, 2, 'one box per lunch date');
+  assert.strictEqual(doc.querySelectorAll('input.lunchDate:checked').length, 0, 'nothing pre-ticked: every date is a choice');
+  lunchBoxes.forEach(b => { b.checked = true; });
+
+  vm.runInContext(`LCHOICE = { location: 'Narberth', dateKeys: ['2026-10-06', '2026-10-07'], dateLabels: ['Oct 6', 'Oct 7'] };
+    PEOPLE = [
+    { name: 'Ann Served', line: 1, match: 'exact', phone: '', email: '', suggested: 'Ann Served',
+      options: [{ name: 'Ann Served', label: 'Ann Served', nameKey: 'ann|served',
+        servedOn: { '2026-10-06': true, '2026-10-07': true }, lunchRowOn: { '2026-10-06': true, '2026-10-07': true }, orderedOn: {} }] },
+    { name: 'Bob New', line: 2, match: 'new', phone: '610', email: '', suggested: 'Bob New',
+      options: [{ name: 'Bob New', label: 'Bob New (as typed — new)', nameKey: 'bob|new', servedOn: {}, lunchRowOn: {}, orderedOn: {} }] },
+    { name: 'Cal Mixed', line: 3, match: 'exact', phone: '', email: '', suggested: 'Cal Mixed',
+      options: [{ name: 'Cal Mixed', label: 'Cal Mixed', nameKey: 'cal|mixed',
+        servedOn: { '2026-10-06': true }, lunchRowOn: { '2026-10-07': true }, orderedOn: { '2026-10-07': 'Chair Yoga' } }] },
+    { name: 'Bob New', line: 4, match: 'new', phone: '', email: '', suggested: 'Bob New',
+      options: [{ name: 'Bob New', label: 'Bob New (as typed — new)', nameKey: 'bob|new', servedOn: {}, lunchRowOn: {}, orderedOn: {} }] }
+  ]; drawLunchReview();`, page);
+  const lrows = () => vm.runInContext('LROWS', page);
+  const lnote = i => String(lrows()[i].note.textContent);
+  assert.strictEqual(lrows().length, 4);
+  assert.strictEqual(lrows()[0].on.checked, false, 'already served on every date: unticked');
+  assert.ok(/Already marked served on all 2 dates — skipped/.test(lnote(0)), lnote(0));
+  assert.strictEqual(lrows()[1].on.checked, true);
+  assert.ok(/ADDED AS A WALK-IN/.test(lnote(1)) && /Oct 6, Oct 7/.test(lnote(1)), 'the walk-in is named: ' + lnote(1));
+  assert.strictEqual(lrows()[2].on.checked, true, 'a mix still has a date to write');
+  assert.ok(/Served on Oct 7/.test(lnote(2)) && /Already served on Oct 6 — skipped/.test(lnote(2)), lnote(2));
+  assert.ok(!/WALK-IN/.test(lnote(2)), 'an existing lunch row is marked, not duplicated');
+  assert.ok(/lunch ordered on Chair Yoga/.test(lnote(2)), 'an open program order is named: ' + lnote(2));
+  assert.strictEqual(lrows()[3].on.checked, false, 'the same person listed twice: unticked');
+  assert.ok(/Listed twice — same person as row 2/.test(lnote(3)), lnote(3));
+  assert.strictEqual(String(lrows()[1].here.value), '1', 'one eaten here by default');
+  assert.strictEqual(String(lrows()[1].home.value), '0');
+
+  // A ticked person with no meal counted is refused on screen, before any call.
+  lrows()[1].here.value = '0'; lrows()[1].here.fire('input');
+  assert.ok(/Count at least one meal/.test(lnote(1)));
+  vm.runInContext('commitLunch()', page);
+  assert.strictEqual(lunchSent, null, 'nothing was sent');
+  assert.ok(/Count at least one meal for: Bob New/.test($('status').textContent), $('status').textContent);
+
+  // Counted, the commit sends the ticked people and their counts and nothing else.
+  lrows()[1].here.value = '2'; lrows()[1].home.value = '1'; lrows()[1].here.fire('input');
+  started = null;
+  vm.runInContext('commitLunch()', page);
+  assert.ok(lunchSent, 'the lunch list was sent');
+  assert.strictEqual(started, null, 'and it did not go through the program-list write');
+  const sentLunch = JSON.parse(JSON.stringify(lunchSent));
+  assert.strictEqual(sentLunch.location, 'Narberth');
+  assert.deepStrictEqual(sentLunch.dateKeys, ['2026-10-06', '2026-10-07']);
+  assert.deepStrictEqual(sentLunch.people.map(p => [p.name, p.ateHere, p.tookHome]),
+    [['Bob New', 2, 1], ['Cal Mixed', 1, 0]], 'only the ticked, with their counts');
+
+  // Switching back drops the lunch review: it must not sit ready to be applied.
+  setMode('program');
+  assert.strictEqual($('lunchReviewBox').style.display, 'none');
+  assert.strictEqual(vm.runInContext('LROWS.length', page), 0);
+  assert.strictEqual($('programOnly').style.display, '');
+  console.log('bulk lunch served dialog: ok');
 }
 console.log('bulk attended review: ok');
 console.log('bulk update actions: ok');
