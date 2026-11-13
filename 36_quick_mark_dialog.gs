@@ -716,6 +716,13 @@ function buildQuickMarkHtml(preloadedIndex) {
   // An "again" is the ↻ link, which asks for a genuine rebuild: the whole
   // point of pressing it is to pick up somebody who registered five minutes
   // ago, and the stored copy is exactly what would not have them.
+  var OLDER = false;
+  function loadOlder() { OLDER = true; loadIndex(true); }
+  function freshnessHtml() {
+    return 'Lists read at ' + INDEX.builtAt + ' · <a onclick="loadIndex(true)">↻ reload</a>' +
+      (OLDER ? ' · showing older sessions' : ' · <a onclick="loadOlder()">show older sessions</a>');
+  }
+
   function loadIndex(again) {
     // A RELOAD LEAVES THE DROPDOWNS ALONE: the lists already here are still
     // good enough to keep working from while a fresh copy is built (marks are
@@ -731,8 +738,7 @@ function buildQuickMarkHtml(preloadedIndex) {
       .withSuccessHandler(function (ix) {
         INDEX = ix;
         drawLocations();
-        el('freshness').innerHTML = 'Lists read at ' + ix.builtAt +
-          ' · <a onclick="loadIndex(true)">↻ reload</a>';
+        el('freshness').innerHTML = freshnessHtml();
         say(again ? 'Lists reloaded.' : 'Ready.', '');
         locationChanged();
       })
@@ -740,7 +746,10 @@ function buildQuickMarkHtml(preloadedIndex) {
         say('Could not load the lists: ' + err.message, 'err');
         el('freshness').innerHTML = '<a onclick="loadIndex(true)">↻ try again</a>';
       });
-    if (again) call.refreshQuickMarkIndex(); else call.getQuickMarkIndex();
+    // Once older sessions have been asked for, every reload keeps them (and
+    // stores nothing); otherwise ↻ is the ordinary stored rebuild.
+    if (OLDER) call.getQuickMarkIndexWithOlder();
+    else if (again) call.refreshQuickMarkIndex(); else call.getQuickMarkIndex();
   }
 
   function locationChanged() {
@@ -2110,8 +2119,7 @@ function buildQuickMarkHtml(preloadedIndex) {
   // server nothing at all until somebody presses Mark. The ↻ link is still
   // there for the desk that wants this minute's registrations.
   if (INDEX) {
-    el('freshness').innerHTML = 'Lists read at ' + INDEX.builtAt +
-      ' · <a onclick="loadIndex(true)">↻ reload</a>';
+    el('freshness').innerHTML = freshnessHtml();
     say('Ready.', '');
     locationChanged();
   } else {

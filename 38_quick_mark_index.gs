@@ -41,6 +41,15 @@ function rebuildQuickMarkListsNow() {
   toastIfPossible(message);
 }
 
+/**
+ * The "show older sessions" button: the same lists reaching back
+ * QUICK_MARK_OLDER_PAST_DAYS. Built on request and NEVER stored, so the shared
+ * copy every other open reads stays small enough to ship inside the dialog.
+ */
+function getQuickMarkIndexWithOlder() {
+  return buildQuickMarkIndex({ pastDays: QUICK_MARK_OLDER_PAST_DAYS });
+}
+
 /** Builds the index, stores it, and hands it back. The ↻ link, and the warmer. */
 function refreshQuickMarkIndex() {
   const index = buildQuickMarkIndex();
@@ -337,7 +346,8 @@ function unpackCachedText(packed) {
  * stale list can only mean a name is missing from a dropdown, never a mark
  * landing on the wrong row — and a walk-in covers the case anyway.
  */
-function buildQuickMarkIndex() {
+function buildQuickMarkIndex(options) {
+  const pastDays = (options && options.pastDays) || QUICK_MARK_PAST_DAYS;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
   const headers = HEADERS.All_Registrants;
@@ -375,7 +385,7 @@ function buildQuickMarkIndex() {
   // twelve subtractions from one map, not twelve reads.
   const bookedTimes = readBookedAppointmentTimes(registrantRows);
 
-  orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows)).forEach(choice => {
+  orderQuickMarkChoices(collectKnownProgramChoices('', registrantRows), pastDays).forEach(choice => {
     const sessionKey = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.label}`;
     if (namesBySession[sessionKey]) return;
     const bucket = { names: [], keys: [], times: [], statuses: [] };
@@ -521,14 +531,14 @@ function freeAppointmentTimesForChoice(choice, bookedTimes) {
  * The cap is applied PER LOCATION, because that is the list a person actually
  * sees: one location's sessions, narrowed from the whole workbook's.
  */
-function orderQuickMarkChoices(choices) {
+function orderQuickMarkChoices(choices, pastDays) {
   const todayKey = formatDateKey(new Date());
   // Only RECENT past sessions travel with the dialog. A year of finished
   // sessions with their rosters is most of the index, and the index has to fit
   // inside the dialog's own page (QUICK_MARK_INLINE_INDEX_MAX_CHARS, `36`) —
   // over it the page fetches its lists, which is the wait this cut removes.
   // The dateless "program only" entry still reaches anybody older.
-  const pastCutoffKey = formatDateKey(new Date(Date.now() - QUICK_MARK_PAST_DAYS * 86400000));
+  const pastCutoffKey = formatDateKey(new Date(Date.now() - (pastDays || QUICK_MARK_PAST_DAYS) * 86400000));
   const upcoming = [];
   const past = [];
   const undated = [];
@@ -928,7 +938,10 @@ function collectKnownMembers() {
 const QUICK_MARK_MAX_DROPDOWN_ITEMS = 400;
 
 /** How far back Quick Mark's session list reaches (see orderQuickMarkChoices). */
-const QUICK_MARK_PAST_DAYS = 45;
+const QUICK_MARK_PAST_DAYS = 20;
+
+/** What "show older sessions" reaches back to. Built on request, never stored. */
+const QUICK_MARK_OLDER_PAST_DAYS = 730;
 
 /**
  * Called from the dialog. Applies one mark to the real registrant row, and
