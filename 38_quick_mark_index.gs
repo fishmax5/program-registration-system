@@ -1939,7 +1939,15 @@ function addQuickMarkWalkIn(sheet, args) {
         `one opens up".`
     };
   }
-  if (session.isAssistance) {
+  // A SESSION THAT HAS ALREADY HAPPENED NEEDS NO CHAIR. The slot rule exists to
+  // stop two people sharing a time that is still to come; for a past date the
+  // desk is recording who WAS there, and "every time is taken" or "nobody wrote
+  // down the time" must not stop that. A blank time is accepted and the row
+  // takes the session's own span, which readBookedAppointmentTimes() cannot
+  // read as a booked slot, so nothing is taken from anyone.
+  const pastAppointment = session.isAssistance && !!session.date &&
+    formatDateKey(session.date) < formatDateKey(new Date());
+  if (session.isAssistance && !(pastAppointment && !appointmentTime)) {
     const taken = readBookedAppointmentTimes(getSectionedRows(sheet, HEADERS.All_Registrants, 'Event_ID'));
     const free = buildAppointmentSlots(session.date, session.end, resolveSlotMinutes(session))
       .filter(s => !(taken[session.eventId] || new Set()).has(s.startLabel));

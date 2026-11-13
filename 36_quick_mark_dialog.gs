@@ -1031,11 +1031,16 @@ function buildQuickMarkHtml(preloadedIndex) {
     }
     offered.sort(function (a, b) { return minutesOfDay(a.value) - minutesOfDay(b.value); });
 
+    var past = chosenSessionIsPast();
+    if (past && showPicker && !moving) {
+      el('apptNote').textContent = 'This session has already happened, so a time is optional' +
+        (free.length ? '.' : ' (every slot was taken).');
+    }
     el('apptTime').innerHTML = '';
-    if (!offered.length) { el('apptTime').value = ''; return; }
+    if (!offered.length && !past) { el('apptTime').value = ''; return; }
     var blank = document.createElement('option');
     blank.value = '';
-    blank.textContent = '— choose a time —';
+    blank.textContent = past ? '— no time (past session) —' : '— choose a time —';
     el('apptTime').appendChild(blank);
     offered.forEach(function (t) {
       var o = document.createElement('option');
@@ -1044,6 +1049,16 @@ function buildQuickMarkHtml(preloadedIndex) {
       el('apptTime').appendChild(o);
     });
     if (moving) el('apptTime').value = held;
+  }
+
+  /** True when the chosen session's date is before today (browser's local date). */
+  function chosenSessionIsPast() {
+    var session = chosenSession();
+    if (!session || !session.dateKey) return false;
+    var now = new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+    return String(session.dateKey) < today;
   }
 
   /** True when a booking on the chosen session has to name an appointment time. */
@@ -1528,7 +1543,9 @@ function buildQuickMarkHtml(preloadedIndex) {
       (el('attended').checked || el('lunch').checked || el('signup').checked || registering ||
         waitlisting || moving) &&
       // An appointment session cannot be booked, or moved, without naming the slot.
-      !(appointmentSession() && (registering || moving) && !el('apptTime').value) &&
+      // (A session already in the past is the exception: the desk is recording
+      // who was there, so no time is needed — see addQuickMarkWalkIn().)
+      !(appointmentSession() && !chosenSessionIsPast() && (registering || moving) && !el('apptTime').value) &&
       // And moving somebody onto the slot they already hold is not a move.
       !(moving && el('apptTime').value === chosenBookedTime() && !el('attended').checked &&
         !el('lunch').checked && !el('signup').checked && !registering);
