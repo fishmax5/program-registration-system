@@ -192,6 +192,7 @@ function menu_refreshMyPermissions() { recordMenuUsage_('refreshMyPermissions');
 function menu_refreshMetricsTabNow() { recordMenuUsage_('refreshMetricsTabNow'); return refreshMetricsTabNow(); }
 function menu_refreshProgramLeaderSheetsNow() { recordMenuUsage_('refreshProgramLeaderSheetsNow'); return refreshProgramLeaderSheetsNow(); }
 function menu_releaseMyTriggers() { recordMenuUsage_('releaseMyTriggers'); return releaseMyTriggers(); }
+function menu_hideAllCalendarGuestLists() { recordMenuUsage_('hideAllCalendarGuestLists'); return hideAllCalendarGuestLists(); }
 function menu_removeAdminGuestsFromCalendarEvents() { recordMenuUsage_('removeAdminGuestsFromCalendarEvents'); return removeAdminGuestsFromCalendarEvents(); }
 function menu_removeAllCalendarInvitesFromEvents() { recordMenuUsage_('removeAllCalendarInvitesFromEvents'); return removeAllCalendarInvitesFromEvents(); }
 function menu_removeDuplicateSessionRows() { recordMenuUsage_('removeDuplicateSessionRows'); return removeDuplicateSessionRows(); }

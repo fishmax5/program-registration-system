@@ -190,6 +190,12 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     // because an invitation withdrawn a second later is two emails instead of
     // none. The office gets one line per person. See 99i.
     const holdInvites = isNotificationTestMode();
+    // GUESTS NEVER SEE EACH OTHER. Every registrant on an event is a member's
+    // personal address, and Google shows the whole guest list to every guest
+    // by default — which publishes a class roster to everybody on it. Hidden
+    // BEFORE anybody is added, so no invitation goes out on an event whose
+    // list is still showing.
+    if (toAdd.length > 0 && !holdInvites) hideEventGuestList_(event, session);
     toAdd.forEach(email => {
       if (holdInvites) {
         recordHeldCalendarInvite(email, session);
@@ -873,5 +879,122 @@ function removeAllCalendarInvitesFromEvents() {
     `did not change.`;
   log(`removeAllCalendarInvitesFromEvents: ${summary}`);
   toastIfPossible(summary);
+  return summary;
+}
+
+// ============================================================================
+// 5b-iii. GUEST LISTS ARE HIDDEN  (no member sees who else is invited)
+// ============================================================================
+//
+// Google Calendar shows every guest the whole guest list unless the event says
+// otherwise, and this section puts members' personal addresses on events — so
+// every invitation used to hand each registrant the name and email of everybody
+// else signed up. `inviteRegistrantsToCalendarEvents` now hides the list before
+// it adds anybody (hideEventGuestList_), and `hideAllCalendarGuestLists()` is
+// the one-time sweep for the events already invited before that existed.
+//
+// The sweep reads the CALENDARS rather than the session table, because the
+// fault is a property of the event, not of anything the workbook records: an
+// event a staff member added guests to by hand is just as exposed. It touches
+// only events that HAVE guests, so a recurring series is not split into a
+// hundred exceptions for a setting nobody would see. Upcoming only, idempotent,
+// asks nothing (it only takes visibility away), and a run that reaches its
+// time budget says so and can simply be pressed again.
+// ============================================================================
+
+/** How far ahead the sweep looks. Past the registration horizon on purpose. */
+const HIDE_GUEST_LIST_SWEEP_DAYS = 400;
+
+/** Stop starting new events after this long, well inside the execution ceiling. */
+const HIDE_GUEST_LIST_SWEEP_BUDGET_MS = 4.5 * 60 * 1000;
+
+/**
+ * Turns "guests can see the guest list" off on one event. Never throws: a
+ * refusal is logged and the caller carries on — but note that the caller then
+ * still adds guests, because withholding a registrant's invitation over a
+ * display setting would be the wrong trade; the log line is how it is found.
+ * Returns true if it changed the event.
+ */
+function hideEventGuestList_(event, session) {
+  try {
+    if (typeof event.guestsCanSeeGuests === 'function' && !event.guestsCanSeeGuests()) return false;
+    event.setGuestsCanSeeGuests(false);
+    return true;
+  } catch (err) {
+    const what = session
+      ? `"${session.title}" on ${formatDateLabel(session.date)}`
+      : `"${safeEventTitle_(event)}"`;
+    log(`⚠️ Could not hide the guest list on ${what} (${err}).`);
+    return false;
+  }
+}
+
+function safeEventTitle_(event) {
+  try { return event.getTitle(); } catch (e) { return '(untitled event)'; }
+}
+
+/**
+ * MENU ENTRY (Admin ▸ One-Time Jobs). Hides the guest list on every upcoming
+ * event, on every calendar in CALENDAR_MAP, that has at least one guest.
+ * Ungated: it only takes visibility away, and it is what somebody presses the
+ * moment they learn members can see each other's addresses.
+ */
+function hideAllCalendarGuestLists() {
+  const started = Date.now();
+  const from = new Date();
+  const to = new Date(from.getTime() + HIDE_GUEST_LIST_SWEEP_DAYS * 24 * 60 * 60 * 1000);
+  let checked = 0;
+  let withGuests = 0;
+  let hidden = 0;
+  let failed = 0;
+  let outOfTime = false;
+  const unreadable = [];
+
+  for (const calendarId of Object.keys(CALENDAR_MAP)) {
+    if (outOfTime) break;
+    let events = [];
+    try {
+      const calendar = CalendarApp.getCalendarById(calendarId);
+      if (!calendar) { unreadable.push(CALENDAR_MAP[calendarId]); continue; }
+      events = calendar.getEvents(from, to);
+    } catch (err) {
+      log(`⚠️ Hide guest lists: could not read the ${CALENDAR_MAP[calendarId]} calendar (${err}).`);
+      unreadable.push(CALENDAR_MAP[calendarId]);
+      continue;
+    }
+    for (const event of events) {
+      if (Date.now() - started > HIDE_GUEST_LIST_SWEEP_BUDGET_MS) { outOfTime = true; break; }
+      checked++;
+      let guestCount = 0;
+      try {
+        guestCount = event.getGuestList().length;
+      } catch (err) {
+        failed++;
+        log(`⚠️ Hide guest lists: could not read the guests of "${safeEventTitle_(event)}" (${err}).`);
+        continue;
+      }
+      if (guestCount === 0) continue;
+      withGuests++;
+      let alreadyHidden = false;
+      try { alreadyHidden = !event.guestsCanSeeGuests(); } catch (e) { /* try the write */ }
+      if (alreadyHidden) continue;
+      if (hideEventGuestList_(event, null)) hidden++;
+      else failed++;
+    }
+  }
+
+  if (hidden > 0) invalidateCalendarEventsCache();
+  const summary =
+    `Guest lists hidden on ${hidden} upcoming event(s); ${withGuests} event(s) with guests ` +
+    `out of ${checked} checked.` +
+    (failed > 0 ? ` ${failed} could not be changed — see the log.` : '') +
+    (unreadable.length > 0 ? ` Could not read: ${unreadable.join(', ')}.` : '') +
+    (outOfTime ? ' Ran out of time before the end — press it again to finish (it skips what is done).' : '') +
+    ' New invitations hide the guest list automatically.';
+  log(`hideAllCalendarGuestLists: ${summary}`);
+  toastIfPossible(summary);
+  try {
+    SpreadsheetApp.getUi().alert('Calendar guest lists', summary, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) { /* no UI on a trigger run */ }
   return summary;
 }

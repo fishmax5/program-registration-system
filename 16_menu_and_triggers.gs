@@ -565,6 +565,10 @@ function buildAdminMenu_(ui, title) {
         // event's guest list: it takes those addresses back off the upcoming
         // events (the office is mailed a digest instead now — see section 5b).
         // A run that hits its cap says so.
+        // Members' addresses are on these events as guests; Google shows every
+        // guest the whole list unless told not to. New invitations hide it
+        // themselves; this does the events invited before that (section 5b-iii).
+        .addItem('\ud83d\ude48 Hide Guest Lists on Calendar Events', menuFn_('hideAllCalendarGuestLists'))
         .addItem('\ud83d\udc65 Remove Office Guests from Calendar Events', menuFn_('removeAdminGuestsFromCalendarEvents'))
         // Everything on the Registrants tab predates the registration ledger
         // (99k), so until this has been run the ledger's own check (99p) says
