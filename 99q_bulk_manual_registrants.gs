@@ -172,6 +172,10 @@
 // the dates that landed, which is what makes the resume safe rather than
 // delicate. A job that died with its watchdog (stale past
 // BULK_REGISTRANTS_STALE_MS) is offered a "Carry on" button, never a re-paste.
+//
+// AND A THIRD KIND OF LIST, kept apart from the program picker: LUNCH SERVED
+// (see its section below) — the people who actually ate on dates already past,
+// for one building, written through Quick Mark's own Lunch tick.
 // ============================================================================
 
 /** One slice works this long, then hands on. Apps Script's ceiling is six minutes. */
@@ -1145,11 +1149,11 @@ function previewBulkRegistrants(args) {
 }
 
 /**
- * The review's shape for a list of { name, phone, email, line }, wherever it
- * came from (a paste, or Deleted_Event_Triage): matched against the roll and
- * checked against who is already on the chosen program. Writes nothing.
+ * A list of { name, phone, email, line } matched against Member_Roll — the half
+ * of every review (a program's, or a day's lunches) that does not depend on
+ * what the list is FOR. A roll that cannot be read shows everybody as new.
  */
-function reviewBulkPeople_(people, programKey) {
+function matchBulkPeopleToRoll_(people) {
   let rows = [];
   const map = getIndexMap(HEADERS.Member_Roll);
   let corrections = {};
@@ -1159,7 +1163,16 @@ function reviewBulkPeople_(people, programKey) {
   } catch (err) {
     log(`ℹ️ Bulk registrants could not read the roll (${err}) — everyone will show as new.`);
   }
-  const matched = matchBulkRegistrantsToRoll(people, rows, map, corrections);
+  return matchBulkRegistrantsToRoll(people, rows, map, corrections);
+}
+
+/**
+ * The review's shape for a list of { name, phone, email, line }, wherever it
+ * came from (a paste, or Deleted_Event_Triage): matched against the roll and
+ * checked against who is already on the chosen program. Writes nothing.
+ */
+function reviewBulkPeople_(people, programKey) {
+  const matched = matchBulkPeopleToRoll_(people);
 
   let lookup = name => ({ nameKey: duplicateRegistrationNameKey(name), alreadyOn: {}, cancelledOn: {}, standing: false });
   let checked = false;
@@ -1286,25 +1299,37 @@ function startBulkRegistrants(args) {
   // BULK_REGISTRANTS_PLAN_V1 keeps its key (absent reads as "not from triage").
   const plan = { jobId, program, picked: (args.picked || []).map(String), people,
     triageKey: String(args.triageKey || '') };
+  // WHICH ACTIONS, in the log and in the label, because "40 people queued" on
+  // a list that cancels them reads as the opposite of what it is.
+  const actions = {};
+  people.forEach(x => { actions[x.action] = (actions[x.action] || 0) + 1; });
+  const what = Object.keys(actions).sort().map(k => `${actions[k]} ${k}`).join(', ');
+  return beginBulkJob_(plan, program.label, what);
+}
+
+/**
+ * Saves a reviewed plan and starts working through it — the half of starting a
+ * list that is the same whatever the list says (a program's registrations, or
+ * lunches served). The plan carries its own `jobId` and `people` and, for the
+ * lunch mode, `mode: 'lunch'`; nothing here reads what a person is to be GIVEN.
+ */
+function beginBulkJob_(plan, label, what) {
+  const jobId = plan.jobId;
+  const people = plan.people;
   if (!writeChunkedScriptProperty(BULK_REGISTRANTS_PLAN_PROP_KEY, JSON.stringify(plan),
     BULK_REGISTRANTS_CHUNK_CHARS, BULK_REGISTRANTS_MAX_CHUNKS)) {
     return { ok: false, message: '⚠️ The list could not be saved to work through — nothing was written. ' +
       'Try a shorter list.' };
   }
   writeBulkRegistrantsResult_({
-    jobId, label: program.label, total: people.length, next: 0, written: 0,
+    jobId, label, total: people.length, next: 0, written: 0,
     lines: [], done: false, problem: '', remaining: [], startedAt: Date.now()
   });
   saveSlicedJobState(BULK_REGISTRANTS_JOB_PROP_KEY, {
     startedAt: Date.now(), lastSliceAt: Date.now(), slices: 0, stalledSlices: 0, errorSlices: 0,
     jobId, next: 0, total: people.length, written: 0
   });
-  // WHICH ACTIONS, in the log and in the label, because "40 people queued" on
-  // a list that cancels them reads as the opposite of what it is.
-  const actions = {};
-  people.forEach(x => { actions[x.action] = (actions[x.action] || 0) + 1; });
-  const what = Object.keys(actions).sort().map(k => `${actions[k]} ${k}`).join(', ');
-  log(`startBulkRegistrants: ${program.label} — ${people.length} people queued (${what}).`);
+  log(`startBulkRegistrants: ${label} — ${people.length} people queued (${what}).`);
   runBulkRegistrantsSlice();
   return Object.assign({ ok: true }, bulkRegistrantsStatus());
 }
@@ -1725,6 +1750,377 @@ function applyOneBulkPersonAction_(program, picked, person) {
   return outcome || { busy: true };
 }
 
+// ----------------------------------------------------------------------------
+// LUNCH SERVED: a list of people who ate, for dates that have already happened
+// ----------------------------------------------------------------------------
+//
+// A third thing a list can say, and the one nothing else here could: "these
+// are the people who actually ate on the 6th". Caroline's September and
+// October lunches for Narberth were eaten and never recorded, and the number
+// the centre is judged on is `Lunch_Served` — which the dialog's "with lunch"
+// box deliberately does not set (it is a SIGN-UP: ordered, not served), and
+// which All_Lunch_Registrants cannot be asked to hold, being wholly derived
+// from the Registrants tab. So this is a mode of its own, beside the program
+// list rather than inside it: no program is picked (lunch is a building and a
+// day, the lunch-only session Quick Mark already has), and the dates may be
+// PAST — which is the whole point, and the one thing the program list cannot
+// be asked for.
+//
+// EVERY WRITE IS QUICK MARK'S LUNCH TICK (applyQuickMarkLocked, 38), the same
+// reason the Register half goes through it: duplicates, the walk-in row for
+// somebody the workbook has never heard of, the ledger entry and the wording
+// are the desk's own, and a second writer of those cells is a second place for
+// them to come apart. `ledgerSource` is LEDGER_SOURCES.BULK_LIST, so "forty
+// lunches typed in on a Friday" is a different question from a mark made in
+// front of the person it was about.
+//
+// SEMANTICS ARE THE DESK'S: Lunch_Served ticked; Attended set when they ate
+// here and left clear when it was all taken home (the take-out case, which is
+// what Quick Mark's Lunch-without-Attended means); the two counts land in
+// Day1_Dined_In / Day1_Taken_Out. A person with no row on that day's lunch is
+// added as a walk-in ("Manually Added"), and the review SAYS so beside every
+// such name — nothing is created that the screen did not name first.
+//
+// IDEMPOTENT: a person already marked served on a date is skipped for THAT
+// date and reported, never counted twice. The check is made inside the write,
+// under the lock and against a fresh read, because the slice that wrote half a
+// person's dates may have been killed and this is the one that carries on.
+// "Served" is read off any live row at that building on that day, not only the
+// lunch-only one: a meal handed over against a program's own registration is
+// still a meal handed over.
+//
+// WHAT IT DELIBERATELY DOES NOT DO: settle a lunch ORDER a person made through
+// a program's form that day. The served meal is a lunch-only row (Quick Mark's
+// own shape), and marking the program row instead would, through the desk's
+// Lunch tick, clear that person's attendance at the program. The review names
+// anybody who has such an order open, so it can be settled by hand.
+
+/** How far back the date list reaches. Generous: a term, not a year. */
+const BULK_LUNCH_LOOKBACK_DAYS = 150;
+/** More dates than this in one list is a different job. */
+const BULK_LUNCH_MAX_DATES = 40;
+const BULK_LUNCH_DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The lunch dates the dialog offers, per building. Pure: `rows` are
+ * Lunch_Schedule rows, `isOffered(dateKey, location)` the catering policy.
+ * Only dates up to and including today, newest first, and only a catered type
+ * — a row that says "Not Serving" is not a lunch anybody could have eaten.
+ */
+function bulkLunchDatesFrom_(rows, map, todayKey, sinceKey, isOffered) {
+  const byBuilding = {};
+  (rows || []).forEach(row => {
+    const type = String(row[map['Type']] || '').trim();
+    if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
+    const date = coerceDate(row[map['Event_Date']]);
+    const location = String(row[map['Location']] || '').trim();
+    if (!date || !location) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey > todayKey || dateKey < sinceKey) return;
+    if (isOffered && !isOffered(dateKey, location)) return;
+    const list = (byBuilding[location] = byBuilding[location] || []);
+    if (list.some(d => d.dateKey === dateKey)) return;
+    const dish = map['Meal_Shorthand'] !== undefined ? String(row[map['Meal_Shorthand']] || row[map['Meal_Description']] || '').trim() : '';
+    list.push({ dateKey, dateLabel: formatDateLabel(date), dish });
+  });
+  return Object.keys(byBuilding).sort().map(location => ({
+    location,
+    dates: byBuilding[location].sort((a, b) => b.dateKey.localeCompare(a.dateKey))
+  }));
+}
+
+/** The dialog's two pick-lists: { todayKey, buildings: [{ location, dates }] }. */
+function listBulkLunchChoices() {
+  const todayKey = formatDateKey(new Date());
+  const since = new Date(); since.setDate(since.getDate() - BULK_LUNCH_LOOKBACK_DAYS);
+  let buildings = [];
+  try {
+    const menu = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+    if (menu) {
+      buildings = bulkLunchDatesFrom_(readLunchScheduleRows(menu), getIndexMap(HEADERS.Lunch_Schedule),
+        todayKey, formatDateKey(since),
+        (dateKey, location) => isLunchOfferedOn(parseDateKey(dateKey), location));
+    }
+  } catch (err) {
+    log(`ℹ️ Bulk lunches could not read ${SHEET_NAMES.LUNCH_SCHEDULE} (${err}).`);
+  }
+  return { todayKey, buildings };
+}
+
+/** The Quick Mark session value for one building's lunch on one date. Pure given the menu. */
+function bulkLunchSessionValue_(location, dateKey) {
+  return `${lunchOnlyRowTitle(location, dateKey)}${LOCATION_LABEL_SEPARATOR}` +
+    `${formatDateLabel(parseDateKey(dateKey))}`;
+}
+
+/**
+ * Checks a building and a set of dates the way the write will, so the review
+ * and the start refuse the same things. Returns { ok, location, dateKeys } or
+ * { ok: false, message }. A future date is refused (nothing has been eaten),
+ * and so is one with no lunch scheduled — a walk-in written there would carry
+ * `No Lunch` and the person would look served and count nowhere.
+ */
+function validateBulkLunchChoice_(location, dateKeys, todayKey, isOffered) {
+  const loc = String(location || '').trim();
+  if (!loc) return { ok: false, message: '⚠️ Choose the building first.' };
+  const keys = [];
+  (dateKeys || []).forEach(k => {
+    const key = String(k || '').trim();
+    if (BULK_LUNCH_DATE_KEY_RE.test(key) && keys.indexOf(key) === -1) keys.push(key);
+  });
+  if (!keys.length) return { ok: false, message: '⚠️ Tick at least one lunch date.' };
+  if (keys.length > BULK_LUNCH_MAX_DATES) {
+    return { ok: false, message: `⚠️ ${keys.length} dates at once — more than ${BULK_LUNCH_MAX_DATES} is a different job. Split it.` };
+  }
+  const future = keys.filter(k => k > todayKey);
+  if (future.length) {
+    return { ok: false, message: `⚠️ ${future.join(', ')} ${future.length > 1 ? 'are' : 'is'} still to come — ` +
+      'lunch served can only be recorded for today or earlier.' };
+  }
+  const closed = keys.filter(k => isOffered && !isOffered(k, loc));
+  if (closed.length) {
+    return { ok: false, message: `⚠️ No lunch is scheduled at ${loc} on ${closed.join(', ')}. Add a Hot or Cold row ` +
+      `for ${closed.length > 1 ? 'those dates' : 'that date'} on ${SHEET_NAMES.LUNCH_SCHEDULE} first, or the ` +
+      'meal would be recorded as no lunch.' };
+  }
+  return { ok: true, location: loc, dateKeys: keys.sort() };
+}
+
+function bulkLunchChoiceCheck_(location, dateKeys) {
+  return validateBulkLunchChoice_(location, dateKeys, formatDateKey(new Date()),
+    (dateKey, loc) => isLunchOfferedOn(parseDateKey(dateKey), loc));
+}
+
+/**
+ * WHO ALREADY HAS A LUNCH ON THESE DATES, as a lookup by name. Pure.
+ *   servedOn   { dateKey: true }   a live row at this building that day has
+ *                                  Lunch_Served ticked — any program, any row
+ *   lunchRowOn { dateKey: true }   they already have a lunch-only row that day
+ *                                  (so the write marks it rather than adding one)
+ *   orderedOn  { dateKey: 'Title' } a program row with a lunch ordered and not
+ *                                  served — left open, and named in the review
+ * Cancelled and Superseded rows are not a registration and never count.
+ */
+function buildBulkLunchServedIndex_(location, dateKeys, registrantRows, regMap) {
+  const loc = String(location || '').trim().toLowerCase();
+  const wanted = {};
+  (dateKeys || []).forEach(k => { wanted[k] = true; });
+  const byName = {};
+  (registrantRows || []).forEach(row => {
+    if (String(row[regMap['Location']] || '').trim().toLowerCase() !== loc) return;
+    const date = coerceDate(row[regMap['Event_Date']]);
+    const dateKey = date ? formatDateKey(date) : '';
+    if (!wanted[dateKey]) return;
+    const status = String(row[regMap['Program_Status']] || '').trim();
+    if (status === 'Cancelled' || status === 'Superseded') return;
+    const key = duplicateRegistrationNameKey(row[regMap['Name']]);
+    if (!key) return;
+    const entry = (byName[key] = byName[key] || { servedOn: {}, lunchRowOn: {}, orderedOn: {} });
+    const lunchOnly = isLunchOnlyEventId(row[regMap['Event_ID']]);
+    if (lunchOnly) entry.lunchRowOn[dateKey] = true;
+    if (isTruthyCheckbox(row[regMap['Lunch_Served']])) entry.servedOn[dateKey] = true;
+    else if (!lunchOnly && String(row[regMap['Lunch_Status']] || '').trim() === 'Needed') {
+      entry.orderedOn[dateKey] = String(row[regMap['Event']] || '').trim();
+    }
+  });
+  return name => {
+    const key = duplicateRegistrationNameKey(name);
+    const entry = (key && byName[key]) || { servedOn: {}, lunchRowOn: {}, orderedOn: {} };
+    return { nameKey: key, servedOn: entry.servedOn, lunchRowOn: entry.lunchRowOn, orderedOn: entry.orderedOn };
+  };
+}
+
+function readBulkLunchRegistrantRows_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+  return sheet ? getSectionedRowValues(sheet, HEADERS.All_Registrants, 'Event_ID') : [];
+}
+
+/**
+ * The review for a pasted list of people who ate: matched against the roll and
+ * checked against who is already down as served on the chosen dates. Writes
+ * nothing. Each option carries servedOn / lunchRowOn / orderedOn (see
+ * buildBulkLunchServedIndex_) so the dialog can say, per name and per date,
+ * whether the write will mark an existing lunch, add a walk-in, or skip.
+ */
+function previewBulkLunchServed(args) {
+  args = args || {};
+  const fields = args.fields || [];
+  if (!fields.some(f => f === 'name' || f === 'first' || f === 'last')) {
+    return { ok: false, message: '⚠️ No column is set to a name. Set at least one column to Name, First name or Last name.' };
+  }
+  const choice = bulkLunchChoiceCheck_(args.location, args.dateKeys);
+  if (!choice.ok) return choice;
+  const people = peopleFromBulkRecords(args.records || [], fields, !!args.hasHeader);
+  if (!people.length) return { ok: false, message: '⚠️ No names found — every row\'s name columns are empty.' };
+  if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
+    return { ok: false, message: `⚠️ That is ${people.length} people — more than ${BULK_REGISTRANTS_MAX_PEOPLE} ` +
+      'at once. Split it into two lists.' };
+  }
+  const matched = matchBulkPeopleToRoll_(people);
+  let lookup = name => ({ nameKey: duplicateRegistrationNameKey(name), servedOn: {}, lunchRowOn: {}, orderedOn: {} });
+  let checked = false;
+  try {
+    lookup = buildBulkLunchServedIndex_(choice.location, choice.dateKeys, readBulkLunchRegistrantRows_(),
+      getIndexMap(HEADERS.All_Registrants));
+    checked = true;
+  } catch (err) {
+    log(`ℹ️ Bulk lunches could not check who is already marked served (${err}).`);
+  }
+  matched.forEach(p => {
+    const names = [];
+    (p.candidates || []).forEach(n => { if (names.indexOf(n) === -1) names.push(n); });
+    if (p.match !== 'exact' && names.indexOf(p.name) === -1) names.push(p.name);
+    p.options = names.map(n => Object.assign({
+      name: n, label: n === p.name && p.match !== 'exact' ? `${n} (as typed — new)` : n
+    }, lookup(n)));
+  });
+  return {
+    ok: true,
+    people: matched,
+    location: choice.location,
+    dateKeys: choice.dateKeys,
+    dateLabels: choice.dateKeys.map(k => formatDateLabel(parseDateKey(k))),
+    duplicatesChecked: checked,
+    counts: ['exact', 'contact', 'similar', 'new'].reduce((acc, k) => {
+      acc[k] = matched.filter(p => p.match === k).length;
+      return acc;
+    }, {})
+  };
+}
+
+/**
+ * Called from the dialog: saves the reviewed list and starts working through
+ * it. `args` is { location, dateKeys, people: [{ name, phone, email, ateHere,
+ * tookHome }] }. The same job, plan and result the program lists use — a
+ * plan with `mode: 'lunch'`, which is additive, so BULK_REGISTRANTS_PLAN_V1
+ * keeps its key and a plan without it still reads as a program list.
+ */
+function startBulkLunchServed(args) {
+  args = args || {};
+  if (isBulkRegistrantsJobActive()) {
+    return Object.assign(bulkRegistrantsStatus(), { ok: false,
+      message: '⏳ A list is already being worked through — its progress is shown here. ' +
+        'Let it finish (or stop it) before starting another.' });
+  }
+  const choice = bulkLunchChoiceCheck_(args.location, args.dateKeys);
+  if (!choice.ok) return choice;
+  const seen = {};
+  const people = [];
+  const noMeal = [];
+  (args.people || []).forEach(p => {
+    const name = String((p && p.name) || '').trim();
+    if (!name) return;
+    const key = duplicateRegistrationNameKey(name) || name.toLowerCase();
+    if (seen[key]) return; // listed twice: the second is the same lunch
+    seen[key] = true;
+    const ateHere = quickMarkCount(p.ateHere);
+    const tookHome = quickMarkCount(p.tookHome);
+    if (ateHere + tookHome < 1) { noMeal.push(name); return; }
+    people.push({ name, phone: String(p.phone || ''), email: String(p.email || ''), ateHere, tookHome });
+  });
+  if (noMeal.length) {
+    return { ok: false, message: `⚠️ ${noMeal.join(', ')} ${noMeal.length > 1 ? 'have' : 'has'} no meal counted — ` +
+      'give each at least one eaten here or taken home, or untick them. Nothing was written.' };
+  }
+  if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to do.' };
+  if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
+    return { ok: false, message: `⚠️ More than ${BULK_REGISTRANTS_MAX_PEOPLE} people at once — split the list.` };
+  }
+  const dates = choice.dateKeys.map(k => formatDateLabel(parseDateKey(k))).join(', ');
+  const label = `Lunch served — ${choice.location} (${dates})`;
+  const plan = {
+    jobId: Utilities.getUuid(),
+    mode: 'lunch',
+    // The slice reads plan.program for the other mode only; carried so nothing
+    // that inspects a plan finds it missing.
+    program: { title: 'Lunch served', location: choice.location, label, sessions: [] },
+    picked: choice.dateKeys,
+    lunch: { location: choice.location, dateKeys: choice.dateKeys },
+    people,
+    triageKey: ''
+  };
+  return beginBulkJob_(plan, label, `${people.length} lunch(es) served on ${choice.dateKeys.length} date(s)`);
+}
+
+/**
+ * One person's lunches, under the workbook lock. Returns { busy } when the
+ * lock could not be had, else { line, written } — `written` the dates marked.
+ */
+function serveOneBulkLunchPerson_(lunch, person) {
+  const name = String(person.name || '').trim();
+  const todayKey = formatDateKey(new Date());
+  // Re-checked HERE, not trusted from the plan: a list reviewed at five and
+  // finished after midnight must not mark tomorrow's lunch served.
+  const dateKeys = ((lunch && lunch.dateKeys) || []).filter(k => k <= todayKey);
+  if (!dateKeys.length) return { line: `⚠️ ${name} — no date left that can be marked, so nothing was written.`, written: 0 };
+  const ateHere = quickMarkCount(person.ateHere);
+  const tookHome = quickMarkCount(person.tookHome);
+
+  const outcome = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => {
+    // A FRESH READ, under the lock: what makes a carried-on slice skip the
+    // dates the killed one had already finished.
+    let info = { servedOn: {}, lunchRowOn: {} };
+    try {
+      info = buildBulkLunchServedIndex_(lunch.location, dateKeys, readBulkLunchRegistrantRows_(),
+        getIndexMap(HEADERS.All_Registrants))(name);
+    } catch (err) {
+      log(`ℹ️ Bulk lunches could not re-check ${name} (${err}) — the desk's own write still refuses a duplicate.`);
+    }
+    const marked = [];
+    const already = [];
+    const walkIns = [];
+    let refused = '';
+    withRegistrantAddBatch_(() => dateKeys.forEach(dateKey => {
+      if (info.servedOn[dateKey]) { already.push(dateKey); return; }
+      const res = applyQuickMarkLocked({
+        location: lunch.location,
+        session: bulkLunchSessionValue_(lunch.location, dateKey),
+        name,
+        // The desk's Lunch tick. Attended only when they ate here: a meal
+        // carried out is the take-out case, and Quick Mark's Lunch-without-
+        // Attended is exactly that.
+        lunch: true,
+        attended: ateHere > 0,
+        ateHere,
+        tookHome,
+        // Used only on a NEW row (a walk-in), where it is what was cooked for
+        // them; an existing row's order is left as it was.
+        mealsOrdered: ateHere + tookHome,
+        confirmWalkIn: true,
+        phone: String(person.phone || ''),
+        email: String(person.email || ''),
+        ledgerSource: LEDGER_SOURCES.BULK_LIST
+      }) || {};
+      if (res.ok) {
+        marked.push(dateKey);
+        if (!info.lunchRowOn[dateKey]) walkIns.push(dateKey);
+      } else if (!refused) refused = res.message || '';
+    }));
+    // Inside the lock, per person, for the reason every other path here does:
+    // an entry buffered and never flushed is the loss the ledger exists to prevent.
+    flushPersistentRegistries();
+    return { marked, already, walkIns, refused };
+  }, null);
+  if (!outcome) return { busy: true };
+
+  const label = keys => keys.map(k => formatDateLabel(parseDateKey(k))).join(', ');
+  const meals = `${ateHere} here${tookHome ? `, ${tookHome} taken home` : ''}`;
+  const alreadyNote = outcome.already.length
+    ? ` Already marked served on ${label(outcome.already)} — left as it was.` : '';
+  const walkInNote = outcome.walkIns.length
+    ? ` No lunch row on ${label(outcome.walkIns)} — added as a walk-in.` : '';
+  let line;
+  if (outcome.marked.length) {
+    line = `🍽️ ${name} — lunch served on ${label(outcome.marked)} (${meals}).${walkInNote}${alreadyNote}` +
+      (outcome.refused ? ` Not the rest: ${outcome.refused}` : '');
+  } else if (outcome.already.length && !outcome.refused) {
+    line = `➖ ${name} — already marked served on every date chosen; nothing added.`;
+  } else {
+    line = `⚠️ ${name} — nothing written.${alreadyNote} ${outcome.refused}`.trim();
+  }
+  return { line, written: outcome.marked.length };
+}
+
 /** ONE SLICE: work down the list until the budget runs out, then hand on. */
 function runBulkRegistrantsSlice() {
   return runSlicedJob({
@@ -1754,6 +2150,9 @@ function runBulkRegistrantsSlice() {
       const people = plan.people || [];
       if (state.next >= people.length) return { finished: true };
 
+      // LUNCH SERVED is its own kind of list (see its section): no program,
+      // dates that are past, and nobody to email afterwards.
+      const lunchMode = plan.mode === 'lunch';
       // A slice resumed tomorrow must not register anybody onto yesterday.
       const todayKey = formatDateKey(new Date());
       const program = Object.assign({}, plan.program, {
@@ -1771,7 +2170,9 @@ function runBulkRegistrantsSlice() {
         // A sync holds the workbook for up to its whole budget; waiting on the
         // lock person by person would spend this slice doing nothing.
         if (workbookHeldElsewhere()) { busy = true; break; }
-        const outcome = applyOneBulkPersonAction_(program, plan.picked, people[state.next]);
+        const outcome = lunchMode
+          ? serveOneBulkLunchPerson_(plan.lunch, people[state.next])
+          : applyOneBulkPersonAction_(program, plan.picked, people[state.next]);
         if (outcome.busy) { busy = true; break; }
         result.lines = (result.lines || []).concat([outcome.line]);
         // WHO WAS ACTUALLY CHANGED, for the follow-up email: a person whose
@@ -1779,7 +2180,7 @@ function runBulkRegistrantsSlice() {
         // nothing to be told. The dates are the ones CHOSEN for the row, which
         // can name a date the person was already on — the email says "for",
         // not "newly added to".
-        if (outcome.written > 0) {
+        if (outcome.written > 0 && !lunchMode) {
           result.changed = (result.changed || []).concat([
             bulkFollowUpEntryFor_(program, plan.picked, people[state.next])]);
         }
@@ -2118,6 +2519,10 @@ function buildBulkRegistrantsHtml() {
          border-radius: 4px; padding: 8px; font-size: 12px; }
 </style>
 <div id="setup">
+<p style="margin:0 0 8px 0"><b>What is this list?</b>
+  <label style="margin-left:10px"><input type="radio" name="mode" value="program" checked> People on a program (register, cancel…)</label>
+  <label style="margin-left:10px"><input type="radio" name="mode" value="lunch"> Lunch served (meals already eaten)</label></p>
+<div id="programOnly">
 <h3>1. Program</h3>
 <select id="program" style="width:100%"><option value="">Loading…</option></select>
 <h3>2. What to do with them</h3>
@@ -2150,6 +2555,19 @@ function buildBulkRegistrantsHtml() {
 <b>one date and one time</b>, chosen on their row in the review (free times only — the same ones Quick Mark offers).
 A row with no time is unticked until you pick one. Standing places and “every date” do not apply.</p>
 <div id="dates" style="margin-top:6px"></div>
+</div>
+<div id="lunchOnly" style="display:none">
+<h3>1. Building and lunch dates</h3>
+<p class="hint">Records lunches that were <b>actually eaten</b> — the “served” count, which the program list’s “with lunch”
+box does not touch. Past dates are fine; future ones are not. Only dates with a Hot or Cold lunch on
+<code>Lunch_Schedule</code> are offered: add the menu row first if a date is missing.
+Anybody with no lunch row that day is added as a walk-in, and the review says so.</p>
+<select id="lunchBuilding" style="min-width:260px"><option value="">Loading…</option></select>
+<div id="lunchDates" style="margin-top:6px"></div>
+<p class="hint" style="margin:4px 0 0 0"><a href="#" onclick="return tickLunchDates(true)">Tick all dates</a> ·
+<a href="#" onclick="return tickLunchDates(false)">Clear</a> — everybody on the list below is recorded on every date ticked.</p>
+</div>
+<div id="whoOnly">
 <h3>3. Who</h3>
 <p class="hint"><b>Everybody already on this program</b> is the quick way for anything but Register — their names
 come off the tab, so there is nothing to type and no spelling to get wrong. Tick the ones you mean in the review.</p>
@@ -2159,6 +2577,7 @@ come off the tab, so there is nothing to type and no spelling to get wrong. Tick
 registered by this list is taken off triage.</p>
 <div><select id="triageEvent" style="max-width:560px"><option value="">Loading deleted events…</option></select>
 <button id="triageBtn" class="plain" onclick="pickFromTriage()">Pick from this deleted event</button></div>
+</div>
 <p class="hint" style="margin-top:10px">Or open an Excel (.xlsx) or CSV file, or paste the list — one person per line,
 straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
 <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
@@ -2185,6 +2604,18 @@ registered at all when cancelling — is unticked for you and says why. Untick a
 <a href="#" onclick="return tickAll(false)">Uncheck all</a></p>
 <div id="review"></div>
 <div style="margin-top:8px"><button id="commit" onclick="commit()" disabled>Apply to the ticked people</button></div>
+</div>
+<div id="lunchReviewBox" style="display:none">
+<h3>5. Review — lunch served</h3>
+<p class="hint">Set what each person had: <b>eaten here</b> and <b>taken home</b> (one eaten here is the default).
+Somebody who ate here is also marked present; a meal taken out is not. A name with
+<span class="new">no lunch row</span> that day is <b>added as a walk-in</b> (flagged “Manually Added”) — nobody is
+created without being named here. Anybody already marked served on every date is unticked and skipped; on a mix of
+dates only the new ones are written.</p>
+<p class="hint" style="margin:0 0 6px 0"><a href="#" onclick="return tickAllLunch(true)">Check all</a> ·
+<a href="#" onclick="return tickAllLunch(false)">Uncheck all</a></p>
+<div id="lunchReview" style="max-height:300px;overflow:auto"></div>
+<div style="margin-top:8px"><button id="lunchCommit" onclick="commitLunch()" disabled>Record lunch served for the ticked people</button></div>
 </div>
 </div>
 <div id="progress">
@@ -2416,7 +2847,8 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     drawColumns();
     $('mapping').style.display = '';
     $('reviewBox').style.display = 'none';
-    PEOPLE = []; ROWS = [];
+    $('lunchReviewBox').style.display = 'none';
+    PEOPLE = []; ROWS = []; LROWS = [];
     say(res.records.length + ' row(s), ' + res.columns + ' column(s)' + (from || '') + '. Check the headings, then press Check.');
   }
 
@@ -2464,6 +2896,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   $('hasHeader').addEventListener('change', function () { if (RAW) drawColumns(); });
 
   function check() {
+    if (mode() === 'lunch') { checkLunch(); return; }
     if (!RAW) { say('Read the columns first.', 'err'); return; }
     if (!program()) { say('Choose the program first — that is how people already registered are found.', 'err'); return; }
     var fields = RAW.fields.slice();
@@ -2914,6 +3347,232 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     }).startBulkRegistrants({ programKey: p.key, picked: pickedKeys(), people: people, triageKey: TRIAGE_KEY });
   }
 
+  // ---- LUNCH SERVED: a second mode of the same dialog. The paste, the file
+  // and the column mapping above are shared; what differs is the choice (a
+  // building and past dates, not a program), the review (meal counts, and
+  // walk-ins named) and the write (startBulkLunchServed). Everything from the
+  // workbook is still written with textContent.
+  var LUNCH = null;     // { todayKey, buildings: [{ location, dates: [...] }] } — loaded once, on first use
+  var LROWS = [];
+  var LCHOICE = null;   // { location, dateKeys, dateLabels } as the server checked them
+  function mode() {
+    var r = document.querySelector('input[name=mode]:checked');
+    return r ? r.value : 'program';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function (r) {
+    r.addEventListener('change', setMode);
+  });
+  function setMode() {
+    var lunch = mode() === 'lunch';
+    $('programOnly').style.display = lunch ? 'none' : '';
+    $('whoOnly').style.display = lunch ? 'none' : '';
+    $('lunchOnly').style.display = lunch ? '' : 'none';
+    // A list read in one mode is not a list for the other: the review, the
+    // mapping and the people would otherwise sit under the wrong heading,
+    // ready to be applied as something they were never checked as.
+    PEOPLE = []; ROWS = []; LROWS = []; LCHOICE = null; FROM_ROSTER = false; TRIAGE_KEY = '';
+    $('review').textContent = ''; $('lunchReview').textContent = '';
+    $('reviewBox').style.display = 'none'; $('lunchReviewBox').style.display = 'none';
+    say('');
+    if (lunch && !LUNCH) loadLunchChoices();
+  }
+  function loadLunchChoices() {
+    google.script.run.withSuccessHandler(function (res) {
+      LUNCH = res || { todayKey: '', buildings: [] };
+      var sel = $('lunchBuilding');
+      sel.textContent = '';
+      var first = el('option', LUNCH.buildings.length ? 'Choose a building…' : 'No past lunch dates found on Lunch_Schedule');
+      first.value = ''; sel.appendChild(first);
+      LUNCH.buildings.forEach(function (b) { var o = el('option', b.location + ' (' + b.dates.length + ' lunch dates)'); o.value = b.location; sel.appendChild(o); });
+    }).withFailureHandler(function (err) { say('Could not read the lunch dates: ' + err.message, 'err'); })
+      .listBulkLunchChoices();
+  }
+  $('lunchBuilding').addEventListener('change', drawLunchDates);
+  function drawLunchDates() {
+    var box = $('lunchDates');
+    box.textContent = '';
+    var loc = $('lunchBuilding').value;
+    var b = null;
+    ((LUNCH && LUNCH.buildings) || []).forEach(function (x) { if (x.location === loc) b = x; });
+    if (!b) return;
+    b.dates.forEach(function (d) {
+      var l = el('label');
+      var c = document.createElement('input');
+      c.type = 'checkbox'; c.value = d.dateKey; c.className = 'lunchDate';
+      // A ticked date changes who is "already served", so a checked list is checked again.
+      c.addEventListener('change', function () { if (PEOPLE.length && mode() === 'lunch') checkLunch(); });
+      l.appendChild(c); l.appendChild(document.createTextNode(' ' + d.dateLabel + (d.dish ? ' — ' + d.dish : '')));
+      l.style.display = 'block';
+      box.appendChild(l);
+    });
+  }
+  function tickLunchDates(on) {
+    Array.prototype.forEach.call(document.querySelectorAll('input.lunchDate'), function (c) { c.checked = on; });
+    if (PEOPLE.length && mode() === 'lunch') checkLunch();
+    return false;
+  }
+  function lunchDateKeys() {
+    return Array.prototype.map.call(document.querySelectorAll('input.lunchDate:checked'), function (c) { return c.value; });
+  }
+  $('lunchBuilding').addEventListener('change', function () { if (PEOPLE.length && mode() === 'lunch') { PEOPLE = []; LROWS = []; $('lunchReviewBox').style.display = 'none'; } });
+
+  function checkLunch() {
+    if (!RAW) { say('Read the columns first.', 'err'); return; }
+    var loc = $('lunchBuilding').value;
+    var keys = lunchDateKeys();
+    if (!loc) { say('Choose the building first.', 'err'); return; }
+    if (!keys.length) { say('Tick at least one lunch date.', 'err'); return; }
+    var fields = RAW.fields.slice();
+    if (!fields.some(function (f) { return f === 'name' || f === 'first' || f === 'last'; })) {
+      say('Set at least one column to Name, First name or Last name.', 'err'); return;
+    }
+    $('check').disabled = true;
+    say('Checking against the member roll and the lunches already marked served…');
+    google.script.run.withSuccessHandler(function (res) {
+      $('check').disabled = false;
+      if (!res || !res.ok) { say((res && res.message) || 'Nothing came back.', 'err'); return; }
+      PEOPLE = res.people;
+      LCHOICE = { location: res.location, dateKeys: res.dateKeys, dateLabels: res.dateLabels };
+      drawLunchReview();
+    }).withFailureHandler(function (err) {
+      $('check').disabled = false;
+      say('Failed: ' + err.message, 'err');
+    }).previewBulkLunchServed({ records: RAW.records, fields: fields, hasHeader: $('hasHeader').checked,
+      location: loc, dateKeys: keys });
+  }
+
+  function drawLunchReview() {
+    var box = $('lunchReview');
+    box.textContent = '';
+    LROWS = [];
+    var table = el('table');
+    var head = el('tr');
+    ['', 'Row', 'Name', 'Match', 'Acting on', 'Ate here', 'Took home', 'Note']
+      .forEach(function (h) { head.appendChild(el('th', h)); });
+    table.appendChild(head);
+    PEOPLE.forEach(function (p, i) {
+      var tr = el('tr');
+      var r = { tr: tr, person: p, auto: false, touched: false };
+      var tdOn = el('td'); var on = document.createElement('input');
+      on.type = 'checkbox'; on.checked = true;
+      on.addEventListener('change', function () { r.touched = true; evaluateLunch(); });
+      tdOn.appendChild(on); tr.appendChild(tdOn); r.on = on;
+      tr.appendChild(el('td', String(p.line || i + 1)));
+      tr.appendChild(el('td', p.name));
+      tr.appendChild(el('td', LABELS[p.match] || p.match, p.match));
+      var tdAs = el('td'); var as = document.createElement('select');
+      (p.options || []).forEach(function (opt, k) { var o = el('option', opt.label); o.value = String(k); as.appendChild(o); });
+      for (var k = 0; k < (p.options || []).length; k++) if (p.options[k].name === p.suggested) as.value = String(k);
+      as.addEventListener('change', evaluateLunch);
+      tdAs.appendChild(as); tr.appendChild(tdAs); r.as = as;
+      [['here', 1], ['home', 0]].forEach(function (f) {
+        var td = el('td'); var n = document.createElement('input');
+        n.type = 'number'; n.min = '0'; n.max = '20'; n.step = '1'; n.value = String(f[1]); n.style.width = '52px';
+        n.addEventListener('input', evaluateLunch);
+        td.appendChild(n); tr.appendChild(td); r[f[0]] = n;
+      });
+      r.note = el('td', '', 'note'); tr.appendChild(r.note);
+      table.appendChild(tr);
+      LROWS.push(r);
+    });
+    box.appendChild(table);
+    $('lunchReviewBox').style.display = '';
+    evaluateLunch();
+    var walk = LROWS.filter(function (r) { return r.walkIns.length; }).length;
+    say(PEOPLE.length + ' people for ' + LCHOICE.dateLabels.length + ' date(s).' +
+      (walk ? ' ' + walk + ' with no lunch row on at least one date — they will be added as walk-ins.' : ''));
+  }
+  function lunchChosen(r) {
+    return (r.person.options || [])[Number(r.as.value)] ||
+      { name: r.person.name, servedOn: {}, lunchRowOn: {}, orderedOn: {} };
+  }
+  function lunchLabel(key) {
+    var i = LCHOICE.dateKeys.indexOf(key);
+    return i === -1 ? key : LCHOICE.dateLabels[i];
+  }
+  // What the write will do for this row, date by date — said before anything
+  // is written. Marked / skipped (already served) / walk-in (no lunch row) are
+  // the three outcomes; an order left open on a program is named, not settled.
+  function evaluateLunch() {
+    var seen = {};
+    LROWS.forEach(function (r) {
+      var opt = lunchChosen(r);
+      var served = [], todo = [], walk = [], ordered = [];
+      LCHOICE.dateKeys.forEach(function (k) {
+        if ((opt.servedOn || {})[k]) { served.push(k); return; }
+        todo.push(k);
+        if (!(opt.lunchRowOn || {})[k]) walk.push(k);
+        if ((opt.orderedOn || {})[k]) ordered.push(k + '|' + opt.orderedOn[k]);
+      });
+      r.walkIns = walk;
+      var labels = function (list) { return list.map(lunchLabel).join(', '); };
+      var note = '';
+      var already = false;
+      var meals = (Number(r.here.value) || 0) + (Number(r.home.value) || 0);
+      if (!todo.length) { already = true; note = 'Already marked served on ' + (served.length > 1 ? 'all ' + served.length + ' dates' : labels(served)) + ' — skipped.'; }
+      else {
+        note = 'Served on ' + labels(todo) + '.';
+        if (served.length) note += ' Already served on ' + labels(served) + ' — skipped.';
+        if (walk.length) note += ' No lunch row on ' + labels(walk) + ' — will be ADDED AS A WALK-IN.';
+        ordered.forEach(function (x) { var parts = x.split('|'); note += ' Has a lunch ordered on ' + parts[1] + ' (' + lunchLabel(parts[0]) + ') — left open.'; });
+        if (meals < 1) note += ' Count at least one meal.';
+      }
+      var key = opt.nameKey || '';
+      if (!already && key && seen[key]) { already = true; note = 'Listed twice — same person as row ' + seen[key] + '.'; }
+      if (!already && key && (r.on.checked || r.auto)) seen[key] = r.person.line;
+      r.note.textContent = note;
+      r.tr.className = already ? 'already' : '';
+      if (already && !r.touched && r.on.checked) { r.on.checked = false; r.auto = true; }
+      else if (!already && r.auto && !r.touched) { r.on.checked = true; r.auto = false; }
+    });
+    updateLunchCommit();
+  }
+  function tickAllLunch(on) {
+    LROWS.forEach(function (r) {
+      if (on && r.tr.className === 'already') return;
+      r.on.checked = on; r.touched = true; r.auto = false;
+    });
+    updateLunchCommit();
+    return false;
+  }
+  function updateLunchCommit() {
+    $('lunchCommit').disabled = !LROWS.some(function (r) { return r.on.checked; });
+  }
+  function commitLunch() {
+    if (!LCHOICE) { say('Check the list first.', 'err'); return; }
+    var people = [], noMeal = [], pairs = 0, walkPairs = 0, skipPairs = 0;
+    LROWS.forEach(function (r) {
+      if (!r.on.checked) return;
+      var opt = lunchChosen(r);
+      var here = Math.max(0, Math.floor(Number(r.here.value) || 0));
+      var home = Math.max(0, Math.floor(Number(r.home.value) || 0));
+      if (here + home < 1) { noMeal.push(opt.name); return; }
+      var todo = LCHOICE.dateKeys.filter(function (k) { return !(opt.servedOn || {})[k]; });
+      pairs += todo.length;
+      skipPairs += LCHOICE.dateKeys.length - todo.length;
+      walkPairs += todo.filter(function (k) { return !(opt.lunchRowOn || {})[k]; }).length;
+      people.push({ name: opt.name, phone: r.person.phone, email: r.person.email, ateHere: here, tookHome: home });
+    });
+    if (noMeal.length) { say('Count at least one meal for: ' + noMeal.join(', ') + ' — or untick them.', 'err'); return; }
+    if (!people.length) { say('Nobody is ticked.', 'err'); return; }
+    if (!confirm('Record lunch served at ' + LCHOICE.location + ' on ' + LCHOICE.dateLabels.join(', ') + ':\\n\\n' +
+      people.length + ' people, ' + pairs + ' lunch(es) to record' +
+      (walkPairs ? ', of which ' + walkPairs + ' add a walk-in row' : '') +
+      (skipPairs ? '\\n' + skipPairs + ' already marked served and skipped' : '') +
+      '\\n\\nThis changes the served counts. Go ahead?')) return;
+    $('lunchCommit').disabled = true;
+    say('');
+    showProgress({ exists: true, active: true, label: 'Lunch served — ' + LCHOICE.location, total: people.length, next: 0, lines: [] });
+    google.script.run.withSuccessHandler(function (st) {
+      if (st && st.ok === false && !st.exists) { say(st.message || 'Nothing was written.', 'err'); backToSetup(); return; }
+      if (st && st.message) say(st.message, st.ok === false ? 'err' : '');
+      if (st) showProgress(st);
+    }).withFailureHandler(function (err) {
+      say('The first run reported: ' + err.message + ' — checking whether it is carrying on…');
+      poll();
+    }).startBulkLunchServed({ location: LCHOICE.location, dateKeys: LCHOICE.dateKeys, people: people });
+  }
+
   // ---- 5. Progress, polled — the work does not live in this window.
   function showProgress(st) {
     $('setup').style.display = 'none';
@@ -3054,6 +3713,9 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     $('columns').textContent = '';
     $('mapping').style.display = 'none';
     $('reviewBox').style.display = 'none';
+    LROWS = []; LCHOICE = null;
+    $('lunchReview').textContent = '';
+    $('lunchReviewBox').style.display = 'none';
     $('progress').style.display = 'none';
     $('setup').style.display = '';
     say('');
