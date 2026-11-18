@@ -197,6 +197,8 @@ function syncLunchOnlySessions(registrySheet) {
   const wanted = {};
   /** Location -> the furthest-out catered month it has rows for past the horizon. */
   const beyondHorizonBy = {};
+  /** Event_ID -> true for every catered Lunch_Schedule date (see pruneStaleLunchOnlyRows_). */
+  const cateredEventIds = {};
   readLunchScheduleRows(menuSheet).forEach(row => {
     const d = coerceDate(row[menuMap['Event_Date']]);
     const location = String(row[menuMap['Location']] || '').trim();
@@ -205,6 +207,8 @@ function syncLunchOnlySessions(registrySheet) {
     if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
     if (getCateringPolicyForLocation(location) === CATERING_POLICIES.NEVER) return;
     stats.cateredRows++;
+    // EVERY catered date, whatever the horizon: what the prune below keeps.
+    cateredEventIds[makeLunchOnlyEventId(formatDateKey(d), location)] = true;
 
     // COUNTED, not just skipped. A date outside the window is the difference
     // between "there is no menu" and "there is a menu and it is further out
@@ -230,6 +234,12 @@ function syncLunchOnlySessions(registrySheet) {
     if (!wanted[groupKey]) wanted[groupKey] = { location, monthLabel, dateKeys: [] };
     if (wanted[groupKey].dateKeys.indexOf(dateKey) === -1) wanted[groupKey].dateKeys.push(dateKey);
   });
+
+  // A DATE REMOVED FROM Lunch_Schedule used to leave its session row behind for
+  // ever (the note below explains why rows are kept), so a building whose menu
+  // was cleared still listed every upcoming lunch on the dashboards. Upcoming
+  // rows nobody is registered for now go; see pruneStaleLunchOnlyRows_().
+  pruneStaleLunchOnlyRows_(registrySheet, headers, map, cateredEventIds, stats);
 
   // A DATE FLIPPED TO "Not Serving" DROPS OUT HERE, and that is how it leaves
   // the form: `wanted` is what the date labels are built from, so the next
@@ -454,6 +464,56 @@ function syncLunchOnlySessions(registrySheet) {
 
   saveLunchOnlyFormLinks(links);
   return links;
+}
+
+/**
+ * Takes UPCOMING lunch-only session rows off the session table when their date
+ * is no longer a catered row on Lunch_Schedule (removed, flipped to Not
+ * Serving, or its location set to "Never").
+ *
+ * What is kept, and why: a row with ANY registrant behind it (any status — a
+ * cancelled one is still the anchor of a record), a row dated before today
+ * (history), and everything when Lunch_Schedule has no catered row anywhere,
+ * because that reads as an unreadable or half-typed tab as easily as a
+ * deliberate clear. Never throws: this is housekeeping on an hourly path.
+ * Rows are rewritten through the normal render with skipTriage; the session
+ * table's shrink guard (99x) still applies, since nobody confirmed this.
+ */
+function pruneStaleLunchOnlyRows_(registrySheet, headers, map, cateredEventIds, stats) {
+  try {
+    if (!stats || stats.cateredRows === 0) return 0;
+    const todayKey = formatDateKey(new Date());
+    const rows = getSectionedRows(registrySheet, headers, 'Event_ID');
+    const candidates = rows.filter(row => {
+      const id = String(row[map['Event_ID']] || '').trim();
+      if (!isLunchOnlyEventId(id) || cateredEventIds[id]) return false;
+      const d = coerceDate(row[map['Event_Date']]);
+      return !!d && formatDateKey(d) >= todayKey;
+    });
+    if (candidates.length === 0) return 0;
+
+    const registrantsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
+    const held = {};
+    if (registrantsSheet) {
+      getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID').forEach(r => {
+        const id = String(r[getIndexMap(HEADERS.All_Registrants)['Event_ID']] || '').trim();
+        if (id) held[id] = true;
+      });
+    }
+    const drop = candidates.filter(row => !held[String(row[map['Event_ID']] || '').trim()]);
+    if (drop.length === 0) return 0;
+
+    const dropSet = new Set(drop);
+    renderProgramDashboard(true, {
+      sessionRows: rows.filter(row => !dropSet.has(row)),
+      skipTriage: true
+    });
+    log(`Lunch sign-up: removed ${drop.length} upcoming lunch row(s) no longer on ${SHEET_NAMES.LUNCH_SCHEDULE}.`);
+    return drop.length;
+  } catch (err) {
+    log(`ℹ️ Could not prune stale lunch rows (${err}) — they stay until the next sync.`);
+    return 0;
+  }
 }
 
 /** Noon on `dateKey` — see LUNCH_ONLY_SESSION_HOUR. */
