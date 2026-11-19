@@ -237,7 +237,9 @@ function notificationProgramKey(title, location) {
  * that exists, is a decision — see 9h.
  */
 function notificationPolicyForSession(session) {
-  const row = readNotificationPolicyRows()[notificationProgramKey(session.title, session.location)];
+  // Through the program's filed title (99zzc), so a session carrying an
+  // alias or a "CANCELLED…:" prefix follows its program's ticks.
+  const row = readNotificationPolicyRows()[programSettingsKey(session.title, session.location)];
   if (!row) return defaultNotificationPolicy(!!session.isAssistance);
   return policyFromNotificationRow(row, getIndexMap(HEADERS.Program_Settings),
     !!session.isAssistance);

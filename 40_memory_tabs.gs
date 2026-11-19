@@ -344,6 +344,11 @@ function refreshProgramSettings(ss, sessionRows) {
   const consolidatePending = !notificationConsolidationDone_();
   if (consolidatePending) consolidateKindDefaults_(kindDefaults);
   let consolidatedRows = 0;
+  // THE ALIASES, off the rows just read (99zzc) rather than a second read: a
+  // session whose title is listed in a row's Also_Known_As, or carries a
+  // "CANCELLED…:" prefix, is counted on its program's row, not a row of its own.
+  // A row an alias used to have stays, under the inactive heading, notes intact.
+  const aliasIndex = buildProgramAliasIndex(prior.rows, headers);
   const existingByKey = {};
   prior.rows.forEach(row => {
     // Every lunch title this workbook has ever used ("🥡 Lunch Only (no
@@ -386,7 +391,8 @@ function refreshProgramSettings(ss, sessionRows) {
     // one Lunch row for that building, whatever date or title it carries.
     const isLunch = isLunchOnlyEventId(row[regMap['Event_ID']]) ||
       isLunchOnlyProgramTitle(row[regMap['Clean_Title']]);
-    const title = isLunch ? PROGRAM_SETTINGS_LUNCH_TITLE : String(row[regMap['Clean_Title']] || '').trim();
+    const title = isLunch ? PROGRAM_SETTINGS_LUNCH_TITLE
+      : canonicalProgramTitle(String(row[regMap['Clean_Title']] || '').trim(), location, aliasIndex);
     if (!title) return;
     const key = notificationProgramKey(title, location);
     const d = coerceDate(row[regMap['Event_Date']]);
@@ -422,6 +428,9 @@ function refreshProgramSettings(ss, sessionRows) {
     const cap = Number(row[regMap['Max_Capacity']]);
     if (cap > 0) p.caps[cap] = (p.caps[cap] || 0) + 1;
   });
+
+  // Titles that look like one program on one form, for a person to decide.
+  reportProgramAliasCandidates(rows, aliasIndex, todayKey);
 
   const entries = [];
   const seen = {};

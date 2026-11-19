@@ -469,7 +469,14 @@ function questionsForFormContext(specs, context) {
   // against a calendar saying "Book Club" is one program typed two ways, and
   // matching it exactly is a question nobody can find and nothing anywhere
   // says was dropped. See programTitleMatchKey() for what this will NOT do.
-  const titles = new Set((context.titles || []).map(programTitleMatchKey));
+  // AND THE TITLE EACH IS FILED UNDER (99zzc): a question aimed at "Medicare
+  // Counseling" reaches the form whose sessions say "Medicare Counseling (by
+  // appt.)" once staff have listed that as an alias. Only ever adds a title
+  // the staff named; the resemblance rule below is untouched.
+  const filedTitles = typeof programTitlesWithCanonical === 'function'
+    ? programTitlesWithCanonical(context.titles || [], context.locations || [])
+    : (context.titles || []);
+  const titles = new Set(filedTitles.map(programTitleMatchKey));
   const locations = new Set((context.locations || []).map(programTitleMatchKey));
   // WHAT A KEYWORD IS MATCHED AGAINST: everything about this form that names
   // what it is for — the programs on it, the sites it runs at, and the

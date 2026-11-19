@@ -50,6 +50,21 @@ this.useAliasRows = function (rows) {
 this.forgetAliases = function () { invalidateProgramAliasIndex(); };
 this.invalidateNotificationPolicyCache = invalidateNotificationPolicyCache;
 this.peekAliasIndex = function () { return __programAliasIndex; };
+this.programSettingsKey = programSettingsKey;
+this.programTitlesWithCanonical = programTitlesWithCanonical;
+this.findProgramAliasCandidates = findProgramAliasCandidates;
+this.reportProgramAliasCandidates = reportProgramAliasCandidates;
+this.questionsForFormContext = questionsForFormContext;
+this.notificationPolicyForSession = notificationPolicyForSession;
+this.usePolicyRows = function (rows) {
+  const map = getIndexMap(HEADERS.Program_Settings);
+  const out = {};
+  rows.forEach(r => { out[notificationProgramKey(r[map['Event']], r[map['Location']])] = r; });
+  __notificationPolicyRowsCache = out;
+  __programAliasIndex = undefined;
+};
+this.drainAdminDigest = function () { const d = __adminDigest; __adminDigest = null; return d || {}; };
+this.SESSION_HEADERS = HEADERS.All_Program_Sessions;
 `, sandbox);
 
 const headers = sandbox.HEADERS.Program_Settings;
@@ -124,6 +139,83 @@ sandbox.invalidateNotificationPolicyCache();
 check('invalidateNotificationPolicyCache() drops the alias memo too', sandbox.peekAliasIndex(), undefined);
 check('with no workbook, no alias applies and nothing throws',
   sandbox.leaderProgramKey('Medicare Counseling (by appt.)', 'Ashbridge'), 'medicare counseling (by appt.)|ashbridge');
+
+console.log('a session title finds its program\'s settings row');
+sandbox.useAliasRows([settingsRow('Medicare Counseling', 'Ashbridge', 'Medicare Counseling (by appt.)')]);
+check('the alias keys to the program\'s row',
+  sandbox.programSettingsKey('Medicare Counseling (by appt.)', 'Ashbridge'), 'medicare counseling|ashbridge');
+check('a status prefix does too',
+  sandbox.programSettingsKey("CANCELLED DUE TO ILLNESS:T'ai Chi 1", 'Ashbridge'), "t'ai chi 1|ashbridge");
+check('a plain title is unchanged',
+  sandbox.programSettingsKey('Knit & Chat', 'Ashbridge'), 'knit & chat|ashbridge');
+
+console.log('the aliases come off the notification read, not a second one');
+{
+  const reminding = settingsRow('Medicare Counseling', 'Ashbridge', 'Medicare Counseling (by appt.)');
+  reminding[col('Other_Reminders')] = '7';
+  sandbox.usePolicyRows([reminding]);
+  const idx = sandbox.canonicalProgramTitle('Medicare Counseling (by appt.)', 'Ashbridge');
+  check('the memoized policy rows supply the aliases', idx, 'Medicare Counseling');
+  const policy = sandbox.notificationPolicyForSession({ title: 'Medicare Counseling (by appt.)', location: 'Ashbridge' });
+  // The row asks for a reminder 7 days out; a session that missed its row
+  // would get the built-in default, which sends nothing.
+  check('a session under the alias reads its program\'s row', policy.remind, true);
+  sandbox.forgetAliases();
+  sandbox.invalidateNotificationPolicyCache();
+}
+
+console.log('Program_Questions reach a form that only carries the alias');
+{
+  const idx = sandbox.buildProgramAliasIndex([
+    settingsRow('Medicare Counseling', 'Ashbridge', 'Medicare Counseling (by appt.)')
+  ], headers);
+  sandbox.useAliasRows([settingsRow('Medicare Counseling', 'Ashbridge', 'Medicare Counseling (by appt.)')]);
+  check('titles gain the title they are filed under',
+    sandbox.programTitlesWithCanonical(['Medicare Counseling (by appt.)'], ['Ashbridge'], idx),
+    ['Medicare Counseling (by appt.)', 'Medicare Counseling']);
+  const specs = [{ program: 'Medicare Counseling', location: '', keywords: [] }];
+  check('a question aimed at the program is asked',
+    sandbox.questionsForFormContext(specs, { titles: ['Medicare Counseling (by appt.)'], locations: ['Ashbridge'] }).length, 1);
+  check('but not at a building where it is no alias',
+    sandbox.questionsForFormContext(specs, { titles: ['Medicare Counseling (by appt.)'], locations: ['Narberth'] }).length, 0);
+  sandbox.forgetAliases();
+}
+
+console.log('the digest suggests, narrowly');
+{
+  const sh = sandbox.SESSION_HEADERS;
+  const at = name => sh.indexOf(name);
+  const session = (title, location, formId, date) => {
+    const row = new Array(sh.length).fill('');
+    row[at('Clean_Title')] = title; row[at('Location')] = location;
+    row[at('Form_ID')] = formId; row[at('Event_Date')] = date || new Date(2099, 0, 5);
+    row[at('Event_ID')] = 'e-' + title + '-' + location;
+    return row;
+  };
+  const none = { aliases: {}, ambiguous: [] };
+  const rows = [
+    session('Medicare Counseling', 'Ashbridge', 'f1'),
+    session('Medicare Counseling (by appt.)', 'Ashbridge', 'f1'),
+    session('Advanced Mah Jongg', 'Ashbridge', 'f2'),
+    session('Mah Jongg Free Play (Experienced only)', 'Ashbridge', 'f2'),
+    session('Medicare Counseling (by appt.)', 'Narberth', 'f3'),
+    session('Knit & Chat', 'Ashbridge', 'f4', new Date(2000, 0, 1)),
+    session('Knit & Chat with Sue', 'Ashbridge', 'f4', new Date(2000, 0, 1))
+  ];
+  const found = sandbox.findProgramAliasCandidates(rows, none, '2026-11-19');
+  check('one title plus a qualifier on one form is suggested, shorter as the program',
+    found.map(c => [c.location, c.program, c.alias]),
+    [['Ashbridge', 'Medicare Counseling', 'Medicare Counseling (by appt.)']]);
+  const done = sandbox.buildProgramAliasIndex([
+    settingsRow('Medicare Counseling', 'Ashbridge', 'Medicare Counseling (by appt.)')], headers);
+  check('an alias already listed is not suggested again',
+    sandbox.findProgramAliasCandidates(rows, done, '2026-11-19').length, 0);
+  sandbox.drainAdminDigest();
+  check('each suggestion is one digest line', sandbox.reportProgramAliasCandidates(rows, none, '2026-11-19'), 1);
+  const digest = sandbox.drainAdminDigest();
+  const lines = digest['Titles that may be one program'] || [];
+  check('naming the column to type it in', /Also_Known_As/.test(lines[0] || ''), true);
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
