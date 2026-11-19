@@ -33,6 +33,19 @@
 //   rows differ" is not something anybody can act on and "Meals_Ordered says 2
 //   and the tab says 4" is.
 //
+// AND A THIRD SIDE, read only to keep bucket two honest: Deleted_Event_Triage.
+// When a session's calendar event goes, moveRegistrantsToTriage() (26) moves
+// its rows off All_Registrants and onto triage, and appends nothing to the
+// ledger — so every one of them used to land in bucket two, and by November
+// 2026 they were nearly nine in ten of the 1,200 the digest called missing.
+// A triaged row is not lost: it is on a tab, with a note asking a person to
+// confirm it. So a registration the fold holds and the tab does not, but
+// triage DOES, is reported as ON TRIAGE and kept out of the 🚨 count. Only
+// the ones dated today onward reach the digest, because those are the people
+// on no roster for a session still ahead; the rest is history the triage tab
+// already shows. A triage tab that could not be read is said, and its rows
+// fall back into bucket two for that run rather than vanishing from it.
+//
 // IT IS READ-ONLY AND IT NEVER THROWS. It runs at the end of a sync that has
 // already done everything that matters, and a verifier that took the sync down
 // with it would be a diagnostic causing the fault it exists to report. Every
@@ -100,10 +113,27 @@ const LEDGER_VERIFY_MAX_LISTED = 25;
 const LEDGER_VERIFY_DIGEST_SECTION = 'Registration ledger';
 
 /**
+ * The statuses of somebody still expecting a seat — a Cancelled row parked on
+ * triage is nobody's problem, and a blank reads as the fold's own default.
+ * Words from PROGRAM_STATUS_OPTIONS (02), spelled out here because this file's
+ * constants stand alone (see LOAD ORDER above).
+ */
+const LEDGER_VERIFY_HOLDING_STATUSES = ['Active', 'Waitlisted', ''];
+
+/** How many programs the "on triage, still ahead" line names before it says "and N more". */
+const LEDGER_VERIFY_TRIAGE_PROGRAMS_LISTED = 15;
+
+/**
  * THE COMPARISON. Returns a plain object and writes nothing.
  *
- *   { ok, checked, folded, missingFromFold, missingFromTab, disagreeing,
- *     problems, skipped }
+ *   { ok, checked, folded, missingFromFold, missingFromTab, onTriage,
+ *     disagreeing, problems, skipped }
+ *
+ * `onTriage` is the part of "in the fold, not on the tab" that is on
+ * Deleted_Event_Triage instead: accounted for, so NOT in missingFromTab. Each
+ * carries `dateKey`, `when` ('future' — today included — 'past' or
+ * 'undated') and the fold's `status`, so the digest can name the ones still
+ * ahead.
  *
  * `ok` is false only when a side could not be read at all — an empty bucket is
  * a good answer, an unread side is not one.
@@ -141,10 +171,21 @@ function verifyLedgerAgainstTab() {
   if (!folded || !tabRows) {
     return {
       ok: false, checked: 0, folded: 0,
-      missingFromFold: [], missingFromTab: [], disagreeing: [],
+      missingFromFold: [], missingFromTab: [], onTriage: [], disagreeing: [],
       problems: folded ? folded.problems : [], skipped: skipped
     };
   }
+
+  // The third side. Guarded on its own and NOT fatal: without it the check is
+  // exactly what it was before triage was read, which is a worse answer and
+  // still an answer — so it is said, and the run goes on.
+  let onTriageIndex = {};
+  try {
+    onTriageIndex = ledgerVerifyTriageIndex_(readLedgerVerifyTriageRows_());
+  } catch (err) {
+    skipped.push(`${SHEET_NAMES.TRIAGE} could not be read (${err}), so rows parked there are counted as missing this run`);
+  }
+  const todayKey = formatDateKey(new Date());
 
   const byKeyOnTab = {};
   tabRows.forEach(row => {
@@ -165,6 +206,7 @@ function verifyLedgerAgainstTab() {
 
   const missingFromFold = [];
   const missingFromTab = [];
+  const onTriage = [];
   const disagreeing = [];
 
   Object.keys(byKeyOnTab).forEach(key => {
@@ -182,7 +224,20 @@ function verifyLedgerAgainstTab() {
 
   Object.keys(byKeyInFold).forEach(key => {
     if (byKeyOnTab[key] !== undefined) return;
-    missingFromTab.push(describeLedgerVerifyRow_(byKeyInFold[key], map));
+    const foldRow = byKeyInFold[key];
+    const described = describeLedgerVerifyRow_(foldRow, map);
+    if (onTriageIndex[key] === undefined) {
+      missingFromTab.push(described);
+      return;
+    }
+    const dateKey = ledgerVerifyDateKey_(foldRow[map['Event_Date']]);
+    onTriage.push(Object.assign(described, {
+      event: String(foldRow[map['Event']] || '').trim() || 'an untitled session',
+      location: String(foldRow[map['Location']] || '').trim(),
+      dateKey: dateKey,
+      when: !dateKey ? 'undated' : (dateKey >= todayKey ? 'future' : 'past'),
+      status: String(foldRow[map['Program_Status']] || '').trim()
+    }));
   });
 
   return {
@@ -191,6 +246,7 @@ function verifyLedgerAgainstTab() {
     folded: Object.keys(byKeyInFold).length,
     missingFromFold: missingFromFold,
     missingFromTab: missingFromTab,
+    onTriage: onTriage,
     disagreeing: disagreeing,
     problems: folded.problems || [],
     skipped: skipped,
@@ -200,6 +256,40 @@ function verifyLedgerAgainstTab() {
     // here still files nothing.
     checkpoint: ledgerVerifyCheckpoint_()
   };
+}
+
+/**
+ * Deleted_Event_Triage's rows, in its own layout. Its own function so the
+ * triage report (99zz) reads the tab the same way, and so a test can hand the
+ * verifier a triage side without standing up a sheet.
+ */
+function readLedgerVerifyTriageRows_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.TRIAGE);
+  return sheet ? getSectionedRows(sheet, HEADERS.Deleted_Event_Triage, 'Event_ID') : [];
+}
+
+/**
+ * { registrantTombstoneKey: triage row } — the same key the other two sides
+ * are matched on, built from triage's OWN column positions (it is a superset
+ * of the Registrants layout, not the same one). A Superseded row is out of
+ * scope here for the reason it is out of scope everywhere in this file.
+ */
+function ledgerVerifyTriageIndex_(triageRows) {
+  const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
+  const index = {};
+  (triageRows || []).forEach(row => {
+    if (isSupersededRegistrantRow(row, tMap)) return;
+    const key = registrantTombstoneKey(row[tMap['Event_ID']], row[tMap['Name']], row[tMap['Person_Type']]);
+    if (key && index[key] === undefined) index[key] = row;
+  });
+  return index;
+}
+
+/** A row's date as 'yyyy-MM-dd' — a folded row carries the Payload's string, a tab row a Date. */
+function ledgerVerifyDateKey_(raw) {
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
+  const date = coerceDate(raw);
+  return date ? formatDateKey(date) : '';
 }
 
 /** validateLedgerCheckpoint(), guarded — a cache check must never cost the verifier its answer. */
@@ -334,6 +424,32 @@ function describeLedgerVerification(result) {
     ledgerVerifyList_(result.missingFromTab.map(r => r.said)).forEach(line => lines.push(`   • ${line}`));
   }
 
+  // ON TRIAGE, STILL AHEAD. Not lost and not a writer fault, so no 🚨 — but
+  // these are people on no roster for a session that has not happened, which
+  // is worth a line every day until somebody restores or confirms them. Named
+  // by PROGRAM, not by person: the fix is per program (a rename, a move, a
+  // deleted series), and a list of four hundred names is a list nobody reads.
+  // Past-dated triage rows file nothing; the triage tab already shows them.
+  const ahead = (result.onTriage || []).filter(r => r.when === 'future' && LEDGER_VERIFY_HOLDING_STATUSES.indexOf(r.status) !== -1);
+  if (ahead.length) {
+    lines.push(`📥 ${ahead.length} registration(s) for today onward are on ${SHEET_NAMES.TRIAGE}, ` +
+      `not on ${SHEET_NAMES.REGISTRANT_DASH}. They are not lost — their session was renamed, moved or ` +
+      `taken off the calendar — but nobody on them is on a roster until the office restores or confirms them.`);
+    const byProgram = {};
+    const order = [];
+    ahead.forEach(r => {
+      const label = `${r.event}${r.location ? ` (${r.location})` : ''}`;
+      if (!byProgram[label]) { byProgram[label] = { count: 0, first: r.dateKey }; order.push(label); }
+      byProgram[label].count++;
+      if (r.dateKey && r.dateKey < byProgram[label].first) byProgram[label].first = r.dateKey;
+    });
+    order.sort((a, b) => byProgram[b].count - byProgram[a].count || (a < b ? -1 : 1));
+    const shown = order.slice(0, LEDGER_VERIFY_TRIAGE_PROGRAMS_LISTED).map(label =>
+      `${label}: ${byProgram[label].count}, from ${byProgram[label].first}`);
+    if (order.length > shown.length) shown.push(`…and ${order.length - shown.length} more program(s)`);
+    shown.forEach(line => lines.push(`   • ${line}`));
+  }
+
   if (result.missingFromFold.length) {
     lines.push(`${result.missingFromFold.length} row(s) on ${SHEET_NAMES.REGISTRANT_DASH} have no ` +
       `registration in the ledger. Until the one-time backfill has been run (Admin \u25b8 One-Time Jobs \u25b8 ` +
@@ -379,7 +495,9 @@ function showLedgerVerificationReport() {
     : `The ledger and ${SHEET_NAMES.REGISTRANT_DASH} agree on all ${result.checked} live registration(s).`;
   const checkpointLine = result.checkpoint && typeof describeLedgerCheckpointValidation_ === 'function'
     ? `\n\n${describeLedgerCheckpointValidation_(result.checkpoint)}` : '';
-  const text = `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.\n\n${body}${checkpointLine}`;
+  const parked = (result.onTriage || []).length;
+  const triageLine = parked ? ` ${parked} of the ledger's are on ${SHEET_NAMES.TRIAGE} instead, and count as accounted for.` : '';
+  const text = `${result.checked} row(s) on the tab, ${result.folded} registration(s) in the ledger.${triageLine}\n\n${body}${checkpointLine}`;
   log(`Ledger verification: ${body}`);
   presentReport_('Registration ledger vs the Registrants tab', text);
   return result;

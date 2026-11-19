@@ -64,13 +64,17 @@ this.breakVerifierSide = function (which) {
   if (which === 'ledger') readLedgerEntries = function () { throw new Error('busy'); };
   else getSectionedRows = function () { throw new Error('busy'); };
 };
+this.setTriageSide = function (rows) {
+  readLedgerVerifyTriageRows_ = function () { if (rows instanceof Error) throw rows; return rows; };
+};
 this.spoolNotes = function (sink) { spoolOfficeNote = function (s, m) { sink.push(m); return true; }; };
 `, sandbox, { filename: 'program.gs' });
 
 const {
   HEADERS, SHEET_NAMES, getIndexMap, LEDGER_KINDS, LEDGER_SOURCES, LEDGER_VERIFY_COLUMNS,
   makeLedgerEntry, ledgerPayloadFromRow, ledgerEntriesForExistingRow,
-  verifyLedgerAgainstTab, describeLedgerVerification, setVerifierSides, breakVerifierSide
+  verifyLedgerAgainstTab, describeLedgerVerification, setVerifierSides, breakVerifierSide,
+  setTriageSide
 } = sandbox;
 
 let failures = 0;
@@ -181,6 +185,86 @@ const textCount = tabRow({
 });
 setVerifierSides(joanEntries, [textCount]);
 check('"2" and 2 are not a disagreement', verifyLedgerAgainstTab().disagreeing.length, 0);
+
+// --- the triage tab: the third side ------------------------------------------
+//
+// A row moveRegistrantsToTriage() (26) took off the tab is on triage, with no
+// ledger entry saying so. It is NOT lost, and counting it in the 🚨 bucket is
+// how 1,100 parked rows came to bury 160 real ones. Triage has its OWN column
+// positions (a superset of the Registrants layout), so the key is read from
+// those — a test row built in the Registrants layout would not prove that.
+const TMAP = getIndexMap(HEADERS.Deleted_Event_Triage);
+function triageRow(fields) {
+  const row = new Array(HEADERS.Deleted_Event_Triage.length).fill('');
+  row[TMAP['Program_Status']] = 'Active';
+  row[TMAP['Person_Type']] = 'Registrant';
+  Object.keys(fields).forEach(h => { row[TMAP[h]] = fields[h]; });
+  return row;
+}
+check('triage really is laid out differently from the tab', TMAP['Event_ID'] !== MAP['Event_ID'], true);
+
+const aheadRow = fields => tabRow(Object.assign({
+  Event_ID: 'ev-2099', Event: 'Chair Yoga', Location: 'Narberth', Event_Date: new Date(2099, 0, 5)
+}, fields));
+const carol = aheadRow({ Name: 'Carol Ames' });
+const dave = aheadRow({ Name: 'Dave Ames', Program_Status: 'Cancelled' });
+const carolEntries = ledgerEntriesForExistingRow(carol, MAP);
+const daveEntries = ledgerEntriesForExistingRow(dave, MAP);
+const triaged = person => triageRow({
+  Name: person, Event_ID: 'ev-2099', Event: 'Chair Yoga', Location: 'Narberth',
+  Deleted_Event_Title: 'Chair Yoga', Deleted_Event_Location: 'Narberth'
+});
+
+setVerifierSides(joanEntries.concat(carolEntries), [joan]);
+setTriageSide([triaged('Carol Ames')]);
+result = verifyLedgerAgainstTab();
+check('a registration parked on triage is not counted as lost', result.missingFromTab.length, 0);
+check('it is counted as on triage instead', result.onTriage.map(r => r.name), ['Carol Ames']);
+check('dated, so the digest can tell ahead from history',
+  [result.onTriage[0].dateKey, result.onTriage[0].when], ['2099-01-05', 'future']);
+let triageLines = describeLedgerVerification(result);
+check('a seat still ahead on triage files ONE line and a program list, never the 🚨',
+  triageLines.map(l => l.slice(0, 2)), ['📥', '  ']);
+check('named by program and building, with the first date',
+  triageLines[1].trim(), '• Chair Yoga (Narberth): 1, from 2099-01-05');
+
+// The same person on triage, but for a date already gone: accounted for, and
+// history — the triage tab already shows it, so a clean run still files nothing.
+const pastCarol = tabRow({
+  Name: 'Carol Ames', Event_ID: 'ev-2020', Event: 'Chair Yoga', Location: 'Narberth',
+  Event_Date: new Date(2020, 0, 6)
+});
+setVerifierSides(ledgerEntriesForExistingRow(pastCarol, MAP), []);
+setTriageSide([triageRow({ Name: 'Carol Ames', Event_ID: 'ev-2020' })]);
+result = verifyLedgerAgainstTab();
+check('a past triaged row is on triage', [result.onTriage.length, result.onTriage[0].when], [1, 'past']);
+check('and files nothing', describeLedgerVerification(result), []);
+
+// A cancellation parked on triage is nobody waiting for a seat.
+setVerifierSides(daveEntries, []);
+setTriageSide([triaged('Dave Ames')]);
+result = verifyLedgerAgainstTab();
+check('a cancelled registration on triage is accounted for', result.onTriage.length, 1);
+check('and is not a seat anybody is waiting on', describeLedgerVerification(result), []);
+
+// Matched on the same key as the other two sides: a different person on the
+// same triaged session does not account for this one.
+setVerifierSides(carolEntries, []);
+setTriageSide([triaged('Somebody Else')]);
+result = verifyLedgerAgainstTab();
+check('only the same person on the same session counts', result.missingFromTab.map(r => r.name), ['Carol Ames']);
+
+// A triage tab that cannot be read costs the run its triage answer, not the
+// whole check: it says so, and the parked rows fall back into the lost bucket
+// rather than vanishing from every bucket.
+setVerifierSides(carolEntries, []);
+setTriageSide(new Error('busy'));
+result = verifyLedgerAgainstTab();
+check('an unreadable triage tab is not fatal', result.ok, true);
+check('the rows it would have held are counted as missing', result.missingFromTab.length, 1);
+triageLines = describeLedgerVerification(result);
+check('and the report says why first', triageLines[0].indexOf('Deleted_Event_Triage could not be read') !== -1, true);
+setTriageSide([]);
 
 // --- a side that could not be read -----------------------------------------
 //

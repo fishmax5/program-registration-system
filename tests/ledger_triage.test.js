@@ -34,6 +34,8 @@ this.describeLedgerTriage = describeLedgerTriage;
 this.readRegistrantSnapshots_ = readRegistrantSnapshots_;
 this.judgeAgainstSnapshots_ = judgeAgainstSnapshots_;
 this.parseSnapshotCsv_ = parseSnapshotCsv_;
+this.HEADERS_T = HEADERS.Deleted_Event_Triage;
+this.setTriage = function (rows) { readLedgerVerifyTriageRows_ = function () { return rows; }; };
 this.setSides = function (entries, rows) {
   readLedgerEntries = function () { return entries; };
   getSectionedRows = function () { return rows; };
@@ -99,6 +101,31 @@ const v = S.verifyLedgerAgainstTab();
 check('bucket sizes equal the verifier\'s',
   [a.missingFromTab.length, a.missingFromFold.length, a.disagreeing.length],
   [v.missingFromTab.length, v.missingFromFold.length, v.disagreeing.length]);
+
+// the triage tab: a registration parked there is its own bucket, in both files
+const TM = S.getIndexMap(S.HEADERS_T);
+const parked = new Array(S.HEADERS_T.length).fill('');
+parked[TM['Name']] = 'Future Fran'; parked[TM['Event_ID']] = 'e-fut'; parked[TM['Person_Type']] = 'Registrant';
+parked[TM['Program_Status']] = 'Active'; parked[TM['Deleted_Event_Title']] = 'Chair Yoga (old title)';
+parked[TM['Deleted_Event_Location']] = 'Narberth'; parked[TM['Flagged_Date']] = new Date(2026, 10, 3);
+const t = S.analyzeLedgerDivergence_(entries, rows, TODAY, [parked]);
+check('a triaged registration leaves the missing bucket', t.missingFromTab.map(f => f.name).sort(),
+  ['Club Cal', 'Lunch Lou', 'Past Pat']);
+check('and is on triage, with what triage called it',
+  t.onTriage.map(f => [f.name, f.when, f.triage.title, f.triage.location, f.triage.flagged]),
+  [['Future Fran', 'future', 'Chair Yoga (old title)', 'Narberth', '2026-11-03']]);
+S.setTriage([parked]);
+const vt = S.verifyLedgerAgainstTab();
+check('triage bucket sizes equal the verifier\'s',
+  [t.missingFromTab.length, t.onTriage.length, t.missingFromFold.length, t.disagreeing.length],
+  [vt.missingFromTab.length, vt.onTriage.length, vt.missingFromFold.length, vt.disagreeing.length]);
+const parkedText = S.describeLedgerTriage({ ok: true, skipped: [], analysis: t,
+  snapshotRead: { snapshots: [], found: 0, read: 0, skipped: [] }, futureMissing: [] });
+check('the report gives triage its own section',
+  parkedText.indexOf('=== ON DELETED_EVENT_TRIAGE INSTEAD (accounted for, on no roster): 1 (1 future-dated, 0 past, 0 undated) ===') !== -1, true);
+check('naming the program and what triage called it',
+  parkedText.indexOf('Chair Yoga (Ashbridge)  ←  triaged as "Chair Yoga (old title)"') !== -1, true);
+S.setTriage([]);
 
 // snapshots
 const csv = (header, lines) => [header].concat(lines).map(l => l.map(c => `"${c}"`).join(',')).join('\n');
