@@ -634,9 +634,16 @@ function removeProgramLeaderSheetRegistryEntry(programKey) {
   __leaderSheetRegistryDirty = true;
 }
 
-/** Program identity: title AND location, which is the privacy boundary — see the section header. */
+/**
+ * Program identity: title AND location, which is the privacy boundary — see the
+ * section header. The title is the one the program is FILED under at that
+ * building (canonicalProgramTitle, 99zzc): a title staff listed in the
+ * program's Also_Known_As, or one carrying a "CANCELLED…:" status word, files
+ * under the program's own name, so one program is one roster however many
+ * ways the calendar spells it. A title with no alias keys exactly as before.
+ */
 function leaderProgramKey(title, location) {
-  return `${normalizeNameKey(title)}|${normalizeNameKey(location)}`;
+  return `${normalizeNameKey(canonicalProgramTitle(title, location))}|${normalizeNameKey(location)}`;
 }
 
 /**
@@ -1305,6 +1312,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   let unchanged = 0;
   let keptStranded = 0;
   let quarantined = 0;
+  let mergedAway = 0;
   let visited = 0;
   for (let i = 0; i < order.length; i++) {
     // At least one sheet per call, so a follow-up run that starts late still
@@ -1334,6 +1342,16 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     renewWorkbookLease();
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
+    // A SHEET WHOSE PROGRAM IS NOW FILED UNDER ANOTHER NAME (99zzc): its title
+    // was listed in another program's Also_Known_As, or carries a status
+    // prefix. Its sessions' rows now reach that program's sheet, so this one
+    // would come out empty — and an empty write over the leader's last roster
+    // is the worse answer. Left exactly as last written; the pull at the head
+    // of the sync still reads any marks made on it.
+    if (programTitleIsFiledElsewhere(entry.title, entry.location)) {
+      mergedAway++;
+      return;
+    }
     // A program delivered on the web roster page (99zn): its sheet is cut
     // over (frozen after one last read) rather than rewritten, and one that
     // came back from the page is un-frozen here so the write below redraws it.
@@ -1509,6 +1527,10 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   if (keptStranded > 0) {
     log(`Program registrant sheets: kept the last roster on ${keptStranded} sheet(s) whose registrants ` +
       `matched no session on the table, rather than writing them empty.`);
+  }
+  if (mergedAway > 0) {
+    log(`Program registrant sheets: left ${mergedAway} sheet(s) as last written — their program is now ` +
+      `filed under another name (Program_Settings ▸ Also_Known_As), whose sheet carries its sessions.`);
   }
   return pushed;
 }
@@ -2402,8 +2424,11 @@ function openUpAllFormSharing() {
  */
 function createProgramLeaderSheet(programValue) {
   const parts = String(programValue || '').split('|||');
-  const title = String(parts[0] || '').trim();
   const location = String(parts[1] || '').trim();
+  // The program's own name, not the one the earliest session happened to
+  // carry: a sheet made from an alias's session is still that program's sheet
+  // (99zzc), and its file name and heading should say so.
+  const title = canonicalProgramTitle(String(parts[0] || '').trim(), location);
   if (!title || !location) throw new Error('Pick a program first.');
 
   const programKey = leaderProgramKey(title, location);
@@ -2756,7 +2781,9 @@ function listProgramLeaderProgramOptions() {
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
     const key = leaderProgramKey(title, location);
-    if (!byKey[key]) byKey[key] = { key, title, location, sessions: 0, nextDate: null };
+    if (!byKey[key]) {
+      byKey[key] = { key, title: canonicalProgramTitle(title, location), location, sessions: 0, nextDate: null };
+    }
     byKey[key].sessions++;
     if (!byKey[key].nextDate || date < byKey[key].nextDate) byKey[key].nextDate = date;
   });

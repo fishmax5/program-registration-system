@@ -522,4 +522,37 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'and not again on the next hour');
 }
 
+// ---------------------------------------------------------------------------
+// 8. A SHEET WHOSE PROGRAM IS NOW FILED UNDER ANOTHER NAME IS LEFT ALONE (99zzc)
+//
+// A registry entry made for "CANCELLED DUE TO ILLNESS:T'ai Chi 1" (or for a
+// title staff have since listed in another program's Also_Known_As) has no
+// rows of its own any more — they reach the program's own sheet. Writing it
+// would write "nobody has signed up" over the leader's last roster, so it is
+// not opened at all, while the program's own sheet is written as ever.
+// ---------------------------------------------------------------------------
+{
+  const OWN = { title: "T'ai Chi 1", location: 'Ashbridge' };
+  const STRAY = { title: "CANCELLED DUE TO ILLNESS:T'ai Chi 1", location: 'Ashbridge' };
+  const OWN_KEY = "t'ai chi 1|ashbridge";
+  const STRAY_KEY = "cancelled due to illness:t'ai chi 1|ashbridge";
+  const rows = rosterRows(1, 2);
+  const sheet = makeCountingSheet([], 'Sign_Up_Sheet');
+  const openedIds = [];
+  sandbox.__clearSpreadsheetHandles();
+  sandbox.SpreadsheetApp.openById = id => {
+    openedIds.push(id);
+    return { getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet] };
+  };
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [OWN_KEY]: rows }));
+  sandbox.__setRegistry({
+    [OWN_KEY]: Object.assign({}, OWN, { fileId: 'F_OWN' }),
+    [STRAY_KEY]: Object.assign({}, STRAY, { fileId: 'F_STRAY' })
+  });
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1, 'only the program\'s own sheet is written');
+  assert.ok(openedIds.indexOf('F_STRAY') === -1, 'the merged-away sheet is never opened');
+  assert.ok(openedIds.indexOf('F_OWN') !== -1, 'the program\'s own sheet is');
+}
+
 console.log('✅ leader_sheet_push.test.js passed');

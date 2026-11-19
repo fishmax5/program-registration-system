@@ -199,6 +199,9 @@ let __notificationPolicyRowsCache = null;
 
 function invalidateNotificationPolicyCache() {
   __notificationPolicyRowsCache = null;
+  // The same tab feeds the program aliases (99zzc); a rewrite of it is a
+  // rewrite of both. Guarded for a deployment without 99zzc.
+  try { invalidateProgramAliasIndex(); } catch (err) { /* nothing to forget */ }
 }
 
 function readNotificationPolicyRows() {
