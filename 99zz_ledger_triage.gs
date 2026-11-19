@@ -38,13 +38,19 @@
 //                   "nothing found" and "nothing looked at" are different
 //                   answers (99n's rule, 32's, 51's).
 //
-// READ-ONLY, AND IT CHANGES NO WRITER. It does not touch 99n — the verifier's
-// buckets, its digest lines and its tests are exactly what they were. This
-// file repeats 99n's matching (registrantTombstoneKey, the same columns, the
+// READ-ONLY, AND IT CHANGES NO WRITER. This file repeats 99n's matching (registrantTombstoneKey, the same columns, the
 // same value wear-down) rather than editing it, because the verifier needs
 // per-finding detail (keys, dates, columns as names) that its own result
 // deliberately does not carry. Where the two could drift, tests/ledger_triage
 // asserts the bucket SIZES equal verifyLedgerAgainstTab()'s on the same input.
+//
+// THE TRIAGE TAB IS THE THIRD SIDE HERE TOO (November 2026). 99n now counts a
+// registration that is on Deleted_Event_Triage as accounted for rather than
+// missing, and so does this: such a finding goes in its own `onTriage` bucket,
+// never in missingFromTab, so the snapshot check below is spent on rows that
+// could really be lost. The triage side is read through 99n's own reader and
+// index (readLedgerVerifyTriageRows_, ledgerVerifyTriageIndex_) so the two
+// files cannot come to disagree about what "on triage" means.
 //
 // NEVER THROWS, bounded in time. Every stage is guarded and a stage that could
 // not run is named. The snapshot read is capped (LEDGER_TRIAGE_SNAPSHOT_MAX_FILES
@@ -119,8 +125,13 @@ function ledgerTriageOrigin_(eventId, sources, formSource) {
  * THE PURE HALF. Same matching as verifyLedgerAgainstTab() (99n), keeping what
  * that one drops.
  *
- *   analyzeLedgerDivergence_(entries, tabRows, todayKey, now?)
- *     -> { checked, folded, missingFromTab[], missingFromFold[], disagreeing[], problems }
+ *   analyzeLedgerDivergence_(entries, tabRows, todayKey, triageRows?)
+ *     -> { checked, folded, missingFromTab[], missingFromFold[], onTriage[], disagreeing[], problems }
+ *
+ * `triageRows` are Deleted_Event_Triage's rows in that tab's own layout; a
+ * registration the tab lacks and triage holds is an `onTriage` finding, which
+ * also carries `triage` { title, location, flagged } — what the session was
+ * called, and where, when it went.
  *
  * Every finding: { bucket, key, name, event, location, personType, dateKey, when,
  *   origin, lastSource, lastKind, kinds[], sources[], firstEntryAt, status,
@@ -129,7 +140,7 @@ function ledgerTriageOrigin_(eventId, sources, formSource) {
  * The ledger's side is read per registration from the SORTED entries, because
  * the last entry is the last word and the fold's own order is what "last" means.
  */
-function analyzeLedgerDivergence_(entries, tabRows, todayKey) {
+function analyzeLedgerDivergence_(entries, tabRows, todayKey, triageRows) {
   const headers = HEADERS.All_Registrants;
   const map = getIndexMap(headers);
   const sorted = sortLedgerEntries_(entries);
@@ -188,14 +199,29 @@ function analyzeLedgerDivergence_(entries, tabRows, todayKey) {
     };
   }
 
+  const onTriageIndex = ledgerVerifyTriageIndex_(triageRows || []);
+  const tMap = getIndexMap(HEADERS.Deleted_Event_Triage);
+
   const missingFromTab = [];
   const missingFromFold = [];
+  const onTriage = [];
   const disagreeing = [];
 
   Object.keys(inFold).forEach(key => {
     if (onTab[key] !== undefined) return;
     const row = inFold[key];
-    missingFromTab.push(finding('missingFromTab', key, row, folded.index[key]));
+    const triageRow = onTriageIndex[key];
+    if (triageRow === undefined) {
+      missingFromTab.push(finding('missingFromTab', key, row, folded.index[key]));
+      return;
+    }
+    const f = finding('onTriage', key, row, folded.index[key]);
+    f.triage = {
+      title: String(triageRow[tMap['Deleted_Event_Title']] || '').trim(),
+      location: String(triageRow[tMap['Deleted_Event_Location']] || '').trim(),
+      flagged: ledgerTriageDateKey_(triageRow[tMap['Flagged_Date']])
+    };
+    onTriage.push(f);
   });
   Object.keys(onTab).forEach(key => {
     const tabRow = onTab[key];
@@ -226,6 +252,7 @@ function analyzeLedgerDivergence_(entries, tabRows, todayKey) {
     folded: Object.keys(inFold).length,
     missingFromTab: missingFromTab,
     missingFromFold: missingFromFold,
+    onTriage: onTriage,
     disagreeing: disagreeing,
     problems: folded.problems || []
   };
@@ -378,9 +405,16 @@ function triageLedgerFindings() {
   } catch (err) { skipped.push(`${SHEET_NAMES.REGISTRANT_DASH} could not be read (${err})`); }
   if (!entries || !tabRows) return { ok: false, skipped: skipped };
 
+  // Not fatal, as in 99n: without it the triaged rows are simply counted as
+  // missing again, and the report says why.
+  let triageRows = [];
+  try { triageRows = readLedgerVerifyTriageRows_(); } catch (err) {
+    skipped.push(`${SHEET_NAMES.TRIAGE} could not be read (${err}), so rows parked there are counted as missing`);
+  }
+
   let analysis;
   try {
-    analysis = analyzeLedgerDivergence_(entries, tabRows, formatDateKey(new Date()));
+    analysis = analyzeLedgerDivergence_(entries, tabRows, formatDateKey(new Date()), triageRows);
   } catch (err) {
     return { ok: false, skipped: skipped.concat([`the comparison failed (${err})`]) };
   }
@@ -455,6 +489,21 @@ function describeLedgerTriage(result) {
       lines.push(...ledgerTriageTallyLines_(ledgerTriageTally_(part, f => `${f.lastSource} / ${f.lastKind || '—'}`)));
     });
   });
+
+  // ON TRIAGE — accounted for, not lost. Said apart from the two above so a
+  // count of real gaps is never inflated by a renamed or moved program again,
+  // and the future half is drawn by program, because that is the unit the
+  // office fixes it in.
+  const parked = a.onTriage || [];
+  lines.push('', `=== ON ${SHEET_NAMES.TRIAGE.toUpperCase()} INSTEAD (accounted for, on no roster): ${parked.length} (${split(parked)}) ===`);
+  const parkedAhead = parked.filter(f => f.when === 'future' && LEDGER_VERIFY_HOLDING_STATUSES.indexOf(f.status) !== -1);
+  if (parkedAhead.length) {
+    lines.push(`-- today onward, still holding a seat: ${parkedAhead.length} --`);
+    lines.push('  by program (as the ledger has it) and the session triage says went:');
+    lines.push(...ledgerTriageTallyLines_(ledgerTriageTally_(parkedAhead, f =>
+      `${f.event}${f.location ? ` (${f.location})` : ''}` +
+      `${f.triage && f.triage.title && f.triage.title !== f.event ? `  ←  triaged as "${f.triage.title}"` : ''}`)).slice(0, 20));
+  }
 
   lines.push('', `=== BOTH, DISAGREEING: ${a.disagreeing.length} (${split(a.disagreeing)}) ===`);
   if (a.disagreeing.length) {
