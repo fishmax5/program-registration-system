@@ -26,20 +26,19 @@
 //     forms folder rather than loose in My Drive, so a year of them is one
 //     place you can sort by name and find any day.
 //
-// LUNCH COMES FIRST, because lunch is what the sheet is for. The document is
-// two sections, in this order:
+// LUNCH ONLY (Nov 2026). The office uses this sheet for lunch and nothing
+// else — programs are checked in on the door app (72–74) and the leaders'
+// rosters (46 / 99zn) — so a sheet is built only for a place and day with a
+// CATERED LUNCH on Lunch_Schedule, and it holds one list: the people with a
+// meal ordered. This is the list the kitchen hands food against, and the one
+// somebody carries to the serving table. Nothing on it is there for any other
+// reason.
 //
-//   1. LUNCH — only the people with a meal ordered. This is the list the
-//      kitchen hands food against, and the one somebody carries to the serving
-//      table. Nothing on it is there for any other reason.
-//   2. EVERYONE — the full roster for that place and day, lunch or not, so the
-//      desk can still tick off an arrival who is only here for the program.
-//
-// (Google Docs TABS cannot be created programmatically — the Document service
-// can read `getTabs()` and switch between them, but nothing in Apps Script or
-// the Docs API adds one. So the two "tabs" are two page-broken sections with
-// their own headings, which is what a person reading or printing this actually
-// wants anyway: one file, lunch on page one.)
+// It used to be two sections — this lunch page, then an EVERYONE page with the
+// whole day's roster — and it was built for every day with a program on it,
+// lunch or not. Neither was used, and the everyone table was most of the Doc
+// writing the 06:00 run did. Docs built before then keep their second page
+// until that day is built again; nothing is deleted.
 //
 // THE COLUMNS are the ones the desk uses, left to right:
 //
@@ -68,20 +67,11 @@
 // change where it goes, and colouring them would colour half the sheet and
 // cost the two washes their meaning.
 //
-// IT IS A SHEET FOR A DAY AND A PLACE, NOT FOR A PROGRAM. The desk is one desk:
-// whoever is on it that morning signs in everybody who walks up, whichever
-// program they came for, and hands out lunch to the subset who ordered it. A
-// per-program sheet would mean the same person holding three sheets and
-// guessing which one a given arrival is on — so the picker asks for a LOCATION
-// and a DATE, and the roster is every registrant at that place on that day
-// across every program, with a Program column saying which is which.
-//
-// EVERYONE APPEARS ON SECTION 2, INCLUDING THE PEOPLE NOT EATING, and a
-// registrant with no lunch is printed with a literal 0 in each of the four meal
-// columns — already answered, nothing to collect, and it transcribes back as
-// the zero it is. A blank box is indistinguishable from a box nobody has filled
-// in yet; at the end of service that is the difference between "ordered
-// nothing" and "we forgot to ask".
+// IT IS A SHEET FOR A DAY AND A PLACE, NOT FOR A PROGRAM. A person may have
+// ordered their lunch on any program's form, so the lunch list is everyone at
+// that place on that day with a meal ordered, across every program, with a
+// Program column saying which form it came from — and the picker asks for a
+// LOCATION and a (lunch) DATE.
 //
 // ONE PERSON IS ONE ROW, AGGRESSIVELY. See dedupeSignInEntries() for the whole
 // rule, but the short version is that the desk is looking up an ARRIVAL, not a
@@ -204,7 +194,7 @@ const SIGN_IN_SPECIAL_RE =
 function showSignInSheetDialog() {
   const options = listSignInSheetOptions();
   if (options.length === 0) {
-    toastIfPossible('Nothing to build yet — no sessions or lunch dates in the next few weeks. Run Sync Cal first.');
+    toastIfPossible('Nothing to build yet — no catered lunch on Lunch_Schedule in the next few weeks.');
     return;
   }
   const html = HtmlService.createHtmlOutput(buildSignInSheetHtml(options))
@@ -214,14 +204,15 @@ function showSignInSheetDialog() {
 }
 
 /**
- * Every location+date worth offering: every session on the dashboard and every
- * catered day on the menu, within a window either side of today.
+ * Every location+date worth offering: every CATERED lunch day on
+ * Lunch_Schedule, within a window either side of today.
  *
- * Both sources, because the two answer different questions — the dashboard
- * knows where people are expected, the menu knows where food is being served,
- * and a sign-in sheet is wanted for either. Yesterday and the day before are
- * included on purpose: the commonest reason to build one late is that the
- * original was never opened.
+ * Lunch only (Nov 2026). This used to offer every session on the program
+ * dashboard as well, so the 06:00 run built a Doc for every building with a
+ * program on it, lunch or not, and nobody used those. A day with no catered
+ * lunch is no longer offered and no longer built. Yesterday and the days
+ * before are still included on purpose: the commonest reason to build one late
+ * is that the original was never opened.
  *
  * Returned as one flat list of entries rather than a location -> dates map:
  * the dialog needs the locations for one dropdown and the dates for the other,
@@ -237,51 +228,37 @@ const SIGN_IN_SHEET_MAX_OPTIONS = 400;
 function listSignInSheetOptions() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const today = parseDateKey(formatDateKey(new Date()));
+  let lunchRows = [];
+  try {
+    const menu = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
+    if (menu) lunchRows = readLunchScheduleRows(menu);
+  } catch (err) {
+    log(`ℹ️ Sign-in sheet: could not read ${SHEET_NAMES.LUNCH_SCHEDULE} (${err}).`);
+  }
+  return buildSignInSheetOptions_(lunchRows, getIndexMap(HEADERS.Lunch_Schedule), today);
+}
+
+/**
+ * The pure half of listSignInSheetOptions(): Lunch_Schedule rows in, dialog
+ * options out. Only a row whose Type is one of CATERED_LUNCH_TYPES counts —
+ * a "Not Serving" day, or a day the menu simply lists, gets no sheet.
+ */
+function buildSignInSheetOptions_(lunchRows, map, today) {
   const from = formatDateKey(new Date(today.getTime() - SIGN_IN_SHEET_WINDOW_BACK_DAYS * 86400000));
   const to = formatDateKey(new Date(today.getTime() + SIGN_IN_SHEET_WINDOW_FORWARD_DAYS * 86400000));
 
   const byKey = {};
-  const note = (date, location, programTitle, catered) => {
-    const d = coerceDate(date);
-    const loc = String(location || '').trim();
+  (lunchRows || []).forEach(row => {
+    const type = String(row[map['Type']] || '').trim();
+    if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
+    const d = coerceDate(row[map['Event_Date']]);
+    const loc = String(row[map['Location']] || '').trim();
     if (!d || !loc) return;
     const dateKey = formatDateKey(d);
     if (dateKey < from || dateKey > to) return;
     const key = `${dateKey}|${loc}`;
-    if (!byKey[key]) {
-      byKey[key] = { dateKey, location: loc, programs: [], catered: false, distance: Math.abs(d - today) };
-    }
-    if (catered) byKey[key].catered = true;
-    const title = String(programTitle || '').trim();
-    if (title && byKey[key].programs.indexOf(title) === -1) byKey[key].programs.push(title);
-  };
-
-  try {
-    const dash = ss.getSheetByName(SHEET_NAMES.PROGRAM_DASHBOARD);
-    if (dash) {
-      const headers = HEADERS.All_Program_Sessions;
-      const map = getIndexMap(headers);
-      getSectionedRows(dash, headers, 'Event_ID').forEach(row => {
-        note(row[map['Event_Date']], row[map['Location']], row[map['Clean_Title']], false);
-      });
-    }
-  } catch (err) {
-    log(`ℹ️ Sign-in sheet: could not read the program dashboard (${err}).`);
-  }
-
-  try {
-    const menu = ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE);
-    if (menu) {
-      const map = getIndexMap(HEADERS.Lunch_Schedule);
-      readLunchScheduleRows(menu).forEach(row => {
-        const type = String(row[map['Type']] || '').trim();
-        if (CATERED_LUNCH_TYPES.indexOf(type) === -1) return;
-        note(row[map['Event_Date']], row[map['Location']], '', true);
-      });
-    }
-  } catch (err) {
-    log(`ℹ️ Sign-in sheet: could not read ${SHEET_NAMES.LUNCH_SCHEDULE} (${err}).`);
-  }
+    if (!byKey[key]) byKey[key] = { dateKey, location: loc, distance: Math.abs(d - today) };
+  });
 
   return Object.keys(byKey)
     .map(k => byKey[k])
@@ -296,11 +273,7 @@ function listSignInSheetOptions() {
       dateKey: entry.dateKey,
       location: entry.location,
       distance: entry.distance,
-      label: formatDateLabel(parseDateKey(entry.dateKey)) +
-        (entry.catered ? '  •  lunch served' : '') +
-        (entry.programs.length > 0
-          ? `  •  ${entry.programs.slice(0, 3).join(', ')}${entry.programs.length > 3 ? `, +${entry.programs.length - 3} more` : ''}`
-          : '  •  no program scheduled')
+      label: formatDateLabel(parseDateKey(entry.dateKey)) + '  •  lunch served'
     }));
 }
 
@@ -351,9 +324,9 @@ function buildSignInSheetHtml(options) {
   .ok { color: #188038; } .err { color: #C5221F; }
   a { color: #1155CC; }
 </style>
-<h3>Sign-in sheet for a day</h3>
+<h3>Lunch sign-in sheet for a day</h3>
 <p class="hint">
-  A live Google Doc for one place and one day: lunch on page one, everybody on page two.
+  A live Google Doc for one place and one lunch day: everyone with a meal ordered.
   Take-out rows are washed yellow, fridge and other special handling purple.
   Building the same day again reuses the same document, so the link never goes stale.
 </p>
@@ -387,7 +360,7 @@ function buildSignInSheetHtml(options) {
     });
     if (best) sel.value = best.value; // land on the nearest day, not the earliest
     document.getElementById('go').disabled = mine.length === 0;
-    if (mine.length === 0) say('Nothing scheduled at this location in the next few weeks.', 'err');
+    if (mine.length === 0) say('No catered lunch at this location in the next few weeks.', 'err');
     else say('', '');
   }
 
@@ -441,9 +414,9 @@ function createSignInSheetDoc(sessionValue, include) {
   if (!dateKey || !location) return { url: '', message: '⚠️ Pick a date and location first.' };
 
   const data = collectSignInSheetData(dateKey, location, include === 'all');
-  if (data.rows.length === 0 && !data.meal) {
-    return { url: '', message: `⚠️ Nothing registered for ${formatDateLabel(parseDateKey(dateKey))} at ${location}, ` +
-      `and no lunch on the menu — there is nothing to put on a sheet.` };
+  if (!signInSheetWorthBuilding_(data)) {
+    return { url: '', message: `⚠️ No catered lunch and no meals ordered for ${formatDateLabel(parseDateKey(dateKey))} ` +
+      `at ${location} — there is nothing to put on a sheet.` };
   }
 
   const file = renderSignInSheetDoc(data);
@@ -454,8 +427,7 @@ function createSignInSheetDoc(sessionValue, include) {
   // rather than making a second one.
   recordSignInSheetFile(dateKey, location, file);
   flushPersistentRegistries();
-  const message = `✅ ${data.lunchRows.length} on the lunch list (${data.lunchCount} meal(s)), ` +
-    `${data.rows.length} on the full roster` +
+  const message = `✅ ${data.lunchRows.length} on the lunch list (${data.lunchCount} meal(s))` +
     (data.mergedAway > 0 ? `, ${data.mergedAway} duplicate row(s) merged` : '') +
     // NOBODY WAS MERGED ON A PHONE NUMBER — said out loud, because the version
     // that did merge on one said nothing at all, and the missing people were
@@ -464,7 +436,7 @@ function createSignInSheetDoc(sessionValue, include) {
       ? `, ${data.contactSuggestions.length} shared phone number(s) left as separate people`
       : '') +
     (data.meal ? `. Lunch: ${data.meal.shorthand || data.meal.description || data.meal.type}` : '') + '.';
-  log(`createSignInSheetDoc: wrote "${file.getName()}" — ${data.rows.length} person(s), ` +
+  log(`createSignInSheetDoc: wrote "${file.getName()}" — ` +
     `${data.lunchRows.length} eating, ${data.lunchCount} meal(s), ${data.mergedAway} duplicate(s) merged, ` +
     `${(data.contactSuggestions || []).length} shared-number group(s) kept apart` +
     ((data.contactSuggestions || []).length > 0
@@ -475,7 +447,7 @@ function createSignInSheetDoc(sessionValue, include) {
 
 /**
  * SCHEDULED ENTRY POINT: builds one sign-in sheet per location that has a
- * session or catered lunch TODAY, unattended — see writeTriggers() (16) for
+ * catered lunch TODAY, unattended — see writeTriggers() (16) for
  * the early-morning trigger that calls this. The desk should never have to
  * remember to press "Print Sign-In Sheet" before the first person walks in.
  *
@@ -496,7 +468,7 @@ function createSignInSheetDoc(sessionValue, include) {
  *
  * "Active registrations only" — the dialog's own recommended default — since
  * an unattended run has nobody there to choose "include cancelled/waitlisted".
- * A location with nothing to print (no active roster and no catered lunch) is
+ * A location with nothing to print (no catered lunch and nobody eating) is
  * skipped without complaint, exactly like createSignInSheetDoc()'s own guard.
  */
 function autoCreateTodaysSignInSheets() {
@@ -523,12 +495,12 @@ function autoCreateTodaysSignInSheets() {
 function autoCreateTodaysSignInSheetsInternal() {
   const todayKey = formatDateKey(new Date());
   // listSignInSheetOptions() already covers today (its window runs 7 days
-  // back to 45 forward) and already answers the two-source question this
-  // needs — where is somebody expected, where is lunch being served — so this
-  // reuses it rather than re-reading the dashboard and the menu itself.
+  // back to 45 forward) and already answers the one question this needs —
+  // where is lunch being served — so this reuses it rather than re-reading
+  // the menu itself.
   const todays = listSignInSheetOptions().filter(o => o.dateKey === todayKey);
   if (todays.length === 0) {
-    log(`autoCreateTodaysSignInSheets: nothing scheduled for ${todayKey} — no sheets to print.`);
+    log(`autoCreateTodaysSignInSheets: no catered lunch on ${todayKey} — no sheets to print.`);
     return;
   }
 
@@ -537,13 +509,13 @@ function autoCreateTodaysSignInSheetsInternal() {
   todays.forEach(option => {
     try {
       const data = collectSignInSheetData(option.dateKey, option.location, false);
-      if (data.rows.length === 0 && !data.meal) {
+      if (!signInSheetWorthBuilding_(data)) {
         skipped.push(option.location);
         return;
       }
       const file = renderSignInSheetDoc(data);
       recordSignInSheetFile(option.dateKey, option.location, file);
-      built.push(`${option.location} (${data.rows.length} name(s))`);
+      built.push(`${option.location} (${data.lunchRows.length} eating)`);
     } catch (err) {
       log(`⚠️ autoCreateTodaysSignInSheets: failed to build a sheet for ${option.location} on ${todayKey} (${err}).`);
     }
@@ -553,8 +525,18 @@ function autoCreateTodaysSignInSheetsInternal() {
   const summary = built.length > 0
     ? `autoCreateTodaysSignInSheets: built ${built.length} sheet(s) for ${todayKey} — ${built.join('; ')}` +
       (skipped.length > 0 ? `. Skipped (nothing to print): ${skipped.join(', ')}.` : '.')
-    : `autoCreateTodaysSignInSheets: nothing to print for ${todayKey} (${skipped.length} location(s) had no active registrations or lunch).`;
+    : `autoCreateTodaysSignInSheets: nothing to print for ${todayKey} (${skipped.length} location(s) had no lunch served or ordered).`;
   log(summary);
+}
+
+/**
+ * Whether a day has anything for a LUNCH sheet: a catered meal on the menu, or
+ * at least one person with a meal ordered (a menu row typed after the orders
+ * came in should not leave the kitchen without a list). A day with programs
+ * but no lunch is no longer worth a Doc.
+ */
+function signInSheetWorthBuilding_(data) {
+  return !!(data && (data.meal || (data.lunchRows || []).length > 0));
 }
 
 /**
@@ -596,9 +578,9 @@ function collectSignInSheetData(dateKey, location, includeEveryone) {
     if (!d || formatDateKey(d) !== dateKey) return;
     if (String(row[map['Location']] || '').trim() !== location) return;
     const status = String(row[map['Program_Status']] || '').trim();
-    // Superseded rows are left out even of the everyone page: the person is
-    // already on it under the row their latest submission wrote, and a name
-    // printed twice at the door is read as two arrivals.
+    // Superseded rows are left out: the person is already on the list under
+    // the row their latest submission wrote, and a name printed twice at the
+    // serving table is read as two lunches.
     if (isSupersededRegistrantRow(row, map)) return;
     if (!includeEveryone && status !== 'Active') return;
 
@@ -1142,7 +1124,9 @@ function renderSignInSheetDoc(data) {
   body.setMarginLeft(SIGN_IN_PAGE.margin);
   body.setMarginRight(SIGN_IN_PAGE.margin);
 
-  // SECTION ONE: LUNCH. First because it is what the sheet is for.
+  // THE LUNCH LIST — the only section (Nov 2026). The EVERYONE page that used
+  // to follow it is gone: nobody used it, and its table was most of the
+  // writing this Doc cost.
   writeSignInSheetHeading(body, data, {
     section: 'Lunch',
     note: data.lunchRows.length === 0
@@ -1150,16 +1134,6 @@ function renderSignInSheetDoc(data) {
       : 'Everyone with a meal ordered. Hand food against this page.'
   });
   writeSignInSheetTable(body, data.lunchRows, { showZeros: false });
-
-  body.appendPageBreak();
-
-  // SECTION TWO: EVERYONE.
-  writeSignInSheetHeading(body, data, {
-    section: 'Everyone',
-    note: 'The full roster for this day — lunch or not. Rows showing 0 in the meal ' +
-      'columns ordered no lunch: nothing to serve them, nothing to write in those boxes.'
-  });
-  writeSignInSheetTable(body, data.rows, { showZeros: true });
 
   // DocumentApp leaves an empty paragraph at the top of a cleared body; it
   // costs a line of a page that is meant to hold as many rows as possible.
@@ -1265,14 +1239,12 @@ function writeSignInSheetHeading(body, data, options) {
   } else {
     bits.push('Lunch: none scheduled');
   }
-  if (data.programs.length > 0) bits.push(data.programs.join(' · '));
-  if (data.noLunchCount > 0) bits.push(`${data.noLunchCount} here without lunch`);
   bits.push(`Questions at the desk: ${CENTER_PHONE}`);
   const sub = body.appendParagraph(bits.join('   |   '));
   sub.editAsText().setFontSize(10).setBold(false).setForegroundColor('#555555');
 
   // THE KEY TO THE TWO WASHES. A colour nobody can name is a colour nobody
-  // trusts, so it is spelled out on both pages rather than once at the front.
+  // trusts, so it is spelled out above the table rather than left to memory.
   const legend = body.appendParagraph('');
   const legendText = legend.editAsText();
   legendText.appendText('  TAKE-OUT  ');

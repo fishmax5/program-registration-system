@@ -257,7 +257,7 @@ function buildDeskMenu_(ui, title) {
     // THE DOOR, from the desk's side: the printed sheet for today, and the
     // sign-in app on the laptop. Both were a submenu deep under Sign-In &
     // Door; the app also keeps its own toolbar menu (99zc).
-    .addItem('\ud83d\udccb Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
+    .addItem('\ud83d\udccb Lunch Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
     .addItem('\ud83d\udeaa Open the Sign-In App', menuFn_('openSignInApp'))
     .addSeparator()
     // ONE ITEM, NOT TWO. "Sync Cal" and "Sync Registrations" are a distinction

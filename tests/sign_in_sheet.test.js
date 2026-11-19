@@ -52,6 +52,8 @@ this.splitNameForPrinting = splitNameForPrinting;
 this.getIndexMap = getIndexMap;
 this.HEADERS = HEADERS;
 this.PALETTE = PALETTE;
+this.buildSignInSheetOptions_ = buildSignInSheetOptions_;
+this.signInSheetWorthBuilding_ = signInSheetWorthBuilding_;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -307,6 +309,52 @@ check('the fullest spelling of a merged name is the one printed',
     entry({ name: 'Jane Smith', program: 'Art' }),
     entry({ name: 'Jane A. Smith', program: 'Chorus' })
   ])[0].name, 'Jane A. Smith');
+
+// ---------------------------------------------------------------------------
+// Lunch only (Nov 2026): a sheet is offered, and built at 06:00, only for a
+// place and day with a CATERED lunch — never for a day that only has programs.
+// ---------------------------------------------------------------------------
+{
+  const lmap = sandbox.getIndexMap(sandbox.HEADERS.Lunch_Schedule);
+  const lunchRow = (date, location, type) => {
+    const row = new Array(sandbox.HEADERS.Lunch_Schedule.length).fill('');
+    row[lmap['Event_Date']] = date;
+    row[lmap['Location']] = location;
+    row[lmap['Type']] = type;
+    return row;
+  };
+  const today = new Date(2026, 10, 19);
+  const opts = sandbox.buildSignInSheetOptions_([
+    lunchRow(new Date(2026, 10, 19), 'Ashbridge', 'Hot'),
+    lunchRow(new Date(2026, 10, 20), 'Ashbridge', 'Cold'),
+    lunchRow(new Date(2026, 10, 19), 'Narberth', 'Not Serving'),
+    lunchRow(new Date(2026, 10, 19), 'Ashbridge', 'Hot'),          // same day twice: one option
+    lunchRow(new Date(2027, 2, 1), 'Ashbridge', 'Hot'),            // beyond the 45-day window
+    lunchRow('', 'Ashbridge', 'Hot')                               // no date
+  ], lmap, today);
+  check('only catered lunch days inside the window are offered, once each',
+    opts.map(o => o.value).sort(), ['2026-11-19|Ashbridge', '2026-11-20|Ashbridge']);
+  check('every option is labelled as a lunch day',
+    opts.every(o => /lunch served/.test(o.label)), true);
+  check('no lunch rows, no options (a program-only day gets no sheet)',
+    sandbox.buildSignInSheetOptions_([], lmap, today), []);
+
+  check('a catered meal is worth a sheet', sandbox.signInSheetWorthBuilding_({ meal: { type: 'Hot' }, lunchRows: [] }), true);
+  check('meals ordered with no menu row are still worth a sheet',
+    sandbox.signInSheetWorthBuilding_({ meal: null, lunchRows: [{ meals: 1 }] }), true);
+  check('programs but no lunch are not worth a sheet',
+    sandbox.signInSheetWorthBuilding_({ meal: null, lunchRows: [], rows: [{}, {}] }), false);
+
+  // The Doc itself: one table (the lunch list), no Everyone page.
+  const fn = src.slice(src.indexOf('function renderSignInSheetDoc('));
+  const body = fn.slice(0, fn.indexOf('\nfunction '));
+  check('the sign-in Doc writes exactly one table',
+    (body.match(/writeSignInSheetTable\(/g) || []).length, 1);
+  check('the sign-in Doc writes the lunch rows, not the full roster',
+    /writeSignInSheetTable\(body, data\.lunchRows/.test(body), true);
+  check('the sign-in Doc has no page break into a second section',
+    /appendPageBreak/.test(body), false);
+}
 
 console.log(failures === 0 ? '\nAll sign-in sheet checks passed.' : `\n${failures} failure(s).`);
 process.exit(failures === 0 ? 0 : 1);
