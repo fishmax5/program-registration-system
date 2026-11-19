@@ -572,7 +572,7 @@ function programMonthSettingsCell(title, locations, index) {
   let policy = null;
   let found = false;
   (locations || []).forEach(location => {
-    const row = index[notificationProgramKey(title, location)];
+    const row = index[programSettingsKey(title, location)];
     if (!row) return;
     found = true;
     // The room it actually gets — its own, else a keyword rule's (99zx) — so a

@@ -263,7 +263,7 @@ function readRoomManagementSchedule_(todayKey) {
       if (!start) return;
       const key = formatDateKey(start);
       if (key < todayKey) return;
-      const pk = notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+      const pk = programSettingsKey(String(row[map['Clean_Title']] || '').trim(),
         String(row[map['Location']] || '').trim());
       (out[pk] = out[pk] || []).push(key);
     });
@@ -293,7 +293,7 @@ function readRoomManagementTimes_(todayKey) {
       if (key < todayKey) return;
       const label = publicSessionTimeLabel_(row, map, start);
       const sort = publicSessionSortTime_(start);
-      const k = notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+      const k = programSettingsKey(String(row[map['Clean_Title']] || '').trim(),
         String(row[map['Location']] || '').trim()) + '|' + key;
       if (!out[k] || sort < out[k].sort) out[k] = { label, sort };
     });
@@ -322,7 +322,7 @@ function readRoomManagementOverrides_(todayKey) {
       if (!start) return;
       const key = formatDateKey(start);
       if (key < todayKey) return;
-      out[notificationProgramKey(String(row[map['Clean_Title']] || '').trim(),
+      out[programSettingsKey(String(row[map['Clean_Title']] || '').trim(),
         String(row[map['Location']] || '').trim()) + '|' + key] = own;
     });
   } catch (err) {

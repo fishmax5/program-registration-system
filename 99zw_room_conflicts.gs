@@ -300,7 +300,7 @@ function collectRoomSessions_(todayKey) {
     const title = String(row[map['Clean_Title']] || '').trim();
     const location = String(row[map['Location']] || '').trim();
     const override = String(row[map['Room_Override']] || '').trim();
-    const settings = defaults[notificationProgramKey(title, location)];
+    const settings = defaults[programSettingsKey(title, location)];
     const standing = settings ? String(settings[settingsMap['Room_Or_Setup']] || '').trim() : '';
 
     // A date's override beats everything; otherwise the program's own listed

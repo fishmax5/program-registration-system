@@ -36,8 +36,20 @@
 // WHAT THIS DOES NOT TOUCH. Event_ID is still md5(calendar | title | date)
 // (`07`): changing what a session's title means to the Event_ID would re-key
 // its registrants and sweep them to triage, which is the opposite of the
-// point. This is the PROGRAM layer only. Nor does it yet touch Program_Settings'
-// own lookups, Program_Questions or club keys — the next change does.
+// point. This is the PROGRAM layer only.
+//
+// WHERE ELSE IT REACHES (second change, November 2026). A session's title finds
+// its Program_Settings row through programSettingsKey() — notifications, the
+// month dashboard, room checks and Room_Management — and refreshProgramSettings
+// (`40`) folds an alias's sessions into the program's row. Program_Questions
+// aimed at the program reach a form that only carries the alias. The sync also
+// SUGGESTS aliases in the office digest (never applies one): two titles on one
+// form at one building, one the other plus a qualifier.
+//
+// NOT CLUBS. Club_Key is STORED on every standing-roster row and "never
+// changes" (`41`), so a club key that followed an alias would orphan the
+// members filed under the old title. Clubs stay keyed by their own title until
+// a change rewrites the stored keys the way `22` does for a rename.
 //
 // AMBIGUITY IS REFUSED, NOT GUESSED. A title listed under two different
 // programs at one building is ignored (and said once per execution), because
@@ -104,12 +116,12 @@ function programAliasIndex_() {
   if (__programAliasIndex) return __programAliasIndex;
   let index = { aliases: {}, ambiguous: [] };
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss && typeof ss.getSheetByName === 'function'
-      ? ss.getSheetByName(SHEET_NAMES.PROGRAM_SETTINGS) : null;
-    if (sheet) {
-      const headers = HEADERS.Program_Settings;
-      index = buildProgramAliasIndex(readSimpleTableValues(sheet, headers), headers);
+    // THE SAME READ the notification policy makes (`70`), memoized there and
+    // forgotten with this one, so the aliases cost the sync no round trip.
+    const byKey = readNotificationPolicyRows();
+    const rows = Object.keys(byKey).map(k => byKey[k]);
+    if (rows.length) {
+      index = buildProgramAliasIndex(rows, HEADERS.Program_Settings);
       if (index.ambiguous.length) {
         log(`⚠️ ${SHEET_NAMES.PROGRAM_SETTINGS}: ${index.ambiguous.length} title(s) are listed in ` +
           `Also_Known_As under two different programs at one building, so they are ignored: ` +
@@ -148,4 +160,108 @@ function programTitleIsFiledElsewhere(title, location, index) {
   const text = String(title === null || title === undefined ? '' : title).trim();
   if (!text) return false;
   return normalizeNameKey(canonicalProgramTitle(text, location, index)) !== normalizeNameKey(text);
+}
+
+/**
+ * The key a SESSION's title finds its Program_Settings row by: the title it is
+ * filed under, then the same fold as notificationProgramKey(). Use this for a
+ * calendar or session title; a Program_Settings row's own Event is already the
+ * program's name and keys with notificationProgramKey() directly.
+ */
+function programSettingsKey(title, location, index) {
+  return notificationProgramKey(canonicalProgramTitle(title, location, index), location);
+}
+
+/**
+ * Every title the given titles are filed under at any of the given buildings,
+ * plus the titles themselves — for a matcher that knows a form's titles and
+ * buildings but not which title runs where (Program_Questions, `53`).
+ */
+function programTitlesWithCanonical(titles, locations, index) {
+  const out = [];
+  const seen = {};
+  const add = t => {
+    const text = String(t || '').trim();
+    const k = normalizeNameKey(text);
+    if (!text || seen[k]) return;
+    seen[k] = true;
+    out.push(text);
+  };
+  const locs = (locations || []).length ? locations : [''];
+  (titles || []).forEach(title => {
+    add(title);
+    locs.forEach(location => add(canonicalProgramTitle(title, location, index)));
+  });
+  return out;
+}
+
+// --- suggestions ------------------------------------------------------------
+
+/** The office digest heading the suggestions are filed under. */
+const PROGRAM_ALIAS_SUGGESTION_CATEGORY = 'Titles that may be one program';
+
+/**
+ * Pure. Session rows (HEADERS.All_Program_Sessions) → [{ location, program,
+ * alias, formId }]: two titles that are still DIFFERENT after the status word
+ * and the existing aliases, on ONE upcoming form at ONE building, where one
+ * title is the other plus something ("Medicare Counseling (by appt.)",
+ * "Computer Tech Support with <leader>"). The shorter is offered as the
+ * program, the longer as its alias.
+ *
+ * WHY SO NARROW. A shared form alone is not enough: Advanced Mah Jongg and Mah
+ * Jongg Free Play share one on purpose, and a suggestion repeated every day
+ * that staff have already said no to is a line they learn to skip. Lunch forms
+ * cover a whole menu and are left out entirely.
+ */
+function findProgramAliasCandidates(sessionRows, index, todayKey) {
+  const map = getIndexMap(HEADERS.All_Program_Sessions);
+  const groups = {};
+  (sessionRows || []).forEach(row => {
+    const formId = String(row[map['Form_ID']] || '').trim();
+    const location = String(row[map['Location']] || '').trim();
+    const raw = String(row[map['Clean_Title']] || '').trim();
+    if (!formId || !location || !raw) return;
+    if (isLunchOnlyEventId(row[map['Event_ID']]) || isLunchOnlyProgramTitle(raw)) return;
+    const d = coerceDate(row[map['Event_Date']]);
+    if (!d || (todayKey && formatDateKey(d) < todayKey)) return;
+    const title = canonicalProgramTitle(raw, location, index);
+    const gk = `${formId}|${normalizeNameKey(location)}`;
+    const g = groups[gk] = groups[gk] || { formId, location, titles: {} };
+    g.titles[normalizeNameKey(title)] = title;
+  });
+  const out = [];
+  const said = {};
+  Object.keys(groups).forEach(gk => {
+    const g = groups[gk];
+    const titles = Object.keys(g.titles).map(k => g.titles[k])
+      .sort((a, b) => a.length - b.length || a.localeCompare(b));
+    titles.forEach((program, i) => {
+      const pk = programTitleMatchKey(program);
+      if (!pk) return;
+      titles.slice(i + 1).forEach(alias => {
+        const ak = programTitleMatchKey(alias);
+        if (!ak || ak === pk || ak.indexOf(pk) !== 0) return;
+        const key = `${normalizeNameKey(alias)}|${normalizeNameKey(g.location)}`;
+        if (said[key]) return;
+        said[key] = true;
+        out.push({ location: g.location, program, alias, formId: g.formId });
+      });
+    });
+  });
+  return out.sort((a, b) => a.location.localeCompare(b.location) || a.program.localeCompare(b.program));
+}
+
+/** Files each candidate as one office digest line. Never throws; returns the count. */
+function reportProgramAliasCandidates(sessionRows, index, todayKey) {
+  try {
+    const found = findProgramAliasCandidates(sessionRows, index, todayKey);
+    found.forEach(c => noteForAdmin(PROGRAM_ALIAS_SUGGESTION_CATEGORY,
+      `"${c.alias}" at ${c.location} uses the same form as "${c.program}". If they are one program, ` +
+      `add "${c.alias}" to Also_Known_As on the "${c.program}" row of ${SHEET_NAMES.PROGRAM_SETTINGS} ` +
+      `so they share one roster.`));
+    return found.length;
+  } catch (err) {
+    try { console.log(`Program alias suggestions skipped (${err}).`); } catch (e) { /* none */ }
+    return 0;
+  }
 }
