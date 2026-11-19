@@ -12,6 +12,9 @@
 //      closes it — see sync_skip_unchanged). A program form is untouched.
 //   2. 30 — the row's Status reads "⛔ Not Serving" (count kept), not Unlimited.
 //   3. 86 — the public schedule leaves the row out.
+//   4. 13 — the hourly lunch pass takes the row off once every sign-up on it
+//      is Cancelled or Superseded, but keeps a still-open form's last upcoming
+//      rows until 99ze has closed it.
 // ============================================================================
 const assert = require('assert');
 const vm = require('vm');
@@ -40,6 +43,7 @@ this.HEADERS = HEADERS;
 this.getIndexMap = getIndexMap;
 this.NOT_SERVING_STATUS = NOT_SERVING_STATUS;
 this.EVENT_STATUS_COLORS = EVENT_STATUS_COLORS;
+this.SHEET_NAMES = SHEET_NAMES;
 `, sandbox, { filename: 'program.gs' });
 sandbox.log = () => {};
 sandbox.getPersistentFormRegistry = () => ({});
@@ -126,6 +130,55 @@ const lunchRow = (date, extra) => row(Object.assign({
     'a served lunch day is on the schedule');
   assert.strictEqual(sandbox.buildPublicSessionRow(lunchRow(DARK, { Status: '🟢 Unlimited' }), map, todayKey, horizonKey),
     null, 'a Not Serving lunch day is not');
+}
+
+// ---------------------------------------------------------------------------
+// 4. The hourly lunch pass takes a row off once nobody live is signed up
+// ---------------------------------------------------------------------------
+{
+  const rMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
+  const reg = (eventId, status) => {
+    const r = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
+    r[rMap['Event_ID']] = eventId; r[rMap['Program_Status']] = status;
+    return r;
+  };
+  const d = n => dayAt(n);
+  const id = date => `LUNCHONLY:${key(date)}|Narberth`;
+  const A = d(5), B = d(6), C = d(7), E = d(8), F = d(9), PAST = d(-5);
+  let sessionRows, registrantRows, rendered, ended;
+  const setup = () => {
+    sessionRows = [
+      lunchRow(A),                                // live sign-up: stays
+      lunchRow(B),                                // all cancelled: goes
+      lunchRow(C),                                // nobody ever: goes
+      lunchRow(E, { Form_ID: 'DECFORM' }),        // the only upcoming row of an open form
+      lunchRow(F, { Form_ID: 'DECFORM' }),
+      lunchRow(PAST, { Form_ID: 'DECFORM' })      // a past row does not keep a form "seen"
+    ];
+    registrantRows = [reg(id(A), 'Active'), reg(id(A), 'Cancelled'),
+      reg(id(B), 'Cancelled'), reg(id(B), 'Superseded'), reg(id(F), 'Cancelled')];
+    rendered = null;
+  };
+  sandbox.SpreadsheetApp.getActiveSpreadsheet = () => ({
+    getSpreadsheetTimeZone: () => 'America/New_York',
+    getSheetByName: name => ({ name })
+  });
+  sandbox.getSectionedRows = sheet => (sheet && sheet.name === sandbox.SHEET_NAMES.REGISTRANT_DASH
+    ? registrantRows : sessionRows);
+  sandbox.renderProgramDashboard = (force, opts) => { rendered = opts.sessionRows; };
+  sandbox.readEndedForms = () => ended;
+  const headersS = sandbox.HEADERS.All_Program_Sessions;
+  const left = () => rendered.map(r => key(r[map['Event_Date']]));
+
+  setup(); ended = {};
+  const n = sandbox.pruneStaleLunchOnlyRows_({ name: 'sessions' }, headersS, map, {}, { cateredRows: 3 });
+  assert.strictEqual(n, 2, 'the all-cancelled day and the nobody day go');
+  assert.deepStrictEqual(left(), [key(A), key(E), key(F), key(PAST)],
+    'a live sign-up keeps its day, and a still-open form keeps its last upcoming rows');
+
+  setup(); ended = { DECFORM: { closedByUs: true } };
+  sandbox.pruneStaleLunchOnlyRows_({ name: 'sessions' }, headersS, map, {}, { cateredRows: 3 });
+  assert.deepStrictEqual(left(), [key(A), key(PAST)], 'once the form is closed, its rows go too');
 }
 
 console.log('✅ lunch_not_serving.test.js passed');

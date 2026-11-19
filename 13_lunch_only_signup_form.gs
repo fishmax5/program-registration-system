@@ -238,7 +238,7 @@ function syncLunchOnlySessions(registrySheet) {
   // A DATE REMOVED FROM Lunch_Schedule used to leave its session row behind for
   // ever (the note below explains why rows are kept), so a building whose menu
   // was cleared still listed every upcoming lunch on the dashboards. Upcoming
-  // rows nobody is registered for now go; see pruneStaleLunchOnlyRows_().
+  // rows nobody live is registered for now go; see pruneStaleLunchOnlyRows_().
   pruneStaleLunchOnlyRows_(registrySheet, headers, map, cateredEventIds, stats);
 
   // A DATE FLIPPED TO "Not Serving" DROPS OUT HERE, and that is how it leaves
@@ -473,11 +473,20 @@ function syncLunchOnlySessions(registrySheet) {
  * is no longer a catered row on Lunch_Schedule (removed, flipped to Not
  * Serving, or its location set to "Never").
  *
- * What is kept, and why: a row with ANY registrant behind it (any status — a
- * cancelled one is still the anchor of a record), a row dated before today
- * (history), and everything when Lunch_Schedule has no catered row anywhere,
- * because that reads as an unreadable or half-typed tab as easily as a
- * deliberate clear. Never throws: this is housekeeping on an hourly path.
+ * What is kept, and why: a row with a LIVE registrant behind it (anybody not
+ * Cancelled or Superseded — they are the people who still need telling), a
+ * row dated before today (history), and everything when Lunch_Schedule has no
+ * catered row anywhere, because that reads as an unreadable or half-typed tab
+ * as easily as a deliberate clear. A row whose sign-ups are ALL cancelled goes:
+ * the registrant rows themselves stay on the Registrants tab as the record.
+ *
+ * AND THE LAST ROWS OF A FORM THAT IS STILL OPEN. The ended-forms pass (99ze)
+ * and the hourly import both find a form through its session rows, so taking
+ * every row off a form 99ze has not closed yet would leave it open, unread and
+ * still listing its dates, for good. Those rows wait until 99ze has recorded
+ * the form as ended (a lunch form with no served day left closes on the next
+ * full sync), and go on the run after. Never throws: this is housekeeping on
+ * an hourly path.
  * Rows are rewritten through the normal render with skipTriage; the session
  * table's shrink guard (99x) still applies, since nobody confirmed this.
  */
@@ -497,12 +506,31 @@ function pruneStaleLunchOnlyRows_(registrySheet, headers, map, cateredEventIds, 
     const registrantsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
     const held = {};
     if (registrantsSheet) {
+      const rMap = getIndexMap(HEADERS.All_Registrants);
       getSectionedRows(registrantsSheet, HEADERS.All_Registrants, 'Event_ID').forEach(r => {
-        const id = String(r[getIndexMap(HEADERS.All_Registrants)['Event_ID']] || '').trim();
-        if (id) held[id] = true;
+        const id = String(r[rMap['Event_ID']] || '').trim();
+        const status = String(r[rMap['Program_Status']] || '').trim();
+        if (id && CANCELLATION_TERMINAL_STATUSES.indexOf(status) === -1) held[id] = true;
       });
     }
-    const drop = candidates.filter(row => !held[String(row[map['Event_ID']] || '').trim()]);
+    let drop = candidates.filter(row => !held[String(row[map['Event_ID']] || '').trim()]);
+    if (drop.length === 0) return 0;
+
+    // A form's last UPCOMING rows stay until 99ze has closed it — see above.
+    // Upcoming, because a form left with only past rows is judged by its last
+    // past date and would stay open another week.
+    const dropSet0 = new Set(drop);
+    const formOf = row => String(row[map['Form_ID']] || '').trim();
+    const keptForms = new Set(rows.filter(row => {
+      if (dropSet0.has(row)) return false;
+      const d = coerceDate(row[map['Event_Date']]);
+      return !!d && formatDateKey(d) >= todayKey;
+    }).map(formOf).filter(Boolean));
+    const ended = readEndedForms();
+    drop = drop.filter(row => {
+      const formId = formOf(row);
+      return !formId || keptForms.has(formId) || !!ended[formId];
+    });
     if (drop.length === 0) return 0;
 
     const dropSet = new Set(drop);

@@ -313,6 +313,10 @@ Three other places now finish the job:
 Sign-ups on a Not Serving day are not cancelled and nobody is emailed by the
 system: `buildDashboardRollup()` still sends the admin note naming them so
 staff can tell them, and their row stays on the session tab with its count.
+Once every sign-up on such a day is Cancelled or Superseded, the hourly lunch
+pass (`pruneStaleLunchOnlyRows_`) takes the row off; the registrant rows stay on
+the Registrants tab. A form's last upcoming rows wait until 99ze has closed it,
+because the close and the hourly import both find a form through its rows.
 
 The window those forms are built in is `LUNCH_SIGNUP_LOOKAHEAD_MONTHS` (six),
 and it is deliberately *not* the calendar import's 60-day lookahead. It used to
