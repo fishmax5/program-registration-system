@@ -891,6 +891,8 @@ function noteProgramSettingsHeaders_(sheet, headers) {
   const notes = {
     Event: 'Grey headings group programs by kind. The green row under each heading holds the ' +
       'defaults new programs of that kind are born with.',
+    Also_Known_As: 'Other calendar titles that are THIS program at this building, comma-separated — e.g. ' +
+      '"Medicare Counseling (by appt.)". Their sessions then share this program\'s roster, leaders and waiting list.',
     Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
     Room_Or_Setup: 'The program\'s usual room — pick from Config\'s Rooms list. A single date that moves rooms is ' +
       'set on the session table\'s Room_Override column. Text that is not on the list is not checked for double-booking.',
