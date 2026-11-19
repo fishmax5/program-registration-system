@@ -4,9 +4,16 @@
 
 const ENABLE_LOGGING = true;
 
-/** Central logger — no-op when ENABLE_LOGGING is false. */
+/**
+ * Central logger — no-op when ENABLE_LOGGING is false. Every line also goes to
+ * the Run_Log tab (99zzb), buffered and written in batches, so a run can be
+ * read without the Apps Script editor.
+ */
 function log(msg) {
   if (ENABLE_LOGGING) console.log(msg);
+  if (ENABLE_LOGGING) {
+    try { recordRunLogLine(msg); } catch (err) { /* the console line above is the record */ }
+  }
   // The heartbeat of the workbook lock (99w): any run holding it and doing
   // work is logging, so this is what keeps its lease from lapsing. A no-op
   // without the lock, and throttled to one property write a minute with it.

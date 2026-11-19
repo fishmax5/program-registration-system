@@ -130,6 +130,9 @@ function flushPersistentRegistries() {
   } catch (err) {
     log(`⚠️ Could not write the registration ledger's pending entries (${err}).`);
   }
+  // And the run log (99zzb), last, so the ledger warning above is on it.
+  // flushRunLog() never throws; the guard is for a deployment missing 99zzb.
+  try { flushRunLog(); } catch (err) { /* console already has every line */ }
 }
 
 const SYNC_LOCK_WAIT_MS = 10 * 1000;
@@ -171,6 +174,11 @@ function withScriptLock(waitMs, fn, onBusy, label) {
     // flushLedger() never throws, and the guard keeps it that way.
     try { flushLedger(); } catch (err) { log(`⚠️ Ledger flush in withScriptLock failed: ${err}`); }
     lock.releaseLock();
+    // The run log too (99zzb): a desk write is a short execution that may
+    // never log for a minute, so without this its lines would die with it.
+    // AFTER the release, unlike the ledger: Run_Log needs no lock, and the
+    // next person at the counter should not wait on it.
+    try { flushRunLog(); } catch (err) { /* console already has every line */ }
   }
 }
 
