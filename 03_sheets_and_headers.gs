@@ -117,7 +117,11 @@ const SHEET_NAMES = {
   // the keyword rules, four tables side by side. Staff-owned; its Room column
   // is Program_Settings' Room_Or_Setup written through, not a second store.
   // See 99zx_room_management.gs.
-  ROOM_MANAGEMENT: 'Room_Management'
+  ROOM_MANAGEMENT: 'Room_Management',
+  // Every log() line, buffered and appended in batches, newest RUN_LOG_MAX_ROWS
+  // kept, so a run can be read without the Apps Script editor or a clasp
+  // login. Nothing reads it back. Hidden; machine-written. See 99zzb_run_log.gs.
+  RUN_LOG: 'Run_Log'
 };
 
 const LEGACY_ACTIVE_PROGRAMS_SHEET_NAME = 'Active_Programs';
@@ -1116,6 +1120,10 @@ defineLazyGlobal_('HEADERS', () => ({
     'Event_ID', 'Name', 'Person_Type', 'Party_ID',
     'Source', 'Actor', 'Payload', 'Note'
   ],
+  // One row per log() line (99zzb). Run_ID is the first 8 characters of the
+  // execution's id, so the lines of one run sort together; Run is the workbook
+  // lock's label when the line was logged under it, blank otherwise.
+  Run_Log: ['Logged_At', 'Run_ID', 'Run', 'Level', 'Message'],
   // One row per person per PROGRAM (title × building) waiting for any date of
   // it. Status 'Waiting' (or blank) is on the list; 'Placed' and 'Removed' are
   // kept as the record rather than deleted. See 99z_program_waitlist.gs.
