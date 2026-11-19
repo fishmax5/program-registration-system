@@ -288,7 +288,7 @@ change was made for the duplicate-registration case (one person, three
 programs, one Tuesday, three lunch requests, one lunch) and this falls out of
 it for free.
 
-### F. A lunch-only form whose whole month is cancelled stays open
+### F. A lunch-only form whose whole month is cancelled closes itself
 
 The lunch-only sign-up forms are generated from `Lunch_Schedule`, one per
 location per calendar month, and `syncLunchOnlySessions()` works from the set
@@ -296,17 +296,23 @@ of dates that are *currently* catered. A single date flipped to `Not Serving`
 therefore leaves the form on the next refresh, which is right and is tested.
 
 If **every** date in a location's month is flipped, that location/month leaves
-the map altogether: its form is not refreshed, and its link stops being pinned
-to `Master_Lunch_Dashboard`. The form itself stays open and still lists the
-dates it had, so a link already handed out still accepts submissions — which
-land as registrations for meals nobody is cooking. `buildDashboardRollup()`
-does email the names on a Not-Serving date with sign-ups, so it is not silent.
+the map altogether, so `syncLunchOnlySessions()` no longer touches its form.
+Three other places now finish the job:
 
-Left as is on purpose. Closing the form automatically means re-opening it
-automatically when the menu comes back, and a form that opens and shuts itself
-on the strength of a menu edit fails in ways nobody can predict from the
-outside. Doing it by hand is one click on a form that, in practice, is
-cancelled outright about never.
+- `buildFormSessionContext()` offers a lunch-only form only the days
+  `isLunchOfferedOn()` says yes to, so the hourly shape check never puts a Not
+  Serving day back on a form (it used to rebuild the grid from every surviving
+  row, including the ones kept for their sign-ups).
+- `closeEndedForms()` (99ze) treats a lunch-only form with upcoming rows but no
+  upcoming served day as ended at once and closes it with a message saying
+  lunch is not being served. Typing a catered menu back onto one of its days
+  re-opens it, but only if 99ze was the one that closed it.
+- The public schedule leaves out a lunch row on a day that is not served, and
+  the session tab marks such a row `⛔ Not Serving` instead of Unlimited.
+
+Sign-ups on a Not Serving day are not cancelled and nobody is emailed by the
+system: `buildDashboardRollup()` still sends the admin note naming them so
+staff can tell them, and their row stays on the session tab with its count.
 
 The window those forms are built in is `LUNCH_SIGNUP_LOOKAHEAD_MONTHS` (six),
 and it is deliberately *not* the calendar import's 60-day lookahead. It used to

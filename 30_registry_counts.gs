@@ -106,6 +106,9 @@ function recomputeCountsForZone(model, zone, counts) {
   // the box to make happen: the registrants ARE being waitlisted, and the tab
   // said the session had unlimited room.
   const forcedWaitlist = sessionGridColumn(model, zone, 'Waitlist_Only');
+  // WHICH LUNCH-ONLY DAYS THE KITCHEN IS NOT SERVING — see NOT_SERVING_STATUS.
+  const eventDates = sessionGridColumn(model, zone, 'Event_Date');
+  const locations = sessionGridColumn(model, zone, 'Location');
 
   const activeOut = sessionGridColumn(model, zone, 'Active_Count');
   const waitlistOut = sessionGridColumn(model, zone, 'Waitlist_Count');
@@ -123,7 +126,21 @@ function recomputeCountsForZone(model, zone, counts) {
       !!isAppointment && isAssistanceColumnValue(isAppointment[i]));
 
     activeOut[i] = c.active;
-    if (isForced) {
+    let notServing = false;
+    if (eventDates && locations && isLunchOnlyEventId(eventId) && coerceDate(eventDates[i])) {
+      // A menu tab that cannot be read leaves the row counted as before.
+      try {
+        notServing = !isLunchOfferedOn(coerceDate(eventDates[i]), String(locations[i] || '').trim());
+      } catch (err) {
+        notServing = false;
+      }
+    }
+    if (notServing) {
+      // The count stays: it is who has to be told. Nothing else applies.
+      waitlistOut[i] = '';
+      remainingOut[i] = '';
+      statusOut[i] = NOT_SERVING_STATUS;
+    } else if (isForced) {
       // The counts are real either way; only the two DERIVED cells are decided
       // by the tick. Seats remaining is 0 because nobody can take one, and the
       // status says so in the same words a full session uses.

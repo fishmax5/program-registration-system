@@ -186,6 +186,19 @@ function comparePublicSessions_(a, b) {
 }
 
 /**
+ * isLunchOfferedOn() (15), except that a read that fails keeps the day: the
+ * whole public page is not lost to one unreadable menu tab, and the row is
+ * shown exactly as it was before this check existed.
+ */
+function publicLunchDayServed_(date, location) {
+  try {
+    return isLunchOfferedOn(date, location);
+  } catch (err) {
+    return true;
+  }
+}
+
+/**
  * ONE SESSION ROW, AS MUCH OF IT AS A STRANGER MAY SEE — or null for a row
  * that does not belong on a public calendar at all.
  *
@@ -212,6 +225,11 @@ function buildPublicSessionRow(row, map, todayKey, horizonKey) {
 
   const eventId = String(row[map['Event_ID']] || '').trim();
   const lunch = isLunchOnlyEventId(eventId);
+  // A LUNCH DAY THE KITCHEN IS NOT SERVING is not on the schedule, whatever its
+  // row's status. The row can outlive its menu (13 keeps one people signed up
+  // for), and a public card offering lunch that day is the one thing it must
+  // not do.
+  if (lunch && !publicLunchDayServed_(date, String(row[map['Location']] || '').trim())) return null;
   const linkCell = row[map['Form_Response_Link']];
   const url = hyperlinkFormulaUrl(linkCell);
   const noRegistration = isNoRegistrationColumnValue(row[map['No_Registration']])

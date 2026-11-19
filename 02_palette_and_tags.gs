@@ -140,7 +140,9 @@ const EVENT_STATUS_COLORS = {
   '🔴 Waitlist Only': PALETTE.SIGNAL_RED,
   // A step deeper than Open, not a different hue: "unlimited" is "open, more
   // so", and giving it a hue of its own would have implied a third state.
-  '🟢 Unlimited': PALETTE.SIGNAL_GREEN_DEEP
+  '🟢 Unlimited': PALETTE.SIGNAL_GREEN_DEEP,
+  // A lunch-only day the kitchen is not serving (NOT_SERVING_STATUS, 07).
+  '⛔ Not Serving': PALETTE.DISABLED
 };
 
 const REGISTRANT_STATUS_COLORS = {

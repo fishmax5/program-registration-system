@@ -549,6 +549,15 @@ function computeEventId(calendarId, cleanTitle, dateKey) {
  */
 const WAITLIST_ONLY_STATUS = '🔴 Waitlist Only';
 
+/**
+ * WHAT A LUNCH-ONLY DAY THE KITCHEN IS NOT SERVING READS AS. Its row stays on
+ * the session tab when people had signed up for it (13 keeps it so the record
+ * of who asked survives), but it is off the form and off the public schedule,
+ * and the tab has to say why rather than call it Unlimited. Grey, from
+ * EVENT_STATUS_COLORS: "not applicable", not a state of the room.
+ */
+const NOT_SERVING_STATUS = '⛔ Not Serving';
+
 function computeStatus(activeCount, maxCapacity) {
   if (maxCapacity <= 0) return '🟢 Open';
   const remaining = maxCapacity - activeCount;

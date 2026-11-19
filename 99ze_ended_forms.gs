@@ -40,6 +40,18 @@
 // A form marked for a full re-import (99) is read whatever this says — that
 // list is joined onto the plan separately, from the beginning of time.
 //
+// A LUNCH-ONLY FORM ENDS WHEN IT HAS NO SERVED DAY LEFT TO OFFER, not a week
+// after its last row. Its rows can outlive their menu (13 keeps a "Not
+// Serving" date that people signed up for, so the record of who asked
+// survives), and a day the kitchen is not serving is not one anybody can sign
+// up for. So a form whose every row is a lunch-only row is judged by its
+// UPCOMING days that isLunchOfferedOn() (15) still says yes to. With none
+// left it is ended at once (NO_SERVED_DAY_KEY sorts before any cutoff); if
+// that is because upcoming days turned to "Not Serving", the closed message
+// says so rather than that a program ended. Turning a day back to a catered
+// menu revives it through the same rule as any other form: only a form this
+// file closed is re-opened.
+//
 // Numbered after `99zd` for the usual reason — never renumber. Behavior plus
 // self-contained constants; everything it reaches for (`openFormCached`,
 // `formatDateKey`, `coerceDate`, `CENTER_PHONE`) it reads at CALL time.
@@ -56,6 +68,9 @@ const ENDED_FORMS_PROP_KEY = 'ENDED_FORMS_CLOSED_V1';
 
 /** A first deploy may find dozens; the rest are closed on the following runs. */
 const ENDED_FORMS_MAX_CLOSES_PER_RUN = 25;
+
+/** The "last session" of a lunch-only form with no served day left: earlier than any cutoff. */
+const NO_SERVED_DAY_KEY = '0000-01-01';
 
 function readEndedForms() {
   try {
@@ -75,18 +90,50 @@ function writeEndedForms_(ended) {
  * BOTH sections of the session table. A form with any row whose date cannot
  * be read is left out entirely: not knowing when it ends is not knowing that
  * it has.
+ *
+ * A form whose every row is lunch-only counts only its upcoming served days,
+ * and one with none gets NO_SERVED_DAY_KEY — see the header. `notServingFormIds`
+ * (when passed) collects the ones that lost upcoming days to "Not Serving", so
+ * the close can say so.
  */
-function lastSessionDateByForm_(sessionRows) {
+function lastSessionDateByForm_(sessionRows, notServingFormIds, now) {
+  const todayKey = formatDateKey(now || new Date());
   const map = getIndexMap(HEADERS.All_Program_Sessions);
   const latest = {};
+  const latestServed = {};
   const unreadable = {};
+  const notLunchOnly = {};
+  const notServingAhead = {};
+  const seen = {};
   (sessionRows || []).forEach(row => {
     const formId = String(row[map['Form_ID']] || '').trim();
     if (!formId) return;
+    seen[formId] = true;
+    const lunch = isLunchOnlyEventId(row[map['Event_ID']]);
+    if (!lunch) notLunchOnly[formId] = true;
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) { unreadable[formId] = true; return; }
     const key = formatDateKey(date);
     if (!latest[formId] || key > latest[formId]) latest[formId] = key;
+    if (!lunch || key < todayKey) return;
+    let served = true; // a menu tab that cannot be read never closes a form
+    try {
+      served = isLunchOfferedOn(date, String(row[map['Location']] || '').trim());
+    } catch (err) {
+      served = true;
+    }
+    if (!served) {
+      notServingAhead[formId] = true;
+    } else if (!latestServed[formId] || key > latestServed[formId]) {
+      latestServed[formId] = key;
+    }
+  });
+  Object.keys(seen).forEach(formId => {
+    if (notLunchOnly[formId] || !latest[formId] || latestServed[formId]) return;
+    // Past rows only: it ends a week after the last one, like any form.
+    if (!notServingAhead[formId]) return;
+    latest[formId] = NO_SERVED_DAY_KEY;
+    if (notServingFormIds) notServingFormIds[formId] = true;
   });
   Object.keys(unreadable).forEach(id => delete latest[id]);
   return latest;
@@ -152,6 +199,13 @@ function endedFormClosedMessage_() {
     'link on the program calendar' + (phone ? ` or call ${phone}` : '') + '.';
 }
 
+function lunchNotServingClosedMessage_() {
+  let phone = '';
+  try { phone = CENTER_PHONE; } catch (err) { phone = ''; }
+  return 'Lunch is not being served on the dates this form covers, so it is no longer taking sign-ups. ' +
+    'Please check the program calendar for upcoming lunch dates' + (phone ? ` or call ${phone}` : '') + '.';
+}
+
 /**
  * Closes the forms that have ended and re-opens the ones this closed that have
  * a session again. Runs after the import's rows are on the tab (27), so a
@@ -167,7 +221,8 @@ function closeEndedForms(sessionRows, options) {
   const deadline = options.deadline || Infinity;
   const now = options.now || new Date();
   const ended = readEndedForms();
-  const lastByForm = lastSessionDateByForm_(sessionRows);
+  const notServingFormIds = {};
+  const lastByForm = lastSessionDateByForm_(sessionRows, notServingFormIds, now);
   const { toClose, revived } = classifyEndedForms(lastByForm, ended, endedFormCutoffKey_(now));
   let changed = false;
   let closed = 0;
@@ -198,7 +253,8 @@ function closeEndedForms(sessionRows, options) {
       const form = openFormCached(formId);
       let closedByUs = false;
       if (form.isAcceptingResponses()) {
-        form.setCustomClosedFormMessage(endedFormClosedMessage_());
+        form.setCustomClosedFormMessage(notServingFormIds[formId]
+          ? lunchNotServingClosedMessage_() : endedFormClosedMessage_());
         form.setAcceptingResponses(false);
         closedByUs = true;
       }

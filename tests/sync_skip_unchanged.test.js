@@ -6,7 +6,8 @@
 //
 //   1. 99ze — a form whose program ended a week ago is closed, read ONE more
 //      window, then left off the list; re-opened (only if we closed it) when
-//      it gains a session again.
+//      it gains a session again. A lunch-only form with no served day ahead
+//      closes at once, and re-opens when a day is catered again.
 //   2. 99zf — a program registrant sheet Drive says nobody touched since it
 //      was last read is not opened; once a day every one is.
 //   3. 99zg — the Registrants tab is not rewritten when the rows it would
@@ -154,6 +155,57 @@ const clear = () => Object.keys(store).forEach(k => delete store[k]);
   // A form with an unreadable date is never judged ended.
   assert.strictEqual(sandbox.lastSessionDateByForm_([session('X', 2026, 1, 1),
     Object.assign(session('X', 2026, 1, 1), { [sMap['Event_Date']]: 'soon' })]).X, undefined);
+}
+
+// ---------------------------------------------------------------------------
+// 1b. A LUNCH-ONLY FORM WITH NO SERVED DAY LEFT CLOSES AT ONCE
+// ---------------------------------------------------------------------------
+{
+  clear();
+  const notServed = new Set(['2026-10-20', '2026-10-21', '2026-10-22']);
+  const realOffered = sandbox.isLunchOfferedOn;
+  sandbox.isLunchOfferedOn = date => !notServed.has(sandbox.formatDateKey(date));
+  const lunch = (formId, y, m, d) => {
+    const row = session(formId, y, m, d);
+    const key = sandbox.formatDateKey(new RealDate(y, m, d));
+    row[sMap['Event_ID']] = `LUNCHONLY:${key}|Narberth`;
+    row[sMap['Location']] = 'Narberth';
+    return row;
+  };
+  const forms = { DARK: fakeForm(true), PART: fakeForm(true), PROG: fakeForm(true) };
+  sandbox.openFormCached = id => { if (!forms[id]) throw new Error('gone'); return forms[id]; };
+  const rows = [
+    lunch('DARK', 2026, 9, 1), lunch('DARK', 2026, 9, 20), lunch('DARK', 2026, 9, 21), // every day ahead is Not Serving
+    lunch('PART', 2026, 9, 20), lunch('PART', 2026, 9, 23),                           // one day ahead still served
+    lunch('PROG', 2026, 9, 21), session('PROG', 2026, 9, 28)                          // not a lunch-only form
+  ];
+  const first = sandbox.closeEndedForms(rows);
+  assert.strictEqual(first.closed, 1, 'only the lunch form with nothing left to serve closes');
+  assert.strictEqual(forms.DARK.accepting, false);
+  assert.ok(/not being served/.test(forms.DARK.message), 'and says lunch is not being served');
+  assert.strictEqual(forms.PART.accepting, true, 'a lunch form with a served day ahead stays open');
+  assert.strictEqual(forms.PROG.accepting, true, 'a program form is judged by its rows, as before');
+
+  // The menu comes back for the 21st: the form this closed re-opens.
+  notServed.delete('2026-10-21');
+  const again = sandbox.closeEndedForms(rows);
+  assert.strictEqual(again.reopened, 1, 'a served day ahead re-opens it');
+  assert.strictEqual(forms.DARK.accepting, true);
+
+  // A lunch form whose rows are all past ends a week later, like any form.
+  clear();
+  forms.OLDLUNCH = fakeForm(true);
+  const old = sandbox.closeEndedForms([lunch('OLDLUNCH', 2026, 8, 1)]);
+  assert.strictEqual(old.closed, 1);
+  assert.ok(/ended/.test(forms.OLDLUNCH.message), 'with the ordinary ended message');
+
+  // A menu tab that cannot be read never closes a lunch form.
+  clear();
+  forms.UNREAD = fakeForm(true);
+  sandbox.isLunchOfferedOn = () => { throw new Error('sheet unavailable'); };
+  assert.strictEqual(sandbox.closeEndedForms([lunch('UNREAD', 2026, 9, 20)]).closed, 0);
+  assert.strictEqual(forms.UNREAD.accepting, true);
+  sandbox.isLunchOfferedOn = realOffered;
 }
 
 // ---------------------------------------------------------------------------

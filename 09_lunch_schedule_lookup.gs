@@ -308,9 +308,22 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   // that form offers, leaving every label-shaping field above derived from the
   // whole row set. The reason it is the last thing that happens is spelled out
   // there.
+  // A LUNCH-ONLY FORM OFFERS ONLY THE DAYS LUNCH IS SERVED. Its rows can
+  // outlive their menu: a date that has sign-ups on it keeps its row when
+  // Lunch_Schedule turns it to "Not Serving" (pruneStaleLunchOnlyRows_ in 13),
+  // so the record of who asked survives. The form must not keep offering that
+  // day, though, and this is the one place every form-refresh path reads its
+  // dates from, so the hourly shape check and the lunch sync agree on the list
+  // instead of one putting back what the other took out. Everything above
+  // (locations, titles) still reads the whole row set, so labels don't shift.
+  // A form left with no served day at all comes out with no sessions, which
+  // every caller already treats as "leave the form alone"; 99ze closes it.
+  const offeredSessions = isLunchOnly
+    ? sessions.filter(s => isLunchOfferedOn(s.date, s.location))
+    : sessions;
   return windowAssistanceContextSessions({
     formId,
-    sessions,
+    sessions: offeredSessions,
     locations,
     titles,
     typeTags,

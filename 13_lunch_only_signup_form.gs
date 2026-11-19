@@ -248,13 +248,15 @@ function syncLunchOnlySessions(registrySheet) {
   // for that meal, who buildDashboardRollup() is meanwhile emailing somebody
   // about by name.
   //
-  // THE ONE LOOSE END, and it is deliberate: a location/month whose dates ALL
-  // become Not Serving disappears from this map entirely, so its form is not
-  // refreshed and its link stops being pinned — but the form itself stays open
-  // and still lists the dates it had. Closing it automatically would mean
-  // re-opening it automatically too, and a form that opens and closes itself
-  // on the strength of a menu edit is a worse failure than a stale link. Close
-  // it by hand if that ever happens; see STRESS_TEST.md.
+  // A LOCATION/MONTH WHOSE DATES ALL BECOME NOT SERVING disappears from this
+  // map entirely, so its form is not refreshed here and its link stops being
+  // pinned. The form is not left open, though: buildFormSessionContext() (09)
+  // offers a lunch-only form only its served days, so the hourly shape check
+  // takes the Not Serving ones off, and the ended-forms pass (99ze) closes a
+  // lunch-only form with no served day left, with a message saying lunch is
+  // not being served. A day turned back to a catered menu re-opens it (only a
+  // form 99ze closed). Rows people signed up for stay on the session tab as
+  // NOT_SERVING_STATUS, and the public schedule leaves them out (86).
 
   // TYPED, REAL, AND TOO FAR OFF TO BUILD YET — and reported only where that
   // is the WHOLE of what a location has, which is the case where the silence
