@@ -137,7 +137,13 @@ const LEDGER_SOURCES = Object.freeze({
   // A whole date moved to another building's calendar (99zy), registrants and
   // all. Not `change-panel`: that is one person rung through at the desk, and
   // "forty people moved because a building closed" is a different question.
-  RELOCATE: 'relocate'
+  RELOCATE: 'relocate',
+  // Triaged people put back on the program their dates became (99zzd): a
+  // rename or a building move the sync read as deleted dates. Not `relocate`,
+  // which moved live dates with their calendar events; these people had
+  // already been taken off every roster, and "who put them back" is the
+  // question this answers.
+  TRIAGE_MOVE: 'triage-move'
 });
 
 /** Every source, for validation. */

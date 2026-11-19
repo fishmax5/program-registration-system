@@ -391,6 +391,10 @@ function buildCoordinatorMenu_(ui, title, role) {
       // A BUILDING CLOSES: tick dates and send them, registrants and all, to
       // the other building's calendar. See 99zy.
       .addItem('\ud83c\udfe2 Move Sessions to Another Building\u2026', menuFn_('showRelocateSessionsDialog'))
+      // ITS AFTERMATH, when the move was made on the calendar by hand: the
+      // sync read the dates as deleted and put their people on triage. This
+      // puts them on the program their dates became. See 99zzd.
+      .addItem('\ud83d\udce5 Put Triaged People on Their New Program\u2026', menuFn_('showTriageToProgramDialog'))
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
       // sense together — a [Personalized Assistance] program is booked by time
