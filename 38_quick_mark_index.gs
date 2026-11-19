@@ -1578,6 +1578,22 @@ function applyQuickMarkLocked(args) {
   const moveResult = moveResultFor(moveTime, { bookedTime: appointmentTime, freedTime: bookedTime, name });
 
   if (register && !attended && !lunch && !signup && !moveTime) {
+    // A row that is Waitlisted or Cancelled is NOT a registration. Saying
+    // "already registered" here told the bulk list (99q) that somebody held a
+    // seat when they held none, so they were left off the roster with a line
+    // that read like a success. Say what the row actually is, and flag it so
+    // callers can report it apart from a genuine "already on".
+    const rowStatus = String(current[map['Program_Status']] || '').trim();
+    if (rowStatus === 'Waitlisted' || rowStatus === 'Cancelled') {
+      const whenLabel = target.date ? formatDateLabel(target.date) : 'that date';
+      const notRegistered = rowStatus === 'Waitlisted'
+        ? `⚠️ ${name} is on the WAITING LIST for ${selection.title || 'that program'} on ${whenLabel} — ` +
+          `not registered, so no seat was given. Use Change this registration ▸ Put them back on to promote them.`
+        : `⚠️ ${name} has a CANCELLED booking for ${selection.title || 'that program'} on ${whenLabel} — ` +
+          `not registered. Use Change this registration ▸ Put them back on.`;
+      toastIfPossible(notRegistered);
+      return { ok: true, message: notRegistered, namesChanged: false, notRegistered: rowStatus };
+    }
     const already = `✅ ${name} is already registered for ${selection.title || 'that program'} on ` +
       `${target.date ? formatDateLabel(target.date) : 'that date'} — nothing to add.` +
       `${earlierNote}${standingNote}`;

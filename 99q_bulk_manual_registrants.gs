@@ -1437,6 +1437,7 @@ function registerOneBulkPerson_(program, picked, person) {
   const outcome = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => {
     let done = 0;
     let already = 0;
+    const notRegistered = {};
     let refused = '';
     // ONE WRITE PER PERSON, not one per date. Each date is still Quick Mark's
     // Register — the same checks, the same row, the same ledger entry — but a
@@ -1473,7 +1474,12 @@ function registerOneBulkPerson_(program, picked, person) {
       // all, so a person already on a date who is now being marked attended
       // does not come back that way — their Attended cell moved, which is a
       // write, and is counted as one.
-      if (res.ok && /already registered/i.test(String(res.message || ''))) already++;
+      if (res.ok && res.notRegistered) {
+        // Waitlisted / Cancelled row: nothing written, and NOT "already on".
+        if (!notRegistered[res.notRegistered]) notRegistered[res.notRegistered] = 0;
+        notRegistered[res.notRegistered]++;
+      }
+      else if (res.ok && /already registered/i.test(String(res.message || ''))) already++;
       else if (res.ok) done++;
       else if (!refused) refused = res.message || '';
     }));
@@ -1481,11 +1487,15 @@ function registerOneBulkPerson_(program, picked, person) {
     // (99k), and an entry buffered and never flushed is the loss the ledger
     // exists to prevent. One flush per person, not per date.
     flushPersistentRegistries();
-    return { done, already, refused };
+    return { done, already, refused, notRegistered };
   }, null);
   if (!outcome) return { busy: true };
 
-  const alreadyNote = outcome.already ? ` Already on ${outcome.already} date(s), left as they were.` : '';
+  const waitN = outcome.notRegistered.Waitlisted || 0;
+  const cancN = outcome.notRegistered.Cancelled || 0;
+  const heldBack = (waitN ? ` On the waiting list for ${waitN} date(s) — NOT registered, no seat given.` : '') +
+    (cancN ? ` Cancelled on ${cancN} date(s) — NOT registered; use Put them back on.` : '');
+  const alreadyNote = (outcome.already ? ` Already on ${outcome.already} date(s), left as they were.` : '') + heldBack;
   // NAMED, NOT COUNTED. "Marked attended" beside a person put on eight dates
   // is the sentence this rule exists to stop anybody reading, so the line says
   // which date(s) it was — and says nothing at all where the tick reached no
@@ -1504,6 +1514,8 @@ function registerOneBulkPerson_(program, picked, person) {
   } else if (outcome.done) {
     line = `✅ ${name} — ${outcome.done} of ${sessions.length} date(s).${alreadyNote}${attendedNote}` +
       (outcome.refused ? ` Not the rest: ${outcome.refused}` : '');
+  } else if ((waitN || cancN) && !outcome.refused) {
+    line = `⚠️ ${name} — nothing added.${alreadyNote}${attendedNote}`;
   } else if (outcome.already && !outcome.refused) {
     line = `➖ ${name} — already registered on every date chosen; nothing added.${attendedNote}`;
   } else {
