@@ -226,6 +226,7 @@ function menu_showAssistanceScheduleDialog() { recordMenuUsage_('showAssistanceS
 function menu_showBulkRegistrantsDialog() { recordMenuUsage_('showBulkRegistrantsDialog'); return showBulkRegistrantsDialog(); }
 function menu_showBulkWaitlistOnlyDialog() { recordMenuUsage_('showBulkWaitlistOnlyDialog'); return showBulkWaitlistOnlyDialog(); }
 function menu_showRelocateSessionsDialog() { recordMenuUsage_('showRelocateSessionsDialog'); return showRelocateSessionsDialog(); }
+function menu_showTriageToProgramDialog() { recordMenuUsage_('showTriageToProgramDialog'); return showTriageToProgramDialog(); }
 function menu_showCalendarInviteDialog() { recordMenuUsage_('showCalendarInviteDialog'); return showCalendarInviteDialog(); }
 function menu_openSignInApp() { recordMenuUsage_('openSignInApp'); return openSignInApp(); }
 function menu_showCheckInPageDialog() { recordMenuUsage_('showCheckInPageDialog'); return showCheckInPageDialog(); }
