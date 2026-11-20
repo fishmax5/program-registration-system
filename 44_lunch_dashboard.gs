@@ -105,14 +105,21 @@ const LUNCH_SIGNUP_PINNED_LIMIT = 4;
  * last rather than first, so it lands under the months it cannot be placed
  * among instead of above them.
  */
-function buildLunchSignUpRows(links) {
+function buildLunchSignUpRows(links, closedMonths) {
   const rows = [];
   // Pruned on the way out as well as on the way in: the dashboard renders far
   // more often than the lunch sync runs, and a month that ended overnight
   // must stop being pinned on the next render rather than on the next sync.
   const live = pruneLunchOnlyFormLinks(links);
+  const closed = closedMonths || {};
   Object.keys(live).forEach(groupKey => {
     const m = live[groupKey];
+    // A month whose kitchen is closed for every day left in it — see
+    // lunchMonthsClosedAhead() — keeps its stored pin (13 keeps it on
+    // purpose, so a day turned back to Hot finds the same form) but is not
+    // SHOWN: a link to a form taking no sign-ups is the "Narberth lunches are
+    // still on the sheet" of November 2026, not a link anybody can use.
+    if (closed[`${String(m.location || '').trim()}|${String(m.monthKey || '').trim()}`]) return;
     rows.push({
       location: m.location || '',
       monthLabel: m.monthLabel || '',
@@ -125,6 +132,55 @@ function buildLunchSignUpRows(links) {
   return rows.sort((a, b) => (a.monthKey === b.monthKey
     ? String(a.location).localeCompare(String(b.location))
     : (a.monthKey < b.monthKey ? -1 : 1)));
+}
+
+/**
+ * { 'Narberth|2026-11': true } — every location+month whose remaining days on
+ * Lunch_Schedule (today onward) ALL read "Not Serving".
+ *
+ * ONLY A DECISION COUNTS, NEVER A GAP. The pinned block deliberately keeps a
+ * month whose menu simply has not been typed yet (see syncLunchOnlySessions(),
+ * 13: "a month that has not ended stays, whatever the menu currently says"),
+ * because that form is open and its link is being asked for at the desk. A
+ * month with no upcoming menu rows at all is therefore NOT in this map, and
+ * neither is one with a single Hot, Cold or blank-typed day left in it. What
+ * is in it is the month somebody has gone through and closed, day by day —
+ * Narberth from November 2026 — whose form 99ze has already closed with a
+ * "lunch is not being served" message.
+ *
+ * Pure over the rows it is handed, so the test needs no sheet.
+ */
+function lunchMonthsClosedAhead(menuRows, todayKey) {
+  const map = getIndexMap(HEADERS.Lunch_Schedule);
+  const seen = {};
+  const open = {};
+  (menuRows || []).forEach(row => {
+    const d = coerceDate(row[map['Event_Date']]);
+    const location = String(row[map['Location']] || '').trim();
+    if (!d || !location) return;
+    const dateKey = formatDateKey(d);
+    if (dateKey < todayKey) return;
+    const key = `${location}|${dateKey.slice(0, 7)}`;
+    seen[key] = true;
+    if (String(row[map['Type']] || '').trim() !== 'Not Serving') open[key] = true;
+  });
+  const closed = {};
+  Object.keys(seen).forEach(key => { if (!open[key]) closed[key] = true; });
+  return closed;
+}
+
+/** lunchMonthsClosedAhead() over the live menu tab; {} when it cannot be read. */
+function readLunchMonthsClosedAhead_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const menuSheet = ss ? ss.getSheetByName(SHEET_NAMES.LUNCH_SCHEDULE) : null;
+    if (!menuSheet) return {};
+    return lunchMonthsClosedAhead(readLunchScheduleRows(menuSheet), formatDateKey(new Date()));
+  } catch (err) {
+    // Showing a pin we could have hidden is the safe failure here.
+    log(`ℹ️ Could not read Lunch_Schedule to hide closed months' sign-up links (${err}).`);
+    return {};
+  }
 }
 
 /**
@@ -627,7 +683,7 @@ function updateMasterLunchDashboard(registrantRows) {
   const sheet = getOrCreateSheet(ss, SHEET_NAMES.LUNCH_DASHBOARD);
   const headers = HEADERS.Master_Lunch_Dashboard;
   const map = getIndexMap(headers);
-  const signUpRows = buildLunchSignUpRows(getLunchOnlyFormLinks());
+  const signUpRows = buildLunchSignUpRows(getLunchOnlyFormLinks(), readLunchMonthsClosedAhead_());
   const plan = getDashboardRowPlan(signUpRows.length);
   const rollup = buildDashboardRollup(registrantRows);
 
@@ -880,7 +936,8 @@ function applyLunchRosterFormatting(sheet, headers, result) {
 
 /**
  * Removes the schedule rows for upcoming dates that Lunch_Schedule now marks
- * "Not Serving".
+ * "Not Serving" — and, since November 2026, any upcoming AUTO-SYNCED row that
+ * this pass no longer has a reason for (see STALE ROWS below).
  *
  * WHY THIS IS NEEDED AT ALL: the Full Schedule table is UPSERTED, not rebuilt.
  * That's deliberate — it's what makes hand-entered buffers and actuals survive
@@ -912,6 +969,20 @@ function applyLunchRosterFormatting(sheet, headers, result) {
  *   ROWS STILL IN THE ROLLUP. A "Not Serving" day where somebody's
  *   Lunch_Served box is ticked stays, because food demonstrably happened —
  *   Served_Confirmed records reality, not the plan.
+ *
+ * STALE ROWS. The same "a row never leaves on its own" applies to an upcoming
+ * day that simply stopped being wanted, with no "Not Serving" row to say so:
+ * Narberth's January Mondays-to-Fridays were seeded while its calendar still
+ * ran them, the calendar moved to Ashbridge, and the rows stayed on the
+ * schedule with the last counts they were given (8, 4, 5, 7) — counts nobody
+ * was behind any more, since All_Lunch_Registrants, drawn from the same
+ * rollup, listed no one (2026-11-20). An upcoming row the rollup does not
+ * contain has no catered menu, no session offering lunch and no person asking
+ * for it; if it is also Auto-Synced and carries nothing typed, every cell on
+ * it was written by this code and none of it is true any more, so it goes
+ * too, silently. The three exceptions above still hold for it: a hand-edited
+ * row or a typed number keeps it (with no note, since nothing has been
+ * decided about that day), and past dates are never touched.
  */
 function dropNotServingRows(tableRows, map, rollup) {
   const inRollup = {};
@@ -920,6 +991,7 @@ function dropNotServingRows(tableRows, map, rollup) {
   const todayKey = formatDateKey(new Date());
   const kept = [];
   let dropped = 0;
+  let droppedStale = 0;
 
   tableRows.forEach(row => {
     const d = coerceDate(row[map['Event_Date']]);
@@ -929,27 +1001,32 @@ function dropNotServingRows(tableRows, map, rollup) {
     const dateKey = formatDateKey(d);
     if (inRollup[`${dateKey}|${location}`]) { kept.push(row); return; }
     if (dateKey < todayKey) { kept.push(row); return; }
-    if (!isExplicitlyNotServing(d, location)) { kept.push(row); return; }
+    const notServing = isExplicitlyNotServing(d, location);
 
     const override = String(row[map['Manual_Override']] || '').trim();
     const typed = LUNCH_DASHBOARD_MANUAL_COLUMNS.filter(
       name => map[name] !== undefined && String(row[map[name]] || '').trim() !== '');
     if (override === 'Manually Added' || override === 'Manually Edited' || typed.length > 0) {
-      const why = (override === 'Manually Added' || override === 'Manually Edited')
-        ? `hand-edited (${override})`
-        : `carries hand-entered numbers (${typed.join(', ')})`;
-      noteForAdmin('Not-Serving date still on the lunch dashboard',
-        `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row ` +
-        `${why} so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
+      if (notServing) {
+        const why = (override === 'Manually Added' || override === 'Manually Edited')
+          ? `hand-edited (${override})`
+          : `carries hand-entered numbers (${typed.join(', ')})`;
+        noteForAdmin('Not-Serving date still on the lunch dashboard',
+          `${formatDateLabel(d)} at ${location} is marked "Not Serving", but its dashboard row ` +
+          `${why} so it has been left alone. Delete it yourself if it shouldn't be ordered.`);
+      }
       kept.push(row);
       return;
     }
 
-    dropped++;
+    if (notServing) dropped++; else droppedStale++;
   });
 
   if (dropped > 0) {
     log(`Master_Lunch_Dashboard: removed ${dropped} upcoming row(s) for date+location(s) now marked "Not Serving".`);
+  }
+  if (droppedStale > 0) {
+    log(`Master_Lunch_Dashboard: removed ${droppedStale} upcoming auto-synced row(s) with no menu, session or sign-up behind them any more.`);
   }
   return kept;
 }
