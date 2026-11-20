@@ -555,4 +555,31 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.ok(openedIds.indexOf('F_OWN') !== -1, 'the program\'s own sheet is');
 }
 
+// ---------------------------------------------------------------------------
+// A LUNCH'S SHEET IS NEVER PUSHED (Nov 2026). The ~45 per-dish sheets built
+// before lunch stopped getting one are left as last written and never opened,
+// so they stop costing an open an hour and stop reporting "came out empty".
+// ---------------------------------------------------------------------------
+{
+  const OWN_KEY = 'chair yoga|ashbridge';
+  const LUNCH_KEY = 'lunch @ narberth — cheese lasagna|narberth';
+  const sheet = makeCountingSheet([], 'Sign_Up_Sheet');
+  const openedIds = [];
+  sandbox.__clearSpreadsheetHandles();
+  sandbox.SpreadsheetApp.openById = id => {
+    openedIds.push(id);
+    return { getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet] };
+  };
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [OWN_KEY]: rosterRows(1, 2) }));
+  sandbox.__setRegistry({
+    [OWN_KEY]: { fileId: 'F_OWN', title: 'Chair Yoga', location: 'Ashbridge' },
+    [LUNCH_KEY]: { fileId: 'F_LUNCH', title: 'Lunch @ Narberth — Cheese Lasagna', location: 'Narberth' }
+  });
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], [], { force: true }), 1,
+    'only the program sheet is written, even on a forced push');
+  assert.ok(openedIds.indexOf('F_LUNCH') === -1, 'the lunch sheet is never opened');
+  assert.ok(openedIds.indexOf('F_OWN') !== -1, 'the program sheet is');
+}
+
 console.log('✅ leader_sheet_push.test.js passed');
