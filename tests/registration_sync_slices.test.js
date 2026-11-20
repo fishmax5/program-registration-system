@@ -148,7 +148,7 @@ function installStubs() {
     'updateMasterLunchDashboard', 'refreshMemoryTabs', 'renderClubMembersSheet', 'refreshClubMemberLabels',
     'ensureRegistrantSheetsForUpcomingPrograms', 'ensureProgramLeaderSheetsForNotifyingLeaders',
     'pushProgramLeaderSheets', 'notifyProgramLeadersOfRosterChanges', 'sendProgramLeaderDaySnapshotDigests',
-    'inviteRegistrantsToCalendarEvents', 'sendRegistrantReminders', 'checkRoomConflictsForDigest'
+    'inviteRegistrantsToCalendarEvents', 'sendWeeklyRegistrantEmails', 'checkRoomConflictsForDigest'
   ].forEach(name => { sandbox[name] = record(name); });
   sandbox.renderProgramDashboard = (...args) => {
     calls.push({ name: 'renderProgramDashboard', args });
@@ -295,7 +295,7 @@ const namesCalled = () => calls.map(c => c.name);
     namesCalled().indexOf('pushProgramLeaderSheets') === -1,
     'a leader is told about a roster only after the sheet holding it went out');
   assert.ok(namesCalled().indexOf('inviteRegistrantsToCalendarEvents') <
-    namesCalled().indexOf('sendRegistrantReminders'),
+    namesCalled().indexOf('sendWeeklyRegistrantEmails'),
     'the invitation goes before the reminder about it');
 }
 
@@ -315,7 +315,7 @@ const namesCalled = () => calls.map(c => c.name);
   assert.deepStrictEqual(Array.from(plan.tail), [], 'and it is not retried inside this window');
   assert.ok(plan.problems.some(p => /lunch dashboard/.test(p)),
     'the failure is named in words the office can act on');
-  assert.ok(namesCalled().indexOf('sendRegistrantReminders') !== -1,
+  assert.ok(namesCalled().indexOf('sendWeeklyRegistrantEmails') !== -1,
     'every step after the failure still ran');
 }
 
@@ -353,7 +353,7 @@ const namesCalled = () => calls.map(c => c.name);
 
   const result = sandbox.syncRegistrationsInternal();
   assert.ok(result.finished, 'it ran to the end with no deadline');
-  assert.ok(namesCalled().indexOf('sendRegistrantReminders') !== -1, 'including the last step of the tail');
+  assert.ok(namesCalled().indexOf('sendWeeklyRegistrantEmails') !== -1, 'including the last step of the tail');
   assert.ok(!Object.keys(sandbox.PropertiesService.__store).some(
     k => k === 'REGISTRATION_SYNC_PLAN_V1' && before.indexOf(k) === -1),
     'and it wrote no plan for a follow-up run to pick up');

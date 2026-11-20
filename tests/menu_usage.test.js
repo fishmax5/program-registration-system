@@ -135,7 +135,7 @@ const BEFORE_R4 = [
   'sendProgramLeaderDayDigestsNow',
   'showAssistanceScheduleDialog',
   'showCalendarInviteDialog',
-  'sendRegistrantRemindersNow',
+  'sendWeeklyRegistrantEmailsNow',
   'showProgramReviewDialog',
   'pushProgramQuestionsToForms',
   'showFixOneFormDialog',

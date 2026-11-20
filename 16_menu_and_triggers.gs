@@ -355,7 +355,7 @@ function buildCoordinatorMenu_(ui, title, role) {
       // Beside the invitations because they are the two channels one
       // Program_Settings row governs, and this is the one that can
       // say "your appointment is at 2:15". See sections 9e and 9h.
-      .addItem('Send Registrant Reminders Now', menuFn_('sendRegistrantRemindersNow')))
+      .addItem('Send Weekly Registrant Emails Now', menuFn_('sendWeeklyRegistrantEmailsNow')))
     .addSubMenu(ui.createMenu('\ud83d\udcdd Programs & Forms')
       // FIRST, because it is the one that says what is wrong before anything
       // else here is worth pressing. Everything below acts on one program;

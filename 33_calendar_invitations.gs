@@ -195,34 +195,25 @@ function inviteRegistrantsToCalendarEvents(sessionRows, registrantRows, options)
     // by default — which publishes a class roster to everybody on it. Hidden
     // BEFORE anybody is added, so no invitation goes out on an event whose
     // list is still showing.
-    if (toAdd.length > 0 && !holdInvites) hideEventGuestList_(event, session);
-    toAdd.forEach(email => {
-      if (holdInvites) {
+    // Hidden in the same quiet patch that adds them (changeEventGuestsQuietly_),
+    // so no guest list is ever shown and no Google email goes out.
+    const addNow = holdInvites ? [] : toAdd;
+    if (holdInvites) {
+      toAdd.forEach(email => {
         recordHeldCalendarInvite(email, session);
         result.deferred++;
-        return;
-      }
-      try {
-        event.addGuest(email);
-        already.add(email);
-        addedHere.push(email);
-        result.invited++;
+      });
+    }
+    if (addNow.length > 0 || toRemove.length > 0) {
+      if (changeEventGuestsQuietly_(event, addNow, toRemove)) {
+        addNow.forEach(email => { already.add(email); addedHere.push(email); result.invited++; });
+        toRemove.forEach(email => { already.delete(email); removedHere.push(email); result.removed++; });
         changed = true;
-      } catch (err) {
-        log(`⚠️ Could not invite ${email} to "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
+      } else {
+        log(`⚠️ Nobody was added to or removed from "${session.title}" on ${formatDateLabel(session.date)} ` +
+          `this sync — the next sync tries again.`);
       }
-    });
-    toRemove.forEach(email => {
-      try {
-        event.removeGuest(email);
-        already.delete(email);
-        removedHere.push(email);
-        result.removed++;
-        changed = true;
-      } catch (err) {
-        log(`⚠️ Could not remove ${email} from "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
-      }
-    });
+    }
 
     if (changed) {
       ledger[eventId] = Array.from(already);
@@ -673,15 +664,11 @@ function removeAdminGuestsFromCalendarEvents() {
     }
 
     let changedHere = false;
-    calendarInviteAdminCleanupTargets(guests, adminEmails).forEach(email => {
-      try {
-        event.removeGuest(email);
-        removed++;
-        changedHere = true;
-      } catch (err) {
-        log(`⚠️ Could not remove ${email} from "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
-      }
-    });
+    const targets = calendarInviteAdminCleanupTargets(guests, adminEmails);
+    if (targets.length > 0 && changeEventGuestsQuietly_(event, [], targets)) {
+      removed += targets.length;
+      changedHere = true;
+    }
     if (changedHere) eventsTouched++;
 
     // The ledger too, whether or not the calendar had them: an address left
@@ -846,16 +833,11 @@ function removeAllCalendarInvitesFromEvents() {
     }
 
     let changedHere = false;
-    dedupePreservingOrder(guests.map(email => String(email || '').trim()).filter(Boolean))
-      .forEach(email => {
-        try {
-          event.removeGuest(email);
-          removed++;
-          changedHere = true;
-        } catch (err) {
-          log(`⚠️ Could not remove ${email} from "${session.title}" on ${formatDateLabel(session.date)} (${err}).`);
-        }
-      });
+    const everyone = dedupePreservingOrder(guests.map(email => String(email || '').trim()).filter(Boolean));
+    if (everyone.length > 0 && changeEventGuestsQuietly_(event, [], everyone)) {
+      removed += everyone.length;
+      changedHere = true;
+    }
     if (changedHere) eventsTouched++;
 
     // The whole ledger entry, not a filtered one: nobody is invited to this
@@ -1049,11 +1031,83 @@ function findApiEventForCalendarEvent_(calendarId, event) {
     maxResults: 50
   });
   const title = String(event.getTitle() || '');
+  // An all-day event's API copy has start.date ("2026-11-24"), not a time.
+  const allDay = typeof event.isAllDayEvent === 'function' && event.isAllDayEvent();
+  const dayKey = allDay ? formatDateKey(event.getStartTime()) : '';
   const hits = ((found && found.items) || []).filter(item => {
-    const dt = item.start && item.start.dateTime;
-    return dt && new Date(dt).getTime() === startMs && String(item.summary || '') === title;
+    if (String(item.summary || '') !== title || !item.start) return false;
+    if (allDay) return item.start.date === dayKey;
+    const dt = item.start.dateTime;
+    return !!dt && new Date(dt).getTime() === startMs;
   });
   return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * Adds and removes guests WITHOUT Google emailing anybody (November 2026: the
+ * center sends one weekly email of its own instead, see 70). CalendarApp's
+ * addGuest() IS an invitation email and removeGuest() a cancellation, with no
+ * switch to stop either, so this patches the instance's attendee list through
+ * the Advanced Calendar service with sendUpdates: 'none', and hides the guest
+ * list from guests in the same call.
+ *
+ * NO FALLBACK to addGuest/removeGuest: those are exactly the email this is
+ * here to stop. Returns false and changes nothing when the instance cannot be
+ * found or the patch fails, so the caller leaves its ledger alone and the next
+ * sync tries again.
+ *
+ * A guest added this way gets no invitation. A Gmail or Google account sees
+ * the event on their calendar anyway; any other address sees nothing until it
+ * is opened from a Google calendar, which is why the weekly email exists.
+ */
+function changeEventGuestsQuietly_(event, add, remove) {
+  try {
+    const calendarId = event.getOriginalCalendarId();
+    const api = calendarId ? findApiEventForCalendarEvent_(calendarId, event) : null;
+    if (!api || !api.id) {
+      log(`⚠️ Could not find the calendar's own copy of "${safeEventTitle_(event)}" — its guest list was left as it was.`);
+      return false;
+    }
+    const lower = email => String(email || '').trim().toLowerCase();
+    const dropping = {};
+    (remove || []).forEach(email => { dropping[lower(email)] = true; });
+    const attendees = (api.attendees || []).filter(guest => !dropping[lower(guest.email)]);
+    const present = {};
+    attendees.forEach(guest => { present[lower(guest.email)] = true; });
+    (add || []).forEach(email => {
+      if (present[lower(email)]) return;
+      attendees.push({ email: String(email).trim() });
+      present[lower(email)] = true;
+    });
+    Calendar.Events.patch({ attendees, guestsCanSeeOtherGuests: false }, calendarId, api.id,
+      { sendUpdates: 'none' });
+    return true;
+  } catch (err) {
+    log(`⚠️ Could not change the guest list of "${safeEventTitle_(event)}" quietly (${err}) — it was left as it was.`);
+    return false;
+  }
+}
+
+/**
+ * Deletes an event without mailing its guests a cancellation. An event with
+ * no guests is deleted the ordinary way; one whose API copy cannot be found
+ * falls back to the ordinary delete, which does mail them, and says so.
+ */
+function deleteEventQuietly(event) {
+  if (eventHasGuests_(event)) {
+    try {
+      const calendarId = event.getOriginalCalendarId();
+      const api = calendarId ? findApiEventForCalendarEvent_(calendarId, event) : null;
+      if (api && api.id) {
+        Calendar.Events.remove(calendarId, api.id, { sendUpdates: 'none' });
+        return;
+      }
+      log(`⚠️ Could not find the calendar's own copy of "${safeEventTitle_(event)}" to delete it quietly — deleted it the ordinary way, so its guests were sent Google's cancellation.`);
+    } catch (err) {
+      log(`⚠️ A quiet delete of "${safeEventTitle_(event)}" failed (${err}) — deleted it the ordinary way, so its guests were sent Google's cancellation.`);
+    }
+  }
+  event.deleteEvent();
 }
 
 /** Patches an event with guests without mailing them. Returns false if it could not. */
