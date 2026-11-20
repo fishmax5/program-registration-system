@@ -537,9 +537,6 @@ function refreshProgramSettings(ss, sessionRows) {
   // still a legal answer.
   applyMemoryTabValidation(sheet, headers, outRows.length, {
     checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
-    // Where the leader's roster lives (99zn). Closed: a misspelling would read
-    // as Sheet, which is safe and silent — the dropdown is what stops it.
-    lists: { Roster_Delivery: ROSTER_DELIVERY_OPTIONS },
     // Event is SUGGESTING, like Program on Program_Leaders: every program the
     // calendar has produced, so a row typed on the spare line (a program the
     // sync has not reached yet) is picked rather than spelled — a misspelled
@@ -905,7 +902,6 @@ function noteProgramSettingsHeaders_(sheet, headers) {
     Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
     Room_Or_Setup: 'The program\'s usual room — pick from Config\'s Rooms list. A single date that moves rooms is ' +
       'set on the session table\'s Room_Override column. Text that is not on the list is not checked for double-booking.',
-    Roster_Delivery: 'Sheet (default), Both, or Web — where the leader\'s roster lives.',
     Add_Guest_To_Calendar: 'WHAT IT SENDS — add each registrant as a guest on the real calendar event.',
     Confirm_On_Booking: 'An email the moment somebody registers; the only place an appointment\'s own time is stated.',
     Week_Before: 'Email 7 days before each session.',

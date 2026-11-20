@@ -18,7 +18,7 @@
 // What is pinned here: the tick writing through, the untick doing nothing at
 // all, the ledger entry appearing ONCE and not again on a repeat sync, an old
 // five-value snapshot still reading back as "nothing was touched", and the web
-// roster page (99zn) refusing an untick the same way the sheet does.
+// roster page (99zn, retired Nov 2026) refusing an untick the same way the sheet did.
 const assert = require('assert');
 const vm = require('vm');
 const src = require('./helpers/source').readSource();
@@ -62,7 +62,6 @@ vm.runInContext(`
   noteForAdmin = function () {};
   getProgramLeaderSheetRegistry = () => ({ prog: { fileId: 'f', title: 'Yoga', location: 'Ashbridge' } });
   openSpreadsheetCached = () => ({ getSheetByName: () => ({}) });
-  leaderRosterSheetRetired = () => false;
   planLeaderSheetPull_ = () => ({ untouched: () => false, read: () => {}, save: () => {} });
 
   var __map = getIndexMap(HEADERS.All_Registrants);
@@ -245,33 +244,6 @@ const run = code => JSON.parse(JSON.stringify(
   assert.ok(out.editable.indexOf('Attended') === out.editable.length - 1,
     'the ack columns are APPENDED to the snapshot order (see 03)');
   assert.ok(out.ticks.indexOf('Attended') !== -1, 'and drawn as a real checkbox');
-}
-
-// ---------------------------------------------------------------------------
-// 7. THE WEB ROSTER PAGE (99zn): same column, same rule, its own words
-// ---------------------------------------------------------------------------
-{
-  const out = run(`
-    resolveLeaderRosterToken_ = () => ({ programKey: 'yoga|ashbridge', title: 'Yoga', location: 'Ashbridge' });
-    leaderRosterWriteState_ = () => ({ writable: true, reason: '' });
-    var __applied = [];
-    applyLeaderRosterEditLocked_ = function (args) { __applied.push(args); return { ok: true, changed: 1 }; };
-    deferQuickMarkBehindSync_ = () => null;
-    withScriptLock = (ms, fn) => fn();
-    leaderRosterNameFor_ = () => 'Joan';
-    leaderRosterView = () => ({ ok: true });
-    const tick = leaderRosterMark('t', 'k', 'Attended', true);
-    const untick = leaderRosterMark('t', 'k', 'Attended', false);
-    const other = leaderRosterMark('t', 'k', 'Lunch_Served', true);
-    return { tick: tick, untick: untick, other: other, applied: __applied.slice() };
-  `);
-  assert.strictEqual(out.tick.ok, true, 'a tick is taken');
-  assert.strictEqual(out.untick.ok, false, 'an untick is refused');
-  assert.ok(/only ever added here/.test(out.untick.message),
-    'with the reason, because somebody pressed a button and a shrug is not an answer');
-  assert.strictEqual(out.other.ok, false, 'and a column that is not a leader’s is still refused');
-  assert.strictEqual(out.applied.length, 1, 'only the tick reached the writer');
-  assert.deepStrictEqual(out.applied[0].changes, { Attended: true });
 }
 
 console.log('✅ leader_sheet_attended.test.js passed');

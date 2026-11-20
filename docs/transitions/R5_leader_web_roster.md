@@ -1,5 +1,8 @@
 # R5 — Program rosters served from the web app (transition plan)
 
+> **Retired 2026-11-20.** No program was ever switched to Web or Both, so the page and its cutover were removed (`99zn` is now a stub; see CLAUDE.md). This file is kept as the record of the design.
+
+
 Item #5 of `docs/RESTRUCTURING_PROPOSALS.md`. Written before the code, and kept
 as the record of how a program moves from its spreadsheet to its web page
 without losing a tick.

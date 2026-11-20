@@ -852,10 +852,10 @@ defineLazyGlobal_('HEADERS', () => ({
     // program at this building, comma-separated, so its sessions share one
     // roster, one set of leaders and one waiting list (99zzc).
     'Event', 'Location', 'Also_Known_As', 'Type_Tag', 'Next_Date', 'Last_Date', 'Sessions_Tracked',
-    // HOW IT RUNS. Roster_Delivery (Sheet / Both / Web — where this program's
-    // leader roster lives, 99zn; blank reads as Sheet) sits here with the other
-    // standing facts rather than after the notes, where it was appended.
-    'Usual_Capacity', 'Typical_Attendance', 'Room_Or_Setup', 'Roster_Delivery',
+    // HOW IT RUNS. (Roster_Delivery sat here until the web roster page, 99zn,
+    // was retired in Nov 2026; every row was blank. The next redraw drops the
+    // column, and every reader projects by name.)
+    'Usual_Capacity', 'Typical_Attendance', 'Room_Or_Setup',
     // WHAT IT SENDS. The one place a person decides who is told, in the order
     // it happens: the guest list, the moment of booking, then the reminders.
     'Add_Guest_To_Calendar', 'Confirm_On_Booking',
@@ -1199,7 +1199,7 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'U
  */
 const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Roster_Delivery', 'Also_Known_As'];
+  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Also_Known_As'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

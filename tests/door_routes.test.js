@@ -156,13 +156,13 @@ ok('mode: walk-in is handed back unchanged — no route claims it',
 ok('a location and a mode travel together',
   sandbox.checkInPageUrl({ location: 'Narberth', mode: 'session' }) ===
     `${BASE}?location=Narberth&mode=session`);
-// THE LEADER ROSTER PAGE (99zn) shares the word 'roster' with the staff
-// roster: with a ?t= it is the leader's page, without one it is still the
-// staff page every existing bookmark expects.
-sandbox.buildLeaderRosterPageHtml = (view, token) => `PAGE:leaderRoster t=${token}`;
-sandbox.leaderRosterData = () => ({ ok: false });
-ok('?mode=roster&t= is the leader roster page',
-  served({ mode: 'roster', t: 'abc' }).html === 'PAGE:leaderRoster t=abc');
+// THE LEADER ROSTER PAGE (99zn) was retired in Nov 2026. An old link that
+// still carries its ?t= gets a plain notice, never the staff roster; a bare
+// ?mode=roster is still the staff page every existing bookmark expects.
+ok('?mode=roster&t= is the retired-link notice, not the staff roster',
+  served({ mode: 'roster', t: 'abc' }).html.indexOf('no longer used') !== -1);
+ok('the notice does not echo the token back',
+  served({ mode: 'roster', t: 'abc' }).html.indexOf('abc') === -1);
 ok('a bare ?mode=roster is still the staff roster',
   served({ mode: 'roster' }).html.indexOf('PAGE:roster') === 0);
 ok('the leader roster page keeps the default framing refusal',
