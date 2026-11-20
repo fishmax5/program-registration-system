@@ -218,7 +218,7 @@ function menu_saveCurrentTabOrder() { recordMenuUsage_('saveCurrentTabOrder'); r
 function menu_sendOfficeDigestNow() { recordMenuUsage_('sendOfficeDigestNow'); return sendOfficeDigestNow(); }
 function menu_sendProgramLeaderDayDigestsNow() { recordMenuUsage_('sendProgramLeaderDayDigestsNow'); return sendProgramLeaderDayDigestsNow(); }
 function menu_sendProgramLeaderRosterAlertsNow() { recordMenuUsage_('sendProgramLeaderRosterAlertsNow'); return sendProgramLeaderRosterAlertsNow(); }
-function menu_sendRegistrantRemindersNow() { recordMenuUsage_('sendRegistrantRemindersNow'); return sendRegistrantRemindersNow(); }
+function menu_sendWeeklyRegistrantEmailsNow() { recordMenuUsage_('sendWeeklyRegistrantEmailsNow'); return sendWeeklyRegistrantEmailsNow(); }
 function menu_showAdminMenu() { recordMenuUsage_('showAdminMenu'); return showAdminMenu(); }
 function menu_showAllPastRows() { recordMenuUsage_('showAllPastRows'); return showAllPastRows(); }
 function menu_showAssistanceReviewDialog() { recordMenuUsage_('showAssistanceReviewDialog'); return showAssistanceReviewDialog(); }

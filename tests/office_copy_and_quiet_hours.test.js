@@ -149,7 +149,7 @@ check('a failed office copy still reads as sent', survived.status, 'sent');
 check('...and the member\'s message was the one that went', sentMail.map(m => m.to), ['member@example.org']);
 
 // ---------------------------------------------------------------------------
-// 2. NOT BEFORE NINE.
+// 2. NOT BEFORE NINE, NOT FROM EIGHT IN THE EVENING.
 // ---------------------------------------------------------------------------
 check('the gate is 9am', sandbox.REMINDER_EARLIEST_HOUR, 9);
 check('12:10am is too early',
@@ -158,8 +158,12 @@ check('8:59am is still too early',
   sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 8, 59))), false);
 check('9:00am sends',
   sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 9, 0))), true);
-check('and so does the whole rest of the day',
-  sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 23, 30))), true);
+check('and so does the afternoon',
+  sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 19, 59))), true);
+check('but not 8pm or later',
+  sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 20, 0))), false);
+check('nor 11:30pm',
+  sandbox.isWithinRegistrantReminderHours(new Date(Date.UTC(2026, 8, 8, 23, 30))), false);
 
 // ---------------------------------------------------------------------------
 // 3. NOTHING AT ALL BETWEEN FIVE AND EIGHT.

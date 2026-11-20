@@ -12,7 +12,7 @@ const patches = [];
 let listItems = [];
 const sandbox = {
   console: { log: () => {} },
-  Utilities: { formatDate: () => '', sleep: () => {} },
+  Utilities: { formatDate: (d, tz, p) => p === 'yyyy-MM-dd' ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '', sleep: () => {} },
   PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty: () => {}, deleteProperty: () => {} }) },
   SpreadsheetApp: { getActiveSpreadsheet: () => null, getActive: () => null },
   FormApp: { ItemType: {} }, CalendarApp: {}, DriveApp: {}, HtmlService: {}, LockService: {},
@@ -21,13 +21,16 @@ const sandbox = {
   Calendar: {
     Events: {
       list: () => ({ items: listItems }),
-      patch: (resource, calendarId, eventId, options) => { patches.push({ resource, calendarId, eventId, options }); return {}; }
+      patch: (resource, calendarId, eventId, options) => { patches.push({ resource, calendarId, eventId, options }); return {}; },
+      remove: (calendarId, eventId, options) => { patches.push({ removed: eventId, options }); }
     }
   }
 };
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.setEventDescriptionQuietly = setEventDescriptionQuietly;
+this.changeEventGuestsQuietly_ = changeEventGuestsQuietly_;
+this.deleteEventQuietly = deleteEventQuietly;
 this.setEventTimeQuietly = setEventTimeQuietly;
 log = function () {};
 `, sandbox);
@@ -101,6 +104,57 @@ const instance = { id: 'abc_20261201T153000Z', summary: 'Intro to Tai Chi', star
   sandbox.setEventDescriptionQuietly(ev, 'new link');
   assert.strictEqual(ev.plainDescription, 'new link');
   sandbox.Calendar.Events.patch = saved;
+}
+
+// 6. Guests added and removed in ONE quiet patch: existing guests kept with
+//    their replies, the removed one gone, nobody emailed, list hidden.
+{
+  patches.length = 0;
+  listItems = [Object.assign({}, instance, { attendees: [
+    { email: 'Keep@example.com', responseStatus: 'accepted' }, { email: 'gone@example.com' }] })];
+  const ev = fakeEvent(['keep@example.com', 'gone@example.com']);
+  ev.addGuest = () => { throw new Error('addGuest emails the guest'); };
+  ev.removeGuest = () => { throw new Error('removeGuest emails the guest'); };
+  assert.strictEqual(sandbox.changeEventGuestsQuietly_(ev, ['new@example.com', 'keep@example.com'], ['GONE@example.com']), true);
+  assert.strictEqual(patches.length, 1);
+  assert.strictEqual(JSON.stringify(patches[0].resource.attendees),
+    JSON.stringify([{ email: 'Keep@example.com', responseStatus: 'accepted' }, { email: 'new@example.com' }]));
+  assert.strictEqual(patches[0].resource.guestsCanSeeOtherGuests, false);
+  assert.strictEqual(patches[0].options.sendUpdates, 'none');
+  assert.strictEqual(patches[0].eventId, instance.id);
+}
+
+// 7. No API copy: nothing changes, and there is NO fallback to addGuest.
+{
+  patches.length = 0; listItems = [];
+  const ev = fakeEvent([]);
+  let called = false;
+  ev.addGuest = () => { called = true; };
+  assert.strictEqual(sandbox.changeEventGuestsQuietly_(ev, ['new@example.com'], []), false);
+  assert.strictEqual(called, false);
+  assert.strictEqual(patches.length, 0);
+}
+
+// 8. An all-day event is matched on its date.
+{
+  patches.length = 0;
+  listItems = [{ id: 'day1', summary: 'Intro to Tai Chi', start: { date: '2026-12-01' } }];
+  const ev = fakeEvent([]);
+  ev.isAllDayEvent = () => true;
+  ev.getStartTime = () => new Date(2026, 11, 1);
+  assert.strictEqual(sandbox.changeEventGuestsQuietly_(ev, ['new@example.com'], []), true);
+  assert.strictEqual(patches[0].eventId, 'day1');
+}
+
+// 9. Deleting an event with guests sends no cancellation.
+{
+  patches.length = 0; listItems = [instance];
+  const ev = fakeEvent(['member@example.com']);
+  let plain = false;
+  ev.deleteEvent = () => { plain = true; };
+  sandbox.deleteEventQuietly(ev);
+  assert.strictEqual(plain, false);
+  assert.strictEqual(JSON.stringify(patches[0]), JSON.stringify({ removed: instance.id, options: { sendUpdates: 'none' } }));
 }
 
 console.log('quiet_event_edits: all passed');

@@ -902,12 +902,13 @@ function noteProgramSettingsHeaders_(sheet, headers) {
     Usual_Capacity: 'HOW IT RUNS — the cap to suggest; seeded from the calendar where it agrees.',
     Room_Or_Setup: 'The program\'s usual room — pick from Config\'s Rooms list. A single date that moves rooms is ' +
       'set on the session table\'s Room_Override column. Text that is not on the list is not checked for double-booking.',
-    Add_Guest_To_Calendar: 'WHAT IT SENDS — add each registrant as a guest on the real calendar event.',
-    Confirm_On_Booking: 'An email the moment somebody registers; the only place an appointment\'s own time is stated.',
-    Week_Before: 'Email 7 days before each session.',
-    Day_Before: 'Email 1 day before.',
-    Morning_Of: 'Email on the day itself.',
-    Other_Reminders: 'Further day counts, e.g. "14, 3". Adds to the boxes; does not replace them.'
+    Add_Guest_To_Calendar: 'Add each registrant as a guest on the real calendar event. Silent: Google sends no ' +
+      'invitation. Registrant email is now one weekly email from Friday 10am covering every program.',
+    Confirm_On_Booking: 'RETIRED (Nov 2026) — sends nothing. The weekly email replaced it.',
+    Week_Before: 'RETIRED (Nov 2026) — sends nothing. The weekly email replaced it.',
+    Day_Before: 'RETIRED (Nov 2026) — sends nothing. The weekly email replaced it.',
+    Morning_Of: 'RETIRED (Nov 2026) — sends nothing. The weekly email replaced it.',
+    Other_Reminders: 'RETIRED (Nov 2026) — sends nothing. The weekly email replaced it.'
   };
   try {
     sheet.getRange(MEMORY_TAB_HEADER_ROW, 1, 1, headers.length)

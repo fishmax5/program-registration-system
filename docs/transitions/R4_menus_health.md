@@ -111,7 +111,7 @@ base branch (99 items, plus the non-admin escape hatch).
 | `sendProgramLeaderDayDigestsNow` | 👩‍🏫 Rosters & Sharing ▸ Send Roster Digests Now | Coordinator ▸ 👩‍🏫 Rosters & Sharing |
 | `showAssistanceScheduleDialog` | 👩‍🏫 Rosters & Sharing ▸ Personalized Assistance Schedule… | Coordinator ▸ 👩‍🏫 Rosters & Sharing |
 | `showCalendarInviteDialog` | 👩‍🏫 Rosters & Sharing ▸ Invite Registrants to Calendar Events… | Coordinator ▸ 👩‍🏫 Rosters & Sharing |
-| `sendRegistrantRemindersNow` | 👩‍🏫 Rosters & Sharing ▸ Send Registrant Reminders Now | Coordinator ▸ 👩‍🏫 Rosters & Sharing |
+| `sendWeeklyRegistrantEmailsNow` | 👩‍🏫 Rosters & Sharing ▸ Send Weekly Registrant Emails Now | Coordinator ▸ 👩‍🏫 Rosters & Sharing |
 | `showProgramReviewDialog` | 📝 Programs & Forms ▸ 🔍 Review Programs, Then Update Once… | Coordinator ▸ 📝 Programs & Forms |
 | `pushProgramQuestionsToForms` | 📝 Programs & Forms ▸ Update Program Questions on Forms | Coordinator ▸ 📝 Programs & Forms |
 | `showFixOneFormDialog` | 📝 Programs & Forms ▸ 🩹 Update One Form (keeps its link)… | Coordinator ▸ 📝 Programs & Forms |
@@ -256,7 +256,7 @@ entry — never delete the function.
 | Settings & Fixes ▸ Rebuild the Program Month View | Redrawn by every sync. |
 | Sign-In & Door ▸ Write Queued Check-Ins Now | The five-minute flush and the post-sync flush (`99w`) write them. |
 | Settings & Fixes ▸ Show All Past Rows / Resize All Sheets | Cosmetic; collapse again on the next sync. |
-| Rosters & Sharing ▸ Send Roster Change Alerts Now / Send Roster Digests Now / Send Registrant Reminders Now | The sync sends all three. |
+| Rosters & Sharing ▸ Send Roster Change Alerts Now / Send Roster Digests Now / Send Weekly Registrant Emails Now | The sync sends all three. |
 | Rosters & Sharing ▸ Merge Duplicate Members Now | Runs on every roll write (`79`). |
 | Admin ▸ Rewrite Event Links (fix duplicates) | Superseded by the description writer (`26`). |
 | Admin ▸ Read an Event's Tags… / Load Weekend Events… | Rare, one-off. |

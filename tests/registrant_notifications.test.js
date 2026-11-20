@@ -8,10 +8,8 @@
 // what a row that does not exist yet falls back to, and how the retired
 // Notify_Mode dropdown is carried onto the boxes that replaced it.
 //
-// The appointment case is checked all the way to the message, because the
-// time line in it is the reason this exists: a calendar event has one
-// description shared by every guest, so the person's own slot can only be
-// said in mail.
+// What these answers no longer do — send per-program reminders — is pinned
+// in weekly_registrant_email.test.js, beside the one email that replaced them.
 const vm = require('vm');
 
 const src = require('./helpers/source').readSource();
@@ -37,8 +35,6 @@ vm.runInContext(src + `
 ;this.defaultNotificationPolicy = defaultNotificationPolicy;
 this.parseReminderDays = parseReminderDays;
 this.notificationProgramKey = notificationProgramKey;
-this.buildRegistrantReminderBody = buildRegistrantReminderBody;
-this.buildRegistrantReminderSubject = buildRegistrantReminderSubject;
 this.LEGACY_NOTIFY_MODES = LEGACY_NOTIFY_MODES;
 this.policyFromNotificationRow = policyFromNotificationRow;
 this.policyFromLegacyCells = policyFromLegacyCells;
@@ -52,7 +48,6 @@ this.LEGACY_SHEET_RENAMES = LEGACY_SHEET_RENAMES;
 this.LEGACY_PROGRAM_OPTIONS_SHEET_NAME = LEGACY_PROGRAM_OPTIONS_SHEET_NAME;
 this.NOTIFICATION_CHECKBOX_COLUMNS = NOTIFICATION_CHECKBOX_COLUMNS;
 this.seedNotificationHalf = seedNotificationHalf;
-this.REMINDER_CONFIRMATION_OFFSET = REMINDER_CONFIRMATION_OFFSET;
 this.HEADERS = HEADERS;
 
 `, sandbox, { filename: 'program.gs' });
@@ -236,39 +231,6 @@ check('a day count past the window is dropped', sandbox.parseReminderDays('400, 
 check('pure nonsense yields nothing to send on', sandbox.parseReminderDays('soon-ish'), []);
 check('an unparseable Other_Reminders cell costs the boxes nothing',
   readRow({ Day_Before: true, Other_Reminders: 'soon-ish' }).days, [1]);
-
-// ---------------------------------------------------------------------------
-// The message. The time line is the whole point of it.
-// ---------------------------------------------------------------------------
-const session = {
-  title: 'Personalized Assistance', location: 'Main Building',
-  date: new Date(2026, 2, 3), time: '9:00 AM – 4:00 PM'
-};
-const booked = sandbox.buildRegistrantReminderBody(
-  session, { name: "Mary O'Brien", time: '2:15 PM' }, sandbox.REMINDER_CONFIRMATION_OFFSET, 5);
-checkTrue('a booking confirmation states the person\'s own time', booked.indexOf('2:15 PM') !== -1);
-checkTrue('...and greets them by name', booked.indexOf("Mary O'Brien") !== -1);
-// The shared block hours must not appear beside a personal slot — two times in
-// one message is exactly the confusion this feature exists to remove.
-check('...and does not also quote the whole block', booked.indexOf('9:00 AM – 4:00 PM'), -1);
-
-const dayBefore = sandbox.buildRegistrantReminderBody(
-  session, { name: 'Mary', time: '2:15 PM' }, 1, 1);
-checkTrue('the day-before reminder says tomorrow', dayBefore.indexOf('tomorrow') !== -1);
-checkTrue('...and repeats the time', dayBefore.indexOf('2:15 PM') !== -1);
-
-const group = sandbox.buildRegistrantReminderBody(
-  { title: 'Chair Yoga', location: 'Annex', date: new Date(2026, 2, 3), time: '10:00 AM' },
-  { name: 'Sam', time: '' }, 0, 0);
-checkTrue('a program with no per-person time falls back to the session time',
-  group.indexOf('10:00 AM') !== -1);
-checkTrue('...and says today', group.indexOf('today') !== -1);
-
-check('the confirmation subject is not a countdown',
-  sandbox.buildRegistrantReminderSubject(session, sandbox.REMINDER_CONFIRMATION_OFFSET)
-    .indexOf('Reminder'), -1);
-checkTrue('a countdown subject names the program',
-  sandbox.buildRegistrantReminderSubject(session, 1).indexOf('Personalized Assistance') !== -1);
 
 // ---------------------------------------------------------------------------
 // SEEDING A ROW'S NOTIFICATION HALF — the merge's whole promise in one

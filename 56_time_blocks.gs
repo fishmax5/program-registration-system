@@ -311,7 +311,7 @@ function collapseTimeBlockRun(run, options) {
   const stuck = [];
   doomed.forEach(ev => {
     try {
-      ev.deleteEvent();
+      deleteEventQuietly(ev);
       deleted++;
     } catch (err) {
       stuck.push(`${formatTimeLabel(ev.getStartTime())} (${err})`);

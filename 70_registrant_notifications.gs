@@ -1,141 +1,85 @@
 // ============================================================================
-// 9e. REGISTRANT NOTIFICATIONS  (how often each program tells its people)
+// 9e. REGISTRANT NOTIFICATIONS  (what the people signed up for are told)
 // ============================================================================
 //
-// One row per program, on Program_Settings (section 9h), answering
-// "how much does this program talk to the people signed up for it?" — because
-// the honest answer
-// differs by program and always has. A drop-in coffee morning that fifty
-// people come to needs nothing beyond the calendar entry they already have.
-// A Personalized Assistance appointment is a promise to one person to be
-// somewhere at 2:15, and that person should be told 2:15, in writing, without
-// a member of staff having to remember to type it.
+// ONE EMAIL A WEEK PER PERSON (November 2026). Members were getting a message
+// per program per reminder, plus Google's own invitation and update mail for
+// every calendar change, and the office heard the same complaint again and
+// again: too much mail, so people deleted it unread. So:
 //
-// SIX ANSWERS PER PROGRAM, all staff-owned and none of them exclusive —
-// Add_Guest_To_Calendar, Week_Before, Day_Before, Morning_Of, Other_Reminders and
-// Confirm_On_Booking. Section 9h owns the tab, what the columns mean, why a
-// new row is seeded rather than born blank, and the carry-over from the
-// Notify_Mode dropdown this replaced. This file owns what the answers DO.
+//   THE FRIDAY EMAIL. From Friday at WEEKLY_EMAIL_SEND_HOUR, everybody with an
+//   Active registration in the coming Monday–Sunday is sent ONE message
+//   listing all of it, day by day, with any waitlisted places listed apart.
+//   An appointment shows the person's own time, which is the one thing the
+//   shared calendar event cannot say.
 //
-// WHAT THE TICKS DRIVE. Two independent channels, deliberately:
+//   THE "ADDED TO YOUR WEEK" EMAIL. Somebody who signs up on Saturday for
+//   Tuesday, or comes off a waitlist on Wednesday for Thursday, has missed
+//   the Friday email for that week. They get one short message naming only
+//   what is new, at most once per sync, and nothing for a week that has not
+//   had its Friday email yet — that week's Friday email will carry it.
 //
-//   THE CALENDAR INVITE (section 5b) puts the person on the real event's
-//   guest list, and from then on Google's own reminders and any change to
-//   the event reach them without this workbook doing anything.
+// WHAT IT REPLACED. The per-program Week_Before, Day_Before, Morning_Of,
+// Other_Reminders and Confirm_On_Booking emails. Those ticks on
+// Program_Settings (section 9h) are still read by the mail-volume forecast
+// (99zza) but no longer send anything. Add_Guest_To_Calendar still decides
+// who is put on a calendar event (section 5b), and that is now silent too.
 //
-//   THE REMINDER EMAIL is this file's own send, on the cadence above. It is
-//   the only one that can say something PER PERSON — a calendar event has
-//   ONE description shared by every guest, so "your appointment is at 2:15"
-//   cannot live in the invite itself. For an appointment program the email
-//   is therefore not a nicety; it is where the time is stated. That is also
-//   why an assistance registrant gets one AS SOON AS they are booked
-//   (REMINDER_CONFIRMATION_OFFSET) as well as on the countdown.
+// THE CONFIG SWITCH STILL WINS for the calendar: "📧 Calendar Invitations"
+// set to "Do not invite" means nobody is added to a guest list.
 //
-// THE CONFIG SWITCH STILL WINS. "📧 Calendar Invitations" set to "Do not
-// invite" means nobody is added to a guest list, whatever a program row says:
-// the tab decides which programs opt IN to a channel, never that a channel
-// switched off at the workbook level is on after all.
-//
-// SENDING IS RECORDED, NOT RE-DERIVED. Every send is written to a ledger
-// keyed by event, person and offset, so an hourly sync that finds the same
-// row for the eighth time sends nothing. Without that, "1 day before" would
-// mean twenty-four emails.
+// SENDING IS RECORDED, NOT RE-DERIVED. The ledger keeps, per week and per
+// address, which sessions that person has been told about, so the hourly sync
+// that finds the same rows again sends nothing.
 // ============================================================================
 
 /** The reminder cadence a program falls back to when nothing else says. */
 const DEFAULT_REMINDER_DAYS = [1];
 
-/**
- * The pseudo-offset a booking confirmation is recorded under.
- *
- * Not a day count and deliberately not expressible in Other_Reminders: it fires
- * on the registration, not on a countdown, and the ledger has to be able to
- * tell "we told them their time when they booked" apart from "we reminded
- * them the day before" — the two are both true and neither replaces the other.
- */
-const REMINDER_CONFIRMATION_OFFSET = 'booked';
-
-/** How far out a reminder is worth computing. Past today's date, nothing is. */
+/** The largest day count Other_Reminders keeps (read by parseReminderDays). */
 const REMINDER_FORWARD_DAYS = 30;
 
 /**
- * The earliest hour of the day a reminder email may go out, in TIMEZONE.
+ * The hours of the day a registrant email may go out, in TIMEZONE: from
+ * REMINDER_EARLIEST_HOUR up to, not including, REMINDER_LATEST_HOUR.
  *
- * THE FAILURE IT PREVENTS. This pass rides the hourly sync, so it ran at
- * whatever hour the sync ran — including the small ones. People were getting
- * "your appointment is tomorrow at 2:15" at 12:10am, which reads as a system
- * malfunction even when the content is right, and wakes anyone whose phone is
- * not on Do Not Disturb.
+ * THE FAILURE IT PREVENTS. This pass rides the hourly sync, so without a
+ * window it runs at whatever hour the sync runs, including the small ones.
+ * People got "your appointment is tomorrow at 2:15" at 12:10am, which reads as
+ * a malfunction even when the content is right.
  *
- * Nothing is dropped by waiting: a reminder due before this hour is simply not
- * sent yet, its ledger entry stays unwritten, and the first sync at or after
- * this hour sends it. The "every offset already PASSED counts as due" rule in
- * sendRegistrantReminders() is what makes that safe — a 0-day reminder held
- * overnight still goes out on the morning of, not never.
+ * Nothing is dropped by waiting: an email due outside the window is simply not
+ * sent yet, its ledger entry stays unwritten, and the first sync inside the
+ * window sends it.
  *
  * NOT the same thing as the pause switch (section 9f), which DROPS what it
  * holds. This defers; nothing is lost.
  */
 const REMINDER_EARLIEST_HOUR = 9;
+const REMINDER_LATEST_HOUR = 20;
 
-/** Is it late enough in the day to email registrants? */
+/** Is it a decent hour to email registrants? */
 function isWithinRegistrantReminderHours(now) {
   const at = now || new Date();
-  return Number(Utilities.formatDate(at, TIMEZONE, 'H')) >= REMINDER_EARLIEST_HOUR;
+  const hour = Number(Utilities.formatDate(at, TIMEZONE, 'H'));
+  return hour >= REMINDER_EARLIEST_HOUR && hour < REMINDER_LATEST_HOUR;
 }
 
 /**
- * The most reminder emails one run will send, and the floor it will not dig
+ * The most registrant emails one run will send, and the floor it will not dig
  * the day's mail quota below (the `reserve` sendRationedEmail() is given, see
- * section 9f). Same reasoning as the roster alerts one file up: this pass
- * rides the hourly sync, a quiet hour sends nothing, and the hour that is not
- * quiet must not spend the whole workbook's mail on itself. Anything held back
- * keeps its ledger entry unwritten and goes out on the next pass.
+ * section 9f). This pass rides the hourly sync, and one hour must not spend
+ * the whole workbook's mail on itself. Anything held back keeps its ledger
+ * entry unwritten and goes out on the next sync — so a Friday with 110 people
+ * to write to is three syncs, 10, 11 and noon, not one.
  *
- * THE FLOOR IS THE LOWER OF THE TWO on purpose. The alert pass runs first in
- * the same execution and stops at LEADER_ALERT_QUOTA_RESERVE precisely so
- * there is something left here: a reminder names the time somebody is expected
- * somewhere, which is worth nothing the day after. What stays under this floor
- * is the handful of messages notifyAdmin() needs to report that any of this
- * went wrong.
+ * THE FLOOR IS THE LOWER OF THE TWO on purpose. The leader alert pass runs
+ * first in the same execution and stops at LEADER_ALERT_QUOTA_RESERVE so there
+ * is something left here. What stays under this floor is the handful of
+ * messages notifyAdmin() needs to report that any of this went wrong.
  */
 const MAX_REMINDER_EMAILS_PER_RUN = 40;
 const REMINDER_QUOTA_RESERVE = 10;
-
-/** What this pass calls itself to recordDayLongMailHold() (`76`). */
-const REMINDER_MAIL_PASS = 'registrantReminders';
-
-/** Who has already been told what: { eventId: { "email|offset": true } }. */
-const REMINDER_LEDGER_PROP_KEY = 'REGISTRANT_REMINDERS_V1';
-const REMINDER_LEDGER_CHUNK_CHARS = 8000;
-const REMINDER_LEDGER_MAX_CHUNKS = 40;
-
-let __reminderLedgerCache = null;
-let __reminderLedgerDirty = false;
-
-function getRegistrantReminderLedger() {
-  if (__reminderLedgerCache) return __reminderLedgerCache;
-  const raw = readChunkedScriptProperty(REMINDER_LEDGER_PROP_KEY);
-  let parsed = null;
-  try {
-    parsed = raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    // Unreadable reads as EMPTY, which is the direction that re-sends rather
-    // than the one that goes silent: a duplicate reminder is a mild
-    // annoyance, a missed appointment time is the thing this exists to stop.
-    log(`⚠️ The registrant reminder ledger could not be parsed (${err}) — starting fresh.`);
-  }
-  __reminderLedgerCache = parsed && typeof parsed === 'object' ? parsed : {};
-  return __reminderLedgerCache;
-}
-
-function saveRegistrantReminderLedger() {
-  if (!__reminderLedgerDirty || !__reminderLedgerCache) return;
-  writeChunkedScriptProperty(REMINDER_LEDGER_PROP_KEY, JSON.stringify(__reminderLedgerCache),
-    REMINDER_LEDGER_CHUNK_CHARS, REMINDER_LEDGER_MAX_CHUNKS);
-  __reminderLedgerDirty = false;
-}
-
 
 // --- the policy behind one program ------------------------------------------
 
@@ -246,335 +190,459 @@ function notificationPolicyForSession(session) {
 }
 
 
-// --- the reminder pass -------------------------------------------------------
+
+// --- the weekly email --------------------------------------------------------
+
+/** When a week's email starts going out: the Friday before it, from 10am. */
+const WEEKLY_EMAIL_SEND_HOUR = 10;
+
+/** What this pass calls itself to recordDayLongMailHold() (`76`). */
+const WEEKLY_EMAIL_MAIL_PASS = 'weeklyRegistrantEmail';
 
 /**
- * Emails everybody who is due a reminder, and everybody newly booked into an
- * appointment program their own time. Returns { sent, held, eventsTouched }.
- *
- * Runs off the two tables the sync has just settled, like the invitation pass
- * beside it, and is safe to call every hour: the ledger makes a repeat send
- * impossible and a sync with nothing due does no work beyond the read.
- *
- * options.ignoreQuietHours skips the REMINDER_EARLIEST_HOUR check — the menu
- * item passes it, the hourly sync does not.
+ * Who has been told about what:
+ *   { firstWeek: 'yyyy-MM-dd', weeks: { mondayKey: { email: [sessionKey…] } } }
+ * where a sessionKey is "eventId|dateKey". firstWeek is the Monday of the
+ * first week this pass ever wrote about — see firstWeeklyEmailWeek_().
  */
-function sendRegistrantReminders(sessionRows, registrantRows, options) {
-  const result = { sent: 0, held: 0, paused: 0, eventsTouched: 0, stoppedForToday: false };
+const WEEKLY_EMAIL_LEDGER_PROP_KEY = 'WEEKLY_REGISTRANT_EMAIL_V1';
+const WEEKLY_EMAIL_LEDGER_CHUNK_CHARS = 8000;
+const WEEKLY_EMAIL_LEDGER_MAX_CHUNKS = 40;
 
-  // Already stopped for the day — the mail quota, or a rehearsal notification
-  // test mode has shown the office once already. Checked before the rows are
-  // read, because the read is the expensive half and there is nothing this
-  // pass could do with it. The menu item asks anyway; a person pressing it is
-  // not an hourly trigger. See WHICH HOLD in 76_rationed_mailer.gs.
-  if (!(options && options.ignoreQuietHours) && dayLongMailHoldInEffect(REMINDER_MAIL_PASS)) {
-    result.stoppedForToday = true;
-    return result;
+/** The per-program reminder ledger this pass replaced; cleared on first run. */
+const RETIRED_REMINDER_LEDGER_PROP_KEY = 'REGISTRANT_REMINDERS_V1';
+
+let __weeklyEmailLedgerCache = null;
+let __weeklyEmailLedgerDirty = false;
+
+function getWeeklyEmailLedger() {
+  if (__weeklyEmailLedgerCache) return __weeklyEmailLedgerCache;
+  const raw = readChunkedScriptProperty(WEEKLY_EMAIL_LEDGER_PROP_KEY);
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    // Unreadable reads as EMPTY but keeps no firstWeek, so the pass starts
+    // again from the coming week rather than re-sending the one under way.
+    log(`⚠️ The weekly registrant email ledger could not be parsed (${err}) — starting fresh.`);
   }
+  const ledger = parsed && typeof parsed === 'object' ? parsed : {};
+  if (!ledger.weeks || typeof ledger.weeks !== 'object') ledger.weeks = {};
+  __weeklyEmailLedgerCache = ledger;
+  return ledger;
+}
 
-  // Too early in the day to write to anybody. Deferred, not dropped: the
-  // ledger is untouched, so the first sync at or after REMINDER_EARLIEST_HOUR
-  // sends everything that came due overnight. See the constant's banner.
-  if (!(options && options.ignoreQuietHours) && !isWithinRegistrantReminderHours()) return result;
+function saveWeeklyEmailLedger() {
+  if (!__weeklyEmailLedgerDirty || !__weeklyEmailLedgerCache) return;
+  writeChunkedScriptProperty(WEEKLY_EMAIL_LEDGER_PROP_KEY, JSON.stringify(__weeklyEmailLedgerCache),
+    WEEKLY_EMAIL_LEDGER_CHUNK_CHARS, WEEKLY_EMAIL_LEDGER_MAX_CHUNKS);
+  __weeklyEmailLedgerDirty = false;
+}
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const regHeaders = HEADERS.All_Program_Sessions;
-  const regMap = getIndexMap(regHeaders);
-  const sessions = sessionRows ||
-    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), regHeaders, 'Event_ID');
-  if (sessions.length === 0) return result;
+/** "2026-11-20" moved by `days`, on the calendar date alone (no clock, no DST). */
+function shiftDateKey_(dateKey, days) {
+  const parts = String(dateKey).split('-').map(Number);
+  const moved = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + days));
+  const pad = n => String(n).padStart(2, '0');
+  return `${moved.getUTCFullYear()}-${pad(moved.getUTCMonth() + 1)}-${pad(moved.getUTCDate())}`;
+}
 
-  const today = new Date();
-  const todayKey = formatDateKey(today);
-  const horizonKey = formatDateKey(new Date(today.getTime() + REMINDER_FORWARD_DAYS * 86400000));
+/** Monday 1 … Sunday 7, for a date key. */
+function isoWeekdayOfDateKey_(dateKey) {
+  const parts = String(dateKey).split('-').map(Number);
+  const day = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+  return day === 0 ? 7 : day;
+}
 
-  // Every session in the window, with the policy its program asks for. Built
-  // first so a program that sends nothing costs one lookup rather than a pass
-  // over its registrants.
-  const due = {};
-  const liveEventIds = {};
-  sessions.forEach(row => {
-    const eventId = String(row[regMap['Event_ID']] || '').trim();
-    const date = coerceDate(row[regMap['Event_Date']]);
+/** The Monday of the week a date key falls in. */
+function mondayOfDateKey_(dateKey) {
+  return shiftDateKey_(dateKey, 1 - isoWeekdayOfDateKey_(dateKey));
+}
+
+/** Has the Friday email for the week starting `mondayKey` been due yet? */
+function weeklyEmailIsDue_(mondayKey, todayKey, hour) {
+  const fridayKey = shiftDateKey_(mondayKey, -3);
+  return todayKey > fridayKey || (todayKey === fridayKey && hour >= WEEKLY_EMAIL_SEND_HOUR);
+}
+
+/**
+ * The first week this pass writes about, decided once, on its first run.
+ *
+ * Monday to Wednesday: the week already under way, so the rest of it is not
+ * left with no word at all now that the per-program reminders have stopped.
+ * Thursday to Sunday: the coming week. A Thursday start would be a "your week"
+ * email with three days left in it, sent a day before the real one.
+ */
+function firstWeeklyEmailWeek_(todayKey) {
+  const monday = mondayOfDateKey_(todayKey);
+  return isoWeekdayOfDateKey_(todayKey) <= 3 ? monday : shiftDateKey_(monday, 7);
+}
+
+/** True for "CANCELLED DUE TO ILLNESS: X" and its kin (see 99zzc). */
+function isCancelledSessionTitle_(title) {
+  return /^\s*cancel{1,2}ed\b[^:]{0,60}:/i.test(String(title || ''));
+}
+
+/** "10:00 AM" / "2:15 PM - 3:00 PM" → minutes after midnight, for sorting. */
+function minutesOfTimeLabel_(label) {
+  const match = String(label || '').match(/(\d{1,2})(?::(\d{2}))?\s*([AaPp])\.?[Mm]/);
+  if (!match) return 24 * 60;
+  let hour = Number(match[1]) % 12;
+  if (/p/i.test(match[3])) hour += 12;
+  return hour * 60 + Number(match[2] || 0);
+}
+
+/**
+ * Everybody's registrations for the weeks this run may write about, grouped
+ * by address. Pure apart from the header map, so the tests drive it directly.
+ *
+ * Returns { email: { names: [..], weeks: { mondayKey: [item…] } } } where an
+ * item is { key, dateKey, date, title, time, location, waitlisted }. Only
+ * sessions from today on, never a cancelled session, never an address that
+ * cannot be mailed, and one item per session per address even when two
+ * people share the address (a couple), with both names kept for the greeting.
+ */
+function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey) {
+  const sessMap = getIndexMap(HEADERS.All_Program_Sessions);
+  const regMap = getIndexMap(HEADERS.All_Registrants);
+  const sessionsByKey = {};
+  (sessionRows || []).forEach(row => {
+    const eventId = String(row[sessMap['Event_ID']] || '').trim();
+    const date = coerceDate(row[sessMap['Event_Date']]);
     if (!eventId || !date) return;
-    const dateKey = formatDateKey(date);
-    liveEventIds[eventId] = dateKey;
-    if (dateKey < todayKey || dateKey > horizonKey) return;
-    const session = {
-      eventId, date, dateKey,
-      title: String(row[regMap['Clean_Title']] || '').trim(),
-      location: String(row[regMap['Location']] || '').trim(),
-      time: eventTimeLabelOf(row[regMap['Event_Time']]),
-      isAssistance: isAssistanceColumnValue(row[regMap['Personalized_Assistance']])
+    sessionsByKey[`${eventId}|${formatDateKey(date)}`] = {
+      title: String(row[sessMap['Clean_Title']] || '').trim(),
+      location: String(row[sessMap['Location']] || '').trim(),
+      time: eventTimeLabelOf(row[sessMap['Event_Time']]),
+      isAssistance: isAssistanceColumnValue(row[sessMap['Personalized_Assistance']])
     };
-    const policy = notificationPolicyForSession(session);
-    if (!policy.remind) return;
-    // How many days from today this session is. A reminder for "1 day before"
-    // is owed when that number is 1 — computed on the DATE KEYS rather than on
-    // a millisecond difference, which a daylight-saving boundary rounds wrong.
-    const daysAway = Math.round(
-      (parseDateKey(dateKey).getTime() - parseDateKey(todayKey).getTime()) / 86400000);
-    const offsets = policy.days.filter(day => day >= daysAway);
-    if (offsets.length === 0 && !policy.confirmTime) return;
-    // EVERY offset already PASSED counts as due, not just today's exact match:
-    // a person who registers the evening before a "7 days before" reminder was
-    // meant to go out has still never been told, and the ledger stops the one
-    // they did get from repeating.
-    due[eventId] = { session, policy, offsets, daysAway };
   });
-  if (Object.keys(due).length === 0) {
-    pruneRegistrantReminderLedger(liveEventIds, todayKey);
-    saveRegistrantReminderLedger();
-    return result;
-  }
 
-  const lrHeaders = HEADERS.All_Registrants;
-  const lrMap = getIndexMap(lrHeaders);
-  const rows = registrantRows ||
-    getSectionedRows(getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), lrHeaders, 'Event_ID');
-
-  const ledger = getRegistrantReminderLedger();
-
-  rows.forEach(row => {
-    const eventId = String(row[lrMap['Event_ID']] || '').trim();
-    const item = due[eventId];
-    if (!item) return;
-    // ACTIVE ONLY. A waitlisted or cancelled row is not a person who should be
-    // told to turn up; the roster alerts are where a change of status is
-    // reported, and to staff rather than to the member.
-    if (String(row[lrMap['Program_Status']] || '').trim() !== 'Active') return;
-    const email = String(row[lrMap['Email']] || '').trim().toLowerCase();
+  const wantedWeeks = {};
+  weekKeys.forEach(key => { wantedWeeks[key] = true; });
+  const byEmail = {};
+  (registrantRows || []).forEach(row => {
+    const status = String(row[regMap['Program_Status']] || '').trim();
+    if (status !== 'Active' && status !== 'Waitlisted') return;
+    const email = String(row[regMap['Email']] || '').trim().toLowerCase();
     if (!isPlausibleEmail(email)) return;
+    const date = coerceDate(row[regMap['Event_Date']]);
+    if (!date) return;
+    const dateKey = formatDateKey(date);
+    if (dateKey < todayKey) return;
+    const weekKey = mondayOfDateKey_(dateKey);
+    if (!wantedWeeks[weekKey]) return;
 
-    const name = String(row[lrMap['Name']] || '').trim();
-    // The person's OWN time where the program has one per person, the
-    // session's where it does not. This is the line the calendar invite
-    // cannot carry.
-    const personalTime = item.policy.personalizeTime
-      ? eventTimeLabelOf(row[lrMap['Event_Time']]) : '';
-    const wanted = [];
-    if (item.policy.confirmTime) wanted.push(REMINDER_CONFIRMATION_OFFSET);
-    item.offsets.forEach(day => wanted.push(day));
+    const eventId = String(row[regMap['Event_ID']] || '').trim();
+    const key = `${eventId}|${dateKey}`;
+    const session = sessionsByKey[key] || null;
+    const title = (session && session.title) || String(row[regMap['Event']] || '').trim();
+    if (!title || isCancelledSessionTitle_(title)) return;
+    // The person's OWN time for an appointment; the session's for anything else.
+    const ownTime = eventTimeLabelOf(row[regMap['Event_Time']]);
+    const time = session && !session.isAssistance ? (session.time || ownTime) : ownTime;
 
-    const sentFor = ledger[eventId] || {};
-    wanted.forEach(offset => {
-      if (result.stoppedForToday) return;
-      const stamp = `${email}|${offset}`;
-      // Read here as well as inside the send: a message that has already gone
-      // must not count against the per-run cap the way a held one does.
-      const alreadySent = () => !!sentFor[stamp];
-      if (alreadySent()) return;
-      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN) {
-        result.held++;
-        return;
-      }
-
-      // The quota, the send itself, the refused-address rule and "record it
-      // only once it is away" are section 9f's. What is decided here is who is
-      // due a message, what it says, and how much of a scarce quota this pass
-      // may spend (`reserve`).
-      //
-      // THE OFFICE IS NO LONGER ON THE MESSAGE — neither BCC'd nor sent its
-      // own copy. A day of reminders was a day of office mail apiece; it is
-      // one line each in the 10am digest now (see 88_office_daily_digest.gs),
-      // spooled below once the member's copy is actually away. That also makes
-      // a send cost ONE message against the daily quota rather than one plus
-      // the size of the office table, which is why this pass now gets further
-      // through a backlog on the same hundred.
-      const outcome = sendRationedEmail({
-        to: email,
-        subject: buildRegistrantReminderSubject(item.session, offset),
-        body: buildRegistrantReminderBody(item.session, { name, time: personalTime }, offset,
-          item.daysAway),
-        reserve: REMINDER_QUOTA_RESERVE,
-        alreadySent,
-        recordSent: () => {
-          sentFor[stamp] = true;
-          ledger[eventId] = sentFor;
-          __reminderLedgerDirty = true;
-        }
-      });
-
-      if (outcome.status === 'sent' || outcome.status === 'duplicate') {
-        if (outcome.status === 'sent') {
-          result.sent++;
-          // One line for tomorrow morning's digest, in place of the copy the
-          // office used to be sent of every one of these.
-          spoolOfficeNote('Reminders sent to registrants',
-            `${name ? `${name} <${email}>` : email} — "${item.session.title}" on ` +
-            `${formatDateLabel(item.session.date)}${describeReminderOffset(offset)}`);
-        }
-        return;
-      }
-      if (outcome.status === 'held') {
-        result.held++;
-        // A hold that lasts the day — the mail quota, or a reminder
-        // notification test mode has already shown the office — is not worth
-        // asking about again this hour. The ledger is untouched either way, so
-        // the reminder still goes out; stopping only keeps the next twenty
-        // syncs from re-spending a real message on the same rehearsal. See
-        // WHICH HOLD in 76_rationed_mailer.gs.
-        if (mailHoldLastsAllDay(outcome)) {
-          result.stoppedForToday = true;
-          if (recordDayLongMailHold(REMINDER_MAIL_PASS)) {
-            noteForAdmin('Registrant reminders held until tomorrow',
-              `Reminders stopped for the rest of today (${outcome.error}). Nothing has been recorded as ` +
-              `sent, so tomorrow's first sync sends everything still due. Later syncs today will not ` +
-              `try again.`);
-          }
-        }
-        return;
-      }
-      // PAUSED IS NOT HELD. The mailer has already called recordSent() for it
-      // (see THE PAUSE in section 9f), so this reminder is spent, not queued:
-      // switching the pause off does not deliver yesterday's "your program is
-      // tomorrow" the day after. Counted so the run can say so, and no
-      // warning — nothing went wrong.
-      if (outcome.status === 'paused') {
-        result.paused++;
-        return;
-      }
-      // NOT recorded, so the next pass tries again. Told to the admin on the
-      // refusal itself — an address MailApp refuses will refuse the same way
-      // tomorrow — but not again for the messages suppressed behind it, which
-      // are the same bad address reported twice.
-      log(`⚠️ Could not send a reminder to ${email} for "${item.session.title}" ` +
-        `on ${formatDateLabel(item.session.date)} (${outcome.error}).`);
-      if (outcome.status === 'failed') {
-        noteForAdmin('Reminders that could not be sent',
-          `${email} could not be emailed about "${item.session.title}" on ` +
-          `${formatDateLabel(item.session.date)} (${outcome.error}). It will be tried again next sync.`);
-      }
+    const person = byEmail[email] || (byEmail[email] = { names: [], weeks: {} });
+    const name = String(row[regMap['Name']] || '').trim();
+    if (name && person.names.indexOf(name) === -1) person.names.push(name);
+    const list = person.weeks[weekKey] || (person.weeks[weekKey] = []);
+    const existing = list.filter(item => item.key === key)[0];
+    const waitlisted = status === 'Waitlisted';
+    if (existing) {
+      // Active beats Waitlisted when one address holds both on one session.
+      if (!waitlisted) existing.waitlisted = false;
+      return;
+    }
+    list.push({
+      key, dateKey, date, title, time, waitlisted,
+      location: (session && session.location) || String(row[regMap['Location']] || '').trim()
     });
   });
 
-  result.eventsTouched = Object.keys(ledger).length;
-  pruneRegistrantReminderLedger(liveEventIds, todayKey);
-  saveRegistrantReminderLedger();
-
-  if (result.sent > 0 || result.held > 0) {
-    log(`Registrant reminders: ${result.sent} email(s) sent` +
-      (result.held > 0 ? `; ${result.held} held back by the per-run cap or the mail quota — ` +
-        `they go out on the next sync.` : '.'));
-  }
-  if (result.paused > 0) {
-    log(`Registrant reminders: ${result.paused} email(s) dropped — mail to members and leaders is paused.`);
-  }
-  if (result.held > 0) {
-    noteForAdmin('Reminders held back',
-      `${result.held} reminder email(s) were not sent this run because the per-run cap or the daily ` +
-      `mail quota was reached. They were NOT discarded — the next sync sends them.`);
-  }
-  return result;
-}
-
-/**
- * Drops ledger entries for events that have happened or that the calendar no
- * longer mentions. Without it the ledger grows by one entry per person per
- * session for ever, against a Script Properties budget it shares with every
- * other registry in this project.
- */
-function pruneRegistrantReminderLedger(liveEventIds, todayKey) {
-  const ledger = getRegistrantReminderLedger();
-  Object.keys(ledger).forEach(eventId => {
-    const dateKey = liveEventIds[eventId];
-    if (dateKey && dateKey >= todayKey) return;
-    delete ledger[eventId];
-    __reminderLedgerDirty = true;
+  Object.keys(byEmail).forEach(email => {
+    Object.keys(byEmail[email].weeks).forEach(weekKey => {
+      byEmail[email].weeks[weekKey].sort((a, b) =>
+        (a.dateKey < b.dateKey ? -1 : a.dateKey > b.dateKey ? 1 : 0) ||
+        (minutesOfTimeLabel_(a.time) - minutesOfTimeLabel_(b.time)) ||
+        a.title.localeCompare(b.title));
+    });
   });
+  return byEmail;
 }
 
 /**
- * Which of a program's reminders this was, in the few words the office digest
- * has room for: " (booking confirmation)", " (the day before)", " (7 days
- * before)". Not the subject line — that is written to the member.
+ * The Friday email, or the "added to your week" one, for one person and week.
+ * Returns null when there is nothing to send. `told` is what the ledger says
+ * they have already been sent for that week, or null if nothing yet.
  */
-function describeReminderOffset(offset) {
-  if (offset === REMINDER_CONFIRMATION_OFFSET) return ' (booking confirmation)';
-  if (offset === 0) return ' (the morning of)';
-  if (offset === 1) return ' (the day before)';
-  return ` (${offset} days before)`;
-}
-
-/** "Your appointment on Tue, Mar 3, 2026" / "Reminder: Chair Yoga tomorrow". */
-function buildRegistrantReminderSubject(session, offset) {
-  const title = session.title || 'your program';
-  if (offset === REMINDER_CONFIRMATION_OFFSET) {
-    return `${title} — ${formatDateLabel(session.date)}`;
+function planWeeklyEmail(person, weekKey, items, told, todayKey) {
+  const active = items.filter(item => !item.waitlisted);
+  if (told === null || told === undefined) {
+    if (active.length === 0) return null;
+    return {
+      kind: 'weekly',
+      subject: buildWeeklyEmailSubject(weekKey),
+      body: buildWeeklyEmailBody(person.names, weekKey, items, todayKey),
+      keys: active.map(item => item.key)
+    };
   }
-  const when = offset === 0 ? 'today' : (offset === 1 ? 'tomorrow' : `in ${offset} days`);
-  return `Reminder: ${title} ${when}`;
+  const already = {};
+  told.forEach(key => { already[key] = true; });
+  const added = active.filter(item => !already[item.key]);
+  if (added.length === 0) return null;
+  return {
+    kind: 'added',
+    subject: buildAddedToWeekSubject(added),
+    body: buildAddedToWeekBody(person.names, weekKey, added),
+    keys: told.concat(added.map(item => item.key))
+  };
+}
+
+function weekRangeLabel_(weekKey) {
+  const short = key => Utilities.formatDate(parseDateKey(key), TIMEZONE, 'EEE, MMM d');
+  return `${short(weekKey)} – ${short(shiftDateKey_(weekKey, 6))}`;
+}
+
+function greetingFor_(names) {
+  if (names.length === 1) return `Hello ${names[0]},`;
+  if (names.length === 2) return `Hello ${names[0]} and ${names[1]},`;
+  return 'Hello,';
+}
+
+function itemLine_(item, withDate) {
+  const parts = [item.title];
+  if (withDate) parts.push(Utilities.formatDate(item.date, TIMEZONE, 'EEE, MMM d'));
+  if (item.time) parts.push(item.time);
+  if (item.location) parts.push(item.location);
+  return `  • ${parts.join(', ')}`;
+}
+
+/** "Your New Horizons programs for the week of Mon, Nov 23". */
+function buildWeeklyEmailSubject(weekKey) {
+  return `Your ${centerShortNameForMail_()} programs for the week of ` +
+    Utilities.formatDate(parseDateKey(weekKey), TIMEZONE, 'EEE, MMM d');
 }
 
 /**
- * The message itself. Plain text on purpose — it is four lines of fact, it
- * reaches a phone unmangled, and nothing in it is worth a stylesheet.
- *
- * THE TIME LINE IS THE POINT for an appointment: it names the person's own
- * slot, which is the one thing the shared calendar event cannot say.
+ * The Friday email. Plain text on purpose: it reaches a phone unmangled, and
+ * a list of days is the whole content.
  */
-function buildRegistrantReminderBody(session, person, offset, daysAway) {
-  const lines = [];
-  lines.push(person.name ? `Hello ${person.name},` : 'Hello,');
+function buildWeeklyEmailBody(names, weekKey, items, todayKey) {
+  const active = items.filter(item => !item.waitlisted);
+  const waiting = items.filter(item => item.waitlisted);
+  const underWay = todayKey > shiftDateKey_(weekKey, -1);
+  const lines = [greetingFor_(names), ''];
+  lines.push(underWay
+    ? `Here is everything you are registered for in the rest of this week (${weekRangeLabel_(weekKey)}):`
+    : `Here is everything you are registered for next week (${weekRangeLabel_(weekKey)}):`);
+  let day = '';
+  active.forEach(item => {
+    if (item.dateKey !== day) {
+      day = item.dateKey;
+      lines.push('');
+      lines.push(Utilities.formatDate(item.date, TIMEZONE, 'EEEE, MMM d'));
+    }
+    lines.push(itemLine_(item, false));
+  });
+  if (waiting.length > 0) {
+    lines.push('');
+    lines.push('You are on the waitlist for:');
+    waiting.forEach(item => lines.push(itemLine_(item, true)));
+  }
   lines.push('');
-  if (offset === REMINDER_CONFIRMATION_OFFSET) {
-    lines.push(person.time
-      ? `You are booked for ${session.title} on ${formatDateLabel(session.date)} at ${person.time}.`
-      : `You are booked for ${session.title} on ${formatDateLabel(session.date)}.`);
-  } else {
-    const when = daysAway === 0 ? 'today' : (daysAway === 1 ? 'tomorrow'
-      : `on ${formatDateLabel(session.date)}`);
-    lines.push(person.time
-      ? `A reminder that ${session.title} is ${when} at ${person.time}.`
-      : `A reminder that ${session.title} is ${when}.`);
+  lines.push('This is your one reminder for the week. If you sign up for something else this week, ' +
+    'we will send a short note about just that.');
+  lines.push('');
+  lines.push('If you can no longer make something, please let us know so the place can go to somebody else.');
+  return lines.join('\n');
+}
+
+/** "Added to your week: Chair Yoga on Tue, Nov 24" / "2 programs added to your week". */
+function buildAddedToWeekSubject(added) {
+  if (added.length === 1) {
+    return `Added to your week: ${added[0].title} on ` +
+      Utilities.formatDate(added[0].date, TIMEZONE, 'EEE, MMM d');
   }
-  if (!person.time && session.time) lines.push(`Time: ${session.time}`);
-  lines.push(`Date: ${formatDateLabel(session.date)}`);
-  if (session.location) lines.push(`Location: ${session.location}`);
+  return `${added.length} programs added to your week`;
+}
+
+function buildAddedToWeekBody(names, weekKey, added) {
+  const lines = [greetingFor_(names), ''];
+  lines.push(added.length === 1
+    ? `You are now registered for this, in the week of ${weekRangeLabel_(weekKey)}:`
+    : `You are now registered for these, in the week of ${weekRangeLabel_(weekKey)}:`);
+  lines.push('');
+  added.forEach(item => lines.push(itemLine_(item, true)));
+  lines.push('');
+  lines.push('Everything else in your week is as in our last email.');
   lines.push('');
   lines.push('If you can no longer make it, please let us know so the place can go to somebody else.');
   return lines.join('\n');
+}
+
+/** "New Horizons" — the center's name as a subject line can carry it. */
+function centerShortNameForMail_() {
+  const name = String(typeof CENTER_NAME === 'string' ? CENTER_NAME : '').trim();
+  return name.replace(/\s+Senior Center$/i, '') || 'New Horizons';
+}
+
+/**
+ * THE PASS. Sends each person's Friday email for every week that has had its
+ * Friday (from firstWeek on), and an "added to your week" note for anything
+ * new in a week already written about. Returns { sent, weekly, added, held,
+ * paused, stoppedForToday }.
+ *
+ * Safe to call every hour: the ledger makes a repeat send impossible, and an
+ * hour with nothing new does no work beyond the read.
+ *
+ * options.ignoreQuietHours skips the hours window and the day-long hold — the
+ * menu item passes it. It never brings a week's Friday email forward.
+ * options.now is for tests.
+ */
+function sendWeeklyRegistrantEmails(sessionRows, registrantRows, options) {
+  const opts = options || {};
+  const result = { sent: 0, weekly: 0, added: 0, held: 0, paused: 0, stoppedForToday: false };
+  if (!opts.ignoreQuietHours && dayLongMailHoldInEffect(WEEKLY_EMAIL_MAIL_PASS)) {
+    result.stoppedForToday = true;
+    return result;
+  }
+  const now = opts.now || new Date();
+  if (!opts.ignoreQuietHours && !isWithinRegistrantReminderHours(now)) return result;
+
+  const todayKey = formatDateKey(now);
+  const hour = Number(Utilities.formatDate(now, TIMEZONE, 'H'));
+  const ledger = getWeeklyEmailLedger();
+  if (!ledger.firstWeek) {
+    ledger.firstWeek = firstWeeklyEmailWeek_(todayKey);
+    __weeklyEmailLedgerDirty = true;
+    // The ledger of the per-program reminders this replaced: nothing reads it
+    // any more, and it holds Script Properties space every other store shares.
+    clearChunkedScriptProperty(RETIRED_REMINDER_LEDGER_PROP_KEY);
+  }
+
+  // Forget weeks that are over.
+  const thisMonday = mondayOfDateKey_(todayKey);
+  Object.keys(ledger.weeks).forEach(weekKey => {
+    if (weekKey < thisMonday) { delete ledger.weeks[weekKey]; __weeklyEmailLedgerDirty = true; }
+  });
+
+  const weekKeys = [thisMonday, shiftDateKey_(thisMonday, 7)]
+    .filter(weekKey => weekKey >= ledger.firstWeek && weeklyEmailIsDue_(weekKey, todayKey, hour));
+  if (weekKeys.length === 0) {
+    saveWeeklyEmailLedger();
+    return result;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessions = sessionRows || getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
+  const rows = registrantRows || getSectionedRows(
+    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
+  const byEmail = collectWeeklyEmailItems(sessions, rows, weekKeys, todayKey);
+
+  const weeklyCounts = {};
+  const emails = Object.keys(byEmail).sort();
+  for (const weekKey of weekKeys) {
+    const toldThisWeek = ledger.weeks[weekKey] || {};
+    for (const email of emails) {
+      if (result.stoppedForToday) break;
+      const person = byEmail[email];
+      const items = person.weeks[weekKey];
+      if (!items) continue;
+      const plan = planWeeklyEmail(person, weekKey, items,
+        Object.prototype.hasOwnProperty.call(toldThisWeek, email) ? toldThisWeek[email] : null, todayKey);
+      if (!plan) continue;
+      if (result.sent >= MAX_REMINDER_EMAILS_PER_RUN) { result.held++; continue; }
+
+      const outcome = sendRationedEmail({
+        to: email,
+        subject: plan.subject,
+        body: plan.body,
+        reserve: REMINDER_QUOTA_RESERVE,
+        alreadySent: () => {
+          const told = toldThisWeek[email];
+          return !!told && plan.keys.every(key => told.indexOf(key) !== -1);
+        },
+        recordSent: () => {
+          toldThisWeek[email] = plan.keys.slice();
+          ledger.weeks[weekKey] = toldThisWeek;
+          __weeklyEmailLedgerDirty = true;
+        }
+      });
+
+      if (outcome.status === 'sent') {
+        result.sent++;
+        if (plan.kind === 'weekly') {
+          result.weekly++;
+          weeklyCounts[weekKey] = (weeklyCounts[weekKey] || 0) + 1;
+        } else {
+          result.added++;
+          spoolOfficeNote('Registrant emails',
+            `${person.names[0] ? `${person.names[0]} <${email}>` : email} — added to their week of ` +
+            `${weekRangeLabel_(weekKey)}`);
+        }
+        continue;
+      }
+      if (outcome.status === 'duplicate') continue;
+      if (outcome.status === 'held') {
+        result.held++;
+        if (mailHoldLastsAllDay(outcome)) {
+          result.stoppedForToday = true;
+          if (recordDayLongMailHold(WEEKLY_EMAIL_MAIL_PASS)) {
+            noteForAdmin('Weekly registrant emails held until tomorrow',
+              `The weekly emails stopped for the rest of today (${outcome.error}). Nothing has been ` +
+              `recorded as sent, so tomorrow's first sync sends everybody still waiting.`);
+          }
+        }
+        continue;
+      }
+      // PAUSED: the mailer has recorded it as spent (section 9f).
+      if (outcome.status === 'paused') { result.paused++; continue; }
+      log(`⚠️ Could not send the weekly email to ${email} (${outcome.error}).`);
+      if (outcome.status === 'failed') {
+        noteForAdmin('Weekly emails that could not be sent',
+          `${email} could not be sent their weekly email (${outcome.error}). It will be tried again next sync.`);
+      }
+    }
+  }
+
+  saveWeeklyEmailLedger();
+  Object.keys(weeklyCounts).forEach(weekKey => {
+    spoolOfficeNote('Registrant emails',
+      `${weeklyCounts[weekKey]} weekly email(s) sent for ${weekRangeLabel_(weekKey)}`);
+  });
+  if (result.sent > 0 || result.held > 0) {
+    log(`Weekly registrant emails: ${result.sent} sent` +
+      (result.held > 0 ? `; ${result.held} held for the next sync.` : '.'));
+  }
+  if (result.paused > 0) {
+    log(`Weekly registrant emails: ${result.paused} dropped — mail to members and leaders is paused.`);
+  }
+  return result;
 }
 
 
 // --- the menu ----------------------------------------------------------------
 
 /**
- * MENU ENTRY: run the reminder pass now instead of waiting for the next sync.
- *
- * Reads both tables fresh — whoever pressed this has just ticked a box on
- * Program_Settings and expects that tick counted — and clears the
- * policy memo first for the same reason.
- *
- * REMINDER_EARLIEST_HOUR does not apply here. It exists to stop the unattended
- * hourly sync mailing people at 12:10am; a person who has just pressed the
- * menu item is asking for the send now and gets it.
+ * MENU ENTRY: run the weekly email pass now instead of waiting for the next
+ * sync. Sends nothing for a week whose Friday has not come yet.
  */
-function sendRegistrantRemindersNow() {
+function sendWeeklyRegistrantEmailsNow() {
   if (isBootstrapActive()) {
     toastIfPossible(bootstrapBusyMessage());
     return;
   }
-  invalidateNotificationPolicyCache();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD), HEADERS.All_Program_Sessions, 'Event_ID');
-  const registrantRows = getSectionedRows(
-    getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), HEADERS.All_Registrants, 'Event_ID');
-
   let result;
   try {
-    result = sendRegistrantReminders(sessionRows, registrantRows, { ignoreQuietHours: true });
+    result = sendWeeklyRegistrantEmails(null, null, { ignoreQuietHours: true });
   } catch (err) {
-    log(`⚠️ Could not send the registrant reminders (${err}).`);
-    toastIfPossible(`Could not send the reminders ⚠️ — ${err}`);
+    log(`⚠️ Could not send the weekly registrant emails (${err}).`);
+    toastIfPossible(`Could not send the weekly emails ⚠️ — ${err}`);
     return;
   }
-  flushAdminDigest('Registrant reminders');
-
+  flushAdminDigest('Weekly registrant emails');
   toastIfPossible(result.sent > 0
-    ? `Reminders sent ✅ — ${result.sent} email(s)` + (result.held > 0
-      ? `, ${result.held} held for the next run.` : '.')
-    : `Nobody is due a reminder right now — tick a reminder on ${SHEET_NAMES.PROGRAM_SETTINGS} ` +
-      `to choose which programs send them.`);
+    ? `Weekly emails sent ✅ — ${result.sent}` + (result.held > 0 ? `, ${result.held} held for the next run.` : '.')
+    : 'Nobody is due a weekly email right now. They go out from Friday at 10am.');
 }
