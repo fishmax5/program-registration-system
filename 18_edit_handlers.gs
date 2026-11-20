@@ -1301,7 +1301,7 @@ function stampTypeTagOnCalendar(title, calendarId, newTag) {
 
       const updated = setGroupingBracketInDescription(existing, newTag);
       if (updated === existing) return;
-      ev.setDescription(updated);
+      setEventDescriptionQuietly(ev, updated);
       stamped++;
     });
   });
@@ -1365,7 +1365,7 @@ function stampProgramFlagOnCalendar(title, calendarId, flag, on) {
       // re-tick the box, so this has to reach a person.
       if (!on && descriptionStillCarriesFlag(updated, flag.regex)) stuck++;
       if (updated === existing) return;
-      ev.setDescription(updated);
+      setEventDescriptionQuietly(ev, updated);
       stamped++;
     });
   });
@@ -1452,7 +1452,7 @@ function stampSessionFlagOnCalendarEvent(title, calendarId, dateKey, flag, on) {
     const updated = setFlagBracketInDescription(existing, flag.regex, flag.tag, on);
     if (!on && descriptionStillCarriesFlag(updated, flag.regex)) stuck++;
     if (updated === existing) return;
-    ev.setDescription(updated);
+    setEventDescriptionQuietly(ev, updated);
     stamped++;
   });
 
@@ -1806,7 +1806,7 @@ function stampSharedTagOnCalendars(matchedEvents, shared) {
     const existing = event.getDescription() || '';
     const updated = setSharedBracketInDescription(existing, shared);
     if (updated === existing) return;
-    event.setDescription(updated);
+    setEventDescriptionQuietly(event, updated);
     stamped++;
   });
   if (stamped > 0) {

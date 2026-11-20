@@ -817,7 +817,7 @@ function applyAssistanceSlotMinutes(month, minutes, facts) {
         // A tag that says nothing new is not written to the calendar: every
         // write is a revision on somebody's event, and an unchanged
         // description is not worth one.
-        if (after !== before) { ev.setDescription(after); written++; }
+        if (after !== before) { setEventDescriptionQuietly(ev, after); written++; }
       } catch (err) {
         stuck.push(`${session.dateLabel} (${err})`);
       }

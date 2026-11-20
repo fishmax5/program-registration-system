@@ -285,7 +285,7 @@ function collapseTimeBlockRun(run, options) {
 
   // --- 1. the survivor grows over the whole run ----------------------------
   try {
-    keep.setTime(spanStart, spanEnd);
+    setEventTimeQuietly(keep, spanStart, spanEnd);
   } catch (err) {
     return { ok: false, merged: 0, deleted: 0,
       message: `Nothing was changed. The first event could not be extended to cover the block (${err}).` };
@@ -297,7 +297,7 @@ function collapseTimeBlockRun(run, options) {
       let description = keep.getDescription() || '';
       description = setFlagBracketInDescription(description, ASSISTANCE_WORDS_REGEX, ASSISTANCE_TAG, true);
       description = setSlotMinutesInDescription(description, slotMinutes);
-      if (description !== (keep.getDescription() || '')) keep.setDescription(description);
+      if (description !== (keep.getDescription() || '')) setEventDescriptionQuietly(keep, description);
     } catch (err) {
       // The span is already right, which is the half that cannot be undone by
       // hand in a hurry. A missing tag is one line typed into a description.

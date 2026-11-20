@@ -998,3 +998,95 @@ function hideAllCalendarGuestLists() {
   } catch (e) { /* no UI on a trigger run */ }
   return summary;
 }
+
+// ============================================================================
+// 5c. QUIET EVENT EDITS  (the sync's own edits never email the guests)
+// ============================================================================
+//
+// CalendarApp has no "don't notify" switch. Every setDescription() or
+// setTime() on an event that has guests makes Google send each of them an
+// "Updated invitation — Changed: description" mail, and the sync rewrites
+// descriptions for its own reasons: a new month's sign-up link, a tag
+// stripped, a "not open yet" line swapped for the link, a time block merged.
+// None of that is news to a member; it was most of the Google mail they got
+// (2026-11-20 audit: a member forwarded one back to the office).
+//
+// So an edit to an event WITH guests goes through the Advanced Calendar
+// service with sendUpdates: 'none' — the same switch the relocation tool (99zy)
+// already uses. An event with no guests keeps the plain CalendarApp call: no
+// one can be mailed, and it saves the lookup.
+//
+// Adding a guest (5b) still sends Google's invitation — that one mail is the
+// point of inviting — and removing one still sends its cancellation. Only the
+// sync's housekeeping is silenced.
+//
+// If the API copy of the event cannot be told apart (two dates in one slot
+// with one title), the edit falls back to CalendarApp and is logged: a stale
+// sign-up link is worse than one update mail, and the log is how it is found.
+// ============================================================================
+
+/** True when the event has at least one guest. Never throws. */
+function eventHasGuests_(event) {
+  try {
+    return !!event && typeof event.getGuestList === 'function' && event.getGuestList().length > 0;
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * The Advanced Calendar API's copy of ONE CalendarApp event. getId() is the
+ * SERIES id for every date of a recurring event, so the instance is found by
+ * listing the event's own slot with singleEvents and matching start + title.
+ * Returns null when that is not exactly one item.
+ */
+function findApiEventForCalendarEvent_(calendarId, event) {
+  const startMs = event.getStartTime().getTime();
+  const found = Calendar.Events.list(calendarId, {
+    timeMin: new Date(startMs).toISOString(),
+    timeMax: new Date(event.getEndTime().getTime()).toISOString(),
+    singleEvents: true,
+    maxResults: 50
+  });
+  const title = String(event.getTitle() || '');
+  const hits = ((found && found.items) || []).filter(item => {
+    const dt = item.start && item.start.dateTime;
+    return dt && new Date(dt).getTime() === startMs && String(item.summary || '') === title;
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** Patches an event with guests without mailing them. Returns false if it could not. */
+function patchEventQuietly_(event, patch, what) {
+  try {
+    const calendarId = event.getOriginalCalendarId();
+    const api = calendarId ? findApiEventForCalendarEvent_(calendarId, event) : null;
+    if (api && api.id) {
+      Calendar.Events.patch(patch, calendarId, api.id, { sendUpdates: 'none' });
+      return true;
+    }
+    log(`⚠️ Could not find the calendar's own copy of "${safeEventTitle_(event)}" to change its ${what} quietly — changed it the ordinary way, so its guests were sent Google's update.`);
+  } catch (err) {
+    log(`⚠️ A quiet ${what} change on "${safeEventTitle_(event)}" failed (${err}) — changed it the ordinary way, so its guests were sent Google's update.`);
+  }
+  return false;
+}
+
+/**
+ * The one way the sync writes an event description. Guests are never mailed
+ * about it (see the banner above).
+ */
+function setEventDescriptionQuietly(event, description) {
+  const text = String(description === null || description === undefined ? '' : description);
+  if (eventHasGuests_(event) && patchEventQuietly_(event, { description: text }, 'description')) return;
+  event.setDescription(text);
+}
+
+/** The one way the sync moves an event's time. Guests are never mailed about it. */
+function setEventTimeQuietly(event, start, end) {
+  if (eventHasGuests_(event) && patchEventQuietly_(event, {
+    start: { dateTime: new Date(start).toISOString() },
+    end: { dateTime: new Date(end).toISOString() }
+  }, 'time')) return;
+  event.setTime(start, end);
+}
