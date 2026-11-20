@@ -1690,6 +1690,52 @@ function noteForAdmin(category, message) {
 }
 
 /**
+ * NOTES THAT ARE FILED ONCE A DAY (Nov 2026). These are re-stated by every
+ * sync for as long as the thing they describe is true — a lunch date with no
+ * menu, a cancelled lunch somebody signed up for — so the same line was
+ * spooled four times a day and printed as "4×". The first filing of the day
+ * is the one the office needs; a repeat of the identical line that day is now
+ * dropped rather than counted. A line that CHANGES (another name, a new date)
+ * is new, and is filed as ever.
+ */
+const ADMIN_DIGEST_ONCE_A_DAY_CATEGORIES = [
+  'Lunch needed with no menu set',
+  '⚠️ Lunch cancelled with people signed up',
+  'Waitlisted registrants'
+];
+
+/**
+ * Notes that are FOLDED before they are filed: one line per group rather than
+ * one per item. `render(items)` builds the line at flush time from every item
+ * noted under `groupKey` this run. The waitlist is the case it exists for: a
+ * form re-read for one full weekly class filed 306 lines in two minutes on
+ * Nov 18 (34 people × 9 Wednesdays), each saying the same thing.
+ */
+let __adminDigestGroups = null;
+
+function noteForAdminGrouped(category, groupKey, item, render) {
+  if (!__adminDigestGroups) __adminDigestGroups = {};
+  const byKey = __adminDigestGroups[category] || (__adminDigestGroups[category] = {});
+  const group = byKey[groupKey] || (byKey[groupKey] = { items: [], render: render });
+  group.items.push(item);
+}
+
+/** Turns every folded group into its one line on the ordinary collector. */
+function renderAdminDigestGroups_() {
+  const groups = __adminDigestGroups;
+  __adminDigestGroups = null;
+  if (!groups) return;
+  Object.keys(groups).forEach(category => {
+    Object.keys(groups[category]).forEach(key => {
+      const group = groups[category][key];
+      let line = '';
+      try { line = group.render(group.items); } catch (err) { line = ''; }
+      if (line) noteForAdmin(category, line);
+    });
+  });
+}
+
+/**
  * Files the accumulated notes for the office and resets the collector.
  *
  * ONE SPOOL ENTRY PER NOTE, not one per run. The daily digest coalesces
@@ -1700,6 +1746,7 @@ function noteForAdmin(category, message) {
  * "Calendar sync" and "Form re-check" failing the same way stay two lines.
  */
 function flushAdminDigest(context) {
+  renderAdminDigestGroups_();
   const digest = __adminDigest;
   __adminDigest = null;
   if (!digest) return false;
@@ -1709,8 +1756,9 @@ function flushAdminDigest(context) {
 
   let spooled = 0;
   categories.forEach(category => {
+    const options = ADMIN_DIGEST_ONCE_A_DAY_CATEGORIES.indexOf(category) !== -1 ? { oncePerDay: true } : undefined;
     digest[category].forEach(message => {
-      if (spoolOfficeNote(`${category} (${context})`, message)) spooled++;
+      if (spoolOfficeNote(`${category} (${context})`, message, options)) spooled++;
     });
   });
   return spooled > 0;

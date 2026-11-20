@@ -679,11 +679,16 @@ function buildRegistrantRow(args) {
     // something about, so it goes in the admin digest. The two are reported
     // apart because the answer to them is different: one is "open another
     // session", the other is "you already know, and here is who is waiting".
-    noteForAdmin('Waitlisted registrants',
-      `${displayName} (${personType}) for ${formatDateLabel(registryEntry.eventDate)} — ` +
-      (forcedWaitlist
-        ? `this session is marked ${WAITLIST_ONLY_TAG}, so everyone signing up for it is waitlisted.`
-        : `capacity ${registryEntry.maxCapacity} is full.`));
+    //
+    // FOLDED, one line per program and reason (Nov 2026): a weekly class
+    // re-read with a full roster used to file a line per person per date.
+    const reason = forcedWaitlist
+      ? `this session is marked ${WAITLIST_ONLY_TAG}, so everyone signing up for it is waitlisted.`
+      : `capacity ${registryEntry.maxCapacity} is full.`;
+    const program = `${registryEntry.cleanTitle || 'a program'}${registryEntry.location ? ` (${registryEntry.location})` : ''}`;
+    noteForAdminGrouped('Waitlisted registrants', `${program}|${reason}`,
+      { who: `${displayName} (${personType})`, date: registryEntry.eventDate },
+      items => describeWaitlistedGroup_(program, reason, items));
   }
 
   if (programStatus === 'Active') {
@@ -831,3 +836,27 @@ function writeMealsOrdered(row, map, mealsOrdered) {
   row[map['Meals_Ordered']] = amount > 1 ? amount : '';
 }
 
+/**
+ * One digest line for everyone a run waitlisted on one program for one
+ * reason: who (each name once), and which dates (each once, soonest first).
+ * Pure, so the wording is pinned in tests/admin_digest_folding.test.js.
+ */
+function describeWaitlistedGroup_(program, reason, items) {
+  const names = [];
+  const dates = {};
+  (items || []).forEach(item => {
+    if (item.who && names.indexOf(item.who) === -1) names.push(item.who);
+    const d = coerceDate(item.date);
+    if (d) dates[formatDateKey(d)] = d;
+  });
+  if (names.length === 0) return '';
+  const keys = Object.keys(dates).sort();
+  let when = '';
+  if (keys.length === 1) when = ` for ${formatDateLabel(dates[keys[0]])}`;
+  else if (keys.length > 1) {
+    when = ` for ${keys.length} dates, ${formatDateLabel(dates[keys[0]])} to ` +
+      `${formatDateLabel(dates[keys[keys.length - 1]])}`;
+  }
+  const who = names.length === 1 ? names[0] : `${names.length} people: ${names.join(', ')}`;
+  return `${program}${when} — ${reason} Waitlisted: ${who}.`;
+}
