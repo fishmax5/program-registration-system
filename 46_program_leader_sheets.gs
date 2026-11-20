@@ -269,9 +269,8 @@ function leaderSheetAckColumnNote() {
  * MAY THIS EDIT TO AN ACKNOWLEDGEMENT COLUMN BE WRITTEN ONTO THE REGISTRANT ROW?
  *
  * The whole of the one-way rule, in one place, asked by the hourly pull
- * (pullProgramLeaderSheetEdits) and by the web roster page's writer
- * (applyLeaderRosterEditLocked_, `99zn`) — two doors onto the same column, and
- * a rule spelled out separately in each is a rule that holds in one of them.
+ * (pullProgramLeaderSheetEdits). It used to be asked by the web roster page's
+ * writer too (`99zn`, retired Nov 2026), which is why it is its own function.
  *
  * Everything that is not an acknowledgement column passes straight through:
  * the five leader-owned columns merge both ways as they always have.
@@ -928,10 +927,6 @@ function pullProgramLeaderSheetEdits(registrantRows) {
   programKeys.forEach(programKey => {
     const entry = registry[programKey] || {};
     if (!entry.fileId) return;
-    // A sheet whose program moved to the web roster page and whose last ticks
-    // have already been read is frozen (protected) and never read again —
-    // the page is the one source of truth now (99zn).
-    if (leaderRosterSheetRetired(programKey)) return;
     if (pullPlan.untouched(entry.fileId)) return;
     let rows;
     try {
@@ -1360,10 +1355,6 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       lunchSkipped++;
       return;
     }
-    // A program delivered on the web roster page (99zn): its sheet is cut
-    // over (frozen after one last read) rather than rewritten, and one that
-    // came back from the page is un-frozen here so the write below redraws it.
-    if (leaderRosterHandlesSheet_(programKey, entry)) return;
     try {
       const rows = byProgram[programKey] || [];
       // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
@@ -2698,7 +2689,6 @@ function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
     if (dateKey < todayKey || dateKey > horizonKey) return;
     const key = leaderProgramKey(title, location);
     if (registry[key] && registry[key].fileId) return; // already has one, for the life of the program
-    if (rosterDeliveryFor(key) === ROSTER_DELIVERY.WEB) return; // its roster is the web page (99zn)
     if (!wanted[key] || dateKey < wanted[key].dateKey) {
       wanted[key] = { title, location, dateKey };
     }
@@ -2741,7 +2731,6 @@ function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
     if (registry[program.key] && registry[program.key].fileId) return; // already has one
     if (!known[program.key]) return; // not a program this workbook recognizes
     if (leaderSheetSkipsProgram_(program.title)) return; // a lunch: no registrant sheet
-    if (rosterDeliveryFor(program.key) === ROSTER_DELIVERY.WEB) return; // the web page (99zn)
     missing[program.key] = program;
   }));
 

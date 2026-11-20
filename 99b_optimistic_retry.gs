@@ -386,10 +386,12 @@ function applyQueuedOptimisticWrite(entry) {
       // sync held the workbook (48). Lock held, like Quick Mark's body.
       return applyQueuedDeleteRegistrations(args);
     case 'leaderRosterMark':
-      // A tick on a leader's web roster page (99zn) that arrived while a sync
-      // held the workbook. Lock held, like Quick Mark's body. Carries the
-      // program key, never the page's token.
-      return applyLeaderRosterEditLocked_(args);
+      // A tick from the leader's web roster page (99zn), retired Nov 2026. No
+      // program was ever on the page, so none should be queued; one that is
+      // is dropped with a log line rather than retried into an urgent email
+      // about a page that no longer exists.
+      log('ℹ️ Dropped a queued tick from the retired web roster page (99zn).');
+      return { ok: true, message: 'The web roster page is retired; this queued tick was dropped.' };
     case 'doorSignIn':
       // Called WITHOUT the script lock held — walkInSignIn() takes it for
       // itself, one mark at a time, through applyQuickMarkFromDialog(). See

@@ -634,9 +634,9 @@ function notifyProgramLeadersOfRosterChanges(sessionRows, registrantRows) {
       // the title the leader sees on the file the email links to, and the two
       // disagreeing would read as two different classes.
       const entry = registry[program.key] || {};
-      // The sheet, the web roster page, or both — whichever the program's
-      // Roster_Delivery says is the roster now (99zn).
-      const link = leaderRosterEmailLink(program.key, entry);
+      // The program's sign-up sheet — the one roster since the web roster
+      // page (99zn) was retired.
+      const link = leaderSheetEmailLink_(entry);
       programs.push({
         key: program.key,
         title: entry.title || program.title,
@@ -1126,7 +1126,7 @@ function sendProgramLeaderDaySnapshotDigests(sessionRows, registrantRows) {
         const sentFor = ledger[s.eventId] || {};
         if (sentFor[leader.email.toLowerCase()]) return;
         const entry = registry[program.key] || {};
-        const link = leaderRosterEmailLink(program.key, entry);
+        const link = leaderSheetEmailLink_(entry);
         sessions.push({
           eventId: s.eventId, date: s.date, dateKey: s.dateKey,
           title: entry.title || program.title, location: entry.location || program.location,
@@ -1283,4 +1283,17 @@ function sendProgramLeaderDayDigestsNow() {
   toastIfPossible(sent > 0
     ? `Roster digests sent ✅ — ${sent} email(s).`
     : `Nobody is due a digest right now — set Notify_Timing to a day count on ${SHEET_NAMES.PROGRAM_LEADERS}.`);
+}
+
+
+/**
+ * The roster link a leader email carries: the program's sign-up sheet. Kept
+ * in the {url, label, alsoUrl} shape the mail builders already read, from
+ * when a program could also have a web roster page (99zn, retired Nov 2026);
+ * alsoUrl is always blank now. No sheet yet gives an empty url, which the
+ * builders already handle by leaving the link out.
+ */
+function leaderSheetEmailLink_(entry) {
+  const url = entry && entry.fileId ? `https://docs.google.com/spreadsheets/d/${entry.fileId}/edit` : '';
+  return { url, label: 'Your sign-up sheet', alsoUrl: '' };
 }
