@@ -35,8 +35,9 @@
 // already spends one per calendar, so a design that needed one per program
 // would stop working somewhere around the twentieth class.
 //
-// WHO GETS ONE. Every program does, a week before its next session — see
-// ensureRegistrantSheetsForUpcomingPrograms(). It used to be only programs
+// WHO GETS ONE. Every program but lunch does, a week before its next session
+// — see ensureRegistrantSheetsForUpcomingPrograms() and, for why lunch is
+// left out, leaderSheetSkipsProgram_(). It used to be only programs
 // whose leader had ticked Notify_Roster_Changes, and that left the ordinary
 // case (a class with no leader row at all) with no live roster unless somebody
 // remembered the menu item on the morning it was needed. The sheet is cheap,
@@ -1313,6 +1314,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   let keptStranded = 0;
   let quarantined = 0;
   let mergedAway = 0;
+  let lunchSkipped = 0;
   let visited = 0;
   for (let i = 0; i < order.length; i++) {
     // At least one sheet per call, so a follow-up run that starts late still
@@ -1350,6 +1352,12 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
     // of the sync still reads any marks made on it.
     if (programTitleIsFiledElsewhere(entry.title, entry.location)) {
       mergedAway++;
+      return;
+    }
+    // A LUNCH'S SHEET IS NOT PUSHED (see leaderSheetSkipsProgram_). Left as
+    // last written, never opened; the pull still reads any mark made on it.
+    if (leaderSheetSkipsProgram_(entry.title)) {
+      lunchSkipped++;
       return;
     }
     // A program delivered on the web roster page (99zn): its sheet is cut
@@ -1531,6 +1539,10 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   if (mergedAway > 0) {
     log(`Program registrant sheets: left ${mergedAway} sheet(s) as last written — their program is now ` +
       `filed under another name (Program_Settings ▸ Also_Known_As), whose sheet carries its sessions.`);
+  }
+  if (lunchSkipped > 0) {
+    log(`Program registrant sheets: left ${lunchSkipped} lunch sheet(s) as last written — lunch no ` +
+      `longer gets a registrant sheet.`);
   }
   return pushed;
 }
@@ -2608,6 +2620,21 @@ function removeDefaultSheetIfIdle(file, keepName) {
  * it in that function.
  */
 /** What one of these spreadsheets is called in Drive. Named for what is on it, not for who reads it. */
+/**
+ * NO REGISTRANT SHEET FOR A LUNCH (Nov 2026). A lunch-only session is named
+ * for its dish ("Lunch @ Narberth — Cheese Lasagna"), so every dish was its
+ * own program key and so its own spreadsheet: about 45 of them by November,
+ * each built a week ahead and then pushed every hour, with nobody reading
+ * them and the digest reporting them "came out empty" several times a day.
+ * Lunch already has its own rosters (the lunch dashboard and the lunch
+ * sign-in sheet, `45`), and a lunch has no leader to hand one to. So none is
+ * built, offered or pushed. A sheet built before this is left exactly where
+ * it is: its link still opens, and the pull still reads any mark made on it.
+ */
+function leaderSheetSkipsProgram_(title) {
+  return isLunchOnlyProgramTitle(title);
+}
+
 function registrantSheetFileName(title, location) {
   return `Registrant Sheet — ${title} (${location})`;
 }
@@ -2664,6 +2691,7 @@ function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
     const title = String(row[map['Clean_Title']] || '').trim();
     const location = String(row[map['Location']] || '').trim();
     if (!title || !location) return;
+    if (leaderSheetSkipsProgram_(title)) return; // a lunch: no registrant sheet (see above)
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) return;
     const dateKey = formatDateKey(date);
@@ -2712,6 +2740,7 @@ function ensureProgramLeaderSheetsForNotifyingLeaders(ss, sessionRows) {
   leaders.forEach(leader => leader.programs.forEach(program => {
     if (registry[program.key] && registry[program.key].fileId) return; // already has one
     if (!known[program.key]) return; // not a program this workbook recognizes
+    if (leaderSheetSkipsProgram_(program.title)) return; // a lunch: no registrant sheet
     if (rosterDeliveryFor(program.key) === ROSTER_DELIVERY.WEB) return; // the web page (99zn)
     missing[program.key] = program;
   }));
@@ -2778,6 +2807,7 @@ function listProgramLeaderProgramOptions() {
     const location = String(row[map['Location']] || '').trim();
     const date = coerceDate(row[map['Event_Date']]);
     if (!title || !location || !date) return;
+    if (leaderSheetSkipsProgram_(title)) return; // a lunch: no registrant sheet
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
     const key = leaderProgramKey(title, location);

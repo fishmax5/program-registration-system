@@ -268,6 +268,19 @@ check('one run builds no more than the cap',
 check('...and spends it on the soonest sessions',
   built[0], 'Program Z|||Narberth');
 
+// A LUNCH GETS NO SHEET (Nov 2026). Each dish was its own program key, so
+// every lunch date built a spreadsheet nobody read.
+built = [];
+sandbox.__setRegistry({});
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+  dashRow('Lunch @ Narberth — Cheese Lasagna', 'Narberth', 1),
+  dashRow('Lunch @ Ashbridge', 'Ashbridge', 2),
+  dashRow('🥡 Lunch Only (no program)', 'Narberth', 3),
+  dashRow('Chair Yoga', 'Narberth', 2)
+]);
+check('a lunch-only session gets no registrant sheet, a program beside it still does',
+  built, ['Chair Yoga|||Narberth']);
+
 check('the file is named for what is on it, not for who reads it',
   sandbox.registrantSheetFileName('Chair Yoga', 'Narberth'),
   'Registrant Sheet — Chair Yoga (Narberth)');
