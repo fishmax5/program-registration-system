@@ -274,19 +274,7 @@ function relocateApiEventId_(event) {
  * `singleEvents`. Returns null when it cannot be told apart.
  */
 function relocateFindApiEvent_(calendarId, event) {
-  const startMs = event.getStartTime().getTime();
-  const found = Calendar.Events.list(calendarId, {
-    timeMin: new Date(startMs).toISOString(),
-    timeMax: new Date(event.getEndTime().getTime()).toISOString(),
-    singleEvents: true,
-    maxResults: 50
-  });
-  const title = String(event.getTitle() || '');
-  const hits = ((found && found.items) || []).filter(item => {
-    const dt = item.start && item.start.dateTime;
-    return dt && new Date(dt).getTime() === startMs && String(item.summary || '') === title;
-  });
-  return hits.length === 1 ? hits[0] : null;
+  return findApiEventForCalendarEvent_(calendarId, event);
 }
 
 /**

@@ -461,7 +461,7 @@ function stampDetectedSeriesGrouping(groups) {
       const updated = setGroupingBracketInDescription(existing, EVENT_TYPES.GROUPED);
       if (updated === existing) return;
       try {
-        event.setDescription(updated);
+        setEventDescriptionQuietly(event, updated);
       } catch (err) {
         log(`⚠️ Could not write [${EVENT_TYPES.GROUPED}] onto "${group.cleanTitle}" (${err}).`);
         return;

@@ -447,7 +447,7 @@ function rewriteEventRegistrationLinksInternal(registrySheet, showLinks) {
         }
 
         if (updated === existing) { stats.unchanged++; return; }
-        ev.setDescription(updated);
+        setEventDescriptionQuietly(ev, updated);
         if (showLinks && updated !== stripped.text) stats.rewritten++; else stats.cleared++;
       });
     });
@@ -1169,7 +1169,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
       // A notice counts as something to clear just as much as a link does:
       // "Hide link" means these descriptions carry nothing of ours at all.
       if ((stripped.removed === 0 && stripped.noticesRemoved === 0) || stripped.text === existing) return;
-      ev.setDescription(stripped.text);
+      setEventDescriptionQuietly(ev, stripped.text);
       cleared++;
     });
     if (cleared > 0) {
@@ -1192,7 +1192,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
     if (externalUrl) {
       const updated = prependRegistrationLine(stripAllRegistrationLines(existing).text,
         buildExternalRegistrationLinkLine(group.cleanTitle, externalUrl));
-      if (updated !== existing) ev.setDescription(updated);
+      if (updated !== existing) setEventDescriptionQuietly(ev, updated);
       return;
     }
 
@@ -1213,7 +1213,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
         return;
       }
       const updated = prependRegistrationLine(stripped.text, REGISTRATION_NOT_OPEN_LINE);
-      if (updated !== existing) ev.setDescription(updated);
+      if (updated !== existing) setEventDescriptionQuietly(ev, updated);
       return;
     }
 
@@ -1244,7 +1244,7 @@ function backInjectCalendarDescriptions(group, formInfo) {
     // forever, since the first match was always the one that got corrected.
     // A stale notice from a horizon that has since moved comes off here too.
     const updated = prependRegistrationLine(stripped.text, linkLine);
-    if (updated !== existing) ev.setDescription(updated);
+    if (updated !== existing) setEventDescriptionQuietly(ev, updated);
   });
 
   if (notYetOpenCount > 0) {

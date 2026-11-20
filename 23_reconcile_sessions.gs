@@ -456,7 +456,7 @@ function applyNoRegistrationEffects(registrySheet, groups) {
         // [No Registration] must not be left telling people its registration
         // opens later. It doesn't open at all.
         if ((stripped.removed === 0 && stripped.noticesRemoved === 0) || stripped.text === existing) return;
-        ev.setDescription(stripped.text);
+        setEventDescriptionQuietly(ev, stripped.text);
         touched++;
       });
 
@@ -652,7 +652,7 @@ function reconcileRegistrationHorizonNotices(groups, existingState) {
         // not a link, and not a notice either. Only a leftover from before the
         // setting changed can be here, so this is almost always a no-op.
         if (stripped.noticesRemoved > 0 && stripped.text !== existing) {
-          ev.setDescription(stripped.text);
+          setEventDescriptionQuietly(ev, stripped.text);
           cleared++;
         }
         return;
@@ -666,7 +666,7 @@ function reconcileRegistrationHorizonNotices(groups, existingState) {
         }
         const updated = prependRegistrationLine(stripped.text, REGISTRATION_NOT_OPEN_LINE);
         if (updated === existing) return;
-        ev.setDescription(updated);
+        setEventDescriptionQuietly(ev, updated);
         marked++;
         return;
       }
@@ -684,7 +684,7 @@ function reconcileRegistrationHorizonNotices(groups, existingState) {
         ? prependRegistrationLine(stripped.text, buildRegistrationLinkLine(group, formInfo))
         : stripped.text; // no form to link to yet — the stale notice still comes off
       if (updated === existing) return;
-      ev.setDescription(updated);
+      setEventDescriptionQuietly(ev, updated);
       if (formInfo) restored++; else cleared++;
     });
   });
