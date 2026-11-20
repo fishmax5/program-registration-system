@@ -292,7 +292,11 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     //
     // ONCE A DAY (99zg): what it files goes out in the NEXT day's 10am digest,
     // so twenty-four folds of a growing ledger said what one does.
+    //
+    // PAUSED (Nov 2026): see ledgerVerifyRunsInSync_() in 99n. The step stays
+    // in the list so a plan stored mid-run still finds it.
     run: () => {
+      if (!ledgerVerifyRunsInSync_()) return undefined;
       if (!dailyStepDue_('ledger_verify')) return undefined;
       reportLedgerVerification();
       recordDailyStepRun_('ledger_verify');

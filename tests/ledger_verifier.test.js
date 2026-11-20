@@ -53,6 +53,8 @@ this.ledgerPayloadFromRow = ledgerPayloadFromRow;
 this.ledgerEntriesForExistingRow = ledgerEntriesForExistingRow;
 this.verifyLedgerAgainstTab = verifyLedgerAgainstTab;
 this.describeLedgerVerification = describeLedgerVerification;
+this.registrationSyncTailStep = registrationSyncTailStep;
+this.__stubVerifierReport = function (fn) { reportLedgerVerification = fn; dailyStepDue_ = function () { return true; }; };
 this.setVerifierSides = function (entries, rows) {
   readLedgerEntries = function () { return entries; };
   getSectionedRows = function () { return rows; };
@@ -277,6 +279,20 @@ check('an unreadable ledger is not a clean run', result.ok, false);
 const skippedLines = describeLedgerVerification(result);
 check('it says so and stops', skippedLines.length, 1);
 check('naming what it could not read', skippedLines[0].indexOf('incomplete') !== -1, true);
+
+// --- paused in the sync (Nov 2026) -----------------------------------------
+//
+// The daily sync no longer folds the ledger or files its findings: ~94 digest
+// lines a day nobody was working. The step is still in the list, and still
+// runs when the switch is turned back on.
+{
+  let reported = 0;
+  sandbox.__stubVerifierReport(() => { reported++; return null; });
+  const step = sandbox.registrationSyncTailStep('ledger_verify');
+  check('the ledger step is still in the sync tail', !!step, true);
+  step.run({});
+  check('...but the sync no longer runs the verifier or files its lines', reported, 0);
+}
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll ledger verifier checks passed.');
 process.exit(failures ? 1 : 0);
