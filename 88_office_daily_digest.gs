@@ -254,7 +254,8 @@ function enforceOfficeDigestSpoolBudget_(todayKey) {
  * something that has already happened, and a spool that will not write must
  * not take down the pass that was telling it.
  */
-function spoolOfficeNote(section, message) {
+function spoolOfficeNote(section, message, options) {
+  const oncePerDay = !!(options && options.oncePerDay);
   const heading = String(section === null || section === undefined ? '' : section).trim() || 'Notes';
   const line = String(message === null || message === undefined ? '' : message).trim();
   if (!line) return false;
@@ -283,6 +284,9 @@ function spoolOfficeNote(section, message) {
     for (let i = 0; i < spool.chunks.length; i++) {
       const found = spool.chunks[i].filter(e => e.s === heading && e.m === line)[0];
       if (!found) continue;
+      // A note filed once a day (ADMIN_DIGEST_ONCE_A_DAY_CATEGORIES, 15) is
+      // already in today's digest: nothing to write, not even the count.
+      if (oncePerDay) return true;
       found.n = (Number(found.n) || 1) + 1;
       found.l = stamp;
       return writeOfficeDigestChunk_(dateKey, i, spool.chunks[i]);
