@@ -297,9 +297,8 @@ function renderGrouped(sheet, rows) {
     'rangeList.setBackground',
     'rangeList.setFontColor',
     'rangeList.setFontWeight',
-    'rangeList.setHorizontalAlignment',
-    'rangeList.setNumberFormat'
-  ], 'every heading painted together, one call per attribute');
+    'rangeList.setHorizontalAlignment'
+  ], 'every heading painted together, one call per attribute — and never stamped Plain text (99zze)');
 
   // The dropdowns and tick boxes the band gave them are taken back off: a
   // heading row carrying five checkboxes is not a heading.

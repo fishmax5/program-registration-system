@@ -2387,6 +2387,12 @@ function insertRegistrantRowsInPlace_(sheet, rows) {
       // Text BEFORE the value, or "10:00 AM" becomes a time dated 1899 — see
       // stampTextColumns().
       if (textCol > 0) sheet.getRange(first, textCol, n, 1).setNumberFormat('@');
+      // And the tick boxes NOT text, before the value, or a row inserted under
+      // a text-formatted neighbour writes its unticked boxes as the word
+      // "false" (99zze). The values themselves go out as booleans.
+      const checkboxCols = registrantCheckboxColumns_();
+      stampCheckboxColumns_(sheet, headers, checkboxCols, first, n);
+      coerceCheckboxColumns_(group.map(item => item.row), headers, checkboxCols);
       target.setValues(group.map(item => item.row));
     } catch (err) {
       log(`ℹ️ Could not insert ${n} registrant row(s) in place (${err}) — redrawing the tab instead.`);
@@ -2407,6 +2413,10 @@ function insertRegistrantRowsInPlace_(sheet, rows) {
       const source = top ? first + n : first - 1;
       sheet.getRange(source, 1, 1, numCols)
         .copyTo(sheet.getRange(first, 1, n, numCols), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+      // The neighbour's format may be the stale Plain text this tab carried
+      // before 99zze; the next single-cell tick written here would then land
+      // as a word. Put the tick-box columns back.
+      stampCheckboxColumns_(sheet, headers, registrantCheckboxColumns_(), first, n);
       setDataRowHeights(sheet, first, n);
     } catch (err) {
       log(`ℹ️ Inserted ${n} registrant row(s) but could not copy the formatting beside them (${err}).`);

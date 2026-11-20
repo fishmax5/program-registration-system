@@ -717,12 +717,14 @@ function clearRegistrantMarksOnRow(row, map, options) {
   const attended = opts.attended !== false;
   const lunch = opts.lunch !== false;
   let cleared = false;
-  if (attended && map['Attended'] !== undefined && row[map['Attended']] === true) {
+  // isTruthyCheckbox, not === true: a tick that reached the tab as the word
+  // "true" (99zze) is still a tick, and an undo that skipped it left it on.
+  if (attended && map['Attended'] !== undefined && isTruthyCheckbox(row[map['Attended']])) {
     row[map['Attended']] = false;
     cleared = true;
   }
   if (!lunch) return cleared;
-  if (map['Lunch_Served'] !== undefined && row[map['Lunch_Served']] === true) {
+  if (map['Lunch_Served'] !== undefined && isTruthyCheckbox(row[map['Lunch_Served']])) {
     row[map['Lunch_Served']] = false;
     cleared = true;
   }

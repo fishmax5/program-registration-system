@@ -12,6 +12,7 @@ function renderTriageSheet(force, allRows) {
     pastLabel: '🕓 Past (Triaged)',
     // Triage rows are registrant rows — same column, same coercion.
     textColumns: ['Event_Time'],
+    checkboxColumns: registrantCheckboxColumns_(),
     force,
     afterWrite: applyRegistrantsFormatting
   });

@@ -797,6 +797,13 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // guard's count is the memoized read the render already paid for, and
   // before the early write below, so a refusal leaves the tab exactly as it was.
   if (opts.guardMarker) guardRegistrantRowLoss_(sheet, headers, opts.guardMarker, allRows);
+  // TICK BOXES GO OUT AS BOOLEANS. A cell that came back off the tab as the
+  // word "false" (a text-formatted cell, see 99zze) is written back as the box
+  // it means. This is what repairs a tab that has already been through it.
+  if (opts.checkboxColumns) {
+    const fixed = coerceCheckboxColumns_(allRows, headers, opts.checkboxColumns);
+    if (fixed) log(`${sheet.getName()}: ${fixed} tick-box cell(s) held the words true/false — written back as tick boxes.`);
+  }
   // Belt and braces: writeUpcomingPastSections() below drops this tab's cached
   // reads too, but the early write happens first and a throw in between would
   // otherwise leave the old rows cached against a rewritten tab.
@@ -823,6 +830,13 @@ function renderFlatDateSheet(sheet, headers, allRows, opts) {
   // first because a value landing under an old rule that rejects it throws.
   // See 99u_write_before_clear.gs.
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+  // AND NOT PLAIN TEXT, before any value lands: a boolean written into a cell an
+  // earlier render left as '@' becomes the word "false" (99zze). Down the whole
+  // column, because which rows carry a stale '@' is not something this render
+  // knows, and clearFormats() below has been seen to leave it in place.
+  if (opts.checkboxColumns) {
+    stampCheckboxColumns_(sheet, headers, opts.checkboxColumns, 1, sheet.getMaxRows());
+  }
   const tableStart = opts.startRow || 1;
   writeTabValuesBeforeRender_(sheet,
     [sectionedTableValueBlock_(tableStart, headers, upcoming, past, opts)],
