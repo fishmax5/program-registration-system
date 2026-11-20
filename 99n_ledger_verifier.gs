@@ -124,6 +124,24 @@ const LEDGER_VERIFY_HOLDING_STATUSES = ['Active', 'Waitlisted', ''];
 const LEDGER_VERIFY_TRIAGE_PROGRAMS_LISTED = 15;
 
 /**
+ * PAUSED IN THE SYNC (Nov 2026). The daily run filed about 94 lines a day into
+ * the office digest (over a thousand "missing", a hundred disagreements, a
+ * hundred and seventy entries it could not replay) and nobody was working
+ * them: the triage report built to sort them had never been opened. A report
+ * nobody acts on costs a fold of the whole ledger every day and buries the
+ * lines in the digest that do need someone. So the sync no longer runs it.
+ *
+ * Nothing about the ledger itself changes: every writer still appends, and
+ * the check is still one press away (Health panel, or the menu's ledger
+ * report, showLedgerVerificationReport). Turning it back on is this one
+ * function returning true, once the ledger is settled or the day phase 4 is
+ * taken up again.
+ */
+function ledgerVerifyRunsInSync_() {
+  return false;
+}
+
+/**
  * THE COMPARISON. Returns a plain object and writes nothing.
  *
  *   { ok, checked, folded, missingFromFold, missingFromTab, onTriage,
