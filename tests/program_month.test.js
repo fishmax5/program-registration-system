@@ -325,6 +325,33 @@ const build = (rows, link, leaders, settings) =>
     ['Lunch @ Ashbridge', '2 days']);
 }
 
+// --- 5b. A lunch day the kitchen is not serving is not a session ------------
+// "Lunch @ Narberth" stayed under Running with a Next_Date that was a Not
+// Serving day. Those rows are left out of the month view entirely, so a
+// location whose every remaining day is Not Serving reads as what it is.
+{
+  const NOT_SERVING = vm.runInContext('NOT_SERVING_STATUS', sandbox);
+  const lunch = (day, status) => session({
+    at: [2026, 8, day, 12, 0],
+    formId: '',
+    title: 'Lunch @ Narberth — Chx Parm',
+    location: 'Narberth',
+    active: 3,
+    status: status || '',
+    eventId: `${sandbox.LUNCH_ONLY_EVENT_ID_PREFIX}Narberth_ns_${day}`
+  });
+  const rows = [lunch(1), lunch(2), lunch(8, NOT_SERVING), lunch(9, NOT_SERVING)];
+  const built = build(rows);
+  check('a not-serving lunch day is not counted on the month view',
+    cell(built.rows[0], 'Sessions'), '2 days');
+  check('and is never the next date', cell(built.rows[0], 'Next_Date'), '');
+  check('every day not serving leaves no lunch row at all',
+    build([lunch(8, NOT_SERVING), lunch(9, NOT_SERVING)]).rows.length, 0);
+  // A PROGRAM row whose Status happens to read the same is still a program.
+  const odd = session({ at: [2026, 8, 8, 9, 30], status: NOT_SERVING });
+  check('only lunch-only rows are dropped', build([odd]).rows.length, 1);
+}
+
 // --- Times that do not agree say so, and name the outliers in a note --------
 {
   const rows = [

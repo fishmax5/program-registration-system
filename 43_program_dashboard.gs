@@ -708,6 +708,38 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
 
 /** Clears the sheet and redraws all sections in order, then applies all formatting. */
 /**
+ * A LUNCH-ONLY ROW FOR A DAY THE KITCHEN IS NOT SERVING — the row 30 marks
+ * NOT_SERVING_STATUS. Read off the Status cell rather than the menu, because
+ * that cell is exactly what somebody looking at the tab sees, and it keeps
+ * this pure. A program row never qualifies, whatever its status says.
+ */
+function isNotServingLunchRow(row, map) {
+  if (!row || !isLunchOnlyEventId(row[map['Event_ID']])) return false;
+  return String(row[map['Status']] || '').trim() === NOT_SERVING_STATUS;
+}
+
+/**
+ * The unbroken stretches of `rows` that `wanted` picks, as sheet bands
+ * { start, count } from `startRow`. Pure, so the tests can pin it.
+ */
+function sessionRowBands_(rows, startRow, wanted) {
+  const bands = [];
+  let runStart = -1;
+  (rows || []).forEach((row, i) => {
+    if (wanted(row)) {
+      if (runStart === -1) runStart = i;
+      return;
+    }
+    if (runStart !== -1) {
+      bands.push({ start: startRow + runStart, count: i - runStart });
+      runStart = -1;
+    }
+  });
+  if (runStart !== -1) bands.push({ start: startRow + runStart, count: rows.length - runStart });
+  return bands;
+}
+
+/**
  * Puts the generated lunch rows BACK ON SCREEN — the inverse of what used to
  * happen here, and the reason this function still exists rather than simply
  * being deleted.
@@ -728,30 +760,26 @@ function setEventTimeFormulas(sheet, dataStart, count, map, dateColLetter) {
  * that something, and it runs on every render — which also undoes a row
  * somebody hid by hand.
  *
- * Shown in RUNS, for the same reason they were hidden in runs: a month of
- * lunches is one showRows() call per unbroken stretch, not thirty.
+ * EXCEPT A DAY THE KITCHEN IS NOT SERVING (isNotServingLunchRow). That row
+ * stays in the table — it is who signed up and has to be told, and 13 and 99ze
+ * still need it — but it is not something running that day, and a column of
+ * "⛔ Not Serving" lunches reads as a schedule that is not happening. So it is
+ * HIDDEN, still found by Ctrl+F, and the Upcoming banner says how many and
+ * why. Turning the day back to a catered menu un-hides it on the next render.
+ *
+ * Shown and hidden in RUNS: a month of lunches is one call per unbroken
+ * stretch, not thirty. Returns how many lunch rows were shown.
  */
 function showLunchOnlySessionRows(sheet, map, upcoming, past, result) {
-  const bands = [];
-  const collect = (rows, startRow) => {
-    let runStart = -1;
-    rows.forEach((row, i) => {
-      if (isLunchOnlyEventId(row[map['Event_ID']])) {
-        if (runStart === -1) runStart = i;
-        return;
-      }
-      if (runStart !== -1) {
-        bands.push({ start: startRow + runStart, count: i - runStart });
-        runStart = -1;
-      }
-    });
-    if (runStart !== -1) bands.push({ start: startRow + runStart, count: rows.length - runStart });
-  };
-  collect(upcoming, result.upcomingDataStart);
-  collect(past, result.pastDataStart);
+  const served = row => isLunchOnlyEventId(row[map['Event_ID']]) && !isNotServingLunchRow(row, map);
+  const notServing = row => isNotServingLunchRow(row, map);
+  const showBands = sessionRowBands_(upcoming, result.upcomingDataStart, served)
+    .concat(sessionRowBands_(past, result.pastDataStart, served));
+  const hideBands = sessionRowBands_(upcoming, result.upcomingDataStart, notServing)
+    .concat(sessionRowBands_(past, result.pastDataStart, notServing));
 
   let shown = 0;
-  bands.forEach(band => {
+  showBands.forEach(band => {
     try {
       sheet.showRows(band.start, band.count);
       shown += band.count;
@@ -759,6 +787,28 @@ function showLunchOnlySessionRows(sheet, map, upcoming, past, result) {
       log(`ℹ️ Could not show ${band.count} lunch row(s) at row ${band.start} (${err}).`);
     }
   });
+  let hidden = 0;
+  let hiddenUpcoming = 0;
+  const upcomingEnd = result.upcomingDataStart + (upcoming || []).length;
+  hideBands.forEach(band => {
+    try {
+      sheet.hideRows(band.start, band.count);
+      hidden += band.count;
+      if (band.start < upcomingEnd) hiddenUpcoming += band.count;
+    } catch (err) {
+      log(`ℹ️ Could not hide ${band.count} not-serving lunch row(s) at row ${band.start} (${err}).`);
+    }
+  });
+  if (hiddenUpcoming > 0 && result.upcomingBannerRow) {
+    try {
+      sheet.getRange(result.upcomingBannerRow, 1)
+        .setValue(`🔜 Upcoming Sessions  ·  ${hiddenUpcoming} not-serving lunch day(s) hidden`)
+        .setNote(`${hiddenUpcoming} upcoming lunch row(s) are for days ${SHEET_NAMES.LUNCH_SCHEDULE} marks ` +
+          `"Not Serving", so they are hidden. They stay on this tab (Ctrl+F finds them) because people ` +
+          `had signed up; the lunch dashboard lists who to tell. Change the day back to a menu and the ` +
+          `row shows again on the next sync.`);
+    } catch (err) { /* the banner is a convenience */ }
+  }
   return shown;
 }
 
@@ -911,9 +961,9 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
   setEventTimeFormulas(sheet, result.pastDataStart, past.length, map, dateColLetter);
 
   // THE LUNCH ROWS ARE ON THE VIEW, and are put back onto it if an older
-  // render (or a person) hid them — see showLunchOnlySessionRows(). The banner
-  // says nothing about them any more because there is nothing left to explain:
-  // they read as what they are.
+  // render (or a person) hid them, except a day the kitchen is not serving,
+  // which is hidden and counted on the Upcoming banner — see
+  // showLunchOnlySessionRows().
   showLunchOnlySessionRows(sheet, map, upcoming, past, result);
 
   const zones = [

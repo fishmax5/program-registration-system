@@ -811,6 +811,10 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     // No date, no place on a tab whose row is a span. A dateless row keeps
     // living on the session table, where it is visible and fixable.
     if (!date) return;
+    // A LUNCH DAY THE KITCHEN IS NOT SERVING is not a session of anything:
+    // counted, it kept "Lunch @ Narberth" under Running with a Next_Date nobody
+    // was cooking for. Its row stays on the session tab (43 hides it there).
+    if (isNotServingLunchRow(row, sessionMap)) return;
     const key = programMonthGroupKey(row, sessionMap, formLocations);
     if (!groups[key]) {
       groups[key] = { key, sessions: [] };
