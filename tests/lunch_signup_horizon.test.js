@@ -327,6 +327,40 @@ const count = sandbox.showLunchOnlySessionRows(fakeSheet, progMap, upcomingRows,
 check('every lunch row is shown and no class is touched', count, 4);
 check('and consecutive ones go in one call, not one each', shownBands, ['10+2', '13+1', '101+1']);
 
+// A DAY THE KITCHEN IS NOT SERVING is hidden instead, in runs, and the
+// Upcoming banner says how many. Its row is still written: it is who signed up.
+{
+  const NOT_SERVING = vm.runInContext('NOT_SERVING_STATUS', sandbox);
+  const shown = [];
+  const hidden = [];
+  const banner = {};
+  const sheet2 = {
+    getName: () => sandbox.SHEET_NAMES.PROGRAM_DASHBOARD,
+    showRows: (start, count) => shown.push(`${start}+${count}`),
+    hideRows: (start, count) => hidden.push(`${start}+${count}`),
+    getRange: (r, c) => ({
+      setValue(v) { banner.row = r; banner.value = v; return this; },
+      setNote(n) { banner.note = n; return this; }
+    })
+  };
+  const ns = r => { r[progMap['Status']] = NOT_SERVING; return r; };
+  const up = [
+    sessionRow(lunchId('2026-09-01'), 'Lunch @ Narberth — Chx Parm'),
+    ns(sessionRow(lunchId('2026-09-02'), 'Lunch @ Narberth — Turkey Wrap')),
+    ns(sessionRow(lunchId('2026-09-03'), 'Lunch @ Narberth — Ragout')),
+    sessionRow('cal-hash-1', 'Chair Yoga'),
+    ns(sessionRow('cal-hash-3', 'Odd program'))
+  ];
+  const past = [ns(sessionRow(lunchId('2026-08-04'), 'Lunch @ Narberth — Cod'))];
+  const n = sandbox.showLunchOnlySessionRows(sheet2, progMap, up, past,
+    { upcomingDataStart: 10, pastDataStart: 100, upcomingBannerRow: 8 });
+  check('only served lunch rows are shown', [n, shown], [1, ['10+1']]);
+  check('not-serving lunch rows are hidden in runs, Past included', hidden, ['11+2', '100+1']);
+  check('a program row is never hidden for its status', hidden.indexOf('14+1'), -1);
+  check('the Upcoming banner counts only the upcoming ones',
+    [banner.row, /2 not-serving lunch day/.test(banner.value)], [8, true]);
+}
+
 // The summaries still count programs only. "42 programs this month"
 // counting thirty lunches is a number nobody can use, and the Today block
 // names what is RUNNING at a location — the meal has its own count on the
