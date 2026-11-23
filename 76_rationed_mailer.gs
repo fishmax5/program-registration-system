@@ -527,7 +527,7 @@ function sendRationedEmail(request) {
   if (bccList.length > 0 && !forwardToOffice) options.bcc = bccList.join(',');
 
   try {
-    MailApp.sendEmail(options);
+    sendMemberMail_(options);
   } catch (err) {
     // Not counted against the quota: a message MailApp would not take is a
     // message it did not send. Remembered, so the next one to this address
@@ -546,6 +546,50 @@ function sendRationedEmail(request) {
   // nobody receives and nothing retries.
   if (typeof req.recordSent === 'function') req.recordSent();
   return result;
+}
+
+/** Memo: null = not asked yet, then true/false for this execution. */
+let __memberFromAliasUsable = null;
+
+/**
+ * Can this execution send "from" MAIL_FROM_ADDRESS? Only if GmailApp exists
+ * and lists it among the account's verified aliases. Asked once; any failure
+ * (scope not granted yet, no alias) answers false and mail goes out as before.
+ */
+function memberFromAliasUsable_() {
+  if (__memberFromAliasUsable !== null) return __memberFromAliasUsable;
+  let usable = false;
+  try {
+    const from = String(typeof MAIL_FROM_ADDRESS === 'string' ? MAIL_FROM_ADDRESS : '').trim().toLowerCase();
+    if (from && typeof GmailApp !== 'undefined') {
+      usable = (GmailApp.getAliases() || []).some(a => String(a).toLowerCase() === from);
+      if (!usable) log(`ℹ️ ${MAIL_FROM_ADDRESS} is not a "Send mail as" alias on the sending account — member mail goes out from the account itself.`);
+    }
+  } catch (err) {
+    log(`ℹ️ Could not check Gmail aliases (${err}) — member mail goes out from the account itself.`);
+  }
+  __memberFromAliasUsable = usable;
+  return usable;
+}
+
+/**
+ * Puts one member-facing message on the wire: from MAIL_FROM_ADDRESS when the
+ * alias is usable, else MailApp as always. A GmailApp failure falls back to
+ * MailApp for the same message, so a bad alias can never silence mail.
+ */
+function sendMemberMail_(options) {
+  if (memberFromAliasUsable_()) {
+    try {
+      const extra = { from: MAIL_FROM_ADDRESS, replyTo: options.replyTo, name: options.name };
+      if (options.bcc) extra.bcc = options.bcc;
+      GmailApp.sendEmail(options.to, options.subject, options.body, extra);
+      return;
+    } catch (err) {
+      log(`⚠️ Sending from ${MAIL_FROM_ADDRESS} failed (${err}) — sending from the account itself.`);
+      __memberFromAliasUsable = false;
+    }
+  }
+  MailApp.sendEmail(options);
 }
 
 /** What marks an office copy in a subject line. Kept short: it is read in a list. */

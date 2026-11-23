@@ -718,6 +718,16 @@ const CENTER_EMAIL = 'info@newhorizonsseniorcenter.org';
 const MAIL_REPLY_TO = 'carolinemeiers@newhorizonsseniorcenter.org';
 const MAIL_SENDER_NAME = CENTER_NAME;
 
+/**
+ * THE FROM ADDRESS OF MEMBER-FACING MAIL (weekly emails, reminders, leader
+ * alerts — everything through sendRationedEmail, `76`). It only takes effect
+ * when this address is a verified "Send mail as" alias on the sending Gmail
+ * account (`GmailApp.getAliases()` lists it); otherwise the message goes out
+ * from the account itself, exactly as before. Replies still go to
+ * MAIL_REPLY_TO. Blank turns the feature off.
+ */
+const MAIL_FROM_ADDRESS = 'newhorizons@newhorizonsseniorcenter.org';
+
 /** The standing sign-off appended to every form description. */
 const FORM_ASSISTANCE_TAGLINE =
   `If you need additional assistance, please call ${CENTER_PHONE} or email ${CENTER_EMAIL}`;
