@@ -265,11 +265,11 @@ const REGISTRATION_SYNC_TAIL_STEPS = [
     run: ctx => inviteRegistrantsToCalendarEvents(ctx.sessionRows(), ctx.reusableRows())
   },
   {
-    // After the invitations, because an appointment's confirmation should not
-    // reach somebody before the calendar entry it is about.
-    id: 'registrant_reminders',
-    label: 'sending the registrant reminders',
-    run: ctx => sendRegistrantReminders(ctx.sessionRows(), ctx.reusableRows())
+    // After the invitations, so a person's calendar entry exists before the
+    // email that lists it. One email a week per person, see 70.
+    id: 'weekly_registrant_email',
+    label: 'sending the weekly registrant emails',
+    run: ctx => sendWeeklyRegistrantEmails(ctx.sessionRows(), ctx.reusableRows())
   },
   {
     // READ-ONLY, and cheap (one session-table read the run already holds).

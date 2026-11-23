@@ -44,7 +44,7 @@ const SCRIPT_PROPERTY_STORE_NOTES = {
   ALL_DATES_REGISTRANTS_V1: 'every-date registrants (06)',
   OPTIMISTIC_RETRY_QUEUE_V1: 'desk writes waiting to be retried (99b)',
   CALENDAR_INVITES_V1: 'calendar invitations already sent (33)',
-  REGISTRANT_REMINDERS_V1: 'reminders already sent (70)',
+  WEEKLY_REGISTRANT_EMAIL_V1: 'weekly registrant emails already sent (70)',
   PROGRAM_LEADER_ROSTER_STATE_V2: 'leader roster snapshots (66)',
   INSTRUCTOR_SHEET_REGISTRY_V1: 'program registrant sheet registry (46)',
   MENU_USAGE_V1: 'menu click counts (99r)'
