@@ -35,6 +35,7 @@ vm.createContext(sandbox);
 // Top-level `const`s are lexical and do not land on the sandbox object.
 vm.runInContext(src + `
 ;this.LUNCH_SIGNUP_HEADERS = LUNCH_SIGNUP_HEADERS;
+this.HEADERS = HEADERS;
 `, sandbox, { filename: 'program.gs' });
 
 let failures = 0;
@@ -85,6 +86,46 @@ check('soonest month first, then location',
   ['Ashbridge September 2026', 'Narberth September 2026', 'Narberth October 2026']);
 check('the ended month is not among them', rows.some(r => r.monthLabel === 'August 2026'), false);
 check('the date count rides along', rows[0].dateCount, 2);
+
+// --- a month whose kitchen is closed for every day left in it --------------
+// Narberth, November 2026: every remaining day on Lunch_Schedule reads "Not
+// Serving" and its form has been closed, but the pin survives (13 keeps it on
+// purpose). The block must not show it. A month with NO menu rows yet is a gap,
+// not a decision, and stays pinned.
+{
+  const menuMap = sandbox.getIndexMap(sandbox.HEADERS.Lunch_Schedule);
+  const menuRow = (y, m, d, location, type) => {
+    const row = new Array(sandbox.HEADERS.Lunch_Schedule.length).fill('');
+    row[menuMap['Event_Date']] = new Date(y, m - 1, d);
+    row[menuMap['Location']] = location;
+    row[menuMap['Type']] = type;
+    return row;
+  };
+  const menu = [
+    menuRow(2026, 9, 10, 'Narberth', 'Hot'),          // past: ignored
+    menuRow(2026, 9, 16, 'Narberth', 'Not Serving'),
+    menuRow(2026, 9, 17, 'Narberth', 'Not Serving'),
+    menuRow(2026, 9, 16, 'Ashbridge', 'Not Serving'),
+    menuRow(2026, 9, 17, 'Ashbridge', 'Cold'),
+    menuRow(2026, 10, 1, 'Narberth', 'Not Serving'),
+    menuRow(2026, 10, 2, 'Narberth', '')               // blank type is not a decision
+  ];
+  const closed = sandbox.lunchMonthsClosedAhead(menu, '2026-09-15');
+  check('only a month whose every remaining day is Not Serving counts as closed',
+    Object.keys(closed).sort(), ['Narberth|2026-09']);
+  check('a past Hot day does not keep a month open', closed['Narberth|2026-09'], true);
+  check('one served day left keeps it open', !!closed['Ashbridge|2026-09'], false);
+  check('a blank-typed day keeps it open', !!closed['Narberth|2026-10'], false);
+  check('nothing on the menu is nothing closed',
+    Object.keys(sandbox.lunchMonthsClosedAhead([], '2026-09-15')), []);
+
+  const shown = sandbox.buildLunchSignUpRows(stored, closed);
+  check('the closed month is not pinned on the dashboard',
+    shown.map(r => `${r.location} ${r.monthLabel}`),
+    ['Ashbridge September 2026', 'Narberth October 2026']);
+  check('without a closed map nothing extra is hidden',
+    sandbox.buildLunchSignUpRows(stored).length, 3);
+}
 
 // --- the block's shape -----------------------------------------------------
 check('the sign-up link is the last column, so it can overflow',

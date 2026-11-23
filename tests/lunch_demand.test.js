@@ -236,6 +236,47 @@ check('the same row carrying a typed order STAYS',
 check('and so does a hand-edited one, as before',
   dropRows([notServingRow('Manually Edited', '')]).length, 1);
 
+// (b2) A STALE upcoming row: no "Not Serving" to say so, just nothing behind it
+//      any more. Narberth's January days were seeded while the calendar still
+//      ran them there, the programs moved to Ashbridge, and the rows sat on the
+//      schedule with their last counts (2026-11-20). Not in the rollup and
+//      Auto-Synced with nothing typed means every cell was ours, and none of it
+//      is true now.
+sandbox.isExplicitlyNotServing = () => false;
+{
+  let stale = [];
+  sandbox.noteForAdmin = (subject) => { stale.push(subject); };
+  const staleRow = (override, actualOrdered, when) => {
+    const row = notServingRow(override, actualOrdered);
+    if (when) row[dashMap['Event_Date']] = when;
+    row[dashMap['Registered_Count']] = 8;
+    return row;
+  };
+  check('an upcoming auto-synced row nothing asks for any more goes',
+    dropRows([staleRow('Auto-Synced', '')]).length, 0);
+  check('so does one whose Manual_Override is blank',
+    dropRows([staleRow('', '')]).length, 0);
+  check('a stale row with a typed order stays',
+    dropRows([staleRow('Auto-Synced', 30)]).length, 1);
+  check('a hand-edited stale row stays',
+    dropRows([staleRow('Manually Edited', '')]).length, 1);
+  check('a manually added stale row stays',
+    dropRows([staleRow('Manually Added', '')]).length, 1);
+  check('and none of them is reported, since nobody closed that day',
+    stale.length, 0);
+  const past = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  check('a PAST auto-synced row is never touched',
+    dropRows([staleRow('Auto-Synced', '', past)]).length, 1);
+  const keyOf = sandbox.formatDateKey(future);
+  check('a row the rollup still has is kept',
+    sandbox.dropNotServingRowsReal([staleRow('Auto-Synced', '')], dashMap,
+      [{ dateKey: keyOf, location: 'Narberth' }]).length, 1);
+  check('the rollup match is per location',
+    sandbox.dropNotServingRowsReal([staleRow('Auto-Synced', '')], dashMap,
+      [{ dateKey: keyOf, location: 'Ashbridge' }]).length, 0);
+  sandbox.noteForAdmin = () => {};
+}
+
 // (c) A number typed BETWEEN two renders in one execution. A sync slice runs
 //     for up to twenty-five minutes and redraws this tab more than once, and
 //     the per-execution grid cache was dropped when the CODE wrote the tab but
