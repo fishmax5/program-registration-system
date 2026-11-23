@@ -404,6 +404,11 @@ function buildDoorAppHtml(options) {
   var OPTS = JSON.parse(${inlineOptions});
   var SETUP_KEY = 'doorSetup:v1';
 
+  // A shared tablet at the door: no right-click / long-press menu anywhere on
+  // the page (it offers Back, Reload, View Source and Save As to whoever is
+  // standing there). Capture phase, so nothing inside the page can opt back in.
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, true);
+
   var SETUP = null;        // { location, dateKey } — this tablet's own default
   var DAY = null;          // the day, as readWalkInDay() sent it
   var PENDING = null;      // a background day held back until the screen is idle
