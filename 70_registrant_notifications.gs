@@ -342,7 +342,7 @@ function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey
     const ownTime = eventTimeLabelOf(row[regMap['Event_Time']]);
     const time = session && !session.isAssistance ? (session.time || ownTime) : ownTime;
 
-    const person = byEmail[email] || (byEmail[email] = { names: [], weeks: {} });
+    const person = byEmail[email] || (byEmail[email] = { email, names: [], weeks: {} });
     const name = String(row[regMap['Name']] || '').trim();
     if (name && person.names.indexOf(name) === -1) person.names.push(name);
     const list = person.weeks[weekKey] || (person.weeks[weekKey] = []);
@@ -382,7 +382,7 @@ function planWeeklyEmail(person, weekKey, items, told, todayKey) {
     return {
       kind: 'weekly',
       subject: buildWeeklyEmailSubject(weekKey),
-      body: buildWeeklyEmailBody(person.names, weekKey, items, todayKey),
+      body: buildWeeklyEmailBody(person.names, weekKey, items, todayKey, person.email),
       keys: active.map(item => item.key)
     };
   }
@@ -393,7 +393,7 @@ function planWeeklyEmail(person, weekKey, items, told, todayKey) {
   return {
     kind: 'added',
     subject: buildAddedToWeekSubject(added),
-    body: buildAddedToWeekBody(person.names, weekKey, added),
+    body: buildAddedToWeekBody(person.names, weekKey, added, person.email),
     keys: told.concat(added.map(item => item.key))
   };
 }
@@ -427,7 +427,7 @@ function buildWeeklyEmailSubject(weekKey) {
  * The Friday email. Plain text on purpose: it reaches a phone unmangled, and
  * a list of days is the whole content.
  */
-function buildWeeklyEmailBody(names, weekKey, items, todayKey) {
+function buildWeeklyEmailBody(names, weekKey, items, todayKey, email) {
   const active = items.filter(item => !item.waitlisted);
   const waiting = items.filter(item => item.waitlisted);
   const underWay = todayKey > shiftDateKey_(weekKey, -1);
@@ -454,6 +454,7 @@ function buildWeeklyEmailBody(names, weekKey, items, todayKey) {
     'we will send a short note about just that.');
   lines.push('');
   lines.push('If you can no longer make something, please let us know so the place can go to somebody else.');
+  weeklyOptOutFooterLines(email).forEach(line => lines.push(line));
   return lines.join('\n');
 }
 
@@ -466,7 +467,7 @@ function buildAddedToWeekSubject(added) {
   return `${added.length} programs added to your week`;
 }
 
-function buildAddedToWeekBody(names, weekKey, added) {
+function buildAddedToWeekBody(names, weekKey, added, email) {
   const lines = [greetingFor_(names), ''];
   lines.push(added.length === 1
     ? `You are now registered for this, in the week of ${weekRangeLabel_(weekKey)}:`
@@ -477,6 +478,7 @@ function buildAddedToWeekBody(names, weekKey, added) {
   lines.push('Everything else in your week is as in our last email.');
   lines.push('');
   lines.push('If you can no longer make it, please let us know so the place can go to somebody else.');
+  weeklyOptOutFooterLines(email).forEach(line => lines.push(line));
   return lines.join('\n');
 }
 
@@ -501,7 +503,7 @@ function centerShortNameForMail_() {
  */
 function sendWeeklyRegistrantEmails(sessionRows, registrantRows, options) {
   const opts = options || {};
-  const result = { sent: 0, weekly: 0, added: 0, held: 0, paused: 0, stoppedForToday: false };
+  const result = { sent: 0, weekly: 0, added: 0, held: 0, paused: 0, optedOut: 0, stoppedForToday: false };
   if (!opts.ignoreQuietHours && dayLongMailHoldInEffect(WEEKLY_EMAIL_MAIL_PASS)) {
     result.stoppedForToday = true;
     return result;
@@ -541,7 +543,15 @@ function sendWeeklyRegistrantEmails(sessionRows, registrantRows, options) {
   const byEmail = collectWeeklyEmailItems(sessions, rows, weekKeys, todayKey);
 
   const weeklyCounts = {};
-  const emails = Object.keys(byEmail).sort();
+  // Addresses that asked to stop (99zzf). Dropped before anything is planned,
+  // so nothing is recorded for them and a person put back later is treated
+  // like anybody else.
+  const optedOut = weeklyEmailOptOutSet();
+  const emails = Object.keys(byEmail).sort().filter(email => {
+    if (!optedOut[email]) return true;
+    result.optedOut++;
+    return false;
+  });
   for (const weekKey of weekKeys) {
     const toldThisWeek = ledger.weeks[weekKey] || {};
     for (const email of emails) {

@@ -88,6 +88,11 @@ const SHEET_NAMES = {
   // counselling, weekend help — counted for the stats and published nowhere.
   // One row per person helped per session. See 99zi_private_sessions.gs.
   PRIVATE_SESSIONS: 'Private_Sessions',
+  // Addresses that asked not to receive the weekly registrant email — by the
+  // link in its footer or by replying to the office. One row per address,
+  // staff-editable: delete a row to put somebody back. See
+  // 99zzf_weekly_email_opt_out.gs.
+  WEEKLY_EMAIL_OPT_OUTS: 'Weekly_Email_Opt_Outs',
   // The append-only record of what happened to every registration — one row
   // per EVENT (registered, cancelled, moved, corrected), never edited, never
   // removed. All_Registrants is one row per person per session MUTATED IN
@@ -1139,6 +1144,10 @@ defineLazyGlobal_('HEADERS', () => ({
   // See 99zv_standing_events.gs.
   Standing_Events: [
     'Event', 'Location', 'Days_Open', 'Time_Note', 'Active', 'Notes'
+  ],
+  /** Weekly_Email_Opt_Outs — one row per ADDRESS, never per person (99zzf). */
+  Weekly_Email_Opt_Outs: [
+    'Email', 'Opted_Out_On', 'Source', 'Notes'
   ]
 }));
 

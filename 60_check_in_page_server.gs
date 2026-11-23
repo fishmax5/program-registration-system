@@ -177,6 +177,19 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     }
   },
   {
+    id: 'unsubscribe',
+    mode: 'unsubscribe',
+    title: 'Weekly Email',
+    // OPENED BY A MEMBER, from the footer of the weekly email, so like the
+    // cancel page it needs no PIN and no ?location=. It is the one other
+    // route here that a stranger-with-a-phone reaches. It writes only through
+    // the page's own button and only for an address whose HMAC token is on
+    // the link (99zzf); opening it changes nothing, so a mail scanner that
+    // fetches every link cannot unsubscribe anybody. Not frameable.
+    match: params => WEEKLY_OPT_OUT_MODES.indexOf(doorRequestedMode_(params)) !== -1,
+    build: params => buildWeeklyOptOutHtml(weeklyOptOutPageContext(params))
+  },
+  {
     id: 'leader-roster',
     mode: LEADER_ROSTER_MODE,
     title: 'Class Roster',
