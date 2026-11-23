@@ -10,6 +10,10 @@ function renderRegistrantsSheet(force, allRows, options) {
   const rows = dropSupersededRegistrantRows(
     allRows || getSectionedRows(sheet, headers, 'Event_ID'), headers);
   backfillRegistrantEventTimes(ss, headers, rows);
+  // Before the fingerprint, so a tab holding tick boxes as the words
+  // "true"/"false" (99zze) never hashes the same as the repaired tab and is
+  // not skipped as unchanged.
+  coerceCheckboxColumns_(rows, headers, registrantCheckboxColumns_());
   // Same derived pair as the session table, keyed off this row's own program
   // and day — see 69_generated_file_links.gs.
   stampGeneratedFileLinks(rows, getIndexMap(headers), { titleColumn: 'Event' });
@@ -38,6 +42,8 @@ function renderRegistrantsSheet(force, allRows, options) {
     // array here is an unrecoverable loss of registrations.
     guardMarker: 'Event_ID',
     force,
+    // Tick boxes kept boolean, and repaired where they are words — see 99zze.
+    checkboxColumns: registrantCheckboxColumns_(),
     afterWrite: applyRegistrantsFormatting
   });
   // Reached only once the render landed: the baseline the shrink guard judges

@@ -203,7 +203,11 @@ function formatRegistrantGroupDividers_(sheet, numCols, rowNumbers) {
     list.setFontColor(REGISTRANT_GROUP_DIVIDER_FG);
     list.setFontWeight('bold');
     list.setHorizontalAlignment('left');
-    list.setNumberFormat('@');
+    // NO Plain-text stamp. It used to be here, across all of the heading's
+    // columns, and it outlived the heading: the next render's rows landed in
+    // those cells and their tick boxes came out as the word "false" (99zze).
+    // The '▸ ' marker is what keeps a heading's label from parsing as a date,
+    // and the label was written before this ran anyway.
   } catch (err) {
     log(`ℹ️ Could not format ${rowNumbers.length} program heading(s) on "${sheet.getName()}" (${err}).`);
     return 0;
