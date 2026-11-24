@@ -77,7 +77,9 @@ const programs = JSON.parse(run(`JSON.stringify(groupBulkRegistrantPrograms_([
 ]))`));
 assert.strictEqual(programs.length, 3);
 const yogaA = programs.filter(p => p.title === 'Yoga' && p.location === 'A')[0];
-assert.deepStrictEqual(yogaA.sessions.map(s => s.dateKey), ['2026-09-15', '2026-09-22']);
+// A past date inside BULK_REGISTRANT_LOOKBACK_DAYS is offered, flagged past.
+assert.deepStrictEqual(yogaA.sessions.map(s => s.dateKey), ['2026-09-01', '2026-09-15', '2026-09-22']);
+assert.deepStrictEqual(yogaA.sessions.map(s => !!s.past), [true, false, false]);
 assert.ok(!yogaA.appointment, 'an ordinary program is not by appointment');
 assert.ok(programs.filter(p => p.title === 'Help')[0].appointment, 'an appointment program is offered, flagged');
 
@@ -88,6 +90,18 @@ assert.deepStrictEqual(keys('next'), ['2026-09-15']);
 assert.deepStrictEqual(keys('club'), ['2026-09-15']);
 assert.deepStrictEqual(keys('all'), ['2026-09-15', '2026-09-22']);
 assert.deepStrictEqual(keys('picked'), ['2026-09-22'], 'a date the program does not have is ignored');
+// Next / every / standing never reach a past date; naming one does.
+assert.deepStrictEqual(JSON.parse(run(`JSON.stringify(bulkRegistrantSessionsFor(${p}, 'picked', ['2026-09-01']))`)).map(s => s.dateKey), ['2026-09-01']);
+
+// 4a. A Dates column: the row's own dates, any of the usual spellings.
+{
+  const ppl = JSON.parse(run(`JSON.stringify(peopleFromBulkRecords([
+    ['Name', 'Dates'], ['Jane Smith', '9/8/2026; 9/15/2026, 2026-10-06'], ['Bob Lee', '']
+  ], ['name', 'dates'], true))`));
+  assert.deepStrictEqual(ppl[0].dateKeys, ['2026-09-08', '2026-09-15', '2026-10-06']);
+  assert.ok(!ppl[1].dateKeys, 'no Dates cell, no own dates');
+  assert.strictEqual(JSON.parse(run(`JSON.stringify(readBulkRegistrantColumns('Name,Dates\\nJane,9/8/2026'))`)).fields[1], 'dates');
+}
 
 // 4b. WHICH ROWS AN ACTION IS ABOUT — the pure matcher the five non-register
 //     actions share. Keyed on the DATE, because a list is reviewed against

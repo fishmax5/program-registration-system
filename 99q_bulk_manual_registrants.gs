@@ -257,7 +257,19 @@ function bulkActionNeedsExistingRow(action) {
 }
 
 /** What a column can be. '' is "ignore this column". */
-const BULK_REGISTRANT_COLUMN_FIELDS = ['name', 'first', 'last', 'phone', 'email', 'time', ''];
+const BULK_REGISTRANT_COLUMN_FIELDS = ['name', 'first', 'last', 'phone', 'email', 'time', 'dates', ''];
+
+// A DATES COLUMN, AND THE PAST (Nov 2026, Kathy's Mah Jongg sheet). A leader's
+// attendance sheet says who came on WHICH day, person by person, and the list
+// above could only say "these dates" for everybody at once — so the sheet took
+// one paste per date. A cell mapped to Dates ("9/8; 9/15/2026; 2026-10-06")
+// gives that row its OWN dates, and the program list now reaches back
+// BULK_REGISTRANT_LOOKBACK_DAYS so a date already gone is one there is a
+// session for. A past session is flagged `past` and is only ever reached by
+// being named — by a Dates cell or a ticked box, which starts unticked — never
+// by "Next date", "Every date" or a standing place, which mean what they
+// always meant: from today on.
+const BULK_REGISTRANT_LOOKBACK_DAYS = 120;
 
 /** Column headings the paste recognizes, lower-cased, → field. */
 const BULK_REGISTRANT_HEADER_FIELDS = {
@@ -270,8 +282,41 @@ const BULK_REGISTRANT_HEADER_FIELDS = {
   // An appointment program's booked time (see bulkTimeCandidates_). Only read
   // when the chosen program is booked by appointment; ignored otherwise.
   'time': 'time', 'appointment': 'time', 'appointment time': 'time', 'appt': 'time',
-  'appt time': 'time', 'appt.': 'time', 'slot': 'time'
+  'appt time': 'time', 'appt.': 'time', 'slot': 'time',
+  'dates': 'dates', 'date': 'dates', 'attended dates': 'dates', 'dates attended': 'dates'
 };
+
+/**
+ * A Dates cell as date keys: "9/8; 9/15/2026, 2026-10-06" → ['2026-09-08', …].
+ * Pure. A date with no year takes the year that puts it nearest today (a list
+ * typed in January naming "12/30" means last month). Anything unreadable is
+ * dropped, and the review then shows the row with fewer dates than typed.
+ */
+function parseBulkDateList_(value, today) {
+  const now = today || new Date();
+  const out = [];
+  String(value || '').split(/[;,|\n]+|\s{2,}|\s(?=\d{1,2}\/)/).forEach(tok => {
+    const t = tok.trim();
+    if (!t) return;
+    let y, m, d;
+    let hit = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (hit) { y = +hit[1]; m = +hit[2]; d = +hit[3]; }
+    else if ((hit = t.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/))) {
+      m = +hit[1]; d = +hit[2];
+      if (hit[3]) y = hit[3].length === 2 ? 2000 + +hit[3] : +hit[3];
+      else {
+        const base = now.getFullYear();
+        const best = [base - 1, base, base + 1].map(yr => ({ yr, gap: Math.abs(new Date(yr, m - 1, d) - now) }))
+          .sort((a, b) => a.gap - b.gap)[0];
+        y = best.yr;
+      }
+    } else return;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return;
+    const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (out.indexOf(key) === -1) out.push(key);
+  });
+  return out.sort();
+}
 
 const BULK_REGISTRANT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -401,12 +446,13 @@ function peopleFromBulkRecords(records, fields, hasHeader) {
   const body = hasHeader ? (records || []).slice(1) : (records || []);
   const people = [];
   body.forEach((record, i) => {
-    const p = { name: '', first: '', last: '', phone: '', email: '', time: '' };
+    const p = { name: '', first: '', last: '', phone: '', email: '', time: '', dates: '' };
     (fields || []).forEach((field, c) => {
       if (!field || BULK_REGISTRANT_COLUMN_FIELDS.indexOf(field) === -1) return;
       const value = String((record && record[c]) || '').trim();
       if (!value) return;
       if (field === 'phone' || field === 'email' || field === 'time') { p[field] = p[field] || value; return; }
+      if (field === 'dates') { p.dates = p.dates ? `${p.dates}; ${value}` : value; return; }
       p[field] = p[field] ? `${p[field]} ${value}` : value;
     });
     // "Smith, Jane" in a single cell is a name, read the way the roll reads it.
@@ -419,6 +465,8 @@ function peopleFromBulkRecords(records, fields, hasHeader) {
     // program reads back exactly as it always did. `timeMins` is what the
     // dialog matches against the session's free slots; `time` is what was typed.
     if (p.time) { person.time = p.time; person.timeMins = bulkTimeCandidates_(p.time); }
+    // Likewise a Dates column: the row's own dates (see BULK_REGISTRANT_LOOKBACK_DAYS).
+    if (p.dates) { person.datesTyped = p.dates; person.dateKeys = parseBulkDateList_(p.dates); }
     people.push(person);
   });
   return people;
@@ -708,11 +756,15 @@ function listBulkRegistrantPrograms() {
  */
 function groupBulkRegistrantPrograms_(choices, bookedTimes) {
   const todayKey = formatDateKey(new Date());
+  const sinceKey = formatDateKey(new Date(Date.now() - BULK_REGISTRANT_LOOKBACK_DAYS * 86400000));
   const horizonKey = deskMonthHorizonKey(new Date());
   const byKey = {};
   (choices || []).forEach(choice => {
     if (!choice.dateKey || choice.lunchOnly) return;
-    if (choice.dateKey < todayKey || choice.dateKey > horizonKey) return;
+    if (choice.dateKey < sinceKey || choice.dateKey > horizonKey) return;
+    // An appointment's past chairs are not offered: its free times are cut
+    // from today forward, and a past slot is a fact for Quick Mark, not a list.
+    if (choice.appointment && choice.dateKey < todayKey) return;
     const key = `${choice.location}${QUICK_MARK_SESSION_KEY_SEPARATOR}${choice.title}`;
     if (!byKey[key]) {
       // `todayKey` is the WORKBOOK's today, carried so the dialog can grey out
@@ -728,6 +780,7 @@ function groupBulkRegistrantPrograms_(choices, bookedTimes) {
       dateKey: choice.dateKey,
       dateLabel: formatDateLabel(parseDateKey(choice.dateKey))
     };
+    if (choice.dateKey < todayKey) session.past = true;
     if (choice.appointment) {
       let times = [];
       try {
@@ -741,9 +794,15 @@ function groupBulkRegistrantPrograms_(choices, bookedTimes) {
     byKey[key].sessions.push(session);
   });
   return Object.keys(byKey).map(k => byKey[k])
+    // A program whose only dates are past is not offered: there is nothing to
+    // register anybody onto from today, and a list of finished programs would
+    // bury the live ones.
+    .filter(p => p.sessions.some(s => !s.past))
     .map(p => {
       p.sessions.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
-      p.label = `${p.title} — ${p.location || 'no location'} (${p.sessions.length} upcoming${p.appointment ? ', by appointment' : ''})`;
+      const ahead = p.sessions.filter(s => !s.past).length;
+      const behind = p.sessions.length - ahead;
+      p.label = `${p.title} — ${p.location || 'no location'} (${ahead} upcoming${behind ? `, ${behind} past` : ''}${p.appointment ? ', by appointment' : ''})`;
       return p;
     })
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -755,7 +814,15 @@ function groupBulkRegistrantPrograms_(choices, bookedTimes) {
  * past, or a value the dialog did not draw, is not a date anybody chose.
  */
 function bulkRegistrantSessionsFor(program, recurrence, pickedDateKeys) {
-  const sessions = (program && program.sessions) || [];
+  const all = (program && program.sessions) || [];
+  // Next / every / standing mean from today on; a past date is only reached by
+  // being named (see BULK_REGISTRANT_LOOKBACK_DAYS).
+  const sessions = all.filter(s => !s.past);
+  if (recurrence === 'picked') {
+    const wanted = {};
+    (pickedDateKeys || []).forEach(k => { wanted[String(k)] = true; });
+    return all.filter(s => wanted[s.dateKey]);
+  }
   if (!sessions.length) return [];
   if (recurrence === 'next' || recurrence === 'club') return [sessions[0]];
   if (recurrence === 'all') return sessions.slice();
@@ -1286,8 +1353,13 @@ function startBulkRegistrants(args) {
       // ordinary row and on every plan written before it, so the plan key
       // keeps its name.
       apptDate: String(p.apptDate || ''),
-      appointmentTime: String(p.appointmentTime || '')
-    }));
+      appointmentTime: String(p.appointmentTime || ''),
+      // This row's OWN dates, from a Dates column. Additive like the fields
+      // above; when present the row is 'picked' on these rather than on the
+      // list-wide ticks.
+      dateKeys: Array.isArray(p.dateKeys) ? p.dateKeys.map(String) : []
+    }))
+    .map(p => (p.dateKeys.length ? Object.assign(p, { recurrence: 'picked' }) : p));
   if (!people.length) return { ok: false, message: '⚠️ Nobody is ticked — nothing to do.' };
   if (people.length > BULK_REGISTRANTS_MAX_PEOPLE) {
     return { ok: false, message: `⚠️ More than ${BULK_REGISTRANTS_MAX_PEOPLE} people at once — split the list.` };
@@ -2167,8 +2239,14 @@ function runBulkRegistrantsSlice() {
       const lunchMode = plan.mode === 'lunch';
       // A slice resumed tomorrow must not register anybody onto yesterday.
       const todayKey = formatDateKey(new Date());
+      // Past dates inside the lookback stay: they are flagged `past` and are
+      // only reached by being named (bulkRegistrantSessionsFor). An upcoming
+      // date that has since gone past is flagged now, so "every date" does not
+      // reach it either.
+      const sinceKey = formatDateKey(new Date(Date.now() - BULK_REGISTRANT_LOOKBACK_DAYS * 86400000));
       const program = Object.assign({}, plan.program, {
-        sessions: (plan.program.sessions || []).filter(s => s.dateKey >= todayKey)
+        sessions: (plan.program.sessions || []).filter(s => s.dateKey >= sinceKey)
+          .map(s => (s.dateKey < todayKey ? Object.assign({}, s, { past: true }) : s))
       });
 
       let processed = 0;
@@ -2184,7 +2262,7 @@ function runBulkRegistrantsSlice() {
         if (workbookHeldElsewhere()) { busy = true; break; }
         const outcome = lunchMode
           ? serveOneBulkLunchPerson_(plan.lunch, people[state.next])
-          : applyOneBulkPersonAction_(program, plan.picked, people[state.next]);
+          : applyOneBulkPersonAction_(program, bulkPickedFor_(plan, people[state.next]), people[state.next]);
         if (outcome.busy) { busy = true; break; }
         result.lines = (result.lines || []).concat([outcome.line]);
         // WHO WAS ACTUALLY CHANGED, for the follow-up email: a person whose
@@ -2194,7 +2272,7 @@ function runBulkRegistrantsSlice() {
         // not "newly added to".
         if (outcome.written > 0 && !lunchMode) {
           result.changed = (result.changed || []).concat([
-            bulkFollowUpEntryFor_(program, plan.picked, people[state.next])]);
+            bulkFollowUpEntryFor_(program, bulkPickedFor_(plan, people[state.next]), people[state.next])]);
         }
         state.written = (state.written || 0) + outcome.written;
         state.next++;
@@ -2297,6 +2375,11 @@ function finishBulkRegistrants_(state, problem) {
 // on 99s's precedent: somebody is watching, and the daily quota bounds the list.
 
 /** The follow-up record for one person the job changed. Pure. */
+/** The dates one person is 'picked' on: their own Dates cell, else the list's ticks. */
+function bulkPickedFor_(plan, person) {
+  return person && person.dateKeys && person.dateKeys.length ? person.dateKeys : ((plan && plan.picked) || []);
+}
+
 function bulkFollowUpEntryFor_(program, picked, person) {
   const action = BULK_FOLLOWUP_CHANGE_PHRASES[person.action] ? person.action : 'register';
   let dates = '';
@@ -2698,7 +2781,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   // until it does: nothing may be ticked attended on a day nobody has stated.
   var TODAY = '';
   var RECURRENCES = [['next','Next date'],['picked','Ticked dates'],['all','Every date'],['club','Standing']];
-  var FIELDS = [['name','Name'],['first','First name'],['last','Last name'],['phone','Phone'],['email','Email'],['time','Appointment time'],['','— ignore —']];
+  var FIELDS = [['name','Name'],['first','First name'],['last','Last name'],['phone','Phone'],['email','Email'],['time','Appointment time'],['dates','Dates (this row)'],['','— ignore —']];
 
   function el(tag, text, cls) {
     var e = document.createElement(tag);
@@ -2758,16 +2841,16 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     p.sessions.forEach(function (s) {
       var l = el('label');
       var c = document.createElement('input');
-      c.type = 'checkbox'; c.value = s.dateKey; c.className = 'date'; c.checked = true;
+      c.type = 'checkbox'; c.value = s.dateKey; c.className = 'date'; c.checked = !s.past;
       c.addEventListener('change', evaluate);
-      l.appendChild(c); l.appendChild(document.createTextNode(' ' + s.dateLabel));
+      l.appendChild(c); l.appendChild(document.createTextNode(' ' + s.dateLabel + (s.past ? ' (past)' : '')));
       box.appendChild(l);
     });
     evaluate();
   }
   $('recurrence').addEventListener('change', function () {
     var v = this.value;
-    ROWS.forEach(function (r) { r.rec.value = v; });
+    ROWS.forEach(function (r) { if (r.rec.value !== 'own') r.rec.value = v; });
     evaluate();
   });
   // THE ACTION, for the whole list, with every row's own dropdown following it
@@ -3028,7 +3111,12 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       tdAct.appendChild(act); tr.appendChild(tdAct); r.act = act;
       var tdRec = el('td'); var rec = document.createElement('select');
       RECURRENCES.forEach(function (x) { var o = el('option', x[1]); o.value = x[0]; rec.appendChild(o); });
-      rec.value = defaultRec;
+      // A Dates column gave this row its own dates: offered first, and chosen.
+      if (p.dateKeys && p.dateKeys.length) {
+        var own = el('option', 'Dates in the list (' + p.dateKeys.length + ')'); own.value = 'own';
+        rec.insertBefore(own, rec.firstChild);
+        rec.value = 'own';
+      } else rec.value = defaultRec;
       rec.addEventListener('change', evaluate);
       tdRec.appendChild(rec); tr.appendChild(tdRec); r.rec = rec;
       // APPOINTMENT PROGRAMS: this person's own date and time, which replace the
@@ -3106,6 +3194,10 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   function apptRow(r) { return isAppt() && isRegisterish(r.act.value); }
   function rowDatesOf(r) {
     if (apptRow(r)) { var s = sessionByKey(r.dSel.value); return s ? [s] : []; }
+    if (r.rec.value === 'own') {
+      var p = program(); var keys = r.person.dateKeys || [];
+      return p ? p.sessions.filter(function (s) { return keys.indexOf(s.dateKey) !== -1; }) : [];
+    }
     return datesFor(r.rec.value);
   }
 
@@ -3115,8 +3207,9 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   function datesFor(rec) {
     var p = program();
     if (!p) return [];
-    if (rec === 'next' || rec === 'club') return p.sessions.slice(0, 1);
-    if (rec === 'all') return p.sessions.slice();
+    var ahead = p.sessions.filter(function (s) { return !s.past; });
+    if (rec === 'next' || rec === 'club') return ahead.slice(0, 1);
+    if (rec === 'all') return ahead;
     var picked = pickedKeys();
     return p.sessions.filter(function (s) { return picked.indexOf(s.dateKey) !== -1; });
   }
@@ -3236,7 +3329,12 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       r.apptBox.style.display = appt ? '' : 'none';
       r.rec.style.display = appt ? 'none' : '';
       var dates = rowDatesOf(r);
-      var verdict = judge(opt, appt ? 'picked' : rec, act, r.person, appt ? dates : null);
+      var ownDates = !appt && rec === 'own';
+      var verdict = judge(opt, (appt || ownDates) ? 'picked' : rec, act, r.person, (appt || ownDates) ? dates : null);
+      if (ownDates && (r.person.dateKeys || []).length > dates.length) {
+        verdict.note = (verdict.note ? verdict.note + ' ' : '') + ((r.person.dateKeys.length - dates.length) +
+          ' typed date(s) are not a session of this program and are skipped.');
+      }
       var note = verdict.note;
       var already = verdict.nothingToDo;
       var key = opt.nameKey || '';
@@ -3322,7 +3420,8 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       var appt = apptRow(r);
       if (appt && !r.tSel.value) missingTime.push(r.person.name);
       people.push({ name: opt.name, phone: r.person.phone, email: r.person.email,
-        recurrence: appt ? 'picked' : r.rec.value, action: act, reason: reason,
+        recurrence: (appt || r.rec.value === 'own') ? 'picked' : r.rec.value, action: act, reason: reason,
+        dateKeys: (!appt && r.rec.value === 'own') ? rowDatesOf(r).map(function (d) { return d.dateKey; }) : [],
         apptDate: appt ? r.dSel.value : '', appointmentTime: appt ? r.tSel.value : '',
         lunch: lunch && isRegisterish(act),
         attended: act === 'register' && r.att.checked && !r.att.disabled });
