@@ -25,7 +25,7 @@ function makeSheet(name) {
         setValues: v => { v.forEach((row, i) => { grid[r - 1 + i] = grid[r - 1 + i] || []; row.forEach((x, j) => { grid[r - 1 + i][c - 1 + j] = x; }); }); return range; },
         setValue: v => range.setValues([[v]]),
         getValue: () => range.getValues()[0][0],
-        setFontWeight: () => range, setDataValidation: () => range, setNote: () => range,
+        setFontWeight: () => range, setDataValidation: () => range, clearDataValidations: () => range, setNote: () => range,
         getRow: () => r, getColumn: () => c, getNumRows: () => nr, getNumColumns: () => nc
       };
       return range;
@@ -202,6 +202,22 @@ const items = g.items(
 eq(items.map(i => `${i.type}:${i.group}${i.email ? ':' + i.email : ''}`), [
   'create:new@nhsc.org', 'manager:new@nhsc.org:lead@x.com', 'add:new@nhsc.org:a@x.com', 'remove:old@nhsc.org:b@x.com'
 ], 'create, managers, adds, removes; pending and already-removed rows touch nothing');
+
+// --- a tab whose tick boxes ran to row 1000 (the first version's fault) ------------
+{
+  const stale = makeSheet('Email_Groups');
+  stale.grid.push(g.HEADERS.Email_Groups.slice());
+  const activeCol = g.HEADERS.Email_Groups.indexOf('Active');
+  for (let i = 0; i < 999; i++) { const r = g.HEADERS.Email_Groups.map(() => ''); r[activeCol] = false; stale.grid.push(r); }
+  const real = g.HEADERS.Email_Groups.map(() => ''); real[0] = 'stranded@nhsc.org'; real[activeCol] = true; stale.grid.push(real);
+  sheets.Email_Groups = stale;
+  g.ensure();
+  assert.strictEqual(stale.grid[1][0], 'stranded@nhsc.org', 'a row stranded below the checkbox band is packed up under the header');
+  assert.strictEqual(stale.grid[2][0], 'interest-art@nhsc.org', 'and new rows land right after it, not at row 1002');
+  assert.strictEqual(stale.grid[1000][0], '', 'the old cell is blanked');
+  delete sheets.Email_Groups;
+  delete sheets.Group_Requests;
+}
 
 // --- the tabs, the Approve tick, the door, the lists page ---------------------------
 sandbox.SpreadsheetApp.getActiveSpreadsheet = () => Object.assign(ss, {});

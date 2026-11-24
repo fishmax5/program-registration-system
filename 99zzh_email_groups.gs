@@ -255,7 +255,7 @@ function styleGroupRequestsTab_(sheet) {
   try {
     const headers = HEADERS.Group_Requests;
     const map = getIndexMap(headers);
-    const rows = Math.max(sheet.getMaxRows() - 1, 1);
+    const rows = emailGroupsValidationRows_(sheet);
     ['Approve', 'In_Group'].forEach(h => {
       sheet.getRange(2, map[h] + 1, rows, 1).setDataValidation(
         SpreadsheetApp.newDataValidation().requireCheckbox().build());
@@ -275,7 +275,7 @@ function styleEmailGroupsTab_(sheet) {
   try {
     const headers = HEADERS.Email_Groups;
     const map = getIndexMap(headers);
-    const rows = Math.max(sheet.getMaxRows() - 1, 1);
+    const rows = emailGroupsValidationRows_(sheet);
     sheet.getRange(2, map['Active'] + 1, rows, 1).setDataValidation(
       SpreadsheetApp.newDataValidation().requireCheckbox().build());
     sheet.getRange(2, map['Kind'] + 1, rows, 1).setDataValidation(
@@ -329,13 +329,66 @@ function readGroupRequests_() {
   }));
 }
 
+/**
+ * THE LAST ROW WITH SOMETHING IN IT, by content — never getLastRow(). A
+ * checkbox column reads FALSE in every row it is drawn on, so getLastRow() on a
+ * tab whose tick boxes ran to row 1000 answered 1000 and every append landed
+ * below it, out of sight (the first version of this file did exactly that).
+ */
+function lastContentRow_(sheet) {
+  const last = sheet.getLastRow();
+  if (last < 2) return Math.min(last, 1);
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const values = sheet.getRange(1, 1, last, width).getValues();
+  for (let r = values.length - 1; r >= 1; r--) {
+    if (values[r].some(v => v !== '' && v !== null && v !== false)) return r + 1;
+  }
+  return 1;
+}
+
+/** Tick boxes and dropdowns cover the rows in use plus a spare band, never the whole sheet. */
+const EMAIL_GROUPS_SPARE_ROWS = 25;
+function emailGroupsValidationRows_(sheet) {
+  return Math.max(lastContentRow_(sheet) - 1, 0) + EMAIL_GROUPS_SPARE_ROWS;
+}
+
+/**
+ * THE REPAIR for a tab written by that first version: its rows are packed back
+ * up under the header in their order, the old cells blanked (one setValues,
+ * never a clear), and the validation taken off everything below the band.
+ * Idempotent: a tab that is already packed is read once and left alone.
+ * Returns how many rows moved.
+ */
+function packEmailGroupsTab_(sheet) {
+  try {
+    const last = sheet.getLastRow();
+    if (last < 2) return 0;
+    const width = Math.max(sheet.getLastColumn(), 1);
+    const values = sheet.getRange(2, 1, last - 1, width).getValues();
+    const isRow = row => row.some(v => v !== '' && v !== null && v !== false);
+    const kept = values.filter(isRow);
+    const firstGap = values.findIndex(row => !isRow(row));
+    if (firstGap === -1 || firstGap >= kept.length) return 0;
+    const blank = () => Array(width).fill('');
+    const out = kept.concat(values.slice(kept.length).map(blank));
+    sheet.getRange(2, 1, last - 1, width).clearDataValidations();
+    sheet.getRange(2, 1, out.length, width).setValues(out);
+    return kept.length;
+  } catch (err) {
+    log(`⚠️ Could not tidy ${sheet.getName()} (${err}).`);
+    return 0;
+  }
+}
+
 function appendRowsToTab_(name, headers, objects) {
   if (!objects.length) return 0;
   const sheet = emailGroupsSheet_(name, headers, true);
-  const start = Math.max(sheet.getLastRow(), 1) + 1;
+  const start = Math.max(lastContentRow_(sheet), 1) + 1;
   ensureSheetRowsFor_(sheet, start + objects.length - 1);
   sheet.getRange(start, 1, objects.length, headers.length)
     .setValues(objects.map(o => objectToRow_(o, headers)));
+  if (name === SHEET_NAMES.GROUP_REQUESTS) styleGroupRequestsTab_(sheet);
+  else styleEmailGroupsTab_(sheet);
   return objects.length;
 }
 
@@ -358,6 +411,7 @@ function newGroupRequest_(fields) {
 function ensureEmailGroupsTabs_() {
   const groupsSheet = emailGroupsSheet_(SHEET_NAMES.EMAIL_GROUPS, HEADERS.Email_Groups, true);
   const requestsSheet = emailGroupsSheet_(SHEET_NAMES.GROUP_REQUESTS, HEADERS.Group_Requests, true);
+  [groupsSheet, requestsSheet].forEach(packEmailGroupsTab_);
   styleEmailGroupsTab_(groupsSheet);
   styleGroupRequestsTab_(requestsSheet);
   const domain = emailGroupsDomain_();
