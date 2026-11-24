@@ -293,6 +293,42 @@ function minutesOfTimeLabel_(label) {
 }
 
 /**
+ * A cell's time label, never a formula. `Event_Time` on the session table is
+ * `=IF(W18="",TEXT(…))` (setEventTimeFormulas, 43), and the sectioned reader
+ * hands formulas back — printing that put the formula in a member's email.
+ */
+function weeklyTimeText_(label) {
+  const text = String(label || '').trim();
+  return text.charAt(0) === '=' ? '' : text;
+}
+
+/** The session's time, rebuilt from its own start and end (86's rule). */
+function weeklySessionTimeLabel_(row, map, date) {
+  const start = formatTimeLabel(date);
+  const endCell = map['Event_End'] === undefined ? '' : row[map['Event_End']];
+  const end = formatTimeLabel(coerceDate(endCell));
+  if (start && end && end !== start) return `${start} \u2013 ${end}`;
+  if (start && start !== '12:00 AM') return start;
+  return weeklyTimeText_(eventTimeLabelOf(row[map['Event_Time']]));
+}
+
+/** Is lunch served at this building that day? A menu that cannot be read says yes. */
+function weeklyLunchServed_(date, location) {
+  try {
+    return isLunchOfferedOn(date, String(location || '').trim());
+  } catch (err) {
+    return true;
+  }
+}
+
+/** A lunch-only session row on a day the kitchen is not serving. */
+function weeklyLunchNotServing_(row, map, date) {
+  if (!isLunchOnlyEventId(row[map['Event_ID']])) return false;
+  if (isNotServingLunchRow(row, map)) return true;
+  return !weeklyLunchServed_(date, row[map['Location']]);
+}
+
+/**
  * Everybody's registrations for the weeks this run may write about, grouped
  * by address. Pure apart from the header map, so the tests drive it directly.
  *
@@ -313,7 +349,9 @@ function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey
     sessionsByKey[`${eventId}|${formatDateKey(date)}`] = {
       title: String(row[sessMap['Clean_Title']] || '').trim(),
       location: String(row[sessMap['Location']] || '').trim(),
-      time: eventTimeLabelOf(row[sessMap['Event_Time']]),
+      time: weeklySessionTimeLabel_(row, sessMap, date),
+      lunchOnly: isLunchOnlyEventId(eventId),
+      notServing: weeklyLunchNotServing_(row, sessMap, date),
       isAssistance: isAssistanceColumnValue(row[sessMap['Personalized_Assistance']])
     };
   });
@@ -338,8 +376,11 @@ function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey
     const session = sessionsByKey[key] || null;
     const title = (session && session.title) || String(row[regMap['Event']] || '').trim();
     if (!title || isCancelledSessionTitle_(title)) return;
+    // A lunch on a day the kitchen is not serving is not something to come to.
+    if (session ? session.notServing
+        : (isLunchOnlyEventId(eventId) && !weeklyLunchServed_(date, row[regMap['Location']]))) return;
     // The person's OWN time for an appointment; the session's for anything else.
-    const ownTime = eventTimeLabelOf(row[regMap['Event_Time']]);
+    const ownTime = weeklyTimeText_(eventTimeLabelOf(row[regMap['Event_Time']]));
     const time = session && !session.isAssistance ? (session.time || ownTime) : ownTime;
 
     const person = byEmail[email] || (byEmail[email] = { email, names: [], weeks: {} });
