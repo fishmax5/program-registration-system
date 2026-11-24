@@ -187,7 +187,7 @@ const BULK_REGISTRANTS_PLAN_PROP_KEY = 'BULK_REGISTRANTS_PLAN_V1';
 /** What the dialog shows: one line per person so far, and how it ended. Kept after the job. */
 const BULK_REGISTRANTS_RESULT_PROP_KEY = 'BULK_REGISTRANTS_RESULT_V1';
 const BULK_REGISTRANTS_RESUME_HANDLER = 'resumeBulkRegistrants';
-const BULK_REGISTRANTS_RESUME_DELAY_MS = 20 * 1000;
+const BULK_REGISTRANTS_RESUME_DELAY_MS = 5 * 1000;
 /** Longer than a slice's budget plus its slack, so a live slice is never raced by its own watchdog. */
 const BULK_REGISTRANTS_WATCHDOG_DELAY_MS = 8 * 60 * 1000;
 /** Generous, because a sync holding the workbook for 25 minutes costs a slice a minute. */
@@ -199,6 +199,10 @@ const BULK_REGISTRANTS_CHUNK_CHARS = 8000;
 const BULK_REGISTRANTS_MAX_CHUNKS = 30;
 /** More than this is a roll import, not a class list — and would outgrow the plan's chunks. */
 const BULK_REGISTRANTS_MAX_PEOPLE = 400;
+/** People written under one lock hold and one Registrants-tab write (see runBulkRegistrantsSlice). */
+const BULK_REGISTRANTS_GROUP_SIZE = 10;
+/** A finished list's result (and its follow-up email) is shown on reopen for this long, then forgotten. */
+const BULK_REGISTRANTS_RESULT_SHOW_MS = 30 * 60 * 1000;
 // The follow-up email (see THE FOLLOW-UP EMAIL below). Its own key: it outlives
 // the plan, which is cleared when the list finishes, and it carries who has
 // already been written to so a re-press can never send the same person twice.
@@ -1458,6 +1462,13 @@ function dismissBulkRegistrantsResult() {
 function bulkRegistrantsStatus() {
   const result = readBulkRegistrantsResult_();
   if (!result) return { exists: false };
+  // A list that finished a while ago is not news to whoever opens this next —
+  // it was showing up, follow-up email and all, in the middle of somebody's
+  // next import. Forget it once it is BULK_REGISTRANTS_RESULT_SHOW_MS old.
+  if (result.done && result.finishedAt &&
+      Date.now() - result.finishedAt > BULK_REGISTRANTS_RESULT_SHOW_MS) {
+    return dismissBulkRegistrantsResult();
+  }
   const state = getSlicedJobState(BULK_REGISTRANTS_JOB_PROP_KEY);
   const active = !!state && state.jobId === result.jobId && isBulkRegistrantsJobActive();
   return {
@@ -2251,39 +2262,59 @@ function runBulkRegistrantsSlice() {
 
       let processed = 0;
       let busy = false;
-      while (state.next < people.length) {
-        if (Date.now() >= ctx.deadline) break;
-        // Stopped from the dialog while this slice was mid-list: the state is
-        // gone, and saving it again below would bring the job back to life.
-        const live = getSlicedJobState(BULK_REGISTRANTS_JOB_PROP_KEY);
-        if (!live || live.jobId !== state.jobId) return { stop: 'was stopped' };
-        // A sync holds the workbook for up to its whole budget; waiting on the
-        // lock person by person would spend this slice doing nothing.
-        if (workbookHeldElsewhere()) { busy = true; break; }
+      let stopped = false;
+      // GROUPED, for speed: up to BULK_REGISTRANTS_GROUP_SIZE people under ONE
+      // hold of the workbook lock and ONE add batch (38), so their new rows go
+      // on the Registrants tab in one write and progress is saved once per
+      // group rather than per person. The lock is reentrant (99w), so each
+      // person's own withScriptLock nests inside it. A slice killed mid-group
+      // redoes at most that group, and every action here is safe to redo
+      // ("already registered", "no live booking").
+      const one = () => {
+        const person = people[state.next];
         const outcome = lunchMode
-          ? serveOneBulkLunchPerson_(plan.lunch, people[state.next])
-          : applyOneBulkPersonAction_(program, bulkPickedFor_(plan, people[state.next]), people[state.next]);
-        if (outcome.busy) { busy = true; break; }
+          ? serveOneBulkLunchPerson_(plan.lunch, person)
+          : applyOneBulkPersonAction_(program, bulkPickedFor_(plan, person), person);
+        if (outcome.busy) return false;
         result.lines = (result.lines || []).concat([outcome.line]);
         // WHO WAS ACTUALLY CHANGED, for the follow-up email: a person whose
-        // outcome wrote nothing ("already registered", "no live booking") has
-        // nothing to be told. The dates are the ones CHOSEN for the row, which
-        // can name a date the person was already on — the email says "for",
-        // not "newly added to".
+        // outcome wrote nothing has nothing to be told.
         if (outcome.written > 0 && !lunchMode) {
           result.changed = (result.changed || []).concat([
-            bulkFollowUpEntryFor_(program, bulkPickedFor_(plan, people[state.next]), people[state.next])]);
+            bulkFollowUpEntryFor_(program, bulkPickedFor_(plan, person), person)]);
         }
         state.written = (state.written || 0) + outcome.written;
         state.next++;
         result.next = state.next;
         result.written = state.written;
         processed++;
-        // Recorded as each person finishes, not at the end of the slice: a
-        // slice killed outright must not make its successor redo the list.
-        writeBulkRegistrantsResult_(result);
-        ctx.save();
+        return true;
+      };
+      while (state.next < people.length) {
+        if (Date.now() >= ctx.deadline) break;
+        // Stopped from the dialog while this slice was mid-list: the state is
+        // gone, and saving it again below would bring the job back to life.
+        const live = getSlicedJobState(BULK_REGISTRANTS_JOB_PROP_KEY);
+        if (!live || live.jobId !== state.jobId) { stopped = true; break; }
+        // A sync holds the workbook for up to its whole budget; waiting on the
+        // lock person by person would spend this slice doing nothing.
+        if (workbookHeldElsewhere()) { busy = true; break; }
+        const before = processed;
+        const ok = withScriptLock(DESK_LOCK_WAIT_MS * 5, () => withRegistrantAddBatch_(() => {
+          let n = 0;
+          while (n < BULK_REGISTRANTS_GROUP_SIZE && state.next < people.length &&
+                 Date.now() < ctx.deadline) {
+            if (!one()) return false;
+            n++;
+          }
+          return true;
+        }), null);
+        // Recorded per group, not at the end of the slice: a slice killed
+        // outright must not make its successor redo the list.
+        if (processed > before) { writeBulkRegistrantsResult_(result); ctx.save(); }
+        if (!ok) { busy = true; break; }
       }
+      if (stopped) return { stop: 'was stopped' };
 
       if (state.next >= people.length) return { finished: true };
       state.errorSlices = 0;
@@ -2662,22 +2693,33 @@ Anybody with no lunch row that day is added as a walk-in, and the review says so
 <p class="hint" style="margin:4px 0 0 0"><a href="#" onclick="return tickLunchDates(true)">Tick all dates</a> ·
 <a href="#" onclick="return tickLunchDates(false)">Clear</a> — everybody on the list below is recorded on every date ticked.</p>
 </div>
-<div id="whoOnly">
 <h3>3. Who</h3>
-<p class="hint"><b>Everybody already on this program</b> is the quick way for anything but Register — their names
-come off the tab, so there is nothing to type and no spelling to get wrong. Tick the ones you mean in the review.</p>
-<div><button id="roster" class="plain" onclick="pickFromRoster()">Pick from this program’s registrants</button></div>
-<p class="hint" style="margin-top:10px"><b>Moving people off a deleted event?</b> Choose it here — its registrants are in
-<code>Deleted_Event_Triage</code>. They are put on the program and dates chosen above, and anybody who is
-registered by this list is taken off triage.</p>
-<div><select id="triageEvent" style="max-width:560px"><option value="">Loading deleted events…</option></select>
-<button id="triageBtn" class="plain" onclick="pickFromTriage()">Pick from this deleted event</button></div>
+<p class="hint" style="margin-top:0">The choices above apply to <b>everybody</b> on the list — you can still change any one
+person in the review.</p>
+<p style="margin:4px 0 8px 0" id="whoChoice">
+  <label><input type="radio" name="who" id="whoPasteR" value="paste" checked onchange="applyWho()"> Paste or open a list</label>
+  <label style="margin-left:10px" id="whoRosterL"><input type="radio" name="who" id="whoRosterR" value="roster" onchange="applyWho()"> Everybody already on this program</label>
+  <label style="margin-left:10px" id="whoTriageL"><input type="radio" name="who" id="whoTriageR" value="triage" onchange="applyWho()"> People from a deleted event</label></p>
+<div id="whoOnly">
+<div id="whoRoster" style="display:none">
+<p class="hint">Names come off the Registrants tab — nothing to type, no spelling to get wrong. Best for cancel,
+waitlist or put back on. Tick the ones you mean in the review.</p>
+<div><button id="roster" class="plain" onclick="pickFromRoster()">Show this program’s registrants</button></div>
 </div>
-<p class="hint" style="margin-top:10px">Or open an Excel (.xlsx) or CSV file, or paste the list — one person per line,
-straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>. An Excel file is read from its first sheet.</p>
+<div id="whoTriage" style="display:none">
+<p class="hint">Its registrants are in <code>Deleted_Event_Triage</code>. They are put on the program and dates chosen
+above, and anybody registered by this list is taken off triage.</p>
+<div><select id="triageEvent" style="max-width:560px"><option value="">Loading deleted events…</option></select>
+<button id="triageBtn" class="plain" onclick="pickFromTriage()">Show its people</button></div>
+</div>
+</div>
+<div id="whoPaste">
+<p class="hint">One person per line, straight out of a spreadsheet or typed as <code>Name, Phone, Email</code>.
+An Excel (.xlsx) or CSV file is read from its first sheet.</p>
 <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
 <textarea id="csv" style="margin-top:6px" placeholder="…or paste here"></textarea>
 <div style="margin-top:8px"><button id="read" onclick="readColumns()">Read the columns</button></div>
+</div>
 <div id="mapping" style="display:none">
 <h3>4. Which column is which</h3>
 <p class="hint">Check each column's heading — it is a guess. Set a column to <b>ignore</b> to leave it out;
@@ -2689,12 +2731,12 @@ appointment (e.g. computer tech support): "10:30 AM", "2pm" or "14:15" is matche
 </div>
 <div id="reviewBox" style="display:none">
 <h3>5. Review</h3>
-<p class="hint"><span class="exact">On the roll</span> is used as-is.
+<details class="hint"><summary>What the colours and greyed rows mean</summary><p class="hint"><span class="exact">On the roll</span> is used as-is.
 <span class="contact">Same phone/email</span> is pre-selected — check it.
 <span class="similar">Similar name</span> is offered but not chosen.
 <span class="new">New</span> is added to the roll as typed.
 Anybody the chosen action <b>cannot do anything for</b> — already registered when registering, not
-registered at all when cancelling — is unticked for you and says why. Untick anybody else to leave them out.</p>
+registered at all when cancelling — is unticked for you and says why. Untick anybody else to leave them out.</p></details>
 <p class="hint" style="margin:0 0 6px 0"><a href="#" onclick="return tickAll(true)">Check all</a> ·
 <a href="#" onclick="return tickAll(false)">Uncheck all</a></p>
 <div id="review"></div>
@@ -2824,6 +2866,19 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
   }).withFailureHandler(function () {
     $('triageEvent').textContent = ''; $('triageBtn').disabled = true;
   }).listBulkTriageEvents();
+
+  // ---- Who: one way in shown at a time.
+  function applyWho() {
+    var lunch = $('whoOnly') && $('whoOnly').style.display === 'none';
+    var who = lunch ? 'paste' : ($('whoRosterR').checked ? 'roster' : ($('whoTriageR').checked ? 'triage' : 'paste'));
+    if (lunch) $('whoPasteR').checked = true;
+    $('whoRosterL').style.display = lunch ? 'none' : '';
+    $('whoTriageL').style.display = lunch ? 'none' : '';
+    $('whoPaste').style.display = who === 'paste' ? '' : 'none';
+    $('whoRoster').style.display = who === 'roster' ? '' : 'none';
+    $('whoTriage').style.display = who === 'triage' ? '' : 'none';
+    if (who !== 'paste') $('mapping').style.display = 'none';
+  }
 
   // ---- 1. Program and dates.
   $('program').addEventListener('change', function () {
@@ -3477,6 +3532,7 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
     var lunch = mode() === 'lunch';
     $('programOnly').style.display = lunch ? 'none' : '';
     $('whoOnly').style.display = lunch ? 'none' : '';
+    applyWho();
     $('lunchOnly').style.display = lunch ? '' : 'none';
     // A list read in one mode is not a list for the other: the review, the
     // mapping and the people would otherwise sit under the wrong heading,

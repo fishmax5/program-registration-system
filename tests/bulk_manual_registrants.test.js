@@ -359,7 +359,7 @@ assert.strictEqual(programs[0].todayKey, '2026-09-09');
    'read', 'mapping', 'hasHeader', 'columns', 'check', 'reviewBox', 'review', 'commit', 'progress',
    'progTitle', 'barFill', 'progText', 'log', 'stop', 'carryOn', 'another', 'status',
    // The lunch-served mode's own controls (see section 13).
-   'programOnly', 'whoOnly', 'lunchOnly', 'lunchBuilding', 'lunchDates', 'lunchReviewBox', 'lunchReview',
+   'programOnly', 'whoOnly', 'whoPasteR', 'whoRosterR', 'whoTriageR', 'whoRosterL', 'whoTriageL', 'whoPaste', 'whoRoster', 'whoTriage', 'lunchOnly', 'lunchBuilding', 'lunchDates', 'lunchReviewBox', 'lunchReview',
    'lunchCommit']
     .forEach(id => { const n = new Node('div'); n.id = id; body.appendChild(n); });
   // The mode switch: two radios, program ticked.
