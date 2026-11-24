@@ -111,7 +111,7 @@ const CONFIG_LAYOUT = {
   // titles are numbered "[Week N of M]" — see 99zzh_series_week_labels.gs.
   SERIES_WEEK_LABELS: {
     title: '🔢 Series Week Numbers',
-    startCol: 44,
+    startCol: 47,
     headers: ['Week_Numbering']
   }
 };
@@ -125,7 +125,7 @@ const CONFIG_LAYOUT = {
 // (Months_Ahead) and grew into it. Nothing reads this — it is the record of
 // which columns are blank, and a record that says a live cell is blank is
 // worse than no record.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41, 43];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41, 43, 46];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the

@@ -29,6 +29,20 @@ this.stripSeriesWeekLabel = stripSeriesWeekLabel;
 this.applySeriesWeekLabels = applySeriesWeekLabels;
 this.normalizeSeriesWeekMode = normalizeSeriesWeekMode;
 this.buildSeriesWeekNumbersHtml = buildSeriesWeekNumbersHtml;
+this.offeredDates = function () {
+  function ev(t, d) { return { getTitle: () => t, getStartTime: () => new Date(d + 'T15:00:00Z'), getEndTime: () => new Date(d + 'T16:00:00Z') }; }
+  const sessions = [['Memoir Writing', '2026-09-01'], ['CANCELLED: Memoir Writing', '2026-09-08']].map(([t, d]) => {
+    const parsed = parseEventTitle(t); parsed.isFixed = true;
+    return { event: ev(t, d), parsed, calendarId: 'c', locationName: 'N' };
+  });
+  const groups = buildEventGroups(sessions);
+  return sessionsOfGroup(groups[0]).map(s => s.date.toISOString().slice(0, 10));
+};
+this.groupsOfOnlyCancelled = function () {
+  const parsed = parseEventTitle('CANCELLED: Yoga'); parsed.isFixed = true;
+  const e = { getTitle: () => 'x', getStartTime: () => new Date('2026-09-01T15:00:00Z'), getEndTime: () => new Date('2026-09-01T16:00:00Z') };
+  return buildEventGroups([{ event: e, parsed, calendarId: 'c', locationName: 'N' }]).length;
+};
 this.STORE = {};
 this.PROGRAMS = {};
 this.EVENTS = {};
@@ -71,6 +85,14 @@ check('a cancelled title keeps its words',
 check('other brackets are left alone', sandbox.stripSeriesWeekLabel('Yoga [Cap: 12] [Week 1 of 6]'), 'Yoga [Cap: 12]');
 check('modes read in any spelling', ['Freeze', 'recount', 'Dynamic', 'OFF', 'x'].map(sandbox.normalizeSeriesWeekMode),
   ['freeze', 'recount', 'recount', 'off', '']);
+
+// --- a CANCELLED rename keeps the session (99zzi) ---------------------------
+const cancelled = sandbox.parseEventTitle('CANCELLED DUE TO ILLNESS: Memoir Writing');
+check('a cancelled rename keeps the clean title', cancelled.cleanTitle, plain.cleanTitle);
+check('and says it is cancelled', cancelled.isCancelled, true);
+check('an ordinary title is not cancelled', plain.isCancelled, false);
+check('a cancelled date is not offered on the form', sandbox.offeredDates(), ['2026-09-01']);
+check('a group of only cancelled dates makes no group', sandbox.groupsOfOnlyCancelled(), 0);
 
 // --- the numbering --------------------------------------------------------
 const wk = r => Object.keys(r.byWeek).sort().map(w => `${r.byWeek[w].week}/${r.byWeek[w].total}`);

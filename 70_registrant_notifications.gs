@@ -314,7 +314,8 @@ function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey
       title: String(row[sessMap['Clean_Title']] || '').trim(),
       location: String(row[sessMap['Location']] || '').trim(),
       time: eventTimeLabelOf(row[sessMap['Event_Time']]),
-      isAssistance: isAssistanceColumnValue(row[sessMap['Personalized_Assistance']])
+      isAssistance: isAssistanceColumnValue(row[sessMap['Personalized_Assistance']]),
+      cancelled: sessMap['Status'] !== undefined && isCancelledSessionStatus(row[sessMap['Status']])
     };
   });
 
@@ -337,7 +338,7 @@ function collectWeeklyEmailItems(sessionRows, registrantRows, weekKeys, todayKey
     const key = `${eventId}|${dateKey}`;
     const session = sessionsByKey[key] || null;
     const title = (session && session.title) || String(row[regMap['Event']] || '').trim();
-    if (!title || isCancelledSessionTitle_(title)) return;
+    if (!title || isCancelledSessionTitle_(title) || (session && session.cancelled)) return;
     // The person's OWN time for an appointment; the session's for anything else.
     const ownTime = eventTimeLabelOf(row[regMap['Event_Time']]);
     const time = session && !session.isAssistance ? (session.time || ownTime) : ownTime;

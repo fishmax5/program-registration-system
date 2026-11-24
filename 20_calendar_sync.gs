@@ -324,6 +324,15 @@ function parseEventTitle(title) {
   }
   if (!raw) return null;
 
+  // "CANCELLED DUE TO ILLNESS: Memoir Writing" is how staff call a date off
+  // (99zzc). It is a STATUS of this session, not part of the program's name,
+  // so it comes off before the title becomes an identity: the date keeps its
+  // Event_ID, its row and its registrants, and is marked cancelled instead
+  // (99zzi) rather than read as a deleted date beside a new program.
+  const withoutStatus = stripProgramStatusPrefix(raw);
+  const isCancelled = withoutStatus !== raw;
+  raw = withoutStatus;
+
   const legacy = parseSettingsBrackets(raw);
   // Strip every bracketed group, wherever it sits, so the clean title is
   // stable no matter how someone spaced things out.
@@ -337,6 +346,7 @@ function parseEventTitle(title) {
   return {
     cleanTitle,
     isTentative,
+    isCancelled,
     legacyCapacity: legacy.capacity,
     legacyIsFixed: legacy.isFixed,
     legacyIsShared: legacy.isShared,

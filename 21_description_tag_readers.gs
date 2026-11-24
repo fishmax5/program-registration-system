@@ -714,6 +714,8 @@ function importCalendarGroups(registrySheet, options) {
     applyNoRegistrationEffects(registrySheet, work.allGroups || []);
     // The event's own words, for the top of its form — see 99t.
     reconcileEventDescriptionsFromCalendar(registrySheet, work.allGroups || []);
+    // A date called off on the calendar, or put back on (99zzi).
+    reconcileCancelledSessionsFromCalendar(registrySheet);
   });
 
   const summary = {
