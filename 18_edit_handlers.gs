@@ -53,6 +53,9 @@ function onEdit(e) {
       handleRoomManagementEdit(e, sheet);
     } else if (name === SHEET_NAMES.CLUB_MEMBERS) {
       handleClubMembersEdit(e, sheet);
+    } else if (name === SHEET_NAMES.GROUP_REQUESTS) {
+      // An Approve tick (or a fill-down of them) approves and signs (99zzh).
+      handleGroupRequestsEdit(e, sheet);
     } else if (name === SHEET_NAMES.MEMBER_ROLL) {
       handleMemberRollEdit(e, sheet);
     } else if (name === SHEET_NAMES.REGISTRATION_LEDGER) {

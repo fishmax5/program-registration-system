@@ -1,4 +1,4 @@
-// "[WEEK 3 OF 8]" ON A GROUPED PROGRAM'S CALENDAR TITLES (99zzh).
+// "[WEEK 3 OF 8]" ON A GROUPED PROGRAM'S CALENDAR TITLES (99zzj).
 //
 // Pins: the label never changes the clean title (so never a new Event_ID or
 // form) and is not logged as a note; a cancellation keeps its number and a
@@ -86,7 +86,7 @@ check('other brackets are left alone', sandbox.stripSeriesWeekLabel('Yoga [Cap: 
 check('modes read in any spelling', ['Freeze', 'recount', 'Dynamic', 'OFF', 'x'].map(sandbox.normalizeSeriesWeekMode),
   ['freeze', 'recount', 'recount', 'off', '']);
 
-// --- a CANCELLED rename keeps the session (99zzi) ---------------------------
+// --- a CANCELLED rename keeps the session (99zzk) ---------------------------
 const cancelled = sandbox.parseEventTitle('CANCELLED DUE TO ILLNESS: Memoir Writing');
 check('a cancelled rename keeps the clean title', cancelled.cleanTitle, plain.cleanTitle);
 check('and says it is cancelled', cancelled.isCancelled, true);

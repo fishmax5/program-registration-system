@@ -324,6 +324,12 @@ function buildCoordinatorMenu_(ui, title, role) {
       // because it is roster work: who was here and what they did. See 99e.
       .addItem('\ud83e\udd1d Open the Volunteer Hours Tab', menuFn_('openVolunteerHoursTab'))
       .addItem('\ud83d\udd12 Open the Private Sessions Tab', menuFn_('openPrivateSessionsTab'))
+      // EMAIL GROUPS (99zzh): the request queue, a whole program approved at
+      // once, and the push to Google — which also runs by itself at 1am.
+      .addSubMenu(ui.createMenu('\u2709\ufe0f Email Groups')
+        .addItem('Open Group Requests (and propose from rosters)', menuFn_('openGroupRequestsTab'))
+        .addItem('Approve a Program\u2019s Requests\u2026', menuFn_('approveGroupRequestsForProgram'))
+        .addItem('Apply Group Changes Now', menuFn_('applyGroupChanges')))
       // THE ONE-ROW DELETE, beside the roll tools because it is the same job
       // at the other tab: a duplicate found while reading down a list. Mark
       // the rows on All_Registrants (Manual_Override → "Remove This Row"),
@@ -394,7 +400,7 @@ function buildCoordinatorMenu_(ui, title, role) {
       // puts them on the program their dates became. See 99zzd.
       .addItem('\ud83d\udce5 Put Triaged People on Their New Program\u2026', menuFn_('showTriageToProgramDialog'))
       // "[Week N of M]" on a grouped program's calendar titles: freeze or
-      // recount, per program, and recount once. See 99zzh.
+      // recount, per program, and recount once. See 99zzj.
       .addItem('\ud83d\udd22 Series Week Numbers\u2026', menuFn_('showSeriesWeekNumbersDialog'))
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
@@ -552,6 +558,9 @@ function buildAdminMenu_(ui, title) {
       // reach for. Nothing was removed and nothing changed about what they do;
       // they are simply no longer in the way. Each is safe to press twice.
       .addSubMenu(ui.createMenu('\ud83e\uddf0 One-Time Jobs')
+        // Draws the email-group tabs, seeds Art / Exercise / Movies, and
+        // approves everybody currently registered for a ticked program (99zzh).
+        .addItem('\u2709\ufe0f Set Up Email Groups', menuFn_('setUpEmailGroups'))
         // Only worth pressing on a workbook that was printing sign-in sheets
         // before those links existed: it reads the PDF folder once and teaches
         // the registry about what is already in it. New PDFs register
@@ -843,6 +852,12 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('snapshotRegistrantsDaily', () =>
     ScriptApp.newTrigger('snapshotRegistrantsDaily')
       .timeBased().everyDays(1).atHour(3).create());
+  // EMAIL GROUPS, ONCE A DAY and never hourly (99zzh): a Google Group is mail
+  // people receive, and a membership that flickered with every sync would be
+  // worse than one a day late. Does nothing until Set Up Email Groups has run.
+  removed += resetTriggersForHandler(EMAIL_GROUPS_DAILY_HANDLER, () =>
+    ScriptApp.newTrigger(EMAIL_GROUPS_DAILY_HANDLER)
+      .timeBased().everyDays(1).atHour(EMAIL_GROUPS_DAILY_HOUR).create());
   // THE PUBLIC PAGES' SNAPSHOT, built ahead of anybody asking (99y). The two
   // embedded pages on the website read what this stores rather than the
   // session tab, which is what makes them open instantly. Read-only.

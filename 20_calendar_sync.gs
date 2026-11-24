@@ -203,7 +203,7 @@ function parseSettingsBrackets(text) {
   let match;
   while ((match = BRACKET_GROUP_REGEX.exec(raw)) !== null) {
     const rawContent = match[1] || '';
-    // "[Week 3 of 8]" is written onto a grouped program's titles by 99zzh. It
+    // "[Week 3 of 8]" is written onto a grouped program's titles by 99zzj. It
     // is neither a tag nor a note anybody typed, so it is skipped without the
     // log line below, which would otherwise print for every labelled event.
     if (isSeriesWeekLabelBracket(rawContent)) continue;
@@ -328,7 +328,7 @@ function parseEventTitle(title) {
   // (99zzc). It is a STATUS of this session, not part of the program's name,
   // so it comes off before the title becomes an identity: the date keeps its
   // Event_ID, its row and its registrants, and is marked cancelled instead
-  // (99zzi) rather than read as a deleted date beside a new program.
+  // (99zzk) rather than read as a deleted date beside a new program.
   const withoutStatus = stripProgramStatusPrefix(raw);
   const isCancelled = withoutStatus !== raw;
   raw = withoutStatus;

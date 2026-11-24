@@ -19,6 +19,7 @@ function fmt(d, tz, pattern) {
   switch (pattern) {
     case 'yyyy-MM-dd': return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     case 'H': return String(d.getHours());
+    case 'h:mm a': return `${d.getHours() % 12 || 12}:${pad(d.getMinutes())} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
     case 'EEE, MMM d': return `${DAYS[d.getDay()].slice(0, 3)}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
     case 'EEEE, MMM d': return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
     case 'EEE, MMM d, yyyy': return `${DAYS[d.getDay()].slice(0, 3)}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
@@ -171,5 +172,42 @@ assert.strictEqual(sandbox.SENT.length, 0, 'not after 8pm');
 
 // The per-program reminder ledger is cleared on the first run.
 assert.ok(!('REGISTRANT_REMINDERS_V1' in props), 'the retired ledger is not left behind');
+
+// ---------------------------------------------------------------------------
+// Nov 2026: a member was sent `=IF(W18="",TEXT(A18,…))` as the time of a lunch
+// the kitchen was not serving. The session tab's Event_Time is a FORMULA, so
+// the time is rebuilt from the row's own start and end; and a lunch-only row
+// on a Not Serving day is left out of the email entirely.
+// ---------------------------------------------------------------------------
+{
+  const LUNCH_ID = 'LUNCHONLY:Narberth|2026-11-25';
+  const formula = '=IF(W18="",TEXT(A18,"h:mm AM/PM"),TEXT(A18,"h:mm AM/PM")&" – "&TEXT(W18,"h:mm AM/PM"))';
+  const sess = [
+    sessionRow({ Event_ID: 'art', Event_Date: new Date(2026, 10, 25, 10, 0), Event_End: new Date(2026, 10, 25, 11, 30),
+      Clean_Title: 'Art', Location: 'Narberth', Event_Time: formula }),
+    sessionRow({ Event_ID: LUNCH_ID, Event_Date: new Date(2026, 10, 25, 12, 0), Clean_Title: 'Lunch @ Narberth — Roast Turkey',
+      Location: 'Narberth', Event_Time: formula, Status: '⛔ Not Serving' })
+  ];
+  const regs = [
+    regRow({ Event_ID: 'art', Event_Date: d(2026, 11, 25), Event: 'Art', Name: 'Pam', Email: 'pam@example.org', Program_Status: 'Active', Event_Time: formula }),
+    regRow({ Event_ID: LUNCH_ID, Event_Date: d(2026, 11, 25), Event: 'Lunch', Name: 'Pam', Email: 'pam@example.org', Program_Status: 'Active' })
+  ];
+  const items = sandbox.collectWeeklyEmailItems(sess, regs, ['2026-11-23'], '2026-11-24')['pam@example.org'].weeks['2026-11-23'];
+  assert.strictEqual(items.length, 1, 'a Not Serving lunch is not listed');
+  assert.strictEqual(items[0].title, 'Art');
+  assert.strictEqual(items[0].time, '10:00 AM \u2013 11:30 AM', 'the time is rebuilt, never the formula');
+
+  // The menu says Not Serving even though the Status cell has not caught up yet.
+  sess[1][SH.indexOf('Status')] = '';
+  const realOffered = sandbox.isLunchOfferedOn;
+  sandbox.isLunchOfferedOn = () => false;
+  const again = sandbox.collectWeeklyEmailItems(sess, regs, ['2026-11-23'], '2026-11-24')['pam@example.org'].weeks['2026-11-23'];
+  assert.strictEqual(again.length, 1, 'the menu decides too, not only the Status cell');
+  sandbox.isLunchOfferedOn = () => true;
+  const served = sandbox.collectWeeklyEmailItems(sess, regs, ['2026-11-23'], '2026-11-24')['pam@example.org'].weeks['2026-11-23'];
+  assert.strictEqual(served.length, 2, 'a lunch that is being served is still listed');
+  assert.ok(served.every(item => item.time.charAt(0) !== '='), 'no formula on any line');
+  sandbox.isLunchOfferedOn = realOffered;
+}
 
 console.log('All weekly registrant email tests passed.');

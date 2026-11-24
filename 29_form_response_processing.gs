@@ -328,6 +328,9 @@ function applyAllDatesCatchup(registryIndex, protectedKeys, existingRowIndex, or
     const matchingEntries = Object.keys(registryIndex).filter(k => k.startsWith(`${formId}|`)).map(k => registryIndex[k]);
     if (matchingEntries.length === 0) return;
     registry[formId].forEach(entry => {
+      // A phantom guest saved before isPhantomGuestName() existed (28) would
+      // otherwise be added to every new date of the series, for ever.
+      if (entry.personType === 'Guest' && isPhantomGuestName(entry.name, entry.primaryRegistrant)) return;
       matchingEntries.forEach(registryEntry => {
         const row = buildRegistrantRow({
           registryEntry, name: entry.name, personType: entry.personType, lunchType: entry.lunchType,

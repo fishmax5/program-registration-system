@@ -1,5 +1,5 @@
 // ============================================================================
-// 99zzi. A DATE CALLED OFF ON THE CALENDAR STAYS ITS OWN SESSION
+// 99zzk. A DATE CALLED OFF ON THE CALENDAR STAYS ITS OWN SESSION
 // ============================================================================
 //
 // Staff cancel a date by renaming its event "CANCELLED DUE TO ILLNESS: Memoir

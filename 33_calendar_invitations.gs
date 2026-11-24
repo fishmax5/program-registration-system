@@ -1137,7 +1137,7 @@ function setEventDescriptionQuietly(event, description) {
 }
 
 /**
- * The one way the sync changes an event TITLE (the series week label, 99zzh).
+ * The one way the sync changes an event TITLE (the series week label, 99zzj).
  * Guests are never mailed about it.
  */
 function setEventTitleQuietly(event, title) {

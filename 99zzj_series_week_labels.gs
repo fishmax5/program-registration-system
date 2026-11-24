@@ -1,5 +1,5 @@
 // ============================================================================
-// 99zzh. "WEEK 3 OF 8" ON THE CALENDAR, FOR A GROUPED PROGRAM
+// 99zzj. "WEEK 3 OF 8" ON THE CALENDAR, FOR A GROUPED PROGRAM
 // ============================================================================
 //
 // A [Grouped] program (95) is a COURSE: one form, a run with a length. On the

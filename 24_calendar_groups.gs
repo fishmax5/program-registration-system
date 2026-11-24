@@ -281,7 +281,7 @@ function buildEventGroups(parsedSessions, options) {
     // the exact opposite of what somebody ticking it just said.
     groups[key].sessions.push({
       event, calendarId, locationName, waitlistOnly: !!parsed.waitlistOnly,
-      // Called off on the calendar ("CANCELLED…: Title", 99zzi): still a row,
+      // Called off on the calendar ("CANCELLED…: Title", 99zzk): still a row,
       // never a date on the form.
       cancelled: !!parsed.isCancelled
     });
@@ -484,7 +484,7 @@ function sessionsOfGroup(group) {
   // sessions come from Lunch_Schedule and arrive already in this shape. See
   // syncLunchOnlySessions().
   if (group.lunchOnlySessions) return group.lunchOnlySessions;
-  // A date called off on the calendar is never offered (99zzi).
+  // A date called off on the calendar is never offered (99zzk).
   return group.sessions.filter(s => !s.cancelled).map(s => ({
     date: s.event.getStartTime(),
     // Carried so the form's description can say what TIME the session runs at

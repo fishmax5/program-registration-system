@@ -136,7 +136,7 @@ function recomputeCountsForZone(model, zone, counts) {
       }
     }
     if (String(statusOut[i] || '').trim() === CANCELLED_SESSION_STATUS) {
-      // Called off on the calendar (99zzi): the counts stay — they are who
+      // Called off on the calendar (99zzk): the counts stay — they are who
       // has to be told — and nothing can be booked.
       waitlistOut[i] = c.waitlist;
       remainingOut[i] = 0;

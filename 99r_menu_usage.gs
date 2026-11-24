@@ -225,6 +225,10 @@ function menu_showAssistanceReviewDialog() { recordMenuUsage_('showAssistanceRev
 function menu_showAssistanceScheduleDialog() { recordMenuUsage_('showAssistanceScheduleDialog'); return showAssistanceScheduleDialog(); }
 function menu_showBulkRegistrantsDialog() { recordMenuUsage_('showBulkRegistrantsDialog'); return showBulkRegistrantsDialog(); }
 function menu_showBulkWaitlistOnlyDialog() { recordMenuUsage_('showBulkWaitlistOnlyDialog'); return showBulkWaitlistOnlyDialog(); }
+function menu_openGroupRequestsTab() { recordMenuUsage_('openGroupRequestsTab'); return openGroupRequestsTab(); }
+function menu_approveGroupRequestsForProgram() { recordMenuUsage_('approveGroupRequestsForProgram'); return approveGroupRequestsForProgram(); }
+function menu_applyGroupChanges() { recordMenuUsage_('applyGroupChanges'); return applyGroupChanges(); }
+function menu_setUpEmailGroups() { recordMenuUsage_('setUpEmailGroups'); return setUpEmailGroups(); }
 function menu_showRelocateSessionsDialog() { recordMenuUsage_('showRelocateSessionsDialog'); return showRelocateSessionsDialog(); }
 function menu_showTriageToProgramDialog() { recordMenuUsage_('showTriageToProgramDialog'); return showTriageToProgramDialog(); }
 function menu_showSeriesWeekNumbersDialog() { recordMenuUsage_('showSeriesWeekNumbersDialog'); return showSeriesWeekNumbersDialog(); }

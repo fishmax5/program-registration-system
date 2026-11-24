@@ -190,6 +190,18 @@ defineLazyGlobal_('DOOR_ROUTES', () => [
     build: params => buildWeeklyOptOutHtml(weeklyOptOutPageContext(params))
   },
   {
+    id: 'lists',
+    mode: 'lists',
+    title: 'Email Lists',
+    // THE SELF-SERVE INTEREST LISTS (99zzh). Opened by a member, so no PIN and
+    // no ?location=. It writes nothing on a GET: the first page's button asks
+    // for a confirmation email, and the confirmation link (?c=&t=) opens a page
+    // whose button does the adding — a mail scanner fetching the link adds
+    // nobody. The roll match happens on the server and is never shown.
+    match: params => GROUP_LIST_MODES.indexOf(doorRequestedMode_(params)) !== -1,
+    build: params => buildGroupListsHtml(groupListsPageContext(params))
+  },
+  {
     id: 'leader-roster',
     mode: LEADER_ROSTER_MODE,
     title: 'Class Roster',

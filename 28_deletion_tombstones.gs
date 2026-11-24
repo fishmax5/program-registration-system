@@ -540,6 +540,28 @@ function readMealCountGridResponse(formIndex, response, people) {
  * (they're all pre-checked) is correctly ignored rather than inventing a
  * nameless person.
  */
+/**
+ * A GUEST BOX ANSWERED WITH NOBODY. The form's "Guest N Name" boxes are free
+ * text, and people fill them in rather than leave them blank: "No one",
+ * "Just me", "N/A", or their own name again. Each became a Guest row — a seat
+ * against the capacity, a line on the roster and the sign-in sheet, and in
+ * November 2026 a session listed twice in the weekly email to people who were
+ * coming alone. A box answered with one of these is read as empty. A guest
+ * whose name matches the registrant's exactly (case and spacing aside) is the
+ * registrant typed twice; a real namesake would be written "Jr", "Sr" or with
+ * a first name that differs, and still gets through.
+ */
+const PHANTOM_GUEST_NAME_RE = /^(no ?one|none|nobody|no guests?|no ?body|just me|only me|me|myself|self|n\/?a|na|no|nil|0|-+|\.+|x)$/i;
+
+function isPhantomGuestName(guestName, registrantName) {
+  const fold = value => String(value || '').toLowerCase().replace(/[^a-z0-9/]+/g, ' ').trim();
+  const guest = fold(guestName);
+  if (!guest) return true;
+  if (PHANTOM_GUEST_NAME_RE.test(guest) || PHANTOM_GUEST_NAME_RE.test(guest.replace(/ /g, ''))) return true;
+  const registrant = fold(registrantName);
+  return !!registrant && guest === registrant;
+}
+
 function resolvePeopleOnResponse(formIndex, response, registrantName, adminNotes) {
   const people = [{
     name: registrantName, personType: 'Attendee', primaryRegistrant: 'Self',
@@ -547,7 +569,7 @@ function resolvePeopleOnResponse(formIndex, response, registrantName, adminNotes
   }];
   for (let g = 1; g <= MAX_GUESTS; g++) {
     const guestName = String(getResponseValueByTitle(formIndex, response, `Guest ${g} Name`) || '').trim();
-    if (!guestName) continue;
+    if (!guestName || isPhantomGuestName(guestName, registrantName)) continue;
     people.push({
       name: guestName, personType: 'Guest', primaryRegistrant: registrantName,
       columnLabel: PERSON_COLUMN_LABELS[g], baseNotes: ''

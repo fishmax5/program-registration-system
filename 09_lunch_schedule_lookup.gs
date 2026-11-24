@@ -319,7 +319,7 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   // (locations, titles) still reads the whole row set, so labels don't shift.
   // A form left with no served day at all comes out with no sessions, which
   // every caller already treats as "leave the form alone"; 99ze closes it.
-  // A date called off on the calendar (99zzi) is not offered either.
+  // A date called off on the calendar (99zzk) is not offered either.
   const liveSessions = sessions.filter(s => !s.cancelled);
   const offeredSessions = isLunchOnly
     ? liveSessions.filter(s => isLunchOfferedOn(s.date, s.location))

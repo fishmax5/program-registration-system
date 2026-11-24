@@ -992,7 +992,7 @@ function collapseSessionsByEventId_(group) {
     }
     // A date is closed if EITHER event says so.
     if (session.waitlistOnly) kept.waitlistOnly = true;
-    // ...and called off only if BOTH are (99zzi).
+    // ...and called off only if BOTH are (99zzk).
     kept.cancelled = !!(kept.cancelled && session.cancelled);
     session.cancelled = kept.cancelled;
     collisions.push({ eventId, startTime, keptStart: kept.event.getStartTime() });

@@ -108,7 +108,7 @@ const CONFIG_LAYOUT = {
     headers: ['Hide_System_Tabs']
   },
   // Fresh columns once more, same rule. How a grouped program's calendar
-  // titles are numbered "[Week N of M]" — see 99zzh_series_week_labels.gs.
+  // titles are numbered "[Week N of M]" — see 99zzj_series_week_labels.gs.
   SERIES_WEEK_LABELS: {
     title: '🔢 Series Week Numbers',
     startCol: 47,
@@ -540,7 +540,7 @@ const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCa
  * is neither governed by the kill switch nor paused by a bootstrap import.
  */
 const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(
-  ['onProgramFlagEditInstallable', 'refreshPublicScheduleSnapshot']);
+  ['onProgramFlagEditInstallable', 'refreshPublicScheduleSnapshot', 'applyGroupChangesDaily']);
 
 /**
  * Cross-execution cache TTL for the kill-switch read. onCalendarChange can
