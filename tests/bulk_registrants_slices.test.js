@@ -87,7 +87,7 @@ run(`
 const names = ['Ann', 'Bob', 'Cal', 'Dee', 'Eve', 'Fay', 'Gus'].map(n => `${n} Test`);
 const people = names.map(name => ({ name, recurrence: 'next' }));
 people[1].recurrence = 'all';
-sandbox.__args = { programKey: 'A|Yoga', picked: [], people };
+sandbox.__args = { programKey: 'A|Yoga', picked: [], people, wantsFollowUp: true };
 
 // 1. The first slice runs to its budget, records who it did, and hands on once.
 let st = run('startBulkRegistrants(__args)');
@@ -370,3 +370,10 @@ console.log('bulk attended slices: ok');
 }
 
 console.log('bulk update actions slices: ok');
+
+// No email asked for before Start: nothing to offer at the end.
+{
+  const r = run(`(function(){ writeBulkRegistrantsResult_({ jobId: 'nofu', done: true, finishedAt: Date.now(), total: 1,
+    changed: [{ name: 'X' }] }); return bulkRegistrantsStatus(); })()`);
+  assert.strictEqual(r.changedCount, 0, 'follow-up hidden when not asked for');
+}

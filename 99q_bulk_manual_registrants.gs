@@ -1374,7 +1374,9 @@ function startBulkRegistrants(args) {
   // can take the ones actually written off Deleted_Event_Triage. Additive, so
   // BULK_REGISTRANTS_PLAN_V1 keeps its key (absent reads as "not from triage").
   const plan = { jobId, program, picked: (args.picked || []).map(String), people,
-    triageKey: String(args.triageKey || '') };
+    triageKey: String(args.triageKey || ''),
+    // Asked before Start: only then is the follow-up email offered at the end.
+    wantsFollowUp: !!args.wantsFollowUp };
   // WHICH ACTIONS, in the log and in the label, because "40 people queued" on
   // a list that cancels them reads as the opposite of what it is.
   const actions = {};
@@ -1398,7 +1400,7 @@ function beginBulkJob_(plan, label, what) {
       'Try a shorter list.' };
   }
   writeBulkRegistrantsResult_({
-    jobId, label, total: people.length, next: 0, written: 0,
+    jobId, label, total: people.length, next: 0, written: 0, wantsFollowUp: !!plan.wantsFollowUp,
     lines: [], done: false, problem: '', remaining: [], startedAt: Date.now()
   });
   saveSlicedJobState(BULK_REGISTRANTS_JOB_PROP_KEY, {
@@ -1483,7 +1485,7 @@ function bulkRegistrantsStatus() {
     lines: result.lines || [],
     problem: result.problem || '',
     remaining: result.remaining || [],
-    changedCount: (result.changed || []).length
+    changedCount: result.wantsFollowUp ? (result.changed || []).length : 0
   };
 }
 
@@ -2740,6 +2742,7 @@ registered at all when cancelling — is unticked for you and says why. Untick a
 <p class="hint" style="margin:0 0 6px 0"><a href="#" onclick="return tickAll(true)">Check all</a> ·
 <a href="#" onclick="return tickAll(false)">Uncheck all</a></p>
 <div id="review"></div>
+<label style="display:block;margin-top:8px"><input type="checkbox" id="wantsFollowUp"> When it is done, let me email the people it changed</label>
 <div style="margin-top:8px"><button id="commit" onclick="commit()" disabled>Apply to the ticked people</button></div>
 </div>
 <div id="lunchReviewBox" style="display:none">
@@ -3510,7 +3513,8 @@ Mail follows the usual rules — nothing leaves between 5pm and 8am, and this li
       // carrying on from its trigger — so ask rather than assume.
       say('The first run reported: ' + err.message + ' — checking whether it is carrying on…');
       poll();
-    }).startBulkRegistrants({ programKey: p.key, picked: pickedKeys(), people: people, triageKey: TRIAGE_KEY });
+    }).startBulkRegistrants({ programKey: p.key, picked: pickedKeys(), people: people, triageKey: TRIAGE_KEY,
+      wantsFollowUp: $('wantsFollowUp').checked });
   }
 
   // ---- LUNCH SERVED: a second mode of the same dialog. The paste, the file

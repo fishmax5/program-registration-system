@@ -50,7 +50,7 @@ assert.strictEqual(run(`renderBulkFollowUpText_('Hi {name}, {Program} {x} {Chang
   'Hi {Dates}, Yoga {x} c');
 
 // Seed a finished job: Ann changed (email on list), Bob (none anywhere), Cal (roll), Dee same email as Ann.
-run(`writeBulkRegistrantsResult_({ jobId: 'j1', label: 'Yoga — A', done: true, total: 4, changed: [
+run(`writeBulkRegistrantsResult_({ jobId: 'j1', label: 'Yoga — A', done: true, wantsFollowUp: true, total: 4, changed: [
   { name: 'Ann Test', email: 'ann@x.org', action: 'cancel', dates: 'Sep 15' },
   { name: 'Bob Test', email: '', action: 'register', dates: 'Sep 15' },
   { name: 'Cal Test', email: '', action: 'register', dates: 'Sep 22' },
@@ -73,7 +73,7 @@ assert.strictEqual(res.sent, 0);
 assert.strictEqual(sent.length, 2);
 
 // A hold stops the run and the unsent person stays owed.
-run(`writeBulkRegistrantsResult_({ jobId: 'j2', label: 'Y', done: true, total: 2, changed: [
+run(`writeBulkRegistrantsResult_({ jobId: 'j2', label: 'Y', done: true, wantsFollowUp: true, total: 2, changed: [
   { name: 'A', email: 'a@x.org', action: 'register', dates: 'd' }, { name: 'B', email: 'b@x.org', action: 'register', dates: 'd' }] })`);
 run('prepareBulkFollowUp()');
 holdAfter = sent.length + 1;
