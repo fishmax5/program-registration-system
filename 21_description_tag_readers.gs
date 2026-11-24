@@ -567,6 +567,12 @@ function syncCalendarsInternal(options) {
         }
       }
 
+      // "[Week N of M]" on a grouped program's calendar titles (99zzh). Only
+      // on the slice that finished the window, after the render, so it reads
+      // the session table this sync settled on. Inside the quiet window, so
+      // the title writes do not come back as calendar-change news. Never throws.
+      if (!summary.outOfTime) applySeriesWeekLabels();
+
       if (!summary.outOfTime) {
         SpreadsheetApp.getActiveSpreadsheet().toast(
           `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);

@@ -106,6 +106,13 @@ const CONFIG_LAYOUT = {
     title: '🗄️ Hide System Tabs',
     startCol: 42,
     headers: ['Hide_System_Tabs']
+  },
+  // Fresh columns once more, same rule. How a grouped program's calendar
+  // titles are numbered "[Week N of M]" — see 99zzh_series_week_labels.gs.
+  SERIES_WEEK_LABELS: {
+    title: '🔢 Series Week Numbers',
+    startCol: 44,
+    headers: ['Week_Numbering']
   }
 };
 // The blank columns between the blocks above. Columns 8 and 23 are blank too,
@@ -118,7 +125,7 @@ const CONFIG_LAYOUT = {
 // (Months_Ahead) and grew into it. Nothing reads this — it is the record of
 // which columns are blank, and a record that says a live cell is blank is
 // worse than no record.
-const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41];
+const CONFIG_SPACER_COLS = [5, 7, 9, 12, 14, 18, 20, 24, 26, 33, 35, 37, 41, 43];
 
 /**
  * WHO IN THE OFFICE HEARS WHAT. Everything this system sends leaves the

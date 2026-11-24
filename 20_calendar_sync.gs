@@ -203,6 +203,10 @@ function parseSettingsBrackets(text) {
   let match;
   while ((match = BRACKET_GROUP_REGEX.exec(raw)) !== null) {
     const rawContent = match[1] || '';
+    // "[Week 3 of 8]" is written onto a grouped program's titles by 99zzh. It
+    // is neither a tag nor a note anybody typed, so it is skipped without the
+    // log line below, which would otherwise print for every labelled event.
+    if (isSeriesWeekLabelBracket(rawContent)) continue;
     // A BRACKET IS EITHER ALL TAGS OR ALL PROSE — see isTagOnlyBracket(). Staff
     // are told to put clarifying notes in the description, and a note that
     // happens to contain one of these words ("[Film Club selection:
