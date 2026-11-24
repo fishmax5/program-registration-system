@@ -200,8 +200,10 @@ const items = g.items(
     { Request_ID: 'r4', Email: 'd@x.com', Group: 'old@nhsc.org', Status: 'Removed', In_Group: false }],
   [], () => ['lead@x.com'], { 'old@nhsc.org': ['lead@x.com'] });
 eq(items.map(i => `${i.type}:${i.group}${i.email ? ':' + i.email : ''}`), [
-  'create:new@nhsc.org', 'manager:new@nhsc.org:lead@x.com', 'add:new@nhsc.org:a@x.com', 'remove:old@nhsc.org:b@x.com'
-], 'create, managers, adds, removes; pending and already-removed rows touch nothing');
+  'create:new@nhsc.org', 'manager:new@nhsc.org:newhorizons@newhorizonsseniorcenter.org',
+  'manager:new@nhsc.org:lead@x.com', 'manager:old@nhsc.org:newhorizons@newhorizonsseniorcenter.org',
+  'add:new@nhsc.org:a@x.com', 'remove:old@nhsc.org:b@x.com'
+], 'create, managers (the office on every group, leaders on class groups), adds, removes');
 
 // --- a tab whose tick boxes ran to row 1000 (the first version's fault) ------------
 {

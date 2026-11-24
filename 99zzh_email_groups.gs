@@ -121,6 +121,12 @@ const GROUP_REQUEST_SOURCES = {
 /** The sources whose rows the roster may also take away again. */
 const GROUP_ROSTER_SOURCES = ['registration', 'setup'];
 const EMAIL_GROUPS_SEED_INTERESTS = ['Art', 'Exercise', 'Movies'];
+/**
+ * Made a MANAGER of every group this workbook keeps, class and interest alike,
+ * so the office can post to any of them and see who is in it. Added at the
+ * next apply to groups that already exist, too.
+ */
+const EMAIL_GROUPS_DEFAULT_MANAGERS = ['newhorizons@newhorizonsseniorcenter.org'];
 
 const EMAIL_GROUPS_SETTINGS_PROP_KEY = 'EMAIL_GROUPS_SETTINGS_V1';
 const EMAIL_GROUPS_APPLY_STATE_PROP_KEY = 'EMAIL_GROUPS_APPLY_V1';
@@ -1012,10 +1018,16 @@ function buildEmailGroupApplyItems(groups, requests, removals, leadersFor, manag
     if (!g.Created_On) items.push({ type: 'create', group: email, name: String(g.Name || email), kind: g.Kind });
   });
   (groups || []).forEach(g => {
-    if (!g.active || g.Kind !== EMAIL_GROUP_KINDS.CLASS) return;
+    if (!g.active) return;
     if (!g.Created_On && !needed[g.Group_Email]) return;
     const done = (managersDone && managersDone[g.Group_Email]) || [];
-    (leadersFor(g) || []).forEach(email => {
+    // The office's own address manages EVERY group, interest lists included;
+    // a class group's leaders manage it as well.
+    const managers = EMAIL_GROUPS_DEFAULT_MANAGERS.slice();
+    if (g.Kind === EMAIL_GROUP_KINDS.CLASS) {
+      (leadersFor(g) || []).forEach(e => { if (managers.indexOf(e) === -1) managers.push(e); });
+    }
+    managers.forEach(email => {
       if (done.indexOf(email) === -1) items.push({ type: 'manager', group: g.Group_Email, email: email });
     });
   });
