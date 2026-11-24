@@ -863,7 +863,7 @@ function emailGroupsApi_() {
       } catch (err) {
         if (!already(err)) throw err;
       }
-      AdminGroupsSettings.Groups.patch({
+      const settings = {
         // ANNOUNCEMENT-ONLY: managers post, members read. A class group that
         // anybody can reply-all to is the thread this exists to prevent.
         whoCanPostMessage: 'ALL_MANAGERS_CAN_POST',
@@ -873,7 +873,24 @@ function emailGroupsApi_() {
         allowExternalMembers: 'true',
         includeInGlobalAddressList: 'false',
         messageModerationLevel: 'MODERATE_NONE'
-      }, email);
+      };
+      // A group Directory has just made is often not yet visible to the Groups
+      // Settings service: the first patch answers "not found" for a few
+      // seconds. Retried with a growing pause; if it still fails the create
+      // fails, nobody is added to a group with default (open) settings, and
+      // the next run's insert finds the group and tries the settings again.
+      let lastErr = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          AdminGroupsSettings.Groups.patch(settings, email);
+          return;
+        } catch (err) {
+          lastErr = err;
+          if (!missing(err)) break;
+          Utilities.sleep(3000 * (attempt + 1));
+        }
+      }
+      throw lastErr;
     },
     addMember: (group, email, role) => {
       try {
@@ -1091,6 +1108,7 @@ function runApplyGroupChangesSlice_() {
           if (item.requestId) {
             state.outcomes[item.requestId] = { status: 'Failed', inGroup: item.type === 'remove', note: `${item.type}: ${err}` };
           }
+          log(`⚠️ Email groups: ${item.type} ${item.email || ''} ${item.group} failed — ${err}`);
           spoolOfficeNote('Email groups', `Could not ${item.type === 'create' ? 'create' : item.type} ` +
             `${item.email ? item.email + ' in ' : ''}${state.names[item.group] || item.group}: ${err}`);
         }
