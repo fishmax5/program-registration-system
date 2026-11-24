@@ -249,6 +249,7 @@ function invalidateConfigCaches() {
   __triggerOwnerCache = null;
   __groupSeriesUpToCache = null;
   __syncBudgetMinutesCache = null;
+  invalidateSeriesWeekNumberingCache();
   // These two also live in the CROSS-execution cache, which a plain
   // per-execution reset would leave serving the old value to the next
   // trigger firing for up to AUTOMATION_FLAG_CACHE_SECONDS.

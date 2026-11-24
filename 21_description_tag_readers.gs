@@ -567,6 +567,12 @@ function syncCalendarsInternal(options) {
         }
       }
 
+      // "[Week N of M]" on a grouped program's calendar titles (99zzj). Only
+      // on the slice that finished the window, after the render, so it reads
+      // the session table this sync settled on. Inside the quiet window, so
+      // the title writes do not come back as calendar-change news. Never throws.
+      if (!summary.outOfTime) applySeriesWeekLabels();
+
       if (!summary.outOfTime) {
         SpreadsheetApp.getActiveSpreadsheet().toast(
           `Calendar sync complete ✅ (${describeImportSummary(summary)})`, 'Calendar & Form Manager', 5);
@@ -708,6 +714,8 @@ function importCalendarGroups(registrySheet, options) {
     applyNoRegistrationEffects(registrySheet, work.allGroups || []);
     // The event's own words, for the top of its form — see 99t.
     reconcileEventDescriptionsFromCalendar(registrySheet, work.allGroups || []);
+    // A date called off on the calendar, or put back on (99zzk).
+    reconcileCancelledSessionsFromCalendar(registrySheet);
   });
 
   const summary = {

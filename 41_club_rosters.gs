@@ -89,6 +89,8 @@ function upsertClubMembers(entries) {
     const name = String(entry.name || '').trim();
     if (!clubKey || !name) return;
     const personType = String(entry.personType || 'Attendee').trim();
+    // "No one" / "Just me" typed into a guest box is not a member (28).
+    if (personType === 'Guest' && isPhantomGuestName(name, entry.primaryRegistrant)) return;
     const key = clubMemberKey(clubKey, name, personType);
     const existing = index[key];
 
@@ -248,6 +250,10 @@ function applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, 
     const name = String(member[map['Name']] || '').trim();
     const personType = String(member[map['Person_Type']] || 'Attendee').trim();
     if (!name) return;
+    // A phantom guest already on the roster (28's isPhantomGuestName) is not
+    // booked onto another date; the row stays for staff to delete.
+    if (personType === 'Guest' && map['Primary_Registrant'] !== undefined &&
+        isPhantomGuestName(name, member[map['Primary_Registrant']])) return;
     const joinedOn = coerceDate(member[map['Joined_On']]) || new Date();
 
     sessions.forEach(registryEntry => {

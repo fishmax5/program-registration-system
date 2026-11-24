@@ -105,6 +105,8 @@ function styleConfigSheet(sheet) {
     NOTIFICATION_TEST_MODE_OPTIONS, CONFIG_DATA_START_ROW, 1);
   applyValueListValidationBounded(sheet, CONFIG_LAYOUT.SYSTEM_TABS.startCol,
     SYSTEM_TABS_HIDE_OPTIONS, CONFIG_DATA_START_ROW, 1);
+  applyValueListValidationBounded(sheet, CONFIG_LAYOUT.SERIES_WEEK_LABELS.startCol,
+    SERIES_WEEK_NUMBERING_OPTIONS, CONFIG_DATA_START_ROW, 1);
 
   // Who is copied on what: a tick box per category, bounded to the rows the
   // table actually has, so the columns below it stay clean.
@@ -130,6 +132,7 @@ function styleConfigSheet(sheet) {
   seedSyncBudgetRow(sheet);
   seedNotificationTestModeRow(sheet);
   seedSystemTabsRow(sheet);
+  seedSeriesWeekLabelsRow(sheet);
   invalidateConfigCaches(); // the seeds above may have just written cells the caches were built from
 }
 

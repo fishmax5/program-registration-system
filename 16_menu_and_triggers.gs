@@ -399,6 +399,9 @@ function buildCoordinatorMenu_(ui, title, role) {
       // sync read the dates as deleted and put their people on triage. This
       // puts them on the program their dates became. See 99zzd.
       .addItem('\ud83d\udce5 Put Triaged People on Their New Program\u2026', menuFn_('showTriageToProgramDialog'))
+      // "[Week N of M]" on a grouped program's calendar titles: freeze or
+      // recount, per program, and recount once. See 99zzj.
+      .addItem('\ud83d\udd22 Series Week Numbers\u2026', menuFn_('showSeriesWeekNumbersDialog'))
       .addSeparator()
       // APPOINTMENTS ARE THEIR OWN SHAPE, and their three items only ever make
       // sense together — a [Personalized Assistance] program is booked by time

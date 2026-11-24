@@ -285,7 +285,8 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
       // The calendar event's own words, already cleaned (99t) — what the top
       // of the form description says.
       calendarText: map['Event_Description'] === undefined
-        ? '' : readEventDescriptionCell(row[map['Event_Description']]).trim()
+        ? '' : readEventDescriptionCell(row[map['Event_Description']]).trim(),
+      cancelled: map['Status'] !== undefined && isCancelledSessionStatus(row[map['Status']])
     }))
     .filter(s => s.date)
     .sort((a, b) => a.date - b.date);
@@ -318,9 +319,11 @@ function buildFormSessionContext(formId, formRows, map, sharedFormIds) {
   // (locations, titles) still reads the whole row set, so labels don't shift.
   // A form left with no served day at all comes out with no sessions, which
   // every caller already treats as "leave the form alone"; 99ze closes it.
+  // A date called off on the calendar (99zzk) is not offered either.
+  const liveSessions = sessions.filter(s => !s.cancelled);
   const offeredSessions = isLunchOnly
-    ? sessions.filter(s => isLunchOfferedOn(s.date, s.location))
-    : sessions;
+    ? liveSessions.filter(s => isLunchOfferedOn(s.date, s.location))
+    : liveSessions;
   return windowAssistanceContextSessions({
     formId,
     sessions: offeredSessions,

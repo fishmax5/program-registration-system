@@ -1136,6 +1136,16 @@ function setEventDescriptionQuietly(event, description) {
   event.setDescription(text);
 }
 
+/**
+ * The one way the sync changes an event TITLE (the series week label, 99zzj).
+ * Guests are never mailed about it.
+ */
+function setEventTitleQuietly(event, title) {
+  const text = String(title === null || title === undefined ? '' : title);
+  if (eventHasGuests_(event) && patchEventQuietly_(event, { summary: text }, 'title')) return;
+  event.setTitle(text);
+}
+
 /** The one way the sync moves an event's time. Guests are never mailed about it. */
 function setEventTimeQuietly(event, start, end) {
   if (eventHasGuests_(event) && patchEventQuietly_(event, {

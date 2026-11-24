@@ -231,6 +231,7 @@ function menu_applyGroupChanges() { recordMenuUsage_('applyGroupChanges'); retur
 function menu_setUpEmailGroups() { recordMenuUsage_('setUpEmailGroups'); return setUpEmailGroups(); }
 function menu_showRelocateSessionsDialog() { recordMenuUsage_('showRelocateSessionsDialog'); return showRelocateSessionsDialog(); }
 function menu_showTriageToProgramDialog() { recordMenuUsage_('showTriageToProgramDialog'); return showTriageToProgramDialog(); }
+function menu_showSeriesWeekNumbersDialog() { recordMenuUsage_('showSeriesWeekNumbersDialog'); return showSeriesWeekNumbersDialog(); }
 function menu_showCalendarInviteDialog() { recordMenuUsage_('showCalendarInviteDialog'); return showCalendarInviteDialog(); }
 function menu_openSignInApp() { recordMenuUsage_('openSignInApp'); return openSignInApp(); }
 function menu_showCheckInPageDialog() { recordMenuUsage_('showCheckInPageDialog'); return showCheckInPageDialog(); }

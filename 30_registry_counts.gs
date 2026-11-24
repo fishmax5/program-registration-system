@@ -135,7 +135,12 @@ function recomputeCountsForZone(model, zone, counts) {
         notServing = false;
       }
     }
-    if (notServing) {
+    if (String(statusOut[i] || '').trim() === CANCELLED_SESSION_STATUS) {
+      // Called off on the calendar (99zzk): the counts stay — they are who
+      // has to be told — and nothing can be booked.
+      waitlistOut[i] = c.waitlist;
+      remainingOut[i] = 0;
+    } else if (notServing) {
       // The count stays: it is who has to be told. Nothing else applies.
       waitlistOut[i] = '';
       remainingOut[i] = '';

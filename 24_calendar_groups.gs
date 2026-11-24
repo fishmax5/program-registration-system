@@ -280,8 +280,17 @@ function buildEventGroups(parsedSessions, options) {
     // full" and quietly apply it to every other date of the program, which is
     // the exact opposite of what somebody ticking it just said.
     groups[key].sessions.push({
-      event, calendarId, locationName, waitlistOnly: !!parsed.waitlistOnly
+      event, calendarId, locationName, waitlistOnly: !!parsed.waitlistOnly,
+      // Called off on the calendar ("CANCELLED…: Title", 99zzk): still a row,
+      // never a date on the form.
+      cancelled: !!parsed.isCancelled
     });
+    recordCalendarSessionCancelled_(calendarId, parsed.cleanTitle, startTime, !!parsed.isCancelled);
+  });
+  // A group whose every date is called off would otherwise make a form with
+  // nothing on it.
+  Object.keys(groups).forEach(key => {
+    if (groups[key].sessions.every(s => s.cancelled)) delete groups[key];
   });
 
   // ORDER IS LOAD-BEARING HERE, all three steps of it. The flags are unified
@@ -475,7 +484,8 @@ function sessionsOfGroup(group) {
   // sessions come from Lunch_Schedule and arrive already in this shape. See
   // syncLunchOnlySessions().
   if (group.lunchOnlySessions) return group.lunchOnlySessions;
-  return group.sessions.map(s => ({
+  // A date called off on the calendar is never offered (99zzk).
+  return group.sessions.filter(s => !s.cancelled).map(s => ({
     date: s.event.getStartTime(),
     // Carried so the form's description can say what TIME the session runs at
     // — see sessionTimeRangeForDisplay(). Every other consumer of this shape

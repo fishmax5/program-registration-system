@@ -882,8 +882,10 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
     // itself. See recomputeCountsForZone(), which keeps saying so as the counts
     // move.
     row[map['Waitlist_Count']] = (isUncapped && !session.waitlistOnly) ? '' : 0;
-    row[map['Remaining_Seats']] = session.waitlistOnly ? 0 : (isUncapped ? '' : capacity);
-    row[map['Status']] = session.waitlistOnly
+    row[map['Remaining_Seats']] = (session.waitlistOnly || session.cancelled) ? 0 : (isUncapped ? '' : capacity);
+    row[map['Status']] = session.cancelled
+      ? CANCELLED_SESSION_STATUS
+      : session.waitlistOnly
       ? WAITLIST_ONLY_STATUS
       : (isUncapped ? '🟢 Unlimited' : computeStatus(0, capacity));
 
@@ -990,6 +992,9 @@ function collapseSessionsByEventId_(group) {
     }
     // A date is closed if EITHER event says so.
     if (session.waitlistOnly) kept.waitlistOnly = true;
+    // ...and called off only if BOTH are (99zzk).
+    kept.cancelled = !!(kept.cancelled && session.cancelled);
+    session.cancelled = kept.cancelled;
     collisions.push({ eventId, startTime, keptStart: kept.event.getStartTime() });
     // The earliest start keeps the row; a later-sorted twin only ever donates
     // its waitlist tick, which has already been taken above.
