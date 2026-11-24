@@ -429,6 +429,9 @@ function readWalkInDay(location, dateKeyOverride) {
     people: hosted,
     past: foldPastRegistrants(pastRows, programs, peopleByKey),
     members: readWalkInMembers(),
+    // The ask-once interest-list question (99zzh): the lists, and the masked
+    // address of every member not yet asked. Null when there are no lists.
+    interest: emailGroupsDoorInfo(readWalkInMembers()),
     readAt: Utilities.formatDate(new Date(), TIMEZONE, 'h:mm a')
   };
 }

@@ -93,6 +93,13 @@ const SHEET_NAMES = {
   // staff-editable: delete a row to put somebody back. See
   // 99zzf_weekly_email_opt_out.gs.
   WEEKLY_EMAIL_OPT_OUTS: 'Weekly_Email_Opt_Outs',
+  // One row per Google Group this workbook keeps — a class group per ticked
+  // program (Program_Settings' Email_Group) and the interest lists. Staff may
+  // rename a group or untick Active before it is created. See 99zzh.
+  EMAIL_GROUPS: 'Email_Groups',
+  // The queue: one row per person per group, and the only thing Apply Group
+  // Changes reads. Approve to add; Removed to take off. See 99zzh.
+  GROUP_REQUESTS: 'Group_Requests',
   // The append-only record of what happened to every registration — one row
   // per EVENT (registered, cancelled, moved, corrected), never edited, never
   // removed. All_Registrants is one row per person per session MUTATED IN
@@ -883,7 +890,11 @@ defineLazyGlobal_('HEADERS', () => ({
     // it happens: the guest list, the moment of booking, then the reminders.
     'Add_Guest_To_Calendar', 'Confirm_On_Booking',
     'Week_Before', 'Day_Before', 'Morning_Of', 'Other_Reminders',
-    'Staff_Notes'
+    'Staff_Notes',
+    // A class email group for this program (99zzh) — staff-owned. Appended
+    // last, so a tab already holding data reads it blank until the next
+    // redraw writes it out.
+    'Email_Group'
   ],
   /**
    * Program_Leaders — WHO LEADS WHAT, and how they hear about it.
@@ -1166,6 +1177,18 @@ defineLazyGlobal_('HEADERS', () => ({
   /** Weekly_Email_Opt_Outs — one row per ADDRESS, never per person (99zzf). */
   Weekly_Email_Opt_Outs: [
     'Email', 'Opted_Out_On', 'Source', 'Notes'
+  ],
+  /** Email_Groups — one row per Google Group (99zzh). Scope_Key is what the code matches on. */
+  Email_Groups: [
+    'Group_Email', 'Name', 'Kind', 'Scope_Key', 'Active', 'Created_On', 'Notes'
+  ],
+  /**
+   * Group_Requests — one row per person per group (99zzh). In_Group is written
+   * by the apply job only; Request_ID is how it finds the row again.
+   */
+  Group_Requests: [
+    'Name', 'Email', 'Group', 'Source', 'Status', 'Approved_By',
+    'Approve', 'Requested_On', 'Applied_On', 'In_Group', 'Notes', 'Request_ID'
   ]
 }));
 
@@ -1226,7 +1249,7 @@ const MEMBER_ROLL_STAFF_COLUMNS = ['Display_Name', 'First_Name', 'Last_Name', 'U
  */
 const PROGRAM_SETTINGS_STAFF_COLUMNS = ['Typical_Attendance', 'Usual_Capacity', 'Room_Or_Setup',
   'Add_Guest_To_Calendar', 'Week_Before', 'Day_Before', 'Morning_Of',
-  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Also_Known_As'];
+  'Other_Reminders', 'Confirm_On_Booking', 'Staff_Notes', 'Also_Known_As', 'Email_Group'];
 
 /**
  * Program_Leaders columns the staff own — which is nearly all of them.

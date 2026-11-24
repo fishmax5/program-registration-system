@@ -392,6 +392,10 @@ function applyQueuedOptimisticWrite(entry) {
       // about a page that no longer exists.
       log('ℹ️ Dropped a queued tick from the retired web roster page (99zn).');
       return { ok: true, message: 'The web roster page is retired; this queued tick was dropped.' };
+    case 'groupInterest':
+      // The door's interest-list answer (99zzh), queued behind a sync. Lock
+      // held, like Quick Mark's body — it only appends a row.
+      return applyInterestAnswer(args);
     case 'doorSignIn':
       // Called WITHOUT the script lock held — walkInSignIn() takes it for
       // itself, one mark at a time, through applyQuickMarkFromDialog(). See

@@ -67,6 +67,8 @@ function log(msg) {
  * is why every entry below is copied from the call rather than retyped.
  */
 const ADMIN_GATED_ACTIONS = [
+  // Approves everybody currently registered into real Google Groups (99zzh).
+  'Set Up Email Groups',
   // Irreversible: forms replaced or links reissued, registrations removed.
   'Destroy and Rebuild Forms',
   'Cancel Destroy-and-Rebuild Sweep',

@@ -235,6 +235,24 @@ function buildDoorAppHtml(options) {
   #done .tapnext { margin-top: 34px; font-size: 20px; opacity: .85; border: 1px solid rgba(255,255,255,.6);
                    border-radius: 999px; padding: 10px 22px; }
 
+  /* THE ASK-ONCE INTEREST QUESTION (99zzh), between Confirm and the green
+     screen. Above #done so it is seen first; skippable with one tap. */
+  #interest { position: fixed; inset: 0; z-index: 61; background: rgba(32,33,36,.55);
+              display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #interest .card { background: #fff; color: #202124; border-radius: 14px; padding: 24px; max-width: 560px;
+                    width: 100%; max-height: 92vh; overflow: auto; }
+  #interest h2 { font-size: 26px; margin: 0 0 10px 0; }
+  #interest p { font-size: 19px; line-height: 1.45; margin: 0 0 12px 0; }
+  #interest label.opt { display: flex; align-items: center; gap: 14px; font-size: 22px; padding: 14px;
+                        border: 2px solid #BDC1C6; border-radius: 10px; margin: 0 0 10px 0; cursor: pointer; }
+  #interest label.opt input { width: 28px; height: 28px; }
+  #interest input.mail { width: 100%; font-size: 20px; padding: 12px; border: 2px solid #9AA0A6; border-radius: 10px; }
+  #interest .row { display: flex; gap: 12px; margin-top: 14px; }
+  #interest .row button { flex: 1; font-size: 20px; padding: 16px; border-radius: 10px; border: 0; cursor: pointer; }
+  #interest .yes { background: #1A73E8; color: #fff; }
+  #interest .yes[disabled] { background: #9AA0A6; }
+  #interest .no { background: #fff; color: #1A73E8; border: 2px solid #DADCE0 !important; }
+
   ul.list { list-style: none; margin: 0; padding: 0; }
   li.item { background: #fff; border: 2px solid #BDC1C6; border-radius: 10px; margin-bottom: 8px; }
   li.item label { display: flex; align-items: flex-start; gap: 12px; padding: 14px 12px; cursor: pointer; }
@@ -397,6 +415,7 @@ function buildDoorAppHtml(options) {
 <main id="app" class="hide"></main>
 <div id="status"></div>
 <div id="done" class="hide" onclick="closeDone()"></div>
+<div id="interest" class="hide"></div>
 <div id="confirm" class="hide"></div>
 <div id="okb" class="hide"></div>
 
@@ -1983,8 +2002,10 @@ function buildDoorAppHtml(options) {
     // somebody else's day rather than a form to fill in: the office has their
     // name and their number and will send them an application.
     hideStatus();
-    showDone(name, partyNames,
-      notAMember ? 'The office will send you information about membership.' : '');
+    var doneExtra = notAMember ? 'The office will send you information about membership.' : '';
+    // THE INTEREST QUESTION FIRST, once per person and skippable (99zzh). The
+    // sign-in below is sent now either way; only the green screen waits.
+    askInterestThen(payload, function () { showDone(name, partyNames, doneExtra); });
 
     google.script.run
       .withSuccessHandler(function (res) {
@@ -2191,6 +2212,119 @@ function buildDoorAppHtml(options) {
   function hideStatus() {
     var box = document.getElementById('status');
     box.className = '';
+  }
+
+  // THE ASK-ONCE INTEREST-LIST QUESTION (99zzh). DAY.interest carries the
+  // lists and, for every member NOT yet asked, their address masked ('' when
+  // the roll has none). A member missing from that map has been asked; a name
+  // the roll has never seen is asked, with the address they just typed. One
+  // answer per person per tablet session is remembered here as well, so the
+  // 30-second re-read cannot ask again before the server has heard.
+  var INTEREST_ASKED = {};
+  var INTEREST_IDLE_MS = 45000;
+  function interestNameKey(name) {
+    return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+  function maskTyped(email) {
+    var e = String(email || '').trim().toLowerCase();
+    var at = e.indexOf('@');
+    if (at < 1) return '';
+    var local = e.slice(0, at), domain = e.slice(at + 1);
+    var dot = domain.lastIndexOf('.');
+    var host = dot > 0 ? domain.slice(0, dot) : domain, tld = dot > 0 ? domain.slice(dot) : '';
+    return local[0] + '\u2022\u2022\u2022' + (local.length > 2 ? local[local.length - 1] : '') +
+      '@' + (host[0] || '') + '\u2022\u2022\u2022' + tld;
+  }
+  function askInterestThen(payload, next) {
+    var info = DAY && DAY.interest;
+    if (!info || !info.lists || !info.lists.length) return next();
+    var key = interestNameKey(payload.name);
+    if (!key || INTEREST_ASKED[key]) return next();
+    var ask = info.ask || {};
+    var onRoll = (DAY.members || []).some(function (m) { return m.key === key; });
+    var hasEntry = Object.prototype.hasOwnProperty.call(ask, key);
+    if (onRoll && !hasEntry) return next();
+    var masked = hasEntry && ask[key] ? ask[key] : maskTyped(payload.email);
+    var typedEmail = hasEntry && ask[key] ? '' : String(payload.email || '').trim();
+
+    var box = document.getElementById('interest');
+    box.innerHTML = '';
+    var card = el('div', 'card');
+    card.appendChild(el('h2', '', 'Would you like news by email?'));
+    card.appendChild(el('p', '', 'Pick anything you would like to hear about. You can skip this.'));
+    var ticks = [];
+    info.lists.forEach(function (l) {
+      var row = el('label', 'opt');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = l.group;
+      row.appendChild(cb);
+      row.appendChild(el('span', '', l.label));
+      card.appendChild(row);
+      ticks.push(cb);
+    });
+    var mail = null;
+    if (masked && !typedEmail) {
+      card.appendChild(el('p', '', 'We would send it to ' + masked + '.'));
+    } else if (typedEmail) {
+      card.appendChild(el('p', '', 'We would send it to ' + typedEmail + '.'));
+    } else {
+      card.appendChild(el('p', '', 'What email address should we use?'));
+      mail = document.createElement('input');
+      mail.type = 'email';
+      mail.className = 'mail';
+      mail.id = 'interestMail';
+      noSuggest(mail, 'off');
+      card.appendChild(mail);
+    }
+    var row2 = el('div', 'row');
+    var no = document.createElement('button');
+    no.className = 'no';
+    no.textContent = 'No thanks';
+    var yes = document.createElement('button');
+    yes.className = 'yes';
+    yes.textContent = 'Yes, sign me up';
+    row2.appendChild(no);
+    row2.appendChild(yes);
+    card.appendChild(row2);
+    box.appendChild(card);
+    box.classList.remove('hide');
+
+    var finished = false;
+    var idle = window.setTimeout(function () { finish(null); }, INTEREST_IDLE_MS);
+    function finish(answer) {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(idle);
+      box.classList.add('hide');
+      box.innerHTML = '';
+      // Left alone is not an answer: nobody is recorded, and they are asked
+      // next time. A tap on either button is.
+      if (answer) {
+        INTEREST_ASKED[key] = true;
+        answer.pin = pin;
+        answer.location = SETUP.location;
+        answer.name = payload.name;
+        google.script.run.withFailureHandler(function () {}).doorInterestAnswer(JSON.stringify(answer));
+      }
+      next();
+    }
+    function refresh() {
+      var any = ticks.some(function (t) { return t.checked; });
+      var mailOk = !mail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail.value.trim());
+      yes.disabled = !(any && mailOk);
+    }
+    ticks.forEach(function (t) { t.onchange = refresh; });
+    if (mail) mail.oninput = refresh;
+    refresh();
+    no.onclick = function () { finish({ skip: true, email: typedEmail }); };
+    yes.onclick = function () {
+      finish({
+        skip: false,
+        email: mail ? mail.value.trim() : typedEmail,
+        groups: ticks.filter(function (t) { return t.checked; }).map(function (t) { return t.value; })
+      });
+    };
   }
 
   // THE FULL-SCREEN "YOU'RE SIGNED IN". Up for DONE_MS, or until somebody taps

@@ -533,7 +533,7 @@ const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCa
  * is neither governed by the kill switch nor paused by a bootstrap import.
  */
 const EXPECTED_TRIGGER_HANDLERS = MANAGED_AUTOMATION_HANDLERS.concat(
-  ['onProgramFlagEditInstallable', 'refreshPublicScheduleSnapshot']);
+  ['onProgramFlagEditInstallable', 'refreshPublicScheduleSnapshot', 'applyGroupChangesDaily']);
 
 /**
  * Cross-execution cache TTL for the kill-switch read. onCalendarChange can

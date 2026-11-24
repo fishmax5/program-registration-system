@@ -536,7 +536,8 @@ function refreshProgramSettings(ss, sessionRows) {
   // list — the suggestions are the cadences people ask for, and "21, 10" is
   // still a legal answer.
   applyMemoryTabValidation(sheet, headers, outRows.length, {
-    checkboxes: NOTIFICATION_CHECKBOX_COLUMNS,
+    // Email_Group is the class email group tick (99zzh), not a notification.
+    checkboxes: NOTIFICATION_CHECKBOX_COLUMNS.concat(['Email_Group']),
     // Event is SUGGESTING, like Program on Program_Leaders: every program the
     // calendar has produced, so a row typed on the spare line (a program the
     // sync has not reached yet) is picked rather than spelled — a misspelled
