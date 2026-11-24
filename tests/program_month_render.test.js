@@ -170,7 +170,7 @@ const running = programRow({
   Next_Date: new Date(2026, 9, 6), Last_Date: new Date(2026, 11, 15), Status: 'Active',
   Schedule: 'Weekly · Tue 10:00 AM', Seats: '8 of 12', Leader: 'A Leader',
   Register_Link: '=HYPERLINK("https://example.test/register","Register")',
-  Roster_Link: '=HYPERLINK("https://example.test/roster","Roster")'
+  Sign_In_Link: '=HYPERLINK("https://example.test/signin","Sign-in sheet")'
 });
 const finished = programRow({
   Program: 'Winter Chorus', Location: 'Annex', Group_Key: 'program::winter chorus::annex',

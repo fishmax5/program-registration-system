@@ -329,7 +329,9 @@ function install() {
 // ---------------------------------------------------------------------------
 {
   const h = sandbox.HEADERS.All_Program_Sessions;
-  ok('Room_Override is the LAST session-table column', h[h.length - 1] === 'Room_Override');
+  // Followed only by the two columns the front columns hid (99zzg).
+  ok('Room_Override is the last column before the hidden plumbing',
+    h.slice(h.indexOf('Room_Override') + 1).join() === 'Location,Registrant_Sheet_Link');
   ok('Room_Override is a human-editable column', Array.from(sandbox.PROGRAM_DASHBOARD_EDITABLE_COLUMNS).indexOf('Room_Override') !== -1);
   ok('Config no longer carries a Rooms section', sandbox.CONFIG_LAYOUT.ROOMS === undefined);
   const secs = Object.values(sandbox.ROOM_MANAGEMENT_LAYOUT);

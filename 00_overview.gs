@@ -32,11 +32,13 @@
  *      sentence ("12 / 20 · 60% · 2 waiting", or "12 · unlimited"), summed
  *      over THIS MONTH AND NEXT rather than over the program's whole life;
  *      the form, its editor and the two generated sheets are four link
- *      columns, one link each (Register_Link, Edit_Form_Link, Roster_Link,
- *      Sign_In_Link); and the three PROGRAM FLAGS —
+ *      columns, one link each (Register_Link, Edit_Form_Link,
+ *      Sign_In_Link) — the roster is the Program cell's own link since the
+ *      front columns (99zzg: Loc · Program · Next_Date · Next_Registered ·
+ *      Room); and the three PROGRAM FLAGS —
  *      Club, No Registration, Personalized Assistance — are tick boxes here
  *      rather than twelve identical copies of themselves on the session table.
- *      The row leads with Location and Program — what the thing IS — and the
+ *      The row leads with Loc (A / N / Z) and Program — what the thing IS — and the
  *      programs are listed by NAME in both sections, because a person
  *      arrives here knowing a program's name and not when it next runs.
  *      Next_Date sits with Schedule, which asks the same question, and

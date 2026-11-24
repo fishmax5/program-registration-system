@@ -77,6 +77,9 @@ function renderProgramDashboard(force, options) {
   // cells now is last render's answer, and a file may have been built or
   // deleted since.
   stampGeneratedFileLinks(sessionRows, map, { titleColumn: 'Clean_Title' });
+  // The front columns (99zzg): the building as one letter, and the date's
+  // effective room — after the links, since nothing here depends on them.
+  stampSessionFrontColumns_(sessionRows, map);
 
   guardSessionTableShrink(sessionRows.length, options); // after triage, too (99x)
   writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData, force);
@@ -972,7 +975,10 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
   ];
   const rules = [];
   const locationRanges = [];
-  if (todayRowsOut.length > 0) locationRanges.push(sheet.getRange(todayDataStart, 1, todayRowsOut.length, 1));
+  // The Today block names its buildings in full; the session table shows the
+  // letter (Loc, 99zzg) and keeps Location hidden — two rule sets, one tint.
+  const todayLocationRanges = [];
+  if (todayRowsOut.length > 0) todayLocationRanges.push(sheet.getRange(todayDataStart, 1, todayRowsOut.length, 1));
 
   zones.forEach(z => {
     if (z.count < 1) return;
@@ -1011,15 +1017,25 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
     if (map['Room_Override'] !== undefined) {
       applyOpenValueListValidationBounded(sheet, map['Room_Override'] + 1, roomOptionLabels(), z.start, z.count);
     }
+    // The visible Room column shows the date's EFFECTIVE room and carries the
+    // same dropdown; a pick is stored on Room_Override (handleSessionRoomEdit_,
+    // 99zzg), so this column is never protected either.
+    if (map['Room'] !== undefined) {
+      applyOpenValueListValidationBounded(sheet, map['Room'] + 1, roomOptionLabels(), z.start, z.count);
+    }
 
     Object.keys(EVENT_STATUS_COLORS).forEach(text => {
       rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(text).setBackground(EVENT_STATUS_COLORS[text])
         .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
     });
-    locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
+    if (map['Loc'] !== undefined) {
+      locationRanges.push(sheet.getRange(z.start, map['Loc'] + 1, z.count, 1));
+      applyBoundedColumnFormat(sheet, map['Loc'] + 1, z.start, z.count, { alignment: 'center' });
+    }
   });
 
-  rules.push(...buildLocationColorRules(locationRanges));
+  rules.push(...buildLocationColorRules(todayLocationRanges));
+  rules.push(...buildShortLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
 
   // NO YELLOW MANUAL-ENTRY WASH HERE, deliberately. Type_Tag, the flag
@@ -1032,7 +1048,7 @@ function writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, tod
   // behind it (see handleProgramDashboardEdit) — the prompt is the affordance,
   // not the color. Everything else keeps its warning protection.
   protectDerivedColumns(sheet, headers,
-    ['Event_Date', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
+    ['Event_Date', 'Loc', 'Clean_Title', 'Event_Time', 'Event_End', 'Active_Count', 'Waitlist_Count',
       'Remaining_Seats', 'Status', 'Form_ID', 'Event_ID', 'Calendar_Source',
       'Registrant_Sheet_Link', 'Sign_In_Sheet_Link'],
     zones);
@@ -1125,6 +1141,14 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
     writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, todayDataStart, todayRowsOut));
   checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(sessionTableStart), result.upcomingHeaderRow);
 
+  // THE TITLE IS THE ROSTER LINK (99zzg) — after the batch, so the values it
+  // writes cannot be overwritten by it.
+  [[upcoming, result.upcomingDataStart], [past, result.pastDataStart]].forEach(([rows, start]) => {
+    linkTitleCellsToRosters_(sheet, start, map['Clean_Title'] + 1,
+      rows.map(r => r[map['Clean_Title']]),
+      rows.map(r => map['Registrant_Sheet_Link'] === undefined ? '' : rosterUrlFromCell_(r[map['Registrant_Sheet_Link']])));
+  });
+
   // THROUGH THE SESSION TABLE'S HEADER ROW, like every other tab in this
   // workbook — not through the Today block, which is where this used to stop.
   // The bulk of this tab is the session table: hundreds of rows, twenty
@@ -1133,8 +1157,9 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
   // metrics blocks visible as well, since they sit above it — the old
   // behaviour, plus the headers it was missing.
   freezeRowsSafely(sheet, result.upcomingHeaderRow);
-  freezeColumnsSafely(sheet, 3); // date, location, program name
+  freezeColumnsSafely(sheet, 3); // date, location letter, program name
   autosizeColumns(sheet, { force: !!force, minCols: headers.length });
+  narrowLocColumn_(sheet, headers);
   log(`renderProgramDashboard complete: ${todayRowsOut.length} location(s) today, ${upcoming.length} upcoming / ${past.length} past session row(s).`);
 }
 

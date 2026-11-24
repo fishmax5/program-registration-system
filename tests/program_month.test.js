@@ -449,9 +449,13 @@ const build = (rows, link, leaders, settings) =>
   withLinks[sessionMap['Registrant_Sheet_Link']] = 'https://docs.example/roster';
   const built = build([withLinks]);
   check('each link lands in its own column, as one HYPERLINK with a short word',
-    [cell(built.rows[0], 'Register_Link'), cell(built.rows[0], 'Roster_Link')],
-    ['=HYPERLINK("https://forms.example/live","Register")',
-     '=HYPERLINK("https://docs.example/roster","Roster")']);
+    [cell(built.rows[0], 'Register_Link')],
+    ['=HYPERLINK("https://forms.example/live","Register")']);
+  // The roster is no longer a column: the Program cell links to it (99zzg).
+  check('the roster link rides with the row, for the Program cell',
+    built.rosterUrls.get(built.rows[0]), 'https://docs.example/roster');
+  check('...and there is no Roster_Link column',
+    sandbox.HEADERS.Master_Program_Dashboard.indexOf('Roster_Link'), -1);
   check('...and a link the program has not got is a blank cell, not a dangling word',
     [cell(built.rows[0], 'Edit_Form_Link'), cell(built.rows[0], 'Sign_In_Link')], ['', '']);
   check('the combined Links column is gone',
@@ -459,7 +463,7 @@ const build = (rows, link, leaders, settings) =>
   check('no side-channel is handed back for a rich-text pass', built.links, undefined);
   check('every link column is a column of the tab',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(p => sandbox.HEADERS.Master_Program_Dashboard.indexOf(p.column) !== -1),
-    [true, true, true, true]);
+    [true, true, true]);
 }
 // The MOST RECENT non-blank link wins, per column — a Regular program has a
 // form per month and the one worth handing out is this month's.
@@ -717,20 +721,22 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
 {
   const headers = sandbox.HEADERS.Master_Program_Dashboard;
   const at = name => headers.indexOf(name);
-  check('the row leads with what the program IS', headers.slice(0, 2), ['Location', 'Program']);
+  check('the row leads with what the program IS', headers.slice(0, 2), ['Loc', 'Program']);
   check('and no longer with a date', at('Next_Date') > at('Program'), true);
   // NEXT TO SCHEDULE, and immediately BEFORE it: "when does it next run" is
   // the same question as "when does it run", and putting it after Schedule
   // would split Schedule from Sessions, its drill-through to the dates.
-  check('Next_Date sits with Schedule', headers.slice(at('Next_Date'), at('Next_Date') + 3),
-    ['Next_Date', 'Schedule', 'Sessions']);
+  // THE FRONT (99zzg): the next date, how many for it, and the room, straight
+  // after the title.
+  check('the next class, its count and its room follow the title',
+    headers.slice(at('Program') + 1, at('Program') + 4), ['Next_Date', 'Next_Registered', 'Room']);
   // The whole list, so a column that moves moves here too.
   check('the full column order', headers, [
-    'Location', 'Program', 'Leader', 'Type_Tag',
+    'Loc', 'Program', 'Next_Date', 'Next_Registered', 'Room', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
-    'Form_ID', 'Group_Key'
+    'Schedule', 'Sessions', 'Seats', 'Notify',
+    'Register_Link', 'Edit_Form_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Location', 'Form_ID', 'Group_Key'
   ]);
   // NOTHING WAS DROPPED AND NOTHING WAS ADDED. A reorder needs no header
   // alias — nothing reads this tab and the next render redraws it whole (see
@@ -738,9 +744,9 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   // the reorder would be a cell nobody notices is blank.
   check('every column the tab had, it still has',
     headers.slice().sort(), [
-      'Club', 'Edit_Form_Link', 'Form_ID', 'Group_Key', 'Last_Date', 'Leader', 'Location',
-      'Next_Date', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
-      'Register_Link', 'Room', 'Roster_Link', 'Schedule', 'Seats', 'Sessions',
+      'Club', 'Edit_Form_Link', 'Form_ID', 'Group_Key', 'Last_Date', 'Leader', 'Loc', 'Location',
+      'Next_Date', 'Next_Registered', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
+      'Register_Link', 'Room', 'Schedule', 'Seats', 'Sessions',
       'Sign_In_Link', 'Status', 'Type_Tag'
     ].sort());
   check('...and no column twice', headers.length, new Set(headers).size);
@@ -748,7 +754,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
   // builder writes through a table of its own (PROGRAM_MONTH_LINK_PARTS).
   check('and every link part still names one of them',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(part => headers.indexOf(part.column) !== -1),
-    [true, true, true, true]);
+    [true, true, true]);
 }
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------
@@ -1050,11 +1056,11 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
       sandbox.getHeaderMapAt(sheet, 2), 2), flagged],
     [true, { column: 'Club', title: 'Chair Yoga', on: true }]);
 
-  // THE OLD POSITION, WHICH IS THE WHOLE TEST. Club was the 6th column; the
-  // 6th column is No_Registration now, and that is what an edit there means.
+  // THE OLD POSITION, WHICH IS THE WHOLE TEST. Club was the 8th column before the
+  // front columns moved; the 9th is No_Registration now, and that is what an edit there means.
   flagged = null;
   check('and an edit on Club’s OLD column number is read as the column that is there now',
-    [sandbox.handleProgramMonthFlagEdit(edit(6, 'TRUE'), sheet,
+    [sandbox.handleProgramMonthFlagEdit(edit(9, 'TRUE'), sheet,
       sandbox.getHeaderMapAt(sheet, 2), 2), flagged],
     [true, { column: 'No_Registration', title: 'Chair Yoga', on: true }]);
 

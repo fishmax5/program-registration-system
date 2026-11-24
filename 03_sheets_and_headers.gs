@@ -274,11 +274,22 @@ defineLazyGlobal_('HEADERS', () => ({
   // alongside the three numbers that usually answer it — and ticking it sends
   // every further registration for that one session to the waitlist however
   // much room Max_Capacity says is left, including when there is no cap at all.
+  //
+  // THE FRONT FOUR (Nov 2026, 99zzg): after the date, a one-letter building
+  // (`Loc` — A / N / Z, in the building's tint), the title (linked to the
+  // program's roster), how many are registered, and the room. `Location` and
+  // `Registrant_Sheet_Link` are still here and still what every reader reads —
+  // moved to the hidden end, because the letter and the title's link now say
+  // what they said. `Room` is the date's EFFECTIVE room (Room_Override, else
+  // the program's usual room); picking one from its dropdown writes
+  // Room_Override (handleSessionRoomEdit_). Readers project by NAME, so the
+  // order is free to change; `26`'s append writes by the tab's own names.
   All_Program_Sessions: [
-    'Event_Date', 'Location', 'Clean_Title', 'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
+    'Event_Date', 'Loc', 'Clean_Title', 'Active_Count', 'Room',
+    'Event_Time', 'Type_Tag', 'Club', 'No_Registration',
     'Personalized_Assistance',
-    'Active_Count', 'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
-    'Registrant_Sheet_Link', 'Sign_In_Sheet_Link',
+    'Status', 'Waitlist_Only', 'Form_Response_Link', 'Edit_Form_Link',
+    'Sign_In_Sheet_Link',
     'Max_Capacity', 'Waitlist_Count', 'Remaining_Seats',
     'Form_ID', 'Calendar_Synced?', 'Event_ID', 'Calendar_Source', 'Event_End', 'Slot_Minutes',
     'Max_Per_Month',
@@ -294,7 +305,9 @@ defineLazyGlobal_('HEADERS', () => ({
     // why the sync leaves it alone: the render writes back every column of the
     // rows it read, and new rows are only ever appended. Never written to the
     // calendar event's Location.
-    'Room_Override'
+    'Room_Override',
+    // Hidden plumbing since the front columns (99zzg) — see the note above.
+    'Location', 'Registrant_Sheet_Link'
   ],
   /**
    * Master_Program_Dashboard — ONE ROW PER PROGRAM (see SHEET_NAMES.PROGRAM_MONTH).
@@ -405,12 +418,17 @@ defineLazyGlobal_('HEADERS', () => ({
    * reading in the formula bar when something has gone wrong, not for
    * scanning.
    */
+  //
+  // THE FRONT (Nov 2026, 99zzg): Loc (A / N / Z), Program — linked to the
+  // roster, which is why there is no Roster_Link column any more — then the
+  // next date, how many are registered for it, and the room. Location stays,
+  // hidden, because the Leader edit (18) and the coverage line read it.
   Master_Program_Dashboard: [
-    'Location', 'Program', 'Leader', 'Type_Tag',
+    'Loc', 'Program', 'Next_Date', 'Next_Registered', 'Room', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
-    'Next_Date', 'Schedule', 'Sessions', 'Room', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Roster_Link', 'Sign_In_Link', 'Status', 'Last_Date',
-    'Form_ID', 'Group_Key'
+    'Schedule', 'Sessions', 'Seats', 'Notify',
+    'Register_Link', 'Edit_Form_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Location', 'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
   // afterward — a registration's notice period is a fact about when it

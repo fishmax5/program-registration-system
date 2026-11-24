@@ -92,7 +92,7 @@
  * on the session table's Room_Override, not here — this tab is one row per
  * PROGRAM.
  */
-const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Form_ID', 'Group_Key'];
+const PROGRAM_MONTH_HIDDEN_COLUMNS = ['Location', 'Form_ID', 'Group_Key'];
 
 /**
  * The three program-wide flag columns this tab offers as tick boxes, in the
@@ -143,7 +143,6 @@ const PROGRAM_MONTH_JOINER = ' · ';
 const PROGRAM_MONTH_LINK_PARTS = [
   { header: 'Form_Response_Link', column: 'Register_Link', label: 'Register' },
   { header: 'Edit_Form_Link', column: 'Edit_Form_Link', label: 'Edit form' },
-  { header: 'Registrant_Sheet_Link', column: 'Roster_Link', label: 'Roster' },
   { header: 'Sign_In_Sheet_Link', column: 'Sign_In_Link', label: 'Sign-in sheet' }
 ];
 
@@ -831,6 +830,9 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
   const rows = [];
   const notes = [];
   const matched = [];
+  // Row array -> its roster URL, for the Program cell's link (99zzg). A side
+  // map, because the row itself is written as-is with setValues().
+  const rosterUrls = new Map();
   order.forEach(key => {
     const group = groups[key];
     const sessions = group.sessions.slice().sort((a, b) => a.date - b.date);
@@ -910,8 +912,15 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
 
     const out = new Array(headers.length).fill('');
     out[map['Next_Date']] = nextDate || '';
+    if (map['Next_Registered'] !== undefined) {
+      out[map['Next_Registered']] = nextDate
+        ? describeNextSessionRegistered(sessions.filter(s =>
+          formatDateKey(s.date) === formatDateKey(nextDate)), sessionMap)
+        : '';
+    }
     out[map['Last_Date']] = sessions[sessions.length - 1].date;
     out[map['Location']] = describeLocations(locations);
+    if (map['Loc'] !== undefined) out[map['Loc']] = locationShortLetter(out[map['Location']]);
     out[map['Program']] = isLunch
       ? `Lunch @ ${locations[0] || 'this location'}`
       : String(first[sessionMap['Clean_Title']] || '');
@@ -955,6 +964,8 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     out[map['Form_ID']] = String(firstNonBlank('Form_ID') || '');
     out[map['Group_Key']] = key;
 
+    const rosterUrl = rosterUrlFromCell_(firstNonBlank('Registrant_Sheet_Link'));
+    if (rosterUrl) rosterUrls.set(out, rosterUrl);
     rows.push(out);
     if (leader.source === PROGRAM_MONTH_LEADER_SOURCE_MATCHED) matched.push(out);
     if (!isLunch && schedule.note) notes.push({ row: out, header: 'Schedule', text: schedule.note });
@@ -962,7 +973,23 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     if (!isLunch && settings.note) notes.push({ row: out, header: 'Notify', text: settings.note });
   });
 
-  return { rows, notes, matched };
+  return { rows, notes, matched, rosterUrls };
+}
+
+/**
+ * HOW MANY ARE COMING NEXT TIME — the registered count on the program's next
+ * date, over its capacity when every session that day has one: "8 / 12", or
+ * "8" uncapped. A [Shared] program's two buildings on one day are summed.
+ */
+function describeNextSessionRegistered(sessions, sessionMap) {
+  if (!sessions || sessions.length === 0) return '';
+  let registered = 0, capacity = 0, capped = 0;
+  sessions.forEach(s => {
+    registered += programMonthNumber(s.row[sessionMap['Active_Count']]);
+    const cap = sessionCapacity(s.row, sessionMap);
+    if (cap !== null) { capped++; capacity += cap; }
+  });
+  return capped === sessions.length ? `${registered} / ${capacity}` : String(registered);
 }
 
 
@@ -1129,10 +1156,19 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
         .setBackground(EVENT_STATUS_COLORS[text])
         .setRanges([sheet.getRange(z.start, map['Status'] + 1, z.count, 1)]).build());
     });
-    locationRanges.push(sheet.getRange(z.start, map['Location'] + 1, z.count, 1));
+    locationRanges.push(sheet.getRange(z.start, map['Loc'] + 1, z.count, 1));
+    sheet.getRange(z.start, map['Loc'] + 1, z.count, 1).setHorizontalAlignment('center');
+    sheet.getRange(z.start, map['Next_Registered'] + 1, z.count, 1).setHorizontalAlignment('center');
   });
-  rules.push(...buildLocationColorRules(locationRanges));
+  rules.push(...buildShortLocationColorRules(locationRanges));
   sheet.setConditionalFormatRules(rules);
+
+  // THE PROGRAM NAME IS THE ROSTER LINK (99zzg).
+  const rosterUrls = built.rosterUrls || new Map();
+  [[running, result.upcomingDataStart], [finished, result.pastDataStart]].forEach(([rows, start]) => {
+    linkTitleCellsToRosters_(sheet, start, map['Program'] + 1,
+      rows.map(r => r[map['Program']]), rows.map(r => rosterUrls.get(r) || ''));
+  });
 
   writeProgramMonthNotes(sheet, map, built.notes, running, finished, result);
   washMatchedProgramMonthLeaders(sheet, map, built.matched, running, finished, result);
@@ -1160,8 +1196,9 @@ function writeProgramMonthSheet(sheet, built, force, metrics) {
   // Schedule. Leader is deliberately NOT frozen — it is a column somebody
   // TYPES into, and a frozen column is one the pointer crosses on the way to
   // everything else.
-  freezeColumnsSafely(sheet, 2); // location, program name
+  freezeColumnsSafely(sheet, 2); // location letter, program name
   autosizeColumns(sheet, { force: !!force, minCols: numCols });
+  narrowLocColumn_(sheet, headers);
 }
 
 /**

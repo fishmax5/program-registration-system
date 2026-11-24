@@ -922,7 +922,14 @@ function writeEventRegistryRows(registrySheet, group, formInfo) {
   });
 
   if (rows.length > 0) {
-    registrySheet.getRange(registrySheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    // WRITTEN BY THE TAB'S OWN HEADER NAMES, not by HEADERS position. The two
+    // agree after any render, but a change to HEADERS' ORDER (the front
+    // columns, 99zzg) leaves a tab drawn in the old order until it is next
+    // redrawn — and an append in the new order onto it would put every field
+    // of a new session in somebody else's column.
+    const projected = projectSessionRowsOntoTab_(registrySheet, headers, rows);
+    registrySheet.getRange(registrySheet.getLastRow() + 1, 1, projected.length, projected[0].length)
+      .setValues(projected);
     invalidateSectionedRowsCache(registrySheet); // rows the cached read has never seen
     invalidateEventTimeIndex(); // new sessions, and therefore new times to look up
   }

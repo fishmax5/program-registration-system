@@ -213,7 +213,7 @@ const LUNCH_DASHBOARD_HIDDEN_COLUMNS = [];
 // difference between "a human may change this here" and "this flag describes a
 // whole program": it is ticked one session at a time. See WAITLIST_ONLY_TAG.
 const PROGRAM_DASHBOARD_EDITABLE_COLUMNS =
-  ['Type_Tag', 'Club', 'No_Registration', 'Personalized_Assistance', 'Waitlist_Only', 'Room_Override'];
+  ['Type_Tag', 'Club', 'No_Registration', 'Personalized_Assistance', 'Waitlist_Only', 'Room_Override', 'Room'];
 
 /**
  * Internal plumbing on the program dashboard: the raw IDs and the duplicate
@@ -238,7 +238,7 @@ const PROGRAM_DASHBOARD_EDITABLE_COLUMNS =
  */
 const PROGRAM_DASHBOARD_HIDDEN_COLUMNS = ['Club', 'No_Registration', 'Personalized_Assistance',
   'Form_ID', 'Event_ID', 'Calendar_Source', 'Calendar_Synced?', 'Event_End', 'Slot_Minutes', 'Max_Per_Month',
-  'Event_Description'];
+  'Event_Description', 'Room_Override', 'Location', 'Registrant_Sheet_Link'];
 const MANUAL_ENTRY_HEADER_COLOR = PALETTE.ENTRY_HEADER;
 const MANUAL_ENTRY_CELL_TINT = PALETTE.ENTRY_TINT;
 /**

@@ -115,6 +115,10 @@ function handleProgramDashboardEdit(e, sheet) {
     return;
   }
 
+  // The Room column shows the date's effective room; a pick is stored on
+  // Room_Override (99zzg). Answered here and nowhere else.
+  if (handleSessionRoomEdit_(e, sheet, zone.headerRow)) return;
+
   // The flag checkboxes first: an edit lands in exactly one column, and
   // handleProgramFlagEdit() reports whether that column was one of theirs.
   // (readEditedBlock() below is what keeps a fill-down over three hundred rows
