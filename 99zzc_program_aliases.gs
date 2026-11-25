@@ -111,6 +111,21 @@ function buildProgramAliasIndex(rows, headers) {
   return { aliases, ambiguous: Object.keys(ambiguous) };
 }
 
+/**
+ * Pure. An Also_Known_As cell with a renamed program's OLD title added, so a
+ * date still carrying the old name, or a rename back, files under the same
+ * program instead of splitting it again (ROSTER_KEYING_PROPOSAL, phase 2).
+ * Unchanged when the old title is blank, is the new title, or is listed.
+ */
+function aliasCellWithRenamedTitle(cell, oldTitle, newTitle) {
+  const text = String(cell || '').trim();
+  const old = stripProgramStatusPrefix(String(oldTitle || '').trim());
+  if (!old || normalizeNameKey(old) === normalizeNameKey(newTitle)) return text;
+  const listed = text ? text.split(PROGRAM_ALIAS_SEPARATOR_REGEX).map(normalizeNameKey) : [];
+  if (listed.indexOf(normalizeNameKey(old)) !== -1) return text;
+  return text ? `${text}, ${old}` : old;
+}
+
 /** The index for this execution, read off Program_Settings once. Never throws. */
 function programAliasIndex_() {
   if (__programAliasIndex) return __programAliasIndex;

@@ -38,6 +38,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.HEADERS = HEADERS;
+this.aliasCellWithRenamedTitle = aliasCellWithRenamedTitle;
 this.PROGRAM_SETTINGS_STAFF_COLUMNS = PROGRAM_SETTINGS_STAFF_COLUMNS;
 this.buildProgramAliasIndex = buildProgramAliasIndex;
 this.canonicalProgramTitle = canonicalProgramTitle;
@@ -215,6 +216,16 @@ console.log('the digest suggests, narrowly');
   const digest = sandbox.drainAdminDigest();
   const lines = digest['Titles that may be one program'] || [];
   check('naming the column to type it in', /Also_Known_As/.test(lines[0] || ''), true);
+}
+
+// --- A RENAME KEEPS THE OLD TITLE AS AN ALIAS (22 → 99zzc) -----------------
+{
+  const a = sandbox.aliasCellWithRenamedTitle;
+  check('a renamed program keeps its old title as an alias', a('', 'Stitch Club', 'Beginners Stitch Club'), 'Stitch Club');
+  check('...added to what staff already listed', a('Knit Night', 'Stitch Club', 'Beginners Stitch Club'), 'Knit Night, Stitch Club');
+  check('...once', a('Knit Night; stitch  club', 'Stitch Club', 'Beginners Stitch Club'), 'Knit Night; stitch  club');
+  check('...without its status word', a('', 'CANCELLED: Stitch Club', 'Beginners Stitch Club'), 'Stitch Club');
+  check('a respelling to the same name adds nothing', a('', 'Glee  Club', 'glee club'), '');
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
