@@ -33,14 +33,11 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.buildLeaderSheetRowsByProgram = buildLeaderSheetRowsByProgram;
 this.leaderProgramKey = leaderProgramKey;
-this.leaderRowKeyMatches = leaderRowKeyMatches;
-this.leaderPartyRowKey = leaderPartyRowKey;
 this.leaderCancellationDate_ = leaderCancellationDate_;
 this.compareLeaderTimeLabels = compareLeaderTimeLabels;
 this.foldLeaderDigestParties = foldLeaderDigestParties;
 this.describeLeaderDigestPerson = describeLeaderDigestPerson;
 this.buildLeaderDigestSubject = buildLeaderDigestSubject;
-this.decodeLeaderSnapshot = decodeLeaderSnapshot;
 this.HEADERS = HEADERS;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.getIndexMap = getIndexMap;
@@ -105,15 +102,9 @@ check('one line per party, cancellations past two days gone, ordered by the cloc
     '11:00 AM George Moosburner & Noreen Walsh 2', '11:30 AM Fresh Cancel 1']);
 
 const pav = rows[0];
-check('a party line carries the party key', pav[sheetMap['Row_Key']], S.leaderPartyRowKey('E1', 'P1'));
-check('its ticks are OR-ed across the party, and its snapshot says so',
-  [pav[sheetMap['Contacted']], S.decodeLeaderSnapshot(pav[sheetMap['Pushed_Snapshot']])[0]], [true, true]);
-check('a tick on the party line matches both people, and nobody else',
-  regs.map(r => S.leaderRowKeyMatches(r, regMap, pav[sheetMap['Row_Key']]) ? r[regMap['Name']] : null).filter(Boolean),
-  ['John Pavloff', 'Mrs. Pavloff']);
-check('a person\'s own key still matches them',
-  S.leaderRowKeyMatches(regs[8], regMap, `E1||${'barbara shapiro'}`), true);
-
+check('the plain list has no tick, note or machine columns',
+  ['Contacted', 'Confirmed', 'Leader_Notes', 'Row_Key', 'Pushed_Snapshot'].filter(h => sheetMap[h] !== undefined), []);
+check('a party line keeps the party\'s phone', !!pav[sheetMap['Phone']] || pav[sheetMap['Phone']] === '', true);
 check('the last cancellation stamp is the one read',
   S.leaderCancellationDate_('Cancelled at the door on Mon, Nov 2, 2026. | Reactivated | Cancelled by staff on Wed, Nov 4, 2026.').getDate(), 4);
 check('9:30 sorts before 11:00', S.compareLeaderTimeLabels('9:30 AM', '11:00 AM') < 0, true);

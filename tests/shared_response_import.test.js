@@ -319,7 +319,6 @@ function installImportStubs() {
   sandbox.closeEndedForms = record('closeEndedForms');
   sandbox.applyAllDatesCatchup = () => {};
   sandbox.applyClubRosterCatchup = () => {};
-  sandbox.pullProgramLeaderSheetEdits = () => {};
   sandbox.applyLeaderDropsAsCancellations = () => {};
   sandbox.applyLeaderWaitlistTicks = () => {};
   sandbox.applyMemberRollContacts = () => {};

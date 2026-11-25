@@ -10,8 +10,7 @@
 // looking broken:
 //
 //   a registration form  → responses stop arriving on All_Registrants
-//   a registrant sheet   → a leader's ticks never come back, and the refresh
-//                          fails with whatever Drive threw that hour
+//   a registrant sheet   → the refresh fails with whatever Drive threw that hour
 //   a sign-in Doc        → the desk's link opens a file nobody can rebuild
 //   a form image         → the question builder cannot copy it onto the form
 //   a folder             → the next generated file cannot be filed into it
@@ -135,7 +134,8 @@ function collectGeneratedArtifactTargets() {
       id: fileId,
       what: what,
       folder: folder,
-      linkSharing: opts && opts.linkSharing !== undefined ? !!opts.linkSharing : !folder
+      linkSharing: opts && opts.linkSharing !== undefined ? !!opts.linkSharing : !folder,
+      linkPermission: opts && opts.linkPermission
     });
   };
   const guarded = (label, fn) => {
@@ -188,7 +188,8 @@ function collectGeneratedArtifactTargets() {
     const registry = getProgramLeaderSheetRegistry();
     Object.keys(registry).forEach(programKey => {
       const entry = registry[programKey] || {};
-      add(entry.fileId, `the registrant sheet for "${entry.title || programKey}"`);
+      // VIEW: a registrant sheet is a list nobody types in (Nov 2026, `46`).
+      add(entry.fileId, `the registrant sheet for "${entry.title || programKey}"`, { linkPermission: 'view' });
     });
   });
 
@@ -238,7 +239,7 @@ function collectGeneratedArtifactTargets() {
 
 /**
  * MENU ACTION: open up every file this system has made — forms, registrant
- * sheets, sign-in documents, form images — and add the accounts that run it as
+ * sheets, form images — and add the accounts that run it as
  * editors of those and of the folders they sit in.
  *
  * Starts the job; `runOpenUpSharingSlice()` is what does the work, here and on
@@ -254,8 +255,8 @@ function openUpAllGeneratedFileSharing() {
     return 0;
   }
   if (!confirmConsequentialAction('Open up every file this system made?',
-    'Registration forms, program registrant sheets, sign-in documents and form images are all set to ' +
-    '"anyone with the link can edit", and the accounts that run this system are added as editors of ' +
+    'Registration forms and form images are set to "anyone with the link can edit" ' +
+    '(program registrant sheets to "can view"), and the accounts that run this system are added as editors of ' +
     'them and of the folders they live in.\n\nThis is what lets an hourly sync run by one account read ' +
     'files created by another — which is what most "it stopped updating" faults turn out to be. ' +
     'Nothing is moved, renamed or deleted, and no link changes.\n\nIt carries itself on across as many ' +
@@ -337,7 +338,7 @@ function runOpenUpSharingSlice() {
         if (Date.now() >= ctx.deadline) break;
 
         const outcome = openUpFileToAnyoneWithLink(target.id, target.what,
-          { folder: target.folder, linkSharing: target.linkSharing });
+          { folder: target.folder, linkSharing: target.linkSharing, linkPermission: target.linkPermission });
         // A target that never asked for link sharing (a folder, a form image)
         // is judged on whether anything REFUSED; everything else on the link.
         const worked = target.linkSharing ? outcome.openedUp : outcome.problems.length === 0;

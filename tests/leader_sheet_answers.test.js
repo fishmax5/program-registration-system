@@ -85,24 +85,11 @@ function registrantRow(fields) {
 }
 
 // --- The column's place -----------------------------------------------------
-//
-// The shape the sheet had before Answers was added. Kept as a list because
-// what is being pinned is that a SYNC-OWNED column goes on the END, after the
-// two hidden machine columns, so a sheet drawn under an older shape reads its
-// leader ticks back by header exactly where they always were. A column
-// written by the LEADER goes in among the other ticks instead, where they will
-// look for it (Attended; see tests/leader_sheet_attended.test.js), which is
-// why this no longer asserts the whole list verbatim.
-const OLD_HEADERS = [
-  'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
-  'Phone', 'Email', 'Program_Status',
-  'Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes',
-  'Row_Key', 'Pushed_Snapshot'
-];
-check('Answers is appended after every column the sheet already had',
-  Array.from(LEADER_SHEET_HEADERS).slice(-3), ['Row_Key', 'Pushed_Snapshot', 'Answers']);
-check('and every column of that older shape is still there, in its own order',
-  Array.from(LEADER_SHEET_HEADERS).filter(h => OLD_HEADERS.indexOf(h) !== -1), OLD_HEADERS);
+// The view-only list (Nov 2026): Answers is the last column, after the
+// roster's own facts, and there are no tick or machine columns.
+check('Answers is the last column of the plain list',
+  Array.from(LEADER_SHEET_HEADERS),
+  ['Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status', 'Answers']);
 check('Answers is sync-owned, never a leader-owned column',
   [LEADER_SHEET_DERIVED_COLUMNS.indexOf('Answers') !== -1, LEADER_OWNED_COLUMNS.indexOf('Answers')],
   [true, -1]);
@@ -140,25 +127,6 @@ check('a changed answer changes the fingerprint',
   computeLeaderSheetFingerprint(entry, rows) ===
     computeLeaderSheetFingerprint(entry, rowsFor('What was your computer issue?: Email')),
   false);
-
-// --- A sheet written before the column still reads back by header -----------
-const oldRow = OLD_HEADERS.map(h => ({ Name: 'Donna Inners', Dropped: true, Leader_Notes: 'called' })[h] || '');
-oldRow[0] = soon;
-const grid = [['banner'], OLD_HEADERS, oldRow];
-const oldSheet = {
-  getLastRow: () => grid.length,
-  getLastColumn: () => OLD_HEADERS.length,
-  getName: () => 'Sign_Up_Sheet',
-  getRange: (r, c, nr, nc) => ({
-    getValues: () => grid.slice(r - 1, r - 1 + (nr || 1))
-      .map(row => { const out = row.slice(c - 1, c - 1 + (nc || 1)); while (out.length < (nc || 1)) out.push(''); return out; }),
-    getFormulas: () => new Array(nr || 1).fill(0).map(() => new Array(nc || 1).fill(''))
-  })
-};
-const readBack = readSimpleTable(oldSheet, LEADER_SHEET_HEADERS)[0];
-check('the leader\'s ticks on an old-shape sheet are found by header, Answers reads blank',
-  [readBack[sheetMap['Name']], readBack[sheetMap['Dropped']], readBack[sheetMap['Leader_Notes']], readBack[sheetMap['Answers']]],
-  ['Donna Inners', true, 'called', '']);
 
 if (failures) { console.log(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\nall leader sheet answers checks passed');

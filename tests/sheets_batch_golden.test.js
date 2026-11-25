@@ -170,9 +170,7 @@ function leaderRows(weeks, perWeek, opts) {
       row[LMAP['Name']] = `Person ${w}-${n}`;
       row[LMAP['Party_Size']] = 1;
       row[LMAP['Program_Status']] = opts.waitlistAt === `${w}-${n}` ? 'Waitlisted' : 'Active';
-      row[LMAP['Contacted']] = n % 2 === 0;
       row[LMAP['Event_ID']] = `evt|Chair Yoga|${w}`;
-      row[LMAP['Row_Key']] = `k${w}-${n}`;
       row[LMAP['Answers']] = 'Q: a\nQ2: b';
       rows.push(row);
     }
@@ -206,11 +204,11 @@ function leaderCase(label, renders) {
   const s = snapshot(r.b);
   assert.strictEqual(s.frozenRows, 2);
   assert.strictEqual(s.frozenCols, LMAP['Name'] + 1);
-  assert.deepStrictEqual(s.hidden, [LMAP['Row_Key'] + 1, LMAP['Pushed_Snapshot'] + 1]);
+  assert.strictEqual(JSON.stringify(s.hidden), '[]', 'a view-only list hides nothing');
   assert.strictEqual(s.rowHeights[3], 30, 'the first band row is banner height');
   assert.strictEqual(s.cells[`4,${LMAP['Event_Time'] + 1}`].value, '10:00 AM', 'a bare time stays words');
   assert.strictEqual(s.cells[`4,${LMAP['Event_Time'] + 1}`].numberFormat, '@');
-  assert.strictEqual(s.cells[`4,${LMAP['Contacted'] + 1}`].validation, 'checkbox:false');
+  assert.ok(!Object.keys(s.cells).some(k => s.cells[k].validation), 'and draws no checkboxes');
   assert.ok(s.protections.length > 0, 'derived columns are protected');
 }
 

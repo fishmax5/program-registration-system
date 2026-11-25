@@ -69,7 +69,7 @@ const sandbox = {
     },
     getFolderById: id => driveFile(id),
     Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
-    Permission: { EDIT: 'EDIT' }
+    Permission: { EDIT: 'EDIT', VIEW: 'VIEW' }
   },
   HtmlService: {}, LockService: {},
   Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 't@e.com' }) },
@@ -89,7 +89,6 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.collectGeneratedArtifactTargets = collectGeneratedArtifactTargets;
 this.openUpFileToAnyoneWithLink = openUpFileToAnyoneWithLink;
-this.applyLeaderFlagCheckboxes_ = applyLeaderFlagCheckboxes_;
 this.runOpenUpSharingSlice = runOpenUpSharingSlice;
 this.saveSlicedJobState = saveSlicedJobState;
 this.getSlicedJobState = getSlicedJobState;
@@ -192,35 +191,12 @@ const fileOutcome = sandbox.openUpFileToAnyoneWithLink('FORM_BOTH', 'a registrat
 check('a file still gets link sharing', sharing.setSharing, ['FORM_BOTH|ANYONE_WITH_LINK|EDIT']);
 check('a file reports it was opened', fileOutcome.openedUp, true);
 
-// --- a tick column that will not draw --------------------------------------
-
-// A RangeList has insertCheckboxes() and NOT setDataValidation(), which is the
-// whole reason this helper exists: the batched write called the missing one and
-// threw "ticks.setDataValidation is not a function" on every sheet, every hour,
-// leaving the roster half-written with its tick columns reading TRUE/FALSE.
-const drawn = [];
-sandbox.applyLeaderFlagCheckboxes_('Contacted', {
-  insertCheckboxes: () => { drawn.push('insertCheckboxes'); },
-  setHorizontalAlignment: () => { drawn.push('aligned'); }
-});
-check('a tick column is drawn with the call a RangeList actually has',
-  drawn, ['insertCheckboxes', 'aligned']);
-
-let threw = false;
-try {
-  sandbox.applyLeaderFlagCheckboxes_('Contacted', {
-    insertCheckboxes: () => { throw new Error('Exception: You do not have permission'); },
-    setHorizontalAlignment: () => {}
-  });
-} catch (err) {
-  threw = true;
-}
-check('a refused checkbox column never abandons the roster', threw, false);
-
-// A column the headers do not name arrives as null rather than as a NaN column
-// index, and is skipped.
-sandbox.applyLeaderFlagCheckboxes_('Confirmed', null);
-check('a column the headers do not have is skipped', true, true);
+// --- a registrant sheet is a view-only list (Nov 2026) -----------------------
+sharing.setSharing.length = 0;
+sandbox.openUpFileToAnyoneWithLink('SHEET_V', 'a registrant sheet', { linkPermission: 'view' });
+check('a registrant sheet is shared view-only by link', sharing.setSharing, ['SHEET_V|ANYONE_WITH_LINK|VIEW']);
+check('and the sweep asks for view on every registrant sheet',
+  targets.filter(t => /registrant sheet/.test(t.what)).every(t => t.linkPermission === 'view'), true);
 
 // --- it carries itself on ---------------------------------------------------
 //

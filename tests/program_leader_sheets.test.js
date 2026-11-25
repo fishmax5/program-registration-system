@@ -1,12 +1,7 @@
 // THE SHEET A PROGRAM LEADER GETS, now that it is banded by session rather
 // than one flat run of rows.
 //
-// The bands are the whole risk here. The sheet is written by this code and
-// READ BACK by the same code on the next sync, and the merge that reads it
-// matches people by a hidden Row_Key. A band row is a row on that sheet with
-// no Row_Key at all — so if the pull ever stopped skipping it, a band would be
-// read as a registrant whose five marks had just been cleared, and the merge
-// would dutifully clear them in the workbook too.
+// Since Nov 2026 the sheet is a view-only list: nothing is read back.
 //
 // What is pinned here: the grouping the layout is built from, what a band
 // says, and — the load-bearing one — that a sheet with bands interleaved
@@ -39,9 +34,6 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.groupLeaderSheetRowsBySession = groupLeaderSheetRowsBySession;
 this.leaderSheetSessionBandLabel = leaderSheetSessionBandLabel;
-this.pullProgramLeaderSheetEdits = pullProgramLeaderSheetEdits;
-this.leaderRowKey = leaderRowKey;
-this.encodeLeaderSnapshot = encodeLeaderSnapshot;
 this.getIndexMap = getIndexMap;
 this.isLeaderSheetWaitlistedRow = isLeaderSheetWaitlistedRow;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
@@ -51,6 +43,10 @@ this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
 this.ensureRegistrantSheetsForUpcomingPrograms = ensureRegistrantSheetsForUpcomingPrograms;
 this.REGISTRANT_SHEET_MAX_CREATES_PER_RUN = REGISTRANT_SHEET_MAX_CREATES_PER_RUN;
 this.__stubCreate = function (fn) { createProgramLeaderSheet = fn; };
+// Every program has a leader here except one named "No Leader …" — only
+// programs with a leader get a sheet (Nov 2026).
+buildProgramLeaderIndex = () => new Proxy({}, { get: (t, k) =>
+  String(k).indexOf('no leader') === 0 ? undefined : [{ name: 'Lee', emails: [] }] });
 this.registrantSheetFileName = registrantSheetFileName;
 `, sandbox, { filename: 'program.gs' });
 
@@ -116,87 +112,6 @@ check('and says nothing about a waitlist that does not exist',
 check('a session with no readable date still gets a band rather than throwing',
   sandbox.leaderSheetSessionBandLabel({ date: null, timeLabel: '', active: 0, waitlisted: 0, cancelled: 0 })
     .indexOf('Date not set'), 0);
-
-// ---------------------------------------------------------------------------
-// THE ONE THAT MATTERS: a banded sheet pulls back only the leader's edits.
-// ---------------------------------------------------------------------------
-
-const regMap = sandbox.getIndexMap(sandbox.HEADERS.All_Registrants);
-
-function registrantRow(values) {
-  const row = new Array(sandbox.HEADERS.All_Registrants.length).fill('');
-  Object.keys(values).forEach(k => { row[regMap[k]] = values[k]; });
-  return row;
-}
-
-// What the last push sent out, and therefore what the snapshot on each row
-// says. Ann was untouched; Bob has since been ticked Contacted on the sheet.
-//
-// The four flags are BOOLEANS in a snapshot, not blanks: readLeaderValues()
-// normalizes an unticked checkbox to `false` before it is encoded, and a
-// snapshot written with '' would make every unticked box on the sheet look
-// like something the leader had just changed.
-const annSent = [false, false, false, false, ''];
-const bobSent = [false, false, false, false, ''];
-
-const sheetRows = [
-  // A band. Column A carries its label, every other cell is blank — which is
-  // exactly what makes it invisible to the pull.
-  sheetRow({ Event_Date: 'Tue 15 Sep  ·  10:00 AM  ·  2 signed up' }),
-  sheetRow({
-    Event_Date: new Date(2026, 8, 15), Name: 'Ann', Contacted: false, Confirmed: false,
-    Waitlisted: false, Dropped: false, Leader_Notes: '',
-    Row_Key: sandbox.leaderRowKey('EV1', 'P1', 'Ann'),
-    Pushed_Snapshot: sandbox.encodeLeaderSnapshot(annSent)
-  }),
-  sheetRow({
-    Event_Date: new Date(2026, 8, 15), Name: 'Bob', Contacted: true, Confirmed: false,
-    Waitlisted: false, Dropped: false, Leader_Notes: 'left a message',
-    Row_Key: sandbox.leaderRowKey('EV1', 'P2', 'Bob'),
-    Pushed_Snapshot: sandbox.encodeLeaderSnapshot(bobSent)
-  }),
-  sheetRow({ Event_Date: 'Tue 22 Sep  ·  10:00 AM  ·  1 signed up' })
-];
-
-const fakeTab = {
-  getName: () => 'Sign_Up_Sheet',
-  getLastRow: () => 2 + sheetRows.length,
-  getLastColumn: () => sandbox.LEADER_SHEET_HEADERS.length,
-  getRange: () => ({
-    // readSimpleTable() reads the header row, then the data block. Both come
-    // through here; the header read is one row starting at row 2.
-    getValues: () => [sandbox.LEADER_SHEET_HEADERS],
-    getFormulas: () => sheetRows.map(() => new Array(sandbox.LEADER_SHEET_HEADERS.length).fill(''))
-  })
-};
-
-// readSimpleTable() asks for the header row and the data block separately, so
-// the stub answers by shape rather than by call order.
-fakeTab.getRange = (row, col, numRows) => ({
-  getValues: () => (numRows === 1 && row === 2
-    ? [sandbox.LEADER_SHEET_HEADERS]
-    : sheetRows.slice(row - 3, row - 3 + numRows)),
-  getFormulas: () => new Array(numRows).fill(0)
-    .map(() => new Array(sandbox.LEADER_SHEET_HEADERS.length).fill(''))
-});
-
-sandbox.SpreadsheetApp.openById = () => ({ getSheetByName: () => fakeTab });
-sandbox.__setRegistry({ 'chair yoga|narberth': { fileId: 'F1', title: 'Chair Yoga', location: 'Narberth' } });
-
-const registrantRows = [
-  registrantRow({ Event_ID: 'EV1', Party_ID: 'P1', Name: 'Ann', Contacted: false, Leader_Notes: 'staff note' }),
-  registrantRow({ Event_ID: 'EV1', Party_ID: 'P2', Name: 'Bob', Contacted: false, Leader_Notes: '' })
-];
-
-const applied = sandbox.pullProgramLeaderSheetEdits(registrantRows);
-
-check('only the cells the leader actually changed come back', applied, 2);
-check("Bob's tick and note landed on his row",
-  [registrantRows[1][regMap['Contacted']], registrantRows[1][regMap['Leader_Notes']]],
-  [true, 'left a message']);
-check("Ann's untouched cells left the workbook's own note alone",
-  [registrantRows[0][regMap['Contacted']], registrantRows[0][regMap['Leader_Notes']]],
-  [false, 'staff note']);
 
 // ---------------------------------------------------------------------------
 // WHO GETS A SHEET, now that it is every program rather than only the ones
@@ -281,14 +196,21 @@ sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
 check('a lunch-only session gets no registrant sheet, a program beside it still does',
   built, ['Chair Yoga|||Narberth']);
 
+built = [];
+sandbox.__setRegistry({});
+sandbox.ensureRegistrantSheetsForUpcomingPrograms(null, [
+  dashRow('No Leader Club', 'Narberth', 1),
+  dashRow('Chair Yoga', 'Narberth', 2)
+]);
+check('a program with no leader gets no registrant sheet',
+  built, ['Chair Yoga|||Narberth']);
+
 check('the file is named for what is on it, not for who reads it',
   sandbox.registrantSheetFileName('Chair Yoga', 'Narberth'),
   'Registrant Sheet — Chair Yoga (Narberth)');
 
-// WHICH LINES GET THE WASH. A leader scans a roster for "how many chairs",
-// and the one line where the answer is no has to look different — from either
-// side: the status the workbook settled on, or the tick the leader made on
-// this sheet a minute ago and has not yet seen pushed back.
+// WHICH LINES GET THE WASH: a waitlisted status, and only that (a view-only
+// list has no Waitlisted tick of its own since Nov 2026).
 {
   const m = sandbox.getIndexMap(sandbox.LEADER_SHEET_HEADERS);
   const line = over => {
@@ -298,13 +220,9 @@ check('the file is named for what is on it, not for who reads it',
   };
   check('a waitlisted status is washed',
     sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Waitlisted' }), m), true);
-  check("a leader's own tick is washed before the next push confirms it",
-    sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active', Waitlisted: true }), m), true);
-  check('a pasted "TRUE" counts, the same as it does in the merge',
-    sandbox.isLeaderSheetWaitlistedRow(line({ Waitlisted: 'TRUE' }), m), true);
   check('an ordinary active line is not washed',
     sandbox.isLeaderSheetWaitlistedRow(line({ Program_Status: 'Active' }), m), false);
-  check('and neither is a band row, which carries neither',
+  check('and neither is a band row',
     sandbox.isLeaderSheetWaitlistedRow(line({}), m), false);
 }
 
