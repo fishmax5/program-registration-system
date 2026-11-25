@@ -126,14 +126,11 @@ sandbox.__stub('getLunchOnlyFormLinks', () => ({ 'Ashbridge|2026-04': { formId: 
 sandbox.__stub('getOrCreateTemplateForm', () => ({ getId: () => 'TEMPLATE' }));
 sandbox.__stub('getMembershipFormId', () => 'MEMBERSHIP');
 sandbox.__stub('getProgramLeaderSheetRegistry', () => ({ 'chess|ashbridge': { fileId: 'LEADER_SHEET', title: 'Chess' } }));
-sandbox.__stub('getSignInSheetRegistry', () => ({ '2026-04-01|ashbridge': { fileId: 'SIGN_IN_DOC' } }));
 sandbox.__stub('getOrCreateFormImageFolder', () => Object.assign(folder('IMG_FOLDER', 'Form Images'), {
   getFiles: () => iter([folder('IMAGE_1', 'poster.png')])
 }));
 sandbox.__stub('getSystemRootFolder', () => folder('ROOT_FOLDER', 'Program Registration System'));
 sandbox.__stub('getOrCreateFormsFolder', () => folder('FORMS_FOLDER', 'Forms'));
-sandbox.__stub('getOrCreateSignInSheetDocFolder', () => folder('DOC_FOLDER', 'Sign-In Sheets'));
-sandbox.__stub('getOrCreateSignInSheetFolder', () => folder('PDF_FOLDER', 'Printed Sign-In Sheets'));
 sandbox.__stub('getOrCreateProgramLeaderSheetFolder', () => folder('LEADER_FOLDER', 'Registrant Sheets'));
 
 const targets = sandbox.collectGeneratedArtifactTargets();
@@ -141,8 +138,8 @@ const ids = targets.map(t => t.id);
 
 check('every kind of artifact is claimed', ids, [
   'FORM_ROW_ONLY', 'FORM_BOTH', 'FORM_REGISTRY_ONLY', 'LUNCH_FORM', 'TEMPLATE', 'MEMBERSHIP',
-  'LEADER_SHEET', 'SIGN_IN_DOC', 'IMAGE_1',
-  'ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER'
+  'LEADER_SHEET', 'IMAGE_1',
+  'ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER'
 ]);
 
 check('a form named twice is opened once',
@@ -154,11 +151,11 @@ check('a form named twice is opened once',
 // copy of the bytes, so nothing is lost). Everything else gets the link.
 check('folders and form images are named editors only, never link-shared',
   targets.filter(t => !t.linkSharing).map(t => t.id),
-  ['IMAGE_1', 'ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
+  ['IMAGE_1', 'ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
 
 check('only a folder id is fetched as a folder',
   targets.filter(t => t.folder).map(t => t.id),
-  ['ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
+  ['ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
 
 // The pictures INSIDE it are link-shared like any other file; the folder
 // itself is not, and it is claimed exactly once despite being read twice.
@@ -167,9 +164,10 @@ check('the image folder is claimed once, as a folder',
 
 // A registry that throws costs its own entries and nothing else — the sweep is
 // the repair for a half-broken workbook, so it must not need a whole one.
-sandbox.__stub('getSignInSheetRegistry', () => { throw new Error('unreadable'); });
+sandbox.__stub('getProgramLeaderSheetRegistry', () => { throw new Error('unreadable'); });
 check('an unreadable registry does not lose the rest',
-  sandbox.collectGeneratedArtifactTargets().map(t => t.id).indexOf('LEADER_SHEET') !== -1, true);
+  sandbox.collectGeneratedArtifactTargets().map(t => t.id).indexOf('TEMPLATE') !== -1, true);
+sandbox.__stub('getProgramLeaderSheetRegistry', () => ({ 'chess|ashbridge': { fileId: 'LEADER_SHEET', title: 'Chess' } }));
 
 // --- linkSharing: false -----------------------------------------------------
 

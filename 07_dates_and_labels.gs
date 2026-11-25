@@ -756,3 +756,13 @@ function buildTextEqualsRuleForRanges(ranges, text, bgColor) {
 }
 
 
+
+/**
+ * Minimal escaping for values interpolated into a dialog's markup. Lived in
+ * the sign-in sheet file (45) until that was retired (Nov 2026); every dialog
+ * in the project uses it.
+ */
+function escapeHtmlForDialog(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

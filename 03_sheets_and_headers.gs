@@ -265,13 +265,11 @@ defineLazyGlobal_('HEADERS', () => ({
   // with the hidden machine columns because it is an input to the slot
   // arithmetic rather than something staff read: it is how the form layer
   // rebuilds a session's appointment times without going back to the calendar.
-  // Registrant_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
-  // because they are the same kind of thing: somewhere else to click through
-  // to. They point at the two files this system produces OUTSIDE the workbook
-  // — the spreadsheet a program leader marks up, and the printed sign-in PDF
-  // for that day and building. Both are DERIVED: every render recomputes them
-  // from the registries and overwrites whatever is in the cell, so a link can
-  // never outlive the file it points at. See 69_generated_file_links.gs.
+  // Registrant_Sheet_Link points at the one file this system produces OUTSIDE
+  // the workbook — a program's view-only roster sheet, for programs with a
+  // leader. DERIVED: every render recomputes it from the registry and
+  // overwrites the cell (69). Sign_In_Sheet_Link is RETIRED (Nov 2026):
+  // written blank and hidden, kept only so appends stay aligned.
   //
   // Waitlist_Only is the fourth tick and the odd one out: the other three
   // describe a PROGRAM and are the same on every one of its dates, while this
@@ -379,11 +377,11 @@ defineLazyGlobal_('HEADERS', () => ({
    *             would read as a capacity somebody could book against. The
    *             window is stated in the column note, and the Sessions
    *             drill-through is where history lives.
-   *   Register_Link, Edit_Form_Link, Roster_Link, Sign_In_Link
-   *             the session rows' Form_Response_Link, Edit_Form_Link,
-   *             Registrant_Sheet_Link and Sign_In_Sheet_Link, ONE LINK PER
-   *             CELL, each a =HYPERLINK() with a short word on it ("Register",
-   *             "Edit form", "Roster", "Sign-in sheet") — the CURRENT ones, off
+   *   Register_Link, Edit_Form_Link
+   *             the session rows' Form_Response_Link and Edit_Form_Link, ONE
+   *             LINK PER CELL, each a =HYPERLINK() with a short word on it
+   *             ("Register", "Edit form"; Sign_In_Link went with the sign-in
+   *             sheets, Nov 2026) — the CURRENT ones, off
    *             the program's most recent session, because a Regular program
    *             has a form per month and the one worth handing out is this
    *             month's. They were one 'Links' cell of rich text with a live
@@ -434,7 +432,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Loc', 'Program', 'Next_Date', 'Next_Registered', 'Room', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
     'Schedule', 'Sessions', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Register_Link', 'Edit_Form_Link', 'Status', 'Last_Date',
     'Location', 'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
@@ -531,10 +529,11 @@ defineLazyGlobal_('HEADERS', () => ({
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
-  // Registrant_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
-  // session table carries, repeated here so the day's roster is one click
-  // from the sheet the leader is marking and the PDF the desk printed — see
-  // 69_generated_file_links.gs.
+  // Registrant_Sheet_Link is the same derived link the session table carries
+  // (69). Sign_In_Sheet_Link is RETIRED (Nov 2026, the sign-in sheets were
+  // cut): written blank and hidden, and kept in place only because rows are
+  // appended to this tab in HEADERS order and a column taken out of the
+  // middle would misalign every append onto a tab drawn before the change.
   All_Registrants: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Meals_Ordered',
@@ -604,19 +603,16 @@ defineLazyGlobal_('HEADERS', () => ({
   // numbers rather than adding to the total. A row reading 40 ordered, 14
   // takeaway, 8 carried over means eight of that fourteen left the building
   // on a later day.
-  // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
-  // the printed sheet for that date x location (there is no registrant sheet for a
-  // meal), derived on every render from the registry in
-  // 69_generated_file_links.gs. Its position is free to move for the same
-  // reason the buffers' is — the formulas build their A1 refs from this array.
+  // Sign_In_Sheet_Link used to trail here; it went with the sign-in sheets
+  // (Nov 2026). Dropping a trailing column is safe for the reason the
+  // buffers' position is free — the formulas build their A1 refs from this array.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
     'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
     'Carried_Over',
     'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
-    'Standard_Buffer', 'Tester_Buffer',
-    'Sign_In_Sheet_Link'
+    'Standard_Buffer', 'Tester_Buffer'
   ],
   /**
    * All_Lunch_Registrants - WHO is eating, one row per PERSON per date+location.

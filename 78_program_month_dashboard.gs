@@ -133,7 +133,7 @@ const PROGRAM_MONTH_JOINER = ' · ';
  * sectioned writer makes — rather than by a second, rich-text pass after it
  * that could fail on its own and leave the words unlinked.
  *
- * Registrant_Sheet_Link and Sign_In_Sheet_Link are what 69 stamps on the
+ * Registrant_Sheet_Link is what 69 stamps on the
  * session rows. This tab used to ask for 'Leader_Sheet_Link', which is the OLD
  * spelling of the first of those: it survives in LEGACY_HEADER_ALIASES for
  * reading a sheet, but HEADERS.All_Program_Sessions is keyed by the new name,
@@ -142,8 +142,7 @@ const PROGRAM_MONTH_JOINER = ' · ';
  */
 const PROGRAM_MONTH_LINK_PARTS = [
   { header: 'Form_Response_Link', column: 'Register_Link', label: 'Register' },
-  { header: 'Edit_Form_Link', column: 'Edit_Form_Link', label: 'Edit form' },
-  { header: 'Sign_In_Sheet_Link', column: 'Sign_In_Link', label: 'Sign-in sheet' }
+  { header: 'Edit_Form_Link', column: 'Edit_Form_Link', label: 'Edit form' }
 ];
 
 /**

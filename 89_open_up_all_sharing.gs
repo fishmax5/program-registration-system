@@ -192,14 +192,6 @@ function collectGeneratedArtifactTargets() {
     });
   });
 
-  guarded('the sign-in sheets', () => {
-    const registry = getSignInSheetRegistry();
-    Object.keys(registry).forEach(key => {
-      const entry = registry[key] || {};
-      add(entry.fileId, `the sign-in sheet for ${key.replace('|', ' at ')}`);
-    });
-  });
-
   // --- the pictures on the forms -------------------------------------------
   // NAMED EDITORS, AND NO LINK, which is the one place this sweep deliberately
   // stops short of what it does to everything else.
@@ -234,8 +226,6 @@ function collectGeneratedArtifactTargets() {
     [getSystemRootFolder(),
       getSystemOnlyFolder(false),
       getOrCreateFormsFolder(),
-      getOrCreateSignInSheetDocFolder(),
-      getOrCreateSignInSheetFolder(),
       getOrCreateProgramLeaderSheetFolder(),
       getOrCreateFormImageFolder()
     ].forEach(folder => {

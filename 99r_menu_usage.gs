@@ -165,7 +165,6 @@ function resetMenuUsage() {
 
 function menu_applyProgramTagChangesToCalendar() { recordMenuUsage_('applyProgramTagChangesToCalendar'); return applyProgramTagChangesToCalendar(); }
 function menu_backfillLedgerFromTab() { recordMenuUsage_('backfillLedgerFromTab'); return backfillLedgerFromTab(); }
-function menu_backfillSignInSheetRegistry() { recordMenuUsage_('backfillSignInSheetRegistry'); return backfillSignInSheetRegistry(); }
 function menu_clearSavedTabOrder() { recordMenuUsage_('clearSavedTabOrder'); return clearSavedTabOrder(); }
 function menu_clearStuckBackgroundJobs() { recordMenuUsage_('clearStuckBackgroundJobs'); return clearStuckBackgroundJobs(); }
 function menu_dedupeMemberRollNow() { recordMenuUsage_('dedupeMemberRollNow'); return dedupeMemberRollNow(); }
@@ -262,7 +261,6 @@ function menu_showReimportFormDialog() { recordMenuUsage_('showReimportFormDialo
 function menu_showRepointSessionsDialog() { recordMenuUsage_('showRepointSessionsDialog'); return showRepointSessionsDialog(); }
 function menu_showRestoreRegistrantsFromCopyDialog() { recordMenuUsage_('showRestoreRegistrantsFromCopyDialog'); return showRestoreRegistrantsFromCopyDialog(); }
 function menu_showRestoreRegistrantsFromLedgerDialog() { recordMenuUsage_('showRestoreRegistrantsFromLedgerDialog'); return showRestoreRegistrantsFromLedgerDialog(); }
-function menu_showSignInSheetDialog() { recordMenuUsage_('showSignInSheetDialog'); return showSignInSheetDialog(); }
 function menu_showTimeBlockDialog() { recordMenuUsage_('showTimeBlockDialog'); return showTimeBlockDialog(); }
 function menu_showTriggerStatus() { recordMenuUsage_('showTriggerStatus'); return showTriggerStatus(); }
 function menu_showVolunteerHoursDialog() { recordMenuUsage_('showVolunteerHoursDialog'); return showVolunteerHoursDialog(); }

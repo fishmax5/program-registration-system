@@ -48,7 +48,9 @@ defineLazyGlobal_('REGISTRANT_EDITABLE_COLUMNS', () => ([
  * to a color you can plainly see is worse than the column costing a little
  * width.
  */
-const REGISTRANT_HIDDEN_COLUMNS = ['Event_ID', 'Party_ID', 'Form_Source', 'Registration_ID'];
+const REGISTRANT_HIDDEN_COLUMNS = ['Event_ID', 'Party_ID', 'Form_Source', 'Registration_ID',
+  // Retired with the sign-in sheets (Nov 2026); blank, kept for alignment.
+  'Sign_In_Sheet_Link'];
 
 /** Member_Roll columns that come off the forms rather than from staff — refreshed, not hand-kept. */
 const MEMBER_ROLL_DERIVED_CONTACT_COLUMNS = ['Phone', 'Email'];

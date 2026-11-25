@@ -33,6 +33,7 @@ function syncRegistrations(e) {
   // 2026. All three never throw.
   ensureRegistrantSnapshotTrigger_();
   ensurePublicSnapshotTrigger_();
+  retireRetiredSignInSheetState_(); // sign-in sheets retired Nov 2026; never throws (16)
   snapshotRegistrantsIfDue_();
   applySystemTabVisibilityIfDue_(); // once a day; never throws. See 99zp.
 

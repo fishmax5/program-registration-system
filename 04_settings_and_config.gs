@@ -532,7 +532,13 @@ const DEFAULT_AUTOMATION_ENABLED = true;
  * next unpause would deliver a pile of changes nobody remembers making. It is
  * still listed by showTriggerStatus() as a trigger the workbook expects.
  */
-const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange', 'autoCreateTodaysSignInSheets'];
+// autoCreateTodaysSignInSheets left this list on Nov 25 2026 with the sign-in
+// sheets themselves; its leftover trigger is removed by
+// retireRetiredSignInSheetState_() (16).
+const MANAGED_AUTOMATION_HANDLERS = ['syncCalendars', 'syncRegistrations', 'onCalendarChange'];
+
+/** Handlers whose installed triggers are deleted on sight — retired jobs (16). */
+const RETIRED_TRIGGER_HANDLERS = ['autoCreateTodaysSignInSheets'];
 
 /**
  * Every trigger writeTriggers() maintains — the automation ones plus the edit

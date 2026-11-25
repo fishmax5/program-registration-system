@@ -252,10 +252,8 @@ this.PUBLIC_SNAPSHOT_FILE_PROP_KEY = PUBLIC_SNAPSHOT_FILE_PROP_KEY;
     match('public-schedule-snapshot.json', 'application/json'), 'Public Schedule Snapshot');
   check('a CSV somebody exported by hand is left alone',
     match('All_Registrants export for Jane.csv', 'text/csv'), null);
-  check('a live sign-in document is recognized',
-    match('Sign-In 2026-03-04 Narberth', DOCS), 'Sign-In Sheets');
-  check('a retired sign-in PDF is recognized',
-    match('Sign-In 2026-03-04 Narberth.pdf', 'application/pdf'), 'Printed Sign-In Sheets');
+  check('a sign-in document is no longer filed (the sheets were retired)',
+    match('Sign-In 2026-03-04 Narberth', DOCS), null);
 
   // The refusals, which are the point of the MIME check and the anchoring.
   check('a DOCUMENT named like a leader sheet is left alone',

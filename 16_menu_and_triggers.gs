@@ -254,10 +254,9 @@ function buildDeskMenu_(ui, title) {
     .addItem('\u267e\ufe0f Add an Always-Open Event\u2026', menuFn_('showAddStandingEventDialog'))
     .addItem('\u267e\ufe0f Always-Open Events (edit the list)', menuFn_('showStandingEventsTab'))
     .addSeparator()
-    // THE DOOR, from the desk's side: the printed sheet for today, and the
-    // sign-in app on the laptop. Both were a submenu deep under Sign-In &
-    // Door; the app also keeps its own toolbar menu (99zc).
-    .addItem('\ud83d\udccb Lunch Sign-In Sheet (live Doc)\u2026', menuFn_('showSignInSheetDialog'))
+    // THE DOOR, from the desk's side: the sign-in app on the laptop. It also
+    // keeps its own toolbar menu (99zc). The printed sign-in sheet that sat
+    // here was retired on Nov 25 2026.
     .addItem('\ud83d\udeaa Open the Sign-In App', menuFn_('openSignInApp'))
     .addSeparator()
     // ONE ITEM, NOT TWO. "Sync Cal" and "Sync Registrations" are a distinction
@@ -561,11 +560,6 @@ function buildAdminMenu_(ui, title) {
         // Draws the email-group tabs, seeds Art / Exercise / Movies, and
         // approves everybody currently registered for a ticked program (99zzh).
         .addItem('\u2709\ufe0f Set Up Email Groups', menuFn_('setUpEmailGroups'))
-        // Only worth pressing on a workbook that was printing sign-in sheets
-        // before those links existed: it reads the PDF folder once and teaches
-        // the registry about what is already in it. New PDFs register
-        // themselves as they are built. See backfillSignInSheetRegistry().
-        .addItem('\ud83d\udda8\ufe0f Rebuild Sign-In Sheet Links', menuFn_('backfillSignInSheetRegistry'))
         // The same kind of job one tab over: every folder lookup used to create
         // at My Drive ROOT, so a year of forms, leader sheets and sign-in
         // documents can be sitting loose there. This files them under the
@@ -806,12 +800,9 @@ function writeTriggers(force, takingOwnership) {
   let removed = 0;
   removed += resetTriggersForHandler('syncCalendars', () =>
     ScriptApp.newTrigger('syncCalendars').timeBased().everyDays(1).atHour(5).create());
-  // AN HOUR AFTER THE CALENDAR SYNC, not alongside it: this reads
-  // All_Registrants and the dashboard, and wants that hour's syncCalendars()
-  // run — whatever it moved or added overnight — reflected before it prints,
-  // not raced against it. See autoCreateTodaysSignInSheets() (45).
-  removed += resetTriggersForHandler('autoCreateTodaysSignInSheets', () =>
-    ScriptApp.newTrigger('autoCreateTodaysSignInSheets').timeBased().everyDays(1).atHour(6).create());
+  // RETIRED JOBS: their triggers are removed, never recreated (the 6am
+  // sign-in sheet job, Nov 25 2026). See retireRetiredSignInSheetState_().
+  removed += deleteRetiredTriggers_();
   // Fires hourly but IMPORTS every REGISTRATION_SYNC_EVERY_HOURS — see
   // registrationSyncDueFromTrigger_() in 27. everyHours() takes 1, 2, 4, 6, 8
   // or 12 and nothing else, so three hours cannot be a trigger of its own.
@@ -885,7 +876,7 @@ function writeTriggers(force, takingOwnership) {
 
   const message = removed > 0
     ? `Triggers rebuilt ✅ (cleared ${removed} duplicate/stale one(s) under this account — see the log if more keep appearing)`
-    : `All triggers verified — 2 daily (calendar sync + sign-in sheets), 1 hourly (imports every ${REGISTRATION_SYNC_EVERY_HOURS} hours), 1 monthly metrics, 1 check-in flush, ` +
+    : `All triggers verified — 1 daily calendar sync, 1 hourly (imports every ${REGISTRATION_SYNC_EVERY_HOURS} hours), 1 monthly metrics, 1 check-in flush, ` +
       `${calendarResult.created} calendar-edit ✅`;
   toastIfPossible(message); // also called from a trigger run, where there's no UI
   log(`writeTriggers complete: ${message}`);
@@ -1006,3 +997,46 @@ function releaseMyTriggers() {
 }
 
 
+
+
+// ---------------------------------------------------------------------------
+// RETIRED JOBS (Nov 25 2026).
+//
+// The printed / live-Doc sign-in sheets were retired ("kill sign in sheets all
+// together"). Their 6am trigger is still installed on the live workbook, and a
+// trigger whose handler no longer exists fails every morning and mails the
+// owner about it. So the handler stays as a stub that removes its own trigger,
+// writeTriggers() deletes it, and the hourly sync deletes it too — whichever
+// runs first. The old registry property goes in the same pass.
+// ---------------------------------------------------------------------------
+
+/** Deletes every trigger this account holds for a RETIRED_TRIGGER_HANDLERS handler. Returns the count. Never throws. */
+function deleteRetiredTriggers_() {
+  let removed = 0;
+  try {
+    ScriptApp.getProjectTriggers()
+      .filter(t => RETIRED_TRIGGER_HANDLERS.indexOf(t.getHandlerFunction()) !== -1)
+      .forEach(t => { ScriptApp.deleteTrigger(t); removed++; });
+    if (removed > 0) log(`Removed ${removed} trigger(s) for retired jobs (${RETIRED_TRIGGER_HANDLERS.join(', ')}).`);
+  } catch (err) {
+    log(`ℹ️ Could not remove the retired jobs' triggers (${err}).`);
+  }
+  return removed;
+}
+
+/** The hourly sync's sweep: retired triggers and the sign-in registry property. Never throws. */
+function retireRetiredSignInSheetState_() {
+  deleteRetiredTriggers_();
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty(RETIRED_SIGN_IN_SHEET_REGISTRY_PROP_KEY) !== null) {
+      props.deleteProperty(RETIRED_SIGN_IN_SHEET_REGISTRY_PROP_KEY);
+      log('Cleared the retired sign-in sheet registry.');
+    }
+  } catch (err) { /* the next sync tries again */ }
+}
+
+/** The retired 6am job's handler, kept so its leftover trigger removes itself instead of failing. */
+function autoCreateTodaysSignInSheets() {
+  retireRetiredSignInSheetState_();
+}
