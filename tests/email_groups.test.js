@@ -205,6 +205,20 @@ eq(items.map(i => `${i.type}:${i.group}${i.email ? ':' + i.email : ''}`), [
   'add:new@nhsc.org:a@x.com', 'remove:old@nhsc.org:b@x.com'
 ], 'create, managers (the office on every group, leaders on class groups), adds, removes');
 
+// --- a Failed row retries by itself, and stops after the cap ----------------------
+{
+  const grp = [{ Group_Email: 'g@nhsc.org', Name: 'G', Kind: 'Class', active: true, Created_On: '2026-01-01' }];
+  const fail = (id, notes, inGroup) => ({ Request_ID: id, Email: id + '@x.com', Group: 'g@nhsc.org', Status: 'Failed', In_Group: inGroup, Notes: notes });
+  const its = g.items(grp, [
+    fail('a', 'add failed, attempt 1 of 5 — retried automatically next run: Not Authorized', false),
+    fail('b', 'remove failed, attempt 2 of 5: x', true),
+    fail('c', 'add failed, attempt 5 of 5 — no more automatic retries: x', false),
+    fail('d', 'add: old note with no count', false)
+  ], [], () => [], { 'g@nhsc.org': ['newhorizons@newhorizonsseniorcenter.org'] });
+  eq(its.map(i => `${i.type}:${i.requestId}:${i.attempt}`), ['add:a:2', 'add:d:1', 'remove:b:3'],
+    'a failed add retries as an add, a failed removal as a removal, the count goes up, and the fifth failure is the last');
+}
+
 // --- a tab whose tick boxes ran to row 1000 (the first version's fault) ------------
 {
   const stale = makeSheet('Email_Groups');

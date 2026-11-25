@@ -50,7 +50,12 @@
 //   Approved   to be added at the next apply.
 //   Added      in the group.
 //   Removed    taken off (or to be taken off, while In_Group is still ticked).
-//   Failed     Google refused; Notes says why. Set it back to Approved to retry.
+//   Failed     Google refused; Notes says why and which attempt it was. It is
+//              RETRIED by itself on every apply (an add while In_Group is
+//              clear, a removal while it is ticked) until it works or has
+//              failed GROUP_REQUEST_MAX_ATTEMPTS times; after that it waits for
+//              a person, who sets it back to Approved (or Removed) to start
+//              the count again.
 //   Declined   somebody said no. Never proposed again for that group. A
 //              Declined row with no Group is the door's "no thanks", which is
 //              how the door knows not to ask twice.
@@ -121,6 +126,24 @@ const GROUP_REQUEST_SOURCES = {
 /** The sources whose rows the roster may also take away again. */
 const GROUP_ROSTER_SOURCES = ['registration', 'setup'];
 const EMAIL_GROUPS_SEED_INTERESTS = ['Art', 'Exercise', 'Movies'];
+/**
+ * How many applies a Failed row is retried on by itself. Most refusals are a
+ * setting fixed between runs (the API off, the Groups Admin role missing), so
+ * the next run should just work; an address Google will never take must not be
+ * tried every night for ever.
+ */
+const GROUP_REQUEST_MAX_ATTEMPTS = 5;
+
+/** The attempt count written into a Failed row's Notes ("attempt 2 of 5"), 0 when none. */
+function groupRequestAttempts_(q) {
+  const m = /attempt (\d+) of/.exec(String((q && q.Notes) || ''));
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/** A Failed row still owed an automatic retry. */
+function groupRequestRetryable_(q) {
+  return q.Status === 'Failed' && groupRequestAttempts_(q) < GROUP_REQUEST_MAX_ATTEMPTS;
+}
 /**
  * Made a MANAGER of every group this workbook keeps, class and interest alike,
  * so the office can post to any of them and see who is in it. Added at the
@@ -1004,10 +1027,12 @@ function buildEmailGroupApplyItems(groups, requests, removals, leadersFor, manag
   const items = [];
   const removing = {};
   (removals || []).forEach(r => { removing[r.requestId] = r; });
-  const toAdd = (requests || []).filter(q => q.Group && q.Email && q.Status === 'Approved' &&
-    !isTruthyCheckbox(q.In_Group));
+  // A Failed row retries whichever it was: In_Group clear means its add
+  // failed, ticked means its removal did (a failed removal keeps the tick).
+  const toAdd = (requests || []).filter(q => q.Group && q.Email && !isTruthyCheckbox(q.In_Group) &&
+    (q.Status === 'Approved' || groupRequestRetryable_(q)));
   const toRemove = (requests || []).filter(q => q.Group && q.Email && isTruthyCheckbox(q.In_Group) &&
-    (q.Status === 'Removed' || removing[q.Request_ID]));
+    (q.Status === 'Removed' || removing[q.Request_ID] || groupRequestRetryable_(q)));
   const groupBy = {};
   (groups || []).forEach(g => { groupBy[g.Group_Email] = g; });
   const needed = {};
@@ -1034,10 +1059,12 @@ function buildEmailGroupApplyItems(groups, requests, removals, leadersFor, manag
   toAdd.forEach(q => {
     const g = groupBy[q.Group];
     if (!g || !g.active) return;
-    items.push({ type: 'add', group: q.Group, email: q.Email, requestId: q.Request_ID });
+    items.push({ type: 'add', group: q.Group, email: q.Email, requestId: q.Request_ID,
+      attempt: q.Status === 'Failed' ? groupRequestAttempts_(q) + 1 : 1 });
   });
   toRemove.forEach(q => {
     items.push({ type: 'remove', group: q.Group, email: q.Email, requestId: q.Request_ID,
+      attempt: q.Status === 'Failed' ? groupRequestAttempts_(q) + 1 : 1,
       reason: removing[q.Request_ID] ? removing[q.Request_ID].reason : 'removed by staff' });
   });
   return items;
@@ -1172,7 +1199,12 @@ function runApplyGroupChangesSlice_() {
             state.outcomes[`create:${item.group}`] = 'failed';
           }
           if (item.requestId) {
-            state.outcomes[item.requestId] = { status: 'Failed', inGroup: item.type === 'remove', note: `${item.type}: ${err}` };
+            const attempt = item.attempt || 1;
+            const giveUp = attempt >= GROUP_REQUEST_MAX_ATTEMPTS
+              ? ' — no more automatic retries; set Status back to Approved (or Removed) to try again'
+              : ' — retried automatically next run';
+            state.outcomes[item.requestId] = { status: 'Failed', inGroup: item.type === 'remove',
+              note: `${item.type} failed, attempt ${attempt} of ${GROUP_REQUEST_MAX_ATTEMPTS}${giveUp}: ${err}` };
           }
           log(`⚠️ Email groups: ${item.type} ${item.email || ''} ${item.group} failed — ${err}`);
           spoolOfficeNote('Email groups', `Could not ${item.type === 'create' ? 'create' : item.type} ` +
@@ -1222,6 +1254,12 @@ function writeEmailGroupOutcomes_(state) {
           all[i][c('Applied_On')] = today;
           all[i][c('In_Group')] = out.inGroup;
           if (out.note) all[i][c('Notes')] = out.note;
+          // A success takes this file's own failure note back off (never a
+          // note staff wrote), so a row that is now Added does not still
+          // say it failed.
+          else if (/failed, attempt \d+ of|^(add|remove|manager|create): /.test(String(all[i][c('Notes')] || ''))) {
+            all[i][c('Notes')] = '';
+          }
         }
         cols.forEach(ci => sheet.getRange(2, ci + 1, all.length - 1, 1).setValues(all.slice(1).map(r => [r[ci]])));
       }
