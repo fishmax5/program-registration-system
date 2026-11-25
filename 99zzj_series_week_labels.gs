@@ -66,10 +66,25 @@ const DEFAULT_SERIES_WEEK_NUMBERING = 'Freeze';
 const SERIES_WEEK_RUN_GAP_DAYS = 35;
 const SERIES_WEEK_MAX_WRITES_PER_RUN = 150;
 const SERIES_WEEK_PRUNE_DAYS = 180;
+// A run longer than this is a standing program typed [Grouped], not a course,
+// and is not numbered ("Week 37 of 52" says nothing). Same idea as 95's ceiling.
+const SERIES_WEEK_MAX_RUN_WEEKS = 26;
+// A title that says what the program is, whether or not its Club box is
+// ticked: "Advanced Stitch Club", "Walking Club", "Mah Jongg Open Play" were
+// Grouped with the box clear and were numbered. Read as ongoing.
+const SERIES_WEEK_ONGOING_TITLE_REGEX = /\bclub\b|\b(?:open|free)\s*play\b|\bdrop[-\s]?in\b/i;
 // Matches our label anywhere in a title, with the space before it.
 const SERIES_WEEK_LABEL_REGEX = /\s*\[\s*Week\s+\d+\s+of\s+\d+\s*\]/gi;
 
 let __seriesWeekNumberingCache = null;
+// Grouped programs left unnumbered by collectGroupedSeriesPrograms_, and why.
+let __seriesWeekSkipped = [];
+
+/** A run's numbers, or null for a run too long to be a course. */
+function seriesWeekHitFor_(numbers, dateKey) {
+  const hit = numbers && numbers.byWeek[mondayOfDateKey_(dateKey)];
+  return hit && hit.total <= SERIES_WEEK_MAX_RUN_WEEKS ? hit : null;
+}
 
 /** True for the inside of a "[Week 3 of 8]" bracket. */
 function isSeriesWeekLabelBracket(content) {
@@ -247,6 +262,7 @@ function collectGroupedSeriesPrograms_() {
   const rows = getSectionedRows(sheet, headers, 'Event_ID');
   const programs = {};
   const datesByKey = {};
+  const excluded = {};
   rows.forEach(row => {
     const calendarId = String(row[map['Calendar_Source']] || '').trim();
     const title = String(row[map['Clean_Title']] || '').trim();
@@ -254,6 +270,15 @@ function collectGroupedSeriesPrograms_() {
     const dateKey = seriesWeekDateKey_(row[map['Event_Date']]);
     if (!key || !dateKey) return;
     (datesByKey[key] = datesByKey[key] || {})[dateKey] = true;
+    // ONLY A COURSE IS NUMBERED. A club, an appointment program, a
+    // [No Registration] event or lunch can carry Type_Tag Grouped (one form
+    // for the run) and still be an ongoing thing nobody counts in weeks. Any
+    // row of the program saying so rules the whole program out.
+    const reason = (isClubColumnValue(row[map['Club']]) || SERIES_WEEK_ONGOING_TITLE_REGEX.test(title)) ? 'club'
+      : isAssistanceColumnValue(row[map['Personalized_Assistance']]) ? 'appointments'
+      : isNoRegistrationColumnValue(row[map['No_Registration']]) ? 'no registration'
+      : isLunchOnlyEventId(row[map['Event_ID']]) ? 'lunch' : '';
+    if (reason) excluded[key] = excluded[key] || reason;
     if (!isGroupedTypeTag(row[map['Type_Tag']])) return;
     if (!programs[key]) {
       programs[key] = {
@@ -265,7 +290,15 @@ function collectGroupedSeriesPrograms_() {
       };
     }
   });
-  Object.keys(programs).forEach(key => { programs[key].dates = datesByKey[key] || {}; });
+  __seriesWeekSkipped = [];
+  Object.keys(programs).forEach(key => {
+    if (excluded[key]) {
+      __seriesWeekSkipped.push({ key, title: programs[key].title, location: programs[key].location, reason: excluded[key] });
+      delete programs[key];
+      return;
+    }
+    programs[key].dates = datesByKey[key] || {};
+  });
   return programs;
 }
 
@@ -325,7 +358,7 @@ function applySeriesWeekLabels(options) {
       entry.lastWeek = Object.keys(program.dates).sort().pop() || entry.lastWeek || '';
       ledger.programs[key] = entry;
       (eventsByKey[key] || []).forEach(item => {
-        const hit = numbers && numbers.byWeek[mondayOfDateKey_(item.dateKey)];
+        const hit = seriesWeekHitFor_(numbers, item.dateKey);
         const label = hit ? seriesWeekLabelText(hit.week, hit.total) : '';
         wanted.push({ ev: item.ev, raw: item.raw, title: titleWithSeriesWeekLabel(item.raw, label) });
       });
@@ -393,14 +426,19 @@ function listSeriesWeekPrograms() {
     const mode = seriesWeekModeFor_(entry);
     const numbers = mode === 'off' ? null : computeSeriesWeekNumbers(Object.keys(program.dates), entry.weeks, mode);
     const upcoming = Object.keys(program.dates).sort().filter(d => d >= todayKey).map(d => {
-      const hit = numbers && numbers.byWeek[mondayOfDateKey_(d)];
-      return { date: d, label: hit ? `Week ${hit.week} of ${hit.total}` : (mode === 'off' ? 'off' : 'no number') };
+      const hit = seriesWeekHitFor_(numbers, d);
+      const raw = numbers && numbers.byWeek[mondayOfDateKey_(d)];
+      return { date: d, label: hit ? `Week ${hit.week} of ${hit.total}`
+        : mode === 'off' ? 'off'
+        : raw ? `not numbered — ${raw.total}-week run is ongoing, not a course` : 'no number' };
     });
     return {
       key, title: program.title, location: program.location,
       override: normalizeSeriesWeekMode(entry.mode), upcoming
     };
-  }).sort((a, b) => a.title.localeCompare(b.title) || a.location.localeCompare(b.location));
+  }).concat(__seriesWeekSkipped.map(p => ({
+    key: p.key, title: p.title, location: p.location, override: '', upcoming: [], skipped: p.reason
+  }))).sort((a, b) => a.title.localeCompare(b.title) || a.location.localeCompare(b.location));
 }
 
 function showSeriesWeekNumbersDialog() {
@@ -482,6 +520,11 @@ sync. <b>Recount once</b> renumbers this program now and keeps its setting.</p>
       head.appendChild(el('span', p.title, 't'));
       head.appendChild(el('span', ' · ' + p.location, 'loc'));
       box.appendChild(head);
+      if (p.skipped) {
+        box.appendChild(el('div', 'Not numbered: grouped, but a ' + p.skipped + ' program, not a course.', 'dates'));
+        list.appendChild(box);
+        return;
+      }
       var row = el('div', '', 'row');
       var sel = document.createElement('select');
       sel.setAttribute('data-key', p.key);
