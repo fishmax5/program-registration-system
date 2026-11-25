@@ -314,18 +314,13 @@ function checkInCancel(payload) {
 /**
  * A TICK IN "DROPPED" IS A CANCELLATION, and until now it was a note.
  *
- * The shared registrant sheet has carried a Dropped checkbox since it was built,
- * and pullProgramLeaderSheetEdits() has faithfully merged it back onto the
- * Registrants tab every hour — where it sat in a column nothing reads. The
- * leader had done the only thing their sheet offered and the seat stayed full.
+ * Dropped is a tick column on All_Registrants (it was also on the leaders'
+ * shared sheets until Nov 2026, when those became view-only lists). Until this
+ * existed it sat in a column nothing reads and the seat stayed full. "This
+ * person dropped out" is the sentence staff know; translating it into the
+ * workbook's vocabulary is this project's job.
  *
- * Program_Status is a DERIVED column on that sheet (LEADER_SHEET_DERIVED_COLUMNS)
- * — a leader cannot type it, and should not have to: "this person dropped out"
- * is the sentence they know, and translating it into the workbook's vocabulary
- * is this project's job, not theirs.
- *
- * RUN AFTER THE MERGE, INSIDE THE IMPORT, on the same rows the merge just
- * touched — so a tick made this morning is a freed seat by the next pass
+ * RUN INSIDE THE IMPORT, on the rows about to be written — so a tick made this morning is a freed seat by the next pass
  * rather than by the next time somebody notices. Stamps the rows directly
  * instead of going through cancelRegistrantRows(), because the import is
  * about to write this exact array to the tab and re-reading it here would

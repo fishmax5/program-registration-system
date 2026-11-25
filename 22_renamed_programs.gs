@@ -696,6 +696,12 @@ function renameProgramSettingRows(ss, renames) {
   rows.forEach(row => {
     const replacement = titleMap[normalizeNameKey(row[map['Event']])];
     if (replacement) {
+      // The old title stays on as an alias (99zzc), so a date still carrying
+      // it, or a rename back, files under this program instead of splitting it.
+      if (map['Also_Known_As'] !== undefined) {
+        row[map['Also_Known_As']] = aliasCellWithRenamedTitle(
+          row[map['Also_Known_As']], row[map['Event']], replacement);
+      }
       row[map['Event']] = replacement;
       renamed.push(row);
     } else {
@@ -723,8 +729,10 @@ function renameProgramSettingRows(ss, renames) {
   // are all here and all correct; refreshProgramSettings() draws the groupings
   // back on the next sync. See groupProgramSettingsRows() (section 6c).
   writeMemoryTab(sheet, headers, defaultsRows.concat(kept), programSettingsTabOptions());
-  // The tab section 9e reads its policies off has just been rewritten.
+  // The tab section 9e reads its policies off has just been rewritten, and
+  // so has every alias.
   invalidateNotificationPolicyCache();
+  invalidateProgramAliasIndex();
   log(`Renamed program(s): moved ${renamed.length} ${SHEET_NAMES.PROGRAM_SETTINGS} row(s) onto ` +
     `the new name` +
     (kept.length < rows.length ? `, dropping ${rows.length - kept.length} blank duplicate(s)` : '') + '.');

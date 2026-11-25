@@ -1301,8 +1301,7 @@ function writeMasterLunchDashboardSheet(sheet, plan, headers, fullTableRows, rol
         'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge', 'Carried_Over',
         // Config owns these now — typing over one is overwritten on the next
         // render, and the warning says where to change it instead.
-        'Standard_Buffer', 'Tester_Buffer',
-        'Sign_In_Sheet_Link'],
+        'Standard_Buffer', 'Tester_Buffer'],
       zones);
 
     // Nothing on this tab is an internal key, so nothing is hidden — but the

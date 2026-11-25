@@ -211,21 +211,22 @@ function snapshotRegistrantTab_(sheet, reason) {
 }
 
 /**
- * The daily trigger. One CSV a night, pruned after REGISTRANT_SNAPSHOT_KEEP_DAYS.
+ * The 3am trigger. NO LONGER WRITES A CSV (Nov 25 2026, Max: cut the daily
+ * snapshot — the registration ledger, `99k`, is the durable history, and
+ * Google's version history is the copy of the tab). The handler keeps its
+ * name because it is the installed trigger, and it still does the two things
+ * that rode on it: ageing out the CSVs already in the folder, and the
+ * ledger's nightly checkpoint (`99zq`).
+ *
+ * The guard's own snapshot (snapshotRegistrantTab_ on a refused or alarming
+ * shrink) is unchanged: that one is written only when something looks wrong,
+ * and it is the copy somebody wants that same hour.
  *
  * Runs whether or not automation is enabled: the kill switch stops this system
- * CHANGING things, and a copy of what is already there changes nothing. A
- * workbook somebody paused because it was misbehaving is exactly the one whose
- * yesterday is worth keeping.
+ * CHANGING things, and neither job changes a registration.
  */
 function snapshotRegistrantsDaily() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAMES.REGISTRANT_DASH);
-  if (!sheet) {
-    log('ℹ️ No registrants tab to snapshot.');
-    return;
-  }
-  if (snapshotRegistrantTab_(sheet, 'daily')) markDailySnapshotTaken_();
+  markDailySnapshotTaken_();
   pruneRegistrantSnapshots_();
   // Then the registration ledger's checkpoint (99zq), on this trigger rather
   // than one of its own. Guarded twice over: it never throws, and nothing it
@@ -261,7 +262,7 @@ function markDailySnapshotTaken_() {
   } catch (err) { /* the next hourly check takes another; harmless */ }
 }
 
-/** The hourly sync's belt: today's copy, if it is past 3am and there is none. Never throws. */
+/** The hourly sync's belt: today's nightly run (prune + ledger checkpoint), if it is past 3am and none has run. Never throws. */
 function snapshotRegistrantsIfDue_() {
   try {
     const now = new Date();
@@ -269,7 +270,7 @@ function snapshotRegistrantsIfDue_() {
     if (hour < REGISTRANT_DAILY_SNAPSHOT_HOUR) return false;
     const last = PropertiesService.getScriptProperties().getProperty(REGISTRANT_DAILY_SNAPSHOT_PROP_KEY);
     if (last === formatDateKey(now)) return false;
-    log('The nightly registrant snapshot has not run today — taking it now.');
+    log('The nightly ledger checkpoint has not run today — running it now.');
     snapshotRegistrantsDaily();
     return true;
   } catch (err) {

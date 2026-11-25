@@ -114,6 +114,7 @@ this.programMonthLeaderCoverage = programMonthLeaderCoverage;
 this.computeProgramMetrics = computeProgramMetrics;
 this.scanRegistrants = scanRegistrants;
 this.HEADERS = HEADERS;
+this.__setRegistrantRanges = function (colA) { __registrantRosterRangesMemo = Object.assign(parseRegistrantRosterRanges_(colA.map(v => [v])), { base: 'https://sheet.example/edit', gid: 5, lastLetter: 'Z' }); };
 this.getIndexMap = getIndexMap;
 this.LUNCH_ONLY_EVENT_ID_PREFIX = LUNCH_ONLY_EVENT_ID_PREFIX;
 this.handleProgramMonthEdit = handleProgramMonthEdit;
@@ -451,33 +452,41 @@ const build = (rows, link, leaders, settings) =>
   check('each link lands in its own column, as one HYPERLINK with a short word',
     [cell(built.rows[0], 'Register_Link')],
     ['=HYPERLINK("https://forms.example/live","Register")']);
-  // The roster is no longer a column: the Program cell links to it (99zzg).
-  check('the roster link rides with the row, for the Program cell',
-    built.rosterUrls.get(built.rows[0]), 'https://docs.example/roster');
+  // The roster is no longer a column, and the Program cell no longer links to
+  // the roster sheet: it opens the program's rows on All_Registrants (99zzl).
+  check('with no All_Registrants to read, the Program cell is not linked',
+    built.rosterUrls.get(built.rows[0]), undefined);
+  sandbox.__setRegistrantRanges(['Event_Date', '▸ Chair Yoga — Narberth', 'x', 'x']);
+  const linked = build([withLinks]);
+  check('the Program cell opens the program\'s rows on All_Registrants',
+    linked.rosterUrls.get(linked.rows[0]), 'https://sheet.example/edit#gid=5&range=A2:Z4');
+  sandbox.__setRegistrantRanges([]);
   check('...and there is no Roster_Link column',
     sandbox.HEADERS.Master_Program_Dashboard.indexOf('Roster_Link'), -1);
   check('...and a link the program has not got is a blank cell, not a dangling word',
-    [cell(built.rows[0], 'Edit_Form_Link'), cell(built.rows[0], 'Sign_In_Link')], ['', '']);
+    [cell(built.rows[0], 'Edit_Form_Link')], ['']);
+  check('the sign-in link column went with the sign-in sheets',
+    sandbox.HEADERS.Master_Program_Dashboard.indexOf('Sign_In_Link'), -1);
   check('the combined Links column is gone',
     sandbox.HEADERS.Master_Program_Dashboard.indexOf('Links'), -1);
   check('no side-channel is handed back for a rich-text pass', built.links, undefined);
   check('every link column is a column of the tab',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(p => sandbox.HEADERS.Master_Program_Dashboard.indexOf(p.column) !== -1),
-    [true, true, true]);
+    [true, true]);
 }
 // The MOST RECENT non-blank link wins, per column — a Regular program has a
 // form per month and the one worth handing out is this month's.
 {
   const older = session({ at: [2026, 8, 1, 9, 30], formId: 'F_OLD' });
   older[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/sep","View Live Form")';
-  older[sessionMap['Sign_In_Sheet_Link']] = '=HYPERLINK("https://docs.example/signin","Sign-in sheet")';
+  older[sessionMap['Edit_Form_Link']] = '=HYPERLINK("https://forms.example/edit-sep","Edit")';
   const newer = session({ at: [2026, 8, 8, 9, 30], formId: 'F_OLD' });
   newer[sessionMap['Form_Response_Link']] = '=HYPERLINK("https://forms.example/oct","View Live Form")';
   const built = build([older, newer]);
   check('the newest session\u2019s link wins, and an older one fills a column the newest left blank',
-    [cell(built.rows[0], 'Register_Link'), cell(built.rows[0], 'Sign_In_Link')],
+    [cell(built.rows[0], 'Register_Link'), cell(built.rows[0], 'Edit_Form_Link')],
     ['=HYPERLINK("https://forms.example/oct","Register")',
-     '=HYPERLINK("https://docs.example/signin","Sign-in sheet")']);
+     '=HYPERLINK("https://forms.example/edit-sep","Edit form")']);
 }
 // A link cell holding WORDS rather than a link keeps its words: losing them
 // would turn "this program deliberately takes no registrations" into an empty
@@ -735,7 +744,7 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
     'Loc', 'Program', 'Next_Date', 'Next_Registered', 'Room', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
     'Schedule', 'Sessions', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Register_Link', 'Edit_Form_Link', 'Status', 'Last_Date',
     'Location', 'Form_ID', 'Group_Key'
   ]);
   // NOTHING WAS DROPPED AND NOTHING WAS ADDED. A reorder needs no header
@@ -747,14 +756,14 @@ check('...and words are not mistaken for one', sandbox.hyperlinkFormulaUrl('— 
       'Club', 'Edit_Form_Link', 'Form_ID', 'Group_Key', 'Last_Date', 'Leader', 'Loc', 'Location',
       'Next_Date', 'Next_Registered', 'No_Registration', 'Notify', 'Personalized_Assistance', 'Program',
       'Register_Link', 'Room', 'Schedule', 'Seats', 'Sessions',
-      'Sign_In_Link', 'Status', 'Type_Tag'
+      'Status', 'Type_Tag'
     ].sort());
   check('...and no column twice', headers.length, new Set(headers).size);
   // The link columns are still columns of this tab — the one place the row
   // builder writes through a table of its own (PROGRAM_MONTH_LINK_PARTS).
   check('and every link part still names one of them',
     sandbox.PROGRAM_MONTH_LINK_PARTS.map(part => headers.indexOf(part.column) !== -1),
-    [true, true, true]);
+    [true, true]);
 }
 
 // --- A status nothing recognizes is the group's worst, not ignored ----------

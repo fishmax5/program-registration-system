@@ -31,9 +31,8 @@
  *      GOES IN A CELL NOTE. Seats is the four counting columns as one
  *      sentence ("12 / 20 · 60% · 2 waiting", or "12 · unlimited"), summed
  *      over THIS MONTH AND NEXT rather than over the program's whole life;
- *      the form, its editor and the two generated sheets are four link
- *      columns, one link each (Register_Link, Edit_Form_Link,
- *      Sign_In_Link) — the roster is the Program cell's own link since the
+ *      the form and its editor are link columns, one link each
+ *      (Register_Link, Edit_Form_Link) — the roster is the Program cell's own link since the
  *      front columns (99zzg: Loc · Program · Next_Date · Next_Registered ·
  *      Room); and the three PROGRAM FLAGS —
  *      Club, No Registration, Personalized Assistance — are tick boxes here

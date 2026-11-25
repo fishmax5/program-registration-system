@@ -1,6 +1,7 @@
-// THREE WRITERS OF THE REGISTRANTS TAB THAT USED TO TELL THE LEDGER NOTHING:
-// the leader-sheet pull (ticks), the program rename (Event_ID / Event) and —
-// covered by the same composer — the club-list cancel. Each now appends one
+// WRITERS OF THE REGISTRANTS TAB THAT USED TO TELL THE LEDGER NOTHING: the
+// program rename (Event_ID / Event) and — covered by the same composer — the
+// club-list cancel. (The leader-sheet pull was a third until Nov 2026, when
+// the leaders' sheets became view-only lists and the pull was removed.) Each now appends one
 // entry per row it changed, composed before the row moves.
 const vm = require('vm');
 const assert = require('assert');
@@ -49,27 +50,5 @@ assert.strictEqual(re.eventId, 'NEW');
 assert.strictEqual(re.source, 'migration');
 assert.deepStrictEqual(JSON.parse(JSON.stringify(re.payload)), { Event_ID: 'NEW', Event: 'Chair Yoga' });
 assert.strictEqual(renameResult.id, 'NEW');
-
-// --- leader pull: one corrected per row, only the ticks that moved
-const pull = vm.runInContext(`
-  const row = __row({ Name: 'Joan', Event_ID: 'E1', Party_ID: 'P1', Contacted: false });
-  const untouched = __row({ Name: 'Sam', Event_ID: 'E1', Party_ID: 'P2' });
-  const key = leaderRowKey('E1', 'P1', 'Joan');
-  getProgramLeaderSheetRegistry = () => ({ prog: { fileId: 'f', title: 'Yoga' } });
-  openSpreadsheetCached = () => ({ getSheetByName: () => ({}) });
-  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
-  const sheetRow = []; sheetRow[sheetMap['Row_Key']] = key; sheetRow[sheetMap['Pushed_Snapshot']] = 'snap';
-  readSimpleTable = () => [sheetRow];
-  decodeLeaderSnapshot = () => LEADER_OWNED_COLUMNS.map(() => false);
-  readLeaderValues = () => LEADER_OWNED_COLUMNS.map(n => n === 'Contacted');
-  __entries.length = 0;
-  const applied = pullProgramLeaderSheetEdits([row, untouched]);
-  ({ applied, entries: __entries.slice() });
-`, sandbox);
-assert.strictEqual(pull.applied, 1);
-assert.strictEqual(pull.entries.length, 1, 'the untouched row is not recorded');
-assert.strictEqual(pull.entries[0].source, 'leader-sheet');
-assert.strictEqual(pull.entries[0].registrationId, 'REG-Joan');
-assert.deepStrictEqual(JSON.parse(JSON.stringify(pull.entries[0].payload)), { Contacted: true });
 
 console.log('ledger_missing_appends: ok');

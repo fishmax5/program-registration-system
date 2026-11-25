@@ -130,7 +130,6 @@ function installStubs() {
   sandbox.migrateFormsToCurrentTemplate = record('migrateFormsToCurrentTemplate');
   sandbox.applyAllDatesCatchup = record('applyAllDatesCatchup');
   sandbox.applyClubRosterCatchup = record('applyClubRosterCatchup');
-  sandbox.pullProgramLeaderSheetEdits = record('pullProgramLeaderSheetEdits');
   sandbox.applyLeaderDropsAsCancellations = record('applyLeaderDropsAsCancellations');
   sandbox.applyLeaderWaitlistTicks = record('applyLeaderWaitlistTicks');
   sandbox.applyMemberRollContacts = record('applyMemberRollContacts');

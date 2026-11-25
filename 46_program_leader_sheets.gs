@@ -21,88 +21,28 @@
 // stored key or a tab name hands every live sheet to nobody. What changed is
 // every word a person reads.
 //
-// So each program gets its OWN small spreadsheet in Drive, holding nothing but
-// that program's roster, which the leader is added to as an editor.
+// So a program with a leader gets its OWN small spreadsheet in Drive, holding
+// nothing but that program's roster, which the leader is added to as a VIEWER.
 //
 // ONE SHEET PER PROGRAM, NOT PER SESSION. A weekly class is one sheet with a
-// band per date (see below), so a link that was handed out in September is
-// still the right link in March. A sheet per session would mean a new link
-// every week, a folder nobody can find anything in, and marks stranded on
-// last week's file. It is
-// refreshed by the hourly registration sync — the same pass that imports the
-// form responses in the first place — so it costs NO NEW TRIGGER. That matters:
-// Apps Script allows twenty installable triggers per account and this project
-// already spends one per calendar, so a design that needed one per program
-// would stop working somewhere around the twentieth class.
+// band per date, so a link handed out in September is still the right link in
+// March. It is refreshed by the hourly registration sync, so it costs no
+// trigger of its own.
 //
-// WHO GETS ONE. Every program but lunch does, a week before its next session
-// — see ensureRegistrantSheetsForUpcomingPrograms() and, for why lunch is
-// left out, leaderSheetSkipsProgram_(). It used to be only programs
-// whose leader had ticked Notify_Roster_Changes, and that left the ordinary
-// case (a class with no leader row at all) with no live roster unless somebody
-// remembered the menu item on the morning it was needed. The sheet is cheap,
-// it is built once for the life of the program, and a week is long enough to
-// be useful before the day and short enough that a calendar full of next
-// year's dates does not build a hundred spreadsheets tonight.
+// A VIEW-ONLY LIST SINCE NOV 2026. The sheets used to carry five leader tick
+// columns (Contacted, Confirmed, Waitlisted, Dropped, Attended) and
+// Leader_Notes, read back every hour through a hidden per-row snapshot. Max
+// cut that: the office keeps those ticks on All_Registrants, and the hourly
+// read of every sheet in Drive was the costliest thing the sync did. Now the
+// push writes, nothing reads back, the link is view-only and leaders are
+// viewers (shareLeaderSheetWithLeadersAsViewers_). The staff roster link on a
+// program's title points at its rows on All_Registrants instead.
 //
-// WHO IT IS SHARED WITH is still Program_Leaders (section 9c), which is where a
-// leader's name and their address live. A program with no leader row gets its
-// sheet anyway — anyone with the link can open it — and nobody is emailed
-// about it.
-//
-// WHY NOT IMPORTRANGE. A formula-driven mirror is live and needs no code at
-// all, and that was the first plan. It cannot work here, because these sheets
-// are not read-only: the leader marks who they have CONTACTED, who has
-// CONFIRMED, who is WAITLISTED, who has DROPPED. An IMPORTRANGE (or QUERY)
-// result spills into the cells beneath it, so the moment a new registration
-// lands the roster grows by a row and every hand-typed mark below the insertion
-// point is now attached to the wrong person. Silently. There is no way to pin
-// an editable column beside a spilling formula. So the rows are WRITTEN by this
-// code instead, each carrying a hidden Row_Key, and the marks are matched back
-// by that key rather than by position.
-//
-// WHICH WAY THE FIVE LEADER-OWNED COLUMNS FLOW. Both ways, resolved per cell
-// against a snapshot:
-//
-//   Every push writes a hidden Pushed_Snapshot beside each row — the leader
-//   values exactly as they were sent out. Every pull compares the sheet's
-//   current values against that snapshot, cell by cell. A cell that DIFFERS is
-//   something the leader typed since the last refresh, and it wins. A cell
-//   that MATCHES was never touched, so whatever the workbook says now wins,
-//   and a correction made on All_Registrants is not clobbered by a stale copy
-//   sitting in a browser tab.
-//
-// That is a real three-way merge and it is why staff and leader can work on
-// the same roster at once. Without it the last writer would win by accident and
-// the loser would never know.
-//
-// AND ONE COLUMN THAT FLOWS ONE WAY ONLY: Attended. The desk owns it — Quick
-// Mark and the sign-in app tick it at the door — but the person who knows who
-// walked into the room is very often the one standing in it, so the roster
-// carries it and a leader may TICK it. Ticking sets Attended on the registrant
-// row; UNTICKING does nothing whatever. The merge above would happily send a
-// false back, and that false would erase a mark somebody made in front of the
-// person it was about — from a browser tab left open since Tuesday, or from a
-// leader tidying up last month's sheet. Attendance only ever goes up from
-// here; taking one off is the desk's job (Quick Mark ▸ Change this
-// registration). The rule is stated where a leader will meet it: in the banner
-// note and on the column's own header cell (leaderSheetAckColumnNote()), and
-// it is enforced in exactly one place for both doors — leaderAckEditApplies_(),
-// which the hourly pull and the web roster page (99zn) both ask.
-//
-// THE SHEET IS BANDED BY SESSION, not a flat list of rows. A class list is read
-// one class at a time — "who is coming on Thursday" — and a leader with twelve
-// dates on one sheet was reading a four-hundred-row block whose only marker for
-// where Thursday started was the date repeating in column A. Each session now
-// opens with its own band naming the date, the time and the headcount, and its
-// registrants sit under it.
-//
-// THE BANDS ARE INVISIBLE TO THE MERGE, and that is load-bearing rather than
-// incidental: a band row carries no Row_Key and no Pushed_Snapshot, and
-// pullProgramLeaderSheetEdits() skips any row missing either. So the layout can
-// grow another band, a subtotal or a spacer without the pull needing to learn
-// about it, and — the failure that matters — a band row can never be mistaken
-// for a registrant whose marks were all just cleared.
+// WHO GETS ONE. Only a program with a row on Program_Leaders (programHasLeader_),
+// a week before its next session (ensureRegistrantSheetsForUpcomingPrograms),
+// or whenever its leader asked to be notified. A sheet whose program has no
+// leader any more is retired once (retireLeaderlessSheet_): its tab says to ask
+// the office, and the push leaves it alone. Lunch never gets one.
 //
 // THE PRIVACY BOUNDARY is one program AT ONE LOCATION — the same grain as
 // Program_Settings and Program_Leaders, and the reason the key carries both.
@@ -238,47 +178,8 @@ function leaderSheetTabReadsEmpty_(sheet) {
  */
 const LEADER_SHEET_HEADERS = [
   'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size',
-  'Phone', 'Email', 'Program_Status',
-  // Attended sits with the ticks a leader reads in order — rang them, they
-  // confirmed, they came — rather than at the end of the row, and Waitlisted
-  // and Dropped stay adjacent as the pair with consequences off this sheet.
-  // The SNAPSHOT's order is LEADER_SHEET_EDITABLE_COLUMNS' (`03`) and is not
-  // this one; see its banner for why the two deliberately disagree.
-  'Contacted', 'Confirmed', 'Attended', 'Waitlisted', 'Dropped', 'Leader_Notes',
-  'Row_Key', 'Pushed_Snapshot', 'Answers'
+  'Phone', 'Email', 'Program_Status', 'Answers'
 ];
-
-/**
- * WHAT THE Attended HEADER CELL SAYS, because a tick box that behaves
- * differently from the four beside it has to say so where it is, not only in
- * a banner note three paragraphs long that a leader read once in September.
- *
- * One string, used by BOTH painters (`99zk` sends it as a batchUpdate note) —
- * a literal in two places is a sentence that stops matching the day somebody
- * improves one of them, and tests/sheets_batch_golden.test.js compares the
- * notes the two paths leave.
- */
-function leaderSheetAckColumnNote() {
-  return 'Tick this for everyone who came. It goes onto the office\u2019s own ' +
-    'attendance count at the next sync.\n\nUnticking does nothing: the front ' +
-    'desk also marks people in as they arrive, and this box is never allowed ' +
-    'to undo that. If somebody is marked who should not be, ring the office.';
-}
-
-/**
- * MAY THIS EDIT TO AN ACKNOWLEDGEMENT COLUMN BE WRITTEN ONTO THE REGISTRANT ROW?
- *
- * The whole of the one-way rule, in one place, asked by the hourly pull
- * (pullProgramLeaderSheetEdits). It used to be asked by the web roster page's
- * writer too (`99zn`, retired Nov 2026), which is why it is its own function.
- *
- * Everything that is not an acknowledgement column passes straight through:
- * the five leader-owned columns merge both ways as they always have.
- */
-function leaderAckEditApplies_(column, value) {
-  if (LEADER_ACK_FLAG_COLUMNS.indexOf(column) === -1) return true;
-  return normalizeLeaderFlag(value);
-}
 
 /**
  * THE ANSWERS TO THE PROGRAM'S OWN QUESTIONS (Program_Questions, `53`/`54`) —
@@ -292,24 +193,20 @@ function leaderAckEditApplies_(column, value) {
  * (a question added in October is not answered by September's registrants),
  * and a column per title would reshape the sheet every time it did.
  *
- * LAST on the list, after the two hidden machine columns, and sync-owned: the
- * pull reads this sheet by HEADER (readSimpleTable's projection), so a sheet
- * written before this column existed reads it back blank and the leader-owned
- * ticks are found exactly where they always were.
+ * LAST on the list, like every column here written by the sync and never read
+ * back: the sheet is a view-only list (Nov 2026).
  */
 function leaderSheetAnswersText(formAnswers) {
   return String(formAnswers || '').split(' | ')
     .map(part => part.trim()).filter(Boolean).join('\n');
 }
 
-/** Machine columns on the shared sheet. Hidden, never typed in — see writeProgramLeaderSheetTab(). */
-const LEADER_SHEET_HIDDEN_COLUMNS = ['Row_Key', 'Pushed_Snapshot'];
-
-/** What the shared sheet shows but the leader may not change — everything the sync owns. */
-const LEADER_SHEET_DERIVED_COLUMNS = [
-  'Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status',
-  'Answers'
-];
+/**
+ * Every column on the sheet is the sync's. Since Nov 2026 the sheet is a
+ * view-only list — leaders are viewers, nothing on it is read back — so the
+ * warning-only protection covers the whole row.
+ */
+const LEADER_SHEET_DERIVED_COLUMNS = LEADER_SHEET_HEADERS.slice();
 
 /**
  * The background a session band is drawn in, and the ink on it.
@@ -361,9 +258,8 @@ defineLazyGlobal_('LEADER_SHEET_WAITLIST_INK', () => PALETTE.SIGNAL_ORANGE);
  * workbook's Program_Waitlist tab (`99z`) — waiting for ANY date of this
  * program, which no per-session roster could show at all.
  *
- * READ-ONLY, AND NEVER READ BACK. pullProgramLeaderSheetEdits() reads
- * Sign_Up_Sheet and nothing else, so nothing typed here can move a
- * registration; the whole tab is protected with a warning like the derived
+ * READ-ONLY, AND NEVER READ BACK — like the whole sheet since Nov 2026,
+ * so nothing typed here can move a registration; the whole tab is protected with a warning like the derived
  * columns next door. Taking somebody off the waitlist is the office's job
  * (Quick Mark ▸ Change this registration ▸ Put them back on), which is what
  * the banner note says.
@@ -379,7 +275,7 @@ const LEADER_WAITLIST_TAB_NAME = 'Waitlist';
 const LEADER_WAITLIST_HEADERS = ['Name', 'Phone', 'Email', 'Party_Size', 'Dates', 'Added', 'Notes'];
 const LEADER_WAITLIST_EMPTY_TEXT = 'Nobody is on the waiting list.';
 
-/** Is this built roster line WAITLISTED by the workbook (not merely ticked a moment ago)? */
+/** Is this built roster line WAITLISTED by the workbook? */
 function isLeaderSheetStatusWaitlisted_(row, sheetMap) {
   return String(row[sheetMap['Program_Status']] || '').trim() === 'Waitlisted';
 }
@@ -439,7 +335,7 @@ function condenseLeaderWaitlistDates(dates) {
 
 /**
  * The Waitlist tab's rows: one per PERSON, matched on the name alone (the
- * same key the roster's Row_Key normalizes), from this program's waitlisted
+ * normalized), from this program's waitlisted
  * roster lines plus its any-date entries on Program_Waitlist.
  *
  * Order is the order a leader would ring round in: somebody waiting for the
@@ -647,44 +543,6 @@ function leaderProgramKey(title, location) {
 }
 
 /**
- * The identity of one roster line, and the thing that makes the merge safe
- * against re-ordering.
- *
- * Party_ID (the form response) is included because one submission can seat a
- * whole party under one name, and the name alone is included because a row
- * added by hand at the desk has no Party_ID at all. Normalized, so the key a
- * row is written under is the key it is read back under even if somebody
- * retypes the name with a double space.
- */
-function leaderRowKey(eventId, partyId, name) {
-  return `${String(eventId || '').trim()}|${String(partyId || '').trim()}|${normalizeNameKey(name)}`;
-}
-
-/**
- * The Row_Key of a FOLDED party line (foldLeaderSheetParties_): one key for
- * every person who came in on one form response for one session. The name
- * slot is `*`, which normalizeNameKey can never produce from a real name, so
- * a party key cannot collide with a person's.
- */
-function leaderPartyRowKey(eventId, partyId) {
-  return `${String(eventId || '').trim()}|${String(partyId || '').trim()}|*`;
-}
-
-/**
- * Does this Registrants row answer to this roster Row_Key? Its own key, or —
- * when the roster line is a folded party — the party's. The ONE statement of
- * the match, used by the hourly pull and the web roster page (99zn), so a
- * leader's tick on "John Pavloff & Mrs. Pavloff" lands on both of them.
- */
-function leaderRowKeyMatches(row, map, rowKey) {
-  const key = String(rowKey || '');
-  if (!key) return false;
-  if (leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]) === key) return true;
-  const partyId = String(row[map['Party_ID']] || '').trim();
-  return !!partyId && leaderPartyRowKey(row[map['Event_ID']], partyId) === key;
-}
-
-/**
  * Minutes after midnight of the FIRST clock time in a label ("9:30 AM – 10:00
  * AM" → 570), or null. What the roster and the leader digest order a day by.
  */
@@ -754,9 +612,7 @@ function leaderPartyNames(names) {
  * "party of 2" — read as four people, or as two bookings in one slot. So the
  * rows one form response made for one session (same Event_ID, same Party_ID,
  * same Program_Status) are drawn as one line: the names together, the party's
- * size, the ticks OR-ed (somebody marked in is the party marked in), the notes
- * joined. Its Row_Key is leaderPartyRowKey(), and leaderRowKeyMatches() is
- * what sends a tick on that line back to every person in it.
+ * size, and the first phone, email and answers any of them gave.
  *
  * A row with no Party_ID (added at the desk) is never folded: there is nothing
  * that says who it came with.
@@ -797,241 +653,58 @@ function foldLeaderSheetParties_(rows, partyOf) {
         if (other) folded[sheetMap[col]] = other[sheetMap[col]];
       }
     });
-    const values = LEADER_SHEET_EDITABLE_COLUMNS.map(name => {
-      const cells = members.map(r => readLeaderValues(r, sheetMap)[LEADER_SHEET_EDITABLE_COLUMNS.indexOf(name)]);
-      if (LEADER_SHEET_TICK_COLUMNS.indexOf(name) !== -1) return cells.some(Boolean);
-      return cells.filter((v, i) => v && cells.indexOf(v) === i).join(' | ');
-    });
-    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => { folded[sheetMap[name]] = values[i]; });
-    folded[sheetMap['Row_Key']] = leaderPartyRowKey(item.meta.eventId, item.meta.partyId);
-    folded[sheetMap['Pushed_Snapshot']] = encodeLeaderSnapshot(values);
     return folded;
   });
 }
 
-/** A checkbox cell, however Sheets hands it back (boolean from a tick, text from a paste). */
-function normalizeLeaderFlag(value) {
-  if (value === true) return true;
-  return String(value === null || value === undefined ? '' : value).trim().toUpperCase() === 'TRUE';
-}
-
-/** A free-text program leader cell. */
-function normalizeLeaderNote(value) {
-  return String(value === null || value === undefined ? '' : value).trim();
-}
-
-/**
- * The program leader values off a row, normalized — the unit both the snapshot
- * and the merge work in, in LEADER_SHEET_EDITABLE_COLUMNS' order.
- *
- * Read off All_Registrants by the push (so the desk's own Attended mark is
- * what the leader sees) and off the shared sheet by the pull, which is the
- * whole point of there being one function for it.
- */
-function readLeaderValues(row, map) {
-  return LEADER_SHEET_EDITABLE_COLUMNS.map(name => {
-    const raw = map[name] === undefined ? '' : row[map[name]];
-    return LEADER_SHEET_TICK_COLUMNS.indexOf(name) === -1
-      ? normalizeLeaderNote(raw)
-      : normalizeLeaderFlag(raw);
-  });
-}
-
-/**
- * Is this built roster line somebody who is WAITING rather than booked?
- *
- * Either half counts, and they are two different facts that a leader reads as
- * one: Program_Status is what the workbook decided (a full session, a closed
- * one, or a by-hand waitlisting that has already been applied), and the
- * Waitlisted tick is what the leader decided a moment ago on this very sheet.
- * Reading only the first would leave a leader's own tick uncoloured until the
- * next push — which is the hour in which they are actually looking at it.
- */
+/** Is this built roster line somebody who is WAITING rather than booked? (Program_Status alone.) */
 function isLeaderSheetWaitlistedRow(row, sheetMap) {
-  if (String(row[sheetMap['Program_Status']] || '').trim() === 'Waitlisted') return true;
-  return sheetMap['Waitlisted'] !== undefined && normalizeLeaderFlag(row[sheetMap['Waitlisted']]);
+  return isLeaderSheetStatusWaitlisted_(row, sheetMap);
 }
 
 /**
- * The leader values as one hidden cell. JSON rather than a delimiter join
- * because Leader_Notes is free text and any separator worth reading is
- * one somebody will eventually type into a note.
+ * DOES THIS PROGRAM HAVE A LEADER? A row on Program_Leaders for this title and
+ * location with a name or an address on it. Only those programs get a roster
+ * sheet (Nov 2026).
  */
-function encodeLeaderSnapshot(values) {
-  return JSON.stringify(values);
+function programHasLeader_(title, location) {
+  const leaders = buildProgramLeaderIndex()[leaderProgramKey(title, location)] || [];
+  return leaders.some(l => !!l.name || (l.emails || []).length > 0);
 }
 
+/** How many leaderless sheets one push may retire; the rest wait for the next run. */
+const LEADER_SHEET_MAX_RETIRES_PER_RUN = 10;
+
+/** What a retired sheet says instead of a roster. */
+const LEADER_SHEET_RETIRED_TEXT =
+  'This roster is no longer kept up to date. Ask the office for the current list.';
+
 /**
- * A SHORTER SNAPSHOT IS AN OLDER SNAPSHOT, NOT A BROKEN ONE.
- *
- * This read used to insist on exactly LEADER_OWNED_COLUMNS.length values, and
- * that was right while the list never changed. It does now: every sheet in
- * Drive is holding a five-value snapshot written before Attended existed, and
- * the pull that runs BEFORE the template bump redraws them is the one that has
- * to read a leader's last hour of ticks back. Rejecting those snapshots would
- * have the pull treat every row on every sheet as untouched — the safe
- * direction for the WORKBOOK and a silent loss of whatever the leader typed
- * since the last refresh.
- *
- * So a prefix is accepted and padded to today's length with each missing
- * column's own "nothing here" value, which is exactly what a sheet with no
- * such column reads back as (readSimpleTable projects a column the sheet does
- * not have to blank). The two therefore COMPARE EQUAL and the first pull after
- * the upgrade claims no edit it did not see. Only ever a prefix, which is what
- * LEADER_SHEET_EDITABLE_COLUMNS' append-only rule guarantees; anything longer
- * than the current list, or not an array at all, is unreadable as before.
+ * RETIRES ONE SHEET whose program no longer has a leader: the roster tab is
+ * replaced by one line saying so, the Waitlist tab is emptied, and the entry is
+ * marked retired with its fingerprint cleared, so a program that gains a
+ * leader later is pushed in full. Never throws; returns true when it wrote.
  */
-function decodeLeaderSnapshot(cell) {
-  const raw = String(cell === null || cell === undefined ? '' : cell).trim();
-  if (!raw) return null;
+function retireLeaderlessSheet_(programKey, entry) {
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length > LEADER_SHEET_EDITABLE_COLUMNS.length) return null;
-    if (parsed.length < LEADER_OWNED_COLUMNS.length) return null;
-    return LEADER_SHEET_EDITABLE_COLUMNS.map((name, i) => {
-      if (i < parsed.length) return parsed[i];
-      return LEADER_SHEET_TICK_COLUMNS.indexOf(name) === -1 ? '' : false;
-    });
+    const file = openSpreadsheetCached(entry.fileId);
+    const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
+    tab.clear();
+    tab.getRange(1, 1).setValue(LEADER_SHEET_RETIRED_TEXT);
+    const wait = file.getSheetByName(LEADER_WAITLIST_TAB_NAME);
+    if (wait) wait.clear();
+    saveProgramLeaderSheetRegistryEntry(programKey,
+      Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry,
+        { retired: true, pushedFingerprint: '' }));
+    flushProgramLeaderSheetRegistry_();
+    log(`Program registrant sheet for "${entry.title}" (${entry.location}) retired — no leader on Program_Leaders.`);
+    return true;
   } catch (err) {
-    return null; // an unreadable snapshot means "assume nothing" — see pullProgramLeaderSheetEdits()
+    log(`⚠️ Could not retire the program registrant sheet for "${entry.title}" (${err}).`);
+    return false;
+  } finally {
+    forgetSpreadsheetCached(entry.fileId);
   }
-}
-
-
-// --- reading the program leaders' edits back in ---------------------------------
-
-/**
- * Folds every shared sheet's program leader columns back into `registrantRows`
- * IN PLACE, and reports how many cells actually moved.
- *
- * Called from syncRegistrationsInternal() BEFORE the Registrants tab is
- * rewritten, so a program leader's ticks survive the same pass that imports new
- * registrations rather than being overwritten by it.
- *
- * PER CELL, against Pushed_Snapshot: a cell the program leader changed wins, a
- * cell they never touched leaves the workbook's own value alone. A row with NO
- * readable snapshot (hand-pasted, or written by a version before this existed)
- * is treated as untouched — the safe direction, since claiming an edit that
- * never happened would overwrite real data with blanks.
- */
-function pullProgramLeaderSheetEdits(registrantRows) {
-  const registry = getProgramLeaderSheetRegistry();
-  const programKeys = Object.keys(registry);
-  if (programKeys.length === 0 || !registrantRows || registrantRows.length === 0) return 0;
-
-  const edits = {}; // rowKey -> { values: [...], changed: [bool...] }
-  // ONE Drive listing says which sheets nobody has touched since they were
-  // last read; those are not opened (99zf).
-  const pullPlan = planLeaderSheetPull_();
-
-  programKeys.forEach(programKey => {
-    const entry = registry[programKey] || {};
-    if (!entry.fileId) return;
-    if (pullPlan.untouched(entry.fileId)) return;
-    let rows;
-    try {
-      // The push at the end of the same sync opens this file too — see
-      // openSpreadsheetCached() for why that was two loads of one document.
-      const file = openSpreadsheetCached(entry.fileId);
-      const tab = file.getSheetByName(LEADER_SHEET_TAB_NAME);
-      if (!tab) {
-        log(`ℹ️ Program registrant sheet for "${entry.title}" has no "${LEADER_SHEET_TAB_NAME}" tab — nothing to read back.`);
-        return;
-      }
-      rows = readSimpleTable(tab, LEADER_SHEET_HEADERS);
-      pullPlan.read(entry.fileId);
-    } catch (err) {
-      // Deleted, trashed, or unreachable. NOT unregistered automatically: a
-      // permission blip would otherwise silently detach a live sheet and the
-      // next push would build a second one. NOT re-thrown either — see the
-      // push half.
-      log(`⚠️ Could not read the program registrant sheet for "${entry.title}" (${err}).`);
-      noteForAdmin('Program registrant sheets that could not be read',
-        describeLeaderSheetAccessFailure(entry, programKey, err));
-      return;
-    }
-
-    collectLeaderSheetEdits_(rows, edits);
-  });
-
-  pullPlan.save();
-
-  const editedKeys = Object.keys(edits);
-  if (editedKeys.length === 0) return 0;
-
-  const map = getIndexMap(HEADERS.All_Registrants);
-  let applied = 0;
-  registrantRows.forEach(row => {
-    const rowKey = leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
-    const partyId = String(row[map['Party_ID']] || '').trim();
-    // A folded party line's edit belongs to every person in the party.
-    const edit = edits[rowKey] || (partyId ? edits[leaderPartyRowKey(row[map['Event_ID']], partyId)] : null);
-    if (!edit) return;
-    const changedHeaders = [];
-    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => {
-      if (!edit.changed[i] || map[name] === undefined) return;
-      // ONE WAY FOR Attended: a tick lands, an untick is read and discarded.
-      // See leaderAckEditApplies_() and this file's banner — the desk's mark
-      // is not a leader's to clear, and a stale browser tab must not be able
-      // to send a false that erases it.
-      if (!leaderAckEditApplies_(name, edit.values[i])) return;
-      row[map[name]] = edit.values[i];
-      changedHeaders.push(name);
-      applied++;
-    });
-    // A leader's tick is a change to a registration like any other, and this
-    // merge was the one writer of the tab that never told the ledger (Attended
-    // in particular). One `corrected` per row, carrying only the ticks that
-    // moved. Guarded whole: a ledger that will not write must not lose the
-    // leader's edit, which the next pull would otherwise find already applied.
-    if (!changedHeaders.length) return;
-    try {
-      const payload = ledgerColumnsPayload_(row, map, changedHeaders);
-      const id = ledgerIdForRegistrantRow(row, map);
-      // THE ROW MOVING IS NOT EVIDENCE THE REGISTRATION DID (99k). An
-      // Attended tick a leader makes on somebody the desk already marked in
-      // changes this sheet's cell and nothing about the registration, and an
-      // hour where the push could not get the new snapshot out would append
-      // that same entry again, and again. ledgerAlreadyRecords() is the
-      // project's one answer to a correction that corrects nothing.
-      if (id && !ledgerAlreadyRecords(id, payload)) {
-        const entry = ledgerEntryForCorrection_(row, map, payload,
-          { registrationId: id, source: LEDGER_SOURCES.LEADER_SHEET,
-            note: 'Ticked or typed on the program registrant sheet.' });
-        if (entry) appendLedgerEntry(entry);
-      }
-    } catch (err) {
-      log(`⚠️ A leader's edit was merged but could not be recorded in the ledger (${err}).`);
-    }
-  });
-
-  if (applied > 0) log(`Program registrant sheets: merged ${applied} leader-edited cell(s) back into the Registrants tab.`);
-  return applied;
-}
-
-
-/**
- * The pull's per-cell rule, on rows already read off one sheet: a row whose
- * leader values differ from its Pushed_Snapshot is an edit, and only the
- * cells that differ are marked changed. Rows with no Row_Key or no readable
- * snapshot (bands, hand-pasted lines) are skipped. One copy of the rule, shared
- * by the hourly pull and the web-roster cutover's final read (99zn).
- */
-function collectLeaderSheetEdits_(rows, edits) {
-  const sheetMap = getIndexMap(LEADER_SHEET_HEADERS);
-  (rows || []).forEach(row => {
-    const rowKey = String(row[sheetMap['Row_Key']] || '').trim();
-    if (!rowKey) return;
-    const snapshot = decodeLeaderSnapshot(row[sheetMap['Pushed_Snapshot']]);
-    if (!snapshot) return;
-    const current = readLeaderValues(row, sheetMap);
-    const changed = current.map((value, i) => value !== snapshot[i]);
-    if (changed.indexOf(true) === -1) return;
-    // Two sheets claiming the same row key would mean the same session was
-    // shared twice; last one read wins, which is as good an answer as any.
-    edits[rowKey] = { values: current, changed };
-  });
-  return edits;
 }
 
 /**
@@ -1052,10 +725,8 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
     const runningAs = getCurrentUserEmail() || 'the account running the sync';
     return `${name} — this workbook cannot open its shared sheet: ${text}\n\n` +
       `This run is signed in as ${runningAs}, and that account is not on the file. Nothing is lost — the ` +
-      `sheet and everything on it are fine — but the leader's ticks are not coming back into the ` +
-      `workbook and the workbook's rows are not going out to them.\n\n` +
-      `To fix it: open the file, press Share, and either add ${runningAs} as an editor or set "Anyone with ` +
-      `the link" to Editor. Then run "Refresh Program Registrant Sheets Now" once. A sheet made from this menu now ` +
+      `sheet and everything on it are fine — but the workbook's rows are not going out to the leader.\n\n` +
+      `To fix it: open the file, press Share, and add ${runningAs} as an editor. Then run "Refresh Program Registrant Sheets Now" once. A sheet made from this menu now ` +
       `does both of those automatically.${fileRef}`;
   }
   return `${name} — ${text}${fileRef}`;
@@ -1063,48 +734,6 @@ function describeLeaderSheetAccessFailure(entry, programKey, err) {
 
 
 // --- writing the sheets back out --------------------------------------------
-
-/**
- * ONE tick column, across every session band of the sheet, as real checkboxes.
- *
- * THE BUG THIS IS. A RangeList is NOT a Range: it carries setBackground,
- * setNumberFormat, setHorizontalAlignment and the rest of the formatting, and
- * it does NOT carry setDataValidation. So the batched write that replaced the
- * per-run getRange() calls — one range list per column instead of one range
- * per column per band — threw
- *
- *     TypeError: ticks.setDataValidation is not a function
- *
- * on every registrant sheet, every hour. pushProgramLeaderSheets() catches per
- * SHEET, so what a leader saw was the roster abandoned half-written with the
- * four tick columns reading as the words TRUE and FALSE: the values had been
- * written and the validation that draws them as boxes had not.
- *
- * insertCheckboxes() is the call a RangeList DOES have, and it is the better
- * one anyway — it sets the validation AND normalizes the cells already holding
- * TRUE/FALSE, which is what repairs a sheet that has already been through the
- * failure. setDataValidation stays as the fallback for anything handed in that
- * has it instead.
- *
- * GUARDED, and never throws: a column that reads back as TRUE/FALSE still
- * round-trips (normalizeLeaderFlag() accepts both), so losing a whole roster
- * refresh over how a cell is DRAWN is the worse outcome by far. A column the
- * sheet's headers do not name arrives here as null and is skipped, rather than
- * becoming a NaN column index and its own unhelpful throw.
- */
-function applyLeaderFlagCheckboxes_(name, ticks) {
-  if (!ticks) return;
-  try {
-    if (typeof ticks.insertCheckboxes === 'function') ticks.insertCheckboxes();
-    else if (typeof ticks.setDataValidation === 'function') {
-      ticks.setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
-    }
-    ticks.setHorizontalAlignment('center');
-  } catch (err) {
-    log(`ℹ️ Could not draw the "${name}" column as checkboxes (${err}) — the ticks still work.`);
-  }
-}
-
 
 /**
  * Refreshes every registered program registrant sheet from the settled picture.
@@ -1123,16 +752,14 @@ function applyLeaderFlagCheckboxes_(name, ticks) {
 // v3: waitlisted people moved to the Waitlist tab. The bump is the migration —
 // every existing sheet's fingerprint stops matching, so the next sync redraws
 // each one once and gives it the new tab.
-// v4: the Attended acknowledgement column. Same migration, for the same
-// reason and this time it is the SHAPE that moved: a sheet drawn under v3 has
-// eleven columns before Row_Key and the new one has twelve, so a push that
-// skipped on a matching fingerprint would leave a leader with a roster that
-// has no such column while the pull looks for it by header (and reads it back
-// blank, harmlessly, until the redraw lands). The bump makes every registered
+// v4: the Attended acknowledgement column. The bump makes every registered
 // sheet a rewrite exactly once; the push is sliced and resumable precisely so
 // that a template bump cannot cost a run (see pushProgramLeaderSheets' own
 // deadline handling).
-const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v4';
+// v5 (Nov 2026): a view-only list. The tick columns, Leader_Notes and the two
+// hidden machine columns are gone, and nothing is read back. Same migration:
+// every registered sheet is redrawn once in the new shape.
+const LEADER_SHEET_TEMPLATE_KEY = 'leader-sheet-v5';
 
 /**
  * WHAT THIS SHEET WOULD BE WRITTEN WITH, as one short string.
@@ -1310,6 +937,16 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   let quarantined = 0;
   let mergedAway = 0;
   let lunchSkipped = 0;
+  let leaderless = 0;
+  let retiredThisRun = 0;
+  const todayKey = formatDateKey(new Date());
+  // An unreadable Program_Leaders tab reads as "nobody leads anything", and
+  // that must not retire every roster in Drive. No leader rows at all is
+  // treated as not knowing.
+  const leadersKnown = Object.keys(buildProgramLeaderIndex()).length > 0;
+  if (!leadersKnown) {
+    log('⚠️ Program registrant sheets: Program_Leaders reads empty, so no sheet is retired this run.');
+  }
   let visited = 0;
   for (let i = 0; i < order.length; i++) {
     // At least one sheet per call, so a follow-up run that starts late still
@@ -1355,6 +992,17 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       lunchSkipped++;
       return;
     }
+    // A ROSTER FOR A PROGRAM WITH A LEADER, and only those (Nov 2026). A sheet
+    // whose program has nobody on Program_Leaders is retired once — its tab
+    // says so — and left alone after that. One that gains a leader again is
+    // pushed in full on the next run (its fingerprint was cleared).
+    if (leadersKnown && !programHasLeader_(entry.title, entry.location)) {
+      leaderless++;
+      if (!entry.retired && retiredThisRun < LEADER_SHEET_MAX_RETIRES_PER_RUN) {
+        if (retireLeaderlessSheet_(programKey, entry)) retiredThisRun++;
+      }
+      return;
+    }
     try {
       const rows = byProgram[programKey] || [];
       // AN EMPTY ROSTER IS AN ANSWER, AND IT HAS TO BE THE RIGHT ONE. "Nobody
@@ -1394,13 +1042,14 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
         }
       }
       const fingerprint = computeLeaderSheetFingerprint(entry, rows);
-      // NOT OPENED AT ALL when the pull found nobody had touched the file
-      // since it was last read and the roster it would write is the one it
-      // already holds (99zf) — which is most sheets, most hours. Once a day
-      // the pull reads every sheet, so the contradiction check below still
-      // reaches each of them.
-      if (!force && entry.pushedFingerprint === fingerprint && entry.accessOpened &&
-          leaderSheetUntouchedThisRun_(entry.fileId)) {
+      // NOT OPENED AT ALL when the roster it would write is the one it already
+      // holds, the file is already a view-only list, and it was opened once
+      // today — which is most sheets, most hours. Leaders are viewers, so
+      // nothing on the sheet moves unless this script moves it; the first run
+      // of each day still opens it, so the contradiction check below reaches
+      // every sheet daily, and the menu's forced refresh is the escape hatch.
+      if (!force && entry.pushedFingerprint === fingerprint && entry.viewOnly &&
+          entry.checkedOn === todayKey) {
         unchanged++;
         return;
       }
@@ -1410,8 +1059,6 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       pushState.current = { programKey, title: entry.title || '', location: entry.location || '',
         fileId: entry.fileId, at: new Date().toISOString() };
       writeLeaderSheetPushState_(pushState);
-      // Usually already open: the pull at the head of this sync paid for it
-      // (openSpreadsheetCached).
       const file = openSpreadsheetCached(entry.fileId);
       const tab = getOrCreateSheet(file, LEADER_SHEET_TAB_NAME);
       // THE FINGERPRINT IS A CLAIM, AND THIS IS WHERE IT IS CHECKED.
@@ -1432,7 +1079,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // runs itself on the next sync rather than waiting for somebody to press
       // something. See leaderSheetTabReadsEmpty_().
       const content = leaderSheetContentFor(entry, rows);
-      const fingerprintAgrees = !force && entry.pushedFingerprint === fingerprint && entry.accessOpened;
+      const fingerprintAgrees = !force && entry.pushedFingerprint === fingerprint && entry.viewOnly;
       // Against the CLASS LIST, not every row: a program whose only people are
       // waiting shows the placeholder on Sign_Up_Sheet truthfully.
       const contradicted = fingerprintAgrees && content.roster.length > 0 && leaderSheetTabReadsEmpty_(tab);
@@ -1444,12 +1091,13 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
           `as already written, and the shared sheet was showing the leader an empty roster instead. It has ` +
           `been rewritten. Nothing needs doing; the sheet is correct from now on.`);
       }
-      // NO RESTAMP. The banner's note used to be rewritten here every hour to
-      // say "Refreshed …", and that write was a modification of the file — so
-      // Drive reported every sheet as touched every hour and 99zf could never
-      // leave one unopened. The note now says when the roster was last
-      // UPDATED, which an unchanged hour leaves true.
+      // NO RESTAMP: the note says when the roster was last UPDATED, which an
+      // unchanged hour leaves true.
       if (fingerprintAgrees && !contradicted) {
+        if (entry.checkedOn !== todayKey) {
+          saveProgramLeaderSheetRegistryEntry(programKey, Object.assign({}, entry, { checkedOn: todayKey }));
+          flushProgramLeaderSheetRegistry_();
+        }
         unchanged++;
         return;
       }
@@ -1471,7 +1119,7 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       }
       if (waitlistWritten && entry.pushedFingerprint !== fingerprint) {
         saveProgramLeaderSheetRegistryEntry(programKey,
-          Object.assign({}, entry, { pushedFingerprint: fingerprint }));
+          Object.assign({}, entry, { pushedFingerprint: fingerprint, retired: false, checkedOn: todayKey }));
         // NOW, not at the end of the sync: a run killed at its ceiling reaches
         // no flush, and a fingerprint lost is a sheet rewritten again next hour.
         flushProgramLeaderSheetRegistry_();
@@ -1489,14 +1137,19 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
       // the syncs moved to another account. Repaired here because this is the
       // pass that proves we can still open it; the flag on the registry entry
       // is what keeps it from being three Drive calls every hour thereafter.
-      if (!entry.accessOpened) {
+      // ONCE PER SHEET (Nov 2026): the link goes view-only and the program's
+      // leaders become viewers — an older sheet had them as editors because
+      // their ticks used to come back. Merged onto whatever the fingerprint
+      // write above left, not onto the copy this loop started with — two
+      // Object.assign()s from the same stale `entry` would each drop the
+      // other's field.
+      if (!entry.viewOnly) {
         const access = ensureProgramLeaderSheetAccess(file, `program registrant sheet for "${entry.title}"`);
+        shareLeaderSheetWithLeadersAsViewers_(file, entry.title, entry.location);
         if (access.openedUp || access.editors.length > 0) {
-          // Merged onto whatever the fingerprint write above left, not onto the
-          // copy this loop started with — two Object.assign()s from the same
-          // stale `entry` would each drop the other's field.
           saveProgramLeaderSheetRegistryEntry(programKey,
-            Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
+            Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry,
+              { accessOpened: true, viewOnly: true }));
           flushProgramLeaderSheetRegistry_();
         }
       }
@@ -1530,6 +1183,10 @@ function pushProgramLeaderSheets(sessionRows, registrantRows, options) {
   if (mergedAway > 0) {
     log(`Program registrant sheets: left ${mergedAway} sheet(s) as last written — their program is now ` +
       `filed under another name (Program_Settings ▸ Also_Known_As), whose sheet carries its sessions.`);
+  }
+  if (leaderless > 0) {
+    log(`Program registrant sheets: ${leaderless} sheet(s) belong to a program with no leader on ` +
+      `Program_Leaders` + (retiredThisRun > 0 ? ` — retired ${retiredThisRun} this run.` : ' and are left retired.'));
   }
   if (lunchSkipped > 0) {
     log(`Program registrant sheets: left ${lunchSkipped} lunch sheet(s) as last written — lunch no ` +
@@ -1602,7 +1259,6 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
     // A cancellation shows for LEADER_SHEET_CANCELLED_SHOW_DAYS, then leaves.
     if (leaderSheetCancellationExpired_(row, map)) return;
 
-    const values = readLeaderValues(row, map);
     const out = new Array(LEADER_SHEET_HEADERS.length).fill('');
     out[sheetMap['Event_Date']] = row[map['Event_Date']];
     out[sheetMap['Event_Time']] = eventTimeLabelOf(row[map['Event_Time']]);
@@ -1615,16 +1271,6 @@ function buildLeaderSheetRowsByProgram(sessionRows, registrantRows) {
     // In the row, so in the fingerprint: a changed answer redraws the sheet.
     out[sheetMap['Answers']] = map['Form_Answers'] === undefined
       ? '' : leaderSheetAnswersText(row[map['Form_Answers']]);
-    // Including the DESK's own Attended mark, which is what makes the column
-    // worth having on the sheet at all: a leader opening their roster after a
-    // class sees who was already marked in at the door rather than an empty
-    // column inviting them to re-tick nine people.
-    LEADER_SHEET_EDITABLE_COLUMNS.forEach((name, i) => { out[sheetMap[name]] = values[i]; });
-    out[sheetMap['Row_Key']] =
-      leaderRowKey(row[map['Event_ID']], row[map['Party_ID']], row[map['Name']]);
-    // Written in the same breath as the values it describes — that identity is
-    // what the next pull's per-cell comparison rests on.
-    out[sheetMap['Pushed_Snapshot']] = encodeLeaderSnapshot(values);
 
     if (!byProgram[programKey]) byProgram[programKey] = [];
     byProgram[programKey].push(out);
@@ -1868,19 +1514,8 @@ function leaderSheetSessionBandLabel(group) {
 }
 
 /**
- * Draws one shared sheet: banner, header, a band per session with its roster
- * under it, and the yellow "this is yours" wash on exactly the leader-typed
- * columns (LEADER_SHEET_EDITABLE_COLUMNS).
- *
- * Laid out on the memory-tab rows (banner 1, header 2, data 3) so
- * readSimpleTable() can read it straight back on the next pull without a
- * second layout to keep in step.
- *
- * THE BANDS COST THE PULL NOTHING. A band row is written with a label in
- * column A and every other cell blank — no Row_Key, no Pushed_Snapshot — and
- * pullProgramLeaderSheetEdits() skips any row without both. That is the whole
- * contract between the two halves, and it is why this function is free to
- * change the layout without the merge having to be told.
+ * Draws one shared sheet: banner, header, and a band per session with its
+ * roster under it. A view-only list since Nov 2026: nothing on it is read back.
  *
  * ONE setValues AND ONE setBackgrounds for the whole block, bands included.
  * The obvious shape — write each session, then style it — is a handful of API
@@ -1891,41 +1526,15 @@ function leaderSheetSessionBandLabel(group) {
 /**
  * The banner note, and everything a program leader is told by it.
  *
- * Written by the full redraw only. It used to be restamped on every hour when
- * nobody's roster moved, too, and that restamp was a modification of the file
- * that made every sheet look touched to 99zf's Drive check — so the note says
- * when the roster was last UPDATED, which an unchanged hour leaves true. The
- * time is still not in the fingerprint, or no two hours would match.
+ * Written by the full redraw only, so it says when the roster was last
+ * UPDATED. The time is not in the fingerprint, or no two hours would match.
  */
 function leaderSheetBannerNote() {
   const stamp = Utilities.formatDate(new Date(),
     Session.getScriptTimeZone(), "EEE d MMM 'at' h:mm a");
-  return `Last updated ${stamp}. This sheet is checked every hour and rewritten whenever the roster changes.\n\nEach class has its own blue band. Tick the yellow columns; ` +
-    `everything else fills in by itself.\n\n` +
-    // SAID OUT LOUD, because it is the one tick with a consequence outside
-    // this sheet. A leader who thinks Dropped is a private note will use it
-    // to mean "chase this person"; a leader who is told what it does will
-    // use it to free a seat, which is what it now actually does. See
-    // applyLeaderDropsAsCancellations().
-    `Ticking Dropped CANCELS that person's place — their seat and their lunch go back, ` +
-    `and anything you type in Leader_Notes goes with it as the reason. Untick it before the ` +
-    `next hour is up if you did not mean to; after that, ring the office.\n\n` +
-    // THE SECOND TICK WITH A CONSEQUENCE, and the only one that can be
-    // taken back — which is exactly why it has to be said in the same
-    // breath as Dropped, or a leader will use the permanent one to mean
-    // the reversible one. See applyLeaderWaitlistTicks().
-    `Ticking Waitlisted moves that person off the class list and onto the Waitlist tab at the next ` +
-    `sync — their seat and their lunch go back too. Until then the row is peach. Everybody waiting ` +
-    `is listed on the Waitlist tab, one line each with their dates; to put somebody back on the ` +
-    `class, ask the office.\n\n` +
-    // THE THIRD TICK THAT LEAVES THIS SHEET, and the only one that travels in
-    // one direction — said here as well as on the column's own cell note,
-    // because a leader who thinks unticking undoes it will untick it. See
-    // leaderAckEditApplies_() and LEADER_ACK_FLAG_COLUMNS (`03`).
-    `Ticking Attended records that somebody came, and it is added to the office's own attendance ` +
-    `count at the next sync. UNTICKING it does nothing — the front desk marks people in as they ` +
-    `arrive too, and this sheet is never allowed to undo that. If somebody is marked who should ` +
-    `not be, ring the office.`;
+  return `Last updated ${stamp}. This list is checked every hour and rewritten whenever the roster changes.\n\n` +
+    `Each class has its own blue band. Everybody waiting is on the Waitlist tab.\n\n` +
+    `This sheet is view-only. To change a registration, contact the office.`;
 }
 
 /**
@@ -1999,24 +1608,13 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
   writeSectionBanner(sheet, MEMORY_TAB_BANNER_ROW, numCols, bannerText,
     { note: leaderSheetBannerNote() });
   writeSectionHeader(sheet, MEMORY_TAB_HEADER_ROW, numCols, headers);
-  labelManualEntryColumns(sheet, MEMORY_TAB_HEADER_ROW, headers, LEADER_SHEET_EDITABLE_COLUMNS);
-  // The one-way rule, on the column it is about. Drawn whether or not there
-  // are any rows: an empty roster is exactly when a leader reads the headers.
-  LEADER_ACK_FLAG_COLUMNS.forEach(name => {
-    const idx = headers.indexOf(name);
-    if (idx === -1) return;
-    sheet.getRange(MEMORY_TAB_HEADER_ROW, idx + 1).setNote(leaderSheetAckColumnNote());
-  });
-
   if (rows.length === 0) {
     sheet.getRange(MEMORY_TAB_DATA_ROW, 1)
       .setValue(LEADER_SHEET_EMPTY_ROSTER_TEXT)
       .setFontStyle('italic')
       .setFontColor(TYPO.MUTED.color);
     freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
-    applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
     autosizeColumns(sheet, { minCols: numCols, force: true });
-    applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
     freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, numCols));
     return;
   }
@@ -2111,19 +1709,6 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
     // One question per line — wrapped, or the lines collapse into one.
     const answers = rangeListFor(map['Answers'] + 1);
     if (answers) answers.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-    LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
-      if (map[name] === undefined) return;
-      const wash = rangeListFor(map[name] + 1);
-      if (wash) wash.setBackground(MANUAL_ENTRY_CELL_TINT);
-    });
-    // Real checkboxes, so a mark is one click and reads back as a boolean —
-    // which is what the snapshot comparison in pullProgramLeaderSheetEdits()
-    // expects to be comparing. Never on a band row: a checkbox there is an
-    // invitation to tick something that goes nowhere.
-    LEADER_SHEET_TICK_COLUMNS.forEach(name => {
-      if (map[name] === undefined) return;
-      applyLeaderFlagCheckboxes_(name, rangeListFor(map[name] + 1));
-    });
   }
 
   // Warning-only, like everywhere else in this project: a program leader who
@@ -2140,11 +1725,7 @@ function writeProgramLeaderSheetTabLegacy_(sheet, entry, rows) {
     [{ start: MEMORY_TAB_DATA_ROW, count: grid.length }]);
 
   freezeRowsSafely(sheet, MEMORY_TAB_HEADER_ROW);
-  applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
   autosizeColumns(sheet, { minCols: numCols, force: true });
-  // After the autosize, which would otherwise size the two hidden machine
-  // columns back into view on some sheets.
-  applyColumnVisibility(sheet, headers, LEADER_SHEET_HIDDEN_COLUMNS);
   freezeColumnsSafely(sheet, Math.min(map['Name'] + 1, numCols));
 }
 
@@ -2201,7 +1782,80 @@ function getOrCreateProgramLeaderSheetFolder() {
  */
 function ensureProgramLeaderSheetAccess(file, describe) {
   if (!file) return { openedUp: false, editors: [], problems: [] };
-  return openUpFileToAnyoneWithLink(file.getId(), describe || 'program registrant sheet');
+  // VIEW, not edit (Nov 2026): the sheet is a list nobody types in.
+  return openUpFileToAnyoneWithLink(file.getId(), describe || 'program registrant sheet',
+    { linkPermission: 'view' });
+}
+
+/**
+ * The program's leaders as VIEWERS of its sheet. A leader who is an editor
+ * (every sheet made before Nov 2026) is taken off the editors first; an
+ * address that is also one of the accounts that run this system is left as it
+ * is. Quiet unless opts.notify, like the editors. Never throws.
+ */
+function shareLeaderSheetWithLeadersAsViewers_(file, title, location, opts) {
+  const shared = [];
+  let driveFile;
+  try {
+    driveFile = DriveApp.getFileById(file.getId());
+  } catch (err) {
+    log(`ℹ️ Could not open the program registrant sheet for "${title}" in Drive to share it (${err}).`);
+    return shared;
+  }
+  const system = systemEditorEmails_();
+  let editors = [];
+  try {
+    editors = driveFile.getEditors().map(u => String(u.getEmail() || '').trim().toLowerCase());
+  } catch (err) { /* unknown: add as viewers and let Drive sort it out */ }
+  getProgramLeaderEmailsForProgram(title, location).forEach(email => {
+    const lower = String(email || '').trim().toLowerCase();
+    if (!lower || system.indexOf(lower) !== -1) return;
+    try {
+      if (editors.indexOf(lower) !== -1) driveFile.removeEditor(email);
+      // A NEW sheet tells its leader (Drive's own "shared with you" mail is
+      // how they learn the link); the one-off downgrade of an old one does not.
+      if (opts && opts.notify) { driveFile.addViewer(email); shared.push(email); }
+      else if (addViewerWithoutNotifying_(driveFile, email)) shared.push(email);
+    } catch (err) {
+      log(`⚠️ Could not share the program registrant sheet for "${title}" with ${email} (${err}).`);
+      noteForAdmin('Program registrant sheets that could not be shared',
+        `"${title}" (${location}) could not be shared with ${email} — ${err}. Anyone with its link can ` +
+        `view it, so sending them the link by hand works.`);
+    }
+  });
+  return shared;
+}
+
+/** Adds a viewer without Drive mailing them, falling back to DriveApp. See addEditorWithoutNotifying_(). */
+function addViewerWithoutNotifying_(driveFile, email) {
+  const address = String(email || '').trim();
+  if (!address) return false;
+  try {
+    if (typeof Drive !== 'undefined' && Drive.Permissions && Drive.Permissions.insert) {
+      Drive.Permissions.insert(
+        { role: 'reader', type: 'user', value: address },
+        driveFile.getId(),
+        { sendNotificationEmails: false, supportsAllDrives: true });
+      return true;
+    }
+  } catch (err) {
+    log(`ℹ️ Drive would not add ${address} as a viewer quietly (${err}) — falling back to DriveApp.`);
+  }
+  try {
+    driveFile.addViewer(address);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+/** The accounts that run this system, lower-cased: named editors of everything it makes. */
+function systemEditorEmails_() {
+  return dedupePreservingOrder(listAuthorizedAdminEmails()
+    .concat([getTriggerOwner(), getCurrentUserEmail()])
+    .concat(getAllAdminNotificationEmails())
+    .map(e => String(e || '').trim().toLowerCase())
+    .filter(e => e.indexOf('@') > 0));
 }
 
 /**
@@ -2314,15 +1968,11 @@ function openUpFileToAnyoneWithLink(fileId, describe, opts) {
   // is standing access to a file rather than mail, and a named editor survives
   // the link sharing below being tightened by hand later. An empty table means
   // nobody extra (see getAllAdminNotificationEmails).
-  const wanted = listAuthorizedAdminEmails()
-    .concat([getTriggerOwner(), getCurrentUserEmail()])
-    .concat(getAllAdminNotificationEmails())
-    .map(e => String(e || '').trim().toLowerCase())
-    .filter(e => e.indexOf('@') > 0);
+  const wanted = systemEditorEmails_();
   // QUIETLY. These addresses are added again on every run, so a notification
   // per file per run is hundreds of mails telling the office nothing it does
   // not already know. See addEditorWithoutNotifying_().
-  dedupePreservingOrder(wanted).forEach(email => {
+  wanted.forEach(email => {
     if (addEditorWithoutNotifying_(driveFile, email)) {
       outcome.editors.push(email);
     } else {
@@ -2335,7 +1985,11 @@ function openUpFileToAnyoneWithLink(fileId, describe, opts) {
   if (!wantsLinkSharing) return outcome;
 
   try {
-    driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.EDIT);
+    // `linkPermission: 'view'` for a file people only read (a program
+    // registrant sheet, `46`); edit otherwise.
+    const permission = opts && opts.linkPermission === 'view'
+      ? DriveApp.Permission.VIEW : DriveApp.Permission.EDIT;
+    driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, permission);
     outcome.openedUp = true;
   } catch (err) {
     outcome.problems.push(`link sharing could not be turned on (${err})`);
@@ -2433,6 +2087,10 @@ function createProgramLeaderSheet(programValue) {
   // (99zzc), and its file name and heading should say so.
   const title = canonicalProgramTitle(String(parts[0] || '').trim(), location);
   if (!title || !location) throw new Error('Pick a program first.');
+  if (!programHasLeader_(title, location)) {
+    throw new Error(`"${title}" (${location}) has no leader on Program_Leaders, and only programs with a ` +
+      `leader get a registrant sheet. Its registrants are on All_Registrants.`);
+  }
 
   const programKey = leaderProgramKey(title, location);
   const registry = getProgramLeaderSheetRegistry();
@@ -2526,28 +2184,13 @@ function createProgramLeaderSheet(programValue) {
   // Merged onto the CURRENT entry, not onto the `entry` this function built —
   // the fingerprint save above is on the registry now and a second assign from
   // the stale copy would drop it. Same trap the push's two saves document.
+  const emails = getProgramLeaderEmailsForProgram(title, location);
+  const shared = shareLeaderSheetWithLeadersAsViewers_(file, title, location, { notify: isNew });
   if (access.openedUp || access.editors.length > 0) {
     saveProgramLeaderSheetRegistryEntry(programKey,
-      Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry, { accessOpened: true }));
+      Object.assign({}, getProgramLeaderSheetRegistry()[programKey] || entry,
+        { accessOpened: true, viewOnly: true, retired: false }));
   }
-
-  const emails = getProgramLeaderEmailsForProgram(title, location);
-  const shared = [];
-  emails.forEach(email => {
-    try {
-      file.addEditor(email);
-      shared.push(email);
-    } catch (err) {
-      // NOT fatal, and not silent either. An address that bounces off Drive
-      // (a typo, a personal address a Workspace policy will not share with) is
-      // exactly the case where the link still works and somebody should be
-      // told to send it by hand.
-      log(`⚠️ Could not share the program registrant sheet for "${title}" with ${email} (${err}).`);
-      noteForAdmin('Program registrant sheets that could not be shared',
-        `"${title}" (${location}) could not be shared with ${email} — ${err}. The sheet exists and ` +
-        `anyone with its link can open it, so sending them the link by hand works.`);
-    }
-  });
 
   log(`Program registrant sheet ${isNew ? 'created' : 'refreshed'} for "${title}" (${location}) — ` +
     `${(byProgram[programKey] || []).length} row(s), shared with ${shared.length} address(es), ` +
@@ -2561,7 +2204,7 @@ function createProgramLeaderSheet(programValue) {
     rowCount: (byProgram[programKey] || []).length,
     shared,
     unshared: emails.filter(e => shared.indexOf(e) === -1),
-    // Told to the dialog, because "anyone with this link can edit it" is
+    // Told to the dialog, because "anyone with this link can view it" is
     // exactly what somebody about to paste that link into an email needs to
     // know, and so is the opposite.
     linkSharing: access.openedUp,
@@ -2683,6 +2326,7 @@ function ensureRegistrantSheetsForUpcomingPrograms(ss, sessionRows) {
     const location = String(row[map['Location']] || '').trim();
     if (!title || !location) return;
     if (leaderSheetSkipsProgram_(title)) return; // a lunch: no registrant sheet (see above)
+    if (!programHasLeader_(title, location)) return; // leaders only (Nov 2026)
     const date = coerceDate(row[map['Event_Date']]);
     if (!date) return;
     const dateKey = formatDateKey(date);
@@ -2797,6 +2441,7 @@ function listProgramLeaderProgramOptions() {
     const date = coerceDate(row[map['Event_Date']]);
     if (!title || !location || !date) return;
     if (leaderSheetSkipsProgram_(title)) return; // a lunch: no registrant sheet
+    if (!programHasLeader_(title, location)) return; // leaders only (Nov 2026)
     const dateKey = formatDateKey(date);
     if (dateKey < from || dateKey > to) return;
     const key = leaderProgramKey(title, location);
@@ -2820,7 +2465,7 @@ function listProgramLeaderProgramOptions() {
         location: entry.location,
         label: `${entry.title}  •  ${entry.sessions} session(s), next ${formatDateLabel(entry.nextDate)}` +
           (existing ? '  •  already shared' : '') +
-          (emails.length > 0 ? `  •  ${emails.join(', ')}` : '  •  no leader on Program_Leaders'),
+          (emails.length > 0 ? `  •  ${emails.join(', ')}` : '  •  no leader address on Program_Leaders'),
         alreadyShared: !!existing,
         url: existing && existing.fileId ? `https://docs.google.com/spreadsheets/d/${existing.fileId}/edit` : '',
         emails
@@ -2872,44 +2517,13 @@ function refreshProgramLeaderSheetsNow() {
       return;
     }
 
-    // EACH HALF GUARDED SEPARATELY, and neither allowed to fail the action.
-    // One unreachable sheet used to be able to take the whole refresh down
-    // with it — including the sheets that were perfectly reachable, sitting
-    // further down the same loop. Both halves already skip a sheet they cannot
-    // open; this is the outer guard for everything else (a Drive outage, a
-    // quota, a registry entry pointing at something that is no longer a
-    // spreadsheet at all).
-    let merged = 0;
+    // Guarded, and not allowed to fail the action: one unreachable sheet used
+    // to be able to take the whole refresh down with it. The push already
+    // skips a sheet it cannot open; this is the outer guard for everything
+    // else (a Drive outage, a quota, a registry entry that is no longer a
+    // spreadsheet). Nothing is read back from the sheets since Nov 2026.
     let pushed = 0;
     const failures = [];
-    try {
-      merged = pullProgramLeaderSheetEdits(registrantRows);
-      // THE SAME TWO STEPS THE HOURLY SYNC TAKES, and for the same reason: a
-      // merge on its own leaves a Dropped tick sitting in a column nothing
-      // reads and a seat that never comes back. This menu item exists for the
-      // person who does not want to wait an hour, and until now what it saved
-      // them the wait for was half the job.
-      if (merged > 0) {
-        merged += applyLeaderDropsAsCancellations(registrantRows);
-        merged += applyLeaderWaitlistTicks(registrantRows, sessionRows);
-        renderRegistrantsSheet(false, registrantRows);
-        // The seat and the meal, now rather than at the next hourly sync —
-        // the same courtesy cancelRegistrantRows() extends to the desk, for
-        // the same reason: somebody pressed this because they want the
-        // answer today.
-        try {
-          recomputeEventRegistryCounts(
-            getOrCreateSheet(ss, SHEET_NAMES.PROGRAM_DASHBOARD),
-            getOrCreateSheet(ss, SHEET_NAMES.REGISTRANT_DASH), registrantRows);
-          updateMasterLunchDashboard(registrantRows);
-        } catch (err) {
-          log(`⚠️ Merged the leaders' edits, but could not recalculate the counts (${err}) — the hourly sync will.`);
-        }
-      }
-    } catch (err) {
-      log(`⚠️ Could not read the program registrant sheets back in (${err}).`);
-      failures.push(`the program leaders' own edits could not be read back in (${err})`);
-    }
     try {
       // FORCED, because this is the escape hatch. The hourly pass skips a sheet
       // whose rows have not moved (see computeLeaderSheetFingerprint), and the
@@ -2925,7 +2539,7 @@ function refreshProgramLeaderSheetsNow() {
     flushAdminDigest('Program registrant sheet refresh');
     const trouble = failures.length === 0 ? '' : ` ⚠️ ${failures.join('; ')}.`;
     toastIfPossible(`Program registrant sheets refreshed ${failures.length === 0 ? '✅' : '⚠️'} — ` +
-      `${pushed} sheet(s) out, ${merged} program leader edit(s) in.${trouble}`);
+      `${pushed} sheet(s) rewritten.${trouble}`);
   } finally {
     lock.releaseLock();
   }
@@ -2968,16 +2582,12 @@ function buildProgramLeaderSheetHtml(options) {
 </style>
 <h3>Share a live registrant sheet</h3>
 <p class="hint">
-  Makes a small spreadsheet in Drive holding just this program's roster at this location, and adds
-  whoever <b>Program_Leaders</b> names as its leader as an editor. One sheet per program, not per
-  date — the same link stays right all season. It refreshes itself on the hourly registration sync,
-  which also builds one by itself a week before a program's next session, so this is for when you
-  want it sooner.
-  The program leader ticks <b>Contacted</b>, <b>Confirmed</b>, <b>Waitlisted</b> and <b>Dropped</b> and
-  types in <b>Leader_Notes</b>; those come back into the Registrants tab on the same sync.
-  <b>Dropped is a cancellation</b> — the seat and the lunch go back on the next sync, and the
-  leader's note rides along as the reason. <b>Waitlisted moves them onto the waitlist</b> the same
-  way, and unticking it puts them back on whenever the session has room.
+  Makes a small view-only spreadsheet in Drive holding just this program's roster at this location,
+  and shares it with whoever <b>Program_Leaders</b> names as its leader. Only programs with a leader
+  are listed. One sheet per program, not per date — the same link stays right all season. It
+  refreshes itself on the hourly registration sync, which also builds one by itself a week before a
+  program's next session, so this is for when you want it sooner. Nothing typed on it comes back;
+  ticks and changes belong on All_Registrants.
 </p>
 <label for="location">Location</label>
 <select id="location" onchange="fillPrograms()">${locationTags}</select>
@@ -3042,16 +2652,11 @@ function buildProgramLeaderSheetHtml(options) {
         var failed = res.unshared.length > 0
           ? '<br>Could not share with ' + res.unshared.join(', ') + '.'
           : '';
-        // SAID OUT LOUD, both ways. Anyone with the link can edit this sheet —
-        // which is what makes it work for program leaders who have no account here
-        // and what keeps the hourly sync able to read their ticks back — and
-        // somebody about to paste that link into an email is entitled to know
-        // it. When it could NOT be opened up, that is the more urgent half:
-        // the sync will not be able to reach it either.
+        // SAID OUT LOUD: somebody about to paste the link into an email is
+        // entitled to know who can open it.
         var link = res.linkSharing
-          ? '<br>Anyone with the link can open and edit it.'
-          : '<br><b>Link sharing could not be turned on</b>, so only the people named above can open it — ' +
-            'including the account that runs the hourly sync. Share it by hand if the ticks stop coming back.';
+          ? '<br>Anyone with the link can view it.'
+          : '<br><b>Link sharing could not be turned on</b>, so only the people named above can open it.';
         el.innerHTML = (res.isNew ? 'Created' : 'Refreshed') + ' — ' + res.rowCount +
           ' row(s). ' + shared + failed + link +
           '<br><a href="' + res.url + '" target="_blank">Open the sheet</a>';

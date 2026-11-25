@@ -515,7 +515,7 @@ function savePublicPagesSetup_(input) {
   } else {
     lines.push(`Saved, but the first push did not complete: ${published.failed.length ?
       published.failed.map(f => `${f.name} (${f.error})`).join('; ') : published.reason}.`);
-    lines.push('It will retry on the next snapshot rebuild (every 10 minutes).');
+    lines.push('It will retry on the next snapshot rebuild (hourly).');
   }
   lines.push('', 'If this is the first time: in the repository, Settings ▸ Pages, set the source to ' +
     `"Deploy from a branch", branch ${settings.branch}, folder ${settings.folder ? `/${settings.folder}` : '/ (root)'}. ` +

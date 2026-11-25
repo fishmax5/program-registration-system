@@ -108,10 +108,6 @@ function flushPersistentRegistries() {
     props.setProperty(LEADER_SHEET_REGISTRY_PROP_KEY, JSON.stringify(__leaderSheetRegistryCache));
     __leaderSheetRegistryDirty = false;
   }
-  if (__signInSheetRegistryDirty && __signInSheetRegistryCache) {
-    props.setProperty(SIGN_IN_SHEET_REGISTRY_PROP_KEY, JSON.stringify(__signInSheetRegistryCache));
-    __signInSheetRegistryDirty = false;
-  }
   if (__formTemplateVersionDirty && __formTemplateVersionCache) {
     writeDocumentStoreProperty(FORM_TEMPLATE_VERSION_PROP_KEY, JSON.stringify(__formTemplateVersionCache));
     __formTemplateVersionDirty = false;

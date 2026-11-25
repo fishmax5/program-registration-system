@@ -612,14 +612,12 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
 
   try {
     const batch = newSheetsBatch_(sheet);
-    const labelledHeaders = headers.map(h =>
-      LEADER_SHEET_EDITABLE_COLUMNS.indexOf(h) !== -1 ? `${MANUAL_ENTRY_PREFIX} ${h}` : h);
     const bannerText = leaderSheetBannerText_(entry);
 
     sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
     writeTabValuesBeforeRender_(sheet, [
       { row: MEMORY_TAB_BANNER_ROW, values: [[bannerText]] },
-      { row: MEMORY_TAB_HEADER_ROW, values: [labelledHeaders] },
+      { row: MEMORY_TAB_HEADER_ROW, values: [headers] },
       { row: MEMORY_TAB_DATA_ROW, values: rows.length === 0 ? [[LEADER_SHEET_EMPTY_ROSTER_TEXT]] : grid }
     ]);
     // The header row is the marker every sectioned read projects by.
@@ -639,26 +637,11 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
     sheetsBatchNote_(batch, MEMORY_TAB_BANNER_ROW, 1, leaderSheetBannerNote());
     sheetsBatchRowHeight_(batch, MEMORY_TAB_BANNER_ROW, 1, ROW_HEIGHTS.BANNER);
 
-    // writeSectionHeader(), then labelManualEntryColumns()
+    // writeSectionHeader()
     sheetsBatchFormat_(batch, MEMORY_TAB_HEADER_ROW, 1, 1, numCols, {
       fontSize: TYPO.COLUMN_HEADER.size, fontWeight: TYPO.COLUMN_HEADER.weight,
       background: TYPO.COLUMN_HEADER.background, fontColor: TYPO.COLUMN_HEADER.color,
       vAlign: 'middle', wrap: 'CLIP' });
-    LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
-      const idx = headers.indexOf(name);
-      if (idx === -1) return;
-      sheetsBatchFormat_(batch, MEMORY_TAB_HEADER_ROW, idx + 1, 1, 1, {
-        background: MANUAL_ENTRY_HEADER_COLOR, fontColor: '#000000', fontWeight: 'bold' });
-    });
-    // The one-way Attended rule, on its own header cell — the legacy painter
-    // writes the same note from the same function (`46`), and the golden test
-    // compares the two sheets' notes.
-    LEADER_ACK_FLAG_COLUMNS.forEach(name => {
-      const idx = headers.indexOf(name);
-      if (idx === -1) return;
-      sheetsBatchNote_(batch, MEMORY_TAB_HEADER_ROW, idx + 1, leaderSheetAckColumnNote());
-    });
-
     let commitProtections = null;
     if (rows.length === 0) {
       sheetsBatchFormat_(batch, MEMORY_TAB_DATA_ROW, 1, 1, 1, {
@@ -712,16 +695,6 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
         sheetsBatchFormatRuns_(batch, runs, map['Event_Date'] + 1, 1, { numberFormat: DATE_DISPLAY_FORMAT });
         sheetsBatchFormatRuns_(batch, runs, map['Party_Size'] + 1, 1, { numberFormat: '0' });
         sheetsBatchFormatRuns_(batch, runs, map['Answers'] + 1, 1, { wrap: 'WRAP' });
-        LEADER_SHEET_EDITABLE_COLUMNS.forEach(name => {
-          if (map[name] === undefined) return;
-          sheetsBatchFormatRuns_(batch, runs, map[name] + 1, 1, { background: MANUAL_ENTRY_CELL_TINT });
-        });
-        LEADER_SHEET_TICK_COLUMNS.forEach(name => {
-          if (map[name] === undefined) return;
-          runs.forEach(run => sheetsBatchValidation_(batch, run.start, map[name] + 1, run.count, 1,
-            { condition: { type: 'BOOLEAN' }, strict: false }));
-          sheetsBatchFormatRuns_(batch, runs, map[name] + 1, 1, { hAlign: 'center' });
-        });
       }
 
       commitProtections = sheetsBatchDerivedProtections_(batch, headers, LEADER_SHEET_DERIVED_COLUMNS,
@@ -729,7 +702,6 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
     }
 
     sheetsBatchFreeze_(batch, 'rows', MEMORY_TAB_HEADER_ROW);
-    sheetsBatchColumnVisibility_(batch, headers, LEADER_SHEET_HIDDEN_COLUMNS);
     // autosizeColumns(…, { force: true }): CLIP everywhere, then fit. The CLIP
     // also undoes the WRAP/OVERFLOW above, exactly as it always has — see the
     // transition note; the two painters must agree, so this one does too.
@@ -741,7 +713,6 @@ function writeProgramLeaderSheetTabViaSheetsApi_(sheet, entry, rows) {
 
     const widths = readSheetsColumnWidths_(batch, lastCol);
     sheetsBatchBufferedWidths_(batch, widths);
-    sheetsBatchColumnVisibility_(batch, headers, LEADER_SHEET_HIDDEN_COLUMNS);
     sheetsBatchFreeze_(batch, 'columns', Math.min(map['Name'] + 1, numCols));
     sendSheetsBatch_(batch);
 

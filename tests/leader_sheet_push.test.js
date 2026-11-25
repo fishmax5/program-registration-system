@@ -86,17 +86,8 @@ this.HEADERS = HEADERS;
 this.LEADER_SHEET_HEADERS = LEADER_SHEET_HEADERS;
 this.LEADER_OWNED_COLUMNS = LEADER_OWNED_COLUMNS;
 this.LEADER_FLAG_COLUMNS = LEADER_FLAG_COLUMNS;
-this.LEADER_SHEET_EDITABLE_COLUMNS = LEADER_SHEET_EDITABLE_COLUMNS;
-this.LEADER_SHEET_TICK_COLUMNS = LEADER_SHEET_TICK_COLUMNS;
-this.LEADER_ACK_FLAG_COLUMNS = LEADER_ACK_FLAG_COLUMNS;
 this.LEADER_SHEET_TEMPLATE_KEY = LEADER_SHEET_TEMPLATE_KEY;
-this.leaderSheetAckColumnNote = leaderSheetAckColumnNote;
-this.leaderAckEditApplies_ = leaderAckEditApplies_;
-this.readLeaderValues = readLeaderValues;
-this.decodeLeaderSnapshot = decodeLeaderSnapshot;
-this.encodeLeaderSnapshot = encodeLeaderSnapshot;
 this.buildLeaderSheetRowsByProgram = buildLeaderSheetRowsByProgram;
-this.pullProgramLeaderSheetEdits = pullProgramLeaderSheetEdits;
 // computeLeaderSheetFingerprint() with a template key of our choosing, which
 // is how a v3 fingerprint is spelled now that the constant says v4.
 this.__fingerprintUnder = function (key, entry, rows) {
@@ -124,7 +115,9 @@ this.__setRegistry = function (r) { __leaderSheetRegistryCache = r; };
 this.__stubRowsByProgram = function (fn) { buildLeaderSheetRowsByProgram = fn; };
 this.__stubAccess = function (fn) { ensureProgramLeaderSheetAccess = fn; };
 this.__clearSpreadsheetHandles = function () { __spreadsheetHandleCache = {}; };
-this.__markUntouched = function (ids) { __leaderSheetsUntouched = ids; };
+const __origLeaderIndex = buildProgramLeaderIndex;
+this.__stubLeaderIndex = function (idx) { buildProgramLeaderIndex = idx ? () => idx : __origLeaderIndex; };
+this.LEADER_SHEET_RETIRED_TEXT = LEADER_SHEET_RETIRED_TEXT;
 `, sandbox, { filename: 'program.gs' });
 
 sandbox.log = () => {};
@@ -187,27 +180,12 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   const lists = rangeListCalls(sheet);
   assert.ok(lists.length > 0, 'the per-run work went out as range lists');
 
-  // Every tick-box column gets exactly one checkbox call, covering one range
-  // per session run — three ranges here, never a band row among them.
-  //
-  // insertCheckboxes(), NOT setDataValidation(): a RangeList does not have the
-  // latter, so the batched version of this threw on every registrant sheet
-  // until it was changed (see applyLeaderFlagCheckboxes_ in `46`). The helper
-  // now refuses that name, which is what makes this assertion mean something.
-  const validations = lists.filter(c => c.name === 'rangeList.insertCheckboxes');
-  assert.strictEqual(validations.length, sandbox.LEADER_SHEET_TICK_COLUMNS.length,
-    'one checkbox call per tick-box column, whatever the number of sessions');
-  validations.forEach(v => assert.strictEqual(v.ranges.length, 3,
-    'covering one range per session run'));
-
-  // The manual-entry wash: one call per column a leader may type in — the five
-  // they own plus the acknowledgement ticks (Attended) — three ranges each.
-  const washes = lists.filter(c => c.name === 'rangeList.setBackground' &&
-    c.args[0] === sandbox.MANUAL_ENTRY_CELL_TINT);
-  assert.strictEqual(washes.length,
-    sandbox.LEADER_SHEET_EDITABLE_COLUMNS.filter(h => map[h] !== undefined).length,
-    'one wash call per leader-typed column');
-  washes.forEach(w => assert.strictEqual(w.ranges.length, 3, 'covering all three session runs'));
+  // A VIEW-ONLY LIST (Nov 2026): no checkboxes and no yellow "type here"
+  // wash anywhere on the sheet.
+  assert.strictEqual(lists.filter(c => c.name === 'rangeList.insertCheckboxes').length, 0,
+    'no checkbox columns on the plain list');
+  assert.strictEqual(lists.filter(c => c.name === 'rangeList.setBackground' &&
+    c.args[0] === sandbox.MANUAL_ENTRY_CELL_TINT).length, 0, 'and no manual-entry wash');
 
   // The rows themselves: a band row, then its people, per session.
   // The render's own write at the data row — not the early write from row 1
@@ -248,7 +226,7 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(first, 1, 'the first push wrote the sheet');
   const entry = sandbox.getProgramLeaderSheetRegistry()['chair yoga|ashbridge'];
   assert.ok(entry.pushedFingerprint, 'and remembered what it wrote');
-  assert.strictEqual(entry.accessOpened, true,
+  assert.strictEqual(entry.accessOpened && entry.viewOnly, true,
     'the sharing repair and the fingerprint both survive on the entry — neither Object.assign drops the other');
 
   const notesBefore = callsNamed(sheet, 'setNote').length;
@@ -258,7 +236,7 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   assert.strictEqual(second, 0, 'the second push wrote nothing');
   assert.ok(cost <= 1, `an unchanged roster costs at most the contradiction check, was ${cost}`);
   assert.strictEqual(callsNamed(sheet, 'setNote').length, notesBefore,
-    'and no restamp — that write made every sheet look touched to the Drive check (99zf)');
+    'and no restamp');
 
   // One more person: the fingerprint moves and the sheet is rewritten.
   const grown = rows.concat(rosterRows(1, 1));
@@ -338,7 +316,7 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   // workbook's registry held.
   sandbox.__setRegistry({
     [KEY]: Object.assign({}, ENTRY, {
-      accessOpened: true,
+      accessOpened: true, viewOnly: true,
       pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, rows)
     })
   });
@@ -363,7 +341,7 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   sandbox.__stubRowsByProgram(() => ({ [KEY]: [] }));
   sandbox.__setRegistry({
     [KEY]: Object.assign({}, ENTRY, {
-      accessOpened: true,
+      accessOpened: true, viewOnly: true,
       pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, [])
     })
   });
@@ -441,19 +419,20 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   sandbox.__stubRowsByProgram(() => ({ [KEY]: rows }));
   sandbox.__setRegistry({
     [KEY]: Object.assign({}, ENTRY, {
-      accessOpened: true, pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, rows)
+      accessOpened: true, viewOnly: true, pushedFingerprint: sandbox.computeLeaderSheetFingerprint(ENTRY, rows)
     })
   });
-  sandbox.__markUntouched({ FU: true });
 
   assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'nothing written');
-  assert.strictEqual(opened, 0, 'and the file was never opened');
+  assert.strictEqual(opened, 1, 'the first run of the day opens it once, for the contradiction check');
+  opened = 0;
+  sandbox.__clearSpreadsheetHandles();
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'nothing written');
+  assert.strictEqual(opened, 0, 'and after that the file is never opened');
 
   sandbox.__stubRowsByProgram(() => ({ [KEY]: rows.concat(rosterRows(1, 1)) }));
   assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1, 'a roster that moved is still written');
   assert.strictEqual(opened, 1);
-
-  sandbox.__markUntouched(null);
 }
 
 // ---------------------------------------------------------------------------
@@ -468,41 +447,14 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
 // push redraws that sheet exactly once.
 // ---------------------------------------------------------------------------
 {
-  const headersNow = sandbox.LEADER_SHEET_HEADERS;
-  assert.ok(headersNow.indexOf('Attended') > headersNow.indexOf('Confirmed') &&
-    headersNow.indexOf('Attended') < headersNow.indexOf('Waitlisted'),
-    'Attended sits with the other leader ticks, not after the machine columns');
-  assert.strictEqual(headersNow[headersNow.length - 1], 'Answers', 'Answers is still last');
-  assert.strictEqual(headersNow.indexOf('Row_Key'), headersNow.length - 3, 'Row_Key stays where it was');
-  assert.strictEqual(headersNow.indexOf('Pushed_Snapshot'), headersNow.length - 2);
-  // The snapshot's order is NOT the display order: appending is what lets an
-  // old five-value snapshot still be read as a prefix (decodeLeaderSnapshot).
-  assert.deepStrictEqual(sandbox.LEADER_SHEET_EDITABLE_COLUMNS,
-    sandbox.LEADER_OWNED_COLUMNS.concat(['Attended']));
+  // THE VIEW-ONLY LIST (Nov 2026): the roster's facts and the answers, nothing
+  // a leader types and no machine columns; every old sheet redrawn once.
+  assert.strictEqual(JSON.stringify(Array.from(sandbox.LEADER_SHEET_HEADERS)), JSON.stringify(
+    ['Event_Date', 'Event_Time', 'Location', 'Name', 'Party_Size', 'Phone', 'Email', 'Program_Status', 'Answers']));
+  assert.strictEqual(sandbox.LEADER_SHEET_TEMPLATE_KEY, 'leader-sheet-v5');
 
   const ENTRY = { title: 'Chair Yoga', location: 'Ashbridge' };
-
-  // The header cell says what the tick does — on both painters, which
-  // tests/sheets_batch_golden.test.js compares note for note.
-  const drawn = makeCountingSheet([], 'Sign_Up_Sheet');
-  sandbox.writeProgramLeaderSheetTab(drawn, ENTRY, rosterRows(2, 2));
-  const note = callsNamed(drawn, 'setNote')
-    .find(c => c.col === map['Attended'] + 1 && c.row === sandbox.MEMORY_TAB_HEADER_ROW);
-  assert.ok(note, 'the Attended header carries a note of its own');
-  assert.ok(/Unticking does nothing/.test(note.args[0]),
-    'and that note is the one-way rule, where a leader will meet it');
-
-  // An attendance mark moves the fingerprint, so the sheet is rewritten.
   const plain = rosterRows(2, 2);
-  const marked = plain.map(r => r.slice());
-  marked[1][map['Attended']] = true;
-  assert.notStrictEqual(sandbox.computeLeaderSheetFingerprint(ENTRY, marked),
-    sandbox.computeLeaderSheetFingerprint(ENTRY, plain),
-    'a sheet whose only change is an attendance mark is still rewritten');
-
-  // The bump IS the migration: a v3 fingerprint cannot match a v4 push.
-  assert.strictEqual(sandbox.LEADER_SHEET_TEMPLATE_KEY, 'leader-sheet-v4',
-    'the template key was bumped for the new column');
   const KEY = 'chair yoga|ashbridge';
   const sheet = makeCountingSheet([], 'Sign_Up_Sheet');
   sandbox.__clearSpreadsheetHandles();
@@ -512,25 +464,59 @@ const rangeListCalls = sheet => sheet.calls.filter(c => c.name.indexOf('rangeLis
   sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
   sandbox.__stubRowsByProgram(() => ({ [KEY]: plain }));
   sandbox.__setRegistry({
-    [KEY]: Object.assign({}, ENTRY, { fileId: 'FV3', accessOpened: true,
-      pushedFingerprint: sandbox.__fingerprintUnder('leader-sheet-v3', ENTRY, plain) })
+    [KEY]: Object.assign({}, ENTRY, { fileId: 'FV4', accessOpened: true,
+      pushedFingerprint: sandbox.__fingerprintUnder('leader-sheet-v4', ENTRY, plain) })
   });
   assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1,
     'every existing sheet is redrawn once by the bump');
-  assert.strictEqual(sandbox.getProgramLeaderSheetRegistry()[KEY].pushedFingerprint,
-    sandbox.computeLeaderSheetFingerprint(ENTRY, plain), 'and stored under the new key');
+  const after = sandbox.getProgramLeaderSheetRegistry()[KEY];
+  assert.strictEqual(after.pushedFingerprint, sandbox.computeLeaderSheetFingerprint(ENTRY, plain),
+    'and stored under the new key');
+  assert.strictEqual(after.viewOnly, true, 'and the sheet is marked view-only');
   assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 0, 'and not again on the next hour');
 }
 
-// ---------------------------------------------------------------------------
-// 8. A SHEET WHOSE PROGRAM IS NOW FILED UNDER ANOTHER NAME IS LEFT ALONE (99zzc)
-//
-// A registry entry made for "CANCELLED DUE TO ILLNESS:T'ai Chi 1" (or for a
-// title staff have since listed in another program's Also_Known_As) has no
-// rows of its own any more — they reach the program's own sheet. Writing it
-// would write "nobody has signed up" over the leader's last roster, so it is
-// not opened at all, while the program's own sheet is written as ever.
-// ---------------------------------------------------------------------------
+{
+  // ONLY PROGRAMS WITH A LEADER (Nov 2026). A leaderless program's sheet is
+  // retired once — its tab says to ask the office — and never opened again;
+  // one with a leader is pushed as usual. An empty Program_Leaders reads as
+  // "not known" and retires nothing.
+  const LED = 'chair yoga|ashbridge';
+  const BARE = 'tai chi|ashbridge';
+  const grid = [];
+  const sheet = makeCountingSheet(grid, 'Sign_Up_Sheet');
+  const openedIds = [];
+  sandbox.__clearSpreadsheetHandles();
+  sandbox.SpreadsheetApp.openById = id => {
+    openedIds.push(id);
+    return { getSheetByName: () => sheet, insertSheet: () => sheet, getSheets: () => [sheet] };
+  };
+  sandbox.__stubAccess(() => ({ openedUp: true, editors: ['a@b.c'] }));
+  sandbox.__stubRowsByProgram(() => ({ [LED]: rosterRows(1, 2), [BARE]: rosterRows(1, 2) }));
+  sandbox.__stubLeaderIndex({ [LED]: [{ name: 'Pat', emails: [] }] });
+  sandbox.__setRegistry({
+    [LED]: { fileId: 'F_LED', title: 'Chair Yoga', location: 'Ashbridge' },
+    [BARE]: { fileId: 'F_BARE', title: 'Tai Chi', location: 'Ashbridge', pushedFingerprint: 'old' }
+  });
+  assert.strictEqual(sandbox.pushProgramLeaderSheets([], []), 1, 'only the led program is pushed');
+  const bare = sandbox.getProgramLeaderSheetRegistry()[BARE];
+  assert.strictEqual(bare.retired, true, 'the leaderless sheet is retired');
+  assert.strictEqual(bare.pushedFingerprint, '', 'with its fingerprint cleared');
+  assert.ok(callsNamed(sheet, 'setValue').some(c => c.args[0] === sandbox.LEADER_SHEET_RETIRED_TEXT),
+    'and its tab says so');
+
+  openedIds.length = 0;
+  sandbox.pushProgramLeaderSheets([], []);
+  assert.ok(openedIds.indexOf('F_BARE') === -1, 'a retired sheet is not opened again');
+
+  sandbox.__stubLeaderIndex({});
+  sandbox.__setRegistry({ [BARE]: { fileId: 'F_BARE', title: 'Tai Chi', location: 'Ashbridge' } });
+  sandbox.pushProgramLeaderSheets([], []);
+  assert.notStrictEqual(sandbox.getProgramLeaderSheetRegistry()[BARE].retired, true,
+    'an unreadable Program_Leaders retires nothing');
+  sandbox.__stubLeaderIndex(null);
+}
+
 {
   const OWN = { title: "T'ai Chi 1", location: 'Ashbridge' };
   const STRAY = { title: "CANCELLED DUE TO ILLNESS:T'ai Chi 1", location: 'Ashbridge' };

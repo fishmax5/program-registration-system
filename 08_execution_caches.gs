@@ -345,9 +345,9 @@ function openFormCached(formId) {
  * The same bargain as openFormCached(), for the spreadsheets this workbook does
  * NOT live in — the program registrant sheets (46), one per program.
  *
- * A sync opens every one of them TWICE: pullProgramLeaderSheetEdits() reads the
- * leaders' ticks back in before the Registrants tab is rewritten, and
- * pushProgramLeaderSheets() writes the settled roster back out at the end.
+ * A sync could open one more than once (pushProgramLeaderSheets() writes the
+ * roster, the Waitlist tab and the sharing in one pass; until Nov 2026 a pull
+ * read every sheet back first).
  * SpreadsheetApp.openById() loads a whole spreadsheet, which is the most
  * expensive call either of those makes, and on a centre with forty programs it
  * was eighty of them an hour for forty documents that had not changed hands in
@@ -355,9 +355,9 @@ function openFormCached(formId) {
  *
  * FAILURES ARE NOT CACHED, for the same three reasons openFormCached() gives:
  * a refusal is routinely repaired mid-execution (ensureProgramLeaderSheetAccess
- * runs in the push, on a file the pull may have been refused), the throw is the
- * answer at some call sites, and a wrongly remembered "no" silently drops a
- * leader's edits for a whole run. This throws whatever SpreadsheetApp throws,
+ * runs in the push, on a file opened a moment earlier), the throw is the
+ * answer at some call sites, and a wrongly remembered "no" silently skips a
+ * sheet for a whole run. This throws whatever SpreadsheetApp throws,
  * at every call, so every caller's own try/catch is unchanged.
  */
 function openSpreadsheetCached(fileId) {

@@ -1,246 +1,39 @@
 // ============================================================================
-// 22. LIVE LINKS TO THE FILES THIS SYSTEM PRODUCES
-//     (program registrant sheets, printed sign-in PDFs)
+// 22. LIVE LINKS TO THE FILES THIS SYSTEM PRODUCES  (program roster sheets)
 // ============================================================================
 //
-// Two of this project's outputs live OUTSIDE the workbook: the spreadsheet a
-// program leader marks up (46_program_leader_sheets.gs) and the landscape PDF
-// the desk prints and writes on (45_sign_in_sheet.gs). Both were findable only
-// by the dialog that made them — close it and the file is somewhere in Drive,
-// under a name you have to remember, for a date you have to remember.
+// One of this project's outputs lives OUTSIDE the workbook: the view-only
+// roster spreadsheet a program's leader reads (46_program_leader_sheets.gs).
+// Every tab that already has a row for a session carries its link, rebuilt on
+// each render:
 //
-// So every tab that already has a row for a session now carries the links to
-// that session's files, rebuilt on each render:
+//   All_Program_Sessions   Registrant_Sheet_Link (hidden)
+//   All_Registrants        Registrant_Sheet_Link
 //
-//   All_Program_Sessions   Registrant_Sheet_Link + Sign_In_Sheet_Link
-//   All_Registrants            Registrant_Sheet_Link + Sign_In_Sheet_Link
-//   Master_Lunch_Dashboard     Sign_In_Sheet_Link   (a meal has no leader)
+// SIGN-IN SHEETS ARE GONE (Nov 25 2026, Max: "kill sign in sheets all
+// together"). The registry, its backfill, the 6am job and the menu items went
+// with them. Sign_In_Sheet_Link is still in HEADERS for All_Registrants and
+// All_Program_Sessions, written blank and hidden, because both tabs are
+// appended to in HEADERS order and taking a column out of the middle would
+// misalign every append onto a tab drawn before the change. The old registry
+// property is cleared by retireRetiredSignInSheetState_() (16).
 //
 // THE COLUMNS ARE DERIVED, NOT STORED. Nothing here reads back what is in the
-// cell; each render recomputes it from the registries below and overwrites.
-// That is what keeps a link from outliving the file it points at: delete the
-// PDF and the next render simply writes nothing there.
-//
-// WHY A REGISTRY FOR THE PDFs AND NOT A DRIVE SEARCH. A render touches every
-// row on three tabs; a Drive lookup per row is hundreds of round trips for a
-// column nobody may even look at. The registry is one Script Property read per
-// execution, like every other registry in this project (06). PDFs built before
-// this existed are picked up by the one-time folder scan on the Admin menu —
-// see backfillSignInSheetRegistry().
+// cell; each render recomputes it and overwrites.
 //
 // LOAD ORDER: numbered last, and it may stay there. Everything in this file is
 // a function declaration (hoisted across the whole project), and the only
 // top-level constants are its own — nothing earlier reads them at load time.
 // ============================================================================
 
-
-// --- the sign-in PDF registry -----------------------------------------------
-
-/**
- * { "yyyy-MM-dd|location key": { fileId, url, name, builtAt } } — one entry per
- * date x location, the same key the printed sheet is built against.
- *
- * Versioned _V1 like every other stored shape here (see the note in 06 and on
- * LEADER_SHEET_REGISTRY_PROP_KEY): a later change to what an entry holds is a
- * new key, never a quiet reinterpretation of this one.
- */
-const SIGN_IN_SHEET_REGISTRY_PROP_KEY = 'SIGN_IN_SHEET_REGISTRY_V1';
-
-/** How many entries the registry keeps. Oldest built go first — see pruneSignInSheetRegistry(). */
-const SIGN_IN_SHEET_REGISTRY_MAX_ENTRIES = 800;
-
-/**
- * The label a sign-in link reads as. Short: the column is narrow and the date
- * is already on the row.
- *
- * It no longer says PDF, because the file is now a LIVE Google Doc that a
- * rebuild rewrites in place (45_sign_in_sheet.gs). Entries stored before that
- * change still point at real PDFs and still open — the STORED SHAPE did not
- * change, only what is on the other end of the URL, which is why this is still
- * SIGN_IN_SHEET_REGISTRY_PROP_KEY's _V1 and not a new key.
- */
-const SIGN_IN_SHEET_LINK_LABEL = '📋 Sign-In Sheet';
+/** The retired sign-in sheet registry's Script Property, named only so it can be cleared. */
+const RETIRED_SIGN_IN_SHEET_REGISTRY_PROP_KEY = 'SIGN_IN_SHEET_REGISTRY_V1';
 
 /** The label a program registrant sheet link reads as. */
 const LEADER_SHEET_LINK_LABEL = '📋 Registrant Sheet';
 
-let __signInSheetRegistryCache = null;
-let __signInSheetRegistryDirty = false;
-
-/** Read once per execution, written back by flushPersistentRegistries(). */
-function getSignInSheetRegistry() {
-  if (__signInSheetRegistryCache) return __signInSheetRegistryCache;
-  const raw = PropertiesService.getScriptProperties().getProperty(SIGN_IN_SHEET_REGISTRY_PROP_KEY);
-  let parsed = null;
-  try {
-    parsed = raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    // A registry that cannot be parsed is a registry that is gone. Losing it
-    // costs the link column until the next backfill; throwing here would cost
-    // the render.
-    log(`⚠️ The sign-in sheet registry could not be read (${err}) — starting a fresh one.`);
-  }
-  __signInSheetRegistryCache = parsed && typeof parsed === 'object' ? parsed : {};
-  return __signInSheetRegistryCache;
-}
-
-/** The identity of one printed sheet: the day and the building, nothing else. */
-function signInSheetKey(dateKey, location) {
-  return `${String(dateKey || '').trim()}|${normalizeNameKey(location)}`;
-}
-
-/**
- * Remembers the file just built for one date x location, REPLACING whatever
- * was there.
- *
- * Rebuilding a day is the normal case — a name arrives after somebody opened
- * the sheet — and since the sheet became a live Doc this is usually the SAME
- * file being re-recorded: renderSignInSheetDoc() looks the entry up here to
- * find the document to rewrite, so the URL already handed out keeps working.
- * An entry left over from the PDF era points at a PDF, which cannot be
- * rewritten; that build makes a Doc and this replaces the entry with it.
- */
-function recordSignInSheetFile(dateKey, location, file) {
-  if (!dateKey || !location || !file) return;
-  const registry = getSignInSheetRegistry();
-  registry[signInSheetKey(dateKey, location)] = {
-    fileId: file.getId(),
-    url: file.getUrl(),
-    name: file.getName(),
-    builtAt: new Date().toISOString()
-  };
-  __signInSheetRegistryDirty = true;
-  pruneSignInSheetRegistry();
-}
-
-/**
- * Keeps the stored property bounded. A Script Property has a hard size limit
- * and this one grows by an entry per printed day forever; the sheets that fall
- * off are years old and their PDFs are long since irrelevant. The FILES are
- * untouched — only the memory of them.
- */
-function pruneSignInSheetRegistry() {
-  const registry = getSignInSheetRegistry();
-  const keys = Object.keys(registry);
-  if (keys.length <= SIGN_IN_SHEET_REGISTRY_MAX_ENTRIES) return;
-  keys
-    .sort((a, b) => String(registry[a].builtAt || '').localeCompare(String(registry[b].builtAt || '')))
-    .slice(0, keys.length - SIGN_IN_SHEET_REGISTRY_MAX_ENTRIES)
-    .forEach(key => { delete registry[key]; });
-  __signInSheetRegistryDirty = true;
-}
-
-/**
- * What a sign-in sheet is named on disk — the one shape
- * backfillSignInSheetRegistry() can read back.
- *
- * The `.pdf` is optional because a live Google Doc has no extension in its
- * name: both eras of file are "Sign-In yyyy-MM-dd Location", and both parse
- * back to the date and building they were built for.
- */
-const SIGN_IN_SHEET_FILENAME_RE = /^Sign-In (\d{4}-\d{2}-\d{2}) (.+?)(?:\.pdf)?$/i;
-
-/**
- * ADMIN MENU: teaches the registry about every sign-in sheet already sitting in
- * Drive, so a workbook that has been building them for a year does not have to
- * wait for the next rebuild to show a link.
- *
- * BOTH FOLDERS ARE SCANNED, and in this order: the retired PDF folder first,
- * then the live-document folder, so that where a day exists in both, the DOC
- * wins regardless of which file happens to be newer. That is not a tie-break,
- * it is the point — a PDF is a photograph of a roster that has since changed,
- * and the Doc is the roster. Within one folder the newest file still wins, on
- * the same reasoning as a rebuild.
- *
- * Also opens each file it walks up to anyone with the link (see
- * openUpFileToAnyoneWithLink()) — sheets made before that existed, PDF and
- * document alike, were left shared with their builder alone.
- *
- * One scan, by hand, rather than anything automatic: it is a full folder
- * listing, it only ever has work to do once, and getting it wrong is a link
- * column that stays empty rather than anything lost. Names are parsed back
- * with SIGN_IN_SHEET_FILENAME_RE — a file somebody renamed is skipped for the
- * registry, since the date and location cannot be recovered from a name that
- * no longer carries them, but it is still opened up like every other file in
- * the two folders: only the registry needs the name.
- */
-function backfillSignInSheetRegistry() {
-  if (!requireAuthorizedAdmin('Rebuild Sign-In Sheet Links')) return { matched: 0, skipped: 0, opened: 0 };
-  if (!confirmConsequentialAction('Rebuild sign-in sheet links?',
-    'Every sheet already sitting in either sign-in sheet folder is set to "anyone with the link can edit" ' +
-    '(the same fix already applied to registration forms and program registrant sheets), so a printed sheet ' +
-    'opens for whoever clicks its dashboard link, not only whoever printed it.', true)) {
-    return { matched: 0, skipped: 0, opened: 0 };
-  }
-  const locationByKey = {};
-  Object.values(CALENDAR_MAP).forEach(loc => { locationByKey[normalizeNameKey(loc)] = loc; });
-
-  const registry = getSignInSheetRegistry();
-  let matched = 0;
-  let skipped = 0;
-  let opened = 0;
-
-  // [folder, does a hit here overrule a PDF already recorded for that day?]
-  const sources = [
-    [getOrCreateSignInSheetFolder(), false],
-    [getOrCreateSignInSheetDocFolder(), true]
-  ];
-  // Which keys this run has already taken from the DOC folder, so that
-  // newest-wins still applies among documents and only a PDF gets overruled.
-  const claimedByDoc = {};
-
-  sources.forEach(source => {
-    const files = source[0].getFiles();
-    const overrules = source[1];
-    while (files.hasNext()) {
-      const file = files.next();
-      if (openUpFileToAnyoneWithLink(file.getId(), `sign-in sheet "${file.getName()}"`).openedUp) opened++;
-      const parts = SIGN_IN_SHEET_FILENAME_RE.exec(String(file.getName() || '').trim());
-      if (!parts) { skipped++; continue; }
-      const dateKey = parts[1];
-      const location = locationByKey[normalizeNameKey(parts[2])] || parts[2];
-      const key = signInSheetKey(dateKey, location);
-      const builtAt = file.getDateCreated();
-      const existing = registry[key];
-      const newestWins = !overrules || claimedByDoc[key];
-      if (existing && newestWins && String(existing.builtAt || '') >= builtAt.toISOString()) continue;
-      if (overrules) claimedByDoc[key] = true;
-      registry[key] = {
-        fileId: file.getId(),
-        url: file.getUrl(),
-        name: file.getName(),
-        builtAt: builtAt.toISOString()
-      };
-      __signInSheetRegistryDirty = true;
-      matched++;
-    }
-  });
-
-  pruneSignInSheetRegistry();
-  flushPersistentRegistries();
-  const message = `Sign-in sheet links: ${matched} sheet(s) picked up, ${opened} opened to anyone with the link` +
-    (skipped > 0 ? `, ${skipped} file(s) skipped (name no longer says which date and location)` : '') +
-    '. The links appear on the next render.';
-  log(message);
-  toastIfPossible(message);
-  return { matched, skipped, opened };
-}
-
 
 // --- what a render asks for -------------------------------------------------
-
-/**
- * The HYPERLINK formula for one session's printed sheet, or '' when no PDF has
- * been built for that day and building yet. '' rather than a placeholder: an
- * empty cell reads as "there isn't one", which is true, and a column of "none"
- * on a tab this wide is noise.
- */
-function signInSheetLinkFormula(dateValue, location) {
-  const date = coerceDate(dateValue);
-  if (!date || !location) return '';
-  const entry = getSignInSheetRegistry()[signInSheetKey(formatDateKey(date), location)];
-  return entry && entry.url ? makeHyperlinkFormula(entry.url, SIGN_IN_SHEET_LINK_LABEL) : '';
-}
 
 /**
  * The HYPERLINK formula for the spreadsheet a program's leader marks up, or ''
@@ -262,8 +55,7 @@ function leaderSheetLinkFormula(title, location) {
 /**
  * Fills the file-link columns in on rows about to be written to a tab.
  *
- * `columns` names which of the two this tab carries and where each one's
- * inputs live, so one function serves all three tabs:
+ * `options` says where the program title lives on this tab:
  *   { titleColumn: 'Clean_Title' }  — omit for a tab with no program on the row
  *
  * A tab whose header row predates these columns simply has no index for them,
@@ -279,9 +71,8 @@ function stampGeneratedFileLinks(rows, map, options) {
 
   rows.forEach(row => {
     const location = String(row[map['Location']] || '').trim();
-    if (signInIdx !== undefined) {
-      row[signInIdx] = signInSheetLinkFormula(row[map['Event_Date']], location);
-    }
+    // Retired column: blank, so an old link to a sign-in Doc does not linger.
+    if (signInIdx !== undefined) row[signInIdx] = '';
     if (leaderIdx !== undefined) {
       row[leaderIdx] = titleIdx === undefined
         ? '' : leaderSheetLinkFormula(row[titleIdx], location);

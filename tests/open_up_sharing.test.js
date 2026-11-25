@@ -69,7 +69,7 @@ const sandbox = {
     },
     getFolderById: id => driveFile(id),
     Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
-    Permission: { EDIT: 'EDIT' }
+    Permission: { EDIT: 'EDIT', VIEW: 'VIEW' }
   },
   HtmlService: {}, LockService: {},
   Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 't@e.com' }) },
@@ -89,7 +89,6 @@ vm.createContext(sandbox);
 vm.runInContext(src + `
 ;this.collectGeneratedArtifactTargets = collectGeneratedArtifactTargets;
 this.openUpFileToAnyoneWithLink = openUpFileToAnyoneWithLink;
-this.applyLeaderFlagCheckboxes_ = applyLeaderFlagCheckboxes_;
 this.runOpenUpSharingSlice = runOpenUpSharingSlice;
 this.saveSlicedJobState = saveSlicedJobState;
 this.getSlicedJobState = getSlicedJobState;
@@ -126,14 +125,11 @@ sandbox.__stub('getLunchOnlyFormLinks', () => ({ 'Ashbridge|2026-04': { formId: 
 sandbox.__stub('getOrCreateTemplateForm', () => ({ getId: () => 'TEMPLATE' }));
 sandbox.__stub('getMembershipFormId', () => 'MEMBERSHIP');
 sandbox.__stub('getProgramLeaderSheetRegistry', () => ({ 'chess|ashbridge': { fileId: 'LEADER_SHEET', title: 'Chess' } }));
-sandbox.__stub('getSignInSheetRegistry', () => ({ '2026-04-01|ashbridge': { fileId: 'SIGN_IN_DOC' } }));
 sandbox.__stub('getOrCreateFormImageFolder', () => Object.assign(folder('IMG_FOLDER', 'Form Images'), {
   getFiles: () => iter([folder('IMAGE_1', 'poster.png')])
 }));
 sandbox.__stub('getSystemRootFolder', () => folder('ROOT_FOLDER', 'Program Registration System'));
 sandbox.__stub('getOrCreateFormsFolder', () => folder('FORMS_FOLDER', 'Forms'));
-sandbox.__stub('getOrCreateSignInSheetDocFolder', () => folder('DOC_FOLDER', 'Sign-In Sheets'));
-sandbox.__stub('getOrCreateSignInSheetFolder', () => folder('PDF_FOLDER', 'Printed Sign-In Sheets'));
 sandbox.__stub('getOrCreateProgramLeaderSheetFolder', () => folder('LEADER_FOLDER', 'Registrant Sheets'));
 
 const targets = sandbox.collectGeneratedArtifactTargets();
@@ -141,8 +137,8 @@ const ids = targets.map(t => t.id);
 
 check('every kind of artifact is claimed', ids, [
   'FORM_ROW_ONLY', 'FORM_BOTH', 'FORM_REGISTRY_ONLY', 'LUNCH_FORM', 'TEMPLATE', 'MEMBERSHIP',
-  'LEADER_SHEET', 'SIGN_IN_DOC', 'IMAGE_1',
-  'ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER'
+  'LEADER_SHEET', 'IMAGE_1',
+  'ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER'
 ]);
 
 check('a form named twice is opened once',
@@ -154,11 +150,11 @@ check('a form named twice is opened once',
 // copy of the bytes, so nothing is lost). Everything else gets the link.
 check('folders and form images are named editors only, never link-shared',
   targets.filter(t => !t.linkSharing).map(t => t.id),
-  ['IMAGE_1', 'ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
+  ['IMAGE_1', 'ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
 
 check('only a folder id is fetched as a folder',
   targets.filter(t => t.folder).map(t => t.id),
-  ['ROOT_FOLDER', 'FORMS_FOLDER', 'DOC_FOLDER', 'PDF_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
+  ['ROOT_FOLDER', 'FORMS_FOLDER', 'LEADER_FOLDER', 'IMG_FOLDER']);
 
 // The pictures INSIDE it are link-shared like any other file; the folder
 // itself is not, and it is claimed exactly once despite being read twice.
@@ -167,9 +163,10 @@ check('the image folder is claimed once, as a folder',
 
 // A registry that throws costs its own entries and nothing else — the sweep is
 // the repair for a half-broken workbook, so it must not need a whole one.
-sandbox.__stub('getSignInSheetRegistry', () => { throw new Error('unreadable'); });
+sandbox.__stub('getProgramLeaderSheetRegistry', () => { throw new Error('unreadable'); });
 check('an unreadable registry does not lose the rest',
-  sandbox.collectGeneratedArtifactTargets().map(t => t.id).indexOf('LEADER_SHEET') !== -1, true);
+  sandbox.collectGeneratedArtifactTargets().map(t => t.id).indexOf('TEMPLATE') !== -1, true);
+sandbox.__stub('getProgramLeaderSheetRegistry', () => ({ 'chess|ashbridge': { fileId: 'LEADER_SHEET', title: 'Chess' } }));
 
 // --- linkSharing: false -----------------------------------------------------
 
@@ -194,35 +191,12 @@ const fileOutcome = sandbox.openUpFileToAnyoneWithLink('FORM_BOTH', 'a registrat
 check('a file still gets link sharing', sharing.setSharing, ['FORM_BOTH|ANYONE_WITH_LINK|EDIT']);
 check('a file reports it was opened', fileOutcome.openedUp, true);
 
-// --- a tick column that will not draw --------------------------------------
-
-// A RangeList has insertCheckboxes() and NOT setDataValidation(), which is the
-// whole reason this helper exists: the batched write called the missing one and
-// threw "ticks.setDataValidation is not a function" on every sheet, every hour,
-// leaving the roster half-written with its tick columns reading TRUE/FALSE.
-const drawn = [];
-sandbox.applyLeaderFlagCheckboxes_('Contacted', {
-  insertCheckboxes: () => { drawn.push('insertCheckboxes'); },
-  setHorizontalAlignment: () => { drawn.push('aligned'); }
-});
-check('a tick column is drawn with the call a RangeList actually has',
-  drawn, ['insertCheckboxes', 'aligned']);
-
-let threw = false;
-try {
-  sandbox.applyLeaderFlagCheckboxes_('Contacted', {
-    insertCheckboxes: () => { throw new Error('Exception: You do not have permission'); },
-    setHorizontalAlignment: () => {}
-  });
-} catch (err) {
-  threw = true;
-}
-check('a refused checkbox column never abandons the roster', threw, false);
-
-// A column the headers do not name arrives as null rather than as a NaN column
-// index, and is skipped.
-sandbox.applyLeaderFlagCheckboxes_('Confirmed', null);
-check('a column the headers do not have is skipped', true, true);
+// --- a registrant sheet is a view-only list (Nov 2026) -----------------------
+sharing.setSharing.length = 0;
+sandbox.openUpFileToAnyoneWithLink('SHEET_V', 'a registrant sheet', { linkPermission: 'view' });
+check('a registrant sheet is shared view-only by link', sharing.setSharing, ['SHEET_V|ANYONE_WITH_LINK|VIEW']);
+check('and the sweep asks for view on every registrant sheet',
+  targets.filter(t => /registrant sheet/.test(t.what)).every(t => t.linkPermission === 'view'), true);
 
 // --- it carries itself on ---------------------------------------------------
 //

@@ -145,7 +145,7 @@ function readWorkbookChangeGeneration_() {
 
 /**
  * The fingerprint a skippable tail step is judged by: its own inputs, today,
- * the change generation, and the two generated-file registries whose links
+ * the change generation, and the roster-sheet registry whose links
  * every dashboard stamps (`69`) — a sheet the sync itself just created must
  * reach the dashboards within the hour, and the sync's own writes do not move
  * the generation.
@@ -154,7 +154,7 @@ function tailRenderFingerprint_(stepId, parts) {
   let registries = '';
   try {
     const props = PropertiesService.getScriptProperties();
-    registries = [LEADER_SHEET_REGISTRY_PROP_KEY, SIGN_IN_SHEET_REGISTRY_PROP_KEY]
+    registries = [LEADER_SHEET_REGISTRY_PROP_KEY]
       .map(key => props.getProperty(key) || '').join('|');
   } catch (err) {
     registries = String(Date.now());

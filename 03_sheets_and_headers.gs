@@ -265,13 +265,11 @@ defineLazyGlobal_('HEADERS', () => ({
   // with the hidden machine columns because it is an input to the slot
   // arithmetic rather than something staff read: it is how the form layer
   // rebuilds a session's appointment times without going back to the calendar.
-  // Registrant_Sheet_Link and Sign_In_Sheet_Link sit with the other two links
-  // because they are the same kind of thing: somewhere else to click through
-  // to. They point at the two files this system produces OUTSIDE the workbook
-  // — the spreadsheet a program leader marks up, and the printed sign-in PDF
-  // for that day and building. Both are DERIVED: every render recomputes them
-  // from the registries and overwrites whatever is in the cell, so a link can
-  // never outlive the file it points at. See 69_generated_file_links.gs.
+  // Registrant_Sheet_Link points at the one file this system produces OUTSIDE
+  // the workbook — a program's view-only roster sheet, for programs with a
+  // leader. DERIVED: every render recomputes it from the registry and
+  // overwrites the cell (69). Sign_In_Sheet_Link is RETIRED (Nov 2026):
+  // written blank and hidden, kept only so appends stay aligned.
   //
   // Waitlist_Only is the fourth tick and the odd one out: the other three
   // describe a PROGRAM and are the same on every one of its dates, while this
@@ -379,11 +377,11 @@ defineLazyGlobal_('HEADERS', () => ({
    *             would read as a capacity somebody could book against. The
    *             window is stated in the column note, and the Sessions
    *             drill-through is where history lives.
-   *   Register_Link, Edit_Form_Link, Roster_Link, Sign_In_Link
-   *             the session rows' Form_Response_Link, Edit_Form_Link,
-   *             Registrant_Sheet_Link and Sign_In_Sheet_Link, ONE LINK PER
-   *             CELL, each a =HYPERLINK() with a short word on it ("Register",
-   *             "Edit form", "Roster", "Sign-in sheet") — the CURRENT ones, off
+   *   Register_Link, Edit_Form_Link
+   *             the session rows' Form_Response_Link and Edit_Form_Link, ONE
+   *             LINK PER CELL, each a =HYPERLINK() with a short word on it
+   *             ("Register", "Edit form"; Sign_In_Link went with the sign-in
+   *             sheets, Nov 2026) — the CURRENT ones, off
    *             the program's most recent session, because a Regular program
    *             has a form per month and the one worth handing out is this
    *             month's. They were one 'Links' cell of rich text with a live
@@ -434,7 +432,7 @@ defineLazyGlobal_('HEADERS', () => ({
     'Loc', 'Program', 'Next_Date', 'Next_Registered', 'Room', 'Leader', 'Type_Tag',
     'Club', 'No_Registration', 'Personalized_Assistance',
     'Schedule', 'Sessions', 'Seats', 'Notify',
-    'Register_Link', 'Edit_Form_Link', 'Sign_In_Link', 'Status', 'Last_Date',
+    'Register_Link', 'Edit_Form_Link', 'Status', 'Last_Date',
     'Location', 'Form_ID', 'Group_Key'
   ],
   // Order_Ahead_Flag is computed once, at import time, and never recomputed
@@ -531,10 +529,11 @@ defineLazyGlobal_('HEADERS', () => ({
   // Forms collects). Email is what inviteRegistrantsToCalendarEvents() adds as
   // a calendar guest; Phone is what the printed sign-in sheet needs and what
   // staff ring when a program moves.
-  // Registrant_Sheet_Link and Sign_In_Sheet_Link are the same derived pair the
-  // session table carries, repeated here so the day's roster is one click
-  // from the sheet the leader is marking and the PDF the desk printed — see
-  // 69_generated_file_links.gs.
+  // Registrant_Sheet_Link is the same derived link the session table carries
+  // (69). Sign_In_Sheet_Link is RETIRED (Nov 2026, the sign-in sheets were
+  // cut): written blank and hidden, and kept in place only because rows are
+  // appended to this tab in HEADERS order and a column taken out of the
+  // middle would misalign every append onto a tab drawn before the change.
   All_Registrants: [
     'Event_Date', 'Location', 'Event', 'Event_Time', 'Name', 'Attended', 'Lunch_Served',
     'Meals_Ordered',
@@ -604,19 +603,16 @@ defineLazyGlobal_('HEADERS', () => ({
   // numbers rather than adding to the total. A row reading 40 ordered, 14
   // takeaway, 8 carried over means eight of that fourteen left the building
   // on a later day.
-  // Sign_In_Sheet_Link trails at the very end, behind even the buffers: it is
-  // the printed sheet for that date x location (there is no registrant sheet for a
-  // meal), derived on every render from the registry in
-  // 69_generated_file_links.gs. Its position is free to move for the same
-  // reason the buffers' is — the formulas build their A1 refs from this array.
+  // Sign_In_Sheet_Link used to trail here; it went with the sign-in sheets
+  // (Nov 2026). Dropping a trailing column is safe for the reason the
+  // buffers' position is free — the formulas build their A1 refs from this array.
   Master_Lunch_Dashboard: [
     'Event_Date', 'Location', 'Lunch_Type', 'Meal_Shorthand',
     'Registered_Count', 'Served_Confirmed', 'Total_to_Order', 'Actual_Ordered',
     'Day_1_In-Person', 'Day_1_Takeaway', 'Subs_In-Person', 'Subs_Takeaway', 'In_Fridge',
     'Carried_Over',
     'Total_Consumed', 'Thrown_Away', 'Discrepancy', 'Manual_Override',
-    'Standard_Buffer', 'Tester_Buffer',
-    'Sign_In_Sheet_Link'
+    'Standard_Buffer', 'Tester_Buffer'
   ],
   /**
    * All_Lunch_Registrants - WHO is eating, one row per PERSON per date+location.
@@ -1274,82 +1270,23 @@ const CLUB_MEMBERS_STAFF_COLUMNS = ['Lunch', 'Active', 'Staff_Notes'];
 /** What a Club_Members row's Lunch cell can say. Mirrors the form's own yes/no, not the Hot/Cold a day resolves to. */
 const CLUB_LUNCH_OPTIONS = ['Yes - Lunch', 'No Lunch'];
 
-/** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
 /**
- * THE FIVE COLUMNS THE PROGRAM LEADER OWNS, in the order they appear on both
- * All_Registrants and the shared sheet. This one array drives the checkbox
- * formatting, the yellow wash, the snapshot encoding and the merge — they can
- * never disagree about what is leader-owned, which is the kind of drift that
- * turns a merge into data loss.
- *
- * These five are the ones that merge BOTH WAYS. The shared roster also carries
- * the acknowledgement ticks below, which do not, and the three lists after
- * this one are how "leader-owned" and "a leader may type here" stopped being
- * the same sentence.
+ * THE FIVE "LEADER" COLUMNS on All_Registrants. The names are historical: they
+ * were the program leader's on the shared roster, merged back every hour,
+ * until Nov 2026 made that roster a view-only list. The office ticks them on
+ * All_Registrants now, and Dropped / Waitlisted still act (`71`). This one
+ * array drives their checkbox formatting and the yellow wash.
  *
  * Waitlisted is deliberately SEPARATE from Program_Status's own "Waitlisted"
- * value. They answer different questions: Program_Status is what the system
- * decided from Max_Capacity, and this is what the leader decided about a
- * person they have actually spoken to. Ticking one does not move the other —
- * Program_Status rides along on the shared sheet, read-only, so the leader
- * can see both.
+ * value: Program_Status is what the system decided from Max_Capacity, and this
+ * is what somebody decided about a person they have actually spoken to.
  */
 const LEADER_OWNED_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped', 'Leader_Notes'];
 
 /** The first four of those are real checkboxes; Leader_Notes is free text. */
 const LEADER_FLAG_COLUMNS = ['Contacted', 'Confirmed', 'Waitlisted', 'Dropped'];
 
-/**
- * THE ACKNOWLEDGEMENT TICK, AND THE ONE DIRECTION IT TRAVELS.
- *
- * Attended is not a leader's column the way the five above are — it is the
- * DESK'S column, ticked at the door by Quick Mark (`38`) and by the sign-in
- * app (`74`), counted by the dashboard's metrics block (`43`) and stored by
- * the Metrics tab (`83`). But the person who knows who walked into the room is
- * very often the one standing in it, and until now they had nowhere to say so:
- * a leader covering a class at Ashbridge could see the roster on their own
- * sheet and not record a single arrival on it.
- *
- * So the roster carries it, and it travels ONE WAY: a tick sets Attended on
- * the registrant row, and an UNTICK does nothing at all. That asymmetry is
- * deliberate and is the only thing that makes the column safe to hand out.
- * The desk is the authority for clearing a mark — Quick Mark's own "I ticked
- * the wrong Mary" undo (`99a`) is a decision somebody made in front of the
- * person — and a leader tidying their sheet a week later, or a browser tab
- * open since Tuesday saving a stale false, must never be able to erase it.
- * Attendance only ever goes up from here. It is said in the sheet's banner
- * note and on the column's own header cell, so a leader is told rather than
- * surprised (leaderSheetAckColumnNote(), `46`).
- *
- * Separate from LEADER_FLAG_COLUMNS rather than added to it for the same
- * reason: those five merge per cell in BOTH directions against the pushed
- * snapshot, and a sixth with a different rule inside that list is a rule
- * nobody reading the merge would see.
- */
-const LEADER_ACK_FLAG_COLUMNS = ['Attended'];
-
-/**
- * Everything a program leader may type on the shared roster — the five they
- * own plus the acknowledgement ticks — and THE ORDER THE PUSHED SNAPSHOT IS
- * WRITTEN IN, which is why the ack columns are appended rather than slotted in
- * beside the ticks they sit next to on screen.
- *
- * The snapshot is a positional JSON array in a hidden cell of somebody else's
- * spreadsheet (encodeLeaderSnapshot, `46`), and every sheet in Drive is still
- * holding one written under the old five-column list. Appending means an old
- * snapshot is a PREFIX of a new one, so decodeLeaderSnapshot() can pad it and
- * the first pull after this ships still reads a leader's ticks back correctly
- * — where a reordered list would have made every stored snapshot unreadable
- * and quietly dropped an hour of somebody's work.
- *
- * The DISPLAY order is LEADER_SHEET_HEADERS' business, and there Attended sits
- * with the other ticks where a leader expects it.
- */
-const LEADER_SHEET_EDITABLE_COLUMNS = LEADER_OWNED_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
-
-/** Every column on the shared roster drawn as a real checkbox. Leader_Notes is free text. */
-const LEADER_SHEET_TICK_COLUMNS = LEADER_FLAG_COLUMNS.concat(LEADER_ACK_FLAG_COLUMNS);
-
+/** Day-of columns on Registrants that staff tick by hand. TRUE/FALSE checkboxes. */
 const REGISTRANT_DAYOF_COLUMNS = ['Attended', 'Lunch_Served'];
 
 /**

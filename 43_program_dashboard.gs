@@ -1141,12 +1141,16 @@ function writeProgramDashboardSheet(sheet, headers, map, sessionRows, todayData,
     writeProgramSessionTable_(sheet, headers, map, upcoming, past, row, todayDataStart, todayRowsOut));
   checkPredictedTableRow_(sheet, sectionedTableHeaderRow_(sessionTableStart), result.upcomingHeaderRow);
 
-  // THE TITLE IS THE ROSTER LINK (99zzg) — after the batch, so the values it
-  // writes cannot be overwritten by it.
+  // THE TITLE OPENS THE PROGRAM'S ROWS ON All_Registrants (99zzl) — after
+  // the batch, so the values it writes cannot be overwritten by it. Read
+  // fresh: All_Registrants may have been redrawn earlier in this run.
+  resetRegistrantRosterRanges_();
+  const registrantRanges = readRegistrantRosterRanges_();
   [[upcoming, result.upcomingDataStart], [past, result.pastDataStart]].forEach(([rows, start]) => {
     linkTitleCellsToRosters_(sheet, start, map['Clean_Title'] + 1,
       rows.map(r => r[map['Clean_Title']]),
-      rows.map(r => map['Registrant_Sheet_Link'] === undefined ? '' : rosterUrlFromCell_(r[map['Registrant_Sheet_Link']])));
+      rows.map(r => registrantRanges
+        ? registrantRosterRangeUrl_(r[map['Clean_Title']], r[map['Location']], registrantRanges) : ''));
   });
 
   // THROUGH THE SESSION TABLE'S HEADER ROW, like every other tab in this

@@ -28,12 +28,12 @@ function syncRegistrations(e) {
     return;
   }
 
-  // THE DAY'S SECOND COPY, BEFORE ANYTHING WRITES. The 3am trigger is the
-  // primary; this is what makes a missing or failed one cost nothing — and it
-  // runs before this sync touches the tab, so the copy is of what the sync
-  // found. Both never throw. See 99j.
+  // THE NIGHTLY JOB'S BELT (99j): the 3am trigger runs the ledger checkpoint;
+  // this runs it if that trigger is missing or failed. No CSV since Nov 25
+  // 2026. All three never throw.
   ensureRegistrantSnapshotTrigger_();
   ensurePublicSnapshotTrigger_();
+  retireRetiredSignInSheetState_(); // sign-in sheets retired Nov 2026; never throws (16)
   snapshotRegistrantsIfDue_();
   applySystemTabVisibilityIfDue_(); // once a day; never throws. See 99zp.
 
@@ -287,18 +287,14 @@ function runRegistrationImportPhase(sync) {
   sync.step('catching up club members', () =>
     applyClubRosterCatchup(registryIndex, protectedKeys, existingRowIndex, orderAheadDays, newRows));
 
-  // BEFORE the tab is rewritten, not after: the leaders' shared sheets hold
-  // marks made since the last run, and this is the pass that would otherwise
-  // overwrite them with the copy the workbook already had. See
-  // pullProgramLeaderSheetEdits() for how a touched cell is told from an
-  // untouched one. Guarded, because a shared sheet somebody trashed must not
-  // be able to stop the registration import.
+  // BEFORE the tab is rewritten: a Dropped or Waitlisted tick the office made
+  // on All_Registrants (the staff tick columns, 99zze) is a cancellation or a
+  // waitlisting, and until it became one it was a column nothing read while
+  // the seat stayed full. The leaders' own sheets are view-only lists since
+  // Nov 2026 and nothing is read back from them. Guarded, because a bad row
+  // must not be able to stop the registration import.
   try {
-    pullProgramLeaderSheetEdits(existingRows);
-    // IMMEDIATELY AFTER THE MERGE, on the rows it just touched: a leader's
-    // "Dropped" tick is a cancellation, and until it became one it was a
-    // column nothing read while the seat stayed full. See
-    // applyLeaderDropsAsCancellations() for why it stamps these rows rather
+    // See applyLeaderDropsAsCancellations() for why it stamps these rows rather
     // than going through cancelRegistrantRows() — the tab is written below.
     applyLeaderDropsAsCancellations(existingRows);
     // ...and the tick beside it, which was a note for exactly as long. Two-way,
@@ -307,7 +303,7 @@ function runRegistrationImportPhase(sync) {
     // refused here rather than being put in a queue it has left.
     applyLeaderWaitlistTicks(existingRows, sessionRows);
   } catch (err) {
-    log(`⚠️ Could not read the program registrant sheets back in this run (${err}) — the registrations themselves are fine.`);
+    log(`⚠️ Could not apply this run's Dropped / Waitlisted ticks (${err}) — the registrations themselves are fine.`);
   }
 
   const combinedRegistrantRows = existingRows.concat(newRows);

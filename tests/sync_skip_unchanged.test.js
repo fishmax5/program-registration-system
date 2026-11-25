@@ -8,8 +8,9 @@
 //      window, then left off the list; re-opened (only if we closed it) when
 //      it gains a session again. A lunch-only form with no served day ahead
 //      closes at once, and re-opens when a day is catered again.
-//   2. 99zf — a program registrant sheet Drive says nobody touched since it
-//      was last read is not opened; once a day every one is.
+//   2. (99zf, retired Nov 2026 with the leader-sheet pull: a registrant sheet
+//      is a view-only list now and the push skips on its own fingerprint —
+//      tests/leader_sheet_push.test.js.)
 //   3. 99zg — the Registrants tab is not rewritten when the rows it would
 //      write hash the same with today's date; a different day or row redraws.
 //   4. 99zg — a tail dashboard is skipped on an unchanged fingerprint, and
@@ -206,56 +207,6 @@ const clear = () => Object.keys(store).forEach(k => delete store[k]);
   assert.strictEqual(sandbox.closeEndedForms([lunch('UNREAD', 2026, 9, 20)]).closed, 0);
   assert.strictEqual(forms.UNREAD.accepting, true);
   sandbox.isLunchOfferedOn = realOffered;
-}
-
-// ---------------------------------------------------------------------------
-// 2. LEADER SHEETS DRIVE SAYS NOBODY TOUCHED
-// ---------------------------------------------------------------------------
-{
-  clear();
-  let modified = { A: '2026-10-06T10:00:00Z', B: '2026-10-06T10:00:00Z' };
-  let listings = 0;
-  sandbox.getOrCreateProgramLeaderSheetFolder = () => ({ getId: () => 'FOLDER' });
-  sandbox.Drive = { Files: { list: params => {
-    listings++;
-    assert.ok(params.q.indexOf("'FOLDER' in parents") === 0);
-    return { items: Object.keys(modified).map(id => ({ id, modifiedDate: modified[id] })) };
-  } } };
-
-  // First run of the day: everything is read, and the baselines recorded.
-  let plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('A'), false, 'the daily full check opens every sheet');
-  plan.read('A'); plan.read('B'); plan.save();
-  assert.strictEqual(listings, 1, 'one Drive call for every sheet');
-
-  // Next hour: nothing moved.
-  plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('A'), true, 'a sheet whose date has not moved is not opened');
-  assert.strictEqual(sandbox.leaderSheetUntouchedThisRun_('A'), true, 'and the push is told');
-  assert.strictEqual(plan.untouched('C'), false, 'a sheet outside the folder is always read');
-  plan.save();
-
-  // A leader edits B.
-  modified.B = '2026-10-06T10:40:00Z';
-  plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('A'), true);
-  assert.strictEqual(plan.untouched('B'), false, 'an edited sheet is read');
-  assert.strictEqual(sandbox.leaderSheetUntouchedThisRun_('B'), false);
-  plan.read('B'); plan.save();
-  plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('B'), true, 'and is quiet again once read');
-
-  // Tomorrow: the full check again.
-  NOW += 24 * 3600 * 1000;
-  plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('A'), false, 'once a day nothing is skipped');
-  plan.save();
-
-  // No Drive service: the old behavior.
-  delete sandbox.Drive;
-  plan = sandbox.planLeaderSheetPull_();
-  assert.strictEqual(plan.untouched('A'), false, 'nothing is skipped when Drive cannot be asked');
-  NOW -= 24 * 3600 * 1000;
 }
 
 // ---------------------------------------------------------------------------

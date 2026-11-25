@@ -119,12 +119,11 @@ function getSystemRootFolder() {
 // So there are two shelves now:
 //
 //   <anchor>/                        what staff open: the workbook, the
-//     Program Registrant Sheets      program registrant sheets (`46`) and
-//     Sign-In Sheets                 the live sign-in Docs (`45`)
+//     Program Registrant Sheets      program roster sheets (`46`)
 //     System/                        everything only this code reads —
-//       Program Registration Forms   the forms (`04`), the retired PDFs
-//       Printed Sign-In Sheets       (`45`), the form images (`55`), the
-//       Form Images                  registrant snapshots (`99j`), the
+//       Program Registration Forms   the forms (`04`), the form images
+//       Form Images                  (`55`), the old registrant snapshots
+//       Registrant Snapshots         (`99j`, no new ones since Nov 2026), the
 //       Registrant Snapshots         public schedule's JSON (`99y`), the
 //       Public Schedule Snapshot     ledger archive (`99za`) and the form
 //       Ledger Archive               template (`05`)
@@ -475,22 +474,6 @@ defineLazyGlobal_('STRAY_FILE_PATTERNS', () => [
     what: 'a program registrant sheet'
   },
   {
-    // A live sign-in document (`45`) — same name shape the retired PDFs used,
-    // which is why SIGN_IN_SHEET_FILENAME_RE in `69` reads both.
-    re: /^Sign-In \d{4}-\d{2}-\d{2} /,
-    mime: MimeType.GOOGLE_DOCS,
-    folder: SIGN_IN_DOC_FOLDER_NAME,
-    what: 'a sign-in sheet'
-  },
-  {
-    // The retired PDF export of the same (`45`, `69`). Still worth filing:
-    // the registry backfill reads that folder and its links are live.
-    re: /^Sign-In \d{4}-\d{2}-\d{2} .+\.pdf$/i,
-    mime: 'application/pdf',
-    folder: SIGN_IN_SHEET_FOLDER_NAME,
-    what: 'a printed sign-in sheet'
-  },
-  {
     // A registrant snapshot (`99j`): "All_Registrants 2026-10-01_0355 (daily).csv".
     re: new RegExp(`^${escapeDriveNameForRegExp_(SHEET_NAMES.REGISTRANT_DASH)} \\d{4}-\\d{2}-\\d{2}_\\d{4} \\(.+\\)\\.csv$`),
     mime: MimeType.CSV,
@@ -539,10 +522,8 @@ function collectSystemFolders_() {
   };
   // Staff-facing first, so their lookups only PEEK at System (82b).
   add(getOrCreateProgramLeaderSheetFolder);
-  add(getOrCreateSignInSheetDocFolder);
   // System-only.
   add(getOrCreateFormsFolder);
-  add(getOrCreateSignInSheetFolder);
   add(getOrCreateFormImageFolder);
   add(getOrCreateRegistrantSnapshotFolder);
   add(getOrCreatePublicScheduleSnapshotFolder);
@@ -653,16 +634,6 @@ function organizeGeneratedFiles() {
     fileInto(entry && entry.fileId, folders[LEADER_SHEET_FOLDER_NAME], `leader sheet for ${key}`);
   });
 
-  const signInRegistry = getSignInSheetRegistry();
-  Object.keys(signInRegistry).forEach(key => {
-    const entry = signInRegistry[key];
-    // The registry holds both live Docs and the retired PDFs. A PDF belongs
-    // in the printed folder; anything else is the live document.
-    const isPdf = /\.pdf$/i.test(String((entry && entry.name) || ''));
-    const target = isPdf ? folders[SIGN_IN_SHEET_FOLDER_NAME] : folders[SIGN_IN_DOC_FOLDER_NAME];
-    fileInto(entry && entry.fileId, target, `sign-in sheet for ${key}`);
-  });
-
   // Pass 2: My Drive root and the anchor's top level, by name and MIME type.
   // See the banner above for why this pass is bounded, anchored and logged.
   const loose = [{ label: 'My Drive', get: () => DriveApp.getRootFolder() }];
@@ -740,7 +711,7 @@ function parseDriveFolderId_(text) {
 }
 
 /**
- * Moves `System`, `Sign-In Sheets` and `Program Registrant Sheets` from the
+ * Moves `System` and `Program Registrant Sheets` from the
  * current anchor into `newRoot`, then makes `newRoot` the anchor. Returns the
  * lines to report. Never throws on a single folder it cannot move.
  */
@@ -748,7 +719,7 @@ function moveSystemFoldersToNewAnchor_(newRoot) {
   const moved = [];
   const oldRoot = getSystemRootFolder();
   if (oldRoot && oldRoot.getId() !== newRoot.getId()) {
-    [SYSTEM_SUBFOLDER_NAME, SIGN_IN_DOC_FOLDER_NAME, LEADER_SHEET_FOLDER_NAME].forEach(name => {
+    [SYSTEM_SUBFOLDER_NAME, LEADER_SHEET_FOLDER_NAME].forEach(name => {
       const folder = pickSystemFolder_(oldRoot.getFoldersByName(name));
       if (!folder || folder.getId() === newRoot.getId()) return;
       if (moveDriveFileInto(folder, newRoot, `the "${name}" folder`)) {
@@ -772,7 +743,7 @@ function chooseSystemHomeFolder() {
   if (!requireAuthorizedAdmin('Choose System Home Folder')) return;
   const ui = SpreadsheetApp.getUi();
   const answer = ui.prompt('Choose System Home Folder',
-    'Paste the link to the Drive folder that should hold "System", "Sign-In Sheets" and ' +
+    'Paste the link to the Drive folder that should hold "System" and ' +
     '"Program Registrant Sheets". Those folders are MOVED there with everything in them; ' +
     'no link changes and nothing is deleted.',
     ui.ButtonSet.OK_CANCEL);
