@@ -436,11 +436,57 @@ function newGroupRequest_(fields) {
   }, fields || {});
 }
 
+/**
+ * A group's page on groups.google.com — where a manager posts, and where the
+ * office reads who is in it. Built from the address alone; '' for a blank one.
+ */
+function emailGroupLink(groupEmail) {
+  const e = normalizeGroupEmail_(groupEmail);
+  const at = e.indexOf('@');
+  if (at < 1) return '';
+  return `https://groups.google.com/a/${e.slice(at + 1)}/g/${e.slice(0, at)}`;
+}
+
+/**
+ * Fills Group_Link on every row that has been created and has none — the
+ * groups made before the column existed. One column write. Never throws.
+ */
+function fillEmailGroupLinks_() {
+  try {
+    const sheet = emailGroupsSheet_(SHEET_NAMES.EMAIL_GROUPS, HEADERS.Email_Groups, false);
+    if (!sheet || sheet.getLastRow() < 2) return 0;
+    const width = sheet.getLastColumn();
+    const head = sheet.getRange(1, 1, 1, width).getValues()[0].map(h => String(h || '').trim());
+    let col = head.indexOf('Group_Link');
+    if (col === -1) {
+      col = width;
+      sheet.getRange(1, col + 1).setValue('Group_Link').setFontWeight('bold');
+    }
+    const emailCol = head.indexOf('Group_Email');
+    const createdCol = head.indexOf('Created_On');
+    if (emailCol === -1 || createdCol === -1) return 0;
+    const n = sheet.getLastRow() - 1;
+    const rows = sheet.getRange(2, 1, n, Math.max(width, col + 1)).getValues();
+    let filled = 0;
+    const out = rows.map(r => {
+      const have = String(r[col] || '').trim();
+      if (!have && r[emailCol] && r[createdCol]) { filled++; return [emailGroupLink(r[emailCol])]; }
+      return [have];
+    });
+    if (filled) sheet.getRange(2, col + 1, n, 1).setValues(out);
+    return filled;
+  } catch (err) {
+    log(`ℹ️ Could not fill the group links (${err}).`);
+    return 0;
+  }
+}
+
 /** Draws both tabs and adds the three interest lists, once. Returns how many were seeded. */
 function ensureEmailGroupsTabs_() {
   const groupsSheet = emailGroupsSheet_(SHEET_NAMES.EMAIL_GROUPS, HEADERS.Email_Groups, true);
   const requestsSheet = emailGroupsSheet_(SHEET_NAMES.GROUP_REQUESTS, HEADERS.Group_Requests, true);
   [groupsSheet, requestsSheet].forEach(packEmailGroupsTab_);
+  fillEmailGroupLinks_();
   styleEmailGroupsTab_(groupsSheet);
   styleGroupRequestsTab_(requestsSheet);
   const domain = emailGroupsDomain_();
@@ -1037,14 +1083,17 @@ function buildEmailGroupApplyItems(groups, requests, removals, leadersFor, manag
   (groups || []).forEach(g => { groupBy[g.Group_Email] = g; });
   const needed = {};
   toAdd.forEach(q => { needed[q.Group] = true; });
-  Object.keys(needed).sort().forEach(email => {
-    const g = groupBy[email];
-    if (!g || !g.active) return;
-    if (!g.Created_On) items.push({ type: 'create', group: email, name: String(g.Name || email), kind: g.Kind });
+  // EVERY active group on the tab is created, not only the ones somebody has
+  // been approved for: an interest list has to exist (and have a link) before
+  // anybody can be told about it. Groups with a member waiting go first.
+  const creates = (groups || []).filter(g => g.active && g.Group_Email && !g.Created_On)
+    .sort((a, b) => (needed[b.Group_Email] ? 1 : 0) - (needed[a.Group_Email] ? 1 : 0) ||
+      (a.Group_Email < b.Group_Email ? -1 : 1));
+  creates.forEach(g => {
+    items.push({ type: 'create', group: g.Group_Email, name: String(g.Name || g.Group_Email), kind: g.Kind });
   });
   (groups || []).forEach(g => {
-    if (!g.active) return;
-    if (!g.Created_On && !needed[g.Group_Email]) return;
+    if (!g.active || !g.Group_Email) return;
     const done = (managersDone && managersDone[g.Group_Email]) || [];
     // The office's own address manages EVERY group, interest lists included;
     // a class group's leaders manage it as well.
@@ -1274,6 +1323,9 @@ function writeEmailGroupOutcomes_(state) {
       readEmailGroups_().forEach(g => {
         if (state.created[g.Group_Email] && !g.Created_On) {
           sheet.getRange(g._row, head.indexOf('Created_On') + 1).setValue(state.created[g.Group_Email]);
+          if (head.indexOf('Group_Link') >= 0) {
+            sheet.getRange(g._row, head.indexOf('Group_Link') + 1).setValue(emailGroupLink(g.Group_Email));
+          }
           spoolOfficeNote('Email groups', `Created the group ${g.Name || g.Group_Email} (${g.Group_Email}).`);
         }
       });

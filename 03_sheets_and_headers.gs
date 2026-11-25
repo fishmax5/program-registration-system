@@ -1176,7 +1176,10 @@ defineLazyGlobal_('HEADERS', () => ({
   ],
   /** Email_Groups — one row per Google Group (99zzh). Scope_Key is what the code matches on. */
   Email_Groups: [
-    'Group_Email', 'Name', 'Kind', 'Scope_Key', 'Active', 'Created_On', 'Notes'
+    'Group_Email', 'Name', 'Kind', 'Scope_Key', 'Active', 'Created_On', 'Notes',
+    // The group's page on groups.google.com, written once the group exists
+    // (99zzh). Appended last, so a tab that already has rows reads it blank.
+    'Group_Link'
   ],
   /**
    * Group_Requests — one row per person per group (99zzh). In_Group is written

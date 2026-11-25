@@ -204,6 +204,9 @@ eq(items.map(i => `${i.type}:${i.group}${i.email ? ':' + i.email : ''}`), [
   'manager:new@nhsc.org:lead@x.com', 'manager:old@nhsc.org:newhorizons@newhorizonsseniorcenter.org',
   'add:new@nhsc.org:a@x.com', 'remove:old@nhsc.org:b@x.com'
 ], 'create, managers (the office on every group, leaders on class groups), adds, removes');
+eq(g.items([{ Group_Email: 'interest-art@nhsc.org', Name: 'Art', Kind: 'Interest', active: true, Created_On: '' }], [], [], () => [], {})
+  .map(i => i.type), ['create', 'manager'], 'an active group is created even before anybody has joined it');
+assert.strictEqual(vm.runInContext('emailGroupLink("Interest-Art@nhsc.org")', sandbox), 'https://groups.google.com/a/nhsc.org/g/interest-art');
 
 // --- a Failed row retries by itself, and stops after the cap ----------------------
 {
@@ -321,6 +324,8 @@ assert.strictEqual(jane.In_Group, true);
 assert.strictEqual(reqs.find(r => r.Request_ID === 'boom').Status, 'Failed', 'a refusal is Failed, with the reason');
 assert.ok(/Not Authorized/.test(reqs.find(r => r.Request_ID === 'boom').Notes));
 assert.ok(g.groups().find(x => x.Group_Email === 'interest-art@nhsc.org').Created_On, 'Created_On stamped');
+assert.strictEqual(g.groups().find(x => x.Group_Email === 'interest-movies@nhsc.org').Group_Link,
+  'https://groups.google.com/a/nhsc.org/g/interest-movies', 'every list is made, with its link, even with nobody in it yet');
 assert.strictEqual(scriptProps.EMAIL_GROUPS_APPLY_V1, undefined, 'the sliced job cleans up');
 calls.length = 0;
 g.start({ interactive: false });
