@@ -842,13 +842,10 @@ function writeTriggers(force, takingOwnership) {
   removed += resetTriggersForHandler('sendOfficeDailyDigest', () =>
     ScriptApp.newTrigger('sendOfficeDailyDigest')
       .timeBased().everyDays(1).atHour(OFFICE_DIGEST_HOUR).create());
-  // YESTERDAY'S REGISTRATIONS, KEPT. All_Registrants is rebuilt by reading
-  // itself, clearing itself and writing the rows back, so one short row array
-  // is a permanent loss with no second copy anywhere — see
-  // 99j_registrant_safety_net.gs. This is that second copy: one dated CSV a
-  // night, pruned after ninety days. 3am, ahead of every other nightly job, so
-  // the copy is of the day that ended rather than of whatever the 5am calendar
-  // sync has since made of it.
+  // THE NIGHTLY LEDGER CHECKPOINT (99zq), plus ageing out the old registrant
+  // CSVs. The handler is still called snapshotRegistrantsDaily because that is
+  // the installed trigger's name, but since Nov 25 2026 it writes no CSV: the
+  // ledger (99k) is the history. 3am, ahead of every other nightly job.
   removed += resetTriggersForHandler('snapshotRegistrantsDaily', () =>
     ScriptApp.newTrigger('snapshotRegistrantsDaily')
       .timeBased().everyDays(1).atHour(3).create());

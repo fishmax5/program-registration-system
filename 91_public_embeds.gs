@@ -803,7 +803,7 @@ function publicStaticLoaderScript() {
 
   /**
    * THE QUIET RE-READ. 'no-cache' revalidates with the CDN (a 304 when nothing
-   * moved), so the first paint may come from a copy up to ten minutes old and
+   * moved), so the first paint may come from a copy up to an hour old and
    * this is what brings it current. Nothing on screen changes unless builtAt did.
    */
   function refreshStatic(force, apply) {

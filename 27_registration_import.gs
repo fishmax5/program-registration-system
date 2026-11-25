@@ -28,10 +28,9 @@ function syncRegistrations(e) {
     return;
   }
 
-  // THE DAY'S SECOND COPY, BEFORE ANYTHING WRITES. The 3am trigger is the
-  // primary; this is what makes a missing or failed one cost nothing — and it
-  // runs before this sync touches the tab, so the copy is of what the sync
-  // found. Both never throw. See 99j.
+  // THE NIGHTLY JOB'S BELT (99j): the 3am trigger runs the ledger checkpoint;
+  // this runs it if that trigger is missing or failed. No CSV since Nov 25
+  // 2026. All three never throw.
   ensureRegistrantSnapshotTrigger_();
   ensurePublicSnapshotTrigger_();
   snapshotRegistrantsIfDue_();

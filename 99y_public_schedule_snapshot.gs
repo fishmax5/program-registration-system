@@ -16,7 +16,8 @@
 //      it twice — in the script cache for PUBLIC_SNAPSHOT_CACHE_SECONDS, and
 //      in a Drive file as the fallback a cold or evicted cache falls back to.
 //   2. A time-driven trigger (refreshPublicScheduleSnapshot, every
-//      PUBLIC_SNAPSHOT_TRIGGER_MINUTES) rebuilds it, and so does the end of
+//      PUBLIC_SNAPSHOT_TRIGGER_HOURS — hourly since Nov 25 2026, it was every
+//      ten minutes) rebuilds it, and so does the end of
 //      every calendar sync (90). writeTriggers() (16) installs the trigger
 //      through resetTriggersForHandler(), which removes every copy before
 //      creating one, so re-running it never doubles it; the hourly sync
@@ -40,7 +41,7 @@
 // busy workbook — meaning that workbook was never cached at all.
 //
 // WHAT STALENESS COSTS. Seats. A session that fills is shown as open for at
-// most one trigger interval, and the FORM is what refuses the booking — the
+// most one trigger interval (an hour, less after a calendar sync), and the FORM is what refuses the booking — the
 // page has never been the authority on a seat (86's banner). A snapshot from
 // a previous DAY is never served: its first date is yesterday, so a stored
 // one whose todayKey is not today is treated as missing and rebuilt live.
@@ -52,8 +53,20 @@
 /** How long a built snapshot sits in the script cache (CacheService's max). */
 const PUBLIC_SNAPSHOT_CACHE_SECONDS = 21600;
 
-/** How often the trigger rebuilds it. Must be 1, 5, 10, 15 or 30 (everyMinutes). */
-const PUBLIC_SNAPSHOT_TRIGGER_MINUTES = 10;
+/**
+ * How often the trigger rebuilds it, in hours (everyHours: 1, 2, 4, 6, 8 or 12).
+ * Was every ten minutes until Nov 25 2026 — the form is what refuses a full
+ * session, and the end of every calendar sync rebuilds it anyway.
+ */
+const PUBLIC_SNAPSHOT_TRIGGER_HOURS = 1;
+
+/**
+ * Which cadence the installed trigger was made with. A trigger's interval
+ * cannot be read back, so a workbook whose trigger predates the change is
+ * told apart by this marker and rebuilt once (ensurePublicSnapshotTrigger_).
+ */
+const PUBLIC_SNAPSHOT_TRIGGER_CADENCE_PROP_KEY = 'PUBLIC_SNAPSHOT_TRIGGER_CADENCE_V1';
+const PUBLIC_SNAPSHOT_TRIGGER_CADENCE = 'hourly';
 
 /** The trigger's handler — named here so writeTriggers() and the ensure share one spelling. */
 const PUBLIC_SNAPSHOT_TRIGGER_HANDLER = 'refreshPublicScheduleSnapshot';
@@ -282,13 +295,20 @@ function refreshPublicScheduleSnapshotAfterSync_() {
  */
 function ensurePublicSnapshotTrigger_() {
   try {
-    const exists = ScriptApp.getProjectTriggers()
-      .some(t => t.getHandlerFunction() === PUBLIC_SNAPSHOT_TRIGGER_HANDLER);
-    if (exists) return false;
+    const props = PropertiesService.getScriptProperties();
+    const current = props.getProperty(PUBLIC_SNAPSHOT_TRIGGER_CADENCE_PROP_KEY) === PUBLIC_SNAPSHOT_TRIGGER_CADENCE;
+    const mine = ScriptApp.getProjectTriggers()
+      .filter(t => t.getHandlerFunction() === PUBLIC_SNAPSHOT_TRIGGER_HANDLER);
+    if (mine.length > 0 && current) return false;
     const owner = getTriggerOwner();
     if (owner && owner !== getCurrentUserEmail()) return false;
+    // An older trigger (every ten minutes) is replaced, once.
+    mine.forEach(t => ScriptApp.deleteTrigger(t));
     createPublicSnapshotTrigger_();
-    log('Installed the missing public schedule snapshot trigger.');
+    props.setProperty(PUBLIC_SNAPSHOT_TRIGGER_CADENCE_PROP_KEY, PUBLIC_SNAPSHOT_TRIGGER_CADENCE);
+    log(mine.length > 0
+      ? 'Rebuilt the public schedule snapshot trigger to run hourly.'
+      : 'Installed the missing public schedule snapshot trigger.');
     return true;
   } catch (err) {
     log(`⚠️ Could not install the public schedule snapshot trigger (${err}).`);
@@ -297,6 +317,11 @@ function ensurePublicSnapshotTrigger_() {
 }
 
 function createPublicSnapshotTrigger_() {
-  return ScriptApp.newTrigger(PUBLIC_SNAPSHOT_TRIGGER_HANDLER)
-    .timeBased().everyMinutes(PUBLIC_SNAPSHOT_TRIGGER_MINUTES).create();
+  const trigger = ScriptApp.newTrigger(PUBLIC_SNAPSHOT_TRIGGER_HANDLER)
+    .timeBased().everyHours(PUBLIC_SNAPSHOT_TRIGGER_HOURS).create();
+  try {
+    PropertiesService.getScriptProperties()
+      .setProperty(PUBLIC_SNAPSHOT_TRIGGER_CADENCE_PROP_KEY, PUBLIC_SNAPSHOT_TRIGGER_CADENCE);
+  } catch (err) { /* the hourly ensure rewrites it once more; harmless */ }
+  return trigger;
 }
