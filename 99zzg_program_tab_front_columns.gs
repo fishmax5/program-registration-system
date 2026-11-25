@@ -109,21 +109,19 @@ function stampSessionFrontColumns_(rows, map) {
   });
 }
 
-/** The roster URL out of a Registrant_Sheet_Link cell (a =HYPERLINK() or a bare URL), or ''. */
-function rosterUrlFromCell_(raw) {
-  return hyperlinkFormulaUrl(raw);
-}
-
 /**
- * Puts each title back as a rich-text link to its roster — one call per run of
+ * Puts each title back as a rich-text link (to its program's rows on
+ * All_Registrants since Nov 2026 — see 99zzl) — one call per run of
  * rows. `titles` and `urls` are parallel arrays; a row with no URL is written
  * as plain text. Never throws: a link that cannot be drawn leaves the title.
  */
-function linkTitleCellsToRosters_(sheet, startRow, col, titles, urls) {
+function linkTitleCellsToRosters_(sheet, startRow, col, titles, urls, opts) {
   if (!titles || titles.length === 0 || !col) return;
   try {
     if (typeof SpreadsheetApp.newRichTextValue !== 'function') return;
-    if (!urls.some(Boolean)) return; // nothing to link — the values already say it
+    // Nothing to link — the values already say it. A relink (99zzl) writes
+    // anyway, so a link that no longer leads anywhere is taken off.
+    if (!urls.some(Boolean) && !(opts && opts.writePlain)) return;
     const values = titles.map((title, i) => {
       const text = String(title == null ? '' : title);
       const builder = SpreadsheetApp.newRichTextValue().setText(text);

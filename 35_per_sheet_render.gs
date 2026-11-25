@@ -50,6 +50,9 @@ function renderRegistrantsSheet(force, allRows, options) {
   // an EMPTY tab against (99j), so an emptied tab cannot pass as a new one.
   recordRenderedRegistrantCount_(rows.length);
   recordRegistrantRenderFingerprint_(fingerprint);
+  // The program blocks may have moved: point the dashboards' title links at
+  // where they are now (99zzl). Only when they moved; never throws.
+  relinkDashboardTitlesToRegistrants_();
   return result;
 }
 

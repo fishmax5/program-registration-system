@@ -114,6 +114,7 @@ this.programMonthLeaderCoverage = programMonthLeaderCoverage;
 this.computeProgramMetrics = computeProgramMetrics;
 this.scanRegistrants = scanRegistrants;
 this.HEADERS = HEADERS;
+this.__setRegistrantRanges = function (colA) { __registrantRosterRangesMemo = Object.assign(parseRegistrantRosterRanges_(colA.map(v => [v])), { base: 'https://sheet.example/edit', gid: 5, lastLetter: 'Z' }); };
 this.getIndexMap = getIndexMap;
 this.LUNCH_ONLY_EVENT_ID_PREFIX = LUNCH_ONLY_EVENT_ID_PREFIX;
 this.handleProgramMonthEdit = handleProgramMonthEdit;
@@ -451,9 +452,15 @@ const build = (rows, link, leaders, settings) =>
   check('each link lands in its own column, as one HYPERLINK with a short word',
     [cell(built.rows[0], 'Register_Link')],
     ['=HYPERLINK("https://forms.example/live","Register")']);
-  // The roster is no longer a column: the Program cell links to it (99zzg).
-  check('the roster link rides with the row, for the Program cell',
-    built.rosterUrls.get(built.rows[0]), 'https://docs.example/roster');
+  // The roster is no longer a column, and the Program cell no longer links to
+  // the roster sheet: it opens the program's rows on All_Registrants (99zzl).
+  check('with no All_Registrants to read, the Program cell is not linked',
+    built.rosterUrls.get(built.rows[0]), undefined);
+  sandbox.__setRegistrantRanges(['Event_Date', '▸ Chair Yoga — Narberth', 'x', 'x']);
+  const linked = build([withLinks]);
+  check('the Program cell opens the program\'s rows on All_Registrants',
+    linked.rosterUrls.get(linked.rows[0]), 'https://sheet.example/edit#gid=5&range=A2:Z4');
+  sandbox.__setRegistrantRanges([]);
   check('...and there is no Roster_Link column',
     sandbox.HEADERS.Master_Program_Dashboard.indexOf('Roster_Link'), -1);
   check('...and a link the program has not got is a blank cell, not a dangling word',

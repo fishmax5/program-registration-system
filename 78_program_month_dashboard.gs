@@ -963,7 +963,11 @@ function buildProgramMonthRows(sessionRows, sessionMap, linkTarget, leaderIndex,
     out[map['Form_ID']] = String(firstNonBlank('Form_ID') || '');
     out[map['Group_Key']] = key;
 
-    const rosterUrl = rosterUrlFromCell_(firstNonBlank('Registrant_Sheet_Link'));
+    // THE TITLE OPENS THE PROGRAM'S ROWS ON All_Registrants (99zzl): every
+    // spelling the sessions carry is tried, in each building.
+    const rosterUrl = registrantRosterRangeUrl_(
+      sessions.map(s => s.row ? s.row[sessionMap['Clean_Title']] : '').concat([out[map['Program']]]),
+      out[map['Location']]);
     if (rosterUrl) rosterUrls.set(out, rosterUrl);
     rows.push(out);
     if (leader.source === PROGRAM_MONTH_LEADER_SOURCE_MATCHED) matched.push(out);
