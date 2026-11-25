@@ -1256,7 +1256,13 @@ function finishApplyGroupChanges_(state, problem) {
   clearSlicedJobState(EMAIL_GROUPS_APPLY_STATE_PROP_KEY);
   deleteSlicedJobResumeTriggers(EMAIL_GROUPS_APPLY_HANDLER);
   const c = state.counts || {};
-  const headline = `${problem ? `⚠️ Applying group changes ${problem}.` : '✅ Group changes applied.'} ` +
+  // A run where nothing landed is not "applied": say so, and point at the
+  // commonest cause (the running account lacks the Groups Admin role).
+  const done = (c.create || 0) + (c.add || 0) + (c.remove || 0) + (c.manager || 0);
+  const opener = problem ? `⚠️ Applying group changes ${problem}.`
+    : (c.failed && !done) ? '⚠️ No group changes went through — every one was refused (see the log and the Notes column).'
+    : c.failed ? '⚠️ Group changes partly applied.' : '✅ Group changes applied.';
+  const headline = `${opener} ` +
     `${c.create || 0} created, ${c.add || 0} added, ${c.remove || 0} removed, ${c.manager || 0} manager(s), ` +
     `${c.failed || 0} failed.`;
   log(`applyGroupChanges: ${headline}`);
