@@ -43,6 +43,17 @@ this.groupsOfOnlyCancelled = function () {
   const e = { getTitle: () => 'x', getStartTime: () => new Date('2026-09-01T15:00:00Z'), getEndTime: () => new Date('2026-09-01T16:00:00Z') };
   return buildEventGroups([{ event: e, parsed, calendarId: 'c', locationName: 'N' }]).length;
 };
+this.realCollect = collectGroupedSeriesPrograms_;
+this.hitFor = seriesWeekHitFor_;
+this.collectFrom = function (rows) {
+  const map = getIndexMap(HEADERS.All_Program_Sessions);
+  const full = rows.map(r => { const a = HEADERS.All_Program_Sessions.map(() => ''); Object.keys(r).forEach(k => { a[map[k]] = r[k]; }); return a; });
+  const savedSS = SpreadsheetApp.getActiveSpreadsheet, savedRows = getSectionedRows;
+  SpreadsheetApp.getActiveSpreadsheet = () => ({ getSheetByName: () => ({}) });
+  getSectionedRows = () => full;
+  try { const p = realCollect(); return { kept: Object.keys(p).map(k => p[k].title).sort(), skipped: __seriesWeekSkipped.map(x => x.title + ':' + x.reason).sort() }; }
+  finally { SpreadsheetApp.getActiveSpreadsheet = savedSS; getSectionedRows = savedRows; }
+};
 this.STORE = {};
 this.PROGRAMS = {};
 this.EVENTS = {};
@@ -93,6 +104,26 @@ check('and says it is cancelled', cancelled.isCancelled, true);
 check('an ordinary title is not cancelled', plain.isCancelled, false);
 check('a cancelled date is not offered on the form', sandbox.offeredDates(), ['2026-09-01']);
 check('a group of only cancelled dates makes no group', sandbox.groupsOfOnlyCancelled(), 0);
+
+// --- only real courses are numbered ------------------------------------------
+const base = { Calendar_Source: 'c', Type_Tag: 'Grouped', Event_Date: new Date('2026-12-01T15:00:00Z') };
+const picked = sandbox.collectFrom([
+  Object.assign({}, base, { Clean_Title: 'Memoir Writing', Event_ID: 'e1' }),
+  Object.assign({}, base, { Clean_Title: 'Mah Jongg Club', Club: true, Event_ID: 'e2' }),
+  // a club flag on ANY row of the program rules it out
+  Object.assign({}, base, { Clean_Title: 'Book Club', Event_ID: 'e3' }),
+  Object.assign({}, base, { Clean_Title: 'Book Club', Type_Tag: 'Regular', Club: true, Event_ID: 'e4', Event_Date: new Date('2026-12-08T15:00:00Z') }),
+  Object.assign({}, base, { Clean_Title: 'Tech Help', Personalized_Assistance: true, Event_ID: 'e5' }),
+  Object.assign({}, base, { Clean_Title: 'Open Studio', No_Registration: true, Event_ID: 'e6' }),
+  // the title says club though the box is clear (the Stitch Clubs)
+  Object.assign({}, base, { Clean_Title: 'Walking Club', Event_ID: 'e7' }),
+  Object.assign({}, base, { Clean_Title: 'Mah Jongg Open Play(Experienced only)', Event_ID: 'e8' })
+]);
+check('only the course is numbered', picked.kept, ['Memoir Writing']);
+check('clubs and other ongoing programs are listed as skipped', picked.skipped,
+  ['Book Club:club', 'Mah Jongg Club:club', 'Mah Jongg Open Play(Experienced only):club', 'Open Studio:no registration', 'Tech Help:appointments', 'Walking Club:club']);
+const year = []; for (let i = 0; i < 40; i++) year.push(new Date(Date.UTC(2026, 0, 6 + 7 * i)).toISOString().slice(0, 10));
+check('a 40-week run is ongoing, not a course', sandbox.hitFor(sandbox.computeSeriesWeekNumbers(year, {}, 'freeze'), year[3]), null);
 
 // --- the numbering --------------------------------------------------------
 const wk = r => Object.keys(r.byWeek).sort().map(w => `${r.byWeek[w].week}/${r.byWeek[w].total}`);
